@@ -11,6 +11,8 @@ export interface GitAccount {
   baseUrl: string;
   username: string;
   tokenPreview: string;
+  /** 拉取仓库遇到 401 时由后端置 true,设置页据此显示「Token 已失效」标记 */
+  tokenInvalid: boolean;
   createdAt: number;
   updatedAt: number;
 }

@@ -38,6 +38,8 @@ pub enum ErrorCode {
     GitNoTracking,
     /// 当前目录不是 Git 仓库
     NotGitRepository,
+    /// 平台账号 Token 无效或已过期
+    AccountTokenInvalid,
 }
 
 impl ErrorCode {
@@ -59,6 +61,7 @@ impl ErrorCode {
             ErrorCode::GitDiverged => "git_diverged",
             ErrorCode::GitNoTracking => "git_no_tracking",
             ErrorCode::NotGitRepository => "not_git_repository",
+            ErrorCode::AccountTokenInvalid => "account_token_invalid",
         }
     }
 }

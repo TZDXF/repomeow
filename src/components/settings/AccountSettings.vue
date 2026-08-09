@@ -157,6 +157,14 @@ async function remove(account: GitAccount) {
             <span class="truncate text-sm font-medium">
               {{ account.label || account.username || providerLabel(account.provider) }}
             </span>
+            <Badge
+              v-if="account.tokenInvalid"
+              variant="destructive"
+              class="shrink-0 text-xs"
+              :title="t('settings.accounts.tokenInvalidHint')"
+            >
+              {{ t("settings.accounts.tokenInvalid") }}
+            </Badge>
           </div>
           <p class="mt-0.5 truncate text-xs text-muted-foreground">
             <template v-if="account.username">@{{ account.username }} · </template>

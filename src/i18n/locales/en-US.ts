@@ -52,6 +52,8 @@ export default {
       "Local and remote branches have diverged. Run git pull --rebase in a terminal or configure a merge strategy",
     git_no_tracking: "Current branch has no upstream. Run git push -u origin <branch> first",
     not_git_repository: "Current directory is not a Git repository",
+    account_token_invalid:
+      "The access token is invalid or expired. Update it in Settings → Accounts",
   },
   titleBar: {
     minimize: "Minimize",
@@ -621,6 +623,9 @@ export default {
       enableGhCli: "GitHub CLI (gh)",
       enableGhCliHint:
         "When enabled, an authenticated gh shows up as an account in the Add Project → Account Repos dropdown",
+      tokenInvalid: "Token invalid",
+      tokenInvalidHint:
+        "The token for this account is invalid or expired. Edit the account to update it",
       empty: "No linked accounts yet",
       add: "Add account",
       addTitle: "Link account",

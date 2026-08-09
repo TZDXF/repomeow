@@ -3,7 +3,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::db::Db;
-use crate::error::{AppError, AppResult};
+use crate::error::{AppError, AppResult, ErrorCode};
 
 /// 代码托管平台账号(GitHub / Gitee / 自建 GitLab)。
 /// token 以明文落库且不回传,前端仅能看到 token_preview 脱敏预览。
@@ -16,6 +16,8 @@ pub struct GitAccount {
     pub base_url: String,
     pub username: String,
     pub token_preview: String,
+    /// 拉取仓库遇到 401 时由后端置 true,前端设置页据此标记「Token 已失效」
+    pub token_invalid: bool,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -100,11 +102,13 @@ struct AccountRow {
     base_url: String,
     username: String,
     token: String,
+    token_invalid: bool,
     created_at: i64,
     updated_at: i64,
 }
 
-const ACCOUNT_COLS: &str = "id, provider, label, base_url, username, token, created_at, updated_at";
+const ACCOUNT_COLS: &str =
+    "id, provider, label, base_url, username, token, token_invalid, created_at, updated_at";
 
 fn map_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<AccountRow> {
     Ok(AccountRow {
@@ -114,8 +118,9 @@ fn map_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<AccountRow> {
         base_url: r.get(3)?,
         username: r.get(4)?,
         token: r.get(5)?,
-        created_at: r.get(6)?,
-        updated_at: r.get(7)?,
+        token_invalid: r.get(6)?,
+        created_at: r.get(7)?,
+        updated_at: r.get(8)?,
     })
 }
 
@@ -127,6 +132,7 @@ fn row_to_account(row: &AccountRow) -> GitAccount {
         base_url: row.base_url.clone(),
         username: row.username.clone(),
         token_preview: token_preview(&row.token),
+        token_invalid: row.token_invalid,
         created_at: row.created_at,
         updated_at: row.updated_at,
     }
@@ -216,6 +222,7 @@ fn gh_cli_account_row() -> AppResult<AccountRow> {
         base_url: "https://github.com".to_string(),
         username,
         token,
+        token_invalid: false,
         created_at: 0,
         updated_at: 0,
     })
@@ -277,17 +284,39 @@ async fn send(req: reqwest::RequestBuilder) -> AppResult<reqwest::Response> {
     }
     let body = resp.text().await.unwrap_or_default();
     let body = body.trim();
-    let msg = match status.as_u16() {
-        401 => "Token 无效或已过期".to_string(),
-        403 => "权限不足或触发接口限流".to_string(),
-        404 => "接口不存在(自建 GitLab 请检查实例地址)".to_string(),
-        _ => format!("平台接口请求失败(HTTP {status})"),
-    };
-    if body.is_empty() {
-        Err(AppError::External(msg))
+    // 401 用结构化错误码:前端按 code 本地化,list_account_repos 也据此给账号打失效标记
+    if status.as_u16() == 401 {
+        return Err(AppError::Coded {
+            code: ErrorCode::AccountTokenInvalid,
+            message: "Token 无效或已过期".into(),
+        });
+    }
+    // 已知状态码直接给友好文案,不把平台返回的原始 JSON 拼给用户
+    match status.as_u16() {
+        403 => return Err(AppError::External("权限不足或触发接口限流".into())),
+        404 => {
+            return Err(AppError::External(
+                "接口不存在(自建 GitLab 请检查实例地址)".into(),
+            ));
+        }
+        _ => {}
+    }
+    // 其他状态码:尝试提取响应 JSON 的 message 字段,避免把整段原始响应丢给用户
+    let detail = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| {
+            v.get("message")
+                .and_then(|m| m.as_str())
+                .map(str::to_string)
+        })
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| body.chars().take(200).collect());
+    if detail.is_empty() {
+        Err(AppError::External(format!("平台接口请求失败(HTTP {status})")))
     } else {
-        let brief: String = body.chars().take(200).collect();
-        Err(AppError::External(format!("{msg}: {brief}")))
+        Err(AppError::External(format!(
+            "平台接口请求失败(HTTP {status}): {detail}"
+        )))
     }
 }
 
@@ -564,18 +593,22 @@ pub async fn update_git_account(
     };
 
     let mut username = existing.username.clone();
+    // token 或实例地址变化时重新调 API 验证;验证通过即清除失效标记
+    let mut verified = false;
     if new_token.is_some() || base != existing.base_url {
         let token_to_use = new_token.clone().unwrap_or_else(|| existing.token.clone());
         username = fetch_username(&existing.provider, &base, &token_to_use).await?;
+        verified = true;
     }
 
     let conn = db.0.lock().unwrap();
     conn.execute(
         "UPDATE git_accounts
          SET label = ?1, base_url = ?2, username = ?3,
-             token = COALESCE(?4, token), updated_at = ?5
+             token = COALESCE(?4, token), updated_at = ?5,
+             token_invalid = CASE WHEN ?7 THEN 0 ELSE token_invalid END
          WHERE id = ?6",
-        params![label.trim(), base, username, new_token, now(), id],
+        params![label.trim(), base, username, new_token, now(), id, verified],
     )?;
     let row = get_account_row(&conn, id)?;
     Ok(row_to_account(&row))
@@ -646,7 +679,24 @@ pub async fn list_account_repos(db: State<'_, Db>, account_id: i64) -> AppResult
         let conn = db.0.lock().unwrap();
         get_account_row(&conn, account_id)?
     };
-    fetch_all_repos(&row).await
+    let result = fetch_all_repos(&row).await;
+    // Token 失效(401)时落库标记,设置页账号列表据此提示用户更新 Token
+    if let Err(e) = &result {
+        if matches!(
+            e,
+            AppError::Coded {
+                code: ErrorCode::AccountTokenInvalid,
+                ..
+            }
+        ) {
+            let conn = db.0.lock().unwrap();
+            let _ = conn.execute(
+                "UPDATE git_accounts SET token_invalid = 1 WHERE id = ?1",
+                params![account_id],
+            );
+        }
+    }
+    result
 }
 
 #[cfg(test)]
@@ -719,6 +769,8 @@ mod tests {
         let account = row_to_account(&row);
         assert_eq!(account.token_preview, "****1234");
         assert_eq!(account.provider, "github");
+        // 迁移新增列默认未失效
+        assert!(!account.token_invalid);
 
         let (provider, username, token) = get_credentials(&conn, 1).unwrap();
         assert_eq!(

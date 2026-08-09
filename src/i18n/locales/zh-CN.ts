@@ -47,6 +47,7 @@ export default {
     git_diverged: "本地与远端分支已分叉,请在终端执行 git pull --rebase 或配置合并策略后再试",
     git_no_tracking: "当前分支未关联远端分支,请先执行 git push -u origin <分支名>",
     not_git_repository: "当前目录不是 Git 仓库",
+    account_token_invalid: "Token 无效或已过期,请到「设置 → 账号绑定」更新该账号的 Token",
   },
   titleBar: {
     minimize: "最小化",
@@ -599,6 +600,8 @@ export default {
       description: "绑定 GitHub / Gitee / GitLab 账号,用于浏览账号下的仓库并一键克隆添加",
       enableGhCli: "GitHub CLI (gh)",
       enableGhCliHint: "启用后,已登录的 gh 会作为账号出现在「添加项目 → 账号仓库」的账号下拉中",
+      tokenInvalid: "Token 已失效",
+      tokenInvalidHint: "该账号的 Token 无效或已过期,请编辑账号更新 Token",
       empty: "还没有绑定任何账号",
       add: "添加账号",
       addTitle: "绑定账号",
