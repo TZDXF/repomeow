@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 use tauri::State;
 
 use crate::db::Db;
-use crate::error::{AppError, AppResult};
+use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::HiddenItem;
 
 const KINDS: [&str; 3] = ["packageFile", "packageScript", "composeFile"];
@@ -28,10 +28,10 @@ pub fn set_hidden(
     hidden: bool,
 ) -> AppResult<()> {
     if !KINDS.contains(&kind) {
-        return Err(AppError::Invalid(format!("未知的隐藏项类型: {kind}")));
+        return Err(AppError::coded(ErrorCode::HiddenItemTypeUnknown, kind.to_string()));
     }
     if target_key.is_empty() {
-        return Err(AppError::Invalid("隐藏项标识不能为空".into()));
+        return Err(AppError::coded(ErrorCode::HiddenItemKeyRequired, ""));
     }
     if hidden {
         conn.execute(
@@ -109,11 +109,11 @@ mod tests {
 
         assert!(matches!(
             set_hidden(&conn, p.id, "bogus", "x", true),
-            Err(AppError::Invalid(_))
+            Err(ref e) if e.is_code(ErrorCode::HiddenItemTypeUnknown)
         ));
         assert!(matches!(
             set_hidden(&conn, p.id, "packageFile", "", true),
-            Err(AppError::Invalid(_))
+            Err(ref e) if e.is_code(ErrorCode::HiddenItemKeyRequired)
         ));
     }
 

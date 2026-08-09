@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 use tauri::State;
 
 use crate::db::Db;
-use crate::error::{AppError, AppResult};
+use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::Tag;
 
 const DEFAULT_COLOR: &str = "#3b82f6";
@@ -18,7 +18,7 @@ fn validate_color(color: &str) -> AppResult<String> {
     if valid {
         Ok(color.to_string())
     } else {
-        Err(AppError::Invalid(format!("颜色格式不正确: {color}")))
+        Err(AppError::coded(ErrorCode::TagColorInvalid, color.to_string()))
     }
 }
 
@@ -37,7 +37,7 @@ pub fn all(conn: &Connection) -> AppResult<Vec<Tag>> {
 pub fn create(conn: &Connection, name: &str, color: &str) -> AppResult<Tag> {
     let name = name.trim();
     if name.is_empty() {
-        return Err(AppError::Invalid("标签名不能为空".into()));
+        return Err(AppError::coded(ErrorCode::TagNameRequired, ""));
     }
     let color = validate_color(color)?;
     conn.execute(
@@ -48,7 +48,7 @@ pub fn create(conn: &Connection, name: &str, color: &str) -> AppResult<Tag> {
         rusqlite::Error::SqliteFailure(err, _)
             if err.code == rusqlite::ErrorCode::ConstraintViolation =>
         {
-            AppError::Conflict(format!("标签已存在: {name}"))
+            AppError::coded(ErrorCode::TagNameConflict, name.to_string())
         }
         other => AppError::Db(other),
     })?;
@@ -62,7 +62,7 @@ pub fn create(conn: &Connection, name: &str, color: &str) -> AppResult<Tag> {
 pub fn remove(conn: &Connection, id: i64) -> AppResult<()> {
     let changed = conn.execute("DELETE FROM tags WHERE id = ?1", params![id])?;
     if changed == 0 {
-        return Err(AppError::NotFound(format!("tag {id}")));
+        return Err(AppError::coded(ErrorCode::TagNotFound, id.to_string()));
     }
     Ok(())
 }
@@ -70,7 +70,7 @@ pub fn remove(conn: &Connection, id: i64) -> AppResult<()> {
 pub fn update(conn: &Connection, id: i64, name: &str, color: &str) -> AppResult<Tag> {
     let name = name.trim();
     if name.is_empty() {
-        return Err(AppError::Invalid("标签名不能为空".into()));
+        return Err(AppError::coded(ErrorCode::TagNameRequired, ""));
     }
     let color = validate_color(color)?;
     let changed = conn
@@ -82,12 +82,12 @@ pub fn update(conn: &Connection, id: i64, name: &str, color: &str) -> AppResult<
             rusqlite::Error::SqliteFailure(err, _)
                 if err.code == rusqlite::ErrorCode::ConstraintViolation =>
             {
-                AppError::Conflict(format!("标签已存在: {name}"))
+                AppError::coded(ErrorCode::TagNameConflict, name.to_string())
             }
             other => AppError::Db(other),
         })?;
     if changed == 0 {
-        return Err(AppError::NotFound(format!("tag {id}")));
+        return Err(AppError::coded(ErrorCode::TagNotFound, id.to_string()));
     }
     Ok(Tag {
         id,
@@ -103,7 +103,7 @@ pub fn apply_project_tags(conn: &Connection, project_id: i64, tag_ids: &[i64]) -
         |r| r.get(0),
     )?;
     if !exists {
-        return Err(AppError::NotFound(format!("project {project_id}")));
+        return Err(AppError::coded(ErrorCode::ProjectNotFound, project_id.to_string()));
     }
     let tx = conn.unchecked_transaction()?;
     tx.execute(
@@ -178,7 +178,7 @@ mod tests {
 
         remove(&conn, t2.id).unwrap();
         assert_eq!(all(&conn).unwrap().len(), 1);
-        assert!(matches!(remove(&conn, t2.id), Err(AppError::NotFound(_))));
+        assert!(matches!(remove(&conn, t2.id), Err(ref e) if e.is_code(ErrorCode::TagNotFound)));
         let _ = t;
     }
 
@@ -188,7 +188,7 @@ mod tests {
         create(&conn, "work", "").unwrap();
         assert!(matches!(
             create(&conn, "work", "#fff"),
-            Err(AppError::Conflict(_))
+            Err(ref e) if e.is_code(ErrorCode::TagNameConflict)
         ));
     }
 
@@ -206,32 +206,32 @@ mod tests {
         // 不存在的 tag
         assert!(matches!(
             update(&conn, 9999, "x", ""),
-            Err(AppError::NotFound(_))
+            Err(ref e) if e.is_code(ErrorCode::TagNotFound)
         ));
         // 空名称 / 非法颜色
         assert!(matches!(
             update(&conn, t.id, " ", ""),
-            Err(AppError::Invalid(_))
+            Err(ref e) if e.is_code(ErrorCode::TagNameRequired)
         ));
         assert!(matches!(
             update(&conn, t.id, "x", "red"),
-            Err(AppError::Invalid(_))
+            Err(ref e) if e.is_code(ErrorCode::TagColorInvalid)
         ));
         // 重名冲突
         create(&conn, "other", "").unwrap();
         assert!(matches!(
             update(&conn, t.id, "other", ""),
-            Err(AppError::Conflict(_))
+            Err(ref e) if e.is_code(ErrorCode::TagNameConflict)
         ));
     }
 
     #[test]
     fn rejects_bad_input() {
         let conn = test_conn();
-        assert!(matches!(create(&conn, " ", ""), Err(AppError::Invalid(_))));
+        assert!(matches!(create(&conn, " ", ""), Err(ref e) if e.is_code(ErrorCode::TagNameRequired)));
         assert!(matches!(
             create(&conn, "x", "not-a-color"),
-            Err(AppError::Invalid(_))
+            Err(ref e) if e.is_code(ErrorCode::TagColorInvalid)
         ));
         assert!(create(&conn, "x", "#a1b2").is_ok());
     }
@@ -258,7 +258,7 @@ mod tests {
         // 项目不存在
         assert!(matches!(
             apply_project_tags(&conn, 9999, &[]),
-            Err(AppError::NotFound(_))
+            Err(ref e) if e.is_code(ErrorCode::ProjectNotFound)
         ));
 
         // 删除 tag 级联清理关联

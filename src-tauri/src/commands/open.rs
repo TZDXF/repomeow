@@ -4,7 +4,7 @@ use std::process::Command;
 use tauri::State;
 
 use crate::db::{self, Db};
-use crate::error::{AppError, AppResult};
+use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::EditorKind;
 
 /// detect_editors 结果在 settings 表中的缓存 key(JSON: { "<kind>": bool })
@@ -182,7 +182,7 @@ pub fn spawn_terminal(path: &str, _title: &str, command: Option<&str>) -> AppRes
 
 #[cfg(all(not(windows), not(target_os = "macos")))]
 pub fn spawn_terminal(_path: &str, _title: &str, _command: Option<&str>) -> AppResult<()> {
-    Err(AppError::External("当前平台暂不支持打开终端".into()))
+    Err(AppError::coded(ErrorCode::TerminalNotSupported, ""))
 }
 
 /// 通过编辑器 CLI 打开目录(命令需在 PATH 中)
@@ -202,7 +202,7 @@ pub(crate) fn open_explorer(path: &str) -> AppResult<()> {
     #[cfg(target_os = "macos")]
     Command::new("open").arg(path).spawn()?;
     #[cfg(all(not(windows), not(target_os = "macos")))]
-    return Err(AppError::External("当前平台暂不支持打开文件管理器".into()));
+    return Err(AppError::coded(ErrorCode::FileManagerNotSupported, ""));
     Ok(())
 }
 
@@ -219,14 +219,14 @@ fn command_on_path(cli: &str) -> bool {
 #[tauri::command]
 pub fn open_with(path: String, kind: EditorKind) -> AppResult<()> {
     if !std::path::Path::new(&path).is_dir() {
-        return Err(AppError::invalid_path(&path));
+        return Err(AppError::coded(ErrorCode::InvalidPath, path));
     }
     match kind {
         EditorKind::Explorer => open_explorer(&path),
         EditorKind::Terminal => spawn_terminal(&path, "Terminal", None),
         other => match cli_command(other) {
             Some(cli) => open_editor(cli, &path),
-            None => Err(AppError::Invalid(format!("未知的打开方式: {other:?}"))),
+            None => Err(AppError::coded(ErrorCode::OpenMethodUnknown, format!("{other:?}"))),
         },
     }
 }

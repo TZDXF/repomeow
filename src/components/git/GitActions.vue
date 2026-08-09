@@ -66,14 +66,14 @@ async function push() {
     await store.pushRepository(props.project);
     toast.success(t("git.push.success"));
   } catch (e) {
-    const msg = String(e);
-    if (msg.includes("non-fast-forward") || msg.includes("fetch first")) {
+    const code = (e as Error & { code?: string }).code;
+    if (code === "git_push_rejected") {
       // 远端有本地缺失的提交:不再倾倒 git 原文,给出快捷修复入口
       toast.error(t("git.push.rejected"), {
         action: { label: t("git.push.pullAndPush"), onClick: () => pullThenPush() },
       });
     } else {
-      toast.error(msg);
+      toast.error(String(e));
     }
   } finally {
     busy.value = "";

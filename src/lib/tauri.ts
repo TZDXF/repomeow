@@ -8,9 +8,20 @@ type SerializedAppError = {
   message?: unknown;
 };
 
-function translateCommandError(error: unknown): string {
-  // Tauri AppError 使用 `{ code, message }`;原生 Error 直接使用 message。
+type WrappedCommandError = Error & {
+  /** Rust 后端错误码(供 catch 站点做条件分支,如推送被拒绝时给出快捷操作) */
+  code?: string;
+  cause?: unknown;
+};
 
+/**
+ * 将 Tauri 拒绝对象翻译为本地化文本。
+ * - 命中 `errors.<code>` i18n key → 返回本地化文本
+ * - 未命中但有 `code` → 返回 `code` + `message`(技术上下文)
+ * - 有 `message` → 返回 `message`
+ * - 兜底 → "未知错误"
+ */
+function translateCommandError(error: unknown): string {
   if (error instanceof Error) {
     return error.message || String(error);
   }
@@ -22,12 +33,15 @@ function translateCommandError(error: unknown): string {
     if (code && i18n.global.te(`errors.${code}`)) {
       return i18n.global.t(`errors.${code}`);
     }
+    // 未命中 i18n:有 message 用 message,否则兜底("code:message" 形式对用户无意义)
     if (message) {
       return message;
     }
+    if (code) {
+      return code;
+    }
   }
 
-  // 无法识别的错误统一返回稳定文案,避免显示 "[object Object]"
   return "未知错误";
 }
 
@@ -41,9 +55,14 @@ export async function cmd<T>(name: string, args?: Record<string, unknown>): Prom
   try {
     return await invoke<T>(name, args);
   } catch (error) {
-    // 保留 Tauri rejection 的原始 payload 供上层诊断
-    const wrapped = new Error(translateCommandError(error)) as Error & { cause?: unknown };
+    const wrapped = new Error(translateCommandError(error)) as WrappedCommandError;
     wrapped.cause = error;
+    if (error && typeof error === "object") {
+      const code = (error as SerializedAppError).code;
+      if (typeof code === "string" && code) {
+        wrapped.code = code;
+      }
+    }
     throw wrapped;
   }
 }

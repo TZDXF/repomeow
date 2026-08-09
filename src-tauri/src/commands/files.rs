@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::commands::walk;
-use crate::error::{AppError, AppResult};
+use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::{ComposeFile, ComposePort, ComposeService, ReadmeContent};
 
 /// README 候选文件名,按优先级排列(大小写常见变体)
@@ -23,7 +23,7 @@ const COMPOSE_MAX_BYTES: u64 = 256 * 1024;
 
 pub(crate) fn ensure_dir(path: &str) -> AppResult<()> {
     if !Path::new(path).is_dir() {
-        return Err(AppError::invalid_path(path));
+        return Err(AppError::coded(ErrorCode::InvalidPath, path));
     }
     Ok(())
 }
@@ -77,22 +77,22 @@ const SAVE_TEXT_MAX_BYTES: usize = 512 * 1024;
 #[tauri::command]
 pub fn save_text_file(path: String, content: String) -> AppResult<()> {
     if path.trim().is_empty() {
-        return Err(AppError::Invalid("保存路径不能为空".into()));
+        return Err(AppError::coded(ErrorCode::SavePathRequired, ""));
     }
     if content.len() > SAVE_TEXT_MAX_BYTES {
-        return Err(AppError::Invalid(format!(
-            "内容超过 {} 字节上限",
-            SAVE_TEXT_MAX_BYTES
-        )));
+        return Err(AppError::coded(
+            ErrorCode::SaveContentTooLarge,
+            SAVE_TEXT_MAX_BYTES.to_string(),
+        ));
     }
     // 父目录必须存在
     let p = Path::new(&path);
     if let Some(parent) = p.parent() {
         if !parent.as_os_str().is_empty() && !parent.is_dir() {
-            return Err(AppError::Invalid(format!(
-                "目标目录不存在: {}",
-                parent.display()
-            )));
+            return Err(AppError::coded(
+                ErrorCode::SaveParentDirMissing,
+                parent.display().to_string(),
+            ));
         }
     }
     std::fs::write(p, content.as_bytes())?;
@@ -382,14 +382,14 @@ mod tests {
         // 空路径报错
         assert!(matches!(
             save_text_file("".into(), "x".into()),
-            Err(AppError::Invalid(_))
+            Err(ref e) if e.is_code(ErrorCode::SavePathRequired)
         ));
 
         // 父目录不存在报错
         let bad = p.join("missing/out.txt");
         assert!(matches!(
             save_text_file(bad.to_string_lossy().into_owned(), "x".into()),
-            Err(AppError::Invalid(_))
+            Err(ref e) if e.is_code(ErrorCode::SaveParentDirMissing)
         ));
 
         // 超大内容报错
@@ -397,7 +397,7 @@ mod tests {
         let target2 = p.join("huge.txt");
         assert!(matches!(
             save_text_file(target2.to_string_lossy().into_owned(), huge),
-            Err(AppError::Invalid(_))
+            Err(ref e) if e.is_code(ErrorCode::SaveContentTooLarge)
         ));
 
         let _ = fs::remove_dir_all(&dir);

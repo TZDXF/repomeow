@@ -20,7 +20,7 @@ use tokio::time::{self, Duration, Instant};
 
 use crate::commands::git::{run_git_current_user, run_git_log};
 use crate::commands::report::{read_schedules, ReportGeneratedPayload, ReportSchedule};
-use crate::error::{AppError, AppResult};
+use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::GitCommitInfo;
 use crate::workday;
 
@@ -180,7 +180,7 @@ async fn call_ai(
     config: &AiConfig,
     system_prompt: &str,
     user_prompt: &str,
-) -> Result<String, String> {
+) -> AppResult<String> {
     let url = format!(
         "{}/chat/completions",
         config.ai_base_url.trim_end_matches('/')
@@ -205,24 +205,27 @@ async fn call_ai(
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("AI 请求失败: {e}"))?;
+        .map_err(|e| AppError::coded(ErrorCode::AiRequestFailed, e.to_string()))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(format!("AI 返回错误 ({status}): {text}"));
+        return Err(AppError::coded(
+            ErrorCode::AiResponseError,
+            format!("status={status} body={text}"),
+        ));
     }
 
     let data: ChatResponse = resp
         .json()
         .await
-        .map_err(|e| format!("解析 AI 响应失败: {e}"))?;
+        .map_err(|e| AppError::coded(ErrorCode::AiResponseParseFailed, e.to_string()))?;
 
     let content = data
         .choices
         .first()
         .map(|c| c.message.content.clone())
-        .ok_or_else(|| "AI 返回空响应".to_string())?;
+        .ok_or_else(|| AppError::coded(ErrorCode::AiEmptyResponse, ""))?;
     Ok(strip_thinking(&content))
 }
 
@@ -489,9 +492,10 @@ fn mark_last_run(conn: &rusqlite::Connection, schedule_id: &str) -> AppResult<()
         rusqlite::params![now_ts, schedule_id],
     )?;
     if updated != 1 {
-        return Err(AppError::External(format!(
-            "[scheduler] 更新 last_run_at 未命中任何行(schedule_id={schedule_id}, updated={updated})"
-        )));
+        return Err(AppError::coded(
+            ErrorCode::DbError,
+            format!("scheduler: last_run_at update missing schedule_id={schedule_id} updated={updated}"),
+        ));
     }
     Ok(())
 }
@@ -504,9 +508,10 @@ fn delete_report_history_row(conn: &rusqlite::Connection, history_id: i64) -> Ap
         rusqlite::params![history_id],
     )?;
     if deleted != 1 {
-        return Err(AppError::External(format!(
-            "[scheduler] 清理孤儿 report_history 失败: id={history_id}, deleted={deleted}"
-        )));
+        return Err(AppError::coded(
+            ErrorCode::DbError,
+            format!("scheduler: orphan report_history cleanup failed id={history_id} deleted={deleted}"),
+        ));
     }
     Ok(())
 }
@@ -551,15 +556,15 @@ pub(crate) async fn fire_schedule(
     let ai_config = load_ai_config(data_dir);
     if ai_config.ai_base_url.is_empty() {
         eprintln!("[scheduler] AI 接口地址未配置,跳过生成");
-        return Err(AppError::ai_not_configured());
+        return Err(AppError::coded(ErrorCode::AiNotConfigured, "base_url"));
     }
     if ai_config.ai_api_key.is_empty() {
         eprintln!("[scheduler] AI API Key 未配置,跳过生成");
-        return Err(AppError::ai_not_configured());
+        return Err(AppError::coded(ErrorCode::AiNotConfigured, "api_key"));
     }
     if ai_config.ai_model.is_empty() {
         eprintln!("[scheduler] AI 模型未配置,跳过生成");
-        return Err(AppError::ai_not_configured());
+        return Err(AppError::coded(ErrorCode::AiNotConfigured, "model"));
     }
 
     // 3. 读取提示词模板(按报告类型)
@@ -643,9 +648,7 @@ pub(crate) async fn fire_schedule(
     if commits_by_project.is_empty() {
         eprintln!("[scheduler] {schedule_name}: 无提交记录,跳过");
         // 不写历史、不更新 last_run_at,让下一次循环再次尝试
-        return Err(AppError::External(
-            "所选项目在时间范围内没有提交记录".into(),
-        ));
+        return Err(AppError::coded(ErrorCode::SchedulerNoCommits, ""));
     }
 
     // 6. 组装 prompt
@@ -660,7 +663,7 @@ pub(crate) async fn fire_schedule(
         .await
         .map_err(|e| {
             eprintln!("[scheduler] {schedule_name}: AI 调用失败: {e}");
-            AppError::External(e)
+            e
         })?;
 
     // 8. 一次性事务保存报告历史 + 关联 commits,失败回滚。

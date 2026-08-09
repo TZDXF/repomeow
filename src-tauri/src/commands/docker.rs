@@ -3,7 +3,7 @@ use std::process::Command;
 
 use serde::Deserialize;
 
-use crate::error::{AppError, AppResult};
+use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::ComposeServiceState;
 
 fn docker_command() -> Command {
@@ -54,7 +54,7 @@ fn parse_ps(output: &str) -> Vec<ComposeServiceState> {
 fn ps_blocking(path: &str, file: &str) -> AppResult<Vec<ComposeServiceState>> {
     let dir = Path::new(path);
     if !dir.is_dir() {
-        return Err(AppError::Invalid(format!("目录不存在: {path}")));
+        return Err(AppError::coded(ErrorCode::DockerDirNotFound, path));
     }
     // 与前端 up/down 的执行方式保持一致:项目根目录 + 相对 -f 路径,
     // 这样 compose 项目名解析一致,ps 才能命中同一组容器。
@@ -74,7 +74,7 @@ fn ps_blocking(path: &str, file: &str) -> AppResult<Vec<ComposeServiceState>> {
 pub async fn compose_ps(path: String, file: String) -> AppResult<Vec<ComposeServiceState>> {
     tokio::task::spawn_blocking(move || ps_blocking(&path, &file))
         .await
-        .map_err(|e| AppError::External(format!("任务执行失败: {e}")))?
+        .map_err(|e| AppError::coded(ErrorCode::DockerTaskFailed, e.to_string()))?
 }
 
 fn run_docker(dir: &Path, args: &[&str]) -> AppResult<std::process::Output> {
@@ -82,7 +82,7 @@ fn run_docker(dir: &Path, args: &[&str]) -> AppResult<std::process::Output> {
         .args(args)
         .current_dir(dir)
         .output()
-        .map_err(|e| AppError::External(format!("docker 执行失败: {e}")))
+        .map_err(|e| AppError::coded(ErrorCode::DockerExecFailed, e.to_string()))
 }
 
 /// 校验 docker 子命令成功,失败时把 stderr 包成错误
@@ -90,10 +90,9 @@ fn ensure_ok(action: &str, out: std::process::Output) -> AppResult<std::process:
     if out.status.success() {
         Ok(out)
     } else {
-        Err(AppError::External(format!(
-            "{action}失败: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        )))
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        let context = format!("action={action} stderr={stderr}");
+        Err(AppError::coded(ErrorCode::DockerActionFailed, context))
     }
 }
 
@@ -115,7 +114,7 @@ fn service_images(dir: &Path, file: &str) -> AppResult<Vec<(String, String)>> {
         run_docker(dir, &["compose", "-f", file, "config", "--format", "json"])?,
     )?;
     let v: serde_json::Value = serde_json::from_slice(&cfg.stdout)
-        .map_err(|e| AppError::External(format!("解析 compose 配置失败: {e}")))?;
+        .map_err(|e| AppError::coded(ErrorCode::DockerComposeParseFailed, e.to_string()))?;
     let services = v
         .get("services")
         .and_then(|s| s.as_object())
@@ -138,19 +137,21 @@ fn save_image(dir: &Path, image: &str, dest: &Path) -> AppResult<()> {
     }
     let stderr = String::from_utf8_lossy(&out.stderr);
     if stderr.contains("No such image") {
-        return Err(AppError::Invalid(format!(
-            "镜像 {image} 本地不存在,请先构建或拉取"
-        )));
+        return Err(AppError::coded(
+            ErrorCode::DockerContainerNotCreated,
+            format!("image={image}"),
+        ));
     }
-    Err(AppError::External(format!("导出失败: {}", stderr.trim())))
+    Err(AppError::coded(ErrorCode::DockerSaveFailed, stderr.trim().to_string()))
 }
 
 /// 导出单个服务:container → docker export(需容器已创建);image → docker save(只需本地有镜像)
 fn export_one(dir: &Path, file: &str, service: &str, kind: &str, dest: &Path) -> AppResult<()> {
     match kind {
         "container" => {
-            let id = container_id(dir, file, service)?
-                .ok_or_else(|| AppError::Invalid(format!("服务 {service} 尚未创建容器,请先启动")))?;
+            let id = container_id(dir, file, service)?.ok_or_else(|| {
+                AppError::coded(ErrorCode::DockerContainerNotCreated, service.to_string())
+            })?;
             let out = run_docker(dir, &["export", "-o", &dest.to_string_lossy(), &id])?;
             ensure_ok("导出", out)?;
             Ok(())
@@ -161,11 +162,11 @@ fn export_one(dir: &Path, file: &str, service: &str, kind: &str, dest: &Path) ->
                 .find(|(name, _)| name == service)
                 .map(|(_, image)| image)
                 .ok_or_else(|| {
-                    AppError::Invalid(format!("compose 配置中未找到服务 {service} 的镜像"))
+                    AppError::coded(ErrorCode::DockerServiceImageMissing, service.to_string())
                 })?;
             save_image(dir, &image, dest)
         }
-        _ => Err(AppError::Invalid(format!("未知导出类型: {kind}"))),
+        _ => Err(AppError::coded(ErrorCode::DockerUnknownExportKind, kind.to_string())),
     }
 }
 
@@ -175,7 +176,10 @@ fn export_one(dir: &Path, file: &str, service: &str, kind: &str, dest: &Path) ->
 fn export_all(dir: &Path, file: &str, kind: &str, dest_dir: &str) -> AppResult<()> {
     let dest_dir = Path::new(dest_dir);
     if !dest_dir.is_dir() {
-        return Err(AppError::Invalid(format!("目录不存在: {}", dest_dir.display())));
+        return Err(AppError::coded(
+            ErrorCode::DockerDirNotFound,
+            dest_dir.display().to_string(),
+        ));
     }
     if kind == "image" {
         let mut exported = 0usize;
@@ -191,12 +195,12 @@ fn export_all(dir: &Path, file: &str, kind: &str, dest_dir: &str) -> AppResult<(
             }
         }
         if exported == 0 {
-            return Err(AppError::Invalid("本地没有可导出的镜像,请先构建或拉取".into()));
+            return Err(AppError::coded(ErrorCode::DockerNoExportableImages, ""));
         }
         return Ok(());
     }
     if kind != "container" {
-        return Err(AppError::Invalid(format!("未知导出类型: {kind}")));
+        return Err(AppError::coded(ErrorCode::DockerUnknownExportKind, kind.to_string()));
     }
     let cfg = ensure_ok(
         "读取服务列表",
@@ -219,7 +223,7 @@ fn export_all(dir: &Path, file: &str, kind: &str, dest_dir: &str) -> AppResult<(
         exported += 1;
     }
     if exported == 0 {
-        return Err(AppError::Invalid("没有已创建的容器可导出,请先启动服务".into()));
+        return Err(AppError::coded(ErrorCode::DockerNoExportableContainers, ""));
     }
     Ok(())
 }
@@ -238,7 +242,7 @@ pub async fn compose_export(
     tokio::task::spawn_blocking(move || {
         let dir = Path::new(&path);
         if !dir.is_dir() {
-            return Err(AppError::Invalid(format!("目录不存在: {path}")));
+            return Err(AppError::coded(ErrorCode::DockerDirNotFound, path));
         }
         if service.is_empty() {
             export_all(dir, &file, &kind, &dest)
@@ -247,7 +251,7 @@ pub async fn compose_export(
         }
     })
     .await
-    .map_err(|e| AppError::External(format!("任务执行失败: {e}")))?
+    .map_err(|e| AppError::coded(ErrorCode::DockerTaskFailed, e.to_string()))?
 }
 
 #[cfg(test)]

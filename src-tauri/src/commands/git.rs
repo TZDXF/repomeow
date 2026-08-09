@@ -11,7 +11,7 @@ use tokio::sync::Semaphore;
 
 use crate::commands::account;
 use crate::db::Db;
-use crate::error::{AppError, AppResult};
+use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::{
     GitBranches, GitCommitContext, GitCommitInfo, GitPullResult, GitStatus, GitUntrackedFile,
     GitUser,
@@ -185,7 +185,10 @@ fn run_git(path: &str, args: &[&str]) -> AppResult<Output> {
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let detail = if stderr.is_empty() { stdout } else { stderr };
     Err(if detail.is_empty() {
-        AppError::External(format!("git {} 退出码 {}", args.join(" "), output.status))
+        AppError::coded(
+            ErrorCode::GitCommandFailed,
+            format!("args={} status={}", args.join(" "), output.status),
+        )
     } else {
         friendly_git_error(&detail)
     })
@@ -194,7 +197,7 @@ fn run_git(path: &str, args: &[&str]) -> AppResult<Output> {
 /// 将 git 原始 stderr 转为简洁友好的错误:
 /// 1. 过滤环境噪音行(如 OpenSSH 后量子密钥交换警告)
 /// 2. 常见错误模式映射为带错误码的 Coded 错误(前端按 code 走 i18n,
-///    此处 message 仅作回退);未识别时返回清理后的原文(External)
+///    此处 message 仅保留技术上下文);未识别时返回清理后的原文(External→Coded)
 ///
 /// 注意:`push_blocking` 依赖原文匹配 "no upstream branch",映射规则不得覆盖该短语
 fn friendly_git_error(raw: &str) -> AppError {
@@ -216,7 +219,7 @@ fn friendly_git_error(raw: &str) -> AppError {
         .collect();
     let text = cleaned.join("\n");
     if text.is_empty() {
-        return AppError::External("git 命令失败(详见应用日志)".into());
+        return AppError::coded(ErrorCode::GitNoiseFallback, "");
     }
     let coded = |code: ErrorCode, message: &str| AppError::Coded {
         code,
@@ -225,62 +228,38 @@ fn friendly_git_error(raw: &str) -> AppError {
 
     // 本地修改/未跟踪文件会被合并或切换分支覆盖
     if text.contains("Your local changes to the following files would be overwritten by") {
-        return coded(
-            ErrorCode::GitLocalChangesConflict,
-            "本地修改与远端冲突,请先提交或储藏(git stash)后再试",
-        );
+        return coded(ErrorCode::GitLocalChangesConflict, "");
     }
     if text.contains("The following untracked working tree files would be overwritten by") {
-        return coded(
-            ErrorCode::GitUntrackedConflict,
-            "有未跟踪的本地文件与远端冲突,请先移走或删除后再试",
-        );
+        return coded(ErrorCode::GitUntrackedConflict, "");
     }
 
     // 认证与权限
     if text.contains("Permission denied (publickey") {
-        return coded(
-            ErrorCode::GitSshAuthFailed,
-            "SSH 认证失败:请检查本机密钥是否已添加到远端账号,以及是否有仓库访问权限",
-        );
+        return coded(ErrorCode::GitSshAuthFailed, "");
     }
     if text.contains("Host key verification failed") {
-        return coded(
-            ErrorCode::GitHostKeyFailed,
-            "SSH 主机密钥校验失败:请先在终端执行一次 git 操作并确认主机指纹",
-        );
+        return coded(ErrorCode::GitHostKeyFailed, "");
     }
     if text.contains("Authentication failed") || text.contains("Invalid username or password") {
-        return coded(
-            ErrorCode::GitAuthFailed,
-            "认证失败:请检查用户名密码或访问令牌(Token)是否有效",
-        );
+        return coded(ErrorCode::GitAuthFailed, "");
     }
     if text.contains("Repository not found") || text.contains("repository not found") {
-        return coded(
-            ErrorCode::GitRepoNotFound,
-            "远端仓库不存在或当前账号没有访问权限",
-        );
+        return coded(ErrorCode::GitRepoNotFound, "");
     }
 
     // 网络
     if text.contains("Could not resolve host")
         || text.contains("Temporary failure in name resolution")
     {
-        return coded(
-            ErrorCode::GitNetworkDns,
-            "网络错误:无法解析远端主机名,请检查网络、DNS 或代理设置",
-        );
+        return coded(ErrorCode::GitNetworkDns, "");
     }
     if text.contains("Connection timed out")
         || text.contains("Connection refused")
         || text.contains("Connection reset")
         || text.contains("Failed to connect to")
     {
-        return coded(
-            ErrorCode::GitNetworkConnect,
-            "网络错误:无法连接远端服务器,请检查网络或代理设置",
-        );
+        return coded(ErrorCode::GitNetworkConnect, "");
     }
 
     // 推送/拉取策略
@@ -289,32 +268,24 @@ fn friendly_git_error(raw: &str) -> AppError {
             || text.contains("fetch first")
             || text.contains("Updates were rejected")
         {
-            return coded(
-                ErrorCode::GitPushRejected,
-                "推送被拒绝:远端有本地没有的新提交,请先拉取合并后再推送",
-            );
+            return coded(ErrorCode::GitPushRejected, "");
         }
-        return AppError::External(format!("推送失败:{text}"));
+        return AppError::coded(ErrorCode::GitPushFailed, text);
     }
     if text.contains("You have divergent branches")
         || text.contains("Need to specify how to reconcile divergent branches")
     {
-        return coded(
-            ErrorCode::GitDiverged,
-            "本地与远端分支已分叉,请在终端执行 git pull --rebase 或配置合并策略后再试",
-        );
+        return coded(ErrorCode::GitDiverged, "");
     }
     if text.contains("There is no tracking information") {
-        return coded(
-            ErrorCode::GitNoTracking,
-            "当前分支未关联远端分支,请先执行 git push -u origin <分支名>",
-        );
+        return coded(ErrorCode::GitNoTracking, "");
     }
     if text.contains("not a git repository") {
-        return coded(ErrorCode::NotGitRepository, "当前目录不是 Git 仓库");
+        return coded(ErrorCode::NotGitRepository, "");
     }
 
-    AppError::External(text)
+    // 未识别:整段清理后原文作为 message 携带
+    AppError::coded(ErrorCode::GitCommandFailed, text)
 }
 
 /// 阻塞任务放入 tokio 线程池执行。
@@ -324,7 +295,7 @@ async fn run_blocking<T: Send + 'static>(
 ) -> AppResult<T> {
     tokio::task::spawn_blocking(f)
         .await
-        .map_err(|e| AppError::External(format!("任务执行失败: {e}")))?
+        .map_err(|e| AppError::coded(ErrorCode::GitTaskFailed, e.to_string()))?
 }
 
 pub fn status(path: &str) -> AppResult<GitStatus> {
@@ -818,7 +789,7 @@ pub async fn git_checkout(
 fn checkout_blocking(path: &str, branch: &str, create: bool, remote: bool) -> AppResult<GitStatus> {
     let branch = branch.trim();
     if branch.is_empty() {
-        return Err(AppError::Invalid("分支名不能为空".into()));
+        return Err(AppError::coded(ErrorCode::GitBranchNameRequired, ""));
     }
     if create {
         run_git(path, &["checkout", "-b", branch])?;
@@ -896,7 +867,7 @@ pub async fn git_commit(
 fn commit_blocking(path: &str, message: &str, include_untracked: bool) -> AppResult<GitStatus> {
     let message = message.trim();
     if message.is_empty() {
-        return Err(AppError::Invalid("提交信息不能为空".into()));
+        return Err(AppError::coded(ErrorCode::GitCommitMessageRequired, ""));
     }
     if include_untracked {
         let nested = nested_repo_dirs(path);
@@ -933,7 +904,7 @@ fn pull_blocking(path: &str) -> AppResult<GitPullResult> {
         let stdout = String::from_utf8_lossy(&result.stdout).trim().to_string();
         let detail = if stderr.is_empty() { stdout } else { stderr };
         return Err(if detail.is_empty() {
-            AppError::External("git pull 失败".into())
+            AppError::coded(ErrorCode::GitPullFailed, "")
         } else {
             friendly_git_error(&detail)
         });
@@ -1181,7 +1152,7 @@ pub(crate) fn run_git_log(
         }
         let detail = stderr.trim();
         return Err(if detail.is_empty() {
-            AppError::External(format!("git log 退出码 {}", output.status))
+            AppError::coded(ErrorCode::GitLogFailed, output.status.to_string())
         } else {
             friendly_git_error(detail)
         });
@@ -1265,7 +1236,7 @@ pub async fn git_clone(
 ) -> AppResult<String> {
     let url = url.trim().to_string();
     if url.is_empty() {
-        return Err(AppError::Invalid("仓库地址不能为空".into()));
+        return Err(AppError::coded(ErrorCode::GitCloneUrlRequired, ""));
     }
     // 账号凭据拼进 clone URL(仅 http(s) 地址生效,ssh 地址原样使用)
     let clone_url = match account_id {
@@ -1286,15 +1257,15 @@ pub async fn git_clone(
     let target = Path::new(&target_path);
     let parent = target
         .parent()
-        .ok_or_else(|| AppError::Invalid(format!("目标路径无效: {target_path}")))?;
+        .ok_or_else(|| AppError::coded(ErrorCode::GitCloneInvalidTarget, target_path.clone()))?;
     if !parent.is_dir() {
-        return Err(AppError::Invalid(format!(
-            "存放目录不存在: {}",
-            parent.display()
-        )));
+        return Err(AppError::coded(
+            ErrorCode::GitCloneParentMissing,
+            parent.display().to_string(),
+        ));
     }
     if target.exists() {
-        return Err(AppError::Conflict(format!("目标目录已存在: {target_path}")));
+        return Err(AppError::coded(ErrorCode::GitCloneTargetExists, target_path.clone()));
     }
 
     let mut command = tokio::process::Command::new("git");
@@ -1315,7 +1286,7 @@ pub async fn git_clone(
     }
     let mut child = command
         .spawn()
-        .map_err(|e| AppError::External(format!("启动 git clone 失败: {e}")))?;
+        .map_err(|e| AppError::coded(ErrorCode::GitCloneSpawnFailed, e.to_string()))?;
     // 登记 PID 供应用退出钩子按 PID 清理(child 随后 move 进 CLONE_JOBS,
     // 但 pid 已拷出为独立副本,不受句柄所有权转移影响)
     let _tracked = TrackedPid::new(child.id());
@@ -1354,7 +1325,7 @@ pub async fn git_clone(
         let polled = {
             let mut jobs = clone_jobs().lock().await;
             match jobs.get_mut(&job_id) {
-                None => break Err(AppError::External("已取消克隆".into())),
+                None => break Err(AppError::coded(ErrorCode::GitCloneCanceled, "")),
                 Some(child) => child.try_wait(),
             }
         };
@@ -1367,7 +1338,7 @@ pub async fn git_clone(
                 clone_jobs().lock().await.remove(&job_id);
                 let detail = stderr_buf.lock().unwrap().trim().to_string();
                 break Err(if detail.is_empty() {
-                    AppError::External("git clone 失败".to_string())
+                    AppError::coded(ErrorCode::GitCloneFailed, "")
                 } else {
                     friendly_git_error(&detail)
                 });
@@ -1375,7 +1346,7 @@ pub async fn git_clone(
             Ok(None) => tokio::time::sleep(std::time::Duration::from_millis(200)).await,
             Err(e) => {
                 clone_jobs().lock().await.remove(&job_id);
-                break Err(AppError::External(format!("等待 git clone 结束失败: {e}")));
+                break Err(AppError::coded(ErrorCode::GitClonePollFailed, e.to_string()));
             }
         }
     };
@@ -1524,7 +1495,11 @@ mod tests {
         // push_blocking 依赖该原文短语判断首推回退,映射不得覆盖
         let raw = "fatal: The current branch dev has no upstream branch.";
         let err = friendly_git_error(raw);
-        assert!(err.code().is_none(), "不应映射为错误码: {err}");
+        assert_eq!(
+            err.code(),
+            "git_command_failed",
+            "未识别错误应落到 git_command_failed: {err}"
+        );
         assert!(
             err.to_string().contains("has no upstream branch"),
             "实际输出: {err}"
@@ -1571,7 +1546,8 @@ mod tests {
         let err = friendly_git_error(
             "** WARNING: connection is not using a post-quantum key exchange algorithm.",
         );
-        assert_eq!(err.to_string(), "外部命令失败: git 命令失败(详见应用日志)");
+        assert!(err.is_code(ErrorCode::GitNoiseFallback), "实际输出: {err}");
+        assert_eq!(err.code(), "git_noise_fallback");
     }
 
     #[test]

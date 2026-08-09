@@ -2,7 +2,7 @@ use rusqlite::{params, params_from_iter, Connection, OptionalExtension, ToSql};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::db::Db;
-use crate::error::{AppError, AppResult};
+use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::{Project, Tag};
 
 fn now() -> i64 {
@@ -128,11 +128,11 @@ fn projects_with_tags(conn: &Connection, rows: Vec<ProjectRow>) -> AppResult<Vec
 
 pub fn add(conn: &Connection, path: &str, name: &str, description: &str) -> AppResult<Project> {
     if !std::path::Path::new(path).is_dir() {
-        return Err(AppError::invalid_path(path));
+        return Err(AppError::coded(ErrorCode::InvalidPath, path));
     }
     let name = name.trim();
     if name.is_empty() {
-        return Err(AppError::Invalid("名称不能为空".into()));
+        return Err(AppError::coded(ErrorCode::ProjectNameRequired, ""));
     }
     let ts = now();
     conn.execute(
@@ -144,7 +144,7 @@ pub fn add(conn: &Connection, path: &str, name: &str, description: &str) -> AppR
         rusqlite::Error::SqliteFailure(err, _)
             if err.code == rusqlite::ErrorCode::ConstraintViolation =>
         {
-            AppError::Conflict(format!("项目已存在: {path}"))
+            AppError::coded(ErrorCode::ProjectPathConflict, path)
         }
         other => AppError::Db(other),
     })?;
@@ -156,7 +156,7 @@ pub fn get(conn: &Connection, id: i64) -> AppResult<Project> {
     let row = conn.query_row(&sql, params![id], map_row).optional()?;
     match row {
         Some(r) => with_tags(conn, r),
-        None => Err(AppError::project_not_found(id)),
+        None => Err(AppError::coded(ErrorCode::ProjectNotFound, id.to_string())),
     }
 }
 
@@ -203,23 +203,23 @@ pub fn list(
 pub fn update(conn: &Connection, id: i64, name: &str, description: &str) -> AppResult<Project> {
     let name = name.trim();
     if name.is_empty() {
-        return Err(AppError::Invalid("名称不能为空".into()));
+        return Err(AppError::coded(ErrorCode::ProjectNameRequired, ""));
     }
     let changed = conn.execute(
         "UPDATE projects SET name = ?1, description = ?2, updated_at = ?3 WHERE id = ?4",
         params![name, description, now(), id],
     )?;
     if changed == 0 {
-        return Err(AppError::project_not_found(id));
+        return Err(AppError::coded(ErrorCode::ProjectNotFound, id.to_string()));
     }
     get(conn, id)
 }
 
-/// 重新指定项目目录(项目被移动后修复登记路径;标签、自定义命令等关联随 id 保留)
+/// 重新指定项目目录（项目被移动后修复登记路径；标签、自定义命令等关联随 id 保留）
 pub fn update_path(conn: &Connection, id: i64, path: &str) -> AppResult<Project> {
     let path = path.trim();
     if path.is_empty() || !std::path::Path::new(path).is_dir() {
-        return Err(AppError::invalid_path(path));
+        return Err(AppError::coded(ErrorCode::InvalidPath, path));
     }
     let changed = conn
         .execute(
@@ -230,12 +230,12 @@ pub fn update_path(conn: &Connection, id: i64, path: &str) -> AppResult<Project>
             rusqlite::Error::SqliteFailure(err, _)
                 if err.code == rusqlite::ErrorCode::ConstraintViolation =>
             {
-                AppError::Conflict(format!("项目已存在: {path}"))
+                AppError::coded(ErrorCode::ProjectPathConflict, path)
             }
             other => AppError::Db(other),
         })?;
     if changed == 0 {
-        return Err(AppError::project_not_found(id));
+        return Err(AppError::coded(ErrorCode::ProjectNotFound, id.to_string()));
     }
     get(conn, id)
 }
@@ -252,28 +252,31 @@ fn prepare_move(conn: &Connection, id: i64, target_parent: &str, dir_name: &str)
     let project = get(conn, id)?;
     let src = std::path::PathBuf::from(&project.path);
     if !src.is_dir() {
-        return Err(AppError::invalid_path(&project.path));
+        return Err(AppError::coded(ErrorCode::InvalidPath, &project.path));
     }
     let parent = std::path::Path::new(target_parent.trim());
     if !parent.is_dir() {
-        return Err(AppError::invalid_path(target_parent.trim()));
+        return Err(AppError::coded(ErrorCode::InvalidPath, target_parent.trim()));
     }
     let dir_name = dir_name.trim();
     if dir_name.is_empty() || dir_name == "." || dir_name == ".." || dir_name.contains('/')
         || dir_name.contains('\\')
     {
-        return Err(AppError::Invalid(format!("目录名不合法: {dir_name}")));
+        return Err(AppError::coded(ErrorCode::MoveInvalidDirName, dir_name));
     }
     let target = parent.join(dir_name);
     // Windows 文件系统大小写不敏感,统一按忽略大小写判断"位置未变化"
     if target.to_string_lossy().eq_ignore_ascii_case(&project.path) {
-        return Err(AppError::Invalid("新位置与原位置相同".into()));
+        return Err(AppError::coded(ErrorCode::MoveSameLocation, ""));
     }
     if target.starts_with(&src) {
-        return Err(AppError::Invalid("不能移动到项目目录内部".into()));
+        return Err(AppError::coded(ErrorCode::MoveInsideSelf, ""));
     }
     if target.exists() {
-        return Err(AppError::Conflict(format!("目标目录已存在: {}", target.display())));
+        return Err(AppError::coded(
+            ErrorCode::MoveTargetExists,
+            target.to_string_lossy().to_string(),
+        ));
     }
     let target_str = target.to_string_lossy().to_string();
     // 目标路径已被其他项目登记时提前报错,避免移动后数据库唯一键冲突
@@ -285,7 +288,7 @@ fn prepare_move(conn: &Connection, id: i64, target_parent: &str, dir_name: &str)
         )
         .optional()?;
     if registered.is_some() {
-        return Err(AppError::Conflict(format!("项目已存在: {target_str}")));
+        return Err(AppError::coded(ErrorCode::ProjectPathConflict, target_str));
     }
     Ok(MovePlan { src, target, target_str })
 }
@@ -323,7 +326,10 @@ fn copy_across_devices(src: &std::path::Path, target: &std::path::Path) -> AppRe
         let _ = std::fs::remove_dir_all(target);
         let stdout = String::from_utf8_lossy(&output.stdout);
         let tail: String = stdout.chars().rev().take(200).collect::<String>().chars().rev().collect();
-        return Err(AppError::External(format!("robocopy 退出码 {code}: {tail}")));
+        return Err(AppError::coded(
+            ErrorCode::MoveRobocopyFailed,
+            format!("code={code} tail={tail}"),
+        ));
     }
     std::fs::remove_dir_all(src).map_err(AppError::Io)
 }
@@ -387,7 +393,7 @@ pub fn archive(conn: &Connection, id: i64) -> AppResult<()> {
         params![now(), id],
     )?;
     if changed == 0 {
-        return Err(AppError::project_not_found(id));
+        return Err(AppError::coded(ErrorCode::ProjectNotFound, id.to_string()));
     }
     Ok(())
 }
@@ -410,7 +416,7 @@ pub fn unarchive(conn: &Connection, id: i64) -> AppResult<()> {
         params![id],
     )?;
     if changed == 0 {
-        return Err(AppError::project_not_found(id));
+        return Err(AppError::coded(ErrorCode::ProjectNotFound, id.to_string()));
     }
     Ok(())
 }
@@ -423,7 +429,7 @@ pub fn set_favorite(conn: &Connection, id: i64, favorite: bool) -> AppResult<()>
         params![favorited_at, id],
     )?;
     if changed == 0 {
-        return Err(AppError::project_not_found(id));
+        return Err(AppError::coded(ErrorCode::ProjectNotFound, id.to_string()));
     }
     Ok(())
 }
@@ -432,7 +438,7 @@ pub fn set_favorite(conn: &Connection, id: i64, favorite: bool) -> AppResult<()>
 pub fn remove(conn: &Connection, id: i64) -> AppResult<()> {
     let changed = conn.execute("DELETE FROM projects WHERE id = ?1", params![id])?;
     if changed == 0 {
-        return Err(AppError::project_not_found(id));
+        return Err(AppError::coded(ErrorCode::ProjectNotFound, id.to_string()));
     }
     Ok(())
 }
@@ -665,7 +671,7 @@ mod tests {
         add(&conn, &dir, "a", "").unwrap();
         assert!(matches!(
             add(&conn, &dir, "b", ""),
-            Err(AppError::Conflict(_))
+            Err(ref e) if e.is_code(crate::error::ErrorCode::ProjectPathConflict)
         ));
     }
 
@@ -677,7 +683,7 @@ mod tests {
         let dir = std::env::temp_dir().to_string_lossy().to_string();
         assert!(matches!(
             add(&conn, &dir, "   ", ""),
-            Err(AppError::Invalid(_))
+            Err(ref e) if e.is_code(crate::error::ErrorCode::ProjectNameRequired)
         ));
     }
 
@@ -713,7 +719,7 @@ mod tests {
         );
         assert!(matches!(
             update_path(&conn, a.id, &b.path),
-            Err(AppError::Conflict(_))
+            Err(ref e) if e.is_code(crate::error::ErrorCode::ProjectPathConflict)
         ));
 
         // 换到一个新目录:path 更新,path_exists 重新计算
@@ -750,23 +756,28 @@ mod tests {
         // 目标已存在 / 已被其他项目登记 / 移入自身内部 / 位置未变化 / 目录名带分隔符,均拒绝
         assert!(matches!(
             move_dir(&conn, p.id, &dir.to_string_lossy(), "repomeow-move-taken"),
-            Err(AppError::Conflict(_))
+            Err(ref e) if e.is_code(crate::error::ErrorCode::MoveTargetExists)
         ));
+        // 目标路径已被其他项目登记(磁盘目录已存在 → MoveTargetExists 优先)
+        // 验证路径冲突的 ProjectPathConflict:把 other 目录移除后再试
+        std::fs::remove_dir_all(&other).unwrap();
         assert!(matches!(
             move_dir(&conn, p.id, &dir.to_string_lossy(), "repomeow-move-other"),
-            Err(AppError::Conflict(_))
+            Err(ref e) if e.is_code(crate::error::ErrorCode::ProjectPathConflict)
         ));
+        // 还原以供后续不受影响
+        std::fs::create_dir_all(&other).unwrap();
         assert!(matches!(
             move_dir(&conn, p.id, &src.to_string_lossy(), "inner"),
-            Err(AppError::Invalid(_))
+            Err(ref e) if e.is_code(crate::error::ErrorCode::MoveInsideSelf)
         ));
         assert!(matches!(
             move_dir(&conn, p.id, &dir.to_string_lossy(), "repomeow-move-src"),
-            Err(AppError::Invalid(_))
+            Err(ref e) if e.is_code(crate::error::ErrorCode::MoveSameLocation)
         ));
         assert!(matches!(
             move_dir(&conn, p.id, &dir.to_string_lossy(), "bad/name"),
-            Err(AppError::Invalid(_))
+            Err(ref e) if e.is_code(crate::error::ErrorCode::MoveInvalidDirName)
         ));
 
         // 正常移动 + 改名:磁盘目录移动,登记路径同步更新

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 use crate::commands::open;
-use crate::error::{AppError, AppResult};
+use crate::error::{AppError, AppResult, ErrorCode};
 use crate::APP_DATA_DIR_NAME;
 
 const PROMPTS_DIR_NAME: &str = "prompts";
@@ -26,7 +26,7 @@ fn prompts_dir(app: &AppHandle) -> AppResult<PathBuf> {
     let home = app
         .path()
         .home_dir()
-        .map_err(|e| AppError::External(e.to_string()))?;
+        .map_err(|e| AppError::coded(ErrorCode::IoError, e.to_string()))?;
     Ok(home.join(APP_DATA_DIR_NAME).join(PROMPTS_DIR_NAME))
 }
 

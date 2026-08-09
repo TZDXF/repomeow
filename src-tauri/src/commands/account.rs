@@ -48,7 +48,7 @@ fn normalize_provider(provider: &str) -> AppResult<String> {
     let p = provider.trim().to_lowercase();
     match p.as_str() {
         "github" | "gitee" | "gitlab" => Ok(p),
-        _ => Err(AppError::Invalid(format!("不支持的平台: {provider}"))),
+        _ => Err(AppError::coded(ErrorCode::AccountUnsupportedProvider, provider.to_string())),
     }
 }
 
@@ -60,16 +60,17 @@ fn resolve_base_url(provider: &str, input: Option<&str>) -> AppResult<String> {
         "gitlab" => {
             let raw = input.unwrap_or("").trim().trim_end_matches('/');
             if raw.is_empty() {
-                return Err(AppError::Invalid("GitLab 实例地址不能为空".into()));
+                return Err(AppError::coded(ErrorCode::GitlabBaseUrlRequired, ""));
             }
             if !raw.starts_with("http://") && !raw.starts_with("https://") {
-                return Err(AppError::Invalid(
-                    "GitLab 实例地址需以 http:// 或 https:// 开头".into(),
+                return Err(AppError::coded(
+                    ErrorCode::GitlabBaseUrlInvalidScheme,
+                    raw.to_string(),
                 ));
             }
             Ok(raw.to_string())
         }
-        _ => Err(AppError::Invalid(format!("不支持的平台: {provider}"))),
+        _ => Err(AppError::coded(ErrorCode::AccountUnsupportedProvider, provider.to_string())),
     }
 }
 
@@ -142,7 +143,7 @@ fn get_account_row(conn: &Connection, id: i64) -> AppResult<AccountRow> {
     let sql = format!("SELECT {ACCOUNT_COLS} FROM git_accounts WHERE id = ?1");
     conn.query_row(&sql, params![id], map_row)
         .optional()?
-        .ok_or_else(|| AppError::NotFound(format!("账号不存在: {id}")))
+        .ok_or_else(|| AppError::coded(ErrorCode::AccountNotFound, id.to_string()))
 }
 
 /// 供 git_clone 使用:取账号的 (provider, username, token)
@@ -191,11 +192,9 @@ fn run_gh(args: &[&str]) -> AppResult<String> {
     let out = gh_command()
         .args(args)
         .output()
-        .map_err(|e| AppError::External(format!("启动 gh 失败(未安装?): {e}")))?;
+        .map_err(|e| AppError::coded(ErrorCode::GhCliSpawnFailed, e.to_string()))?;
     if !out.status.success() {
-        return Err(AppError::External(
-            "未检测到已登录的 GitHub CLI(gh),请先执行 gh auth login".into(),
-        ));
+        return Err(AppError::coded(ErrorCode::GhCliNotFound, ""));
     }
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
@@ -205,9 +204,7 @@ fn gh_cli_credentials() -> AppResult<(String, String)> {
     let username = run_gh(&["api", "user", "--jq", ".login"])?;
     let token = run_gh(&["auth", "token"])?;
     if username.is_empty() || token.is_empty() {
-        return Err(AppError::External(
-            "GitHub CLI(gh)返回的凭据不完整".into(),
-        ));
+        return Err(AppError::coded(ErrorCode::GhCliIncompleteCredentials, ""));
     }
     Ok((username, token))
 }
@@ -237,7 +234,7 @@ pub async fn get_gh_cli_account() -> AppResult<Option<GitAccount>> {
         Err(_) => Ok(None),
     })
     .await
-    .map_err(|e| AppError::External(format!("探测 GitHub CLI 失败: {e}")))?
+    .map_err(|e| AppError::coded(ErrorCode::GhCliDetectFailed, e.to_string()))?
 }
 
 /// 供 git_clone 使用:取 gh CLI 的 (provider, username, token)
@@ -247,7 +244,7 @@ pub(crate) async fn gh_cli_git_credentials() -> AppResult<(String, String, Strin
         Ok(("github".to_string(), username, token))
     })
     .await
-    .map_err(|e| AppError::External(format!("获取 GitHub CLI 凭据失败: {e}")))?
+    .map_err(|e| AppError::coded(ErrorCode::GhCliCredentialsFailed, e.to_string()))?
 }
 
 fn http_client() -> reqwest::Client {
@@ -277,7 +274,7 @@ async fn send(req: reqwest::RequestBuilder) -> AppResult<reqwest::Response> {
     let resp = req
         .send()
         .await
-        .map_err(|e| AppError::External(format!("无法连接平台接口: {e}")))?;
+        .map_err(|e| AppError::coded(ErrorCode::PlatformConnectionFailed, e.to_string()))?;
     let status = resp.status();
     if status.is_success() {
         return Ok(resp);
@@ -288,17 +285,13 @@ async fn send(req: reqwest::RequestBuilder) -> AppResult<reqwest::Response> {
     if status.as_u16() == 401 {
         return Err(AppError::Coded {
             code: ErrorCode::AccountTokenInvalid,
-            message: "Token 无效或已过期".into(),
+            message: String::new(),
         });
     }
     // 已知状态码直接给友好文案,不把平台返回的原始 JSON 拼给用户
     match status.as_u16() {
-        403 => return Err(AppError::External("权限不足或触发接口限流".into())),
-        404 => {
-            return Err(AppError::External(
-                "接口不存在(自建 GitLab 请检查实例地址)".into(),
-            ));
-        }
+        403 => return Err(AppError::coded(ErrorCode::PlatformForbidden, "")),
+        404 => return Err(AppError::coded(ErrorCode::PlatformNotFound, "")),
         _ => {}
     }
     // 其他状态码:尝试提取响应 JSON 的 message 字段,避免把整段原始响应丢给用户
@@ -312,11 +305,15 @@ async fn send(req: reqwest::RequestBuilder) -> AppResult<reqwest::Response> {
         .filter(|m| !m.is_empty())
         .unwrap_or_else(|| body.chars().take(200).collect());
     if detail.is_empty() {
-        Err(AppError::External(format!("平台接口请求失败(HTTP {status})")))
+        Err(AppError::coded(
+            ErrorCode::PlatformRequestFailed,
+            format!("status={status}"),
+        ))
     } else {
-        Err(AppError::External(format!(
-            "平台接口请求失败(HTTP {status}): {detail}"
-        )))
+        Err(AppError::coded(
+            ErrorCode::PlatformRequestFailedWithDetail,
+            format!("status={status} detail={detail}"),
+        ))
     }
 }
 
@@ -331,7 +328,7 @@ async fn fetch_username(provider: &str, base_url: &str, token: &str) -> AppResul
     let v: serde_json::Value = resp
         .json()
         .await
-        .map_err(|e| AppError::External(format!("解析用户信息失败: {e}")))?;
+        .map_err(|e| AppError::coded(ErrorCode::UserInfoParseFailed, e.to_string()))?;
     let key = if provider == "gitlab" {
         "username"
     } else {
@@ -340,7 +337,7 @@ async fn fetch_username(provider: &str, base_url: &str, token: &str) -> AppResul
     v.get(key)
         .and_then(|x| x.as_str())
         .map(str::to_string)
-        .ok_or_else(|| AppError::External("平台返回的用户信息缺少用户名字段".into()))
+        .ok_or_else(|| AppError::coded(ErrorCode::UserInfoMissingUsername, ""))
 }
 
 fn json_str(v: &serde_json::Value, key: &str) -> String {
@@ -459,7 +456,7 @@ async fn fetch_json_array(
     let resp = send(apply_auth(http_client().get(url), provider, token)).await?;
     resp.json()
         .await
-        .map_err(|e| AppError::External(format!("解析仓库列表失败: {e}")))
+        .map_err(|e| AppError::coded(ErrorCode::RepoListParseFailed, e.to_string()))
 }
 
 /// 拉取单页仓库列表
@@ -551,7 +548,7 @@ pub async fn add_git_account(
     let provider = normalize_provider(&provider)?;
     let token = token.trim().to_string();
     if token.is_empty() {
-        return Err(AppError::Invalid("Token 不能为空".into()));
+        return Err(AppError::coded(ErrorCode::AccountTokenRequired, ""));
     }
     let base = resolve_base_url(&provider, base_url.as_deref())?;
     let username = fetch_username(&provider, &base, &token).await?;
@@ -619,7 +616,7 @@ pub fn remove_git_account(db: State<'_, Db>, id: i64) -> AppResult<()> {
     let conn = db.0.lock().unwrap();
     let affected = conn.execute("DELETE FROM git_accounts WHERE id = ?1", params![id])?;
     if affected == 0 {
-        return Err(AppError::NotFound(format!("账号不存在: {id}")));
+        return Err(AppError::coded(ErrorCode::AccountNotFound, id.to_string()));
     }
     Ok(())
 }
@@ -672,7 +669,7 @@ pub async fn list_account_repos(db: State<'_, Db>, account_id: i64) -> AppResult
     if account_id == GH_CLI_ACCOUNT_ID {
         let row = tokio::task::spawn_blocking(gh_cli_account_row)
             .await
-            .map_err(|e| AppError::External(format!("获取 GitHub CLI 凭据失败: {e}")))??;
+            .map_err(|e| AppError::coded(ErrorCode::GhCliCredentialsFailed, e.to_string()))??;
         return fetch_all_repos(&row).await;
     }
     let row = {

@@ -4,7 +4,7 @@ use tauri::{AppHandle, Emitter, State};
 use crate::commands::open::spawn_terminal;
 use crate::commands::walk;
 use crate::db::Db;
-use crate::error::{AppError, AppResult};
+use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::{CustomCommand, PackageScript, PackageScriptsGroup};
 
 /// 解析 package.json 内容,返回 (包名, scripts)。
@@ -89,15 +89,15 @@ fn get_command(conn: &Connection, id: i64) -> AppResult<CustomCommand> {
     let sql = format!("SELECT {COMMAND_COLS} FROM custom_commands WHERE id = ?1");
     conn.query_row(&sql, params![id], map_command_row)
         .optional()?
-        .ok_or_else(|| AppError::NotFound(format!("custom command {id}")))
+        .ok_or_else(|| AppError::coded(ErrorCode::CommandNotFound, id.to_string()))
 }
 
 fn validate_command(name: &str, command: &str) -> AppResult<()> {
     if name.trim().is_empty() {
-        return Err(AppError::Invalid("名称不能为空".into()));
+        return Err(AppError::coded(ErrorCode::CommandNameRequired, ""));
     }
     if command.trim().is_empty() {
-        return Err(AppError::Invalid("命令不能为空".into()));
+        return Err(AppError::coded(ErrorCode::CommandContentRequired, ""));
     }
     Ok(())
 }
@@ -107,7 +107,7 @@ fn to_conflict(e: rusqlite::Error, name: &str) -> AppError {
         rusqlite::Error::SqliteFailure(err, _)
             if err.code == rusqlite::ErrorCode::ConstraintViolation =>
         {
-            AppError::Conflict(format!("命令名已存在: {name}"))
+            AppError::coded(ErrorCode::CommandNameConflict, name.to_string())
         }
         other => AppError::Db(other),
     }
@@ -128,7 +128,7 @@ pub fn create_command(
         |r| r.get(0),
     )?;
     if !exists {
-        return Err(AppError::NotFound(format!("project {project_id}")));
+        return Err(AppError::coded(ErrorCode::ProjectNotFound, project_id.to_string()));
     }
     let next_order: i64 = conn.query_row(
         "SELECT COALESCE(MAX(sort_order) + 1, 0) FROM custom_commands WHERE project_id = ?1",
@@ -167,7 +167,7 @@ pub fn update_command(
         )
         .map_err(|e| to_conflict(e, name))?;
     if changed == 0 {
-        return Err(AppError::NotFound(format!("custom command {id}")));
+        return Err(AppError::coded(ErrorCode::CommandNotFound, id.to_string()));
     }
     // 同步可能存在的「常用命令」标记快照(target_key = 命令 id),避免编辑后快照失效
     conn.execute(
@@ -180,7 +180,7 @@ pub fn update_command(
 pub fn delete_command(conn: &Connection, id: i64) -> AppResult<()> {
     let changed = conn.execute("DELETE FROM custom_commands WHERE id = ?1", params![id])?;
     if changed == 0 {
-        return Err(AppError::NotFound(format!("custom command {id}")));
+        return Err(AppError::coded(ErrorCode::CommandNotFound, id.to_string()));
     }
     // 连带删除该命令的「常用命令」标记
     conn.execute(
@@ -252,7 +252,7 @@ pub fn run_in_terminal(
 ) -> AppResult<()> {
     let work_dir = cwd.unwrap_or(path);
     if !std::path::Path::new(&work_dir).is_dir() {
-        return Err(AppError::Invalid(format!("目录不存在: {work_dir}")));
+        return Err(AppError::coded(ErrorCode::ScriptDirNotFound, work_dir));
     }
     spawn_terminal(
         &work_dir,
@@ -406,14 +406,14 @@ mod tests {
         // 重名冲突
         assert!(matches!(
             update_command(&conn, c.id, "logs", "x", "", ""),
-            Err(AppError::Conflict(_))
+            Err(ref e) if e.is_code(ErrorCode::CommandNameConflict)
         ));
 
         delete_command(&conn, c2.id).unwrap();
         assert_eq!(list_commands(&conn, pid).unwrap().len(), 1);
         assert!(matches!(
             delete_command(&conn, c2.id),
-            Err(AppError::NotFound(_))
+            Err(ref e) if e.is_code(ErrorCode::CommandNotFound)
         ));
     }
 
@@ -423,11 +423,11 @@ mod tests {
         let pid = add_project(&conn);
         assert!(matches!(
             create_command(&conn, pid, "", "x", "", ""),
-            Err(AppError::Invalid(_))
+            Err(ref e) if e.is_code(ErrorCode::CommandNameRequired)
         ));
         assert!(matches!(
             create_command(&conn, 9999, "a", "b", "", ""),
-            Err(AppError::NotFound(_))
+            Err(ref e) if e.is_code(ErrorCode::ProjectNotFound)
         ));
 
         create_command(&conn, pid, "a", "b", "", "").unwrap();

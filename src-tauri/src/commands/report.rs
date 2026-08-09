@@ -14,7 +14,7 @@ use tauri::{AppHandle, Manager, State};
 use tokio::sync::Notify;
 
 use crate::db::Db;
-use crate::error::{AppError, AppResult};
+use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::GitCommitInfo;
 use crate::workday;
 
@@ -398,7 +398,7 @@ pub fn get_calendar_meta(
     let data_dir = app
         .path()
         .home_dir()
-        .map_err(|e| AppError::External(e.to_string()))?
+        .map_err(|e| AppError::coded(ErrorCode::IoError, e.to_string()))?
         .join(crate::APP_DATA_DIR_NAME);
     let (holidays, workdays) = workday::load_data(&data_dir).unwrap_or_default();
     let holidays: Vec<String> = holidays.into_iter().collect();
@@ -425,7 +425,7 @@ pub fn get_calendar_meta_impl(
     report_type: &Option<String>,
 ) -> AppResult<HashMap<String, i64>> {
     let month_start = NaiveDate::from_ymd_opt(year, month, 1)
-        .ok_or_else(|| AppError::External("无效的年月".into()))?;
+        .ok_or_else(|| AppError::coded(ErrorCode::ReportInvalidYearMonth, format!("year={year} month={month}")))?;
     // 网格首格 = 当月 1 日向前对齐到所在周的周一(num_days_from_monday() ∈ 0..6)
     let grid_start = month_start
         - chrono::Duration::days(month_start.weekday().num_days_from_monday() as i64);
@@ -480,7 +480,7 @@ pub fn get_holiday_data(app: AppHandle) -> AppResult<HolidayData> {
     let data_dir = app
         .path()
         .home_dir()
-        .map_err(|e| AppError::External(e.to_string()))?
+        .map_err(|e| AppError::coded(ErrorCode::IoError, e.to_string()))?
         .join(crate::APP_DATA_DIR_NAME);
     let (holidays, workdays) = workday::load_data(&data_dir).unwrap_or_default();
     Ok(HolidayData {
@@ -627,7 +627,7 @@ pub async fn get_work_week_ranges(app: AppHandle) -> AppResult<WorkWeekRanges> {
         })
     })
     .await
-    .map_err(|e| AppError::External(format!("任务执行失败: {e}")))?
+    .map_err(|e| AppError::coded(ErrorCode::ReportTaskFailed, e.to_string()))?
 }
 
 // ── commands: batch report planning ────────────────────────────────────
@@ -656,7 +656,7 @@ const BATCH_WEEKLY_MAX_DAYS: i64 = 180;
 
 fn parse_date(s: &str) -> AppResult<NaiveDate> {
     NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d")
-        .map_err(|_| AppError::External(format!("无效的日期: {s}")))
+        .map_err(|_| AppError::coded(ErrorCode::ReportInvalidDate, s.to_string()))
 }
 
 /// 规划批量生成的时段列表。
@@ -674,7 +674,7 @@ pub async fn plan_batch_report_ranges(
         let from = parse_date(&date_from)?;
         let to = parse_date(&date_to)?;
         if from > to {
-            return Err(AppError::External("起始日期不能晚于结束日期".into()));
+            return Err(AppError::coded(ErrorCode::ReportDateRangeInverted, ""));
         }
         let span = (to - from).num_days();
         let fmt = |d: NaiveDate| d.format("%Y-%m-%d").to_string();
@@ -685,9 +685,10 @@ pub async fn plan_batch_report_ranges(
 
         if period_type == "weekly" {
             if span > BATCH_WEEKLY_MAX_DAYS {
-                return Err(AppError::External(format!(
-                    "批量周报跨度不能超过 {BATCH_WEEKLY_MAX_DAYS} 天"
-                )));
+                return Err(AppError::coded(
+                    ErrorCode::ReportBatchWeeklySpanExceeded,
+                    BATCH_WEEKLY_MAX_DAYS.to_string(),
+                ));
             }
             // 逐日扫描,工作日且为工作周末日时闭合一段;末尾不足一周的收尾
             let mut ranges = Vec::new();
@@ -714,9 +715,10 @@ pub async fn plan_batch_report_ranges(
             Ok(ranges)
         } else {
             if span > BATCH_DAILY_MAX_DAYS {
-                return Err(AppError::External(format!(
-                    "批量日报跨度不能超过 {BATCH_DAILY_MAX_DAYS} 天"
-                )));
+                return Err(AppError::coded(
+                    ErrorCode::ReportBatchDailySpanExceeded,
+                    BATCH_DAILY_MAX_DAYS.to_string(),
+                ));
             }
             let mut ranges = Vec::new();
             let mut d = from;
@@ -732,7 +734,7 @@ pub async fn plan_batch_report_ranges(
         }
     })
     .await
-    .map_err(|e| AppError::External(format!("任务执行失败: {e}")))?
+    .map_err(|e| AppError::coded(ErrorCode::ReportTaskFailed, e.to_string()))?
 }
 
 /// 查询范围内已有报告的日期范围列表(按 period_type 过滤,去重)。
@@ -850,7 +852,7 @@ pub async fn run_report_schedule_now(
         let conn = db.0.lock().unwrap();
         let sql = format!("SELECT {SCHEDULE_COLS} FROM report_schedules WHERE id = ?1");
         conn.query_row(&sql, params![id], map_schedule_row)
-            .map_err(|_| AppError::schedule_not_found())?
+            .map_err(|_| AppError::coded(ErrorCode::ScheduleNotFound, id.to_string()))?
     };
     let data_dir = workday::data_dir(&app);
     let client = reqwest::Client::new();

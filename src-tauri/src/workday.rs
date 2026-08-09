@@ -17,7 +17,7 @@ use reqwest::blocking::Client;
 use serde::Deserialize;
 use tauri::Manager;
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult, ErrorCode};
 use crate::APP_DATA_DIR_NAME;
 
 const CDN_URL: &str = "https://cdn.jsdelivr.net/npm/chinese-days/dist/chinese-days.json";
@@ -53,17 +53,17 @@ pub fn load_data(data_dir: &PathBuf) -> AppResult<(HashSet<String>, HashSet<Stri
     let client = Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
-        .map_err(|e| crate::error::AppError::External(format!("创建 HTTP 客户端失败: {e}")))?;
+        .map_err(|e| AppError::coded(ErrorCode::WorkdayHttpClientFailed, e.to_string()))?;
 
     let resp = client
         .get(CDN_URL)
         .header("User-Agent", "repomeow/0.1")
         .send()
-        .map_err(|e| crate::error::AppError::External(format!("拉取中国工作日数据失败: {e}")))?;
+        .map_err(|e| AppError::coded(ErrorCode::WorkdayFetchFailed, e.to_string()))?;
 
-    let body = resp.text().map_err(|e| {
-        crate::error::AppError::External(format!("读取中国工作日数据响应失败: {e}"))
-    })?;
+    let body = resp
+        .text()
+        .map_err(|e| AppError::coded(ErrorCode::WorkdayResponseReadFailed, e.to_string()))?;
 
     // 校验响应内容合法后再写缓存,避免把错误响应固化到缓存
     let parsed = parse_data(&body)?;
@@ -117,7 +117,7 @@ fn parse_cache(raw: &str) -> Option<((HashSet<String>, HashSet<String>), i64)> {
 
 fn parse_data(json: &str) -> AppResult<(HashSet<String>, HashSet<String>)> {
     let data: ChineseDaysData = serde_json::from_str(json)
-        .map_err(|e| crate::error::AppError::External(format!("解析中国工作日数据失败: {e}")))?;
+        .map_err(|e| AppError::coded(ErrorCode::WorkdayParseFailed, e.to_string()))?;
 
     let holidays: HashSet<String> = data
         .holidays

@@ -70,14 +70,44 @@ pub(crate) fn read_setting_string(app: &AppHandle, key: &str) -> Option<String> 
     store.get(key)?.as_str().map(str::to_owned)
 }
 
+/// 加载托盘 i18n 资源文件,按 settings.json 中的 language 字段选择 zh-CN/en-US。
+/// 资源文件 `src-tauri/i18n/tray/<lang>.json` 由 tauri-build 打包进 resources。
+/// 加载失败时返回硬编码中文兜底(原行为)。
+fn load_tray_texts(app: &App) -> (String, String) {
+    let fallback = ("显示主窗口".to_string(), "退出".to_string());
+    let lang = read_setting_string(&app.handle(), "language").unwrap_or_default();
+    let file_name = if lang == "en-US" { "en-US.json" } else { "zh-CN.json" };
+    let path = match app
+        .path()
+        .resolve(format!("i18n/tray/{file_name}"), tauri::path::BaseDirectory::Resource)
+    {
+        Ok(p) => p,
+        Err(_) => return fallback,
+    };
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(_) => return fallback,
+    };
+    let value: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(_) => return fallback,
+    };
+    let open = value
+        .get("showMainWindow")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned)
+        .unwrap_or(fallback.0);
+    let quit = value
+        .get("quit")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned)
+        .unwrap_or(fallback.1);
+    (open, quit)
+}
+
 /// 创建托盘图标:左键单击切换迷你弹窗,左键双击显示主窗口,右键打开菜单。
 pub(crate) fn setup(app: &App) -> tauri::Result<()> {
-    let lang = read_setting_string(&app.handle(), "language").unwrap_or_default();
-    let (open_text, quit_text) = if lang == "en-US" {
-        ("Show RepoMeow", "Quit")
-    } else {
-        ("显示主窗口", "退出")
-    };
+    let (open_text, quit_text) = load_tray_texts(app);
     let open_item = MenuItem::with_id(app, "tray-open", open_text, true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "tray-quit", quit_text, true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open_item, &quit_item])?;

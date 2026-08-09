@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::db::Db;
-use crate::error::{AppError, AppResult};
+use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::PinnedCommand;
 
 const KINDS: [&str; 4] = ["packageScript", "composeFile", "composeService", "customCommand"];
@@ -66,14 +66,14 @@ pub fn set_pinned(
     cwd: Option<&str>,
 ) -> AppResult<()> {
     if !KINDS.contains(&kind) {
-        return Err(AppError::Invalid(format!("未知的标记类型: {kind}")));
+        return Err(AppError::coded(ErrorCode::PinTypeUnknown, kind.to_string()));
     }
     if target_key.is_empty() {
-        return Err(AppError::Invalid("标记项标识不能为空".into()));
+        return Err(AppError::coded(ErrorCode::PinKeyRequired, ""));
     }
     if pinned {
         if label.is_empty() || command.is_empty() {
-            return Err(AppError::Invalid("标记项名称与命令不能为空".into()));
+            return Err(AppError::coded(ErrorCode::PinLabelCommandRequired, ""));
         }
         // 已存在时刷新快照(命令文本可能已变化),幂等
         conn.execute(
@@ -211,15 +211,15 @@ mod tests {
 
         assert!(matches!(
             set_pinned(&conn, pid, "bogus", "x", true, "x", "x", None),
-            Err(AppError::Invalid(_))
+            Err(ref e) if e.is_code(ErrorCode::PinTypeUnknown)
         ));
         assert!(matches!(
             set_pinned(&conn, pid, "packageScript", "", true, "x", "x", None),
-            Err(AppError::Invalid(_))
+            Err(ref e) if e.is_code(ErrorCode::PinKeyRequired)
         ));
         assert!(matches!(
             set_pinned(&conn, pid, "packageScript", "x", true, "", "x", None),
-            Err(AppError::Invalid(_))
+            Err(ref e) if e.is_code(ErrorCode::PinLabelCommandRequired)
         ));
     }
 
