@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   CalendarIcon,
   ChevronRight,
+  FileText,
   FolderGit2,
   Loader2,
   Search,
@@ -23,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import DailyReportDialog from "@/components/report/DailyReportDialog.vue";
 import ReportCalendar from "@/components/report/ReportCalendar.vue";
 import TagCheckList from "@/components/tags/TagCheckList.vue";
 import { cmd } from "@/lib/tauri";
@@ -105,6 +107,21 @@ const selectedProjects = computed(() =>
 
 const reports = ref<ReportHistoryDetail[]>([]);
 const reportsLoading = ref(false);
+
+// ── generate report dialog ──────────────────────────────────────────────
+
+/** 右上角「生成报告」弹窗;关闭后刷新日历与列表,让新生成的报告立即可见 */
+const reportOpen = ref(false);
+
+watch(reportOpen, (v) => {
+  if (v) {
+    return;
+  }
+  loadCalendarMeta(calendarYear.value, calendarMonth.value);
+  if (selectedDate.value) {
+    loadReports(selectedDate.value);
+  }
+});
 
 // ── expand state ────────────────────────────────────────────────────────
 
@@ -299,6 +316,16 @@ watch(
         <ArrowLeft class="h-4 w-4" />
       </Button>
       <h1 class="text-sm font-semibold">{{ t("reportHistory.title") }}</h1>
+      <Button
+        variant="outline"
+        size="sm"
+        class="ml-auto h-8 gap-1.5"
+        :title="t('report.title')"
+        @click="reportOpen = true"
+      >
+        <FileText class="h-3.5 w-3.5" />
+        {{ t("report.title") }}
+      </Button>
     </header>
 
     <!-- body -->
@@ -636,5 +663,7 @@ watch(
         </template>
       </div>
     </div>
+
+    <DailyReportDialog v-model:open="reportOpen" />
   </div>
 </template>

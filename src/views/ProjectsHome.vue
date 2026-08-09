@@ -28,7 +28,6 @@ import { Input } from "@/components/ui/input";
 import AddProjectDialog from "@/components/project/AddProjectDialog.vue";
 import ProjectCard from "@/components/project/ProjectCard.vue";
 import ProjectTable from "@/components/project/ProjectTable.vue";
-import DailyReportDialog from "@/components/report/DailyReportDialog.vue";
 import TagCheckList from "@/components/tags/TagCheckList.vue";
 import TagManager from "@/components/tags/TagManager.vue";
 import { compareFavorited } from "@/lib/favorites";
@@ -41,9 +40,6 @@ const store = useProjectsStore();
 const tagsStore = useTagsStore();
 const settings = useSettingsStore();
 const router = useRouter();
-
-// AI 日报弹窗
-const reportOpen = ref(false);
 
 // 搜索(防抖,逻辑同原 Sidebar)
 const searchInput = ref(store.query);
@@ -210,8 +206,8 @@ const sortedProjects = computed(() => {
           variant="outline"
           size="sm"
           class="h-8 gap-1.5"
-          :title="t('report.title')"
-          @click="reportOpen = true"
+          :title="t('reportHistory.title')"
+          @click="router.push('/report-history')"
         >
           <FileText class="h-3.5 w-3.5" />
           {{ t("ai.entry") }}
@@ -244,7 +240,5 @@ const sortedProjects = computed(() => {
         }}
       </p>
     </div>
-
-    <DailyReportDialog v-model:open="reportOpen" />
   </div>
 </template>

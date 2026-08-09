@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, shallowRef, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRouter } from "vue-router";
 import { toast } from "vue-sonner";
 import { getLocalTimeZone, today as calendarToday } from "@internationalized/date";
 import type { CalendarRootProps, RangeCalendarRootProps } from "reka-ui";
@@ -9,7 +8,6 @@ import {
   Calendar as CalendarIcon,
   Copy,
   ChevronRight,
-  History,
   Loader2,
   Search,
   Sparkles,
@@ -89,7 +87,6 @@ const AUTHOR_OPTIONS: { value: AuthorMode; labelKey: string }[] = [
 ];
 
 const { t } = useI18n();
-const router = useRouter();
 const props = defineProps<{ presetProjectId?: number }>();
 const open = defineModel<boolean>("open", { required: true });
 
@@ -615,15 +612,6 @@ async function startBatch() {
         <!-- pr-8 避开 DialogContent 右上角绝对定位的关闭按钮 -->
         <div class="flex items-center justify-between pr-8">
           <DialogTitle>{{ t("report.title") }}</DialogTitle>
-          <Button
-            variant="ghost"
-            size="sm"
-            class="h-7 gap-1 px-2 text-xs"
-            @click="router.push('/report-history')"
-          >
-            <History class="h-3.5 w-3.5" />
-            {{ t("report.history") }}
-          </Button>
         </div>
         <DialogDescription>{{ t("report.description") }}</DialogDescription>
       </DialogHeader>
