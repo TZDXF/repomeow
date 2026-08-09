@@ -56,7 +56,7 @@ const releaseNotes = computed(() => store.update?.body?.trim() || t("update.noNo
       <p v-else-if="store.status === 'installed'" class="text-sm text-muted-foreground">
         {{ t("update.installedHint") }}
       </p>
-      <p v-else-if="store.status === 'error'" class="text-sm text-destructive">
+      <p v-else-if="store.status === 'error'" class="text-sm break-all text-destructive">
         {{ t("update.installFailed", { error: store.error }) }}
       </p>
 

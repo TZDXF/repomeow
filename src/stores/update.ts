@@ -14,6 +14,36 @@ export type UpdateStatus =
   | "installed"
   | "error";
 
+/**
+ * 把插件抛出的原始错误(常含超长 URL / 底层 reqwest 报错,
+ * 如 "error sending request for url (https://github.com/...)")转成
+ * 适合 toast / 对话框展示的简短文案,避免 UI 溢出。
+ */
+function toFriendlyError(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e);
+  const lower = raw.toLowerCase();
+  const networkHints = [
+    "error sending request",
+    "network",
+    "dns",
+    "timed out",
+    "timeout",
+    "connect",
+    "tcp",
+    "eof",
+  ];
+  if (networkHints.some((hint) => lower.includes(hint))) {
+    return i18n.global.t("update.errorNetwork");
+  }
+  // 去掉 URL(最易导致溢出),并截断过长的原始信息
+  const cleaned = raw
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/\(\s*\)/g, "")
+    .trim();
+  const maxLen = 120;
+  return cleaned.length > maxLen ? `${cleaned.slice(0, maxLen)}...` : cleaned;
+}
+
 export const useUpdateStore = defineStore("update", () => {
   const status = ref<UpdateStatus>("idle");
   /** 检查到的可用更新(由插件返回,含版本号/更新说明/下载安装方法;类实例含私有字段,必须 shallowRef 避免被响应式代理) */
@@ -72,7 +102,7 @@ export const useUpdateStore = defineStore("update", () => {
       }
     } catch (e) {
       status.value = "error";
-      error.value = e instanceof Error ? e.message : String(e);
+      error.value = toFriendlyError(e);
       if (manual) toast.error(t("update.checkFailed", { error: error.value }));
     }
   }
@@ -105,7 +135,7 @@ export const useUpdateStore = defineStore("update", () => {
       }
     } catch (e) {
       status.value = "error";
-      error.value = e instanceof Error ? e.message : String(e);
+      error.value = toFriendlyError(e);
       if (!dialogOpen.value) {
         toast.error(t("update.installFailed", { error: error.value }));
       }

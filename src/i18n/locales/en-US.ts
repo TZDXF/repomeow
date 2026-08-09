@@ -87,6 +87,7 @@ export default {
     downloading: "Downloading update... {progress}%",
     installedHint: "Update installed. Restart the app to apply it.",
     installFailed: "Failed to install the update: {error}",
+    errorNetwork: "Network request failed. Check your network or proxy settings and try again.",
     restartNow: "Restart now",
     later: "Later",
   },

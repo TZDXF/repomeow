@@ -82,6 +82,7 @@ export default {
     downloading: "下载更新中... {progress}%",
     installedHint: "更新已安装,重启应用后生效。",
     installFailed: "更新安装失败:{error}",
+    errorNetwork: "网络请求失败,请检查网络或代理设置后重试",
     restartNow: "立即重启",
     later: "稍后重启",
   },
