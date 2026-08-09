@@ -1,21 +1,14 @@
 <script setup lang="ts">
 // 托盘弹窗项目行下方行内展开的「常用命令」列表:行均不可点击,点运行图标才执行。
-// npm/自定义命令与详情页 ScriptItem 对齐:行首常显绿色 Play 按钮(text-emerald-600)执行;
+// npm/自定义命令与详情页 ScriptItem 对齐:行首常显绿色 Play 按钮(text-emerald-600)执行,
+// 自定义命令带图标时按钮内渲染其自定义图标(与 ScriptItem 一致);
 // compose 条目与详情页 DockerCompose 对齐:绿色 Play / 红色 Square 独立按钮执行
 // (文件 up -d / down,服务 up -d / stop),下拉菜单 build/buildUp/restart 彩色图标一致;
 // 服务行缩进(pl-7)嵌套在所属文件下,按钮常显(托盘为瞬态窗口,不做 hover 显隐)
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
-import {
-  Container,
-  FileCode,
-  Hammer,
-  MoreHorizontal,
-  Play,
-  RotateCw,
-  Square,
-} from "@lucide/vue";
+import { Container, FileCode, Hammer, MoreHorizontal, Play, RotateCw, Square } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -23,6 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { commandIcon } from "@/lib/command-icons";
 import { runInTerminal } from "@/lib/tauri";
 import type { PinnedCommand, Project } from "@/types";
 
@@ -103,6 +97,11 @@ function kindIcon(p: PinnedCommand) {
   return p.kind === "composeFile" ? FileCode : Container;
 }
 
+/** npm/自定义命令行首执行按钮图标:自定义命令带图标时与 ScriptItem 一致渲染自定义图标 */
+function runIcon(p: PinnedCommand) {
+  return p.kind === "customCommand" && p.icon ? commandIcon(p.icon) : undefined;
+}
+
 /** npm/自定义命令:点行首 Play 按钮执行存好的命令(与详情页 ScriptItem 一致) */
 async function runPinned(p: PinnedCommand) {
   try {
@@ -143,7 +142,8 @@ async function runCompose(p: PinnedCommand, action: ComposeAction) {
           :title="e.pin.command"
           @click.stop="runPinned(e.pin)"
         >
-          <Play class="h-3.5 w-3.5" />
+          <component :is="runIcon(e.pin)" v-if="runIcon(e.pin)" class="h-3.5 w-3.5" />
+          <Play v-else class="h-3.5 w-3.5" />
         </Button>
         <span class="min-w-0 flex-1 truncate text-xs" :title="e.pin.command">
           {{ e.pin.label }}

@@ -14,7 +14,10 @@ fn now() -> i64 {
         .unwrap_or(0)
 }
 
-const PIN_COLS: &str = "id, project_id, kind, target_key, label, command, cwd, created_at";
+// icon 不落库:customCommand 的 target_key 即命令 id,查询时实时 JOIN,
+// 自定义命令改图标后无需重新标记即可生效
+const PIN_COLS: &str =
+    "p.id, p.project_id, p.kind, p.target_key, p.label, p.command, p.cwd, p.created_at, c.icon";
 
 fn map_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<PinnedCommand> {
     Ok(PinnedCommand {
@@ -26,15 +29,19 @@ fn map_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<PinnedCommand> {
         command: r.get(5)?,
         cwd: r.get(6)?,
         created_at: r.get(7)?,
+        icon: r.get(8)?,
     })
 }
 
 /// 列出标记命令;project_id 为 None 时返回全部(托盘弹窗一次拉取)
 pub fn list(conn: &Connection, project_id: Option<i64>) -> AppResult<Vec<PinnedCommand>> {
     let sql = format!(
-        "SELECT {PIN_COLS} FROM pinned_commands {where} ORDER BY project_id, created_at, id",
+        "SELECT {PIN_COLS} FROM pinned_commands p
+         LEFT JOIN custom_commands c
+           ON p.kind = 'customCommand' AND c.id = CAST(p.target_key AS INTEGER)
+         {where} ORDER BY p.project_id, p.created_at, p.id",
         where = if project_id.is_some() {
-            "WHERE project_id = ?1"
+            "WHERE p.project_id = ?1"
         } else {
             ""
         },
@@ -214,6 +221,34 @@ mod tests {
             set_pinned(&conn, pid, "packageScript", "x", true, "", "x", None),
             Err(AppError::Invalid(_))
         ));
+    }
+
+    #[test]
+    fn custom_command_pin_carries_icon() {
+        use crate::commands::script;
+        let conn = test_conn();
+        let pid = add_project(&conn);
+
+        let cmd = script::create_command(&conn, pid, "部署", "make deploy", "", "rocket").unwrap();
+        set_pinned(
+            &conn,
+            pid,
+            "customCommand",
+            &cmd.id.to_string(),
+            true,
+            "部署",
+            "make deploy",
+            None,
+        )
+        .unwrap();
+        set_pinned(&conn, pid, "packageScript", ".\ndev", true, "dev", "npm run dev", None).unwrap();
+
+        let items = list(&conn, Some(pid)).unwrap();
+        let custom = items.iter().find(|p| p.kind == "customCommand").unwrap();
+        assert_eq!(custom.icon.as_deref(), Some("rocket"));
+        // 非自定义命令没有图标
+        let npm = items.iter().find(|p| p.kind == "packageScript").unwrap();
+        assert_eq!(npm.icon, None);
     }
 
     #[test]

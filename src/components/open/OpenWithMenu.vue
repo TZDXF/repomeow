@@ -17,6 +17,7 @@ import { useSettingsStore } from "@/stores/settings";
 import type { EditorKind, Project } from "@/types";
 
 const { t } = useI18n();
+// compact(托盘弹窗):与项目页一致的分裂按钮(outline 主按钮 + 相连下拉),主按钮只留图标不展示名称
 const props = withDefaults(defineProps<{ project: Project; compact?: boolean }>(), {
   compact: false,
 });
@@ -53,9 +54,9 @@ async function openWith(kind: EditorKind) {
 <template>
   <div class="flex items-center">
     <Button
-      :variant="compact ? 'ghost' : 'outline'"
-      :size="compact ? 'icon' : 'sm'"
-      :class="[compact ? 'h-7 w-7' : 'rounded-r-none']"
+      variant="outline"
+      :size="compact ? 'icon-sm' : 'sm'"
+      class="rounded-r-none"
       @click.stop="openWith(current.kind)"
     >
       <component :is="current.icon" :class="compact ? 'h-3.5 w-3.5' : 'h-4 w-4'" />
@@ -64,9 +65,9 @@ async function openWith(kind: EditorKind) {
     <DropdownMenu>
       <DropdownMenuTrigger as-child>
         <Button
-          :variant="compact ? 'ghost' : 'outline'"
-          :size="compact ? 'icon' : 'sm'"
-          :class="[compact ? 'h-7 w-7' : 'rounded-l-none border-l-0 px-2']"
+          variant="outline"
+          size="sm"
+          :class="compact ? 'rounded-l-none border-l-0 px-1.5' : 'rounded-l-none border-l-0 px-2'"
           @click.stop
         >
           <ChevronDown :class="compact ? 'h-3.5 w-3.5' : 'h-4 w-4'" />

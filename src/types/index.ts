@@ -219,6 +219,8 @@ export interface PinnedCommand {
   command: string;
   /** 可选工作目录:相对项目根(monorepo 子包),执行时拼接 project.path,迁移目录后仍可用 */
   cwd: string | null;
+  /** 自定义命令的图标名(后端 list 时实时 JOIN custom_commands,其他 kind 为 null) */
+  icon: string | null;
   created_at: number;
 }
 

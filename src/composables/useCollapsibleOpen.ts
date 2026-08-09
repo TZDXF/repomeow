@@ -6,7 +6,7 @@ import { useLocalStorage } from "@vueuse/core";
  */
 const openMap = useLocalStorage<Record<string, boolean>>("repomeow.collapsible-open", {});
 
-export function useCollapsibleOpen(scope: "scripts" | "compose") {
+export function useCollapsibleOpen(scope: "scripts" | "compose" | "trayPins") {
   /** 读取展开状态;无记录时返回 fallback(如单分组默认展开) */
   function isOpen(key: string, fallback: boolean): boolean {
     return openMap.value[`${scope}:${key}`] ?? fallback;

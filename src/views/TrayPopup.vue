@@ -1,15 +1,17 @@
 <script setup lang="ts">
 // 托盘迷你项目列表窗口(类似 JetBrains Toolbox):单击托盘图标弹出,
-// 头部搜索 + 精简项目行,点击行跳主窗口详情,行尾可展开「打开方式」。
+// 头部搜索 + 精简项目行,双击行跳主窗口详情,单击展开/收起「常用命令」(无命令时单击直接打开),
+// 行尾可展开「打开方式」,收藏按钮在最后。命令列表默认折叠,展开状态按项目持久化。
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { Search } from "@lucide/vue";
+import { Search, TerminalSquare } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import OpenWithMenu from "@/components/open/OpenWithMenu.vue";
 import FavoriteToggle from "@/components/project/FavoriteToggle.vue";
 import TrayPinnedCommands from "@/components/project/TrayPinnedCommands.vue";
+import { useCollapsibleOpen } from "@/composables/useCollapsibleOpen";
 import { compareFavorited } from "@/lib/favorites";
 import { cmd, onListen } from "@/lib/tauri";
 import { usePinsStore } from "@/stores/pins";
@@ -20,6 +22,18 @@ const { t } = useI18n();
 const store = useProjectsStore();
 const pinsStore = usePinsStore();
 const searchInput = ref("");
+
+// 常用命令展开状态:与详情页同一套 localStorage 持久化(scope trayPins),默认折叠
+const { isOpen: isPinsOpen, setOpen: setPinsOpen } = useCollapsibleOpen("trayPins");
+
+function pinsOf(project: Project) {
+  return pinsStore.pinsOf(project.id);
+}
+
+function togglePins(project: Project) {
+  const key = String(project.id);
+  setPinsOpen(key, !isPinsOpen(key, false));
+}
 
 // 客户端过滤 + 按最近更新倒序;弹窗有独立 Pinia 实例,与主窗口的查询状态互不影响
 const filtered = computed(() => {
@@ -37,13 +51,40 @@ const filtered = computed(() => {
   return [...list].sort((a, b) => compareFavorited(a, b) || b.updated_at - a.updated_at);
 });
 
-/** 点击项目行:显示主窗口并跳转到该项目详情页(弹窗随后因失焦自动收起) */
+/** 双击项目行:显示主窗口并跳转到该项目详情页(弹窗随后因失焦自动收起) */
 async function openProject(project: Project) {
   try {
     await cmd("show_main_window", { projectId: project.id });
   } catch {
     // 主窗口未就绪等情况静默失败即可
   }
+}
+
+// 单击/双击区分:单击延迟 250ms 执行,期间第二次点击(双击)取消单击动作改为打开详情
+const CLICK_DELAY = 250;
+let clickTimer: number | null = null;
+
+/** 单击:有常用命令时展开/收起列表,无命令时直接打开项目 */
+function onRowClick(project: Project) {
+  if (clickTimer != null) {
+    window.clearTimeout(clickTimer);
+  }
+  clickTimer = window.setTimeout(() => {
+    clickTimer = null;
+    if (pinsOf(project).length) {
+      togglePins(project);
+    } else {
+      openProject(project);
+    }
+  }, CLICK_DELAY);
+}
+
+function onRowDblclick(project: Project) {
+  if (clickTimer != null) {
+    window.clearTimeout(clickTimer);
+    clickTimer = null;
+  }
+  openProject(project);
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -64,6 +105,9 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener("keydown", onKeydown);
+  if (clickTimer != null) {
+    window.clearTimeout(clickTimer);
+  }
 });
 </script>
 
@@ -89,11 +133,27 @@ onUnmounted(() => {
           <button
             type="button"
             class="group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent"
-            @click="openProject(project)"
+            @click="onRowClick(project)"
+            @dblclick="onRowDblclick(project)"
           >
             <div class="min-w-0 flex-1">
               <div class="flex min-w-0 items-center gap-1.5">
                 <span class="truncate text-sm font-medium">{{ project.name }}</span>
+                <!-- 常用命令指示(单击行展开/收起):名称后、标签前,终端图标 + 条数 -->
+                <span
+                  v-if="pinsOf(project).length"
+                  class="flex shrink-0 items-center gap-0.5"
+                  :class="
+                    isPinsOpen(String(project.id), false)
+                      ? 'text-foreground'
+                      : 'text-muted-foreground'
+                  "
+                >
+                  <TerminalSquare class="h-3.5 w-3.5" />
+                  <span class="text-[11px] leading-none tabular-nums">{{
+                    pinsOf(project).length
+                  }}</span>
+                </span>
                 <Badge
                   v-if="!project.path_exists"
                   variant="destructive"
@@ -126,14 +186,18 @@ onUnmounted(() => {
               </p>
             </div>
             <div class="flex shrink-0 items-center">
-              <FavoriteToggle :project="project" />
               <div class="opacity-0 transition-opacity group-hover:opacity-100">
                 <OpenWithMenu :project="project" compact />
               </div>
+              <FavoriteToggle :project="project" />
             </div>
           </button>
-          <!-- 被标记为「常用」的命令行内展开,点击直接执行 -->
-          <TrayPinnedCommands :project="project" :pins="pinsStore.pinsOf(project.id)" />
+          <!-- 被标记为「常用」的命令行内展开,点击直接执行;默认折叠,展开状态按项目持久化 -->
+          <TrayPinnedCommands
+            v-if="isPinsOpen(String(project.id), false)"
+            :project="project"
+            :pins="pinsOf(project)"
+          />
         </div>
         <p v-if="!filtered.length" class="py-10 text-center text-sm text-muted-foreground">
           {{ t("trayPopup.empty") }}

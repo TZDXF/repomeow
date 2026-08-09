@@ -199,6 +199,8 @@ pub struct PinnedCommand {
     pub command: String,
     /// 可选工作目录:相对项目根(monorepo 子包),执行时拼接 project.path,迁移目录后仍可用
     pub cwd: Option<String>,
+    /// 自定义命令的图标名(list 时 LEFT JOIN custom_commands 实时取,其他 kind 恒为 None)
+    pub icon: Option<String>,
     pub created_at: i64,
 }
 
