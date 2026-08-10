@@ -592,7 +592,7 @@ watch(
                     variant="ghost"
                     size="icon"
                     class="h-5 w-5 shrink-0 text-muted-foreground hover:text-destructive"
-                    :title="String(t('common.delete'))"
+                    :title="t('common.delete')"
                     @click.stop="deleteReport(r.id)"
                   >
                     <Trash2 class="h-3 w-3" />

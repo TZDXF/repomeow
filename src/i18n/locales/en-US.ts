@@ -28,6 +28,7 @@ export default {
     minutesAgo: "{count} min ago",
     hoursAgo: "{count} hr ago",
     daysAgo: "{count} day ago",
+    view: "View",
   },
   errors: {
     // generic
@@ -61,21 +62,21 @@ export default {
     git_task_failed: "Task execution failed",
     git_noise_fallback: "git command failed (see application logs)",
     git_local_changes_conflict:
-      "Local changes conflict with the remote. Commit or stash (git stash) them first",
+      "Local changes conflict with the remote. Please commit or stash (`git stash`) them before trying again.",
     git_untracked_conflict:
-      "Untracked local files conflict with the remote. Move or remove them first",
+      "Untracked local files conflict with the remote. Please move or delete them before trying again.",
     git_ssh_auth_failed:
-      "SSH authentication failed: add your local key to the remote account and check repo access",
+      "SSH authentication failed. Please check that your local key is added to the remote account and that you have repository access.",
     git_host_key_failed:
-      "SSH host key verification failed: run a git command in a terminal once and confirm the host fingerprint",
+      "SSH host key verification failed. Please run a git operation in the terminal once and confirm the host fingerprint.",
     git_auth_failed: "Authentication failed: check your username/password or access token",
     git_repo_not_found: "Remote repository does not exist or you do not have access",
     git_network_dns: "Network error: cannot resolve the remote host. Check network, DNS or proxy",
     git_network_connect:
-      "Network error: cannot connect to the remote server. Check network or proxy",
+      "Network error: cannot reach the remote server. Please check your network or proxy settings.",
     git_push_rejected: "Push rejected: the remote has new commits. Pull and merge first",
     git_diverged:
-      "Local and remote branches have diverged. Run git pull --rebase in a terminal or configure a merge strategy",
+      "Local and remote branches have diverged. Please run `git pull --rebase` in the terminal or configure a merge strategy before trying again.",
     git_no_tracking: "Current branch has no upstream. Run git push -u origin <branch> first",
     not_git_repository: "Current directory is not a Git repository",
     // account
@@ -85,7 +86,7 @@ export default {
     gitlab_base_url_invalid_scheme: "GitLab instance URL must start with http:// or https://",
     account_token_required: "Token is required",
     account_token_invalid:
-      "The access token is invalid or expired. Update it in Settings → Accounts",
+      "Token is invalid or expired. Please go to Settings → Accounts to update the token.",
     gh_cli_not_found: "GitHub CLI (gh) is not authenticated. Run gh auth login first",
     gh_cli_spawn_failed: "Failed to start gh (not installed?)",
     gh_cli_incomplete_credentials: "GitHub CLI (gh) returned incomplete credentials",
@@ -232,7 +233,7 @@ export default {
     status: {
       pathMissing: "Directory missing",
       pathMissingHint:
-        "The project directory has been moved, deleted, or is temporarily unavailable. Relocate it to continue using this project.",
+        "The project directory has been moved, deleted, or is temporarily unavailable. Reassign a directory to resume use.",
     },
     add: {
       dialogTitle: "Select project folder",
@@ -259,11 +260,11 @@ export default {
       cloned: 'Cloned and added project "{name}".',
       modeAccount: "Account repos",
       accountDescription:
-        "Browse repositories of a linked account, then clone and add one as a project",
+        "Browse repositories under your linked accounts, select one to clone and add as a project.",
       accountLabel: "Account",
       accountLoading: "Loading accounts...",
       accountEmpty:
-        "No linked accounts yet. Go to Settings → Accounts to add a GitHub / Gitee / GitLab account first.",
+        "No accounts linked yet. Please go to Settings → Accounts to add a GitHub / Gitee / GitLab account.",
       repoSearchPlaceholder: "Search by org, name or description...",
       repoOwnerAll: "All orgs",
       ownerSearchPlaceholder: "Search organizations...",
@@ -283,13 +284,13 @@ export default {
       relocate: "Relocate directory",
       archive: "Archive project",
       archiveConfirm:
-        'Archive project "{name}"?\nIt will be hidden from the list, but its history will be kept.',
+        'Archive project "{name}"?\nArchived projects are hidden from the list; their history is preserved.',
       archiveSuccess: 'Project "{name}" archived.',
     },
     relocate: {
       title: "Relocate directory",
       description:
-        'Pick a new directory for project "{name}". Tags, custom commands and other data will be kept.',
+        'Select a new directory for project "{name}". Tags, custom commands, and other data will be preserved.',
       dialogTitle: "Select new project directory",
       currentPath: "Current path",
       pathLabel: "New directory",
@@ -426,7 +427,7 @@ export default {
     noCommits: "No commits found in the selected projects for this time range",
     loadFailed: "Failed to load commits: {error}",
     missingProjectMapping:
-      "Skipped writing to history: could not map the following projects to current projects: {names}",
+      "The following projects were not found in the current project list and were skipped from history: {names}",
     rangeLabel: "{from} to {to}",
     saved: "Saved to report history",
     history: "History",
@@ -452,6 +453,7 @@ export default {
     batchStatusSkippedNoCommits: "No commits",
     batchStatusFailed: "Failed",
     batchStatusCancelled: "Cancelled",
+    schedule: {},
   },
   reportHistory: {
     title: "Report History",
@@ -503,14 +505,14 @@ export default {
     typeWeekly: "Weekly",
     typeDailyHint: "Generates a daily report of the current day's commits at the set time",
     typeWeeklyHint:
-      "Fires at the end of the weekly period (work week or custom weekday range), covering the period's start day through that day",
+      "By work week or a custom weekday range, fires at the set time on the period's end day, covering from the start day through that day.",
     timeLabel: "Run time",
     weekdayLabel: "Weekday filter",
     everyday: "Every day",
     weekdaysOnly: "Weekdays only (Mon-Fri)",
     chineseWorkdayOnly: "Chinese workdays only",
     chineseWorkdayHint:
-      "Based on official Chinese holidays and makeup workdays, excluding public holidays and including makeup workdays",
+      "Based on official Chinese holidays and makeup workdays; excludes public holidays and includes makeup workdays.",
     workweekLabel: "Fires on work week's last day",
     workweekHint:
       "A work week is a continuous stretch of working time (including makeup workdays; a single mid-week public holiday does not break it). The task fires automatically at the set time on the last workday of the work week, covering its start day through that day.",
@@ -520,7 +522,7 @@ export default {
     weeklyStart: "From",
     weeklyEnd: "To",
     weeklyCustomHint:
-      "Fires every week at the set time on the end weekday, covering the start weekday through that day",
+      "Fires weekly at the set time on the end weekday; the report covers from the start weekday through that day.",
     authorLabel: "Author",
     authorMe: "Myself only",
     authorAll: "Everyone",
@@ -534,6 +536,8 @@ export default {
     runNow: "Run now",
     runSuccess: "Report generated manually",
     runFailed: "Manual run failed: {error}",
+    autoGenerated: 'Scheduled task "{scheduleName}" auto-generated a report ({dateFrom})',
+    deleted: "Deleted",
   },
   openWith: {
     vscode: "VSCode",
@@ -675,7 +679,7 @@ export default {
       language: "Language",
       languageDescription: "Choose the interface language",
       languageNote:
-        "Interface translations will take effect in a future release. Only your preference is saved for now.",
+        "UI translations will take effect in a future release; only the preference is saved for now.",
       openWith: "Default open with",
       openWithDescription:
         "The default action of the Open button on the project detail page. You can always pick another one from the dropdown. Only editors that are installed and have their command on PATH are listed.",
@@ -683,22 +687,22 @@ export default {
     update: {
       autoCheck: "Check for updates on startup",
       autoCheckHint:
-        "Automatically check for new versions after launch and notify when one is found",
+        "Automatically check for new versions after launch and notify when an update is found.",
     },
     tray: {
       title: "System Tray",
       description:
-        "What happens when the window close button is clicked. Single-click the tray icon for a quick project list, double-click to show the main window",
+        "Behavior when the window's close button is clicked. Single-click the tray icon for a project overview; double-click to show the main window.",
       closeToTray: "Minimize to tray",
       closeToTrayHint:
-        "The app keeps running in the system tray after the window is closed; quit from the tray menu",
+        "Keep the app running in the system tray after closing the window. Quit from the tray menu.",
       closeToExit: "Quit",
       closeToExitHint: "Closing the window quits the app",
     },
     autostart: {
       launchAtLogin: "Launch at login",
       launchAtLoginHint:
-        "Start the app silently after signing in: it stays in the system tray without opening the main window",
+        "Auto-launch the app at login and stay silently in the system tray without opening the main window.",
       toggleFailed: "Failed to toggle launch at login: {error}",
     },
     about: {
@@ -721,24 +725,24 @@ export default {
       saved: "AI settings saved",
       concurrency: "Concurrency limit",
       concurrencyHint:
-        "Maximum number of concurrent AI requests (1-5). Lower this when the API is rate-limited.",
+        "Maximum concurrent AI requests (1-5). Lower this if the API rate-limits.",
     },
     accounts: {
       title: "Accounts",
       description:
-        "Link GitHub / Gitee / GitLab accounts to browse their repositories and clone them in one click",
+        "Link GitHub / Gitee / GitLab accounts to browse their repositories and clone them with one click.",
       enableGhCli: "GitHub CLI (gh)",
       enableGhCliHint:
-        "When enabled, an authenticated gh shows up as an account in the Add Project → Account Repos dropdown",
+        "When enabled, a logged-in `gh` CLI appears as an account in the \"Add Project → Account Repositories\" dropdown.",
       tokenInvalid: "Token invalid",
       tokenInvalidHint:
-        "The token for this account is invalid or expired. Edit the account to update it",
+        "This account's token is invalid or expired. Please edit the account to update the token.",
       empty: "No linked accounts yet",
       add: "Add account",
       addTitle: "Link account",
       editTitle: "Edit account",
       formDescription:
-        "The token is verified against the platform API on save; the account is stored only if verification succeeds",
+        "On save, the platform API is called to verify the token and fetch the username. The account is only saved on success.",
       provider: "Provider",
       baseUrl: "Instance URL",
       baseUrlPlaceholder: "https://gitlab.example.com (intranet http URLs allowed)",
@@ -749,7 +753,7 @@ export default {
       tokenKeepPlaceholder: "Leave empty to keep the current token",
       tokenHint: {
         github:
-          "GitHub → Settings → Developer settings → Personal access tokens, repo scope required",
+          "GitHub → Settings → Developer settings → Personal access tokens; requires `repo` scope.",
         gitee: "Gitee → Settings → Private tokens, projects scope required",
         gitlab: "GitLab → Preferences → Access Tokens, read_api scope required",
       },
@@ -771,7 +775,7 @@ export default {
       reportDescription: "Prompt used when summarizing commits into a daily report",
       weeklyReport: "Weekly report prompt",
       weeklyReportDescription:
-        "System prompt for weekly report generation; leave empty to use the built-in default template",
+        "System prompt used to generate weekly reports. Leave blank to use the built-in default template.",
       note: "Leave empty to use the built-in default template (shown as the placeholder). The output language is appended automatically based on the language setting, no need to include it.",
       reset: "Reset to default",
       saved: "Prompts saved",
@@ -799,7 +803,7 @@ export default {
     mdTheme: {
       title: "Markdown theme",
       description:
-        "Rendering style for README and other Markdown content, adapts to light/dark mode",
+        "Choose the rendering style for README and other Markdown content. Adapts automatically with light/dark mode.",
       default: "Follow app",
       defaultDesc: "Matches the app's interface theme",
       github: "GitHub",
@@ -835,7 +839,7 @@ export default {
     archive: {
       title: "Archived projects",
       description:
-        "Archived projects keep their history. You can restore them or delete them permanently.",
+        "Archived projects keep their history and can be restored to the project list or permanently deleted.",
       archivedAt: "Archived {time}",
       searchPlaceholder: "Search name, description, or path...",
       noMatch: "No matching archived projects",

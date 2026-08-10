@@ -9,6 +9,9 @@ on:
 jobs:
   release-windows:
     runs-on: windows-latest
+    # 显式声明环境,让 ${{ secrets.* }} 能拿到 update 这个 Environment 下的私钥;
+    # 仓库级 Repository secrets 当前为空,如果不声明 environment,CI 读不到密钥。
+    environment: update
     permissions:
       contents: write
 
