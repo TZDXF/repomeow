@@ -1200,21 +1200,42 @@ pub(crate) fn run_git_log(
     Ok(commits)
 }
 
-/// 读取提交图谱数据(所有本地+远程分支,含合并提交与引用装饰),按拓扑序输出。
+/// 读取提交图谱数据(含合并提交与引用装饰),按拓扑序输出。
 /// --topo-order 保证子提交先于父提交,是前端泳道布局的前提;
-/// 非 git 仓库或尚无提交时返回空数组而非报错
+/// 非 git 仓库或尚无提交时返回空数组而非报错。
+/// 修订范围:branches 非空时按指定分支(本地或 origin/xxx)取日志;
+/// 否则 include_remote 为 false 时仅本地分支+标签(--branches --tags),默认 --all 含远程
 #[tauri::command]
-pub async fn git_graph_log(path: String, max_count: Option<u32>) -> AppResult<Vec<GitGraphCommit>> {
+pub async fn git_graph_log(
+    path: String,
+    max_count: Option<u32>,
+    branches: Option<Vec<String>>,
+    include_remote: Option<bool>,
+) -> AppResult<Vec<GitGraphCommit>> {
     run_blocking(move || {
         let limit = max_count.unwrap_or(300).min(1000);
-        let args: Vec<String> = vec![
+        let revs: Vec<String> = match branches {
+            Some(list) => list
+                .into_iter()
+                .map(|b| b.trim().to_string())
+                .filter(|b| !b.is_empty())
+                .collect(),
+            None if include_remote == Some(false) => {
+                vec!["--branches".into(), "--tags".into()]
+            }
+            None => vec!["--all".into()],
+        };
+        if revs.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut args: Vec<String> = vec![
             "log".into(),
-            "--all".into(),
             "--topo-order".into(),
             "--pretty=format:%H%x1f%P%x1f%an%x1f%ad%x1f%s%x1f%D".into(),
             "--date=format:%Y-%m-%d %H:%M".into(),
             format!("--max-count={limit}"),
         ];
+        args.extend(revs);
         let Some(output) = run_git_log_raw(&path, &args)? else {
             return Ok(Vec::new());
         };
