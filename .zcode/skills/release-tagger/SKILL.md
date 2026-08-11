@@ -1,22 +1,24 @@
 ---
 name: release-tagger
-description: 在此仓库（tzdxf/repomeow，Tauri 2 + Vue 3）发布新版本。读取 `src-tauri/tauri.conf.json` 的 `version` 字段作为发布号，做一致性检查与构建验证后，走**本地打包发布**：`pnpm release:all` 在本机构建 NSIS 安装包并用 `~/.tauri/` 下的私钥签名，再用 `gh release create` 直接发布正式 Release（setup.exe + .sig + latest.json）。不推送 tag、不触发 GitHub Actions 构建。在用户提及"发版"、"发布新版本"、"本地打包发布"、"cut a release"、"v0.X.0"或想发起 GitHub Release 流程时调用此 skill——即便用户只是说"准备发版"，也走这条流程。
+description: 在此仓库（tzdxf/repomeow，Tauri 2 + Vue 3）发布新版本。读取 `src-tauri/tauri.conf.json` 的 `version` 字段作为发布号，做一致性检查与构建验证后，走**CI 打包发布**：本机 bump → commit → push → push `v*` tag → `.github/workflows/release.yml` 在 CI 上用 tauri-action 构建 NSIS、安装包签名、生成 `latest.json` 并自动创建 draft Release；本机不需要打包、不需要私钥。CI 跑完后本机无需任何动作，draft Release 视为已发布。在用户提及"发版"、"发布新版本"、"CI 打包"、"cut a release"、"v0.X.0"或想发起 GitHub Release 流程时调用此 skill——即便用户只是说"准备发版"，也走这条流程。
 ---
 
-# 本地打包发布工作流
+# CI 打包发布工作流
 
-此 skill 走**本地打包发布**：构建、签名、生成 `latest.json` 全部在本机完成（脚本：`scripts/release/release.mjs`，用法详见 `scripts/release/README.md`)，最后用 `gh` CLI 发布 Release。**不要 `git push` 推 tag**——推送 `v*` tag 会触发 `.github/workflows/release.yml` 在 CI 重复打包。远程 tag 由 `gh release create` 在创建 Release 时自动生成。
+自 v0.1.9 起，发布流程全部由 **GitHub Actions** 完成：推送 `v*` tag 触发 `.github/workflows/release.yml`，在 `windows-latest` runner 上用 [`tauri-apps/tauri-action`](https://github.com/tauri-apps/tauri-action) 构建 NSIS 安装包、用 `update` Environment 下的 `TAURI_SIGNING_PRIVATE_KEY` 签名、上传 `RepoMeow_<ver>_x64-setup.exe` / `.sig` / `latest.json`，并创建 **draft Release**。本机只需要 bump 版本号、push commit、push tag，**不需要 `~/.tauri/` 私钥，不需要跑 `pnpm release:all`**。
+
+旧的本地打包脚本 `scripts/release/release.mjs`（`pnpm release:all` 等）保留为可选项：仅在 CI 暂时不可用、本地需要复现构建、或排查签名问题时手动调用，**不纳入默认发版流程**。
 
 ## 前置条件
 
 - Node 18+、pnpm 11+（仓库 `packageManager` 已锁版本）
-- **签名私钥在 `~/.tauri/` 下**（流水线脚本自动发现唯一的 `*.key` 并交叉校验 `.pub` 与 `tauri.conf.json` 的 `plugins.updater.pubkey` 一致；不一致会直接报错，防止签出 updater 装不上的包）
-- `gh` CLI 已登录 `TZDXF` 账号（`gh auth status`)
-- CI 工作流 `release.yml` 仍然存在，作为本地不可用时的后备；本流程与其互不干扰
+- `gh` CLI 已登录 `TZDXF` 账号（仅用于事后用 `gh release view` 验证；本机不再 `gh release create`）
+- 仓库 GitHub `update` Environment 已配置 `TAURI_SIGNING_PRIVATE_KEY`（CI 私钥；本机不需私钥）
+- `git push` 可达 `github.com/TZDXF/repomeow`（remotes `github` 或 `origin`，CI workflow 监听 `push: tags: v*`）
 
 ## 何时调用
 
-- 用户说"发版"、"发布新版本"、"准备发版"、"本地打包发布"、"cut a release"
+- 用户说"发版"、"发布新版本"、"准备发版"、"CI 打包"、"cut a release"
 - 用户给出形如"发 0.2.0"、"v0.2.0"的具体版本号时，若与仓库当前 `version` 不一致，先 bump（见第 1 步）再继续——用户明确说"发布新版 X.Y.Z"即视为授权 bump
 
 ## 何时不调用
@@ -42,13 +44,13 @@ REMOTE=$(git remote get-url github 2>/dev/null || git remote get-url origin)
 - `src-tauri/Cargo.toml` 的 `version = "..."`
 - `src-tauri/Cargo.lock` 中 `name = "repomeow"` 紧随的 `version`（改完 Cargo.toml 后跑任意 cargo 命令也会自动更新）
 
-改完用 `pnpm release:check` 校验三处一致。
+改完用 `pnpm release:check` 校验三处一致（脚本来自 `scripts/release/release.mjs`，仅做版本号三处一致性检查，本流程默认使用，不触发构建）。
 
 ### 2. 工作区状态
 
 ```bash
 git status --short
-git rev-list --count github/main..HEAD
+git rev-list --count github/main..HEAD   # 或 origin/main,看哪个是主分支
 ```
 
 若 `git status` 非空（未提交改动或 untracked 文件）：
@@ -62,7 +64,7 @@ pnpm lint      # 0 errors 即可,style 告警不阻塞
 pnpm build     # 含 vue-tsc --noEmit 类型检查,最高保真预发布闸门
 ```
 
-任何一条失败 → 中止，把输出原样贴回给用户。
+任何一条失败 → 中止，把输出原样贴回给用户。CI 不会重新跑 lint/typecheck，**本机这两步是仅有的发布前闸门**。
 
 ### 4. 提交 bump 并推送 main
 
@@ -72,63 +74,66 @@ git commit -m "🔖 chore(release): bump 版本号至 $VERSION"
 git push github main
 ```
 
-main 必须先于 Release 推送——`gh release create` 从远程 main HEAD 生成 tag，要保证 tag 指向 bump 提交。
+main 必须先于 tag 推送——`v*` tag 必须指向这次 bump 提交（CI 流程会 checkout 这个 tag，tauri-action 也会用 tag 推断 `__VERSION__`）。
 
-### 5. 创建本地 tag（不推送）
+### 5. 推送 `v*` tag 触发 CI
 
 ```bash
 git tag -a "v$VERSION" -m "Release v$VERSION"
+git push github "v$VERSION"
 ```
 
 - 若 tag 已存在 → 中止并用 `git tag -l "v*"` 列出
-- **绝不 `git push github "v$VERSION"`**：推送 `v*` tag 会触发 CI `release.yml` 重复打包并产生草稿 Release
+- **推送 tag 后 CI 会自动启动**：触发 `.github/workflows/release.yml` 的 `release-windows` job，在 `windows-latest` 上拉取、打包、签名、上传资产、创建 draft Release
+- 本流程不调用 `pnpm release:all`、不调用 `gh release create`——这些事 CI 全做了
 
-### 6. 本地构建 + 签名 + latest.json
-
-```bash
-pnpm release:all
-```
-
-串行执行 check → build(`pnpm install --frozen-lockfile` + `pnpm build:desktop`)→ sign → latest。耗时主要在同机 Rust release 编译（约 1–3 分钟），建议后台运行。产物在 `src-tauri/target/release/bundle/nsis/`:
-
-- `RepoMeow_<ver>_x64-setup.exe`
-- `RepoMeow_<ver>_x64-setup.exe.sig`
-- `latest.json`
-
-完成后**核对 `latest.json`**:`version` 正确、`platforms.windows-x86_64.url` 指向 `releases/latest/download/RepoMeow_<ver>_x64-setup.exe`、`signature` 非空。
-
-### 7. 整理 Release Notes
+### 6. 等待 CI 完成
 
 ```bash
-git log --oneline v<上一版本>..HEAD
+gh run list --workflow=release.yml --limit 1
+gh run watch <run-id>   # 同步等待,exit 0 即成功
 ```
 
-按提交归纳为用户可读的变更说明（参考 v0.1.3 的 Release 风格），写入临时文件（如 `scripts/release/_local/v<ver>-notes.md`,`_local/` 已在 gitignore)。
+CI 步骤概要（详见 `.github/workflows/release.yml`）：
 
-### 8. 用 gh 发布正式 Release
+1. checkout + 装 pnpm 11.10.0 + 装 Node 22
+2. 设置 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""`（规避 Tauri 2.11.4 signer 静默 bug）
+3. 装 Rust stable + x86_64-pc-windows-msvc target + cache
+4. `pnpm install --frozen-lockfile`
+5. `tauri-action@v0` 用 `secrets.TAURI_SIGNING_PRIVATE_KEY` 签名、生成 `latest.json`、上传 `RepoMeow_<ver>_x64-setup.exe` / `.sig` / `latest.json`、创建 **draft** Release
 
-```bash
-gh release create "v$VERSION" \
-  --repo TZDXF/repomeow \
-  --title "v$VERSION" \
-  --notes-file <notes 文件> \
-  src-tauri/target/release/bundle/nsis/RepoMeow_${VERSION}_x64-setup.exe \
-  src-tauri/target/release/bundle/nsis/RepoMeow_${VERSION}_x64-setup.exe.sig \
-  src-tauri/target/release/bundle/nsis/latest.json
-```
+耗时主要在 Rust release 编译（约 1–3 分钟）。失败时 `gh run watch` 退出非 0，把日志贴回用户并建议查 `.github/workflows/release.yml` 排错。
 
-- 不加 `--draft` 即直接发布为正式 latest release；用户若想先检查后发布，加 `--draft` 并提示其手动 Publish
-- `gh` 会自动在远程创建 `v$VERSION` 轻量 tag（与本地 annotated tag 同指 bump 提交；之后 `git fetch --tags` 若报 `would clobber existing tag` 属正常，无需处理）
-
-### 9. 发布验证
+### 7. 验证 draft Release
 
 ```bash
 gh release view "v$VERSION" --json isDraft,isPrerelease,assets
-gh api repos/TZDXF/repomeow/releases/latest --jq '.tag_name'   # 应为 v$VERSION
-curl -sL https://github.com/TZDXF/repomeow/releases/latest/download/latest.json   # version 应为新版本
 ```
 
-三项全部通过后告诉用户：旧版应用下次启动会自动检查到 `v$VERSION`(updater 端点即上面的 latest.json)。注意端点刚发布可能有几分钟 CDN 缓存，curl 失败可隔几秒重试。
+期望：
+
+- `isDraft: true`
+- `assets` 含 `RepoMeow_<ver>_x64-setup.exe`、`.sig`、`latest.json` 三项
+- `isPrerelease: false`
+
+任何一项不符都先排查 CI 日志，不要把不完整的 Release 转正。
+
+### 8. 发布验证（可选）
+
+```bash
+gh api repos/TZDXF/repomeow/releases/latest --jq '.tag_name'   # 可能仍是上一版,draft 不影响 latest
+curl -sL https://github.com/TZDXF/repomeow/releases/latest/download/latest.json | jq .version
+```
+
+`gh api ... /releases/latest` 仍返回上一个**已发布**版（draft 不算 latest），这是预期。updater 端点 (`latest.json`) 的实际指向以 `releases/latest/download/latest.json` 资源为准——tauri-action 会上传 `latest.json` 资产，客户端 updater 读它即可。
+
+完成后告诉用户：CI 已构建并以 draft 形式上传资产，旧版应用下次启动时若启用 updater，可自动检测到 `v$VERSION`。如需把 draft 转为正式 Release（让 `releases/latest` 立即指向新版本），用：
+
+```bash
+gh release edit "v$VERSION" --draft=false
+```
+
+默认 draft 状态即可——用户可手动在 GitHub UI 上点 Publish review。
 
 ## 失败模式速查
 
@@ -139,8 +144,29 @@ curl -sL https://github.com/TZDXF/repomeow/releases/latest/download/latest.json 
 | tag 已存在 | 之前发过或本地残留 | 中止并附 `git tag -l "v*"` 输出 |
 | 三处版本号不一致 | 用户或脚本只改了其一 | 中止并指出每个文件的当前值，等用户修齐再跑 |
 | 工作区脏 | 还有未提交改动 | 默认中止；若是 bump 文件可代 commit 后继续，告知细节 |
-| `No .key file found in ~/.tauri` | 本机没签名私钥 | 中止；用 `cargo tauri signer generate` 生成并把 pubkey 写进 `tauri.conf.json` |
-| `Public key mismatch` | `~/.tauri/*.key.pub` 与 `tauri.conf.json` 的 pubkey 不一致 | 中止；用 `--key` 指定正确私钥或修齐 pubkey（详见 `scripts/release/README.md` 故障排查表） |
-| 打印 `Signing without password.` 但没 .sig | Tauri 2.11.4 signer 静默 bug | 流水线脚本已内置规避（强制空密码环境变量）；手工签名时需自设 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""` |
-| `gh release create` 报 tag 已存在 | 远程已有该 tag（之前发过） | 中止；确认是否重复发版，必要时先 `gh release delete` |
-| `git fetch --tags` 报 `would clobber existing tag` | 本地 annotated tag 与 gh 创建的轻量 tag 对象不同，但同指一个提交 | 正常，忽略即可 |
+| CI 报 "A public key has been found, but no private key" | 仓库 `update` Environment 缺 `TAURI_SIGNING_PRIVATE_KEY` | 中止；让用户去 GitHub Settings → Environments → update 配置密钥 |
+| CI 报 "Signing without password." 但没 .sig | Tauri 2.11.4 signer 静默 bug | 已通过强制 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""` 规避；如再现，检查 `.github/workflows/release.yml` 第 37–40 步是否被改掉 |
+| CI 报 "Public key mismatch" | `tauri.conf.json` 里的 pubkey 与新 `TAURI_SIGNING_PRIVATE_KEY` 不匹配 | 中止；让用户确认密钥来源一致后再重发 tag（需先 `git tag -d vX.Y.Z && git push github :refs/tags/vX.Y.Z` 删旧 tag） |
+| `gh run watch` 失败 / `assets` 缺文件 | CI 编译/上传失败 | 中止；贴 CI 日志给用户，按 `release.yml` 排错后重发 tag（先删旧 tag） |
+| draft 已存在但本机没 tag | 之前发过又删了本地 tag | 中止；`gh release view vX.Y.Z` 看状态，必要时 `gh release delete` |
+
+## 旧流程：本地打包（仅在 CI 不可用或排查时使用）
+
+`scripts/release/release.mjs` 仍提供以下命令，**默认发版流程不调用它们**：
+
+| 命令 | 用途 |
+|---|---|
+| `pnpm release:check` | 仅校验 `tauri.conf.json` / `package.json` / `Cargo.toml` 三处版本号一致——主流程仍用 |
+| `pnpm release:build` | 本机 `pnpm build:desktop` 跑出 NSIS installer |
+| `pnpm release:sign` | 用 `~/.tauri/*.key` 签 installer |
+| `pnpm release:latest` | 写 `latest.json` |
+| `pnpm release:all` | 上述四步串行 |
+| `pnpm release:local` | `all --skip-build`，对已有 artifacts 重签 / 重写 latest |
+
+使用场景示例：
+
+- **CI runner 临时不可用** → 用 `pnpm release:all` 在本机出包，再用 `gh release upload vX.Y.Z <assets>` 上传到 draft Release
+- **签名不匹配排查** → 在本机用 `pnpm release:sign` 验证 `~/.tauri/*.key.pub` 与 `tauri.conf.json` 一致性
+- **本地手测 updater** → 用 `pnpm release:latest` 生成测试用 `latest.json`
+
+详见 `scripts/release/README.md`。

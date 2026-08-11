@@ -1,6 +1,13 @@
-# 本地 release 流水线
+# 本地 release 流水线(备用)
 
-把 0.1.0 那次"手工跑 `pnpm build:desktop` → `tauri signer sign` → 手拼 `latest.json` → `gh release create`"固化成一条命令。
+> **自 v0.1.9 起,默认发版流程走 GitHub Actions CI**——推送 `v*` tag 后,`.github/workflows/release.yml` 用 `tauri-action` 在 CI 上构建、签名、上传并创建 draft Release,本机不需要打包、也不需要私钥。详细流程见 `.zcode/skills/release-tagger/SKILL.md`。
+>
+> 本脚本是上述 CI 流程的**本地等价物**,保留下来仅用于:
+> - CI runner 临时不可用时,在本机出包
+> - 排查签名(`pubkey` 交叉校验)或 updater 行为
+> - 单独重签 / 重新生成 `latest.json`
+>
+> **不纳入默认发版流程**——主流程已不再调用 `pnpm release:all` / `pnpm release:build` / `pnpm release:sign` / `pnpm release:latest` / `pnpm release:local`。仅 `pnpm release:check` 仍被主流程用于版本号一致性自检。
 
 ## 前置条件
 
@@ -87,7 +94,7 @@ gh release create v0.1.0 \
 
 ## 与 CI 的关系
 
-`.github/workflows/release.yml` 的 `release-windows` job 通过 `tauri-apps/tauri-action@v0` 在 CI 里跑 `build → sign → release create` 同一套事。本脚本是它的**本地等价物**,互不干扰 —— 哪个先跑通都行,产物期望一致(都签同一把私钥,pubkey 都来自 `tauri.conf.json`)。
+`.github/workflows/release.yml` 的 `release-windows` job 通过 `tauri-apps/tauri-action@v0` 在 CI 里跑 `build → sign → release create` 同一套事。**自 v0.1.9 起,CI 已成为默认主流程**——本脚本是其**本地等价物**,仅在 CI 不可用或排查时使用。两个流程产物期望一致(都签同一把私钥,pubkey 都来自 `tauri.conf.json`)。
 
 ## 故障排查
 
