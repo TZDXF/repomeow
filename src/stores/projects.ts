@@ -284,7 +284,7 @@ export const useProjectsStore = defineStore("projects", () => {
     return result.conflicts;
   }
 
-  /** 推送当前分支(无 upstream 时后端自动 -u origin HEAD) */
+  /** 推送当前分支(无 upstream 时后端自动 -u <远端> HEAD,优先 origin) */
   async function pushRepository(project: Project) {
     project.git = await cmd<GitStatus>("git_push", { path: project.path });
   }

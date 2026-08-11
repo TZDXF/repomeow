@@ -940,7 +940,27 @@ fn pull_blocking(path: &str) -> AppResult<GitPullResult> {
     })
 }
 
-/// 推送当前分支;无 upstream 时(如新建分支首推)自动回退 `git push -u origin HEAD`
+/// 首推回退时的目标远端:优先 origin,否则取列表第一个远端;
+/// 一个都没有返回 None(此时 `git push` 会先报无推送目标,走不到这里)
+fn default_push_remote(path: &str) -> Option<String> {
+    let out = git_command(path).arg("remote").output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let names: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+    if names.iter().any(|n| n == "origin") {
+        Some("origin".to_string())
+    } else {
+        names.into_iter().next()
+    }
+}
+
+/// 推送当前分支;无 upstream 时(如新建分支首推)自动回退
+/// `git push -u <remote> HEAD`,remote 优先 origin、否则取第一个远端
 #[tauri::command]
 pub async fn git_push(path: String) -> AppResult<GitStatus> {
     run_blocking(move || push_blocking(&path)).await
@@ -955,7 +975,10 @@ fn push_blocking(path: &str) -> AppResult<GitStatus> {
             if !no_upstream {
                 return Err(e);
             }
-            run_git(path, &["push", "-u", "origin", "HEAD"])?;
+            let Some(remote) = default_push_remote(path) else {
+                return Err(e);
+            };
+            run_git(path, &["push", "-u", &remote, "HEAD"])?;
         }
     }
     let st = status(path)?;
@@ -2206,6 +2229,35 @@ mod tests {
             .output()
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "2");
+
+        let _ = fs::remove_dir_all(&origin);
+        let _ = fs::remove_dir_all(&clone);
+    }
+
+    #[test]
+    fn push_first_time_uses_non_origin_remote() {
+        let origin = temp_dir("push-nonorigin");
+        git(&origin, &["init", "--bare", "-b", "main"]);
+
+        let clone = temp_dir("push-nonorigin-clone");
+        git(&clone, &["clone", origin.to_str().unwrap(), "."]);
+        git(&clone, &["config", "user.email", "test@example.com"]);
+        git(&clone, &["config", "user.name", "test"]);
+        // 远端不叫 origin(如 "github")时,首推回退也应成功
+        git(&clone, &["remote", "rename", "origin", "github"]);
+        fs::write(clone.join("a.txt"), "a").unwrap();
+        git(&clone, &["add", "a.txt"]);
+        git(&clone, &["commit", "-m", "c1"]);
+
+        let st = push_blocking(clone.to_str().unwrap()).unwrap();
+        assert!(st.is_repo);
+
+        // upstream 应指向 github/main
+        let out = git_command(clone.to_str().unwrap())
+            .args(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "github/main");
 
         let _ = fs::remove_dir_all(&origin);
         let _ = fs::remove_dir_all(&clone);
