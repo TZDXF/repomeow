@@ -297,20 +297,23 @@ export const useProjectsStore = defineStore("projects", () => {
   }
 
   /**
-   * 创建 worktree 并检出新分支,返回最新 worktree 列表。
-   * worktreePath 支持 `{branch}` 占位符与相对路径(后端基于主工作区根解析)
+   * 创建 worktree,返回最新 worktree 列表。
+   * worktreePath 支持 `{branch}` 占位符与相对路径(后端基于主工作区根解析);
+   * createBranch 为 true 时检出新分支(可选 startPoint 基点),
+   * 为 false 时挂载已有分支(本地分支或 origin/xxx 远程分支)
    */
   function addWorktree(
     project: Project,
     worktreePath: string,
     branch: string,
-    startPoint?: string,
+    options: { createBranch?: boolean; startPoint?: string } = {},
   ) {
     return cmd<GitWorktree[]>("git_worktree_add", {
       path: project.path,
       worktreePath,
       branch,
-      startPoint: startPoint ?? null,
+      createBranch: options.createBranch ?? true,
+      startPoint: options.startPoint ?? null,
     });
   }
 

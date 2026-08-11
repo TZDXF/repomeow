@@ -53,7 +53,10 @@ const branches = ref<GitBranches>({ local: [], remote: [] });
 
 // --- 新建 worktree 表单 ---
 const createOpen = ref(false);
+/** new = 新建分支挂载;existing = 挂载已有分支 */
+const branchMode = ref<"new" | "existing">("new");
 const newBranch = ref("");
+const existingBranch = ref("");
 const baseBranch = ref("");
 const dirPath = ref("");
 /** 用户手动改过目录后不再随分支名联动 */
@@ -92,6 +95,28 @@ function remoteShortName(remote: string) {
 const remoteOnly = computed(() => {
   const local = new Set(branches.value.local);
   return branches.value.remote.filter((r) => !local.has(remoteShortName(r)));
+});
+
+// 已被某个 worktree 检出的分支名(挂载已有分支时不可再选)
+const checkedOutBranches = computed(() => {
+  return new Set(worktrees.value.map((w) => w.branch).filter((b): b is string => !!b));
+});
+
+// 可挂载的已有分支:本地/远程均排除已被检出的
+const attachableLocal = computed(() =>
+  branches.value.local.filter((b) => !checkedOutBranches.value.has(b)),
+);
+const attachableRemote = computed(() =>
+  remoteOnly.value.filter((r) => !checkedOutBranches.value.has(remoteShortName(r))),
+);
+
+/** 当前选定的挂载分支名(用于目录模板联动与提交校验);
+ * 远程引用(origin/x)落地后的本地名是去掉首段前缀的部分 */
+const effectiveBranch = computed(() => {
+  if (branchMode.value === "new") return newBranch.value.trim();
+  const b = existingBranch.value;
+  if (!b) return "";
+  return branches.value.local.includes(b) ? b : remoteShortName(b);
 });
 
 /** 展示用路径:相对主工作区的尽量显示相对路径 */
@@ -137,13 +162,15 @@ watch(open, (v) => {
 // 展开新建表单时:基点默认当前分支,目录按设置模板预填
 watch(createOpen, (v) => {
   if (!v) return;
+  branchMode.value = "new";
   baseBranch.value = currentBranch.value ?? "";
+  existingBranch.value = "";
   dirTouched.value = false;
-  dirPath.value = applyTemplate(newBranch.value);
+  dirPath.value = applyTemplate(effectiveBranch.value);
 });
 
 // 分支名变化且目录未被手动修改时,同步模板中的 {branch}
-watch(newBranch, (name) => {
+watch(effectiveBranch, (name) => {
   if (!dirTouched.value) {
     dirPath.value = applyTemplate(name);
   }
@@ -154,16 +181,20 @@ function applyTemplate(branch: string) {
 }
 
 async function create() {
-  const name = newBranch.value.trim();
+  const isNew = branchMode.value === "new";
+  const name = isNew ? newBranch.value.trim() : existingBranch.value;
   const dir = dirPath.value.trim();
   if (!name || !dir || creating.value) return;
   creating.value = true;
   try {
     const current = currentBranch.value;
     const startPoint =
-      baseBranch.value && baseBranch.value !== current ? baseBranch.value : undefined;
-    worktrees.value = await store.addWorktree(props.project, dir, name, startPoint);
-    toast.success(t("git.worktree.created", { name }));
+      isNew && baseBranch.value && baseBranch.value !== current ? baseBranch.value : undefined;
+    worktrees.value = await store.addWorktree(props.project, dir, name, {
+      createBranch: isNew,
+      startPoint,
+    });
+    toast.success(t("git.worktree.created", { name: effectiveBranch.value || name }));
     createOpen.value = false;
     newBranch.value = "";
   } catch (e) {
@@ -398,6 +429,21 @@ async function remove() {
       <form v-else class="flex flex-col gap-3" @submit.prevent="create">
         <div class="grid grid-cols-2 gap-3">
           <label class="flex flex-col gap-1.5 text-xs text-muted-foreground">
+            {{ t("git.worktree.sourceLabel") }}
+            <Select v-model="branchMode">
+              <SelectTrigger class="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="new">{{ t("git.worktree.sourceNew") }}</SelectItem>
+                <SelectItem value="existing">{{ t("git.worktree.sourceExisting") }}</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+          <label
+            v-if="branchMode === 'new'"
+            class="flex flex-col gap-1.5 text-xs text-muted-foreground"
+          >
             {{ t("git.worktree.branchLabel") }}
             <Input
               v-model="newBranch"
@@ -405,7 +451,32 @@ async function remove() {
               autofocus
             />
           </label>
-          <label class="flex flex-col gap-1.5 text-xs text-muted-foreground">
+          <label v-else class="flex flex-col gap-1.5 text-xs text-muted-foreground">
+            {{ t("git.worktree.existingBranchLabel") }}
+            <Select v-model="existingBranch">
+              <SelectTrigger class="w-full">
+                <SelectValue :placeholder="t('git.worktree.existingBranchLabel')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup v-if="attachableLocal.length">
+                  <SelectLabel>{{ t("git.branch.local") }}</SelectLabel>
+                  <SelectItem v-for="b in attachableLocal" :key="b" :value="b">
+                    {{ b }}
+                  </SelectItem>
+                </SelectGroup>
+                <SelectGroup v-if="attachableRemote.length">
+                  <SelectLabel>{{ t("git.branch.remote") }}</SelectLabel>
+                  <SelectItem v-for="r in attachableRemote" :key="r" :value="r">
+                    {{ r }}
+                  </SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </label>
+          <label
+            v-if="branchMode === 'new'"
+            class="col-span-2 flex flex-col gap-1.5 text-xs text-muted-foreground"
+          >
             {{ t("git.worktree.baseLabel") }}
             <Select v-model="baseBranch">
               <SelectTrigger class="w-full">
@@ -440,7 +511,7 @@ async function remove() {
           <Button
             type="submit"
             size="sm"
-            :disabled="!newBranch.trim() || !dirPath.trim() || creating"
+            :disabled="!effectiveBranch || !dirPath.trim() || creating"
           >
             {{ creating ? t("git.worktree.creating") : t("common.create") }}
           </Button>
