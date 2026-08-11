@@ -19,7 +19,8 @@ import { cmd } from "@/lib/tauri";
 import type { EditorKind, Project } from "@/types";
 
 const { t } = useI18n();
-const props = defineProps<{ project: Project; conflicts: string[] }>();
+// path 缺省为项目路径;worktree 内产生的冲突传 worktree 路径,确保「打开」落在正确目录
+const props = defineProps<{ project: Project; conflicts: string[]; path?: string }>();
 const open = defineModel<boolean>("open", { required: true });
 
 // VSCode 可用性(与 OpenWithMenu 共享同一探测,结果有缓存)
@@ -32,7 +33,7 @@ onMounted(async () => {
 /** 冲突不在应用内解决:引导用户到更合适的工具中处理 */
 async function openIn(kind: EditorKind) {
   try {
-    await cmd("open_with", { path: props.project.path, kind });
+    await cmd("open_with", { path: props.path ?? props.project.path, kind });
     open.value = false;
   } catch (e) {
     toast.error(String(e));

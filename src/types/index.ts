@@ -33,6 +33,33 @@ export interface GitBranches {
   remote: string[];
 }
 
+/** 一个 git worktree(来自 `git worktree list --porcelain`) */
+export interface GitWorktree {
+  /** 绝对路径(git 输出,Windows 上为 '/' 分隔) */
+  path: string;
+  /** 检出的短分支名;detached 时为 null */
+  branch: string | null;
+  /** HEAD 完整 hash */
+  head: string;
+  /** 是否主工作区 */
+  is_main: boolean;
+  /** 是否 detached HEAD */
+  detached: boolean;
+}
+
+/** `git merge` 的结果:最新状态 + 产生的合并冲突文件(为空表示无冲突) */
+export interface GitMergeResult {
+  status: GitStatus;
+  conflicts: string[];
+}
+
+/** `git rebase` 的结果:最新状态 + 冲突文件 + 变基是否处于中断状态 */
+export interface GitRebaseResult {
+  status: GitStatus;
+  conflicts: string[];
+  in_progress: boolean;
+}
+
 /** 批量 git 状态查询结果中的一项(按 path 与项目列表对应) */
 export interface GitStatusItem {
   path: string;

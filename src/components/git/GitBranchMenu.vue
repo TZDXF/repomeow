@@ -2,7 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
-import { Check, GitBranchPlus, Globe, Loader2 } from "@lucide/vue";
+import { Check, GitBranchPlus, GitMerge, Globe, Loader2 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -30,6 +30,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useProjectsStore } from "@/stores/projects";
+import GitBranchOpsDialog from "@/components/git/GitBranchOpsDialog.vue";
 import type { GitBranches, Project } from "@/types";
 
 const { t } = useI18n();
@@ -46,6 +47,15 @@ const createOpen = ref(false);
 const newBranch = ref("");
 const baseBranch = ref("");
 const creating = ref(false);
+
+// --- 合并/变基对话框 ---
+const opsOpen = ref(false);
+const opsInitialOp = ref<"merge" | "rebase">("merge");
+
+function openOps(op: "merge" | "rebase") {
+  opsInitialOp.value = op;
+  opsOpen.value = true;
+}
 
 /** 远程分支去掉远端名前缀: "origin/team/x" -> "team/x" */
 function remoteShortName(remote: string) {
@@ -167,8 +177,18 @@ async function createBranch() {
         <GitBranchPlus class="h-3.5 w-3.5" />
         {{ t("git.branch.newBranch") }}
       </DropdownMenuItem>
+      <DropdownMenuItem class="gap-2 text-xs" @click="openOps('merge')">
+        <GitMerge class="h-3.5 w-3.5" />
+        {{ t("git.branchOps.mergeAction") }}
+      </DropdownMenuItem>
+      <DropdownMenuItem class="gap-2 text-xs" @click="openOps('rebase')">
+        <GitMerge class="h-3.5 w-3.5" />
+        {{ t("git.branchOps.rebaseAction") }}
+      </DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>
+
+  <GitBranchOpsDialog v-model:open="opsOpen" v-model:initial-op="opsInitialOp" :project="project" />
 
   <Dialog v-model:open="createOpen">
     <DialogContent>

@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   BookOpen,
   FileText,
+  FolderGit2,
   FolderSync,
   Pencil,
   Star,
@@ -16,6 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import GitStatusBar from "@/components/git/GitStatusBar.vue";
 import GitActions from "@/components/git/GitActions.vue";
+import WorktreePanel from "@/components/git/WorktreePanel.vue";
 import OpenWithMenu from "@/components/open/OpenWithMenu.vue";
 import DockerCompose from "@/components/project/DockerCompose.vue";
 import ReadmeDrawer from "@/components/project/ReadmeDrawer.vue";
@@ -67,6 +69,9 @@ const readmeOpen = ref(false);
 
 // --- AI 日报弹窗 ---
 const reportOpen = ref(false);
+
+// --- worktree 管理面板 ---
+const worktreeOpen = ref(false);
 
 // --- 收藏切换(收藏项目在列表中置顶) ---
 async function toggleFavorite() {
@@ -248,6 +253,15 @@ async function saveDesc() {
             v-if="project.git?.is_repo"
             variant="outline"
             size="xs"
+            @click="worktreeOpen = true"
+          >
+            <FolderGit2 class="h-3.5 w-3.5" />
+            {{ t("git.worktree.title") }}
+          </Button>
+          <Button
+            v-if="project.git?.is_repo"
+            variant="outline"
+            size="xs"
             @click="router.push(`/projects/${project.id}/graph`)"
           >
             <Waypoints class="h-3.5 w-3.5" />
@@ -269,6 +283,7 @@ async function saveDesc() {
     <ReadmeDrawer v-model:open="readmeOpen" :project="project" />
     <DailyReportDialog v-model:open="reportOpen" :preset-project-id="project.id" />
     <RelocateProjectDialog v-model:open="relocateOpen" :project="project" />
+    <WorktreePanel v-model:open="worktreeOpen" :project="project" />
   </div>
 
   <div

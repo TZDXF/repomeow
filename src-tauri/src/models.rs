@@ -122,6 +122,13 @@ pub struct GitGraphCommit {
     pub is_head: bool,
 }
 
+/// git_graph_log 流式输出的一个批次;done 为 true 表示提交序列结束(commits 可能为空)
+#[derive(Debug, Clone, Serialize)]
+pub struct GitGraphBatch {
+    pub commits: Vec<GitGraphCommit>,
+    pub done: bool,
+}
+
 /// 仓库当前 git 用户身份(user.name / user.email,含全局配置回退)
 #[derive(Debug, Clone, Serialize)]
 pub struct GitUser {

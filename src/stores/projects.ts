@@ -3,10 +3,13 @@ import { defineStore } from "pinia";
 import { cmd } from "@/lib/tauri";
 import type {
   GitBranches,
+  GitMergeResult,
   GitPullResult,
+  GitRebaseResult,
   GitStatus,
   GitStatusItem,
   GitUpdatedPayload,
+  GitWorktree,
   Project,
 } from "@/types";
 
@@ -286,6 +289,84 @@ export const useProjectsStore = defineStore("projects", () => {
     project.git = await cmd<GitStatus>("git_push", { path: project.path });
   }
 
+  // --- worktree / 合并 / 变基 ---
+
+  /** 列出仓库的全部 worktree(第一条为主工作区) */
+  function listWorktrees(project: Project) {
+    return cmd<GitWorktree[]>("list_git_worktrees", { path: project.path });
+  }
+
+  /**
+   * 创建 worktree 并检出新分支,返回最新 worktree 列表。
+   * worktreePath 支持 `{branch}` 占位符与相对路径(后端基于主工作区根解析)
+   */
+  function addWorktree(
+    project: Project,
+    worktreePath: string,
+    branch: string,
+    startPoint?: string,
+  ) {
+    return cmd<GitWorktree[]>("git_worktree_add", {
+      path: project.path,
+      worktreePath,
+      branch,
+      startPoint: startPoint ?? null,
+    });
+  }
+
+  /** 删除 worktree;force 强制(含未提交修改时),deleteBranch 同时删除其检出的本地分支 */
+  function removeWorktree(
+    project: Project,
+    worktreePath: string,
+    options: { force?: boolean; deleteBranch?: boolean } = {},
+  ) {
+    return cmd<GitWorktree[]>("git_worktree_remove", {
+      path: project.path,
+      worktreePath,
+      force: options.force ?? false,
+      deleteBranch: options.deleteBranch ?? false,
+    });
+  }
+
+  /** 将 branch 合并进当前分支;squash 时只暂存不提交。返回冲突文件列表(非空表示有冲突) */
+  async function mergeBranch(project: Project, branch: string, options: { squash?: boolean } = {}) {
+    const result = await cmd<GitMergeResult>("git_merge", {
+      path: project.path,
+      branch,
+      squash: options.squash ?? false,
+    });
+    project.git = result.status;
+    return result.conflicts;
+  }
+
+  /** 中止进行中的合并(git merge --abort) */
+  async function abortMerge(project: Project) {
+    project.git = await cmd<GitStatus>("git_merge_abort", { path: project.path });
+  }
+
+  /**
+   * 将 path 所在工作区的当前分支变基到 onto 之上(默认传项目路径;
+   * worktree 场景传 worktree 路径,此时不回写 project.git)。返回冲突列表与是否中断
+   */
+  async function rebaseBranch(project: Project, onto: string, path?: string) {
+    const result = await cmd<GitRebaseResult>("git_rebase", {
+      path: path ?? project.path,
+      onto,
+    });
+    if (!path) {
+      project.git = result.status;
+    }
+    return { conflicts: result.conflicts, inProgress: result.in_progress };
+  }
+
+  /** 中止进行中的变基(git rebase --abort);path 缺省为项目路径 */
+  async function abortRebase(project: Project, path?: string) {
+    const status = await cmd<GitStatus>("git_rebase_abort", { path: path ?? project.path });
+    if (!path) {
+      project.git = status;
+    }
+  }
+
   const byId = computed(() => {
     return (id: number) => projects.value.find((p) => p.id === id);
   });
@@ -323,6 +404,13 @@ export const useProjectsStore = defineStore("projects", () => {
     commitChanges,
     pullRepository,
     pushRepository,
+    listWorktrees,
+    addWorktree,
+    removeWorktree,
+    mergeBranch,
+    abortMerge,
+    rebaseBranch,
+    abortRebase,
     byId,
   };
 });

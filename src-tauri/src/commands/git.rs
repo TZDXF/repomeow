@@ -1,20 +1,20 @@
 use std::collections::{HashMap, HashSet};
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State, Window};
+use tauri::{AppHandle, Emitter, Manager, State, Window, ipc::Channel};
 use tokio::sync::Semaphore;
 
 use crate::commands::account;
 use crate::db::Db;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::{
-    GitBranches, GitCommitContext, GitCommitInfo, GitGraphCommit, GitMergeResult, GitPullResult,
-    GitRebaseResult, GitStatus, GitUntrackedFile, GitUser, GitWorktree,
+    GitBranches, GitCommitContext, GitCommitInfo, GitGraphBatch, GitGraphCommit, GitMergeResult,
+    GitPullResult, GitRebaseResult, GitStatus, GitUntrackedFile, GitUser, GitWorktree,
 };
 
 /// 后台 fetch 并发上限(超出排队)
@@ -1026,17 +1026,27 @@ fn resolve_worktree_target(main_root: &str, input: &str, branch: &str) -> PathBu
     }
 }
 
-/// 创建 worktree 并检出新分支(`git worktree add <dir> -b <branch> [start_point]`),
-/// 返回最新 worktree 列表。分支已被其它 worktree 检出时报 git_branch_checked_out
+/// 创建 worktree。create_branch 为 true 时检出新分支
+/// (`git worktree add <dir> -b <branch> [start_point]`,start_point 缺省为 HEAD);
+/// 为 false 时挂载已有分支(`git worktree add <dir> <branch>`,branch 可为
+/// 本地分支或 origin/xxx 远程分支,远程时按 checkout DWIM 自动创建跟踪分支)。
+/// 分支已被其它 worktree 检出时报 git_branch_checked_out
 #[tauri::command]
 pub async fn git_worktree_add(
     path: String,
     worktree_path: String,
     branch: String,
+    create_branch: bool,
     start_point: Option<String>,
 ) -> AppResult<Vec<GitWorktree>> {
     run_blocking(move || {
-        worktree_add_blocking(&path, &worktree_path, &branch, start_point.as_deref())
+        worktree_add_blocking(
+            &path,
+            &worktree_path,
+            &branch,
+            create_branch,
+            start_point.as_deref(),
+        )
     })
     .await
 }
@@ -1045,6 +1055,7 @@ fn worktree_add_blocking(
     path: &str,
     worktree_path: &str,
     branch: &str,
+    create_branch: bool,
     start_point: Option<&str>,
 ) -> AppResult<Vec<GitWorktree>> {
     let branch = branch.trim();
@@ -1061,18 +1072,28 @@ fn worktree_add_blocking(
         .first()
         .map(|w| w.path.clone())
         .unwrap_or_else(|| path.to_string());
-    if existing.iter().any(|w| w.branch.as_deref() == Some(branch)) {
-        return Err(AppError::coded(ErrorCode::GitBranchCheckedOut, branch));
-    }
-    if local_branch_names(path)?.iter().any(|b| b == branch) {
-        return Err(AppError::coded(ErrorCode::GitBranchExists, branch));
+    // 挂载已有分支时,远程引用(origin/x)落地后的本地名是去掉首段前缀的部分
+    let local_name = if create_branch || local_branch_names(path)?.iter().any(|b| b == branch) {
+        branch
+    } else {
+        branch.split_once('/').map(|(_, s)| s).unwrap_or(branch)
+    };
+    if existing.iter().any(|w| w.branch.as_deref() == Some(local_name)) {
+        return Err(AppError::coded(ErrorCode::GitBranchCheckedOut, local_name));
     }
     let target = resolve_worktree_target(&main_root, input, branch);
     let target_str = target.to_string_lossy().to_string();
-    match start_point.map(str::trim).filter(|s| !s.is_empty()) {
-        Some(base) => run_git(path, &["worktree", "add", &target_str, "-b", branch, base])?,
-        None => run_git(path, &["worktree", "add", &target_str, "-b", branch])?,
-    };
+    if create_branch {
+        if local_branch_names(path)?.iter().any(|b| b == branch) {
+            return Err(AppError::coded(ErrorCode::GitBranchExists, branch));
+        }
+        match start_point.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(base) => run_git(path, &["worktree", "add", &target_str, "-b", branch, base])?,
+            None => run_git(path, &["worktree", "add", &target_str, "-b", branch])?,
+        };
+    } else {
+        run_git(path, &["worktree", "add", &target_str, branch])?;
+    }
     list_worktrees_blocking(path)
 }
 
@@ -1404,6 +1425,14 @@ pub async fn git_log(
     .await
 }
 
+/// "良性空结果"的 git log stderr 特征(非仓库/无提交/坏默认分支)
+fn is_benign_log_stderr(stderr: &str) -> bool {
+    stderr.contains("not a git repository")
+        || stderr.contains("does not have any commits")
+        || stderr.contains("your current branch")
+        || stderr.contains("bad default revision")
+}
+
 /// 执行 git log 类命令并处理"良性空结果"(非仓库/无提交/坏默认分支 → Ok(None))
 fn run_git_log_raw(path: &str, args: &[String]) -> AppResult<Option<Output>> {
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -1412,11 +1441,7 @@ fn run_git_log_raw(path: &str, args: &[String]) -> AppResult<Option<Output>> {
         return Ok(Some(output));
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let benign = stderr.contains("not a git repository")
-        || stderr.contains("does not have any commits")
-        || stderr.contains("your current branch")
-        || stderr.contains("bad default revision");
-    if benign {
+    if is_benign_log_stderr(&stderr) {
         return Ok(None);
     }
     let detail = stderr.trim();
@@ -1479,20 +1504,22 @@ pub(crate) fn run_git_log(
     Ok(commits)
 }
 
-/// 读取提交图谱数据(含合并提交与引用装饰),按拓扑序输出。
+/// 读取提交图谱数据(含合并提交与引用装饰),按拓扑序流式输出,支持全量历史。
 /// --topo-order 保证子提交先于父提交,是前端泳道布局的前提;
-/// 非 git 仓库或尚无提交时返回空数组而非报错。
+/// 非 git 仓库或尚无提交时仅推送一个 done 批次而非报错。
 /// 修订范围:branches 非空时按指定分支(本地或 origin/xxx)取日志;
-/// 否则 include_remote 为 false 时仅本地分支+标签(--branches --tags),默认 --all 含远程
+/// 否则 include_remote 为 false 时仅本地分支+标签(--branches --tags),默认 --all 含远程。
+/// 结果按 batch_size 分批经 channel 推送(单次 git walk 边读边发),最后一批 done = true
 #[tauri::command]
 pub async fn git_graph_log(
     path: String,
-    max_count: Option<u32>,
     branches: Option<Vec<String>>,
     include_remote: Option<bool>,
-) -> AppResult<Vec<GitGraphCommit>> {
+    batch_size: Option<u32>,
+    on_batch: Channel<GitGraphBatch>,
+) -> AppResult<()> {
     run_blocking(move || {
-        let limit = max_count.unwrap_or(300).min(1000);
+        let size = batch_size.unwrap_or(500).clamp(50, 2000) as usize;
         let revs: Vec<String> = match branches {
             Some(list) => list
                 .into_iter()
@@ -1505,61 +1532,99 @@ pub async fn git_graph_log(
             None => vec!["--all".into()],
         };
         if revs.is_empty() {
-            return Ok(Vec::new());
+            let _ = on_batch.send(GitGraphBatch {
+                commits: Vec::new(),
+                done: true,
+            });
+            return Ok(());
         }
         let mut args: Vec<String> = vec![
             "log".into(),
             "--topo-order".into(),
             "--pretty=format:%H%x1f%P%x1f%an%x1f%ad%x1f%s%x1f%D".into(),
             "--date=format:%Y-%m-%d %H:%M".into(),
-            format!("--max-count={limit}"),
         ];
         args.extend(revs);
-        let Some(output) = run_git_log_raw(&path, &args)? else {
-            return Ok(Vec::new());
-        };
-        let commits = String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .filter_map(|line| {
-                let mut parts = line.splitn(6, '\x1f');
-                let hash = parts.next()?.trim();
-                let parents = parts.next()?.trim();
-                let author = parts.next()?.trim();
-                let date = parts.next()?.trim();
-                let subject = parts.next()?.trim();
-                let decorations = parts.next().unwrap_or("").trim();
-                if hash.is_empty() {
-                    return None;
+
+        let mut child = git_command(&path)
+            .args(&args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| AppError::coded(ErrorCode::GitLogFailed, e.to_string()))?;
+        let stdout = child.stdout.take().expect("stdout 已通过管道捕获");
+        let mut batch: Vec<GitGraphCommit> = Vec::with_capacity(size);
+        for line in BufReader::new(stdout).lines() {
+            let line = line.map_err(|e| AppError::coded(ErrorCode::GitLogFailed, e.to_string()))?;
+            if let Some(commit) = parse_graph_commit_line(&line) {
+                batch.push(commit);
+                if batch.len() >= size {
+                    let _ = on_batch.send(GitGraphBatch {
+                        commits: std::mem::take(&mut batch),
+                        done: false,
+                    });
                 }
-                let mut refs = Vec::new();
-                let mut is_head = false;
-                for deco in decorations.split(", ").map(str::trim).filter(|d| !d.is_empty()) {
-                    if let Some(target) = deco.strip_prefix("HEAD -> ") {
-                        is_head = true;
-                        refs.push(target.to_string());
-                    } else if deco == "HEAD" {
-                        is_head = true;
-                    } else {
-                        refs.push(deco.to_string());
-                    }
-                }
-                Some(GitGraphCommit {
-                    hash: hash.to_string(),
-                    parents: parents
-                        .split_whitespace()
-                        .map(str::to_string)
-                        .collect(),
-                    author: author.to_string(),
-                    date: date.to_string(),
-                    subject: subject.to_string(),
-                    refs,
-                    is_head,
-                })
-            })
-            .collect();
-        Ok(commits)
+            }
+        }
+        let output = child.wait_with_output()?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if batch.is_empty() && is_benign_log_stderr(&stderr) {
+                let _ = on_batch.send(GitGraphBatch {
+                    commits: Vec::new(),
+                    done: true,
+                });
+                return Ok(());
+            }
+            let detail = stderr.trim();
+            return Err(if detail.is_empty() {
+                AppError::coded(ErrorCode::GitLogFailed, output.status.to_string())
+            } else {
+                friendly_git_error(detail)
+            });
+        }
+        let _ = on_batch.send(GitGraphBatch {
+            commits: batch,
+            done: true,
+        });
+        Ok(())
     })
     .await
+}
+
+/// 解析 %H%x1f%P%x1f%an%x1f%ad%x1f%s%x1f%D 格式的一行 git log 输出
+fn parse_graph_commit_line(line: &str) -> Option<GitGraphCommit> {
+    let mut parts = line.splitn(6, '\x1f');
+    let hash = parts.next()?.trim();
+    let parents = parts.next()?.trim();
+    let author = parts.next()?.trim();
+    let date = parts.next()?.trim();
+    let subject = parts.next()?.trim();
+    let decorations = parts.next().unwrap_or("").trim();
+    if hash.is_empty() {
+        return None;
+    }
+    let mut refs = Vec::new();
+    let mut is_head = false;
+    for deco in decorations.split(", ").map(str::trim).filter(|d| !d.is_empty()) {
+        if let Some(target) = deco.strip_prefix("HEAD -> ") {
+            is_head = true;
+            refs.push(target.to_string());
+        } else if deco == "HEAD" {
+            is_head = true;
+        } else {
+            refs.push(deco.to_string());
+        }
+    }
+    Some(GitGraphCommit {
+        hash: hash.to_string(),
+        parents: parents.split_whitespace().map(str::to_string).collect(),
+        author: author.to_string(),
+        date: date.to_string(),
+        subject: subject.to_string(),
+        refs,
+        is_head,
+    })
 }
 
 /// 读取仓库当前 git 用户身份(日报"仅自己"过滤用)。
@@ -2046,7 +2111,7 @@ mod tests {
         assert!(branches.remote.is_empty());
 
         // 新建并切换
-        let st = checkout_blocking(dir.to_str().unwrap(), "feature", true, false).unwrap();
+        let st = checkout_blocking(dir.to_str().unwrap(), "feature", true, false, None).unwrap();
         assert_eq!(st.branch.as_deref(), Some("feature"));
 
         let branches = list_branches_blocking(dir.to_str().unwrap()).unwrap();
@@ -2056,12 +2121,12 @@ mod tests {
         );
 
         // 切回 main
-        let st = checkout_blocking(dir.to_str().unwrap(), "main", false, false).unwrap();
+        let st = checkout_blocking(dir.to_str().unwrap(), "main", false, false, None).unwrap();
         assert_eq!(st.branch.as_deref(), Some("main"));
 
         // 空分支名 / 不存在的分支
-        assert!(checkout_blocking(dir.to_str().unwrap(), " ", false, false).is_err());
-        assert!(checkout_blocking(dir.to_str().unwrap(), "nope", false, false).is_err());
+        assert!(checkout_blocking(dir.to_str().unwrap(), " ", false, false, None).is_err());
+        assert!(checkout_blocking(dir.to_str().unwrap(), "nope", false, false, None).is_err());
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -2099,12 +2164,14 @@ mod tests {
 
         // 检出远程分支:本地无同名分支 → 创建跟踪分支
         let st =
-            checkout_blocking(clone_b.to_str().unwrap(), "origin/feature", false, true).unwrap();
+            checkout_blocking(clone_b.to_str().unwrap(), "origin/feature", false, true, None)
+                .unwrap();
         assert_eq!(st.branch.as_deref(), Some("feature"));
 
         // 本地已有同名分支 → 直接切换(幂等,不报错)
         let st =
-            checkout_blocking(clone_b.to_str().unwrap(), "origin/feature", false, true).unwrap();
+            checkout_blocking(clone_b.to_str().unwrap(), "origin/feature", false, true, None)
+                .unwrap();
         assert_eq!(st.branch.as_deref(), Some("feature"));
 
         let _ = fs::remove_dir_all(&origin);
@@ -2443,5 +2510,89 @@ mod tests {
 
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_dir_all(&plain);
+    }
+
+    #[test]
+    fn parse_worktree_porcelain_parses_blocks() {
+        let text = "worktree D:/repo\n\
+                    HEAD 1111111111111111111111111111111111111111\n\
+                    branch refs/heads/main\n\
+                    \n\
+                    worktree D:/repo/.worktrees/feature-x\n\
+                    HEAD 2222222222222222222222222222222222222222\n\
+                    branch refs/heads/feature/x\n\
+                    \n\
+                    worktree D:/repo/.worktrees/det\n\
+                    HEAD 3333333333333333333333333333333333333333\n\
+                    detached\n";
+        let list = parse_worktree_porcelain(text);
+        assert_eq!(list.len(), 3);
+        assert!(list[0].is_main);
+        assert_eq!(list[0].branch.as_deref(), Some("main"));
+        assert_eq!(list[1].branch.as_deref(), Some("feature/x"));
+        assert!(!list[1].is_main);
+        assert!(!list[1].detached);
+        assert!(list[2].detached);
+        assert_eq!(list[2].branch, None);
+        assert_eq!(list[2].head, "3333333333333333333333333333333333333333");
+    }
+
+    #[test]
+    fn worktree_add_and_remove_roundtrip() {
+        let dir = temp_dir("worktree");
+        init_repo(&dir);
+        fs::write(dir.join("a.txt"), "hello").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-m", "init"]);
+        let path = dir.to_str().unwrap();
+
+        // 初始只有主工作区
+        let initial = list_worktrees_blocking(path).unwrap();
+        assert_eq!(initial.len(), 1);
+        assert!(initial[0].is_main);
+
+        // 相对路径 + {branch} 占位符创建
+        let added =
+            worktree_add_blocking(path, ".worktrees/{branch}", "feature/x", true, None).unwrap();
+        assert_eq!(added.len(), 2);
+        let wt = added.iter().find(|w| !w.is_main).unwrap();
+        assert_eq!(wt.branch.as_deref(), Some("feature/x"));
+        assert!(wt.path.replace('\\', "/").contains(".worktrees/feature-x"));
+        assert!(Path::new(&wt.path).join("a.txt").exists());
+
+        // 分支已被 worktree 检出 → git_branch_checked_out
+        let dup =
+            worktree_add_blocking(path, ".worktrees/dup", "feature/x", true, None).unwrap_err();
+        assert!(dup.is_code(ErrorCode::GitBranchCheckedOut));
+
+        // 挂载已有(未检出)分支
+        git(&dir, &["branch", "topic"]);
+        let attached =
+            worktree_add_blocking(path, ".worktrees/topic", "topic", false, None).unwrap();
+        assert!(
+            attached
+                .iter()
+                .any(|w| w.branch.as_deref() == Some("topic"))
+        );
+
+        // 挂载已被其它 worktree 检出的分支 → git_branch_checked_out
+        let occupied =
+            worktree_add_blocking(path, ".worktrees/topic2", "topic", false, None).unwrap_err();
+        assert!(occupied.is_code(ErrorCode::GitBranchCheckedOut));
+
+        // 主工作区不可删除
+        let rm_main = worktree_remove_blocking(path, &initial[0].path, false, false).unwrap_err();
+        assert!(rm_main.is_code(ErrorCode::GitCommandFailed));
+
+        // 删除 worktree 并删分支
+        let left = worktree_remove_blocking(path, &wt.path, false, true).unwrap();
+        assert_eq!(left.len(), 2);
+        assert!(!Path::new(&wt.path).exists());
+        assert!(!local_branch_names(path)
+            .unwrap()
+            .iter()
+            .any(|b| b == "feature/x"));
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

@@ -47,6 +47,8 @@ export const useSettingsStore = defineStore("settings", () => {
   const closeAction = ref<CloseAction>("tray");
   /** 启用 GitHub CLI(gh)作为「账号仓库」的虚拟账号来源(默认关闭,opt-in) */
   const enableGhCli = ref(false);
+  /** 新建 worktree 的默认目录模板:支持 {branch} 占位符与相对路径(相对主工作区根解析) */
+  const worktreeDirTemplate = ref(".worktrees/{branch}");
 
   let fileStore: Store | null = null;
   let initialized = false;
@@ -146,6 +148,7 @@ export const useSettingsStore = defineStore("settings", () => {
         autoCheckUpdate: "true",
         closeAction: "tray",
         enableGhCli: "false",
+        worktreeDirTemplate: ".worktrees/{branch}",
       },
     });
     const savedTheme = await fileStore.get<ThemeMode>("theme");
@@ -220,6 +223,11 @@ export const useSettingsStore = defineStore("settings", () => {
     const savedEnableGhCli = await fileStore.get<string>("enableGhCli");
     if (savedEnableGhCli === "true" || savedEnableGhCli === "false") {
       enableGhCli.value = savedEnableGhCli === "true";
+    }
+    // worktree 默认目录模板:自由文本,trim 后非空才采用
+    const savedWorktreeDir = await fileStore.get<string>("worktreeDirTemplate");
+    if (typeof savedWorktreeDir === "string" && savedWorktreeDir.trim()) {
+      worktreeDirTemplate.value = savedWorktreeDir.trim();
     }
     applyTheme();
     applyMdTheme();
@@ -327,6 +335,13 @@ export const useSettingsStore = defineStore("settings", () => {
     await persist("enableGhCli", String(value));
   }
 
+  async function setWorktreeDirTemplate(value: string) {
+    const v = value.trim();
+    if (!v) return;
+    worktreeDirTemplate.value = v;
+    await persist("worktreeDirTemplate", v);
+  }
+
   return {
     theme,
     themeSkin,
@@ -342,6 +357,7 @@ export const useSettingsStore = defineStore("settings", () => {
     autoCheckUpdate,
     closeAction,
     enableGhCli,
+    worktreeDirTemplate,
     init,
     applyTheme,
     applyMdTheme,
@@ -360,5 +376,6 @@ export const useSettingsStore = defineStore("settings", () => {
     setAutoCheckUpdate,
     setCloseAction,
     setEnableGhCli,
+    setWorktreeDirTemplate,
   };
 });
