@@ -83,7 +83,7 @@ describe("translateCommandError / cmd 本地化路径(新契约)", () => {
       expect(translateCommandErrorForTest(serialized)).toBe("降级文案");
     });
 
-    it('message 是空字符串,code 未命中:返回 code 本身作为兜底信息', () => {
+    it("message 是空字符串,code 未命中:返回 code 本身作为兜底信息", () => {
       // 新契约:有 code 时至少暴露 code 让用户/日志能看到失败身份;
       // 完全空对象/字段类型异常时才返回 "未知错误"
       const serialized = { code: "unknown", message: "" };

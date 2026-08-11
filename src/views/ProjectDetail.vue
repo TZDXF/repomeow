@@ -11,6 +11,7 @@ import {
   Pencil,
   Star,
   TriangleAlert,
+  Waypoints,
 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import GitStatusBar from "@/components/git/GitStatusBar.vue";
@@ -243,6 +244,15 @@ async function saveDesc() {
         <template v-if="project.path_exists">
           <GitStatusBar :project="project" />
           <GitActions :project="project" />
+          <Button
+            v-if="project.git?.is_repo"
+            variant="outline"
+            size="xs"
+            @click="router.push(`/projects/${project.id}/graph`)"
+          >
+            <Waypoints class="h-3.5 w-3.5" />
+            {{ t("git.graph.title") }}
+          </Button>
         </template>
       </div>
     </header>

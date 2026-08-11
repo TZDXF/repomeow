@@ -75,6 +75,23 @@ pub struct GitCommitInfo {
     pub subject: String,
 }
 
+/// 提交图谱中的一条提交(含分支拓扑所需的父提交与引用装饰)
+#[derive(Debug, Clone, Serialize)]
+pub struct GitGraphCommit {
+    /// 完整 hash
+    pub hash: String,
+    /// 父提交 hash(合并提交有多个,根提交为空)
+    pub parents: Vec<String>,
+    pub author: String,
+    /// 本地时间 "YYYY-MM-DD HH:MM"
+    pub date: String,
+    pub subject: String,
+    /// 指向该提交的引用:"main"、"origin/main"、"tag: v1.0"(tag 保留前缀供前端区分)
+    pub refs: Vec<String>,
+    /// HEAD 是否指向此提交
+    pub is_head: bool,
+}
+
 /// 仓库当前 git 用户身份(user.name / user.email,含全局配置回退)
 #[derive(Debug, Clone, Serialize)]
 pub struct GitUser {

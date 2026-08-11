@@ -101,11 +101,7 @@ export const useSettingsStore = defineStore("settings", () => {
    * 用于托盘弹窗跟随主窗口的主题切换(各 webview 的 Pinia store 互相独立,
    * 仅靠 init 时从 settings.json 读一次,后续主窗口改了不会自动同步)。
    */
-  function syncThemeFromExternal(snapshot: {
-    theme: string;
-    themeSkin: string;
-    mdTheme: string;
-  }) {
+  function syncThemeFromExternal(snapshot: { theme: string; themeSkin: string; mdTheme: string }) {
     if (snapshot.theme === "light" || snapshot.theme === "dark" || snapshot.theme === "system") {
       theme.value = snapshot.theme;
     }
@@ -242,21 +238,33 @@ export const useSettingsStore = defineStore("settings", () => {
     await persist("theme", value);
     // 带全量主题快照:接收方(托盘弹窗等独立 webview 窗口)的 store 是另一实例,
     // 不会自动同步这边的 ref,必须把最新三项一起发过去,接收方覆盖本地 ref 后再 apply
-    await emit(THEME_CHANGED_EVENT, { theme: theme.value, themeSkin: themeSkin.value, mdTheme: mdTheme.value });
+    await emit(THEME_CHANGED_EVENT, {
+      theme: theme.value,
+      themeSkin: themeSkin.value,
+      mdTheme: mdTheme.value,
+    });
   }
 
   async function setThemeSkin(value: ThemeSkin) {
     themeSkin.value = value;
     applyTheme();
     await persist("themeSkin", value);
-    await emit(THEME_CHANGED_EVENT, { theme: theme.value, themeSkin: themeSkin.value, mdTheme: mdTheme.value });
+    await emit(THEME_CHANGED_EVENT, {
+      theme: theme.value,
+      themeSkin: themeSkin.value,
+      mdTheme: mdTheme.value,
+    });
   }
 
   async function setMdTheme(value: MdTheme) {
     mdTheme.value = value;
     applyMdTheme();
     await persist("mdTheme", value);
-    await emit(THEME_CHANGED_EVENT, { theme: theme.value, themeSkin: themeSkin.value, mdTheme: mdTheme.value });
+    await emit(THEME_CHANGED_EVENT, {
+      theme: theme.value,
+      themeSkin: themeSkin.value,
+      mdTheme: mdTheme.value,
+    });
   }
 
   async function setLanguage(value: Language) {

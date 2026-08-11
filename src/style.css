@@ -362,7 +362,6 @@
   [data-theme="island"].dark [data-slot="card"] {
     box-shadow: 0 3px 10px 0 rgba(0, 0, 0, 0.3);
   }
-
 }
 
 /* 注意：glass 皮肤的覆盖规则必须放在 @layer 之外 —— Tailwind v4 的层顺序中 utilities 高于 base,

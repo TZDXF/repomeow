@@ -377,6 +377,24 @@ export default {
       createPlaceholder: "Branch name",
       creating: "Creating...",
       switched: 'Switched to branch "{name}"',
+      createBaseLabel: "Based on branch",
+    },
+    graph: {
+      title: "Commit Graph",
+      back: "Back to project",
+      refresh: "Refresh",
+      commitsCount: "{count} commits",
+      empty: "No commits to display (repository is uninitialized or has no commits)",
+      loadFailed: "Failed to load commit graph",
+      truncatedHint: "Showing only the latest {count} commits; older history was not loaded",
+      copyHash: "Copy full hash",
+      copied: "Copied to clipboard",
+      detail: {
+        hash: "Commit",
+        author: "Author",
+        date: "Date",
+        parents: "Parent commits",
+      },
     },
     conflict: {
       title: "Merge conflicts",
@@ -724,8 +742,7 @@ export default {
       testFailed: "Connection failed: {error}",
       saved: "AI settings saved",
       concurrency: "Concurrency limit",
-      concurrencyHint:
-        "Maximum concurrent AI requests (1-5). Lower this if the API rate-limits.",
+      concurrencyHint: "Maximum concurrent AI requests (1-5). Lower this if the API rate-limits.",
     },
     accounts: {
       title: "Accounts",
@@ -733,7 +750,7 @@ export default {
         "Link GitHub / Gitee / GitLab accounts to browse their repositories and clone them with one click.",
       enableGhCli: "GitHub CLI (gh)",
       enableGhCliHint:
-        "When enabled, a logged-in `gh` CLI appears as an account in the \"Add Project → Account Repositories\" dropdown.",
+        'When enabled, a logged-in `gh` CLI appears as an account in the "Add Project → Account Repositories" dropdown.',
       tokenInvalid: "Token invalid",
       tokenInvalidHint:
         "This account's token is invalid or expired. Please edit the account to update the token.",

@@ -249,18 +249,19 @@ export const useProjectsStore = defineStore("projects", () => {
 
   /**
    * 切换分支。create: 创建并切换;remote: branch 形如 "origin/feature",
-   * 本地无同名分支时自动创建跟踪分支
+   * 本地无同名分支时自动创建跟踪分支;startPoint: create 时的基点(本地分支或 origin/xxx)
    */
   async function checkoutBranch(
     project: Project,
     branch: string,
-    options: { create?: boolean; remote?: boolean } = {},
+    options: { create?: boolean; remote?: boolean; startPoint?: string } = {},
   ) {
     project.git = await cmd<GitStatus>("git_checkout", {
       path: project.path,
       branch,
       create: options.create ?? false,
       remote: options.remote ?? false,
+      startPoint: options.startPoint ?? null,
     });
   }
 

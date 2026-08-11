@@ -78,6 +78,22 @@ export interface GitCommitInfo {
   subject: string;
 }
 
+/** 提交图谱中的一条提交(含分支拓扑所需的父提交与引用装饰) */
+export interface GitGraphCommit {
+  /** 完整 hash */
+  hash: string;
+  /** 父提交 hash(合并提交有多个,根提交为空) */
+  parents: string[];
+  author: string;
+  /** 本地时间 "YYYY-MM-DD HH:MM" */
+  date: string;
+  subject: string;
+  /** 指向该提交的引用:"main"、"origin/main"、"tag: v1.0"(tag 保留前缀) */
+  refs: string[];
+  /** HEAD 是否指向此提交 */
+  is_head: boolean;
+}
+
 /** 仓库当前 git 用户身份(user.name / user.email) */
 export interface GitUser {
   name: string;

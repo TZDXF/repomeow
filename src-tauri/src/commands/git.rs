@@ -13,8 +13,8 @@ use crate::commands::account;
 use crate::db::Db;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::{
-    GitBranches, GitCommitContext, GitCommitInfo, GitPullResult, GitStatus, GitUntrackedFile,
-    GitUser,
+    GitBranches, GitCommitContext, GitCommitInfo, GitGraphCommit, GitPullResult, GitStatus,
+    GitUntrackedFile, GitUser,
 };
 
 /// 后台 fetch 并发上限(超出排队)
@@ -773,7 +773,8 @@ pub async fn git_init(path: String) -> AppResult<GitStatus> {
     .await
 }
 
-/// 切换分支;create 为 true 时创建并切换(`git checkout -b`)。
+/// 切换分支;create 为 true 时创建并切换(`git checkout -b`),
+/// start_point 非空时以其为基点创建(可为本地分支或 origin/xxx 形式的远程分支)。
 /// remote 为 true 时 branch 形如 "origin/feature":本地已有同名分支则直接切换,
 /// 否则创建跟踪分支(`git checkout -b feature --track origin/feature`)
 #[tauri::command]
@@ -782,17 +783,28 @@ pub async fn git_checkout(
     branch: String,
     create: bool,
     remote: bool,
+    start_point: Option<String>,
 ) -> AppResult<GitStatus> {
-    run_blocking(move || checkout_blocking(&path, &branch, create, remote)).await
+    run_blocking(move || checkout_blocking(&path, &branch, create, remote, start_point.as_deref()))
+        .await
 }
 
-fn checkout_blocking(path: &str, branch: &str, create: bool, remote: bool) -> AppResult<GitStatus> {
+fn checkout_blocking(
+    path: &str,
+    branch: &str,
+    create: bool,
+    remote: bool,
+    start_point: Option<&str>,
+) -> AppResult<GitStatus> {
     let branch = branch.trim();
     if branch.is_empty() {
         return Err(AppError::coded(ErrorCode::GitBranchNameRequired, ""));
     }
     if create {
-        run_git(path, &["checkout", "-b", branch])?;
+        match start_point.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(base) => run_git(path, &["checkout", "-b", branch, base])?,
+            None => run_git(path, &["checkout", "-b", branch])?,
+        };
     } else if remote {
         let short = branch.split_once('/').map(|(_, s)| s).unwrap_or(branch);
         if local_branch_names(path)?.iter().any(|b| b == short) {
@@ -1113,6 +1125,29 @@ pub async fn git_log(
     .await
 }
 
+/// 执行 git log 类命令并处理"良性空结果"(非仓库/无提交/坏默认分支 → Ok(None))
+fn run_git_log_raw(path: &str, args: &[String]) -> AppResult<Option<Output>> {
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let output = git_command(path).args(&arg_refs).output()?;
+    if output.status.success() {
+        return Ok(Some(output));
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let benign = stderr.contains("not a git repository")
+        || stderr.contains("does not have any commits")
+        || stderr.contains("your current branch")
+        || stderr.contains("bad default revision");
+    if benign {
+        return Ok(None);
+    }
+    let detail = stderr.trim();
+    Err(if detail.is_empty() {
+        AppError::coded(ErrorCode::GitLogFailed, output.status.to_string())
+    } else {
+        friendly_git_error(detail)
+    })
+}
+
 /// git_log 核心逻辑,供 scheduler 等内部模块复用;参数均为引用以避免不必要的 clone
 pub(crate) fn run_git_log(
     path: &str,
@@ -1139,24 +1174,9 @@ pub(crate) fn run_git_log(
     let limit = max_count.unwrap_or(200).min(1000);
     args.push(format!("--max-count={limit}"));
 
-    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let output = git_command(path).args(&arg_refs).output()?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let benign = stderr.contains("not a git repository")
-            || stderr.contains("does not have any commits")
-            || stderr.contains("your current branch")
-            || stderr.contains("bad default revision");
-        if benign {
-            return Ok(Vec::new());
-        }
-        let detail = stderr.trim();
-        return Err(if detail.is_empty() {
-            AppError::coded(ErrorCode::GitLogFailed, output.status.to_string())
-        } else {
-            friendly_git_error(detail)
-        });
-    }
+    let Some(output) = run_git_log_raw(path, &args)? else {
+        return Ok(Vec::new());
+    };
 
     let commits = String::from_utf8_lossy(&output.stdout)
         .lines()
@@ -1178,6 +1198,68 @@ pub(crate) fn run_git_log(
         })
         .collect();
     Ok(commits)
+}
+
+/// 读取提交图谱数据(所有本地+远程分支,含合并提交与引用装饰),按拓扑序输出。
+/// --topo-order 保证子提交先于父提交,是前端泳道布局的前提;
+/// 非 git 仓库或尚无提交时返回空数组而非报错
+#[tauri::command]
+pub async fn git_graph_log(path: String, max_count: Option<u32>) -> AppResult<Vec<GitGraphCommit>> {
+    run_blocking(move || {
+        let limit = max_count.unwrap_or(300).min(1000);
+        let args: Vec<String> = vec![
+            "log".into(),
+            "--all".into(),
+            "--topo-order".into(),
+            "--pretty=format:%H%x1f%P%x1f%an%x1f%ad%x1f%s%x1f%D".into(),
+            "--date=format:%Y-%m-%d %H:%M".into(),
+            format!("--max-count={limit}"),
+        ];
+        let Some(output) = run_git_log_raw(&path, &args)? else {
+            return Ok(Vec::new());
+        };
+        let commits = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| {
+                let mut parts = line.splitn(6, '\x1f');
+                let hash = parts.next()?.trim();
+                let parents = parts.next()?.trim();
+                let author = parts.next()?.trim();
+                let date = parts.next()?.trim();
+                let subject = parts.next()?.trim();
+                let decorations = parts.next().unwrap_or("").trim();
+                if hash.is_empty() {
+                    return None;
+                }
+                let mut refs = Vec::new();
+                let mut is_head = false;
+                for deco in decorations.split(", ").map(str::trim).filter(|d| !d.is_empty()) {
+                    if let Some(target) = deco.strip_prefix("HEAD -> ") {
+                        is_head = true;
+                        refs.push(target.to_string());
+                    } else if deco == "HEAD" {
+                        is_head = true;
+                    } else {
+                        refs.push(deco.to_string());
+                    }
+                }
+                Some(GitGraphCommit {
+                    hash: hash.to_string(),
+                    parents: parents
+                        .split_whitespace()
+                        .map(str::to_string)
+                        .collect(),
+                    author: author.to_string(),
+                    date: date.to_string(),
+                    subject: subject.to_string(),
+                    refs,
+                    is_head,
+                })
+            })
+            .collect();
+        Ok(commits)
+    })
+    .await
 }
 
 /// 读取仓库当前 git 用户身份(日报"仅自己"过滤用)。
