@@ -422,42 +422,7 @@ async function copyHash(hash: string) {
         </div>
 
         <div v-else class="relative" :style="{ height: `${graphHeight}px` }">
-          <!-- 泳道连线与节点(SVG 覆盖层) -->
-          <svg
-            class="pointer-events-none absolute top-0 left-0"
-            :width="graphWidth"
-            :height="graphHeight"
-          >
-            <path
-              v-for="(e, i) in layout.edges"
-              :key="i"
-              :d="edgePath(e)"
-              :stroke="laneColor(e.color)"
-              stroke-width="1.5"
-              fill="none"
-            />
-            <template v-for="n in layout.nodes" :key="n.commit.hash">
-              <circle
-                v-if="n.commit.is_head"
-                :cx="nodeX(n.lane)"
-                :cy="nodeY(n.row)"
-                r="6.5"
-                fill="none"
-                :stroke="laneColor(n.color)"
-                stroke-width="1.5"
-              />
-              <circle
-                :cx="nodeX(n.lane)"
-                :cy="nodeY(n.row)"
-                :r="selected?.hash === n.commit.hash ? 5 : 4"
-                :fill="laneColor(n.color)"
-                class="stroke-background"
-                stroke-width="2"
-              />
-            </template>
-          </svg>
-
-          <!-- 提交信息行 -->
+          <!-- 提交信息行(先渲染,SVG 覆盖在其上,避免选中/hover 背景挡住泳道连线) -->
           <div
             v-for="n in layout.nodes"
             :key="n.commit.hash"
@@ -508,6 +473,41 @@ async function copyHash(hash: string) {
             </span>
             <span class="shrink-0 text-xs text-muted-foreground">{{ n.commit.date }}</span>
           </div>
+
+          <!-- 泳道连线与节点(SVG 覆盖层,渲染在行之上,不被选中背景遮挡) -->
+          <svg
+            class="pointer-events-none absolute top-0 left-0"
+            :width="graphWidth"
+            :height="graphHeight"
+          >
+            <path
+              v-for="(e, i) in layout.edges"
+              :key="i"
+              :d="edgePath(e)"
+              :stroke="laneColor(e.color)"
+              stroke-width="1.5"
+              fill="none"
+            />
+            <template v-for="n in layout.nodes" :key="n.commit.hash">
+              <circle
+                v-if="n.commit.is_head"
+                :cx="nodeX(n.lane)"
+                :cy="nodeY(n.row)"
+                r="6.5"
+                fill="none"
+                :stroke="laneColor(n.color)"
+                stroke-width="1.5"
+              />
+              <circle
+                :cx="nodeX(n.lane)"
+                :cy="nodeY(n.row)"
+                :r="selected?.hash === n.commit.hash ? 5 : 4"
+                :fill="laneColor(n.color)"
+                class="stroke-background"
+                stroke-width="2"
+              />
+            </template>
+          </svg>
         </div>
 
         <p

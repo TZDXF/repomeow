@@ -39,6 +39,36 @@ pub struct GitBranches {
     pub remote: Vec<String>,
 }
 
+/// 一个 git worktree(来自 `git worktree list --porcelain`)
+#[derive(Debug, Clone, Serialize)]
+pub struct GitWorktree {
+    /// 绝对路径(git 输出,Windows 上为 '/' 分隔)
+    pub path: String,
+    /// 检出的短分支名;detached 时为 None
+    pub branch: Option<String>,
+    /// HEAD 完整 hash
+    pub head: String,
+    /// 是否主工作区(porcelain 输出的第一条)
+    pub is_main: bool,
+    /// 是否 detached HEAD
+    pub detached: bool,
+}
+
+/// `git merge` 的结果:最新状态 + 产生的合并冲突文件(为空表示无冲突)
+#[derive(Debug, Clone, Serialize)]
+pub struct GitMergeResult {
+    pub status: GitStatus,
+    pub conflicts: Vec<String>,
+}
+
+/// `git rebase` 的结果:最新状态 + 冲突文件 + 变基是否处于中断状态(待解决后继续/中止)
+#[derive(Debug, Clone, Serialize)]
+pub struct GitRebaseResult {
+    pub status: GitStatus,
+    pub conflicts: Vec<String>,
+    pub in_progress: bool,
+}
+
 /// 一个可读取文本内容的未跟踪新文件(二进制/超限文件不会出现在此)
 #[derive(Debug, Clone, Serialize)]
 pub struct GitUntrackedFile {

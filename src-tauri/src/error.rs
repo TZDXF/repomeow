@@ -56,6 +56,12 @@ pub enum ErrorCode {
     GitDiverged,
     GitNoTracking,
     NotGitRepository,
+    /// 分支已被其它 worktree 检出,不能重复检出
+    GitBranchCheckedOut,
+    /// worktree 含未提交修改或未跟踪文件,需强制删除
+    GitWorktreeDirty,
+    /// 同名分支已存在
+    GitBranchExists,
 
     // ── 账号 ──────────────────────────────────────────────────────────
     AccountNotFound,
@@ -195,6 +201,9 @@ impl ErrorCode {
             Self::GitDiverged => "git_diverged",
             Self::GitNoTracking => "git_no_tracking",
             Self::NotGitRepository => "not_git_repository",
+            Self::GitBranchCheckedOut => "git_branch_checked_out",
+            Self::GitWorktreeDirty => "git_worktree_dirty",
+            Self::GitBranchExists => "git_branch_exists",
             // 账号
             Self::AccountNotFound => "account_not_found",
             Self::AccountUnsupportedProvider => "account_unsupported_provider",

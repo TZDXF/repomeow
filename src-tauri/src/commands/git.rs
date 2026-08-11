@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -13,8 +13,8 @@ use crate::commands::account;
 use crate::db::Db;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::{
-    GitBranches, GitCommitContext, GitCommitInfo, GitGraphCommit, GitPullResult, GitStatus,
-    GitUntrackedFile, GitUser,
+    GitBranches, GitCommitContext, GitCommitInfo, GitGraphCommit, GitMergeResult, GitPullResult,
+    GitRebaseResult, GitStatus, GitUntrackedFile, GitUser, GitWorktree,
 };
 
 /// 后台 fetch 并发上限(超出排队)
@@ -282,6 +282,17 @@ fn friendly_git_error(raw: &str) -> AppError {
     }
     if text.contains("not a git repository") {
         return coded(ErrorCode::NotGitRepository, "");
+    }
+
+    // worktree / 分支占用
+    if text.contains("is already checked out at") {
+        return coded(ErrorCode::GitBranchCheckedOut, "");
+    }
+    if text.contains("contains modified or untracked files") {
+        return coded(ErrorCode::GitWorktreeDirty, "");
+    }
+    if text.contains("branch named") && text.contains("already exists") {
+        return coded(ErrorCode::GitBranchExists, "");
     }
 
     // 未识别:整段清理后原文作为 message 携带
@@ -952,6 +963,274 @@ fn push_blocking(path: &str) -> AppResult<GitStatus> {
     Ok(st)
 }
 
+// ── worktree / merge / rebase ─────────────────────────────
+
+/// 解析 `git worktree list --porcelain` 输出。
+/// 块格式:`worktree <path>` 起始,后跟 `HEAD <sha>`、`branch refs/heads/<name>` 或 `detached`;
+/// 第一条记录为主工作区
+fn parse_worktree_porcelain(text: &str) -> Vec<GitWorktree> {
+    let mut list = Vec::new();
+    let mut cur: Option<GitWorktree> = None;
+    for line in text.lines() {
+        if let Some(p) = line.strip_prefix("worktree ") {
+            if let Some(w) = cur.take() {
+                list.push(w);
+            }
+            cur = Some(GitWorktree {
+                path: p.trim().to_string(),
+                branch: None,
+                head: String::new(),
+                is_main: false,
+                detached: false,
+            });
+        } else if let Some(w) = cur.as_mut() {
+            if let Some(h) = line.strip_prefix("HEAD ") {
+                w.head = h.trim().to_string();
+            } else if let Some(b) = line.strip_prefix("branch refs/heads/") {
+                w.branch = Some(b.trim().to_string());
+            } else if line.trim() == "detached" {
+                w.detached = true;
+            }
+        }
+    }
+    if let Some(w) = cur.take() {
+        list.push(w);
+    }
+    if let Some(first) = list.first_mut() {
+        first.is_main = true;
+    }
+    list
+}
+
+fn list_worktrees_blocking(path: &str) -> AppResult<Vec<GitWorktree>> {
+    let out = run_git(path, &["worktree", "list", "--porcelain"])?;
+    Ok(parse_worktree_porcelain(&String::from_utf8_lossy(
+        &out.stdout,
+    )))
+}
+
+#[tauri::command]
+pub async fn list_git_worktrees(path: String) -> AppResult<Vec<GitWorktree>> {
+    run_blocking(move || list_worktrees_blocking(&path)).await
+}
+
+/// worktree 目标目录:`{branch}` 占位符替换为分支名(`/` 转 `-`,避免多级路径);
+/// 相对路径基于主工作区根解析,绝对路径原样使用
+fn resolve_worktree_target(main_root: &str, input: &str, branch: &str) -> PathBuf {
+    let templated = input.replace("{branch}", &branch.replace('/', "-"));
+    let p = Path::new(&templated);
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        Path::new(main_root).join(p)
+    }
+}
+
+/// 创建 worktree 并检出新分支(`git worktree add <dir> -b <branch> [start_point]`),
+/// 返回最新 worktree 列表。分支已被其它 worktree 检出时报 git_branch_checked_out
+#[tauri::command]
+pub async fn git_worktree_add(
+    path: String,
+    worktree_path: String,
+    branch: String,
+    start_point: Option<String>,
+) -> AppResult<Vec<GitWorktree>> {
+    run_blocking(move || {
+        worktree_add_blocking(&path, &worktree_path, &branch, start_point.as_deref())
+    })
+    .await
+}
+
+fn worktree_add_blocking(
+    path: &str,
+    worktree_path: &str,
+    branch: &str,
+    start_point: Option<&str>,
+) -> AppResult<Vec<GitWorktree>> {
+    let branch = branch.trim();
+    if branch.is_empty() {
+        return Err(AppError::coded(ErrorCode::GitBranchNameRequired, ""));
+    }
+    let input = worktree_path.trim();
+    if input.is_empty() {
+        return Err(AppError::coded(ErrorCode::InvalidPath, ""));
+    }
+    let existing = list_worktrees_blocking(path)?;
+    // porcelain 第一条即主工作区;查不到(异常)时退回传入路径
+    let main_root = existing
+        .first()
+        .map(|w| w.path.clone())
+        .unwrap_or_else(|| path.to_string());
+    if existing.iter().any(|w| w.branch.as_deref() == Some(branch)) {
+        return Err(AppError::coded(ErrorCode::GitBranchCheckedOut, branch));
+    }
+    if local_branch_names(path)?.iter().any(|b| b == branch) {
+        return Err(AppError::coded(ErrorCode::GitBranchExists, branch));
+    }
+    let target = resolve_worktree_target(&main_root, input, branch);
+    let target_str = target.to_string_lossy().to_string();
+    match start_point.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(base) => run_git(path, &["worktree", "add", &target_str, "-b", branch, base])?,
+        None => run_git(path, &["worktree", "add", &target_str, "-b", branch])?,
+    };
+    list_worktrees_blocking(path)
+}
+
+/// 删除 worktree(`git worktree remove [--force]`),可选同时删除其检出的本地分支
+/// (force 时用 -D,否则 -d 安全删除;未合并的分支会因 -d 报错,此时 worktree 已删,
+/// 用户可勾选强制重试)。主工作区不可删除。返回最新 worktree 列表
+#[tauri::command]
+pub async fn git_worktree_remove(
+    path: String,
+    worktree_path: String,
+    force: bool,
+    delete_branch: bool,
+) -> AppResult<Vec<GitWorktree>> {
+    run_blocking(move || worktree_remove_blocking(&path, &worktree_path, force, delete_branch))
+        .await
+}
+
+fn worktree_remove_blocking(
+    path: &str,
+    worktree_path: &str,
+    force: bool,
+    delete_branch: bool,
+) -> AppResult<Vec<GitWorktree>> {
+    let existing = list_worktrees_blocking(path)?;
+    let target = existing
+        .iter()
+        .find(|w| w.path == worktree_path)
+        .ok_or_else(|| AppError::coded(ErrorCode::InvalidPath, worktree_path))?;
+    if target.is_main {
+        return Err(AppError::coded(
+            ErrorCode::GitCommandFailed,
+            "cannot remove main worktree",
+        ));
+    }
+    let branch = target.branch.clone();
+    let mut args = vec!["worktree", "remove"];
+    if force {
+        args.push("--force");
+    }
+    args.push(worktree_path);
+    run_git(path, &args)?;
+    if delete_branch {
+        if let Some(b) = branch {
+            let flag = if force { "-D" } else { "-d" };
+            run_git(path, &["branch", flag, &b])?;
+        }
+    }
+    list_worktrees_blocking(path)
+}
+
+/// 将指定分支合并进当前分支;squash 时只暂存不自动提交(由用户确认后手动提交)。
+/// 与 pull 一致:产生冲突不算失败,返回冲突文件列表由前端引导解决
+#[tauri::command]
+pub async fn git_merge(path: String, branch: String, squash: bool) -> AppResult<GitMergeResult> {
+    run_blocking(move || merge_blocking(&path, &branch, squash)).await
+}
+
+fn merge_blocking(path: &str, branch: &str, squash: bool) -> AppResult<GitMergeResult> {
+    let branch = branch.trim();
+    if branch.is_empty() {
+        return Err(AppError::coded(ErrorCode::GitBranchNameRequired, ""));
+    }
+    let args: Vec<&str> = if squash {
+        vec!["merge", "--squash", branch]
+    } else {
+        vec!["merge", branch]
+    };
+    let result = git_command(path).args(&args).output()?;
+    let conflicts = unmerged_files(path);
+    if !result.status.success() && conflicts.is_empty() {
+        let stderr = String::from_utf8_lossy(&result.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&result.stdout).trim().to_string();
+        let detail = if stderr.is_empty() { stdout } else { stderr };
+        return Err(if detail.is_empty() {
+            AppError::coded(ErrorCode::GitCommandFailed, "")
+        } else {
+            friendly_git_error(&detail)
+        });
+    }
+    let st = status(path)?;
+    cache_status(path, &st);
+    Ok(GitMergeResult {
+        status: st,
+        conflicts,
+    })
+}
+
+/// 中止进行中的合并(`git merge --abort`),返回最新状态
+#[tauri::command]
+pub async fn git_merge_abort(path: String) -> AppResult<GitStatus> {
+    run_blocking(move || {
+        run_git(&path, &["merge", "--abort"])?;
+        let st = status(&path)?;
+        cache_status(&path, &st);
+        Ok(st)
+    })
+    .await
+}
+
+/// 变基是否处于中断状态:git dir 下存在 rebase-merge / rebase-apply 目录。
+/// 用 --absolute-git-dir 兼容 worktree(其 .git 是指向主仓库 gitdir 的文件)
+fn rebase_in_progress(path: &str) -> bool {
+    let Ok(out) = run_git(path, &["rev-parse", "--absolute-git-dir"]) else {
+        return false;
+    };
+    let gitdir = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if gitdir.is_empty() {
+        return false;
+    }
+    let gd = Path::new(&gitdir);
+    gd.join("rebase-merge").exists() || gd.join("rebase-apply").exists()
+}
+
+/// 将当前分支变基到 onto 之上。冲突/中断不算失败:返回冲突文件与 in_progress,
+/// 由前端引导用户外部解决后 --continue,或调用 git_rebase_abort 中止
+#[tauri::command]
+pub async fn git_rebase(path: String, onto: String) -> AppResult<GitRebaseResult> {
+    run_blocking(move || rebase_blocking(&path, &onto)).await
+}
+
+fn rebase_blocking(path: &str, onto: &str) -> AppResult<GitRebaseResult> {
+    let onto = onto.trim();
+    if onto.is_empty() {
+        return Err(AppError::coded(ErrorCode::GitBranchNameRequired, ""));
+    }
+    let result = git_command(path).args(["rebase", onto]).output()?;
+    let conflicts = unmerged_files(path);
+    let in_progress = rebase_in_progress(path);
+    if !result.status.success() && conflicts.is_empty() && !in_progress {
+        let stderr = String::from_utf8_lossy(&result.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&result.stdout).trim().to_string();
+        let detail = if stderr.is_empty() { stdout } else { stderr };
+        return Err(if detail.is_empty() {
+            AppError::coded(ErrorCode::GitCommandFailed, "")
+        } else {
+            friendly_git_error(&detail)
+        });
+    }
+    let st = status(path)?;
+    cache_status(path, &st);
+    Ok(GitRebaseResult {
+        status: st,
+        conflicts,
+        in_progress,
+    })
+}
+
+/// 中止进行中的变基(`git rebase --abort`),返回最新状态
+#[tauri::command]
+pub async fn git_rebase_abort(path: String) -> AppResult<GitStatus> {
+    run_blocking(move || {
+        run_git(&path, &["rebase", "--abort"])?;
+        let st = status(&path)?;
+        cache_status(&path, &st);
+        Ok(st)
+    })
+    .await
+}
 /// 送入 AI 的 diff 长度上限(超出截断,避免 token 爆炸)
 const DIFF_MAX_CHARS: usize = 30_000;
 /// 单个未跟踪文件内容上限(字符)
