@@ -583,7 +583,7 @@ export default {
     exportContainer: "Export container",
     exportImage: "Export image",
     exported: "Exported to {path}",
-    started: "Started docker compose {args} in terminal",
+    started: 'Started "{name}" in terminal',
     hideFile: "Hide this compose file",
     running: "Running",
     stopped: "Stopped",
@@ -607,7 +607,7 @@ export default {
       title: "NPM Scripts",
       rootDir: "Root",
       hideFile: "Hide this package.json",
-      started: "Started npm run {name} in terminal",
+      started: 'Started "{name}" in terminal',
     },
     custom: {
       title: "Custom commands",

@@ -243,7 +243,7 @@ async function run(
   const args = `-f "${file.path}" ${service ? `${action} ${service}` : action}`;
   try {
     await runInTerminal(props.project, `docker compose ${args}`);
-    toast.success(t("docker.started", { args }));
+    toast.success(t("docker.started", { name: service ?? file.file_name }));
     // 命令在新终端窗口中异步执行,延迟刷新一次状态(拉取镜像时可能仍偏早,可手动刷新)
     setTimeout(loadStatuses, 4000);
   } catch (e) {

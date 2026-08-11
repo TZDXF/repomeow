@@ -568,7 +568,7 @@ export default {
     exportContainer: "导出容器",
     exportImage: "导出镜像",
     exported: "已导出到 {path}",
-    started: "已在终端启动 docker compose {args}",
+    started: "已在终端启动「{name}」",
     hideFile: "隐藏该 compose 文件",
     running: "运行中",
     stopped: "未运行",
@@ -592,7 +592,7 @@ export default {
       title: "NPM Scripts",
       rootDir: "根目录",
       hideFile: "隐藏该 package.json",
-      started: "已在终端启动 npm run {name}",
+      started: "已在终端启动「{name}」",
     },
     custom: {
       title: "自定义命令",
