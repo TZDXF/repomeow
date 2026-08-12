@@ -855,9 +855,10 @@ async function copyHash(hash: string) {
             :style="{ height: `${totalCount * ROW_H}px`, width: `${totalWidth}px` }"
           >
             <!-- 泳道连线与节点(SVG 只覆盖可视窗口;overflow-visible 让穿越窗口的长线完整绘制;
-                 图谱列被拖窄时经 clip-path 只做水平裁剪,泳道间距不变) -->
+                 图谱列被拖窄时经 clip-path 只做水平裁剪,泳道间距不变;
+                 z-10 让图形压在行选中/hover 背景之上,避免高亮盖住节点与连线) -->
             <svg
-              class="pointer-events-none absolute left-0 overflow-visible"
+              class="pointer-events-none absolute left-0 z-10 overflow-visible"
               :style="{
                 top: `${svgOffsetY}px`,
                 width: `${graphWidth}px`,
