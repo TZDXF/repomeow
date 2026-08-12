@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { ChevronDown } from "@lucide/vue";
+import OpenWithIcon from "@/components/open/OpenWithIcon.vue";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -10,7 +11,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { getEditorAvailability, isEditorUnavailable, OPEN_WITH_OPTIONS } from "@/lib/open-with";
+import {
+  getEditorAvailability,
+  isEditorUnavailable,
+  sortOpenWithOptions,
+} from "@/lib/open-with";
 import type { EditorAvailability } from "@/lib/open-with";
 import { cmd } from "@/lib/tauri";
 import { useSettingsStore } from "@/stores/settings";
@@ -30,9 +35,11 @@ onMounted(async () => {
   availability.value = await getEditorAvailability();
 });
 
-// 只展示已扫描到的编辑器;探测中途(null)不过滤,避免闪烁
+// 只展示已扫描到的编辑器;探测中途(null)不过滤,避免闪烁。顺序遵循设置页拖拽结果
 const visibleOptions = computed(() =>
-  OPEN_WITH_OPTIONS.filter((opt) => !isEditorUnavailable(opt.kind, availability.value)),
+  sortOpenWithOptions(settings.openWithOrder).filter(
+    (opt) => !isEditorUnavailable(opt.kind, availability.value),
+  ),
 );
 
 // 默认方式未扫描到时,回退到第一个可用项(explorer / terminal 始终可用)
@@ -59,7 +66,11 @@ async function openWith(kind: EditorKind) {
       class="rounded-r-none"
       @click.stop="openWith(current.kind)"
     >
-      <component :is="current.icon" :class="compact ? 'h-3.5 w-3.5' : 'h-4 w-4'" />
+      <OpenWithIcon
+        :kind="current.kind"
+        :icon="current.icon"
+        :icon-class="compact ? 'h-3.5 w-3.5' : 'h-4 w-4'"
+      />
       <template v-if="!compact">{{ t(current.labelKey) }}</template>
     </Button>
     <DropdownMenu>
@@ -80,7 +91,7 @@ async function openWith(kind: EditorKind) {
           class="gap-2 text-xs"
           @click="openWith(opt.kind)"
         >
-          <component :is="opt.icon" class="h-3.5 w-3.5" />
+          <OpenWithIcon :kind="opt.kind" :icon="opt.icon" icon-class="h-3.5 w-3.5" />
           {{ t(opt.descKey) }}
         </DropdownMenuItem>
       </DropdownMenuContent>

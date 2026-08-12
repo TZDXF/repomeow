@@ -95,6 +95,25 @@ export const OPEN_WITH_OPTIONS: readonly OpenWithOption[] = [
   },
 ] as const;
 
+/**
+ * 归一化打开方式顺序:过滤无效 kind,末尾按默认顺序补齐新增项,保证始终覆盖全部选项。
+ * 新增打开方式无需改持久化数据,旧顺序里缺的项会自动排到末尾。
+ */
+export function normalizeOpenWithOrder(saved: readonly unknown[]): EditorKind[] {
+  const all = OPEN_WITH_OPTIONS.map((opt) => opt.kind);
+  const kept = saved.filter((k): k is EditorKind => all.includes(k as EditorKind));
+  return [...kept, ...all.filter((kind) => !kept.includes(kind))];
+}
+
+/** 按用户自定义顺序排序打开方式选项(设置页拖拽排序的结果,三处共享) */
+export function sortOpenWithOptions(order: readonly EditorKind[]): OpenWithOption[] {
+  const rank = new Map(order.map((kind, i) => [kind, i]));
+  return [...OPEN_WITH_OPTIONS].sort(
+    (a, b) =>
+      (rank.get(a.kind) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.kind) ?? Number.MAX_SAFE_INTEGER),
+  );
+}
+
 /** 编辑器可用性:kind → 是否已安装(CLI 在 PATH 中);不含 explorer / terminal */
 export type EditorAvailability = Partial<Record<EditorKind, boolean>>;
 
@@ -106,6 +125,17 @@ export function getEditorAvailability(): Promise<EditorAvailability> {
     () => ({}) satisfies EditorAvailability,
   );
   return availabilityPromise;
+}
+
+/** 编辑器真实图标:kind → 本机 PNG 缓存文件绝对路径(提取失败无该键或为 null) */
+export type EditorIconMap = Record<string, string | null>;
+
+let iconsPromise: Promise<EditorIconMap> | null = null;
+
+/** 取编辑器真实图标(后端从本机 exe / .app 提取并缓存;失败返回空表,前端回退 lucide 图标) */
+export function getEditorIcons(): Promise<EditorIconMap> {
+  iconsPromise ??= cmd<EditorIconMap>("get_editor_icons").catch(() => ({}));
+  return iconsPromise;
 }
 
 /** 平台内置方式,无需探测 */

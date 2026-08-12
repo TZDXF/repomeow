@@ -4,7 +4,7 @@ import { emit } from "@tauri-apps/api/event";
 import { load, type Store } from "@tauri-apps/plugin-store";
 import { homeDir, join } from "@tauri-apps/api/path";
 import { setI18nLocale, type SupportedLocale } from "@/i18n";
-import { OPEN_WITH_OPTIONS } from "@/lib/open-with";
+import { OPEN_WITH_OPTIONS, normalizeOpenWithOrder } from "@/lib/open-with";
 import type { EditorKind } from "@/types";
 
 /** 主题相关设置变更的跨窗口广播:通知托盘弹窗等其它窗口同步重渲自身 DOM */
@@ -22,6 +22,8 @@ export type CloseAction = "tray" | "exit";
 // 应用数据统一存放于用户主目录下的 .repomeow 目录(与 Rust 端 APP_DATA_DIR_NAME 保持一致)
 const APP_DATA_DIR_NAME = ".repomeow";
 const STORE_FILE = "settings.json";
+/** 打开方式列表顺序的 localStorage 键(纯 UI 偏好,不进 settings.json) */
+const OPEN_WITH_ORDER_CACHE_KEY = "repomeow:open-with-order";
 
 // AI 接入参数(OpenAI Chat Completions 兼容):baseUrl/apiKey/model 均无默认值,
 // 由用户在设置页填写;任一缺失时调用方需先校验。
@@ -32,6 +34,8 @@ export const useSettingsStore = defineStore("settings", () => {
   const mdTheme = ref<MdTheme>("default");
   const language = ref<Language>("zh-CN");
   const defaultOpenWith = ref<EditorKind>("explorer");
+  /** 打开方式列表顺序(设置页可拖拽调整,下拉菜单同步遵循) */
+  const openWithOrder = ref<EditorKind[]>(normalizeOpenWithOrder([]));
   const aiBaseUrl = ref("");
   const aiApiKey = ref("");
   const aiModel = ref("");
@@ -178,6 +182,16 @@ export const useSettingsStore = defineStore("settings", () => {
     if (OPEN_WITH_OPTIONS.some((opt) => opt.kind === savedOpenWith)) {
       defaultOpenWith.value = savedOpenWith as EditorKind;
     }
+    // 打开方式排序:localStorage 里的 JSON 数组,过滤无效 kind 并补齐新增项,非法值回退默认顺序
+    try {
+      const raw = window.localStorage.getItem(OPEN_WITH_ORDER_CACHE_KEY);
+      if (raw) {
+        const parsed: unknown = JSON.parse(raw);
+        openWithOrder.value = normalizeOpenWithOrder(Array.isArray(parsed) ? parsed : []);
+      }
+    } catch {
+      /* localStorage 不可用或 JSON 非法时保持默认顺序 */
+    }
     // AI 配置为自由文本:trim 后非空才赋值,空值保持初始空(无默认值可回退)
     const savedAiBaseUrl = await fileStore.get<string>("aiBaseUrl");
     if (typeof savedAiBaseUrl === "string" && savedAiBaseUrl.trim()) {
@@ -286,6 +300,15 @@ export const useSettingsStore = defineStore("settings", () => {
     await persist("defaultOpenWith", value);
   }
 
+  async function setOpenWithOrder(value: EditorKind[]) {
+    openWithOrder.value = normalizeOpenWithOrder(value);
+    try {
+      window.localStorage.setItem(OPEN_WITH_ORDER_CACHE_KEY, JSON.stringify(openWithOrder.value));
+    } catch {
+      /* localStorage 不可用时静默降级:本次会话内顺序仍生效 */
+    }
+  }
+
   async function setAiBaseUrl(value: string) {
     aiBaseUrl.value = value.trim();
     await persist("aiBaseUrl", aiBaseUrl.value);
@@ -348,6 +371,7 @@ export const useSettingsStore = defineStore("settings", () => {
     mdTheme,
     language,
     defaultOpenWith,
+    openWithOrder,
     aiBaseUrl,
     aiApiKey,
     aiModel,
@@ -367,6 +391,7 @@ export const useSettingsStore = defineStore("settings", () => {
     setMdTheme,
     setLanguage,
     setDefaultOpenWith,
+    setOpenWithOrder,
     setAiBaseUrl,
     setAiApiKey,
     setAiModel,

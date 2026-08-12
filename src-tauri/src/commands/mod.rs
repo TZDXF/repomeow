@@ -1,5 +1,6 @@
 pub mod account;
 pub mod docker;
+pub mod editor_icon;
 pub mod files;
 pub mod git;
 pub mod hidden;

@@ -29,7 +29,7 @@ const EDITOR_CLI_TABLE: &[(EditorKind, &str, &str)] = &[
     (EditorKind::Rustrover, "rustrover", "rustrover"),
 ];
 
-fn cli_command(kind: EditorKind) -> Option<&'static str> {
+pub(crate) fn cli_command(kind: EditorKind) -> Option<&'static str> {
     EDITOR_CLI_TABLE
         .iter()
         .find(|(k, _, _)| *k == kind)
@@ -37,7 +37,7 @@ fn cli_command(kind: EditorKind) -> Option<&'static str> {
 }
 
 /// Windows 下隐藏中间进程的控制台黑窗(最终弹出的终端窗口不受影响)
-fn hidden(#[allow(unused_mut)] mut cmd: Command) -> Command {
+pub(crate) fn hidden(#[allow(unused_mut)] mut cmd: Command) -> Command {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -128,7 +128,7 @@ fn sanitize_cmd_text(s: &str) -> String {
 /// 定位 wt.exe:先查 AppX 执行别名(Store / 官网安装都会注册),
 /// 再用 where 搜 PATH(覆盖 scoop / choco / 绿色版等安装方式);找不到返回 None
 #[cfg(windows)]
-fn find_wt() -> Option<String> {
+pub(crate) fn find_wt() -> Option<String> {
     if let Ok(local) = std::env::var("LOCALAPPDATA") {
         let alias = format!(r"{local}\Microsoft\WindowsApps\wt.exe");
         if std::path::Path::new(&alias).exists() {

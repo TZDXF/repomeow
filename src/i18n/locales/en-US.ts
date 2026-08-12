@@ -799,7 +799,7 @@ export default {
         "UI translations will take effect in a future release; only the preference is saved for now.",
       openWith: "Default open with",
       openWithDescription:
-        "The default action of the Open button on the project detail page. You can always pick another one from the dropdown. Only editors that are installed and have their command on PATH are listed.",
+        "The default action of the Open button on the project detail page. You can always pick another one from the dropdown. Drag to reorder the list; only editors that are installed and have their command on PATH are listed.",
       worktreeDir: "Default worktree directory",
       worktreeDirDescription:
         "Default directory template for new worktrees. Supports the {branch} placeholder and relative paths (resolved against the repository root), e.g. .worktrees/{branch}",

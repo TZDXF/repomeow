@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { Archive, FolderInput, FolderSync, MoreHorizontal, Star, StarOff } from "@lucide/vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
+import OpenWithIcon from "@/components/open/OpenWithIcon.vue";
 import MoveProjectDialog from "@/components/project/MoveProjectDialog.vue";
 import RelocateProjectDialog from "@/components/project/RelocateProjectDialog.vue";
 import { Button } from "@/components/ui/button";
@@ -14,16 +15,22 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { getEditorAvailability, isEditorUnavailable, OPEN_WITH_OPTIONS } from "@/lib/open-with";
+import {
+  getEditorAvailability,
+  isEditorUnavailable,
+  sortOpenWithOptions,
+} from "@/lib/open-with";
 import type { EditorAvailability } from "@/lib/open-with";
 import { cmd } from "@/lib/tauri";
 import { useProjectsStore } from "@/stores/projects";
+import { useSettingsStore } from "@/stores/settings";
 import type { EditorKind, Project } from "@/types";
 
 const { t } = useI18n();
 const props = defineProps<{ project: Project }>();
 
 const store = useProjectsStore();
+const settings = useSettingsStore();
 
 // 可用性探测在 lib/open-with 内模块级共享,避免每个项目实例重复 invoke
 const availability = ref<EditorAvailability | null>(null);
@@ -32,9 +39,11 @@ onMounted(async () => {
   availability.value = await getEditorAvailability();
 });
 
-// 只展示已扫描到的编辑器;探测中途(null)不过滤,避免闪烁
+// 只展示已扫描到的编辑器;探测中途(null)不过滤,避免闪烁。顺序遵循设置页拖拽结果
 const visibleOptions = computed(() =>
-  OPEN_WITH_OPTIONS.filter((opt) => !isEditorUnavailable(opt.kind, availability.value)),
+  sortOpenWithOptions(settings.openWithOrder).filter(
+    (opt) => !isEditorUnavailable(opt.kind, availability.value),
+  ),
 );
 
 async function openWith(kind: EditorKind) {
@@ -93,7 +102,7 @@ async function toggleFavorite() {
         class="gap-2 text-xs"
         @click="openWith(opt.kind)"
       >
-        <component :is="opt.icon" class="h-3.5 w-3.5" />
+        <OpenWithIcon :kind="opt.kind" :icon="opt.icon" icon-class="h-3.5 w-3.5" />
         {{ t(opt.descKey) }}
       </DropdownMenuItem>
       <DropdownMenuSeparator />

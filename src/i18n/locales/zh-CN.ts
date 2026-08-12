@@ -775,7 +775,7 @@ export default {
       languageNote: "界面翻译将在后续版本生效,当前仅保存偏好设置。",
       openWith: "默认打开方式",
       openWithDescription:
-        "项目详情页「打开」按钮默认使用的方式,可随时通过下拉菜单选择其他方式;仅展示已安装且命令已加入 PATH 的编辑器",
+        "项目详情页「打开」按钮默认使用的方式,可随时通过下拉菜单选择其他方式;可拖拽调整列表顺序,仅展示已安装且命令已加入 PATH 的编辑器",
       worktreeDir: "Worktree 默认目录",
       worktreeDirDescription:
         "新建 worktree 时的默认目录模板,支持 {branch} 占位符与相对路径(相对仓库根目录解析),例如 .worktrees/{branch}",

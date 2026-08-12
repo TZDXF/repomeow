@@ -148,6 +148,7 @@ pub fn run() {
             commands::account::get_gh_cli_account,
             commands::open::open_with,
             commands::open::detect_editors,
+            commands::editor_icon::get_editor_icons,
             commands::window::show_main_window,
             commands::window::hide_tray_popup,
             commands::prompt::get_ai_prompts,
