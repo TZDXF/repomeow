@@ -125,6 +125,7 @@ pub fn run() {
             commands::git::git_commit,
             commands::git::git_pull,
             commands::git::git_push,
+            commands::git::git_branch_delete,
             commands::git::git_commit_context,
             commands::git::git_log,
             commands::git::git_graph_log,

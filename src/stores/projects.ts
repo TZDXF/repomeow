@@ -277,16 +277,31 @@ export const useProjectsStore = defineStore("projects", () => {
     });
   }
 
-  /** 拉取远端;返回冲突文件列表(非空表示产生了合并冲突) */
-  async function pullRepository(project: Project) {
-    const result = await cmd<GitPullResult>("git_pull", { path: project.path });
+  /** 拉取远端;返回冲突文件列表(非空表示产生了合并冲突)。branch 指定拉取其他本地分支(快进更新,不切工作区) */
+  async function pullRepository(project: Project, branch?: string) {
+    const result = await cmd<GitPullResult>("git_pull", {
+      path: project.path,
+      branch: branch ?? null,
+    });
     project.git = result.status;
     return result.conflicts;
   }
 
-  /** 推送当前分支(无 upstream 时后端自动 -u <远端> HEAD,优先 origin) */
-  async function pushRepository(project: Project) {
-    project.git = await cmd<GitStatus>("git_push", { path: project.path });
+  /** 推送分支(无 upstream 时后端自动 -u <远端>,优先 origin);branch 缺省推送当前分支 */
+  async function pushRepository(project: Project, branch?: string) {
+    project.git = await cmd<GitStatus>("git_push", {
+      path: project.path,
+      branch: branch ?? null,
+    });
+  }
+
+  /** 删除本地分支;force=false 仅允许删除已合并分支(未合并报 git_branch_not_merged) */
+  async function deleteBranch(project: Project, branch: string, force: boolean) {
+    project.git = await cmd<GitStatus>("git_branch_delete", {
+      path: project.path,
+      branch,
+      force,
+    });
   }
 
   // --- worktree / 合并 / 变基 ---
@@ -408,6 +423,7 @@ export const useProjectsStore = defineStore("projects", () => {
     commitChanges,
     pullRepository,
     pushRepository,
+    deleteBranch,
     listWorktrees,
     addWorktree,
     removeWorktree,

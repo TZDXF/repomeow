@@ -85,6 +85,8 @@ export default {
     git_branch_exists: "A branch with this name already exists",
     git_branch_diverged:
       "The local branch with the same name has diverged from this remote branch and cannot be aligned safely. Mount the local branch instead, or sync them in a terminal first",
+    git_branch_not_merged:
+      "This branch is not fully merged. Use force delete if you really want to remove it",
     // account
     account_not_found: "Account not found",
     account_unsupported_provider: "Unsupported provider",
@@ -386,6 +388,14 @@ export default {
       createBaseLabel: "Based on branch",
       aheadCount: "Ahead of remote by {n}",
       behindCount: "Behind remote by {n}",
+      delete: "Delete branch",
+      deleteTitle: "Delete local branch",
+      deleteConfirm: 'Delete local branch "{name}"? This cannot be undone.',
+      deleteForceHint:
+        'Branch "{name}" is not fully merged. Force deleting will discard unmerged commits. Continue?',
+      forceDelete: "Force delete",
+      deleting: "Deleting...",
+      deleted: 'Deleted branch "{name}"',
     },
     graph: {
       title: "Commit Graph",
@@ -412,8 +422,6 @@ export default {
       searchEmpty: "No matching commits",
       tipNotFound: "The branch tip is outside the current graph",
       loadingMore: "Loading full history, {count} commits loaded",
-      collapseSidebar: "Collapse list",
-      expandSidebar: "Expand list",
       columns: {
         graph: "Graph",
         description: "Description",

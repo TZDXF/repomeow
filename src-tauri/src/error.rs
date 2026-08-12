@@ -64,6 +64,8 @@ pub enum ErrorCode {
     GitBranchExists,
     /// worktree 挂载远程分支时本地同名分支与其分叉,无法安全对齐
     GitBranchDiverged,
+    /// 分支未完全合并,删除需强制(-D)
+    GitBranchNotMerged,
 
     // ── 账号 ──────────────────────────────────────────────────────────
     AccountNotFound,
@@ -207,6 +209,7 @@ impl ErrorCode {
             Self::GitWorktreeDirty => "git_worktree_dirty",
             Self::GitBranchExists => "git_branch_exists",
             Self::GitBranchDiverged => "git_branch_diverged",
+            Self::GitBranchNotMerged => "git_branch_not_merged",
             // 账号
             Self::AccountNotFound => "account_not_found",
             Self::AccountUnsupportedProvider => "account_unsupported_provider",

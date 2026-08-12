@@ -6,7 +6,9 @@ import { toast } from "vue-sonner";
 import { Channel } from "@tauri-apps/api/core";
 import { useElementSize, useLocalStorage, useVirtualList } from "@vueuse/core";
 import {
+  ArrowDownToLine,
   ArrowLeft,
+  ArrowUpToLine,
   ChevronDown,
   ChevronRight,
   Copy,
@@ -15,15 +17,27 @@ import {
   Globe,
   ListFilter,
   Loader2,
-  PanelLeftClose,
-  PanelLeftOpen,
   RefreshCw,
   Search,
   Tag as TagIcon,
+  Trash2,
   X,
 } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,6 +54,7 @@ import {
 } from "@/lib/git-graph";
 import { cmd } from "@/lib/tauri";
 import { useProjectsStore } from "@/stores/projects";
+import ConflictDialog from "@/components/git/ConflictDialog.vue";
 import GitBranchTrackBadges from "@/components/git/GitBranchTrackBadges.vue";
 import type { GitBranches, GitBranchTrack, GitGraphCommit } from "@/types";
 
@@ -274,8 +289,7 @@ const hasSidebar = computed(
     branches.value.local.length > 0 || branches.value.remote.length > 0 || tags.value.length > 0,
 );
 
-// --- 左侧列表:整栏折叠 + 分组/目录折叠 ---
-const sidebarCollapsed = ref(false);
+// --- 左侧列表:分组/目录折叠 ---
 /** 已折叠的分组(local/remote/tags) */
 const collapsedSections = ref<Set<string>>(new Set());
 /** 已折叠的分支目录(带分组前缀避免本地/远程同名目录互相影响) */
@@ -526,6 +540,109 @@ function selectBranch(name: string) {
   }
 }
 
+// --- 本地分支右键:拉取 / 推送(非当前分支由后端快进更新或直接推送,不切换工作区) ---
+const branchOp = ref<{ branch: string; op: "pull" | "push" } | null>(null);
+const conflictOpen = ref(false);
+const conflictFiles = ref<string[]>([]);
+
+async function pullBranch(name: string): Promise<boolean> {
+  const p = project.value;
+  if (!p || branchOp.value) {
+    return false;
+  }
+  branchOp.value = { branch: name, op: "pull" };
+  try {
+    const conflicts = await store.pullRepository(p, name);
+    if (conflicts.length) {
+      // 仅当前分支的 pull 可能产生合并冲突:引导用户在编辑器/终端中解决
+      conflictFiles.value = conflicts;
+      conflictOpen.value = true;
+      return false;
+    }
+    toast.success(t("git.pull.success"));
+    load();
+    return true;
+  } catch (e) {
+    toast.error(String(e));
+    return false;
+  } finally {
+    branchOp.value = null;
+  }
+}
+
+async function pushBranch(name: string) {
+  const p = project.value;
+  if (!p || branchOp.value) {
+    return;
+  }
+  branchOp.value = { branch: name, op: "push" };
+  try {
+    await store.pushRepository(p, name);
+    toast.success(t("git.push.success"));
+    load();
+  } catch (e) {
+    const code = (e as Error & { code?: string }).code;
+    if (code === "git_push_rejected") {
+      // 远端有本地缺失的提交:给出拉取并推送的快捷修复入口
+      toast.error(t("git.push.rejected"), {
+        action: { label: t("git.push.pullAndPush"), onClick: () => pullThenPushBranch(name) },
+      });
+    } else {
+      toast.error(String(e));
+    }
+  } finally {
+    branchOp.value = null;
+  }
+}
+
+/** 先拉取;无冲突则自动重试推送 */
+async function pullThenPushBranch(name: string) {
+  if (await pullBranch(name)) {
+    await pushBranch(name);
+  }
+}
+
+// --- 删除本地分支:先 -d 安全删除;未合并时对话框切换为强制删除确认(-D) ---
+const deleteOpen = ref(false);
+const deleteTarget = ref("");
+const deleteNeedsForce = ref(false);
+const deleting = ref(false);
+
+function askDeleteBranch(name: string) {
+  deleteTarget.value = name;
+  deleteNeedsForce.value = false;
+  deleteOpen.value = true;
+}
+
+async function confirmDeleteBranch() {
+  const p = project.value;
+  const name = deleteTarget.value;
+  if (!p || !name || deleting.value) {
+    return;
+  }
+  deleting.value = true;
+  try {
+    await store.deleteBranch(p, name, deleteNeedsForce.value);
+    toast.success(t("git.branch.deleted", { name }));
+    deleteOpen.value = false;
+    // 被删分支恰为筛选目标时清除选中,避免触发对已删分支的重新拉取
+    if (selectedBranch.value === name) {
+      selectedBranch.value = "";
+    }
+    load();
+  } catch (e) {
+    const code = (e as Error & { code?: string }).code;
+    if (code === "git_branch_not_merged" && !deleteNeedsForce.value) {
+      deleteNeedsForce.value = true;
+    } else {
+      toast.error(String(e));
+      deleteOpen.value = false;
+    }
+  } finally {
+    deleting.value = false;
+  }
+}
+
 function toggleSelect(commit: GitGraphCommit) {
   selected.value = selected.value?.hash === commit.hash ? null : commit;
 }
@@ -635,18 +752,9 @@ async function copyHash(hash: string) {
     </header>
 
     <div class="flex min-h-0 flex-1">
-      <!-- 左侧分支/标签列表(SourceTree 风格),点击定位到顶端提交;整栏可折叠 -->
-      <aside v-if="hasSidebar && !sidebarCollapsed" class="flex w-56 shrink-0 flex-col border-r">
-        <div class="flex items-center justify-end px-2 pt-1.5">
-          <button
-            class="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            :title="t('git.graph.collapseSidebar')"
-            @click="sidebarCollapsed = true"
-          >
-            <PanelLeftClose class="h-3.5 w-3.5" />
-          </button>
-        </div>
-        <div class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 pb-2">
+      <!-- 左侧分支/标签列表(SourceTree 风格),点击定位到顶端提交 -->
+      <aside v-if="hasSidebar" class="flex w-56 shrink-0 flex-col border-r">
+        <div class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 pt-2 pb-2">
           <template v-if="branches.local.length">
             <button
               class="flex items-center gap-1 px-1 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase transition-colors hover:text-foreground"
@@ -659,45 +767,86 @@ async function copyHash(hash: string) {
               {{ t("git.branch.local") }}
             </button>
             <template v-if="!collapsedSections.has('local')">
-              <button
-                v-for="row in localRows"
-                :key="`local:${row.node.fullPath}`"
-                class="flex items-center gap-1.5 rounded-sm py-1 pr-2 text-left text-xs transition-colors hover:bg-accent"
-                :class="[
-                  row.node.branch === currentBranch ? 'font-semibold' : '',
-                  row.node.branch && selectedBranch === row.node.branch ? 'bg-accent' : '',
-                ]"
-                :style="{ paddingLeft: `${8 + row.depth * 12}px` }"
-                @click="onBranchRowClick('local', row)"
-              >
-                <span
-                  v-if="row.node.children.length"
-                  class="shrink-0 text-muted-foreground"
-                  @click.stop="toggleFolder(`local:${row.node.fullPath}`)"
-                >
-                  <ChevronRight
-                    class="h-3 w-3 transition-transform"
-                    :class="collapsedFolders.has(`local:${row.node.fullPath}`) ? '' : 'rotate-90'"
-                  />
-                </span>
-                <span v-else class="w-3 shrink-0" />
-                <Folder
-                  v-if="row.node.children.length"
-                  class="h-3 w-3 shrink-0 text-muted-foreground"
-                />
-                <GitBranch v-else class="h-3 w-3 shrink-0 text-muted-foreground" />
-                <span class="truncate">{{ row.node.name }}</span>
-                <span class="ml-auto flex shrink-0 items-center gap-1.5">
-                  <GitBranchTrackBadges
-                    :ahead="trackOf(row.node.branch)?.ahead ?? 0"
-                    :behind="trackOf(row.node.branch)?.behind ?? 0"
-                  />
-                  <span
-                    v-if="row.node.branch === currentBranch"
-                    class="h-1.5 w-1.5 shrink-0 rounded-full bg-green-500"
-                  />
-                </span>
-              </button>
+              <ContextMenu v-for="row in localRows" :key="`local:${row.node.fullPath}`">
+                <!-- 目录行(本身不是分支)禁用右键菜单 -->
+                <ContextMenuTrigger as-child :disabled="!row.node.branch">
+                  <button
+                    class="flex w-full items-center gap-1.5 rounded-sm py-1 pr-2 text-left text-xs transition-colors hover:bg-accent"
+                    :class="[
+                      row.node.branch === currentBranch ? 'font-semibold' : '',
+                      row.node.branch && selectedBranch === row.node.branch ? 'bg-accent' : '',
+                    ]"
+                    :style="{ paddingLeft: `${8 + row.depth * 12}px` }"
+                    @click="onBranchRowClick('local', row)"
+                  >
+                    <span
+                      v-if="row.node.children.length"
+                      class="shrink-0 text-muted-foreground"
+                      @click.stop="toggleFolder(`local:${row.node.fullPath}`)"
+                    >
+                      <ChevronRight
+                        class="h-3 w-3 transition-transform"
+                        :class="
+                          collapsedFolders.has(`local:${row.node.fullPath}`) ? '' : 'rotate-90'
+                        "
+                      />
+                    </span>
+                    <span v-else class="w-3 shrink-0" />
+                    <Folder
+                      v-if="row.node.children.length"
+                      class="h-3 w-3 shrink-0 text-muted-foreground"
+                    />
+                    <GitBranch v-else class="h-3 w-3 shrink-0 text-muted-foreground" />
+                    <span class="truncate">{{ row.node.name }}</span>
+                    <span class="ml-auto flex shrink-0 items-center gap-1.5">
+                      <GitBranchTrackBadges
+                        :ahead="trackOf(row.node.branch)?.ahead ?? 0"
+                        :behind="trackOf(row.node.branch)?.behind ?? 0"
+                      />
+                      <span
+                        v-if="row.node.branch === currentBranch"
+                        class="h-1.5 w-1.5 shrink-0 rounded-full bg-green-500"
+                      />
+                    </span>
+                  </button>
+                </ContextMenuTrigger>
+                <ContextMenuContent v-if="row.node.branch" class="w-40">
+                  <ContextMenuItem
+                    class="gap-2 text-xs"
+                    :disabled="!!branchOp"
+                    @click="pullBranch(row.node.branch!)"
+                  >
+                    <Loader2
+                      v-if="branchOp?.branch === row.node.branch && branchOp.op === 'pull'"
+                      class="h-3.5 w-3.5 animate-spin"
+                    />
+                    <ArrowDownToLine v-else class="h-3.5 w-3.5" />
+                    {{ t("git.actions.pull") }}
+                  </ContextMenuItem>
+                  <ContextMenuItem
+                    class="gap-2 text-xs"
+                    :disabled="!!branchOp"
+                    @click="pushBranch(row.node.branch!)"
+                  >
+                    <Loader2
+                      v-if="branchOp?.branch === row.node.branch && branchOp.op === 'push'"
+                      class="h-3.5 w-3.5 animate-spin"
+                    />
+                    <ArrowUpToLine v-else class="h-3.5 w-3.5" />
+                    {{ t("git.actions.push") }}
+                  </ContextMenuItem>
+                  <!-- 当前检出分支不可删除(git 会拒绝),直接禁用 -->
+                  <ContextMenuItem
+                    class="gap-2 text-xs"
+                    variant="destructive"
+                    :disabled="!!branchOp || row.node.branch === currentBranch"
+                    @click="askDeleteBranch(row.node.branch!)"
+                  >
+                    <Trash2 class="h-3.5 w-3.5" />
+                    {{ t("git.branch.delete") }}
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
             </template>
           </template>
           <template v-if="branches.remote.length">
@@ -770,17 +919,6 @@ async function copyHash(hash: string) {
           </template>
         </div>
       </aside>
-
-      <!-- 侧栏折叠后的展开把手 -->
-      <div v-if="hasSidebar && sidebarCollapsed" class="flex w-7 shrink-0 flex-col border-r">
-        <button
-          class="mt-1.5 self-center rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          :title="t('git.graph.expandSidebar')"
-          @click="sidebarCollapsed = false"
-        >
-          <PanelLeftOpen class="h-3.5 w-3.5" />
-        </button>
-      </div>
 
       <div v-bind="containerProps" class="relative flex-1 overflow-auto">
         <div v-if="loading && !totalCount" class="flex h-full items-center justify-center">
@@ -1028,6 +1166,40 @@ async function copyHash(hash: string) {
         </Button>
       </div>
     </div>
+
+    <!-- 拉取产生合并冲突时的解决引导(仅当前分支的 pull 可能出现) -->
+    <ConflictDialog v-model:open="conflictOpen" :project="project" :conflicts="conflictFiles" />
+
+    <!-- 删除本地分支确认;未合并分支报错后切换为强制删除确认 -->
+    <Dialog v-model:open="deleteOpen">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{{ t("git.branch.deleteTitle") }}</DialogTitle>
+        </DialogHeader>
+        <p class="text-sm break-all text-muted-foreground">
+          {{
+            deleteNeedsForce
+              ? t("git.branch.deleteForceHint", { name: deleteTarget })
+              : t("git.branch.deleteConfirm", { name: deleteTarget })
+          }}
+        </p>
+        <DialogFooter>
+          <Button variant="outline" :disabled="deleting" @click="deleteOpen = false">
+            {{ t("common.cancel") }}
+          </Button>
+          <Button variant="destructive" :disabled="deleting" @click="confirmDeleteBranch">
+            <Loader2 v-if="deleting" class="h-3.5 w-3.5 animate-spin" />
+            {{
+              deleting
+                ? t("git.branch.deleting")
+                : deleteNeedsForce
+                  ? t("git.branch.forceDelete")
+                  : t("common.delete")
+            }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 
   <div

@@ -79,6 +79,7 @@ export default {
     git_branch_exists: "同名分支已存在",
     git_branch_diverged:
       "本地同名分支与该远程分支已分叉，无法安全对齐到远程状态；请改选本地分支，或先在终端同步两者",
+    git_branch_not_merged: "该分支未完全合并，如需删除请使用强制删除",
     // 账号
     account_not_found: "账号不存在",
     account_unsupported_provider: "不支持的平台",
@@ -374,6 +375,13 @@ export default {
       createBaseLabel: "基于分支",
       aheadCount: "领先远端 {n} 个提交",
       behindCount: "落后远端 {n} 个提交",
+      delete: "删除分支",
+      deleteTitle: "删除本地分支",
+      deleteConfirm: "确定删除本地分支「{name}」吗？此操作不可撤销。",
+      deleteForceHint: "分支「{name}」未完全合并，强制删除将丢失未合并的提交。确定强制删除吗？",
+      forceDelete: "强制删除",
+      deleting: "删除中...",
+      deleted: "已删除分支「{name}」",
     },
     graph: {
       title: "提交图谱",
@@ -400,8 +408,6 @@ export default {
       searchEmpty: "无匹配提交",
       tipNotFound: "该分支的顶端提交不在当前图谱范围内",
       loadingMore: "正在加载全部提交,已加载 {count} 条",
-      collapseSidebar: "收起列表",
-      expandSidebar: "展开列表",
       columns: {
         graph: "图谱",
         description: "描述",

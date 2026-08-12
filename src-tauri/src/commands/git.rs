@@ -295,6 +295,10 @@ fn friendly_git_error(raw: &str) -> AppError {
     if text.contains("branch named") && text.contains("already exists") {
         return coded(ErrorCode::GitBranchExists, "");
     }
+    // 删除分支:未完全合并(git 建议 -D 强删),前端据此引导强制删除
+    if text.contains("is not fully merged") {
+        return coded(ErrorCode::GitBranchNotMerged, "");
+    }
 
     // 未识别:整段清理后原文作为 message 携带
     AppError::coded(ErrorCode::GitCommandFailed, text)
@@ -987,10 +991,19 @@ fn commit_blocking(path: &str, message: &str, include_untracked: bool) -> AppRes
     Ok(st)
 }
 
-/// 拉取远端。产生合并冲突时不算失败:返回冲突文件列表,由前端引导用户解决
+/// 拉取远端。产生合并冲突时不算失败:返回冲突文件列表,由前端引导用户解决。
+/// branch 指定拉取目标分支:为当前检出分支(或缺省)时走 `git pull`;
+/// 为其他本地分支时不切换工作区,经 `git fetch <remote> <src>:<branch>` 快进更新引用
+/// (分叉或分支被其他 worktree 占用时由 git 报错透传)
 #[tauri::command]
-pub async fn git_pull(path: String) -> AppResult<GitPullResult> {
-    run_blocking(move || pull_blocking(&path)).await
+pub async fn git_pull(path: String, branch: Option<String>) -> AppResult<GitPullResult> {
+    run_blocking(move || match branch {
+        Some(b) if !b.is_empty() && current_branch(&path).as_deref() != Some(b.as_str()) => {
+            pull_branch_blocking(&path, &b)
+        }
+        _ => pull_blocking(&path),
+    })
+    .await
 }
 
 fn pull_blocking(path: &str) -> AppResult<GitPullResult> {
@@ -1014,6 +1027,61 @@ fn pull_blocking(path: &str) -> AppResult<GitPullResult> {
     })
 }
 
+/// 拉取非当前检出的本地分支:不切换工作区,用 fetch refspec 快进更新本地引用。
+/// 远端与源分支取该分支的 upstream;未配置 upstream 时回退到默认远端(优先 origin)
+/// 的同名分支。非快进(分叉)或被其他 worktree 检出时 git 报错,经 friendly_git_error 透传
+fn pull_branch_blocking(path: &str, branch: &str) -> AppResult<GitPullResult> {
+    let (remote, src) = match upstream_of(path, branch) {
+        Some(pair) => pair,
+        None => {
+            let remote = default_push_remote(path)
+                .ok_or_else(|| AppError::coded(ErrorCode::GitPullFailed, ""))?;
+            (remote, branch.to_string())
+        }
+    };
+    run_git(path, &["fetch", &remote, &format!("{src}:{branch}")])?;
+    let st = status(path)?;
+    cache_status(path, &st);
+    Ok(GitPullResult {
+        status: st,
+        conflicts: Vec::new(),
+    })
+}
+
+/// 当前检出分支名;detached HEAD 或命令失败时返回 None
+fn current_branch(path: &str) -> Option<String> {
+    let out = git_command(path)
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!name.is_empty() && name != "HEAD").then_some(name)
+}
+
+/// 解析本地分支的 upstream,返回 (远端名, 远端分支名);未配置或已失效时返回 None
+fn upstream_of(path: &str, branch: &str) -> Option<(String, String)> {
+    let out = git_command(path)
+        .args(["rev-parse", "--abbrev-ref", &format!("{branch}@{{upstream}}")])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    split_remote_branch(String::from_utf8_lossy(&out.stdout).trim())
+}
+
+/// 将 "origin/feature/x" 拆为 ("origin", "feature/x");不含 '/' 时无法判定远端,返回 None
+fn split_remote_branch(name: &str) -> Option<(String, String)> {
+    let (remote, branch) = name.split_once('/')?;
+    if remote.is_empty() || branch.is_empty() {
+        return None;
+    }
+    Some((remote.to_string(), branch.to_string()))
+}
+
 /// 首推回退时的目标远端:优先 origin,否则取列表第一个远端;
 /// 一个都没有返回 None(此时 `git push` 会先报无推送目标,走不到这里)
 fn default_push_remote(path: &str) -> Option<String> {
@@ -1033,11 +1101,59 @@ fn default_push_remote(path: &str) -> Option<String> {
     }
 }
 
-/// 推送当前分支;无 upstream 时(如新建分支首推)自动回退
-/// `git push -u <remote> HEAD`,remote 优先 origin、否则取第一个远端
+/// 推送分支;branch 缺省或为当前检出分支时推送 HEAD,无 upstream(如新建分支首推)
+/// 自动回退 `git push -u <remote> HEAD`,remote 优先 origin、否则取第一个远端。
+/// branch 为其他本地分支时推送该分支:有 upstream 推到 upstream 对应分支,
+/// 无 upstream 回退 `git push -u <默认远端> <branch>` 并建立跟踪
 #[tauri::command]
-pub async fn git_push(path: String) -> AppResult<GitStatus> {
-    run_blocking(move || push_blocking(&path)).await
+pub async fn git_push(path: String, branch: Option<String>) -> AppResult<GitStatus> {
+    run_blocking(move || match branch {
+        Some(b) if !b.is_empty() && current_branch(&path).as_deref() != Some(b.as_str()) => {
+            push_branch_blocking(&path, &b)
+        }
+        _ => push_blocking(&path),
+    })
+    .await
+}
+
+/// 推送非当前检出的本地分支(不影响工作区)
+fn push_branch_blocking(path: &str, branch: &str) -> AppResult<GitStatus> {
+    match upstream_of(path, branch) {
+        Some((remote, src)) => {
+            run_git(path, &["push", &remote, &format!("{branch}:{src}")])?;
+        }
+        None => {
+            let remote = default_push_remote(path)
+                .ok_or_else(|| AppError::coded(ErrorCode::GitNoTracking, ""))?;
+            run_git(path, &["push", "-u", &remote, branch])?;
+        }
+    }
+    let st = status(path)?;
+    cache_status(path, &st);
+    Ok(st)
+}
+
+/// 删除本地分支。force=false 用 -d(仅已合并分支,未合并报 git_branch_not_merged);
+/// force=true 用 -D 强删。当前检出或被其他 worktree 占用的分支由 git 拒绝,错误透传
+#[tauri::command]
+pub async fn git_branch_delete(
+    path: String,
+    branch: String,
+    force: bool,
+) -> AppResult<GitStatus> {
+    run_blocking(move || branch_delete_blocking(&path, &branch, force)).await
+}
+
+fn branch_delete_blocking(path: &str, branch: &str, force: bool) -> AppResult<GitStatus> {
+    let branch = branch.trim();
+    if branch.is_empty() {
+        return Err(AppError::coded(ErrorCode::GitBranchNameRequired, ""));
+    }
+    let flag = if force { "-D" } else { "-d" };
+    run_git(path, &["branch", flag, branch])?;
+    let st = status(path)?;
+    cache_status(path, &st);
+    Ok(st)
 }
 
 fn push_blocking(path: &str) -> AppResult<GitStatus> {
@@ -2422,6 +2538,213 @@ mod tests {
 
         let _ = fs::remove_dir_all(&origin);
         let _ = fs::remove_dir_all(&clone);
+    }
+
+    #[test]
+    fn split_remote_branch_parses_remote_and_branch() {
+        assert_eq!(
+            split_remote_branch("origin/feature/x"),
+            Some(("origin".to_string(), "feature/x".to_string()))
+        );
+        assert_eq!(
+            split_remote_branch("github/main"),
+            Some(("github".to_string(), "main".to_string()))
+        );
+        assert_eq!(split_remote_branch("main"), None);
+        assert_eq!(split_remote_branch("/main"), None);
+        assert_eq!(split_remote_branch("origin/"), None);
+    }
+
+    fn clone_with_config(tag: &str, origin: &PathBuf) -> PathBuf {
+        let dir = temp_dir(tag);
+        git(&dir, &["clone", origin.to_str().unwrap(), "."]);
+        git(&dir, &["config", "user.email", "test@example.com"]);
+        git(&dir, &["config", "user.name", "test"]);
+        dir
+    }
+
+    fn rev_parse(dir: &PathBuf, rev: &str) -> String {
+        let out = git_command(dir.to_str().unwrap())
+            .args(["rev-parse", rev])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "rev-parse {rev} 失败");
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// origin(bare) + clone_a:首推 main,并创建推送 feature 分支(clone_a 停留在 feature)
+    fn setup_origin_with_feature(tag: &str) -> (PathBuf, PathBuf) {
+        let origin = temp_dir(&format!("{tag}-origin"));
+        git(&origin, &["init", "--bare", "-b", "main"]);
+        let clone_a = clone_with_config(&format!("{tag}-a"), &origin);
+        fs::write(clone_a.join("a.txt"), "a").unwrap();
+        git(&clone_a, &["add", "a.txt"]);
+        git(&clone_a, &["commit", "-m", "c1"]);
+        git(&clone_a, &["push", "-u", "origin", "main"]);
+        git(&clone_a, &["checkout", "-b", "feature"]);
+        fs::write(clone_a.join("f.txt"), "f1").unwrap();
+        git(&clone_a, &["add", "f.txt"]);
+        git(&clone_a, &["commit", "-m", "f1"]);
+        git(&clone_a, &["push", "-u", "origin", "feature"]);
+        (origin, clone_a)
+    }
+
+    #[test]
+    fn pull_branch_fast_forwards_non_current_branch() {
+        let (origin, clone_a) = setup_origin_with_feature("pullbr-ff");
+        let clone_b = clone_with_config("pullbr-ff-b", &origin);
+        git(&clone_b, &["branch", "--track", "feature", "origin/feature"]);
+
+        // clone_a 推进 feature 并推送,clone_b 的 feature 落后
+        fs::write(clone_a.join("f.txt"), "f2").unwrap();
+        git(&clone_a, &["commit", "-am", "f2"]);
+        git(&clone_a, &["push"]);
+
+        let result = pull_branch_blocking(clone_b.to_str().unwrap(), "feature").unwrap();
+        assert!(result.conflicts.is_empty());
+        // 工作区仍停留在 main,本地 feature 已快进到 origin/feature
+        assert_eq!(result.status.branch.as_deref(), Some("main"));
+        assert_eq!(rev_parse(&clone_b, "feature"), rev_parse(&clone_b, "origin/feature"));
+
+        let _ = fs::remove_dir_all(&origin);
+        let _ = fs::remove_dir_all(&clone_a);
+        let _ = fs::remove_dir_all(&clone_b);
+    }
+
+    #[test]
+    fn pull_branch_diverged_returns_error() {
+        let (origin, clone_a) = setup_origin_with_feature("pullbr-div");
+        let clone_b = clone_with_config("pullbr-div-b", &origin);
+        // clone_b 在 feature 上产生本地提交后切回 main
+        git(&clone_b, &["checkout", "feature"]);
+        fs::write(clone_b.join("b.txt"), "b").unwrap();
+        git(&clone_b, &["add", "b.txt"]);
+        git(&clone_b, &["commit", "-m", "b1"]);
+        git(&clone_b, &["checkout", "main"]);
+        // clone_a 推进 feature,形成分叉
+        fs::write(clone_a.join("f.txt"), "f2").unwrap();
+        git(&clone_a, &["commit", "-am", "f2"]);
+        git(&clone_a, &["push"]);
+
+        assert!(pull_branch_blocking(clone_b.to_str().unwrap(), "feature").is_err());
+        // 失败后本地 feature 未被改写
+        assert_ne!(
+            rev_parse(&clone_b, "feature"),
+            rev_parse(&clone_b, "origin/feature")
+        );
+
+        let _ = fs::remove_dir_all(&origin);
+        let _ = fs::remove_dir_all(&clone_a);
+        let _ = fs::remove_dir_all(&clone_b);
+    }
+
+    #[test]
+    fn push_branch_pushes_to_upstream() {
+        let (origin, clone_a) = setup_origin_with_feature("pushbr-up");
+        let clone_b = clone_with_config("pushbr-up-b", &origin);
+        git(&clone_b, &["checkout", "feature"]);
+        fs::write(clone_b.join("b.txt"), "b").unwrap();
+        git(&clone_b, &["add", "b.txt"]);
+        git(&clone_b, &["commit", "-m", "b1"]);
+        git(&clone_b, &["checkout", "main"]);
+
+        push_branch_blocking(clone_b.to_str().unwrap(), "feature").unwrap();
+        assert_eq!(
+            rev_parse(&clone_b, "feature"),
+            rev_parse(&clone_b, "origin/feature")
+        );
+
+        let _ = fs::remove_dir_all(&origin);
+        let _ = fs::remove_dir_all(&clone_a);
+        let _ = fs::remove_dir_all(&clone_b);
+    }
+
+    #[test]
+    fn push_branch_without_upstream_sets_tracking() {
+        let (origin, clone_a) = setup_origin_with_feature("pushbr-new");
+        let clone_b = clone_with_config("pushbr-new-b", &origin);
+        git(&clone_b, &["branch", "topic"]);
+
+        push_branch_blocking(clone_b.to_str().unwrap(), "topic").unwrap();
+        let out = git_command(clone_b.to_str().unwrap())
+            .args(["rev-parse", "--abbrev-ref", "topic@{upstream}"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "origin/topic");
+        assert_eq!(rev_parse(&clone_b, "topic"), rev_parse(&clone_b, "origin/topic"));
+
+        let _ = fs::remove_dir_all(&origin);
+        let _ = fs::remove_dir_all(&clone_a);
+        let _ = fs::remove_dir_all(&clone_b);
+    }
+
+    #[test]
+    fn branch_delete_merged_branch() {
+        let dir = temp_dir("brdel-merged");
+        init_repo(&dir);
+        fs::write(dir.join("a.txt"), "a").unwrap();
+        git(&dir, &["add", "a.txt"]);
+        git(&dir, &["commit", "-m", "c1"]);
+        // topic 基于 main,无额外提交:视为已合并可安全删除
+        git(&dir, &["branch", "topic"]);
+
+        branch_delete_blocking(dir.to_str().unwrap(), "topic", false).unwrap();
+        let out = git_command(dir.to_str().unwrap())
+            .args(["branch", "--list", "topic"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn branch_delete_unmerged_requires_force() {
+        let dir = temp_dir("brdel-unmerged");
+        init_repo(&dir);
+        fs::write(dir.join("a.txt"), "a").unwrap();
+        git(&dir, &["add", "a.txt"]);
+        git(&dir, &["commit", "-m", "c1"]);
+        // topic 有未合并进 main 的提交
+        git(&dir, &["checkout", "-b", "topic"]);
+        fs::write(dir.join("t.txt"), "t").unwrap();
+        git(&dir, &["add", "t.txt"]);
+        git(&dir, &["commit", "-m", "t1"]);
+        git(&dir, &["checkout", "main"]);
+
+        let err = branch_delete_blocking(dir.to_str().unwrap(), "topic", false).unwrap_err();
+        assert!(err.is_code(ErrorCode::GitBranchNotMerged));
+        // 强删成功
+        branch_delete_blocking(dir.to_str().unwrap(), "topic", true).unwrap();
+        let out = git_command(dir.to_str().unwrap())
+            .args(["branch", "--list", "topic"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn branch_delete_rejects_current_and_empty() {
+        let dir = temp_dir("brdel-current");
+        init_repo(&dir);
+        fs::write(dir.join("a.txt"), "a").unwrap();
+        git(&dir, &["add", "a.txt"]);
+        git(&dir, &["commit", "-m", "c1"]);
+
+        // 空分支名
+        let err = branch_delete_blocking(dir.to_str().unwrap(), "  ", false).unwrap_err();
+        assert!(err.is_code(ErrorCode::GitBranchNameRequired));
+        // 当前检出分支不可删除(git 拒绝),且分支仍在(--list 输出带 * 前缀)
+        assert!(branch_delete_blocking(dir.to_str().unwrap(), "main", true).is_err());
+        let out = git_command(dir.to_str().unwrap())
+            .args(["branch", "--list", "main"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "* main");
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
