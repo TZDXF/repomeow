@@ -10,10 +10,11 @@ import type { Project, ProjectAssets } from "@/types";
  * 不做前端长缓存:每次进入详情页都会重新拉取,后端 walk 缓存保证重复拉取足够便宜。
  */
 export const useProjectAssetsStore = defineStore("project-assets", () => {
-  /** 按项目 id 存放最近一次扫描结果 */
+  /** 按项目 id 存放最近一次扫描结果(详情页同时只展示一个工作区,切换工作区会覆盖) */
   const byProject = ref<Record<number, ProjectAssets>>({});
-  /** 进行中的请求,key 为项目 id:两个卡片同时挂载只发一次 IPC */
-  const inflight = new Map<number, Promise<void>>();
+  /** 进行中的请求,key 为「项目 id + 路径」:两个卡片同时挂载只发一次 IPC,
+   *  且工作区(worktree)切换瞬间不同路径的扫描不会互相去重串扰 */
+  const inflight = new Map<string, Promise<void>>();
 
   function assetsOf(id: number): ProjectAssets | undefined {
     return byProject.value[id];
@@ -21,7 +22,8 @@ export const useProjectAssetsStore = defineStore("project-assets", () => {
 
   /** 拉取(或复用进行中的)扫描结果;失败写入空结果,不向上抛错(卡片按无数据显示) */
   function refresh(project: Project): Promise<void> {
-    const pending = inflight.get(project.id);
+    const key = `${project.id}\n${project.path}`;
+    const pending = inflight.get(key);
     if (pending) return pending;
     const p = (async () => {
       try {
@@ -32,9 +34,9 @@ export const useProjectAssetsStore = defineStore("project-assets", () => {
         byProject.value[project.id] = { package_scripts: [], compose_files: [] };
       }
     })().finally(() => {
-      inflight.delete(project.id);
+      inflight.delete(key);
     });
-    inflight.set(project.id, p);
+    inflight.set(key, p);
     return p;
   }
 

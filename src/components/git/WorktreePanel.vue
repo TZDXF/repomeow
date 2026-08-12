@@ -43,6 +43,8 @@ import type { GitBranches, GitWorktree, Project } from "@/types";
 const { t } = useI18n();
 const props = defineProps<{ project: Project }>();
 const open = defineModel<boolean>("open", { required: true });
+/** worktree 列表发生增删后通知父组件(切换下拉据此刷新并校验当前选中) */
+const emit = defineEmits<{ changed: [] }>();
 
 const store = useProjectsStore();
 const settings = useSettingsStore();
@@ -195,6 +197,7 @@ async function create() {
       startPoint,
     });
     toast.success(t("git.worktree.created", { name: effectiveBranch.value || name }));
+    emit("changed");
     createOpen.value = false;
     newBranch.value = "";
   } catch (e) {
@@ -304,6 +307,7 @@ async function remove() {
       deleteBranch: removeDeleteBranch.value,
     });
     toast.success(t("git.worktree.removed"));
+    emit("changed");
     removeTarget.value = null;
   } catch (e) {
     toast.error(String(e));

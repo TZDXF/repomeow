@@ -81,8 +81,10 @@ const displayFiles = computed(() =>
     .filter((x) => showHidden.value || !x.hidden),
 );
 
+// path 一并作为 watch 源:详情页切换工作区(worktree)时传入的是 id 相同、
+// path 不同的 project 副本,需要按新工作目录重新扫描
 watch(
-  () => props.project.id,
+  () => [props.project.id, props.project.path],
   async () => {
     loaded.value = false;
     showHidden.value = false;

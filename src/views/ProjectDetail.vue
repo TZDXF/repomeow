@@ -7,17 +7,18 @@ import {
   ArrowLeft,
   BookOpen,
   FileText,
-  FolderGit2,
   FolderSync,
   Pencil,
   Star,
   TriangleAlert,
   Waypoints,
 } from "@lucide/vue";
+import { useLocalStorage } from "@vueuse/core";
 import { Button } from "@/components/ui/button";
 import GitStatusBar from "@/components/git/GitStatusBar.vue";
 import GitActions from "@/components/git/GitActions.vue";
 import WorktreePanel from "@/components/git/WorktreePanel.vue";
+import WorktreeSwitcher from "@/components/git/WorktreeSwitcher.vue";
 import OpenWithMenu from "@/components/open/OpenWithMenu.vue";
 import DockerCompose from "@/components/project/DockerCompose.vue";
 import ReadmeDrawer from "@/components/project/ReadmeDrawer.vue";
@@ -27,6 +28,7 @@ import CustomCommands from "@/components/scripts/CustomCommands.vue";
 import PackageScripts from "@/components/scripts/PackageScripts.vue";
 import TagPicker from "@/components/tags/TagPicker.vue";
 import { useProjectsStore } from "@/stores/projects";
+import type { Project } from "@/types";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -70,8 +72,68 @@ const readmeOpen = ref(false);
 // --- AI 日报弹窗 ---
 const reportOpen = ref(false);
 
-// --- worktree 管理面板 ---
+// --- worktree 工作区切换 ---
+// activeWorktreePath: 详情页当前工作目录(null = 主工作区),按项目记忆在 localStorage;
+// worktreeProject: 切到 worktree 时基于 project 的副本(覆盖 path/git),传给 git 状态/操作
+// 与 npm/docker 卡片——store 的 git 读写均以 project.path 执行并把结果回填 project.git,
+// 用副本即可让操作落在 worktree 上,且不污染列表里主工作区的状态;自定义命令按 project_id
+// 存取、跨工作区共享,仍传原 project。
 const worktreeOpen = ref(false);
+const switcherRef = ref<InstanceType<typeof WorktreeSwitcher> | null>(null);
+const activeWorktreePath = ref<string | null>(null);
+const worktreeProject = ref<Project | null>(null);
+/** 各项目记忆的工作区选择:projectId -> worktree 绝对路径(与 useCollapsibleOpen 同走 localStorage) */
+const worktreeSelection = useLocalStorage<Record<string, string>>(
+  "repomeow.worktree-selection",
+  {},
+);
+
+// 进入/切换项目时恢复记忆的工作区;选中的 worktree 是否仍存在由 WorktreeSwitcher 加载
+// 列表后校验,已删除时会把 activeWorktreePath 重置为 null(自动回退主工作区)
+watch(
+  () => project.value?.id,
+  (id) => {
+    activeWorktreePath.value = id != null ? (worktreeSelection.value[String(id)] ?? null) : null;
+  },
+  { immediate: true },
+);
+
+// 工作区变化:持久化选择;切到 worktree 时重建副本并拉取其 git 状态;切回主工作区
+// (不含初始进入,初始刷新由上方 project.id watch 负责)时顺带刷新一次主工作区状态
+watch(
+  activeWorktreePath,
+  (path, oldPath) => {
+    const id = project.value?.id;
+    if (id != null) {
+      const next = { ...worktreeSelection.value };
+      if (path) next[String(id)] = path;
+      else delete next[String(id)];
+      worktreeSelection.value = next;
+    }
+    if (path && project.value) {
+      worktreeProject.value = { ...project.value, path, git: null };
+      store.refreshGitStatus(worktreeProject.value);
+    } else {
+      worktreeProject.value = null;
+      if (oldPath !== undefined && project.value?.path_exists) {
+        store.refreshGitStatus(project.value);
+      }
+    }
+  },
+  { immediate: true },
+);
+
+// 项目基础信息变更(改名/改标签等会替换 store 中的对象)时同步副本的基础字段,
+// 保留当前 worktree 路径与已拉取的 git 状态
+watch(project, (p) => {
+  if (p && worktreeProject.value) {
+    worktreeProject.value = {
+      ...p,
+      path: worktreeProject.value.path,
+      git: worktreeProject.value.git,
+    };
+  }
+});
 
 // --- 收藏切换(收藏项目在列表中置顶) ---
 async function toggleFavorite() {
@@ -202,8 +264,11 @@ async function saveDesc() {
         </div>
       </div>
 
-      <p class="mt-1 truncate pl-10 text-sm text-muted-foreground" :title="project.path">
-        {{ project.path }}
+      <p
+        class="mt-1 truncate pl-10 text-sm text-muted-foreground"
+        :title="(worktreeProject ?? project).path"
+      >
+        {{ (worktreeProject ?? project).path }}
       </p>
 
       <div
@@ -247,17 +312,15 @@ async function saveDesc() {
       <div class="mt-2.5 flex flex-wrap items-center gap-x-6 gap-y-2 pl-10">
         <TagPicker :project="project" />
         <template v-if="project.path_exists">
-          <GitStatusBar :project="project" />
-          <GitActions :project="project" />
-          <Button
+          <GitStatusBar :project="worktreeProject ?? project" />
+          <GitActions :project="worktreeProject ?? project" />
+          <WorktreeSwitcher
             v-if="project.git?.is_repo"
-            variant="outline"
-            size="xs"
-            @click="worktreeOpen = true"
-          >
-            <FolderGit2 class="h-3.5 w-3.5" />
-            {{ t("git.worktree.title") }}
-          </Button>
+            ref="switcherRef"
+            v-model:path="activeWorktreePath"
+            :project="project"
+            @manage="worktreeOpen = true"
+          />
           <Button
             v-if="project.git?.is_repo"
             variant="outline"
@@ -275,15 +338,19 @@ async function saveDesc() {
       v-if="project.path_exists"
       class="grid items-start gap-4 p-6 [grid-template-columns:repeat(auto-fill,minmax(360px,1fr))]"
     >
-      <PackageScripts :project="project" />
-      <DockerCompose :project="project" />
+      <PackageScripts :project="worktreeProject ?? project" />
+      <DockerCompose :project="worktreeProject ?? project" />
       <CustomCommands :project="project" />
     </div>
 
     <ReadmeDrawer v-model:open="readmeOpen" :project="project" />
     <DailyReportDialog v-model:open="reportOpen" :preset-project-id="project.id" />
     <RelocateProjectDialog v-model:open="relocateOpen" :project="project" />
-    <WorktreePanel v-model:open="worktreeOpen" :project="project" />
+    <WorktreePanel
+      v-model:open="worktreeOpen"
+      :project="project"
+      @changed="switcherRef?.reload()"
+    />
   </div>
 
   <div

@@ -446,6 +446,9 @@ export default {
       abortMerge: "中止合并",
       abortRebase: "中止变基",
       aborted: "已中止",
+      workspace: "工作区",
+      switchWorkspace: "切换工作区",
+      manage: "管理 worktree…",
     },
     branchOps: {
       mergeAction: "合并到当前分支…",

@@ -461,6 +461,9 @@ export default {
       abortMerge: "Abort merge",
       abortRebase: "Abort rebase",
       aborted: "Aborted",
+      workspace: "Workspace",
+      switchWorkspace: "Switch workspace",
+      manage: "Manage worktrees…",
     },
     branchOps: {
       mergeAction: "Merge into current branch…",
