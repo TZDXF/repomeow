@@ -6,6 +6,7 @@ import { ChevronDown, FolderGit2, GitBranch, Loader2 } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import GitBranchMenu from "@/components/git/GitBranchMenu.vue";
+import GitBranchTrackBadges from "@/components/git/GitBranchTrackBadges.vue";
 import GitRemoteLink from "@/components/git/GitRemoteLink.vue";
 import { useProjectsStore } from "@/stores/projects";
 import type { Project } from "@/types";
@@ -16,6 +17,19 @@ const store = useProjectsStore();
 
 const git = computed(() => props.project.git);
 const initializing = ref(false);
+
+const ahead = computed(() => git.value?.ahead ?? 0);
+const behind = computed(() => git.value?.behind ?? 0);
+/** 未提交变更总数(已暂存 + 已修改 + 未跟踪) */
+const changes = computed(() => {
+  const g = git.value;
+  return g ? g.staged + g.modified + g.untracked : 0;
+});
+/** 变更标记悬浮提示:三类变更明细 */
+const changesTitle = computed(
+  () =>
+    `${t("git.staged")} ${git.value?.staged ?? 0} · ${t("git.modified")} ${git.value?.modified ?? 0} · ${t("git.untracked")} ${git.value?.untracked ?? 0}`,
+);
 
 async function initRepo() {
   if (initializing.value) return;
@@ -53,6 +67,13 @@ async function initRepo() {
         >
           <GitBranch class="h-3 w-3" />
           {{ git.branch ?? t("git.unknownBranch") }}
+          <!-- 远端更新(领先/落后)与未提交变更标记,点开下拉可执行对应操作 -->
+          <GitBranchTrackBadges :ahead="ahead" :behind="behind" />
+          <span
+            v-if="changes > 0"
+            class="h-1.5 w-1.5 rounded-full bg-amber-500"
+            :title="changesTitle"
+          />
           <ChevronDown class="h-3 w-3 opacity-60" />
         </Badge>
       </GitBranchMenu>
