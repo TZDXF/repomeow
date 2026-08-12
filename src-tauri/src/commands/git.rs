@@ -1156,6 +1156,23 @@ fn branch_delete_blocking(path: &str, branch: &str, force: bool) -> AppResult<Gi
     Ok(st)
 }
 
+/// 删除远程分支。branch 形如 "origin/feature/x",拆出远端名与短名后执行
+/// `git push <remote> --delete <short>`;名称不含远端前缀时报 git_branch_name_required,
+/// 远端不存在或分支不存在等由 git 报错,经 friendly_git_error 透传
+#[tauri::command]
+pub async fn git_remote_branch_delete(path: String, branch: String) -> AppResult<GitStatus> {
+    run_blocking(move || remote_branch_delete_blocking(&path, &branch)).await
+}
+
+fn remote_branch_delete_blocking(path: &str, branch: &str) -> AppResult<GitStatus> {
+    let (remote, short) = split_remote_branch(branch.trim())
+        .ok_or_else(|| AppError::coded(ErrorCode::GitBranchNameRequired, ""))?;
+    run_git(path, &["push", &remote, "--delete", &short])?;
+    let st = status(path)?;
+    cache_status(path, &st);
+    Ok(st)
+}
+
 fn push_blocking(path: &str) -> AppResult<GitStatus> {
     match run_git(path, &["push"]) {
         Ok(_) => {}
@@ -2743,6 +2760,46 @@ mod tests {
             .output()
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "* main");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn remote_branch_delete_removes_remote_ref() {
+        let (origin, clone_a) = setup_origin_with_feature("rdel");
+        let clone_b = clone_with_config("rdel-b", &origin);
+
+        // 删除 origin/feature(短名含多级目录时同样按首个 '/' 拆分)
+        remote_branch_delete_blocking(clone_b.to_str().unwrap(), "origin/feature").unwrap();
+        let out = git_command(clone_b.to_str().unwrap())
+            .args(["ls-remote", "--heads", "origin", "feature"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "");
+        // main 不受影响
+        assert_eq!(
+            rev_parse(&clone_b, "origin/main"),
+            rev_parse(&clone_b, "main")
+        );
+
+        let _ = fs::remove_dir_all(&origin);
+        let _ = fs::remove_dir_all(&clone_a);
+        let _ = fs::remove_dir_all(&clone_b);
+    }
+
+    #[test]
+    fn remote_branch_delete_rejects_name_without_remote() {
+        let dir = temp_dir("rdel-invalid");
+        init_repo(&dir);
+
+        // 无 '/' 或段为空时无法判定远端,报 git_branch_name_required
+        for name in ["main", "", "/main", "origin/"] {
+            let err = remote_branch_delete_blocking(dir.to_str().unwrap(), name).unwrap_err();
+            assert!(
+                err.is_code(ErrorCode::GitBranchNameRequired),
+                "输入 {name:?} 实际输出: {err}"
+            );
+        }
 
         let _ = fs::remove_dir_all(&dir);
     }

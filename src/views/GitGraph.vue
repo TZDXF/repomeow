@@ -32,13 +32,6 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuRadioGroup,
@@ -46,6 +39,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { buildBranchTree, type BranchTreeNode } from "@/lib/branch-tree";
 import {
   createGraphLayouter,
   laneColor,
@@ -55,6 +49,7 @@ import {
 import { cmd } from "@/lib/tauri";
 import { useProjectsStore } from "@/stores/projects";
 import ConflictDialog from "@/components/git/ConflictDialog.vue";
+import GitBranchDeleteDialog from "@/components/git/GitBranchDeleteDialog.vue";
 import GitBranchTrackBadges from "@/components/git/GitBranchTrackBadges.vue";
 import type { GitBranches, GitBranchTrack, GitGraphCommit } from "@/types";
 
@@ -313,41 +308,9 @@ function toggleFolder(key: string) {
   toggleInSet(collapsedFolders, key);
 }
 
-/** 分支树节点:按 "/" 切分分支名后逐层聚合;branch 仅在节点本身也是分支时有值 */
-interface BranchTreeNode {
-  name: string;
-  fullPath: string;
-  branch: string | null;
-  children: BranchTreeNode[];
-}
-
 interface BranchTreeRow {
   node: BranchTreeNode;
   depth: number;
-}
-
-function buildBranchTree(names: string[]): BranchTreeNode[] {
-  const roots: BranchTreeNode[] = [];
-  const byPath = new Map<string, BranchTreeNode>();
-  for (const full of names) {
-    const segs = full.split("/");
-    let prefix = "";
-    let siblings = roots;
-    for (let i = 0; i < segs.length; i++) {
-      prefix = prefix ? `${prefix}/${segs[i]}` : segs[i];
-      let node = byPath.get(prefix);
-      if (!node) {
-        node = { name: segs[i], fullPath: prefix, branch: null, children: [] };
-        byPath.set(prefix, node);
-        siblings.push(node);
-      }
-      if (i === segs.length - 1) {
-        node.branch = full;
-      }
-      siblings = node.children;
-    }
-  }
-  return roots;
 }
 
 /** 折叠键带分组前缀:本地目录与远程目录可能同名(如本地 feature 与 origin/feature) */
@@ -1171,35 +1134,13 @@ async function copyHash(hash: string) {
     <ConflictDialog v-model:open="conflictOpen" :project="project" :conflicts="conflictFiles" />
 
     <!-- 删除本地分支确认;未合并分支报错后切换为强制删除确认 -->
-    <Dialog v-model:open="deleteOpen">
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{{ t("git.branch.deleteTitle") }}</DialogTitle>
-        </DialogHeader>
-        <p class="text-sm break-all text-muted-foreground">
-          {{
-            deleteNeedsForce
-              ? t("git.branch.deleteForceHint", { name: deleteTarget })
-              : t("git.branch.deleteConfirm", { name: deleteTarget })
-          }}
-        </p>
-        <DialogFooter>
-          <Button variant="outline" :disabled="deleting" @click="deleteOpen = false">
-            {{ t("common.cancel") }}
-          </Button>
-          <Button variant="destructive" :disabled="deleting" @click="confirmDeleteBranch">
-            <Loader2 v-if="deleting" class="h-3.5 w-3.5 animate-spin" />
-            {{
-              deleting
-                ? t("git.branch.deleting")
-                : deleteNeedsForce
-                  ? t("git.branch.forceDelete")
-                  : t("common.delete")
-            }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <GitBranchDeleteDialog
+      v-model:open="deleteOpen"
+      :branch="deleteTarget"
+      :needs-force="deleteNeedsForce"
+      :deleting="deleting"
+      @confirm="confirmDeleteBranch"
+    />
   </div>
 
   <div

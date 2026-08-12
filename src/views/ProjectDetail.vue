@@ -16,7 +16,6 @@ import {
 import { useLocalStorage } from "@vueuse/core";
 import { Button } from "@/components/ui/button";
 import GitStatusBar from "@/components/git/GitStatusBar.vue";
-import GitActions from "@/components/git/GitActions.vue";
 import WorktreePanel from "@/components/git/WorktreePanel.vue";
 import WorktreeSwitcher from "@/components/git/WorktreeSwitcher.vue";
 import OpenWithMenu from "@/components/open/OpenWithMenu.vue";
@@ -313,7 +312,6 @@ async function saveDesc() {
         <TagPicker :project="project" />
         <template v-if="project.path_exists">
           <GitStatusBar :project="worktreeProject ?? project" />
-          <GitActions :project="worktreeProject ?? project" />
           <WorktreeSwitcher
             v-if="project.git?.is_repo"
             ref="switcherRef"

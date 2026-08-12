@@ -15,11 +15,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  getEditorAvailability,
-  isEditorUnavailable,
-  sortOpenWithOptions,
-} from "@/lib/open-with";
+import { getEditorAvailability, isEditorUnavailable, sortOpenWithOptions } from "@/lib/open-with";
 import type { EditorAvailability } from "@/lib/open-with";
 import { cmd } from "@/lib/tauri";
 import { useProjectsStore } from "@/stores/projects";

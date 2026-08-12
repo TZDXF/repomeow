@@ -4,11 +4,7 @@ import { Check, GripVertical } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { VueDraggable } from "vue-draggable-plus";
 import OpenWithIcon from "@/components/open/OpenWithIcon.vue";
-import {
-  getEditorAvailability,
-  isEditorUnavailable,
-  sortOpenWithOptions,
-} from "@/lib/open-with";
+import { getEditorAvailability, isEditorUnavailable, sortOpenWithOptions } from "@/lib/open-with";
 import type { EditorAvailability, OpenWithOption } from "@/lib/open-with";
 import { useSettingsStore } from "@/stores/settings";
 import type { EditorKind } from "@/types";

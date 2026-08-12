@@ -227,7 +227,9 @@ function asDateValue(dv: any): DateValue {
   >
     <CalendarHeader class="mb-1">
       <!-- nav 全宽覆盖在标题上方,pointer-events-none 让标题按钮可点,翻页按钮自身恢复 -->
-      <nav class="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between px-1">
+      <nav
+        class="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between px-1"
+      >
         <!-- 日视图用 reka 自带翻页(处理禁用态);月/年视图直接改 placeholder -->
         <CalendarPrevButton
           v-if="view === 'days'"

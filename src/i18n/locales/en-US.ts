@@ -396,6 +396,13 @@ export default {
       forceDelete: "Force delete",
       deleting: "Deleting...",
       deleted: 'Deleted branch "{name}"',
+      checkout: "Check out",
+      update: "Update",
+      deleteRemote: "Delete remote branch",
+      deleteRemoteTitle: "Delete remote branch",
+      deleteRemoteConfirm:
+        'Delete remote branch "{name}"? This removes the branch on the remote and cannot be undone.',
+      remoteDeleted: 'Deleted remote branch "{name}"',
     },
     graph: {
       title: "Commit Graph",
@@ -482,27 +489,6 @@ export default {
       workspace: "Workspace",
       switchWorkspace: "Switch workspace",
       manage: "Manage worktrees…",
-    },
-    branchOps: {
-      mergeAction: "Merge into current branch…",
-      rebaseAction: "Rebase onto branch…",
-      title: "Merge / Rebase branch",
-      sourceLabel: "Source branch",
-      actionLabel: "Action",
-      opMerge: "Merge",
-      opSquash: "Squash merge",
-      opRebase: "Rebase current branch onto source",
-      hint_merge: "Merges the source branch into the current branch with a merge commit",
-      hint_squash:
-        "Squashes all changes from the source branch into staged, uncommitted content. Commit manually after reviewing",
-      hint_rebase: "Replays the current branch's commits on top of the source branch, one by one",
-      run: "Run",
-      running: "Running...",
-      merged: 'Merged "{name}" into current branch',
-      squashStaged: 'Squash-merged "{name}" and staged the changes. Review and commit manually',
-      rebased: 'Rebased current branch onto "{name}"',
-      rebaseInterrupted:
-        "Rebase paused: resolve conflicts and continue (git rebase --continue), or abort the rebase",
     },
   },
   ai: {

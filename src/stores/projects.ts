@@ -304,6 +304,14 @@ export const useProjectsStore = defineStore("projects", () => {
     });
   }
 
+  /** 删除远程分支(branch 形如 "origin/feature/x",后端 push --delete 移除远端引用) */
+  async function deleteRemoteBranch(project: Project, branch: string) {
+    project.git = await cmd<GitStatus>("git_remote_branch_delete", {
+      path: project.path,
+      branch,
+    });
+  }
+
   // --- worktree / 合并 / 变基 ---
 
   /** 列出仓库的全部 worktree(第一条为主工作区) */
@@ -424,6 +432,7 @@ export const useProjectsStore = defineStore("projects", () => {
     pullRepository,
     pushRepository,
     deleteBranch,
+    deleteRemoteBranch,
     listWorktrees,
     addWorktree,
     removeWorktree,
