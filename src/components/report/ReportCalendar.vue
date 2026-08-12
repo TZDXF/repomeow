@@ -226,32 +226,33 @@ function asDateValue(dv: any): DateValue {
     class="p-1"
   >
     <CalendarHeader class="mb-1">
-      <nav class="absolute inset-x-0 top-0 flex items-center justify-between px-1">
+      <!-- nav 全宽覆盖在标题上方,pointer-events-none 让标题按钮可点,翻页按钮自身恢复 -->
+      <nav class="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between px-1">
         <!-- 日视图用 reka 自带翻页(处理禁用态);月/年视图直接改 placeholder -->
         <CalendarPrevButton
           v-if="view === 'days'"
-          class="size-7 bg-transparent p-0 opacity-50 hover:opacity-100 border rounded-md inline-flex items-center justify-center"
+          class="pointer-events-auto size-7 bg-transparent p-0 opacity-50 hover:opacity-100 border rounded-md inline-flex items-center justify-center"
         >
           <ChevronLeft class="size-4" />
         </CalendarPrevButton>
         <button
           v-else
           type="button"
-          class="size-7 bg-transparent p-0 opacity-50 hover:opacity-100 border rounded-md inline-flex items-center justify-center"
+          class="pointer-events-auto size-7 bg-transparent p-0 opacity-50 hover:opacity-100 border rounded-md inline-flex items-center justify-center"
           @click="shiftView(-1)"
         >
           <ChevronLeft class="size-4" />
         </button>
         <CalendarNextButton
           v-if="view === 'days'"
-          class="size-7 bg-transparent p-0 opacity-50 hover:opacity-100 border rounded-md inline-flex items-center justify-center"
+          class="pointer-events-auto size-7 bg-transparent p-0 opacity-50 hover:opacity-100 border rounded-md inline-flex items-center justify-center"
         >
           <ChevronRight class="size-4" />
         </CalendarNextButton>
         <button
           v-else
           type="button"
-          class="size-7 bg-transparent p-0 opacity-50 hover:opacity-100 border rounded-md inline-flex items-center justify-center"
+          class="pointer-events-auto size-7 bg-transparent p-0 opacity-50 hover:opacity-100 border rounded-md inline-flex items-center justify-center"
           @click="shiftView(1)"
         >
           <ChevronRight class="size-4" />

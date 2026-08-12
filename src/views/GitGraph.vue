@@ -4,7 +4,7 @@ import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { toast } from "vue-sonner";
 import { Channel } from "@tauri-apps/api/core";
-import { useElementSize, useVirtualList } from "@vueuse/core";
+import { useElementSize, useLocalStorage, useVirtualList } from "@vueuse/core";
 import {
   ArrowLeft,
   ChevronDown,
@@ -117,14 +117,22 @@ const endIndex = computed(() => visibleNodes.value[visibleNodes.value.length - 1
 const COL_MIN_W = { desc: 160, author: 64, commit: 80, date: 96 } as const;
 /** 图谱列最小宽度:至少保留一个泳道的空间(列宽可小于图形自然宽度,超出部分裁剪而非压缩) */
 const GRAPH_COL_MIN_W = LANE_W + GRAPH_PAD * 2;
-/** 显式列宽;graph/desc 为 0 表示自动(图谱列按泳道数、描述列占满剩余宽度) */
-const colWidths = ref({ graph: 0, desc: 0, author: 120, commit: 96, date: 150 });
+/** 图谱列默认展示的泳道数:更多泳道经 clip-path 裁剪,可拖宽 */
+const GRAPH_DEFAULT_LANES = 5;
+/** 显式列宽(px,持久化到 localStorage);graph/desc 为 0 表示自动(图谱列按默认泳道数、描述列占满剩余宽度) */
+const colWidths = useLocalStorage(
+  "repomeow:graph-col-widths",
+  { graph: 0, desc: 0, author: 120, commit: 96, date: 150 },
+  { mergeDefaults: true },
+);
 
 const { width: containerWidth } = useElementSize(containerProps.ref);
 
-/** 图谱列宽:默认为泳道自然宽度,可拖窄(图形裁剪)或拖宽(留白) */
+/** 图谱列宽:未拖拽过时默认展示 GRAPH_DEFAULT_LANES 个泳道,可拖窄(图形裁剪)或拖宽 */
 const graphColWidth = computed(() =>
-  colWidths.value.graph > 0 ? Math.max(colWidths.value.graph, GRAPH_COL_MIN_W) : graphWidth.value,
+  colWidths.value.graph > 0
+    ? Math.max(colWidths.value.graph, GRAPH_COL_MIN_W)
+    : Math.min(graphWidth.value, GRAPH_DEFAULT_LANES * LANE_W + GRAPH_PAD * 2),
 );
 /** 图谱列被拖窄时的水平裁剪:纵向保留 overflow-visible,让穿越可视窗口的长线完整绘制 */
 const graphClipPath = computed(() => {
