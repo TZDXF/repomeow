@@ -122,14 +122,14 @@ async function generate() {
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              class="h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
+              size="icon"
+              class="h-7 w-7 text-muted-foreground hover:text-foreground"
+              :title="generating ? t('git.commit.generating') : t('git.commit.generate')"
               :disabled="generating || committable === 0"
               @click="generate"
             >
               <Loader2 v-if="generating" class="h-3.5 w-3.5 animate-spin" />
               <Sparkles v-else class="h-3.5 w-3.5" />
-              {{ generating ? t("git.commit.generating") : t("git.commit.generate") }}
             </Button>
           </div>
           <textarea

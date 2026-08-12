@@ -430,7 +430,6 @@ export default {
       count: "{count} 个",
       main: "主工作区",
       detached: "游离 HEAD",
-      open: "打开",
       create: "新建 worktree",
       sourceLabel: "分支来源",
       sourceNew: "新建分支",

@@ -4,7 +4,6 @@ import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import {
   ArrowUpToLine,
-  FolderOpen,
   GitBranchPlus,
   GitMerge,
   Loader2,
@@ -35,7 +34,6 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import ConflictDialog from "@/components/git/ConflictDialog.vue";
-import { cmd } from "@/lib/tauri";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
 import type { GitBranches, GitWorktree, Project } from "@/types";
@@ -202,14 +200,6 @@ async function create() {
   }
 }
 
-async function openDir(w: GitWorktree) {
-  try {
-    await cmd("open_with", { path: w.path, kind: settings.defaultOpenWith });
-  } catch (e) {
-    toast.error(String(e));
-  }
-}
-
 function showConflicts(files: string[], path?: string) {
   conflictFiles.value = files;
   conflictPath.value = path;
@@ -366,9 +356,6 @@ async function remove() {
               </p>
             </div>
             <div class="flex shrink-0 items-center gap-1">
-              <Button variant="ghost" size="xs" :title="t('git.worktree.open')" @click="openDir(w)">
-                <FolderOpen class="h-3.5 w-3.5" />
-              </Button>
               <template v-if="!w.is_main">
                 <Button
                   variant="ghost"

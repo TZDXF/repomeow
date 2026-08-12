@@ -444,7 +444,6 @@ export default {
       count: "{count}",
       main: "Main",
       detached: "Detached HEAD",
-      open: "Open",
       create: "New worktree",
       sourceLabel: "Branch source",
       sourceNew: "New branch",
