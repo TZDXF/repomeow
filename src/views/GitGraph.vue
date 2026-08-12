@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef, triggerRef, watch } from "vue";
+import { computed, ref, shallowRef, triggerRef, watch, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { toast } from "vue-sonner";
@@ -8,11 +8,15 @@ import { useVirtualList } from "@vueuse/core";
 import {
   ArrowLeft,
   ChevronDown,
+  ChevronRight,
   Copy,
+  Folder,
   GitBranch,
   Globe,
   ListFilter,
   Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
   RefreshCw,
   Search,
   Tag as TagIcon,
@@ -71,6 +75,8 @@ const currentBranch = computed(() => project.value?.git?.branch ?? "");
 const ROW_H = 32;
 const LANE_W = 16;
 const GRAPH_PAD = 4;
+// 图形区最大宽度按 6 个泳道计,超出后压缩泳道间距而不是继续加宽
+const MAX_GRAPH_LANES = 6;
 // 流式批次大小(后端钳制 50..2000)
 const BATCH_SIZE = 500;
 
@@ -81,10 +87,20 @@ const edges = shallowRef<GraphEdgeLayout[]>([]);
 const laneCount = ref(1);
 const totalCount = computed(() => nodes.value.length);
 
-const graphWidth = computed(() => laneCount.value * LANE_W + GRAPH_PAD * 2);
+/** 单泳道像素间距;泳道数超过上限时等比压缩,保持图形区不超过 6 个泳道宽 */
+const laneSpacing = computed(() =>
+  laneCount.value <= MAX_GRAPH_LANES ? LANE_W : (MAX_GRAPH_LANES * LANE_W) / laneCount.value,
+);
+
+const graphWidth = computed(
+  () => Math.min(laneCount.value, MAX_GRAPH_LANES) * LANE_W + GRAPH_PAD * 2,
+);
+
+/** 节点半径:随压缩后的泳道间距缩小,避免节点互相粘连 */
+const nodeRadius = computed(() => Math.max(Math.min(4, laneSpacing.value / 2 - 1), 1.5));
 
 function nodeX(lane: number) {
-  return GRAPH_PAD + lane * LANE_W + LANE_W / 2;
+  return GRAPH_PAD + lane * laneSpacing.value + laneSpacing.value / 2;
 }
 function nodeY(row: number) {
   return row * ROW_H + ROW_H / 2;
@@ -188,6 +204,96 @@ const hasSidebar = computed(
   () =>
     branches.value.local.length > 0 || branches.value.remote.length > 0 || tags.value.length > 0,
 );
+
+// --- 左侧列表:整栏折叠 + 分组/目录折叠 ---
+const sidebarCollapsed = ref(false);
+/** 已折叠的分组(local/remote/tags) */
+const collapsedSections = ref<Set<string>>(new Set());
+/** 已折叠的分支目录(带分组前缀避免本地/远程同名目录互相影响) */
+const collapsedFolders = ref<Set<string>>(new Set());
+
+function toggleInSet(target: Ref<Set<string>>, key: string) {
+  const next = new Set(target.value);
+  if (next.has(key)) {
+    next.delete(key);
+  } else {
+    next.add(key);
+  }
+  target.value = next;
+}
+
+function toggleSection(key: string) {
+  toggleInSet(collapsedSections, key);
+}
+
+function toggleFolder(key: string) {
+  toggleInSet(collapsedFolders, key);
+}
+
+/** 分支树节点:按 "/" 切分分支名后逐层聚合;branch 仅在节点本身也是分支时有值 */
+interface BranchTreeNode {
+  name: string;
+  fullPath: string;
+  branch: string | null;
+  children: BranchTreeNode[];
+}
+
+interface BranchTreeRow {
+  node: BranchTreeNode;
+  depth: number;
+}
+
+function buildBranchTree(names: string[]): BranchTreeNode[] {
+  const roots: BranchTreeNode[] = [];
+  const byPath = new Map<string, BranchTreeNode>();
+  for (const full of names) {
+    const segs = full.split("/");
+    let prefix = "";
+    let siblings = roots;
+    for (let i = 0; i < segs.length; i++) {
+      prefix = prefix ? `${prefix}/${segs[i]}` : segs[i];
+      let node = byPath.get(prefix);
+      if (!node) {
+        node = { name: segs[i], fullPath: prefix, branch: null, children: [] };
+        byPath.set(prefix, node);
+        siblings.push(node);
+      }
+      if (i === segs.length - 1) {
+        node.branch = full;
+      }
+      siblings = node.children;
+    }
+  }
+  return roots;
+}
+
+/** 折叠键带分组前缀:本地目录与远程目录可能同名(如本地 feature 与 origin/feature) */
+function branchRows(names: string[], prefix: string): BranchTreeRow[] {
+  const out: BranchTreeRow[] = [];
+  // 拍平分支树为可视行(跳过已折叠目录的子级)
+  const walk = (nodes: BranchTreeNode[], depth: number) => {
+    for (const node of nodes) {
+      out.push({ node, depth });
+      if (node.children.length && !collapsedFolders.value.has(`${prefix}:${node.fullPath}`)) {
+        walk(node.children, depth + 1);
+      }
+    }
+  };
+  walk(buildBranchTree(names), 0);
+  return out;
+}
+
+const localRows = computed(() => branchRows(branches.value.local, "local"));
+const remoteRows = computed(() => branchRows(branches.value.remote, "remote"));
+
+/** 行点击:叶子分支选中定位;目录行(本身不是分支)切换折叠 */
+function onBranchRowClick(prefix: string, row: BranchTreeRow) {
+  if (row.node.branch) {
+    selectBranch(row.node.branch);
+  } else if (row.node.children.length) {
+    toggleFolder(`${prefix}:${row.node.fullPath}`);
+  }
+}
 
 // --- 搜索 ---
 const searchResults = computed<GitGraphCommit[]>(() => {
@@ -447,68 +553,146 @@ async function copyHash(hash: string) {
     </header>
 
     <div class="flex min-h-0 flex-1">
-      <!-- 左侧分支/标签列表(SourceTree 风格),点击定位到顶端提交 -->
-      <aside v-if="hasSidebar" class="w-52 shrink-0 overflow-y-auto border-r">
-        <div class="flex flex-col gap-0.5 px-2 py-2">
+      <!-- 左侧分支/标签列表(SourceTree 风格),点击定位到顶端提交;整栏可折叠 -->
+      <aside v-if="hasSidebar && !sidebarCollapsed" class="flex w-56 shrink-0 flex-col border-r">
+        <div class="flex items-center justify-end px-2 pt-1.5">
+          <button
+            class="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            :title="t('git.graph.collapseSidebar')"
+            @click="sidebarCollapsed = true"
+          >
+            <PanelLeftClose class="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <div class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 pb-2">
           <template v-if="branches.local.length">
-            <p
-              class="px-1 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase"
-            >
-              {{ t("git.branch.local") }}
-            </p>
             <button
-              v-for="b in branches.local"
-              :key="b"
-              class="flex items-center gap-1.5 rounded-sm px-2 py-1 text-left text-xs transition-colors hover:bg-accent"
-              :class="[
-                b === currentBranch ? 'font-semibold' : '',
-                selectedBranch === b ? 'bg-accent' : '',
-              ]"
-              @click="selectBranch(b)"
+              class="flex items-center gap-1 px-1 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase transition-colors hover:text-foreground"
+              @click="toggleSection('local')"
             >
-              <GitBranch class="h-3 w-3 shrink-0 text-muted-foreground" />
-              <span class="truncate">{{ b }}</span>
-              <span
-                v-if="b === currentBranch"
-                class="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-green-500"
+              <ChevronRight
+                class="h-3 w-3 transition-transform"
+                :class="collapsedSections.has('local') ? '' : 'rotate-90'"
               />
+              {{ t("git.branch.local") }}
             </button>
+            <template v-if="!collapsedSections.has('local')">
+              <button
+                v-for="row in localRows"
+                :key="`local:${row.node.fullPath}`"
+                class="flex items-center gap-1.5 rounded-sm py-1 pr-2 text-left text-xs transition-colors hover:bg-accent"
+                :class="[
+                  row.node.branch === currentBranch ? 'font-semibold' : '',
+                  row.node.branch && selectedBranch === row.node.branch ? 'bg-accent' : '',
+                ]"
+                :style="{ paddingLeft: `${8 + row.depth * 12}px` }"
+                @click="onBranchRowClick('local', row)"
+              >
+                <span
+                  v-if="row.node.children.length"
+                  class="shrink-0 text-muted-foreground"
+                  @click.stop="toggleFolder(`local:${row.node.fullPath}`)"
+                >
+                  <ChevronRight
+                    class="h-3 w-3 transition-transform"
+                    :class="collapsedFolders.has(`local:${row.node.fullPath}`) ? '' : 'rotate-90'"
+                  />
+                </span>
+                <span v-else class="w-3 shrink-0" />
+                <Folder
+                  v-if="row.node.children.length"
+                  class="h-3 w-3 shrink-0 text-muted-foreground"
+                />
+                <GitBranch v-else class="h-3 w-3 shrink-0 text-muted-foreground" />
+                <span class="truncate">{{ row.node.name }}</span>
+                <span
+                  v-if="row.node.branch === currentBranch"
+                  class="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-green-500"
+                />
+              </button>
+            </template>
           </template>
           <template v-if="branches.remote.length">
-            <p
-              class="px-1 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase"
-            >
-              {{ t("git.branch.remote") }}
-            </p>
             <button
-              v-for="r in branches.remote"
-              :key="r"
-              class="flex items-center gap-1.5 rounded-sm px-2 py-1 text-left text-xs transition-colors hover:bg-accent"
-              :class="selectedBranch === r ? 'bg-accent' : ''"
-              @click="selectBranch(r)"
+              class="flex items-center gap-1 px-1 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase transition-colors hover:text-foreground"
+              @click="toggleSection('remote')"
             >
-              <Globe class="h-3 w-3 shrink-0 text-muted-foreground" />
-              <span class="truncate">{{ r }}</span>
+              <ChevronRight
+                class="h-3 w-3 transition-transform"
+                :class="collapsedSections.has('remote') ? '' : 'rotate-90'"
+              />
+              {{ t("git.branch.remote") }}
             </button>
+            <template v-if="!collapsedSections.has('remote')">
+              <button
+                v-for="row in remoteRows"
+                :key="`remote:${row.node.fullPath}`"
+                class="flex items-center gap-1.5 rounded-sm py-1 pr-2 text-left text-xs transition-colors hover:bg-accent"
+                :class="row.node.branch && selectedBranch === row.node.branch ? 'bg-accent' : ''"
+                :style="{ paddingLeft: `${8 + row.depth * 12}px` }"
+                @click="onBranchRowClick('remote', row)"
+              >
+                <span
+                  v-if="row.node.children.length"
+                  class="shrink-0 text-muted-foreground"
+                  @click.stop="toggleFolder(`remote:${row.node.fullPath}`)"
+                >
+                  <ChevronRight
+                    class="h-3 w-3 transition-transform"
+                    :class="collapsedFolders.has(`remote:${row.node.fullPath}`) ? '' : 'rotate-90'"
+                  />
+                </span>
+                <span v-else class="w-3 shrink-0" />
+                <!-- 顶层目录即远端名,用 Globe 图标;更深层目录用 Folder -->
+                <Globe
+                  v-if="row.node.children.length && row.depth === 0"
+                  class="h-3 w-3 shrink-0 text-muted-foreground"
+                />
+                <Folder
+                  v-else-if="row.node.children.length"
+                  class="h-3 w-3 shrink-0 text-muted-foreground"
+                />
+                <GitBranch v-else class="h-3 w-3 shrink-0 text-muted-foreground" />
+                <span class="truncate">{{ row.node.name }}</span>
+              </button>
+            </template>
           </template>
           <template v-if="tags.length">
-            <p
-              class="px-1 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase"
-            >
-              {{ t("git.graph.tags") }}
-            </p>
             <button
-              v-for="tag in tags"
-              :key="tag"
-              class="flex items-center gap-1.5 rounded-sm px-2 py-1 text-left text-xs transition-colors hover:bg-accent"
-              @click="locateTag(tag)"
+              class="flex items-center gap-1 px-1 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase transition-colors hover:text-foreground"
+              @click="toggleSection('tags')"
             >
-              <TagIcon class="h-3 w-3 shrink-0 text-amber-600 dark:text-amber-400" />
-              <span class="truncate">{{ tag }}</span>
+              <ChevronRight
+                class="h-3 w-3 transition-transform"
+                :class="collapsedSections.has('tags') ? '' : 'rotate-90'"
+              />
+              {{ t("git.graph.tags") }}
             </button>
+            <template v-if="!collapsedSections.has('tags')">
+              <button
+                v-for="tag in tags"
+                :key="tag"
+                class="flex items-center gap-1.5 rounded-sm px-2 py-1 text-left text-xs transition-colors hover:bg-accent"
+                @click="locateTag(tag)"
+              >
+                <TagIcon class="h-3 w-3 shrink-0 text-amber-600 dark:text-amber-400" />
+                <span class="truncate">{{ tag }}</span>
+              </button>
+            </template>
           </template>
         </div>
       </aside>
+
+      <!-- 侧栏折叠后的展开把手 -->
+      <div v-if="hasSidebar && sidebarCollapsed" class="flex w-7 shrink-0 flex-col border-r">
+        <button
+          class="mt-1.5 self-center rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          :title="t('git.graph.expandSidebar')"
+          @click="sidebarCollapsed = false"
+        >
+          <PanelLeftOpen class="h-3.5 w-3.5" />
+        </button>
+      </div>
 
       <div v-bind="containerProps" class="relative flex-1 overflow-auto">
         <div v-if="loading && !totalCount" class="flex h-full items-center justify-center">
@@ -552,7 +736,7 @@ async function copyHash(hash: string) {
                   v-if="n.commit.is_head"
                   :cx="nodeX(n.lane)"
                   :cy="nodeYRel(index)"
-                  r="6.5"
+                  :r="nodeRadius + 2.5"
                   fill="none"
                   :stroke="laneColor(n.color)"
                   stroke-width="1.5"
@@ -560,7 +744,7 @@ async function copyHash(hash: string) {
                 <circle
                   :cx="nodeX(n.lane)"
                   :cy="nodeYRel(index)"
-                  :r="selected?.hash === n.commit.hash ? 5 : 4"
+                  :r="selected?.hash === n.commit.hash ? nodeRadius + 1 : nodeRadius"
                   :fill="laneColor(n.color)"
                   class="stroke-background"
                   stroke-width="2"

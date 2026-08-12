@@ -396,6 +396,8 @@ export default {
       searchEmpty: "无匹配提交",
       tipNotFound: "该分支的顶端提交不在当前图谱范围内",
       loadingMore: "正在加载全部提交,已加载 {count} 条",
+      collapseSidebar: "收起列表",
+      expandSidebar: "展开列表",
     },
     conflict: {
       title: "存在合并冲突",

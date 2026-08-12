@@ -408,6 +408,8 @@ export default {
       searchEmpty: "No matching commits",
       tipNotFound: "The branch tip is outside the current graph",
       loadingMore: "Loading full history, {count} commits loaded",
+      collapseSidebar: "Collapse list",
+      expandSidebar: "Expand list",
     },
     conflict: {
       title: "Merge conflicts",
