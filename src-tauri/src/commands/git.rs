@@ -723,12 +723,13 @@ fn unmerged_files(path: &str) -> Vec<String> {
 }
 
 fn local_branch_names(path: &str) -> AppResult<Vec<String>> {
-    let out = run_git(path, &["branch", "--format=%(refname:short)"])?;
+    // 不用 %(refname:short):存在与分支同名的 remote 时(如分支 zc + remote zc),
+    // git 为消歧会输出 "heads/zc",而 git log %D 装饰只做 refs/heads/ 前缀剥离(仍显示 "zc"),
+    // 两套命名不一致会导致图谱按分支名定位顶端提交失败;这里与 %D 保持一致
+    let out = run_git(path, &["for-each-ref", "--format=%(refname)", "refs/heads"])?;
     Ok(String::from_utf8_lossy(&out.stdout)
         .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .map(String::from)
+        .filter_map(|l| l.trim().strip_prefix("refs/heads/").map(String::from))
         .collect())
 }
 
@@ -738,23 +739,22 @@ pub async fn list_git_branches(path: String) -> AppResult<GitBranches> {
 }
 
 fn list_branches_blocking(path: &str) -> AppResult<GitBranches> {
-    // 远程分支:for-each-ref 附带 symref 列(tab 分隔),过滤掉 origin/HEAD 这类符号引用
+    // 远程分支:附带 symref 列(tab 分隔),过滤掉 origin/HEAD 这类符号引用;
+    // 名称取完整 refname 剥 refs/remotes/ 前缀,与 git log %D 装饰命名一致
+    // (不用 %(refname:short),它与本地分支同名 remote 歧义时会输出 remotes/zc 等消歧形式)
     let remote_out = run_git(
         path,
-        &[
-            "for-each-ref",
-            "--format=%(refname:short)%09%(symref)",
-            "refs/remotes",
-        ],
+        &["for-each-ref", "--format=%(refname)%09%(symref)", "refs/remotes"],
     )?;
     let remote = String::from_utf8_lossy(&remote_out.stdout)
         .lines()
         .filter_map(|l| {
             let (name, symref) = l.split_once('\t').unwrap_or((l, ""));
-            if name.is_empty() || !symref.is_empty() {
+            let short = name.strip_prefix("refs/remotes/").unwrap_or(name);
+            if short.is_empty() || !symref.is_empty() {
                 None
             } else {
-                Some(name.to_string())
+                Some(short.to_string())
             }
         })
         .collect();
@@ -2150,6 +2150,41 @@ mod tests {
         // 空分支名 / 不存在的分支
         assert!(checkout_blocking(dir.to_str().unwrap(), " ", false, false, None).is_err());
         assert!(checkout_blocking(dir.to_str().unwrap(), "nope", false, false, None).is_err());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn branches_keep_log_style_names_when_remote_shares_branch_name() {
+        // 分支 zc 与 remote zc 同名时(refs/remotes/zc/HEAD 存在),
+        // %(refname:short) 为消歧输出 "heads/zc",而 git log %D 装饰仍显示 "zc";
+        // 分支列表必须与 %D 一致,否则图谱侧栏点分支定位顶端提交失败
+        let dir = temp_dir("ambiguous-remote");
+        init_repo(&dir);
+        fs::write(dir.join("a.txt"), "a").unwrap();
+        git(&dir, &["add", "a.txt"]);
+        git(&dir, &["commit", "-m", "init"]);
+        git(&dir, &["branch", "zc"]);
+        let head = git_command(dir.to_str().unwrap())
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap()
+            .stdout;
+        let head = String::from_utf8_lossy(&head).trim().to_string();
+        git(&dir, &["update-ref", "refs/remotes/zc/HEAD", &head]);
+        git(&dir, &["update-ref", "refs/remotes/zc/zc", &head]);
+
+        // 前提校验:git 的 short 命名在此场景下确实会消歧成 heads/zc
+        let short = git_command(dir.to_str().unwrap())
+            .args(["branch", "--format=%(refname:short)"])
+            .output()
+            .unwrap()
+            .stdout;
+        assert!(String::from_utf8_lossy(&short).contains("heads/zc"));
+
+        let branches = list_branches_blocking(dir.to_str().unwrap()).unwrap();
+        assert_eq!(branches.local, vec!["main".to_string(), "zc".to_string()]);
+        assert!(branches.remote.contains(&"zc/zc".to_string()));
 
         let _ = fs::remove_dir_all(&dir);
     }
