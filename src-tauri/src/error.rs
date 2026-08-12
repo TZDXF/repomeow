@@ -62,6 +62,8 @@ pub enum ErrorCode {
     GitWorktreeDirty,
     /// 同名分支已存在
     GitBranchExists,
+    /// worktree 挂载远程分支时本地同名分支与其分叉,无法安全对齐
+    GitBranchDiverged,
 
     // ── 账号 ──────────────────────────────────────────────────────────
     AccountNotFound,
@@ -204,6 +206,7 @@ impl ErrorCode {
             Self::GitBranchCheckedOut => "git_branch_checked_out",
             Self::GitWorktreeDirty => "git_worktree_dirty",
             Self::GitBranchExists => "git_branch_exists",
+            Self::GitBranchDiverged => "git_branch_diverged",
             // 账号
             Self::AccountNotFound => "account_not_found",
             Self::AccountUnsupportedProvider => "account_unsupported_provider",

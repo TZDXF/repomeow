@@ -300,7 +300,8 @@ export const useProjectsStore = defineStore("projects", () => {
    * 创建 worktree,返回最新 worktree 列表。
    * worktreePath 支持 `{branch}` 占位符与相对路径(后端基于主工作区根解析);
    * createBranch 为 true 时检出新分支(可选 startPoint 基点),
-   * 为 false 时挂载已有分支(本地分支或 origin/xxx 远程分支)
+   * 为 false 时挂载已有分支(本地分支或 origin/xxx 远程分支;远程无本地同名时
+   * 创建跟踪分支,同名时本地落后会先快进对齐,分叉报 git_branch_diverged)
    */
   function addWorktree(
     project: Project,

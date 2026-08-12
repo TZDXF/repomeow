@@ -1051,8 +1051,9 @@ fn resolve_worktree_target(main_root: &str, input: &str, branch: &str) -> PathBu
 
 /// 创建 worktree。create_branch 为 true 时检出新分支
 /// (`git worktree add <dir> -b <branch> [start_point]`,start_point 缺省为 HEAD);
-/// 为 false 时挂载已有分支(`git worktree add <dir> <branch>`,branch 可为
-/// 本地分支或 origin/xxx 远程分支,远程时按 checkout DWIM 自动创建跟踪分支)。
+/// 为 false 时挂载已有分支:本地分支直接挂载;origin/xxx 远程引用在本地无同名分支时
+/// 显式创建跟踪分支(直接传 origin/x 只会得到游离 HEAD,不触发 checkout 式 DWIM),
+/// 本地已有同名分支时按安全快进对齐(见 attach_remote_worktree)。
 /// 分支已被其它 worktree 检出时报 git_branch_checked_out
 #[tauri::command]
 pub async fn git_worktree_add(
@@ -1095,8 +1096,10 @@ fn worktree_add_blocking(
         .first()
         .map(|w| w.path.clone())
         .unwrap_or_else(|| path.to_string());
+    let locals = local_branch_names(path)?;
+    let is_local = locals.iter().any(|b| b == branch);
     // 挂载已有分支时,远程引用(origin/x)落地后的本地名是去掉首段前缀的部分
-    let local_name = if create_branch || local_branch_names(path)?.iter().any(|b| b == branch) {
+    let local_name = if create_branch || is_local {
         branch
     } else {
         branch.split_once('/').map(|(_, s)| s).unwrap_or(branch)
@@ -1107,19 +1110,68 @@ fn worktree_add_blocking(
     let target = resolve_worktree_target(&main_root, input, branch);
     let target_str = target.to_string_lossy().to_string();
     if create_branch {
-        if local_branch_names(path)?.iter().any(|b| b == branch) {
+        if locals.iter().any(|b| b == branch) {
             return Err(AppError::coded(ErrorCode::GitBranchExists, branch));
         }
         match start_point.map(str::trim).filter(|s| !s.is_empty()) {
             Some(base) => run_git(path, &["worktree", "add", &target_str, "-b", branch, base])?,
             None => run_git(path, &["worktree", "add", &target_str, "-b", branch])?,
         };
-    } else {
+    } else if is_local {
         run_git(path, &["worktree", "add", &target_str, branch])?;
+    } else {
+        attach_remote_worktree(path, &target_str, branch, local_name, &locals)?;
     }
     list_worktrees_blocking(path)
 }
 
+/// 挂载远程引用(origin/x)到 worktree。
+/// - 本地无同名分支:`git worktree add --track -b x <dir> origin/x` 显式建跟踪分支
+/// - 本地已有同名分支且可能不同步:本地落后/持平时先 `git branch -f` 对齐到远程提交
+///   再挂载;本地领先(远程是其祖先)直接挂载本地分支;真正分叉时报
+///   git_branch_diverged —— 不静默重置分支,避免本地未推送提交从分支上丢失
+fn attach_remote_worktree(
+    path: &str,
+    target: &str,
+    remote: &str,
+    local_name: &str,
+    locals: &[String],
+) -> AppResult<()> {
+    if locals.iter().any(|b| b == local_name) {
+        if is_ancestor(path, local_name, remote)? {
+            // 落后或持平:对齐到远程提交(持平为 no-op);此时本地分支未被任何
+            // worktree 检出(前置已查),branch -f 安全
+            run_git(path, &["branch", "-f", local_name, remote])?;
+        } else if !is_ancestor(path, remote, local_name)? {
+            return Err(AppError::coded(ErrorCode::GitBranchDiverged, local_name));
+        }
+        run_git(path, &["worktree", "add", target, local_name])?;
+    } else {
+        run_git(
+            path,
+            &["worktree", "add", "--track", "-b", local_name, target, remote],
+        )?;
+    }
+    Ok(())
+}
+
+/// `git merge-base --is-ancestor a b`:a 是否为 b 的祖先(0=是,1=否,其它视为命令失败)
+fn is_ancestor(path: &str, a: &str, b: &str) -> AppResult<bool> {
+    let out = git_command(path)
+        .args(["merge-base", "--is-ancestor", a, b])
+        .output()?;
+    match out.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => {
+            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            Err(AppError::coded(
+                ErrorCode::GitCommandFailed,
+                format!("merge-base --is-ancestor {a} {b}: {stderr}"),
+            ))
+        }
+    }
+}
 /// 删除 worktree(`git worktree remove [--force]`),可选同时删除其检出的本地分支
 /// (force 时用 -D,否则 -d 安全删除;未合并的分支会因 -d 报错,此时 worktree 已删,
 /// 用户可勾选强制重试)。主工作区不可删除。返回最新 worktree 列表
@@ -2681,5 +2733,109 @@ mod tests {
             .any(|b| b == "feature/x"));
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn worktree_add_remote_branch_tracks_or_aligns_local() {
+        // origin:clone_a 推 main 及 feature/topic/hotfix/ahead 四个远程分支(各含 v1 提交)
+        let origin = temp_dir("wt-remote-origin");
+        git(&origin, &["init", "--bare", "-b", "main"]);
+        let clone_a = temp_dir("wt-remote-a");
+        git(&clone_a, &["clone", origin.to_str().unwrap(), "."]);
+        git(&clone_a, &["config", "user.email", "test@example.com"]);
+        git(&clone_a, &["config", "user.name", "test"]);
+        fs::write(clone_a.join("a.txt"), "a").unwrap();
+        git(&clone_a, &["add", "a.txt"]);
+        git(&clone_a, &["commit", "-m", "c1"]);
+        git(&clone_a, &["push", "-u", "origin", "main"]);
+        for (name, file) in [
+            ("feature", "f.txt"),
+            ("topic", "t.txt"),
+            ("hotfix", "h.txt"),
+            ("ahead", "ah.txt"),
+        ] {
+            git(&clone_a, &["checkout", "-b", name, "main"]);
+            fs::write(clone_a.join(file), "v1").unwrap();
+            git(&clone_a, &["add", file]);
+            git(&clone_a, &["commit", "-m", &format!("{name}1")]);
+            git(&clone_a, &["push", "-u", "origin", name]);
+        }
+
+        let clone_b = temp_dir("wt-remote-b");
+        git(&clone_b, &["clone", origin.to_str().unwrap(), "."]);
+        git(&clone_b, &["config", "user.email", "test@example.com"]);
+        git(&clone_b, &["config", "user.name", "test"]);
+        let path_b = clone_b.to_str().unwrap();
+
+        // 1. 本地无同名分支:挂载 origin/feature → 显式创建跟踪分支(而非游离 HEAD)
+        let list =
+            worktree_add_blocking(path_b, ".worktrees/feature", "origin/feature", false, None)
+                .unwrap();
+        let wt = list.iter().find(|w| !w.is_main).unwrap();
+        assert_eq!(wt.branch.as_deref(), Some("feature"));
+        assert!(!wt.detached);
+        assert!(Path::new(&wt.path).join("f.txt").exists());
+        let up = git_command(path_b)
+            .args(["rev-parse", "--abbrev-ref", "feature@{upstream}"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&up.stdout).trim(), "origin/feature");
+
+        // 远程引用落地名已被 worktree 检出 → git_branch_checked_out
+        let occupied =
+            worktree_add_blocking(path_b, ".worktrees/feature2", "origin/feature", false, None)
+                .unwrap_err();
+        assert!(occupied.is_code(ErrorCode::GitBranchCheckedOut));
+
+        // 2. 本地同名分支落后于远程:先快进对齐到远程提交再挂载
+        git(&clone_b, &["branch", "topic", "origin/topic"]);
+        git(&clone_a, &["checkout", "topic"]);
+        fs::write(clone_a.join("t2.txt"), "t2").unwrap();
+        git(&clone_a, &["add", "t2.txt"]);
+        git(&clone_a, &["commit", "-m", "t2"]);
+        git(&clone_a, &["push", "origin", "topic"]);
+        git(&clone_b, &["fetch", "origin"]);
+        let list =
+            worktree_add_blocking(path_b, ".worktrees/topic", "origin/topic", false, None).unwrap();
+        let wt = list.iter().find(|w| w.branch.as_deref() == Some("topic")).unwrap();
+        // 远程新提交在 worktree 中可见,且本地 topic 已对齐 origin/topic
+        assert!(Path::new(&wt.path).join("t2.txt").exists());
+        let local_rev = git_command(path_b).args(["rev-parse", "topic"]).output().unwrap();
+        let remote_rev = git_command(path_b)
+            .args(["rev-parse", "origin/topic"])
+            .output()
+            .unwrap();
+        assert_eq!(local_rev.stdout, remote_rev.stdout);
+
+        // 3. 本地同名分支与远程分叉:报 git_branch_diverged,不静默重置丢本地提交
+        git(&clone_b, &["checkout", "-b", "hotfix", "origin/hotfix"]);
+        fs::write(clone_b.join("local-only.txt"), "l").unwrap();
+        git(&clone_b, &["add", "local-only.txt"]);
+        git(&clone_b, &["commit", "-m", "local-only"]);
+        git(&clone_b, &["checkout", "main"]);
+        git(&clone_a, &["checkout", "hotfix"]);
+        fs::write(clone_a.join("h2.txt"), "h2").unwrap();
+        git(&clone_a, &["add", "h2.txt"]);
+        git(&clone_a, &["commit", "-m", "h2"]);
+        git(&clone_a, &["push", "origin", "hotfix"]);
+        git(&clone_b, &["fetch", "origin"]);
+        let err = worktree_add_blocking(path_b, ".worktrees/hotfix", "origin/hotfix", false, None)
+            .unwrap_err();
+        assert!(err.is_code(ErrorCode::GitBranchDiverged));
+
+        // 4. 本地同名分支领先远程(远程是其祖先):直接挂载本地分支,保留本地提交
+        git(&clone_b, &["checkout", "-b", "ahead", "origin/ahead"]);
+        fs::write(clone_b.join("ahead-local.txt"), "l").unwrap();
+        git(&clone_b, &["add", "ahead-local.txt"]);
+        git(&clone_b, &["commit", "-m", "ahead-local"]);
+        git(&clone_b, &["checkout", "main"]);
+        let list =
+            worktree_add_blocking(path_b, ".worktrees/ahead", "origin/ahead", false, None).unwrap();
+        let wt = list.iter().find(|w| w.branch.as_deref() == Some("ahead")).unwrap();
+        assert!(Path::new(&wt.path).join("ahead-local.txt").exists());
+
+        let _ = fs::remove_dir_all(&origin);
+        let _ = fs::remove_dir_all(&clone_a);
+        let _ = fs::remove_dir_all(&clone_b);
     }
 }

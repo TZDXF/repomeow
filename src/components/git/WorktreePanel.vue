@@ -93,23 +93,18 @@ function remoteShortName(remote: string) {
   return remote.slice(remote.indexOf("/") + 1);
 }
 
-// 已有本地同名分支的远程分支不重复展示(与 GitBranchMenu 一致)
-const remoteOnly = computed(() => {
-  const local = new Set(branches.value.local);
-  return branches.value.remote.filter((r) => !local.has(remoteShortName(r)));
-});
-
 // 已被某个 worktree 检出的分支名(挂载已有分支时不可再选)
 const checkedOutBranches = computed(() => {
   return new Set(worktrees.value.map((w) => w.branch).filter((b): b is string => !!b));
 });
 
-// 可挂载的已有分支:本地/远程均排除已被检出的
+// 可挂载的已有分支:本地/远程均排除已被检出的。远程分支全量列出——本地与远程
+// 可能不同步,同名时两者是不同提交,由用户选择挂载哪一侧(后端按远程语义对齐)
 const attachableLocal = computed(() =>
   branches.value.local.filter((b) => !checkedOutBranches.value.has(b)),
 );
 const attachableRemote = computed(() =>
-  remoteOnly.value.filter((r) => !checkedOutBranches.value.has(remoteShortName(r))),
+  branches.value.remote.filter((r) => !checkedOutBranches.value.has(remoteShortName(r))),
 );
 
 /** 当前选定的挂载分支名(用于目录模板联动与提交校验);
@@ -493,9 +488,9 @@ async function remove() {
                     {{ b }}
                   </SelectItem>
                 </SelectGroup>
-                <SelectGroup v-if="remoteOnly.length">
+                <SelectGroup v-if="branches.remote.length">
                   <SelectLabel>{{ t("git.branch.remote") }}</SelectLabel>
-                  <SelectItem v-for="r in remoteOnly" :key="r" :value="r">
+                  <SelectItem v-for="r in branches.remote" :key="r" :value="r">
                     {{ r }}
                   </SelectItem>
                 </SelectGroup>

@@ -77,6 +77,8 @@ export default {
     git_branch_checked_out: "该分支已在另一个 worktree 中检出，不能重复使用",
     git_worktree_dirty: "该 worktree 存在未提交修改或未跟踪文件，如需删除请勾选强制删除",
     git_branch_exists: "同名分支已存在",
+    git_branch_diverged:
+      "本地同名分支与该远程分支已分叉，无法安全对齐到远程状态；请改选本地分支，或先在终端同步两者",
     // 账号
     account_not_found: "账号不存在",
     account_unsupported_provider: "不支持的平台",

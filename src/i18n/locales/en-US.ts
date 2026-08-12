@@ -83,6 +83,8 @@ export default {
     git_worktree_dirty:
       "This worktree has uncommitted changes or untracked files. Enable force to remove it",
     git_branch_exists: "A branch with this name already exists",
+    git_branch_diverged:
+      "The local branch with the same name has diverged from this remote branch and cannot be aligned safely. Mount the local branch instead, or sync them in a terminal first",
     // account
     account_not_found: "Account not found",
     account_unsupported_provider: "Unsupported provider",
