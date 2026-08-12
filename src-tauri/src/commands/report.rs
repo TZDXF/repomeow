@@ -10,7 +10,7 @@ use std::sync::Arc;
 use chrono::{Datelike, NaiveDate};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Notify;
 
 use crate::db::Db;
@@ -134,6 +134,7 @@ pub struct ReportGeneratedPayload {
 /// 前端在生成报告后自动调用此命令(无需手动操作)。
 #[tauri::command]
 pub fn save_report_history(
+    app: AppHandle,
     db: State<'_, Db>,
     project_ids: Vec<i64>,
     date_from: String,
@@ -169,6 +170,18 @@ pub fn save_report_history(
                 commits_json,
             ],
         )?;
+    }
+
+    // 通知前端刷新(报告历史页日历/列表);与 scheduler 定时生成共用同一事件,
+    // 手动/批量生成没有任务名,schedule_name 置空
+    let payload = ReportGeneratedPayload {
+        schedule_name: String::new(),
+        history_id: report_id,
+        date_from,
+        date_to,
+    };
+    if let Err(e) = app.emit("report://generated", payload) {
+        eprintln!("[report] 发送前端通知失败: {e}");
     }
 
     Ok(report_id)

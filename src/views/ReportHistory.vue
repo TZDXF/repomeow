@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { toast } from "vue-sonner";
@@ -14,6 +14,7 @@ import {
   Tags,
   Trash2,
 } from "@lucide/vue";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import { Markdown, type ControlsConfig } from "vue-stream-markdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,13 +28,18 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import DailyReportDialog from "@/components/report/DailyReportDialog.vue";
 import ReportCalendar from "@/components/report/ReportCalendar.vue";
 import TagCheckList from "@/components/tags/TagCheckList.vue";
-import { cmd } from "@/lib/tauri";
+import { cmd, onListen } from "@/lib/tauri";
 import { formatCommitTime } from "@/lib/format";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
 import { useSettingsStore } from "@/stores/settings";
 import { useProjectsStore } from "@/stores/projects";
 import { useTagsStore } from "@/stores/tags";
-import type { CalendarMeta, ReportHistoryDetail, ReportPeriodType } from "@/types";
+import type {
+  CalendarMeta,
+  ReportGeneratedPayload,
+  ReportHistoryDetail,
+  ReportPeriodType,
+} from "@/types";
 
 type TypeFilter = "all" | ReportPeriodType;
 
@@ -55,6 +61,24 @@ const calendarYear = ref(new Date().getFullYear());
 const calendarMonth = ref(new Date().getMonth() + 1);
 const calendarData = ref<CalendarMeta | null>(null);
 const calendarLoading = ref(false);
+
+/**
+ * 延迟显示的轻量刷新指示:切月/筛选时保留旧数据静默刷新,
+ * 请求超过 200ms 才在日历右上角亮小 spinner,避免全遮罩反复显隐造成闪烁
+ */
+const calendarRefreshing = ref(false);
+let refreshingTimer: ReturnType<typeof setTimeout> | undefined;
+
+watch(calendarLoading, (v) => {
+  if (v) {
+    refreshingTimer = setTimeout(() => {
+      calendarRefreshing.value = true;
+    }, 200);
+  } else {
+    clearTimeout(refreshingTimer);
+    calendarRefreshing.value = false;
+  }
+});
 
 // ── selection ───────────────────────────────────────────────────────────
 
@@ -110,17 +134,27 @@ const reportsLoading = ref(false);
 
 // ── generate report dialog ──────────────────────────────────────────────
 
-/** 右上角「生成报告」弹窗;关闭后刷新日历与列表,让新生成的报告立即可见 */
+/** 右上角「生成报告」弹窗 */
 const reportOpen = ref(false);
 
-watch(reportOpen, (v) => {
-  if (v) {
-    return;
-  }
-  loadCalendarMeta(calendarYear.value, calendarMonth.value);
-  if (selectedDate.value) {
-    loadReports(selectedDate.value);
-  }
+/**
+ * 报告保存成功(手动/批量/定时)后后端会 emit report://generated,
+ * 收到即刷新日历标注与当日列表,新生成的报告立即可见
+ */
+let unlistenReportGenerated: UnlistenFn | undefined;
+
+onMounted(async () => {
+  unlistenReportGenerated = await onListen<ReportGeneratedPayload>("report://generated", () => {
+    loadCalendarMeta(calendarYear.value, calendarMonth.value);
+    if (selectedDate.value) {
+      loadReports(selectedDate.value);
+    }
+  });
+});
+
+onUnmounted(() => {
+  unlistenReportGenerated?.();
+  clearTimeout(refreshingTimer);
 });
 
 // ── expand state ────────────────────────────────────────────────────────
@@ -479,12 +513,17 @@ watch(
 
         <!-- calendar -->
         <div class="relative min-h-0 flex-1">
+          <!-- 仅首次加载(无数据)用全遮罩;后续刷新保留旧数据,避免切月闪烁 -->
           <div
-            v-if="calendarLoading"
+            v-if="calendarLoading && !calendarData"
             class="absolute inset-0 z-10 flex items-center justify-center bg-background/60"
           >
             <Loader2 class="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
+          <Loader2
+            v-else-if="calendarRefreshing"
+            class="absolute right-10 top-2.5 z-10 h-3.5 w-3.5 animate-spin text-muted-foreground"
+          />
           <ScrollArea class="h-full">
             <ReportCalendar
               v-model="selectedDate"
