@@ -4,7 +4,7 @@ import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { toast } from "vue-sonner";
 import { Channel } from "@tauri-apps/api/core";
-import { useVirtualList } from "@vueuse/core";
+import { useElementSize, useVirtualList } from "@vueuse/core";
 import {
   ArrowLeft,
   ChevronDown,
@@ -40,7 +40,8 @@ import {
 } from "@/lib/git-graph";
 import { cmd } from "@/lib/tauri";
 import { useProjectsStore } from "@/stores/projects";
-import type { GitBranches, GitGraphCommit } from "@/types";
+import GitBranchTrackBadges from "@/components/git/GitBranchTrackBadges.vue";
+import type { GitBranches, GitBranchTrack, GitGraphCommit } from "@/types";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -58,7 +59,7 @@ interface GitGraphBatch {
   done: boolean;
 }
 
-const branches = ref<GitBranches>({ local: [], remote: [] });
+const branches = ref<GitBranches>({ local: [], remote: [], tracking: [] });
 const loading = ref(false);
 const loadError = ref("");
 const streamDone = ref(false);
@@ -75,8 +76,8 @@ const currentBranch = computed(() => project.value?.git?.branch ?? "");
 const ROW_H = 32;
 const LANE_W = 16;
 const GRAPH_PAD = 4;
-// 图形区最大宽度按 6 个泳道计,超出后压缩泳道间距而不是继续加宽
-const MAX_GRAPH_LANES = 6;
+const NODE_R = 4;
+const HEADER_H = 32;
 // 流式批次大小(后端钳制 50..2000)
 const BATCH_SIZE = 500;
 
@@ -87,20 +88,11 @@ const edges = shallowRef<GraphEdgeLayout[]>([]);
 const laneCount = ref(1);
 const totalCount = computed(() => nodes.value.length);
 
-/** 单泳道像素间距;泳道数超过上限时等比压缩,保持图形区不超过 6 个泳道宽 */
-const laneSpacing = computed(() =>
-  laneCount.value <= MAX_GRAPH_LANES ? LANE_W : (MAX_GRAPH_LANES * LANE_W) / laneCount.value,
-);
-
-const graphWidth = computed(
-  () => Math.min(laneCount.value, MAX_GRAPH_LANES) * LANE_W + GRAPH_PAD * 2,
-);
-
-/** 节点半径:随压缩后的泳道间距缩小,避免节点互相粘连 */
-const nodeRadius = computed(() => Math.max(Math.min(4, laneSpacing.value / 2 - 1), 1.5));
+/** 图形区自然宽度:泳道间距固定,空间不足时表格横向滚动或裁剪图谱列,而不是压缩泳道 */
+const graphWidth = computed(() => laneCount.value * LANE_W + GRAPH_PAD * 2);
 
 function nodeX(lane: number) {
-  return GRAPH_PAD + lane * laneSpacing.value + laneSpacing.value / 2;
+  return GRAPH_PAD + lane * LANE_W + LANE_W / 2;
 }
 function nodeY(row: number) {
   return row * ROW_H + ROW_H / 2;
@@ -120,6 +112,75 @@ const {
 
 const startIndex = computed(() => visibleNodes.value[0]?.index ?? 0);
 const endIndex = computed(() => visibleNodes.value[visibleNodes.value.length - 1]?.index ?? 0);
+
+// --- 表格列:图谱/描述/作者/提交/日期,拖拽表头分隔条调整列宽 ---
+const COL_MIN_W = { desc: 160, author: 64, commit: 80, date: 96 } as const;
+/** 图谱列最小宽度:至少保留一个泳道的空间(列宽可小于图形自然宽度,超出部分裁剪而非压缩) */
+const GRAPH_COL_MIN_W = LANE_W + GRAPH_PAD * 2;
+/** 显式列宽;graph/desc 为 0 表示自动(图谱列按泳道数、描述列占满剩余宽度) */
+const colWidths = ref({ graph: 0, desc: 0, author: 120, commit: 96, date: 150 });
+
+const { width: containerWidth } = useElementSize(containerProps.ref);
+
+/** 图谱列宽:默认为泳道自然宽度,可拖窄(图形裁剪)或拖宽(留白) */
+const graphColWidth = computed(() =>
+  colWidths.value.graph > 0 ? Math.max(colWidths.value.graph, GRAPH_COL_MIN_W) : graphWidth.value,
+);
+/** 图谱列被拖窄时的水平裁剪:纵向保留 overflow-visible,让穿越可视窗口的长线完整绘制 */
+const graphClipPath = computed(() => {
+  const overflow = graphWidth.value - graphColWidth.value;
+  return overflow > 0 ? `inset(-9999px ${overflow}px -9999px -9999px)` : "none";
+});
+/** 描述列宽:未拖拽过时占满容器剩余宽度,至少保留最小宽度 */
+const descColWidth = computed(() => {
+  if (colWidths.value.desc > 0) {
+    return colWidths.value.desc;
+  }
+  const rest =
+    containerWidth.value -
+    graphColWidth.value -
+    colWidths.value.author -
+    colWidths.value.commit -
+    colWidths.value.date;
+  return Math.max(rest, COL_MIN_W.desc);
+});
+const totalWidth = computed(
+  () =>
+    graphColWidth.value +
+    descColWidth.value +
+    colWidths.value.author +
+    colWidths.value.commit +
+    colWidths.value.date,
+);
+
+type ColKey = keyof typeof colWidths.value;
+
+function colWidth(key: ColKey) {
+  if (key === "graph") {
+    return graphColWidth.value;
+  }
+  if (key === "desc") {
+    return descColWidth.value;
+  }
+  return colWidths.value[key];
+}
+
+/** 拖拽调整列宽:图谱列下限为单个泳道宽度,其余列有各自最小宽度 */
+function startColResize(key: ColKey, e: PointerEvent) {
+  e.preventDefault();
+  const startX = e.clientX;
+  const startW = colWidth(key);
+  const minW = key === "graph" ? GRAPH_COL_MIN_W : COL_MIN_W[key];
+  const onMove = (ev: PointerEvent) => {
+    colWidths.value[key] = Math.max(minW, Math.round(startW + ev.clientX - startX));
+  };
+  const onUp = () => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+}
 
 /** 可视窗口内的连线:edges 按 fromRow 升序,二分截断后按 toRow 过滤(保留穿越窗口的长线) */
 const visibleEdges = computed(() => {
@@ -285,6 +346,19 @@ function branchRows(names: string[], prefix: string): BranchTreeRow[] {
 
 const localRows = computed(() => branchRows(branches.value.local, "local"));
 const remoteRows = computed(() => branchRows(branches.value.remote, "remote"));
+
+/** 分支名 → upstream 跟踪差值(只收录配置了 upstream 的本地分支) */
+const trackByName = computed(() => {
+  const m = new Map<string, GitBranchTrack>();
+  for (const tr of branches.value.tracking) {
+    m.set(tr.name, tr);
+  }
+  return m;
+});
+
+function trackOf(branch: string | null) {
+  return branch ? trackByName.value.get(branch) : undefined;
+}
 
 /** 行点击:叶子分支选中定位;目录行(本身不是分支)切换折叠 */
 function onBranchRowClick(prefix: string, row: BranchTreeRow) {
@@ -605,10 +679,16 @@ async function copyHash(hash: string) {
                 />
                 <GitBranch v-else class="h-3 w-3 shrink-0 text-muted-foreground" />
                 <span class="truncate">{{ row.node.name }}</span>
-                <span
-                  v-if="row.node.branch === currentBranch"
-                  class="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-green-500"
-                />
+                <span class="ml-auto flex shrink-0 items-center gap-1.5">
+                  <GitBranchTrackBadges
+                    :ahead="trackOf(row.node.branch)?.ahead ?? 0"
+                    :behind="trackOf(row.node.branch)?.behind ?? 0"
+                  />
+                  <span
+                    v-if="row.node.branch === currentBranch"
+                    class="h-1.5 w-1.5 shrink-0 rounded-full bg-green-500"
+                  />
+                </span>
               </button>
             </template>
           </template>
@@ -713,14 +793,76 @@ async function copyHash(hash: string) {
         </div>
 
         <template v-else>
-          <div class="relative" :style="{ height: `${totalCount * ROW_H}px` }">
-            <!-- 泳道连线与节点(SVG 只覆盖可视窗口;overflow-visible 让穿越窗口的长线完整绘制) -->
+          <!-- 表头:列名 + 拖拽分隔条调整列宽(图谱列可拖窄,图形裁剪而非压缩) -->
+          <div
+            class="sticky top-0 z-20 flex items-center border-b bg-background text-xs font-medium text-muted-foreground"
+            :style="{ width: `${totalWidth}px`, height: `${HEADER_H}px` }"
+          >
+            <div
+              class="relative flex h-full items-center px-2"
+              :style="{ width: `${graphColWidth}px` }"
+            >
+              {{ t("git.graph.columns.graph") }}
+              <span
+                class="absolute top-0 right-0 h-full w-1.5 cursor-col-resize transition-colors hover:bg-primary/50"
+                @pointerdown="startColResize('graph', $event)"
+              />
+            </div>
+            <div
+              class="relative flex h-full items-center border-l px-2"
+              :style="{ width: `${descColWidth}px` }"
+            >
+              {{ t("git.graph.columns.description") }}
+              <span
+                class="absolute top-0 right-0 h-full w-1.5 cursor-col-resize transition-colors hover:bg-primary/50"
+                @pointerdown="startColResize('desc', $event)"
+              />
+            </div>
+            <div
+              class="relative flex h-full items-center border-l px-2"
+              :style="{ width: `${colWidths.author}px` }"
+            >
+              {{ t("git.graph.columns.author") }}
+              <span
+                class="absolute top-0 right-0 h-full w-1.5 cursor-col-resize transition-colors hover:bg-primary/50"
+                @pointerdown="startColResize('author', $event)"
+              />
+            </div>
+            <div
+              class="relative flex h-full items-center border-l px-2"
+              :style="{ width: `${colWidths.commit}px` }"
+            >
+              {{ t("git.graph.columns.commit") }}
+              <span
+                class="absolute top-0 right-0 h-full w-1.5 cursor-col-resize transition-colors hover:bg-primary/50"
+                @pointerdown="startColResize('commit', $event)"
+              />
+            </div>
+            <div
+              class="relative flex h-full items-center border-l px-2"
+              :style="{ width: `${colWidths.date}px` }"
+            >
+              {{ t("git.graph.columns.date") }}
+              <span
+                class="absolute top-0 right-0 h-full w-1.5 cursor-col-resize transition-colors hover:bg-primary/50"
+                @pointerdown="startColResize('date', $event)"
+              />
+            </div>
+          </div>
+
+          <div
+            class="relative"
+            :style="{ height: `${totalCount * ROW_H}px`, width: `${totalWidth}px` }"
+          >
+            <!-- 泳道连线与节点(SVG 只覆盖可视窗口;overflow-visible 让穿越窗口的长线完整绘制;
+                 图谱列被拖窄时经 clip-path 只做水平裁剪,泳道间距不变) -->
             <svg
               class="pointer-events-none absolute left-0 overflow-visible"
               :style="{
                 top: `${svgOffsetY}px`,
                 width: `${graphWidth}px`,
                 height: `${(endIndex - startIndex + 1) * ROW_H}px`,
+                clipPath: graphClipPath,
               }"
             >
               <path
@@ -736,7 +878,7 @@ async function copyHash(hash: string) {
                   v-if="n.commit.is_head"
                   :cx="nodeX(n.lane)"
                   :cy="nodeYRel(index)"
-                  :r="nodeRadius + 2.5"
+                  :r="NODE_R + 2.5"
                   fill="none"
                   :stroke="laneColor(n.color)"
                   stroke-width="1.5"
@@ -744,7 +886,7 @@ async function copyHash(hash: string) {
                 <circle
                   :cx="nodeX(n.lane)"
                   :cy="nodeYRel(index)"
-                  :r="selected?.hash === n.commit.hash ? nodeRadius + 1 : nodeRadius"
+                  :r="selected?.hash === n.commit.hash ? NODE_R + 1 : NODE_R"
                   :fill="laneColor(n.color)"
                   class="stroke-background"
                   stroke-width="2"
@@ -752,11 +894,11 @@ async function copyHash(hash: string) {
               </template>
             </svg>
 
-            <!-- 提交信息行(虚拟列表,仅渲染可视窗口内的行) -->
+            <!-- 提交信息行(虚拟列表,仅渲染可视窗口内的行;单元格宽度与表头列一致) -->
             <div
               v-for="{ data: n, index } in visibleNodes"
               :key="n.commit.hash"
-              class="absolute right-0 left-0 flex cursor-pointer items-center gap-2 bg-clip-content pr-4 transition-colors hover:bg-accent/60"
+              class="absolute left-0 flex cursor-pointer items-center transition-colors hover:bg-accent/60"
               :class="
                 selected?.hash === n.commit.hash
                   ? 'bg-accent'
@@ -767,41 +909,61 @@ async function copyHash(hash: string) {
               :style="{
                 top: `${index * ROW_H}px`,
                 height: `${ROW_H}px`,
-                paddingLeft: `${graphWidth + 8}px`,
+                width: `${totalWidth}px`,
               }"
               @click="toggleSelect(n.commit)"
             >
-              <Badge
-                v-if="n.commit.is_head"
-                variant="default"
-                class="h-5 shrink-0 px-1.5 text-[10px]"
+              <!-- 图谱列占位:节点与连线由 SVG 覆盖绘制 -->
+              <div class="h-full shrink-0" :style="{ width: `${graphColWidth}px` }" />
+              <div
+                class="flex h-full min-w-0 shrink-0 items-center gap-2 overflow-hidden px-2"
+                :style="{ width: `${descColWidth}px` }"
               >
-                HEAD
-              </Badge>
-              <template v-for="r in n.commit.refs" :key="r">
                 <Badge
-                  v-if="isTag(r)"
-                  variant="outline"
-                  class="h-5 max-w-40 shrink-0 gap-1 px-1.5 text-[10px] text-amber-600 dark:text-amber-400"
+                  v-if="n.commit.is_head"
+                  variant="default"
+                  class="h-5 shrink-0 px-1.5 text-[10px]"
                 >
-                  <TagIcon class="h-2.5 w-2.5 shrink-0" />
-                  <span class="truncate">{{ tagName(r) }}</span>
+                  HEAD
                 </Badge>
-                <Badge
-                  v-else
-                  variant="secondary"
-                  class="h-5 max-w-40 shrink-0 gap-1 px-1.5 text-[10px]"
-                >
-                  <GitBranch class="h-2.5 w-2.5 shrink-0" />
-                  <span class="truncate">{{ r }}</span>
-                </Badge>
-              </template>
-              <span class="min-w-0 flex-1 truncate text-sm">{{ n.commit.subject }}</span>
-              <span class="shrink-0 text-xs text-muted-foreground">{{ n.commit.author }}</span>
-              <span class="shrink-0 font-mono text-xs text-muted-foreground">
+                <template v-for="r in n.commit.refs" :key="r">
+                  <Badge
+                    v-if="isTag(r)"
+                    variant="outline"
+                    class="h-5 max-w-40 shrink-0 gap-1 px-1.5 text-[10px] text-amber-600 dark:text-amber-400"
+                  >
+                    <TagIcon class="h-2.5 w-2.5 shrink-0" />
+                    <span class="truncate">{{ tagName(r) }}</span>
+                  </Badge>
+                  <Badge
+                    v-else
+                    variant="secondary"
+                    class="h-5 max-w-40 shrink-0 gap-1 px-1.5 text-[10px]"
+                  >
+                    <GitBranch class="h-2.5 w-2.5 shrink-0" />
+                    <span class="truncate">{{ r }}</span>
+                  </Badge>
+                </template>
+                <span class="min-w-0 flex-1 truncate text-sm">{{ n.commit.subject }}</span>
+              </div>
+              <span
+                class="shrink-0 truncate px-2 text-xs text-muted-foreground"
+                :style="{ width: `${colWidths.author}px` }"
+              >
+                {{ n.commit.author }}
+              </span>
+              <span
+                class="shrink-0 truncate px-2 font-mono text-xs text-muted-foreground"
+                :style="{ width: `${colWidths.commit}px` }"
+              >
                 {{ shortHash(n.commit.hash) }}
               </span>
-              <span class="shrink-0 text-xs text-muted-foreground">{{ n.commit.date }}</span>
+              <span
+                class="shrink-0 truncate px-2 text-xs text-muted-foreground"
+                :style="{ width: `${colWidths.date}px` }"
+              >
+                {{ n.commit.date }}
+              </span>
             </div>
           </div>
 

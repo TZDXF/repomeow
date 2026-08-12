@@ -372,6 +372,8 @@ export default {
       creating: "创建中...",
       switched: "已切换到分支「{name}」",
       createBaseLabel: "基于分支",
+      aheadCount: "领先远端 {n} 个提交",
+      behindCount: "落后远端 {n} 个提交",
     },
     graph: {
       title: "提交图谱",
@@ -400,6 +402,13 @@ export default {
       loadingMore: "正在加载全部提交,已加载 {count} 条",
       collapseSidebar: "收起列表",
       expandSidebar: "展开列表",
+      columns: {
+        graph: "图谱",
+        description: "描述",
+        author: "作者",
+        commit: "提交",
+        date: "日期",
+      },
     },
     conflict: {
       title: "存在合并冲突",

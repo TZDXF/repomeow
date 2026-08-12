@@ -98,6 +98,77 @@ watch(placeholder, (val) => {
   emit("month-change", val.year, val.month);
 });
 
+// ── 年/月选择视图(点击标题逐级下钻:日 → 月 → 年)──────────────────────────
+
+type CalendarView = "days" | "months" | "years";
+const view = ref<CalendarView>("days");
+
+/** 月份短标签(1月..12月 / Jan..Dec),用 Intl 生成,无需新增 i18n 词条 */
+const monthLabels = computed(() => {
+  const fmt = new Intl.DateTimeFormat(settings.language, { month: "short" });
+  return Array.from({ length: 12 }, (_, i) => fmt.format(new Date(2024, i, 1)));
+});
+
+/** 月选择视图标题:仅年份(zh 显示「2026年」,en 显示「2026」) */
+const yearLabel = computed(() =>
+  new Intl.DateTimeFormat(settings.language, { year: "numeric" }).format(
+    new Date(placeholder.value.year, 0, 1),
+  ),
+);
+
+/** 年选择视图:当前年所在十年为核心,前后各扩 1 年共 12 格(首尾两格淡化) */
+const decadeStart = computed(() => Math.floor(placeholder.value.year / 10) * 10);
+const yearCells = computed(() => Array.from({ length: 12 }, (_, i) => decadeStart.value - 1 + i));
+
+/** 月/年视图下的左右翻页:月视图 ±1 年,年视图 ±10 年 */
+function shiftView(dir: 1 | -1) {
+  placeholder.value =
+    view.value === "months"
+      ? placeholder.value.add({ years: dir })
+      : placeholder.value.add({ years: dir * 10 });
+}
+
+function pickMonth(month: number) {
+  placeholder.value = placeholder.value.set({ month });
+  view.value = "days";
+}
+
+function pickYear(year: number) {
+  placeholder.value = placeholder.value.set({ year });
+  view.value = "months";
+}
+
+/** 高亮规则:已选日期所在月/年铺底色,今天所在月/年标主色 */
+function monthCellClass(month: number): string {
+  const sel = innerValue.value;
+  const now = today(getLocalTimeZone());
+  const y = placeholder.value.year;
+  const classes: string[] = [];
+  if (sel && sel.year === y && sel.month === month) {
+    classes.push("bg-primary/10 font-medium");
+  }
+  if (now.year === y && now.month === month) {
+    classes.push("text-primary");
+  }
+  return classes.join(" ");
+}
+
+function yearCellClass(year: number): string {
+  const sel = innerValue.value;
+  const now = today(getLocalTimeZone());
+  const classes: string[] = [];
+  if (year < decadeStart.value || year > decadeStart.value + 9) {
+    classes.push("text-muted-foreground/50");
+  }
+  if (sel && sel.year === year) {
+    classes.push("bg-primary/10 font-medium");
+  }
+  if (now.year === year) {
+    classes.push("text-primary");
+  }
+  return classes.join(" ");
+}
+
 // ── helpers ─────────────────────────────────────────────────────────────
 
 function getDayClass(dv: DateValue): string {
@@ -156,21 +227,89 @@ function asDateValue(dv: any): DateValue {
   >
     <CalendarHeader class="mb-1">
       <nav class="absolute inset-x-0 top-0 flex items-center justify-between px-1">
+        <!-- 日视图用 reka 自带翻页(处理禁用态);月/年视图直接改 placeholder -->
         <CalendarPrevButton
+          v-if="view === 'days'"
           class="size-7 bg-transparent p-0 opacity-50 hover:opacity-100 border rounded-md inline-flex items-center justify-center"
         >
           <ChevronLeft class="size-4" />
         </CalendarPrevButton>
+        <button
+          v-else
+          type="button"
+          class="size-7 bg-transparent p-0 opacity-50 hover:opacity-100 border rounded-md inline-flex items-center justify-center"
+          @click="shiftView(-1)"
+        >
+          <ChevronLeft class="size-4" />
+        </button>
         <CalendarNextButton
+          v-if="view === 'days'"
           class="size-7 bg-transparent p-0 opacity-50 hover:opacity-100 border rounded-md inline-flex items-center justify-center"
         >
           <ChevronRight class="size-4" />
         </CalendarNextButton>
+        <button
+          v-else
+          type="button"
+          class="size-7 bg-transparent p-0 opacity-50 hover:opacity-100 border rounded-md inline-flex items-center justify-center"
+          @click="shiftView(1)"
+        >
+          <ChevronRight class="size-4" />
+        </button>
       </nav>
-      <CalendarHeading class="text-sm font-medium" />
+      <!-- 标题逐级下钻:日(年月) → 月(年) → 年(十年区间,到顶不可再点) -->
+      <CalendarHeading v-if="view === 'days'" v-slot="{ headingValue }" as-child>
+        <button
+          type="button"
+          class="text-sm font-medium rounded-md px-2 py-0.5 hover:bg-accent"
+          @click="view = 'months'"
+        >
+          {{ headingValue }}
+        </button>
+      </CalendarHeading>
+      <button
+        v-else-if="view === 'months'"
+        type="button"
+        class="text-sm font-medium rounded-md px-2 py-0.5 hover:bg-accent"
+        @click="view = 'years'"
+      >
+        {{ yearLabel }}
+      </button>
+      <div v-else class="text-sm font-medium px-2 py-0.5">
+        {{ decadeStart }}–{{ decadeStart + 9 }}
+      </div>
     </CalendarHeader>
 
-    <CalendarGrid v-for="month in grid" :key="month.value.toString()">
+    <!-- 月选择视图:12 个月,选中后回到日视图 -->
+    <div v-if="view === 'months'" class="grid grid-cols-3 gap-1 p-1">
+      <button
+        v-for="(label, i) in monthLabels"
+        :key="i"
+        type="button"
+        class="flex h-9 items-center justify-center rounded-md text-sm hover:bg-accent"
+        :class="monthCellClass(i + 1)"
+        @click="pickMonth(i + 1)"
+      >
+        {{ label }}
+      </button>
+    </div>
+
+    <!-- 年选择视图:十年区间 12 格,选中后进入月选择 -->
+    <div v-else-if="view === 'years'" class="grid grid-cols-3 gap-1 p-1">
+      <button
+        v-for="y in yearCells"
+        :key="y"
+        type="button"
+        class="flex h-9 items-center justify-center rounded-md text-sm hover:bg-accent"
+        :class="yearCellClass(y)"
+        @click="pickYear(y)"
+      >
+        {{ y }}
+      </button>
+    </div>
+
+    <!-- 日视图保持挂载(v-show),避免来回切换时 reka 网格状态重建 -->
+    <CalendarGrid v-for="month in grid" v-show="view === 'days'" :key="month.value.toString()">
       <CalendarGridHead>
         <CalendarGridRow>
           <CalendarHeadCell

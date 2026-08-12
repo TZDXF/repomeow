@@ -33,7 +33,7 @@ const initialOp = defineModel<"merge" | "rebase">("initialOp", { default: "merge
 
 const store = useProjectsStore();
 
-const branches = ref<GitBranches>({ local: [], remote: [] });
+const branches = ref<GitBranches>({ local: [], remote: [], tracking: [] });
 const source = ref("");
 const op = ref<BranchOp>("merge");
 const running = ref(false);

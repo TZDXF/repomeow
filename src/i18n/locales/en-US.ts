@@ -384,6 +384,8 @@ export default {
       creating: "Creating...",
       switched: 'Switched to branch "{name}"',
       createBaseLabel: "Based on branch",
+      aheadCount: "Ahead of remote by {n}",
+      behindCount: "Behind remote by {n}",
     },
     graph: {
       title: "Commit Graph",
@@ -412,6 +414,13 @@ export default {
       loadingMore: "Loading full history, {count} commits loaded",
       collapseSidebar: "Collapse list",
       expandSidebar: "Expand list",
+      columns: {
+        graph: "Graph",
+        description: "Description",
+        author: "Author",
+        commit: "Commit",
+        date: "Date",
+      },
     },
     conflict: {
       title: "Merge conflicts",

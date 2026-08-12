@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/select";
 import { useProjectsStore } from "@/stores/projects";
 import GitBranchOpsDialog from "@/components/git/GitBranchOpsDialog.vue";
+import GitBranchTrackBadges from "@/components/git/GitBranchTrackBadges.vue";
 import type { GitBranches, Project } from "@/types";
 
 const { t } = useI18n();
@@ -38,7 +39,7 @@ const props = defineProps<{ project: Project }>();
 const store = useProjectsStore();
 
 const open = ref(false);
-const branches = ref<GitBranches>({ local: [], remote: [] });
+const branches = ref<GitBranches>({ local: [], remote: [], tracking: [] });
 const loading = ref(false);
 const switching = ref(false);
 
@@ -56,6 +57,15 @@ function openOps(op: "merge" | "rebase") {
   opsInitialOp.value = op;
   opsOpen.value = true;
 }
+
+/** 分支名 → upstream 跟踪差值 */
+const trackByName = computed(() => {
+  const m = new Map<string, { ahead: number; behind: number }>();
+  for (const tr of branches.value.tracking) {
+    m.set(tr.name, { ahead: tr.ahead, behind: tr.behind });
+  }
+  return m;
+});
 
 /** 远程分支去掉远端名前缀: "origin/team/x" -> "team/x" */
 function remoteShortName(remote: string) {
@@ -156,6 +166,11 @@ async function createBranch() {
           <Check v-if="b === project.git?.branch" class="h-3.5 w-3.5 shrink-0 text-primary" />
           <span v-else class="h-3.5 w-3.5 shrink-0" />
           <span class="truncate">{{ b }}</span>
+          <GitBranchTrackBadges
+            class="ml-auto"
+            :ahead="trackByName.get(b)?.ahead ?? 0"
+            :behind="trackByName.get(b)?.behind ?? 0"
+          />
         </DropdownMenuItem>
         <template v-if="remoteOnly.length">
           <DropdownMenuSeparator />

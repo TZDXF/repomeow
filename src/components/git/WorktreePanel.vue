@@ -51,7 +51,7 @@ const settings = useSettingsStore();
 
 const worktrees = ref<GitWorktree[]>([]);
 const loading = ref(false);
-const branches = ref<GitBranches>({ local: [], remote: [] });
+const branches = ref<GitBranches>({ local: [], remote: [], tracking: [] });
 
 // --- 新建 worktree 表单 ---
 const createOpen = ref(false);

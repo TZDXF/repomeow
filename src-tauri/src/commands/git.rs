@@ -13,8 +13,9 @@ use crate::commands::account;
 use crate::db::Db;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::{
-    GitBranches, GitCommitContext, GitCommitInfo, GitGraphBatch, GitGraphCommit, GitMergeResult,
-    GitPullResult, GitRebaseResult, GitStatus, GitUntrackedFile, GitUser, GitWorktree,
+    GitBranchTrack, GitBranches, GitCommitContext, GitCommitInfo, GitGraphBatch, GitGraphCommit,
+    GitMergeResult, GitPullResult, GitRebaseResult, GitStatus, GitUntrackedFile, GitUser,
+    GitWorktree,
 };
 
 /// 后台 fetch 并发上限(超出排队)
@@ -733,6 +734,77 @@ fn local_branch_names(path: &str) -> AppResult<Vec<String>> {
         .collect())
 }
 
+/// 解析 `%(upstream:track)` 的输出:`[ahead 2, behind 3]` / `[ahead 1]` / `[behind 5]` / `[gone]` / 空。
+/// for-each-ref 是 plumbing,该格式硬编码不受本地化影响;gone/空 均返回 (0, 0)
+fn parse_upstream_track(track: &str) -> (u32, u32) {
+    let mut ahead = 0;
+    let mut behind = 0;
+    let inner = track.trim().trim_start_matches('[').trim_end_matches(']');
+    for part in inner.split(',') {
+        let mut segs = part.trim().split_whitespace();
+        let Some(word) = segs.next() else { continue };
+        let num: u32 = segs.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        match word {
+            "ahead" => ahead = num,
+            "behind" => behind = num,
+            _ => {}
+        }
+    }
+    (ahead, behind)
+}
+
+/// 本地分支名 + upstream 跟踪差值,一次 for-each-ref 取全。
+/// 与 local_branch_names 同样不用 %(refname:short)(同名 remote 消歧问题);
+/// upstream 取完整 refname 自行剥前缀,避免 %(upstream:short) 的同类歧义
+fn local_branches_with_tracking(path: &str) -> AppResult<(Vec<String>, Vec<GitBranchTrack>)> {
+    let out = run_git(
+        path,
+        &[
+            "for-each-ref",
+            "--format=%(refname)%09%(upstream)%09%(upstream:track)",
+            "refs/heads",
+        ],
+    )?;
+    let mut names = Vec::new();
+    let mut tracking = Vec::new();
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let mut cols = line.split('\t');
+        let Some(name) = cols
+            .next()
+            .and_then(|r| r.trim().strip_prefix("refs/heads/"))
+        else {
+            continue;
+        };
+        names.push(name.to_string());
+        let upstream_ref = cols.next().unwrap_or("").trim();
+        if upstream_ref.is_empty() {
+            continue; // 无 upstream 的分支不收录
+        }
+        let track = cols.next().unwrap_or("");
+        if track.trim() == "[gone]" {
+            tracking.push(GitBranchTrack {
+                name: name.to_string(),
+                upstream: None,
+                ahead: 0,
+                behind: 0,
+            });
+            continue;
+        }
+        let upstream = upstream_ref
+            .strip_prefix("refs/remotes/")
+            .or_else(|| upstream_ref.strip_prefix("refs/heads/"))
+            .unwrap_or(upstream_ref);
+        let (ahead, behind) = parse_upstream_track(track);
+        tracking.push(GitBranchTrack {
+            name: name.to_string(),
+            upstream: Some(upstream.to_string()),
+            ahead,
+            behind,
+        });
+    }
+    Ok((names, tracking))
+}
+
 #[tauri::command]
 pub async fn list_git_branches(path: String) -> AppResult<GitBranches> {
     run_blocking(move || list_branches_blocking(&path)).await
@@ -758,9 +830,11 @@ fn list_branches_blocking(path: &str) -> AppResult<GitBranches> {
             }
         })
         .collect();
+    let (local, tracking) = local_branches_with_tracking(path)?;
     Ok(GitBranches {
-        local: local_branch_names(path)?,
+        local,
         remote,
+        tracking,
     })
 }
 
@@ -2348,6 +2422,74 @@ mod tests {
 
         let _ = fs::remove_dir_all(&origin);
         let _ = fs::remove_dir_all(&clone);
+    }
+
+    #[test]
+    fn parse_upstream_track_formats() {
+        assert_eq!(parse_upstream_track("[ahead 2, behind 3]"), (2, 3));
+        assert_eq!(parse_upstream_track("[ahead 1]"), (1, 0));
+        assert_eq!(parse_upstream_track("[behind 5]"), (0, 5));
+        assert_eq!(parse_upstream_track("[gone]"), (0, 0));
+        assert_eq!(parse_upstream_track(""), (0, 0));
+    }
+
+    #[test]
+    fn list_branches_reports_upstream_tracking() {
+        let origin = temp_dir("track-origin");
+        git(&origin, &["init", "--bare", "-b", "main"]);
+
+        let clone_a = temp_dir("track-a");
+        git(&clone_a, &["clone", origin.to_str().unwrap(), "."]);
+        git(&clone_a, &["config", "user.email", "test@example.com"]);
+        git(&clone_a, &["config", "user.name", "test"]);
+        fs::write(clone_a.join("a.txt"), "a").unwrap();
+        git(&clone_a, &["add", "a.txt"]);
+        git(&clone_a, &["commit", "-m", "c1"]);
+        git(&clone_a, &["push", "-u", "origin", "main"]);
+
+        // feature 跟踪 origin/main;local-only 无 upstream
+        git(&clone_a, &["branch", "--track", "feature", "origin/main"]);
+        git(&clone_a, &["branch", "local-only"]);
+        // main 本地多一个未推送提交
+        fs::write(clone_a.join("a.txt"), "a2").unwrap();
+        git(&clone_a, &["commit", "-am", "c2"]);
+
+        // 另一 clone 推进 origin/main,使 main 分叉、feature 落后
+        let clone_b = temp_dir("track-b");
+        git(&clone_b, &["clone", origin.to_str().unwrap(), "."]);
+        git(&clone_b, &["config", "user.email", "test@example.com"]);
+        git(&clone_b, &["config", "user.name", "test"]);
+        fs::write(clone_b.join("b.txt"), "b").unwrap();
+        git(&clone_b, &["add", "b.txt"]);
+        git(&clone_b, &["commit", "-m", "c3"]);
+        git(&clone_b, &["push"]);
+        git(&clone_a, &["fetch", "origin"]);
+
+        // aheady 基于最新 origin/main 再提交一个:只领先不落后
+        git(&clone_a, &["checkout", "-b", "aheady", "origin/main"]);
+        fs::write(clone_a.join("c.txt"), "c").unwrap();
+        git(&clone_a, &["add", "c.txt"]);
+        git(&clone_a, &["commit", "-m", "c4"]);
+        git(&clone_a, &["checkout", "main"]);
+
+        let branches = list_branches_blocking(clone_a.to_str().unwrap()).unwrap();
+        let track = |name: &str| branches.tracking.iter().find(|t| t.name == name).cloned();
+
+        let main = track("main").expect("main 应有 tracking");
+        assert_eq!(main.upstream.as_deref(), Some("origin/main"));
+        assert_eq!((main.ahead, main.behind), (1, 1));
+
+        let feature = track("feature").expect("feature 应有 tracking");
+        assert_eq!((feature.ahead, feature.behind), (0, 1));
+
+        let aheady = track("aheady").expect("aheady 应有 tracking");
+        assert_eq!((aheady.ahead, aheady.behind), (1, 0));
+
+        assert!(track("local-only").is_none(), "无 upstream 的分支不收录");
+
+        let _ = fs::remove_dir_all(&origin);
+        let _ = fs::remove_dir_all(&clone_a);
+        let _ = fs::remove_dir_all(&clone_b);
     }
 
     #[test]

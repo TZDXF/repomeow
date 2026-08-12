@@ -27,10 +27,21 @@ export interface GitPullResult {
   conflicts: string[];
 }
 
-/** 本地/远程分支列表(remote 不含 origin/HEAD 这类符号引用) */
+/** 本地分支与其 upstream 的跟踪差值(ahead=领先远端,behind=落后远端) */
+export interface GitBranchTrack {
+  /** 本地分支名(与 GitBranches.local 中一致) */
+  name: string;
+  /** upstream 短名(如 origin/dev);upstream 已删除时为 null */
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+}
+
+/** 本地/远程分支列表(remote 不含 origin/HEAD 这类符号引用;tracking 只收录配置了 upstream 的本地分支) */
 export interface GitBranches {
   local: string[];
   remote: string[];
+  tracking: GitBranchTrack[];
 }
 
 /** 一个 git worktree(来自 `git worktree list --porcelain`) */
