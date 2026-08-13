@@ -418,6 +418,8 @@ export default {
         filesCount: "变动文件({count})",
         showTree: "树形展示",
         showFlat: "平铺展示",
+        layoutSplit: "左右布局(diff 单独一列)",
+        layoutStack: "上下布局",
         openInIde: "在编辑器中打开",
         selectFile: "选择左侧文件查看变动内容",
         diffTruncated: "已截断",

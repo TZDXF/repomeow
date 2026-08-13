@@ -5,6 +5,7 @@ import { toast } from "vue-sonner";
 import { useLocalStorage } from "@vueuse/core";
 import {
   ChevronRight,
+  Columns2,
   Copy,
   ExternalLink,
   Folder,
@@ -13,6 +14,7 @@ import {
   List,
   Loader2,
   PanelRightClose,
+  Rows2,
   Tag as TagIcon,
 } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
@@ -233,20 +235,33 @@ function statusClass(status: string) {
   }
 }
 
-// --- 文件列表 / diff 区上下分高(拖拽调整) ---
+// --- 布局:vertical = 列表在上 diff 在下;horizontal = 列表与 diff 左右分列(diff 单独一列) ---
+/** 布局切换(持久化) */
+const layout = useLocalStorage<"vertical" | "horizontal">(
+  "repomeow:commit-detail-layout",
+  "vertical",
+);
+
+// --- 文件列表 / diff 区分隔拖拽:上下布局调列表高度,左右布局调列表宽度 ---
 const listHeight = useLocalStorage("repomeow:commit-detail-list-h", 240);
+const listWidth = useLocalStorage("repomeow:commit-detail-list-w", 280);
 const LIST_MIN_H = 120;
 const LIST_MAX_H = 600;
+const LIST_MIN_W = 180;
+const LIST_MAX_W = 560;
 
 function startListResize(e: PointerEvent) {
   e.preventDefault();
-  const startY = e.clientY;
-  const startH = listHeight.value;
+  const horizontal = layout.value === "horizontal";
+  const startPos = horizontal ? e.clientX : e.clientY;
+  const startSize = horizontal ? listWidth.value : listHeight.value;
   const onMove = (ev: PointerEvent) => {
-    listHeight.value = Math.min(
-      LIST_MAX_H,
-      Math.max(LIST_MIN_H, Math.round(startH + ev.clientY - startY)),
-    );
+    const size = Math.round(startSize + (horizontal ? ev.clientX : ev.clientY) - startPos);
+    if (horizontal) {
+      listWidth.value = Math.min(LIST_MAX_W, Math.max(LIST_MIN_W, size));
+    } else {
+      listHeight.value = Math.min(LIST_MAX_H, Math.max(LIST_MIN_H, size));
+    }
   };
   const onUp = () => {
     window.removeEventListener("pointermove", onMove);
@@ -308,189 +323,221 @@ function startListResize(e: PointerEvent) {
       </div>
     </div>
 
-    <!-- 文件列表:平铺 / 树形切换 -->
-    <div class="flex shrink-0 flex-col" :style="{ height: `${listHeight}px` }">
-      <div class="flex shrink-0 items-center justify-between border-b px-3 py-1.5">
-        <span class="text-xs font-medium text-muted-foreground">
-          {{ t("git.graph.detail.filesCount", { count: files.length }) }}
-        </span>
-        <button
-          class="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          :title="t(treeMode ? 'git.graph.detail.showFlat' : 'git.graph.detail.showTree')"
-          @click="treeMode = !treeMode"
-        >
-          <List v-if="treeMode" class="h-3.5 w-3.5" />
-          <FolderTree v-else class="h-3.5 w-3.5" />
-        </button>
-      </div>
-
-      <div class="min-h-0 flex-1 overflow-auto py-1">
-        <div v-if="filesLoading" class="flex h-full items-center justify-center">
-          <Loader2 class="h-4 w-4 animate-spin text-muted-foreground" />
-        </div>
-        <p v-else-if="filesError" class="px-3 py-2 text-xs text-destructive">
-          {{ t("git.graph.detail.filesLoadFailed") }}:{{ filesError }}
-        </p>
-        <p v-else-if="!files.length" class="px-3 py-2 text-xs text-muted-foreground">
-          {{ t(isMerge ? "git.graph.detail.mergeCommit" : "git.graph.detail.emptyFiles") }}
-        </p>
-
-        <!-- 平铺 -->
-        <template v-else-if="!treeMode">
-          <div
-            v-for="file in files"
-            :key="file.path"
-            class="group flex w-full cursor-pointer items-center gap-1.5 px-3 py-1 text-xs transition-colors hover:bg-accent/60"
-            :class="selectedPath === file.path ? 'bg-accent' : ''"
-            @click="selectFile(file)"
-          >
-            <span class="w-3 shrink-0 font-mono font-semibold" :class="statusClass(file.status)">
-              {{ file.status }}
-            </span>
-            <span class="min-w-0 flex-1 truncate font-mono" :title="file.path">
-              <template v-if="file.old_path">{{ file.old_path }} → </template>{{ file.path }}
-            </span>
-            <span v-if="file.additions != null" class="shrink-0 text-green-600 dark:text-green-400">
-              +{{ file.additions }}
-            </span>
-            <span v-if="file.deletions != null" class="shrink-0 text-red-600 dark:text-red-400">
-              -{{ file.deletions }}
-            </span>
+    <!-- 主体:上下布局(列表在上 diff 在下)/ 左右布局(diff 单独一列) -->
+    <div class="flex min-h-0 flex-1" :class="layout === 'horizontal' ? 'flex-row' : 'flex-col'">
+      <!-- 文件列表:平铺 / 树形切换 -->
+      <div
+        class="flex min-h-0 min-w-0 shrink-0 flex-col"
+        :style="
+          layout === 'horizontal' ? { width: `${listWidth}px` } : { height: `${listHeight}px` }
+        "
+      >
+        <div class="flex shrink-0 items-center justify-between border-b px-3 py-1.5">
+          <span class="text-xs font-medium text-muted-foreground">
+            {{ t("git.graph.detail.filesCount", { count: files.length }) }}
+          </span>
+          <div class="flex items-center">
             <button
-              v-if="file.status !== 'D'"
-              class="shrink-0 rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground"
-              :title="t('git.graph.detail.openInIde')"
-              @click.stop="openFile(file)"
+              class="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              :title="
+                t(
+                  layout === 'horizontal'
+                    ? 'git.graph.detail.layoutStack'
+                    : 'git.graph.detail.layoutSplit',
+                )
+              "
+              @click="layout = layout === 'horizontal' ? 'vertical' : 'horizontal'"
             >
-              <ExternalLink class="h-3 w-3" />
+              <Rows2 v-if="layout === 'horizontal'" class="h-3.5 w-3.5" />
+              <Columns2 v-else class="h-3.5 w-3.5" />
+            </button>
+            <button
+              class="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              :title="t(treeMode ? 'git.graph.detail.showFlat' : 'git.graph.detail.showTree')"
+              @click="treeMode = !treeMode"
+            >
+              <List v-if="treeMode" class="h-3.5 w-3.5" />
+              <FolderTree v-else class="h-3.5 w-3.5" />
             </button>
           </div>
-        </template>
+        </div>
 
-        <!-- 树形 -->
-        <template v-else>
-          <div
-            v-for="row in treeRows"
-            :key="row.node.fullPath"
-            class="group flex w-full items-center gap-1.5 py-1 pr-3 text-xs transition-colors"
-            :class="[
-              row.node.file ? 'cursor-pointer hover:bg-accent/60' : '',
-              row.node.file && selectedPath === row.node.file.path ? 'bg-accent' : '',
-            ]"
-            :style="{ paddingLeft: `${8 + row.depth * 14}px` }"
-            @click="row.node.file ? selectFile(row.node.file) : toggleFolder(row.node.fullPath)"
-          >
-            <span class="w-3 shrink-0 text-muted-foreground">
-              <ChevronRight
-                v-if="row.node.children.length"
-                class="h-3 w-3 transition-transform"
-                :class="collapsedFolders.has(row.node.fullPath) ? '' : 'rotate-90'"
-              />
-            </span>
-            <Folder v-if="!row.node.file" class="h-3 w-3 shrink-0 text-muted-foreground" />
-            <span
-              v-else
-              class="w-3 shrink-0 font-mono font-semibold"
-              :class="statusClass(row.node.file.status)"
+        <div class="min-h-0 flex-1 overflow-auto py-1">
+          <div v-if="filesLoading" class="flex h-full items-center justify-center">
+            <Loader2 class="h-4 w-4 animate-spin text-muted-foreground" />
+          </div>
+          <p v-else-if="filesError" class="px-3 py-2 text-xs text-destructive">
+            {{ t("git.graph.detail.filesLoadFailed") }}:{{ filesError }}
+          </p>
+          <p v-else-if="!files.length" class="px-3 py-2 text-xs text-muted-foreground">
+            {{ t(isMerge ? "git.graph.detail.mergeCommit" : "git.graph.detail.emptyFiles") }}
+          </p>
+
+          <!-- 平铺 -->
+          <template v-else-if="!treeMode">
+            <div
+              v-for="file in files"
+              :key="file.path"
+              class="group flex w-full cursor-pointer items-center gap-1.5 px-3 py-1 text-xs transition-colors hover:bg-accent/60"
+              :class="selectedPath === file.path ? 'bg-accent' : ''"
+              @click="selectFile(file)"
             >
-              {{ row.node.file.status }}
-            </span>
-            <span class="min-w-0 flex-1 truncate font-mono" :title="row.node.fullPath">
-              {{ row.node.name }}
-            </span>
-            <template v-if="row.node.file">
+              <span class="w-3 shrink-0 font-mono font-semibold" :class="statusClass(file.status)">
+                {{ file.status }}
+              </span>
+              <span class="min-w-0 flex-1 truncate font-mono" :title="file.path">
+                <template v-if="file.old_path">{{ file.old_path }} → </template>{{ file.path }}
+              </span>
               <span
-                v-if="row.node.file.additions != null"
+                v-if="file.additions != null"
                 class="shrink-0 text-green-600 dark:text-green-400"
               >
-                +{{ row.node.file.additions }}
+                +{{ file.additions }}
               </span>
-              <span
-                v-if="row.node.file.deletions != null"
-                class="shrink-0 text-red-600 dark:text-red-400"
-              >
-                -{{ row.node.file.deletions }}
+              <span v-if="file.deletions != null" class="shrink-0 text-red-600 dark:text-red-400">
+                -{{ file.deletions }}
               </span>
               <button
-                v-if="row.node.file.status !== 'D'"
+                v-if="file.status !== 'D'"
                 class="shrink-0 rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground"
                 :title="t('git.graph.detail.openInIde')"
-                @click.stop="openFile(row.node.file!)"
+                @click.stop="openFile(file)"
               >
                 <ExternalLink class="h-3 w-3" />
               </button>
-            </template>
-          </div>
-        </template>
-      </div>
-    </div>
-
-    <!-- 列表 / diff 上下分高拖拽条 -->
-    <div
-      class="h-1.5 shrink-0 cursor-row-resize transition-colors hover:bg-primary/50"
-      @pointerdown="startListResize"
-    />
-
-    <!-- diff 区:自实现逐行渲染(行号 + 增删底色) -->
-    <div class="flex min-h-0 flex-1 flex-col">
-      <div class="flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
-        <span class="min-w-0 flex-1 truncate font-mono text-xs" :title="selectedFile?.path">
-          {{ selectedFile?.path ?? "" }}
-        </span>
-        <Badge v-if="diff?.truncated" variant="outline" class="h-5 shrink-0 px-1.5 text-[10px]">
-          {{ t("git.graph.detail.diffTruncated") }}
-        </Badge>
-        <button
-          v-if="selectedFile && canOpenInIde"
-          class="shrink-0 rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          :title="t('git.graph.detail.openInIde')"
-          @click="openFile(selectedFile)"
-        >
-          <ExternalLink class="h-3.5 w-3.5" />
-        </button>
-      </div>
-
-      <div class="min-h-0 flex-1 overflow-auto">
-        <div v-if="diffLoading" class="flex h-full items-center justify-center">
-          <Loader2 class="h-4 w-4 animate-spin text-muted-foreground" />
-        </div>
-        <p v-else-if="diffError" class="px-3 py-2 text-xs text-destructive">
-          {{ t("git.graph.detail.diffLoadFailed") }}:{{ diffError }}
-        </p>
-        <p
-          v-else-if="!selectedPath"
-          class="flex h-full items-center justify-center text-xs text-muted-foreground"
-        >
-          {{ t("git.graph.detail.selectFile") }}
-        </p>
-
-        <div v-else class="min-w-max py-1 font-mono text-xs leading-5">
-          <template v-for="(line, i) in diffLines" :key="i">
-            <div
-              v-if="line.kind === 'hunk'"
-              class="bg-muted/60 px-3 text-muted-foreground select-none"
-            >
-              {{ line.text }}
-            </div>
-            <div v-else-if="line.kind === 'meta'" class="px-3 text-muted-foreground select-none">
-              {{ line.text }}
-            </div>
-            <div
-              v-else
-              class="flex w-full"
-              :class="
-                line.kind === 'add' ? 'bg-green-500/10' : line.kind === 'del' ? 'bg-red-500/10' : ''
-              "
-            >
-              <span class="w-10 shrink-0 pr-2 text-right text-muted-foreground/50 select-none">
-                {{ line.oldLine ?? "" }}
-              </span>
-              <span class="w-10 shrink-0 pr-2 text-right text-muted-foreground/50 select-none">
-                {{ line.newLine ?? "" }}
-              </span>
-              <span class="whitespace-pre">{{ line.text }}</span>
             </div>
           </template>
+
+          <!-- 树形 -->
+          <template v-else>
+            <div
+              v-for="row in treeRows"
+              :key="row.node.fullPath"
+              class="group flex w-full items-center gap-1.5 py-1 pr-3 text-xs transition-colors"
+              :class="[
+                row.node.file ? 'cursor-pointer hover:bg-accent/60' : '',
+                row.node.file && selectedPath === row.node.file.path ? 'bg-accent' : '',
+              ]"
+              :style="{ paddingLeft: `${8 + row.depth * 14}px` }"
+              @click="row.node.file ? selectFile(row.node.file) : toggleFolder(row.node.fullPath)"
+            >
+              <span class="w-3 shrink-0 text-muted-foreground">
+                <ChevronRight
+                  v-if="row.node.children.length"
+                  class="h-3 w-3 transition-transform"
+                  :class="collapsedFolders.has(row.node.fullPath) ? '' : 'rotate-90'"
+                />
+              </span>
+              <Folder v-if="!row.node.file" class="h-3 w-3 shrink-0 text-muted-foreground" />
+              <span
+                v-else
+                class="w-3 shrink-0 font-mono font-semibold"
+                :class="statusClass(row.node.file.status)"
+              >
+                {{ row.node.file.status }}
+              </span>
+              <span class="min-w-0 flex-1 truncate font-mono" :title="row.node.fullPath">
+                {{ row.node.name }}
+              </span>
+              <template v-if="row.node.file">
+                <span
+                  v-if="row.node.file.additions != null"
+                  class="shrink-0 text-green-600 dark:text-green-400"
+                >
+                  +{{ row.node.file.additions }}
+                </span>
+                <span
+                  v-if="row.node.file.deletions != null"
+                  class="shrink-0 text-red-600 dark:text-red-400"
+                >
+                  -{{ row.node.file.deletions }}
+                </span>
+                <button
+                  v-if="row.node.file.status !== 'D'"
+                  class="shrink-0 rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground"
+                  :title="t('git.graph.detail.openInIde')"
+                  @click.stop="openFile(row.node.file!)"
+                >
+                  <ExternalLink class="h-3 w-3" />
+                </button>
+              </template>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- 列表 / diff 分隔拖拽条:上下布局横条调高,左右布局竖条调宽 -->
+      <div
+        class="shrink-0 transition-colors hover:bg-primary/50"
+        :class="layout === 'horizontal' ? 'w-1.5 cursor-col-resize' : 'h-1.5 cursor-row-resize'"
+        @pointerdown="startListResize"
+      />
+
+      <!-- diff 区:自实现逐行渲染(行号 + 增删底色) -->
+      <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div class="flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
+          <span class="min-w-0 flex-1 truncate font-mono text-xs" :title="selectedFile?.path">
+            {{ selectedFile?.path ?? "" }}
+          </span>
+          <Badge v-if="diff?.truncated" variant="outline" class="h-5 shrink-0 px-1.5 text-[10px]">
+            {{ t("git.graph.detail.diffTruncated") }}
+          </Badge>
+          <button
+            v-if="selectedFile && canOpenInIde"
+            class="shrink-0 rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            :title="t('git.graph.detail.openInIde')"
+            @click="openFile(selectedFile)"
+          >
+            <ExternalLink class="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+        <div class="min-h-0 flex-1 overflow-auto">
+          <div v-if="diffLoading" class="flex h-full items-center justify-center">
+            <Loader2 class="h-4 w-4 animate-spin text-muted-foreground" />
+          </div>
+          <p v-else-if="diffError" class="px-3 py-2 text-xs text-destructive">
+            {{ t("git.graph.detail.diffLoadFailed") }}:{{ diffError }}
+          </p>
+          <p
+            v-else-if="!selectedPath"
+            class="flex h-full items-center justify-center text-xs text-muted-foreground"
+          >
+            {{ t("git.graph.detail.selectFile") }}
+          </p>
+
+          <div v-else class="min-w-max py-1 font-mono text-xs leading-5">
+            <template v-for="(line, i) in diffLines" :key="i">
+              <div
+                v-if="line.kind === 'hunk'"
+                class="bg-muted/60 px-3 text-muted-foreground select-none"
+              >
+                {{ line.text }}
+              </div>
+              <div v-else-if="line.kind === 'meta'" class="px-3 text-muted-foreground select-none">
+                {{ line.text }}
+              </div>
+              <div
+                v-else
+                class="flex w-full"
+                :class="
+                  line.kind === 'add'
+                    ? 'bg-green-500/10'
+                    : line.kind === 'del'
+                      ? 'bg-red-500/10'
+                      : ''
+                "
+              >
+                <span class="w-10 shrink-0 pr-2 text-right text-muted-foreground/50 select-none">
+                  {{ line.oldLine ?? "" }}
+                </span>
+                <span class="w-10 shrink-0 pr-2 text-right text-muted-foreground/50 select-none">
+                  {{ line.newLine ?? "" }}
+                </span>
+                <span class="whitespace-pre">{{ line.text }}</span>
+              </div>
+            </template>
+          </div>
         </div>
       </div>
     </div>

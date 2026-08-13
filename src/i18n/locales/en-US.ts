@@ -433,6 +433,8 @@ export default {
         filesCount: "Changed files ({count})",
         showTree: "Show as tree",
         showFlat: "Show as flat list",
+        layoutSplit: "Side-by-side layout (diff in its own column)",
+        layoutStack: "Stacked layout",
         openInIde: "Open in editor",
         selectFile: "Select a file on the left to view changes",
         diffTruncated: "Truncated",
