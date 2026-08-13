@@ -16,7 +16,8 @@ import {
   Globe,
   ListFilter,
   Loader2,
-  PanelLeft,
+  PanelLeftClose,
+  PanelLeftOpen,
   RefreshCw,
   Search,
   Tag as TagIcon,
@@ -656,18 +657,6 @@ function tagName(refName: string) {
         <ArrowLeft class="h-4 w-4" />
         {{ t("git.graph.back") }}
       </Button>
-      <!-- 左侧分支/标签列表折叠开关 -->
-      <Button
-        v-if="hasSidebar"
-        variant="ghost"
-        size="sm"
-        class="px-2"
-        :class="sidebarOpen ? '' : 'text-muted-foreground'"
-        :title="t('git.graph.toggleSidebar')"
-        @click="sidebarOpen = !sidebarOpen"
-      >
-        <PanelLeft class="h-4 w-4" />
-      </Button>
       <div class="min-w-0 flex-1">
         <h1 class="truncate text-sm font-medium">
           {{ project.name }} · {{ t("git.graph.title") }}
@@ -749,9 +738,19 @@ function tagName(refName: string) {
     </header>
 
     <div class="flex min-h-0 flex-1">
-      <!-- 左侧分支/标签列表(SourceTree 风格),点击定位到顶端提交;可整体折叠 -->
+      <!-- 左侧分支/标签列表(SourceTree 风格),点击定位到顶端提交;
+           展开时列表顶部可折叠,收起后保留窄条,点击窄条重新展开 -->
       <aside v-if="hasSidebar && sidebarOpen" class="flex w-56 shrink-0 flex-col border-r">
-        <div class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 pt-2 pb-2">
+        <div class="flex items-center justify-end px-2 pt-1.5">
+          <button
+            class="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            :title="t('git.graph.toggleSidebar')"
+            @click="sidebarOpen = false"
+          >
+            <PanelLeftClose class="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <div class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 pt-1 pb-2">
           <template v-if="branches.local.length">
             <button
               class="flex items-center gap-1 px-1 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase transition-colors hover:text-foreground"
@@ -913,6 +912,15 @@ function tagName(refName: string) {
           </template>
         </div>
       </aside>
+      <!-- 收起后的窄条:整条可点击重新展开 -->
+      <button
+        v-else-if="hasSidebar"
+        class="flex w-8 shrink-0 items-start justify-center border-r pt-2.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        :title="t('git.graph.toggleSidebar')"
+        @click="sidebarOpen = true"
+      >
+        <PanelLeftOpen class="h-3.5 w-3.5" />
+      </button>
 
       <div v-bind="containerProps" class="relative flex-1 overflow-auto">
         <div v-if="loading && !totalCount" class="flex h-full items-center justify-center">

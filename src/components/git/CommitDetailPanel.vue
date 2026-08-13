@@ -261,7 +261,9 @@ function startListResize(e: PointerEvent) {
     <!-- 提交信息 -->
     <div class="shrink-0 border-b px-3 py-2.5">
       <div class="flex items-start justify-between gap-2">
-        <p class="min-w-0 text-sm font-medium break-all">{{ commit.subject }}</p>
+        <p class="max-h-15 min-w-0 overflow-y-auto text-sm font-medium break-all">
+          {{ commit.subject }}
+        </p>
         <Button variant="ghost" size="sm" class="h-6 w-6 shrink-0 p-0" @click="emit('close')">
           <X class="h-4 w-4" />
         </Button>
