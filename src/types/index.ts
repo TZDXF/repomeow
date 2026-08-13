@@ -159,6 +159,22 @@ export interface GitCommitFileDiff {
   truncated: boolean;
 }
 
+/** 单个文件的预览内容(read_file_preview) */
+export interface FilePreview {
+  /** 文本内容;二进制文件为 null */
+  text: string | null;
+  /** 文本是否因超过大小上限被截断 */
+  truncated: boolean;
+}
+
+/** 项目文件清单条目(list_project_files) */
+export interface ProjectFileEntry {
+  /** 项目相对路径('/' 分隔) */
+  path: string;
+  /** 是否被 .gitignore / .ignore 排除(灰显用) */
+  ignored: boolean;
+}
+
 /** 工作区待提交的一个变更文件(git_worktree_files,提交对话框变更预览用) */
 export interface GitWorktreeFile {
   /** 仓库相对路径(重命名时为新路径) */

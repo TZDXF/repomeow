@@ -8,6 +8,7 @@ import {
   BookOpen,
   FileText,
   FolderSync,
+  FolderTree,
   Pencil,
   Star,
   TriangleAlert,
@@ -258,6 +259,16 @@ async function saveDesc() {
           <Button v-if="project.path_exists" variant="outline" size="sm" @click="readmeOpen = true">
             <BookOpen class="h-4 w-4" />
             {{ t("readme.title") }}
+          </Button>
+          <Button
+            v-if="project.path_exists"
+            variant="outline"
+            size="sm"
+            :title="t('files.entry')"
+            @click="router.push(`/projects/${project.id}/files`)"
+          >
+            <FolderTree class="h-4 w-4" />
+            {{ t("files.entry") }}
           </Button>
           <OpenWithMenu v-if="project.path_exists" :project="project" />
         </div>

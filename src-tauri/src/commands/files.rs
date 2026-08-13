@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::commands::walk;
 use crate::error::{AppError, AppResult, ErrorCode};
-use crate::models::{ComposeFile, ComposePort, ComposeService, ReadmeContent};
+use crate::models::{ComposeFile, ComposePort, ComposeService, FilePreview, ProjectFileEntry, ReadmeContent};
 
 /// README 候选文件名,按优先级排列(大小写常见变体)
 const README_CANDIDATES: &[&str] = &[
@@ -67,6 +67,63 @@ pub fn read_readme(path: String) -> AppResult<Option<ReadmeContent>> {
         std::fs::read_to_string(&file)?
     };
     Ok(Some(ReadmeContent { file_name, content }))
+}
+
+/// 列出项目内全部文件(含隐藏文件与 node_modules,仅跳过 .git 内部),
+/// 并标记是否被 .gitignore / .ignore 排除(前端灰显用);结果按路径排序
+#[tauri::command]
+pub fn list_project_files(path: String) -> AppResult<Vec<ProjectFileEntry>> {
+    ensure_dir(&path)?;
+    let root = Path::new(&path);
+    let unignored: std::collections::HashSet<_> = walk::unignored_files(root).into_iter().collect();
+    let mut entries: Vec<ProjectFileEntry> = walk::all_files(root)
+        .iter()
+        .map(|p| ProjectFileEntry {
+            path: walk::to_slash(p),
+            ignored: !unignored.contains(p),
+        })
+        .collect();
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(entries)
+}
+
+/// 文件预览读取上限 512KB,与 README 一致;超出按 UTF-8 边界截断
+const PREVIEW_MAX_BYTES: u64 = 512 * 1024;
+
+/// 二进制嗅探:读取前缀内出现 NUL 字节即视为二进制(与 git diff 的嗅探口径一致)
+const BINARY_SNIFF_BYTES: usize = 8_000;
+
+/// 读取项目内单个文件的预览内容。
+/// root 为项目根目录,rel_path 为 list_project_files 返回的相对路径;
+/// canonicalize 后必须仍位于 root 内,拒绝 `..` 越界与符号链接逃逸。
+/// 二进制文件返回 text = None;文本超过 512KB 截断并置 truncated。
+#[tauri::command]
+pub fn read_file_preview(root: String, rel_path: String) -> AppResult<FilePreview> {
+    ensure_dir(&root)?;
+    let root_canon = std::fs::canonicalize(&root)?;
+    let file = std::fs::canonicalize(root_canon.join(&rel_path))
+        .map_err(|_| AppError::coded(ErrorCode::InvalidPath, rel_path.clone()))?;
+    if !file.starts_with(&root_canon) || !file.is_file() {
+        return Err(AppError::coded(ErrorCode::InvalidPath, rel_path));
+    }
+    let bytes = std::fs::read(&file)?;
+    let sniff = &bytes[..bytes.len().min(BINARY_SNIFF_BYTES)];
+    if sniff.contains(&0) {
+        return Ok(FilePreview {
+            text: None,
+            truncated: false,
+        });
+    }
+    let truncated = bytes.len() as u64 > PREVIEW_MAX_BYTES;
+    let mut end = bytes.len().min(PREVIEW_MAX_BYTES as usize);
+    // 按 UTF-8 边界截断:跳过 continuation byte(0b10xxxxxx)
+    while end > 0 && end < bytes.len() && (bytes[end] & 0xC0) == 0x80 {
+        end -= 1;
+    }
+    Ok(FilePreview {
+        text: Some(String::from_utf8_lossy(&bytes[..end]).into_owned()),
+        truncated,
+    })
 }
 
 /// 写入文本到指定路径(供 Markdown 代码块/表格"下载"按钮走 Tauri save dialog 后调用)。
@@ -287,6 +344,90 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir.to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn list_project_files_marks_ignored_entries() {
+        let dir = temp_project_dir("list");
+        let p = Path::new(&dir);
+        fs::write(p.join(".gitignore"), "logs/\n").unwrap();
+        fs::create_dir_all(p.join("node_modules/dep")).unwrap();
+        fs::write(p.join("node_modules/dep/package.json"), "{}").unwrap();
+        fs::create_dir_all(p.join("logs")).unwrap();
+        fs::write(p.join("logs/app.log"), "x").unwrap();
+        fs::write(p.join(".env"), "A=1").unwrap();
+        fs::write(p.join("src.rs"), "fn main() {}").unwrap();
+
+        let entries = list_project_files(dir.clone()).unwrap();
+        let ignored_of = |path: &str| {
+            entries
+                .iter()
+                .find(|e| e.path == path)
+                .unwrap_or_else(|| panic!("缺少 {path}"))
+                .ignored
+        };
+        // 全部文件都在(含隐藏与 node_modules),按路径排序
+        assert!(entries.windows(2).all(|w| w[0].path <= w[1].path));
+        assert!(!ignored_of("src.rs"));
+        assert!(!ignored_of(".env"));
+        assert!(!ignored_of(".gitignore"));
+        assert!(!ignored_of("node_modules/dep/package.json"));
+        // 被 .gitignore 排除的标记为 ignored
+        assert!(ignored_of("logs/app.log"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_file_preview_text_binary_and_escape() {
+        let dir = temp_project_dir("preview");
+        let p = Path::new(&dir);
+        fs::write(p.join("a.txt"), "hello").unwrap();
+        // 前 8KB 内带 NUL → 二进制
+        fs::write(p.join("b.bin"), b"AB\0CD").unwrap();
+        fs::create_dir_all(p.join("sub")).unwrap();
+        let outside = temp_project_dir("preview-outside");
+        fs::write(Path::new(&outside).join("secret.txt"), "secret").unwrap();
+
+        let r = read_file_preview(dir.clone(), "a.txt".into()).unwrap();
+        assert_eq!(r.text.as_deref(), Some("hello"));
+        assert!(!r.truncated);
+
+        let r = read_file_preview(dir.clone(), "b.bin".into()).unwrap();
+        assert!(r.text.is_none());
+
+        // 目录不是文件
+        assert!(read_file_preview(dir.clone(), "sub".into()).is_err());
+        // .. 越界读取项目外文件被拒绝
+        let escape = format!(
+            "../{}/secret.txt",
+            Path::new(&outside).file_name().unwrap().to_string_lossy()
+        );
+        assert!(read_file_preview(dir.clone(), escape).is_err());
+        // 不存在的文件
+        assert!(read_file_preview(dir.clone(), "nope.txt".into()).is_err());
+
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn read_file_preview_truncates_on_utf8_boundary() {
+        let dir = temp_project_dir("truncate");
+        let p = Path::new(&dir);
+        // 超出 512KB 的纯 ASCII + 边界处放多字节字符
+        let mut content = "a".repeat(PREVIEW_MAX_BYTES as usize);
+        content.push('中');
+        content.push_str(&"b".repeat(64));
+        fs::write(p.join("big.txt"), &content).unwrap();
+
+        let r = read_file_preview(dir.clone(), "big.txt".into()).unwrap();
+        assert!(r.truncated);
+        let text = r.text.unwrap();
+        assert!(text.len() <= PREVIEW_MAX_BYTES as usize);
+        assert!(text.chars().all(|c| c == 'a'));
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
