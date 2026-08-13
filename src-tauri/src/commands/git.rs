@@ -1387,7 +1387,45 @@ fn list_worktrees_blocking(path: &str) -> AppResult<Vec<GitWorktree>> {
             }),
         }
     }
+    // 工作区内的 worktree 目录排除出未跟踪(新建与存量都经此处自愈)
+    if let Some(workdir) = repo.workdir() {
+        let commondir = repo.commondir().to_path_buf();
+        for w in list.iter().skip(1) {
+            ensure_worktree_excluded(&commondir, workdir, Path::new(&w.path));
+        }
+    }
     Ok(list)
+}
+
+/// 位于仓库工作区内的 worktree 目录(默认 .worktrees/{branch})会让所在仓库 status
+/// 多出一条未跟踪目录,误 `git add -A` 还会被加成 embedded gitlink;写入 .git/info/exclude
+/// 本地排除(不动可能被跟踪的 .gitignore)。幂等:已有相同行则跳过,读写失败静默忽略
+fn ensure_worktree_excluded(commondir: &Path, workdir: &Path, worktree_path: &Path) {
+    let Ok(rel) = worktree_path.strip_prefix(workdir) else {
+        return; // 工作区外的 worktree 不影响本仓库状态
+    };
+    let rel = rel.to_string_lossy().replace('\\', "/");
+    if rel.is_empty() {
+        return;
+    }
+    let line = format!("/{rel}/");
+    let info_dir = commondir.join("info");
+    let exclude = info_dir.join("exclude");
+    let existing = std::fs::read_to_string(&exclude).unwrap_or_default();
+    if existing.lines().any(|l| l.trim() == line) {
+        return;
+    }
+    if std::fs::create_dir_all(&info_dir).is_err() {
+        return;
+    }
+    let mut content = existing;
+    if !content.is_empty() && !content.ends_with('\n') {
+        content.push('\n');
+    }
+    content.push_str("# RepoMeow worktree\n");
+    content.push_str(&line);
+    content.push('\n');
+    let _ = std::fs::write(&exclude, content);
 }
 
 #[tauri::command]
@@ -4119,6 +4157,35 @@ mod tests {
             .unwrap()
             .iter()
             .any(|b| b == "feature/x"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn worktree_inside_repo_excluded_from_untracked() {
+        let dir = temp_dir("worktree-exclude");
+        init_repo(&dir);
+        fs::write(dir.join("a.txt"), "a").unwrap();
+        git(&dir, &["add", "a.txt"]);
+        git(&dir, &["commit", "-m", "init"]);
+        let path = dir.to_str().unwrap();
+
+        // 创建工作区内的 worktree 前:.worktrees/ 是一条未跟踪目录(嵌套仓库边界,
+        // 提交对话框排除它,与状态计数不一致)
+        worktree_add_blocking(path, ".worktrees/feature", "feature", true, None).unwrap();
+        let exclude = fs::read_to_string(dir.join(".git/info/exclude")).unwrap();
+        assert!(exclude.contains("/.worktrees/feature/"), "exclude: {exclude}");
+        let st = status(path).unwrap();
+        assert_eq!(st.untracked, 0, "worktree 目录不应计入未跟踪");
+
+        // 幂等:再次列出 worktree 不重复追加
+        list_worktrees_blocking(path).unwrap();
+        let exclude2 = fs::read_to_string(dir.join(".git/info/exclude")).unwrap();
+        assert_eq!(
+            exclude2.matches("/.worktrees/feature/").count(),
+            1,
+            "exclude: {exclude2}"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }
