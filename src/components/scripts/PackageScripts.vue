@@ -11,13 +11,15 @@ import ScriptItem from "@/components/scripts/ScriptItem.vue";
 import { useCollapsibleOpen } from "@/composables/useCollapsibleOpen";
 import { cmd, runInTerminal } from "@/lib/tauri";
 import { usePinsStore } from "@/stores/pins";
+import { useHiddenItemsStore } from "@/stores/hidden-items";
 import { useProjectAssetsStore } from "@/stores/project-assets";
-import type { HiddenItem, HiddenKind, PackageScript, PackageScriptsGroup, Project } from "@/types";
+import type { HiddenKind, PackageScript, PackageScriptsGroup, Project } from "@/types";
 
 const { t } = useI18n();
 const props = defineProps<{ project: Project }>();
 const pinsStore = usePinsStore();
 const assetsStore = useProjectAssetsStore();
+const hiddenStore = useHiddenItemsStore();
 
 const { isOpen, setOpen } = useCollapsibleOpen("scripts");
 
@@ -71,10 +73,10 @@ watch(
     showHidden.value = false;
     pinsStore.ensureLoaded();
     try {
-      // refresh 内部去重:与 DockerCompose 同时挂载只触发一次 scan_project_assets
+      // refresh 内部去重:与 DockerCompose 同时挂载只触发一次 scan_project_assets / list_hidden_items
       const [, items] = await Promise.all([
         assetsStore.refresh(props.project),
-        cmd<HiddenItem[]>("list_hidden_items", { projectId: props.project.id }),
+        hiddenStore.refresh(props.project.id),
       ]);
       hiddenGroups.value = new Set(
         items.filter((i) => i.kind === "packageFile").map((i) => i.targetKey),

@@ -69,12 +69,36 @@ fn ps_blocking(path: &str, file: &str) -> AppResult<Vec<ComposeServiceState>> {
     }
 }
 
-/// 查询 compose 文件中各服务的运行状态(阻塞调用放入线程池,避免卡住 UI)
+/// 批量查询多个 compose 文件的服务运行状态:一次 IPC 完成全部文件的 ps,
+/// 避免前端逐文件发起请求造成大量 HTTP 往返;后端限并发并行拉起 docker 进程。
+/// 单文件失败(目录不存在等)降级为空列表,不影响其他文件
 #[tauri::command]
-pub async fn compose_ps(path: String, file: String) -> AppResult<Vec<ComposeServiceState>> {
-    tokio::task::spawn_blocking(move || ps_blocking(&path, &file))
-        .await
-        .map_err(|e| AppError::coded(ErrorCode::DockerTaskFailed, e.to_string()))?
+pub async fn compose_ps_batch(
+    path: String,
+    files: Vec<String>,
+) -> AppResult<Vec<Vec<ComposeServiceState>>> {
+    // 最多同时 4 个 docker CLI 进程,防止文件多时瞬间拉起大量子进程争抢
+    let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(4));
+    let mut handles = Vec::with_capacity(files.len());
+    for file in files {
+        let path = path.clone();
+        let sem = sem.clone();
+        handles.push(tokio::spawn(async move {
+            let _permit = sem.acquire_owned().await;
+            tokio::task::spawn_blocking(move || ps_blocking(&path, &file))
+                .await
+                .unwrap_or_else(|_| Ok(Vec::new()))
+                .unwrap_or_default()
+        }));
+    }
+    let mut results = Vec::with_capacity(handles.len());
+    for h in handles {
+        results.push(
+            h.await
+                .map_err(|e| AppError::coded(ErrorCode::DockerTaskFailed, e.to_string()))?,
+        );
+    }
+    Ok(results)
 }
 
 fn run_docker(dir: &Path, args: &[&str]) -> AppResult<std::process::Output> {

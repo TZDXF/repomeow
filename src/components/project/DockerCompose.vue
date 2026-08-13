@@ -33,13 +33,15 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useCollapsibleOpen } from "@/composables/useCollapsibleOpen";
 import { cmd, runInTerminal } from "@/lib/tauri";
 import { usePinsStore } from "@/stores/pins";
+import { useHiddenItemsStore } from "@/stores/hidden-items";
 import { useProjectAssetsStore } from "@/stores/project-assets";
-import type { ComposeFile, ComposeServiceState, HiddenItem, Project } from "@/types";
+import type { ComposeFile, ComposeServiceState, Project } from "@/types";
 
 const { t } = useI18n();
 const props = defineProps<{ project: Project }>();
 const pinsStore = usePinsStore();
 const assetsStore = useProjectAssetsStore();
+const hiddenStore = useHiddenItemsStore();
 
 const { isOpen, setOpen } = useCollapsibleOpen("compose");
 
@@ -89,10 +91,10 @@ watch(
     loaded.value = false;
     showHidden.value = false;
     try {
-      // refresh 内部去重:与 PackageScripts 同时挂载只触发一次 scan_project_assets
+      // refresh 内部去重:与 PackageScripts 同时挂载只触发一次 scan_project_assets / list_hidden_items
       const [, items] = await Promise.all([
         assetsStore.refresh(props.project),
-        cmd<HiddenItem[]>("list_hidden_items", { projectId: props.project.id }),
+        hiddenStore.refresh(props.project.id),
       ]);
       hiddenFiles.value = new Set(
         items.filter((i) => i.kind === "composeFile").map((i) => i.targetKey),
@@ -131,40 +133,44 @@ async function toggleFileHidden(path: string, hidden: boolean) {
     if (hidden) next.delete(path);
     else next.add(path);
     hiddenFiles.value = next;
+    // 恢复显示的文件需要补查服务状态;隐藏则无需操作(下次刷新自然跳过)
+    if (hidden) loadStatuses();
   } catch (e) {
     toast.error(String(e));
   }
 }
 
-/** 查询每个 compose 文件的服务运行状态(失败静默,全部按未知处理) */
+/** 批量查询各 compose 文件的服务运行状态(失败静默,全部按未知处理);已隐藏文件不查询 */
 async function loadStatuses() {
-  if (!files.value.length) {
+  // 隐藏的文件不展示服务状态,跳过可减少大部分 docker 进程调用;showHidden 时才一并查询
+  const targets = files.value.filter((f) => showHidden.value || !hiddenFiles.value.has(f.path));
+  if (!targets.length) {
     statuses.value = {};
     return;
   }
   refreshing.value = true;
   try {
-    const results = await Promise.all(
-      files.value.map(async (f) => {
-        try {
-          return await cmd<ComposeServiceState[]>("compose_ps", {
-            path: props.project.path,
-            file: f.path,
-          });
-        } catch {
-          return [] as ComposeServiceState[];
-        }
-      }),
-    );
+    // 单次 IPC 批量查询,后端并行执行各文件的 docker compose ps
+    const results = await cmd<ComposeServiceState[][]>("compose_ps_batch", {
+      path: props.project.path,
+      files: targets.map((f) => f.path),
+    });
     const map: Record<string, ComposeServiceState> = {};
-    files.value.forEach((f, i) => {
-      for (const st of results[i]) map[stateKey(f, st.name)] = st;
+    targets.forEach((f, i) => {
+      for (const st of results[i] ?? []) map[stateKey(f, st.name)] = st;
     });
     statuses.value = map;
+  } catch {
+    statuses.value = {};
   } finally {
     refreshing.value = false;
   }
 }
+
+// 临时显示已隐藏文件时需要补查它们的服务状态
+watch(showHidden, (v) => {
+  if (v) loadStatuses();
+});
 
 function stateOf(f: ComposeFile, name: string): ComposeServiceState | undefined {
   return statuses.value[stateKey(f, name)];
