@@ -272,12 +272,19 @@ export const useProjectsStore = defineStore("projects", () => {
     });
   }
 
-  /** 提交更改(未暂存修改始终纳入;includeUntracked 控制是否包含未跟踪文件) */
-  async function commitChanges(project: Project, message: string, includeUntracked: boolean) {
+  /** 提交更改(未暂存修改始终纳入;includeUntracked 控制是否包含未跟踪文件;
+   * paths 为提交对话框勾选的文件子集,空/null 表示全量提交) */
+  async function commitChanges(
+    project: Project,
+    message: string,
+    includeUntracked: boolean,
+    paths?: string[] | null,
+  ) {
     project.git = await cmd<GitStatus>("git_commit", {
       path: project.path,
       message,
       includeUntracked,
+      paths: paths ?? null,
     });
   }
 

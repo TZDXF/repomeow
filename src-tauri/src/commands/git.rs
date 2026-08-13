@@ -20,7 +20,7 @@ use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::{
     GitBranchTrack, GitBranches, GitCommitContext, GitCommitFile, GitCommitFileDiff, GitCommitInfo,
     GitGraphBatch, GitGraphCommit, GitMergeResult, GitPullResult, GitRebaseResult, GitStatus,
-    GitUntrackedFile, GitUser, GitWorktree,
+    GitUntrackedFile, GitUser, GitWorktree, GitWorktreeFile,
 };
 
 /// 后台 fetch 并发上限(超出排队)
@@ -1071,16 +1071,38 @@ pub async fn git_commit(
     path: String,
     message: String,
     include_untracked: bool,
+    paths: Option<Vec<String>>,
 ) -> AppResult<GitStatus> {
-    run_blocking(move || commit_blocking(&path, &message, include_untracked)).await
+    run_blocking(move || commit_blocking(&path, &message, include_untracked, paths)).await
 }
 
-fn commit_blocking(path: &str, message: &str, include_untracked: bool) -> AppResult<GitStatus> {
+fn commit_blocking(
+    path: &str,
+    message: &str,
+    include_untracked: bool,
+    paths: Option<Vec<String>>,
+) -> AppResult<GitStatus> {
     let message = message.trim();
     if message.is_empty() {
         return Err(AppError::coded(ErrorCode::GitCommitMessageRequired, ""));
     }
-    if include_untracked {
+    if let Some(paths) = paths {
+        // 部分提交(提交对话框勾选了文件子集):只暂存并提交这些路径,
+        // 重命名的新旧路径由前端一并传入;commit --only 取这些路径的工作区内容,
+        // 此前已暂存但未选中的文件不进入本次提交(合并进行中 git 会拒绝,错误透传)
+        if paths.is_empty() {
+            return Err(AppError::coded(
+                ErrorCode::GitCommandFailed,
+                "未选择任何要提交的文件".to_string(),
+            ));
+        }
+        let mut add_args: Vec<&str> = vec!["add", "-A", "--"];
+        add_args.extend(paths.iter().map(String::as_str));
+        run_git(path, &add_args)?;
+        let mut commit_args: Vec<&str> = vec!["commit", "-m", message, "--only", "--"];
+        commit_args.extend(paths.iter().map(String::as_str));
+        run_git(path, &commit_args)?;
+    } else if include_untracked {
         let nested = nested_repo_dirs(path);
         if nested.is_empty() {
             run_git(path, &["add", "-A"])?;
@@ -1092,10 +1114,11 @@ fn commit_blocking(path: &str, message: &str, include_untracked: bool) -> AppRes
             let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
             run_git(path, &arg_refs)?;
         }
+        run_git(path, &["commit", "-m", message])?;
     } else {
         run_git(path, &["add", "-u"])?;
+        run_git(path, &["commit", "-m", message])?;
     }
-    run_git(path, &["commit", "-m", message])?;
     let st = status(path)?;
     cache_status(path, &st);
     Ok(st)
@@ -2317,6 +2340,153 @@ fn commit_file_diff_blocking(
     Ok(GitCommitFileDiff { diff, truncated })
 }
 
+/// 构建工作区相对 HEAD 的 diff(覆盖已暂存 + 已跟踪未暂存修改 + 未跟踪文件,与 git_commit 语义一致);
+/// 仓库尚无提交(无 HEAD)时回退到暂存区 diff(相对空树);
+/// include_untracked 使未跟踪文件以 Added delta 出现,补丁内容直接读工作区
+fn worktree_diff<'r>(
+    repo: &'r Repository,
+    configure: impl FnOnce(&mut DiffOptions),
+) -> AppResult<git2::Diff<'r>> {
+    let git_err = |e: git2::Error| AppError::coded(ErrorCode::GitCommandFailed, e.to_string());
+    let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+    let mut opts = DiffOptions::new();
+    // 未跟踪文件以 Untracked delta 出现(不是 Added);
+    // show_untracked_content 使补丁能读到未跟踪文件内容(自动开启 include_untracked)
+    opts.include_typechange(true)
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .show_untracked_content(true);
+    configure(&mut opts);
+    let mut diff = match &head_tree {
+        Some(tree) => repo.diff_tree_to_workdir_with_index(Some(tree), Some(&mut opts)),
+        None => {
+            let index = repo.index().map_err(git_err)?;
+            repo.diff_tree_to_index(None, Some(&index), Some(&mut opts))
+        }
+    }
+    .map_err(git_err)?;
+    diff.find_similar(Some(&mut DiffFindOptions::new().renames(true)))
+        .map_err(git_err)?;
+    Ok(diff)
+}
+
+/// 读取工作区待提交的变更文件清单(状态 + 增删行数,提交对话框变更预览用)。
+/// 未跟踪文件以 status A + untracked 标记返回;嵌套 git 仓库始终排除(与 git_commit 一致)
+#[tauri::command]
+pub async fn git_worktree_files(path: String) -> AppResult<Vec<GitWorktreeFile>> {
+    run_blocking(move || worktree_files_blocking(&path)).await
+}
+
+fn worktree_files_blocking(path: &str) -> AppResult<Vec<GitWorktreeFile>> {
+    let Some(repo) = open_repo(path)? else {
+        return Err(not_a_repo());
+    };
+    let git_err = |e: git2::Error| AppError::coded(ErrorCode::GitCommandFailed, e.to_string());
+    let diff = worktree_diff(&repo, |_| {})?;
+    let index = repo.index().map_err(git_err)?;
+    let workdir = repo
+        .workdir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string());
+    let mut nested_cache: HashSet<String> = HashSet::new();
+    let mut files = Vec::new();
+    for (idx, delta) in diff.deltas().enumerate() {
+        let status = match delta.status() {
+            // 未跟踪文件是 Untracked 而非 Added,统一按新增展示(untracked 标记另行区分)
+            Delta::Added | Delta::Untracked => 'A',
+            Delta::Copied => 'C',
+            Delta::Deleted => 'D',
+            Delta::Modified => 'M',
+            Delta::Renamed => 'R',
+            Delta::Typechange => 'T',
+            _ => continue,
+        };
+        let path = delta
+            .new_file()
+            .path()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if path.is_empty() {
+            continue;
+        }
+        // 嵌套 git 仓库是独立项目,不算本仓库待提交内容
+        if is_nested_repo_cached(&workdir, &path, &mut nested_cache) {
+            continue;
+        }
+        let old_path = if matches!(status, 'R' | 'C') {
+            delta.old_file().path().map(|p| p.to_string_lossy().to_string())
+        } else {
+            None
+        };
+        // 新增文件不在索引中即未跟踪(已暂存的新文件在索引里)
+        let untracked = status == 'A' && index.get_path(Path::new(&path), 0).is_none();
+        // 增删行数;二进制行数记 None(delta 的 binary 标志要在 Patch 加载内容后才置位)
+        let patch = Patch::from_diff(&diff, idx).ok().flatten();
+        let is_binary = diff
+            .get_delta(idx)
+            .map(|d| d.flags().is_binary())
+            .unwrap_or(false);
+        let (additions, deletions) = if is_binary {
+            (None, None)
+        } else {
+            match patch {
+                None => (Some(0), Some(0)),
+                Some(p) => p
+                    .line_stats()
+                    .ok()
+                    .map(|(_, a, d)| (Some(a as u32), Some(d as u32)))
+                    .unwrap_or((None, None)),
+            }
+        };
+        files.push(GitWorktreeFile {
+            path,
+            old_path,
+            status: status.to_string(),
+            additions,
+            deletions,
+            untracked,
+        });
+    }
+    Ok(files)
+}
+
+/// 读取工作区单个待提交文件的 diff(相对 HEAD;未跟踪文件为全新增补丁)。
+/// 重命名时新旧路径都作为 pathspec 传入。超长按字符截断
+#[tauri::command]
+pub async fn git_worktree_file_diff(
+    path: String,
+    file_path: String,
+    old_path: Option<String>,
+) -> AppResult<GitCommitFileDiff> {
+    run_blocking(move || worktree_file_diff_blocking(&path, &file_path, old_path.as_deref())).await
+}
+
+fn worktree_file_diff_blocking(
+    path: &str,
+    file_path: &str,
+    old_path: Option<&str>,
+) -> AppResult<GitCommitFileDiff> {
+    let Some(repo) = open_repo(path)? else {
+        return Err(not_a_repo());
+    };
+    let diff = worktree_diff(&repo, |opts| {
+        opts.pathspec(file_path);
+        if let Some(old) = old_path {
+            opts.pathspec(old);
+        }
+    })?;
+    let mut text = String::new();
+    for (idx, _) in diff.deltas().enumerate() {
+        if let Ok(Some(mut patch)) = Patch::from_diff(&diff, idx) {
+            if let Ok(buf) = patch.to_buf() {
+                text.push_str(&String::from_utf8_lossy(&buf));
+            }
+        }
+    }
+    let (diff, truncated) = truncate_chars(&text, COMMIT_DIFF_MAX_CHARS);
+    Ok(GitCommitFileDiff { diff, truncated })
+}
+
 /// 读取仓库当前 git 用户身份(日报"仅自己"过滤用)。
 /// `git config user.name/email` 本身含全局配置回退;非仓库或未配置时返回空串而非报错
 #[tauri::command]
@@ -2874,7 +3044,7 @@ mod tests {
         init_repo(&dir);
         fs::write(dir.join("a.txt"), "a").unwrap();
 
-        let st = commit_blocking(dir.to_str().unwrap(), "init", true).unwrap();
+        let st = commit_blocking(dir.to_str().unwrap(), "init", true, None).unwrap();
         assert!(st.is_repo);
         assert_eq!(st.branch.as_deref(), Some("main"));
         assert_eq!(st.staged, 0);
@@ -2882,7 +3052,7 @@ mod tests {
         assert_eq!(st.untracked, 0);
 
         // 空提交信息被拒绝
-        assert!(commit_blocking(dir.to_str().unwrap(), "  ", true).is_err());
+        assert!(commit_blocking(dir.to_str().unwrap(), "  ", true, None).is_err());
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -2899,16 +3069,83 @@ mod tests {
         fs::write(dir.join("b.txt"), "b").unwrap(); // 未跟踪
 
         // 不勾选:未暂存修改照常提交,未跟踪文件保留
-        let st = commit_blocking(dir.to_str().unwrap(), "tracked only", false).unwrap();
+        let st = commit_blocking(dir.to_str().unwrap(), "tracked only", false, None).unwrap();
         assert_eq!(st.staged, 0);
         assert_eq!(st.modified, 0);
         assert_eq!(st.untracked, 1);
 
         // 勾选:未跟踪文件一并提交,工作区干净
-        let st = commit_blocking(dir.to_str().unwrap(), "with untracked", true).unwrap();
+        let st = commit_blocking(dir.to_str().unwrap(), "with untracked", true, None).unwrap();
         assert_eq!(st.staged, 0);
         assert_eq!(st.modified, 0);
         assert_eq!(st.untracked, 0);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn commit_paths_partial_selection() {
+        let dir = temp_dir("commit-paths");
+        init_repo(&dir);
+        fs::write(dir.join("a.txt"), "a").unwrap();
+        fs::write(dir.join("b.txt"), "b").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-m", "init"]);
+
+        fs::write(dir.join("a.txt"), "changed").unwrap(); // 未暂存修改
+        fs::write(dir.join("b.txt"), "changed").unwrap(); // 未暂存修改
+        fs::write(dir.join("c.txt"), "c").unwrap(); // 未跟踪
+
+        // 空路径清单被拒绝
+        assert!(commit_blocking(dir.to_str().unwrap(), "none", true, Some(Vec::new())).is_err());
+
+        // 只提交 a.txt 与未跟踪的 c.txt:b.txt 修改保留在工作区
+        let st = commit_blocking(
+            dir.to_str().unwrap(),
+            "partial",
+            true,
+            Some(vec!["a.txt".into(), "c.txt".into()]),
+        )
+        .unwrap();
+        assert_eq!(st.staged, 0);
+        assert_eq!(st.modified, 1);
+        assert_eq!(st.untracked, 0);
+        // 提交内容只含选中的两个文件
+        let out = run_git(dir.to_str().unwrap(), &["show", "--name-status", "--format=", "HEAD"])
+            .unwrap();
+        let names = String::from_utf8_lossy(&out.stdout);
+        assert!(names.contains("M\ta.txt"));
+        assert!(names.contains("A\tc.txt"));
+        assert!(!names.contains("b.txt"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn worktree_files_cover_modified_staged_and_untracked() {
+        let dir = temp_dir("worktree-files");
+        init_repo(&dir);
+        fs::write(dir.join("a.txt"), "a").unwrap();
+        git(&dir, &["add", "a.txt"]);
+        git(&dir, &["commit", "-m", "init"]);
+
+        fs::write(dir.join("a.txt"), "changed").unwrap(); // 未暂存修改
+        fs::write(dir.join("b.txt"), "b").unwrap(); // 未跟踪
+        fs::create_dir_all(dir.join("sub")).unwrap();
+        fs::write(dir.join("sub/c.txt"), "c").unwrap(); // 未跟踪(嵌套目录)
+
+        let files = worktree_files_blocking(dir.to_str().unwrap()).unwrap();
+        let by_path: HashMap<_, _> = files.iter().map(|f| (f.path.as_str(), f)).collect();
+        assert_eq!(by_path.len(), 3, "文件清单: {files:?}");
+        assert_eq!(by_path["a.txt"].status, "M");
+        assert!(!by_path["a.txt"].untracked);
+        assert!(by_path["b.txt"].untracked);
+        assert!(by_path["sub/c.txt"].untracked);
+        assert!(by_path["b.txt"].additions.unwrap_or(0) > 0);
+
+        // 未跟踪文件的单文件 diff 是全新增补丁
+        let d = worktree_file_diff_blocking(dir.to_str().unwrap(), "b.txt", None).unwrap();
+        assert!(d.diff.contains("+b"), "未跟踪文件 diff: {}", d.diff);
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -3639,7 +3876,7 @@ mod tests {
         fs::write(dir.join("b.txt"), "b").unwrap();
 
         // 勾选包含未跟踪:b.txt 被提交,嵌套仓库不被加成 embedded gitlink
-        let st = commit_blocking(dir.to_str().unwrap(), "add b", true).unwrap();
+        let st = commit_blocking(dir.to_str().unwrap(), "add b", true, None).unwrap();
         assert_eq!(st.untracked, 0);
 
         let out = git_command(dir.to_str().unwrap())

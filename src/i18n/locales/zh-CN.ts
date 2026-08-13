@@ -359,9 +359,12 @@ export default {
       submittingAndPushing: "提交并推送中...",
       submitAndPushSuccess: "提交并推送成功",
       success: "提交成功",
-      empty: "没有可提交的更改",
       generate: "AI 生成",
       generating: "生成中...",
+      showChanges: "查看变更",
+      hideChanges: "收起变更",
+      selectAll: "全选",
+      includeFile: "纳入本次提交",
     },
     pull: {
       pulling: "拉取中...",

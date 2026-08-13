@@ -159,6 +159,22 @@ export interface GitCommitFileDiff {
   truncated: boolean;
 }
 
+/** 工作区待提交的一个变更文件(git_worktree_files,提交对话框变更预览用) */
+export interface GitWorktreeFile {
+  /** 仓库相对路径(重命名时为新路径) */
+  path: string;
+  /** 重命名前的旧路径(仅 status = R 时有值) */
+  old_path: string | null;
+  /** 变更类型:A 新增 / M 修改 / D 删除 / R 重命名 / T 类型变更 */
+  status: string;
+  /** 新增行数;二进制文件为 null */
+  additions: number | null;
+  /** 删除行数;二进制文件为 null */
+  deletions: number | null;
+  /** 是否未跟踪文件(勾选"包含未跟踪文件"才会被提交) */
+  untracked: boolean;
+}
+
 /** 用户自定义 AI 提示词(~/.repomeow/prompts/*.md);空字符串表示使用内置默认模板 */
 export interface AiPrompts {
   /** 提交信息生成提示词 */

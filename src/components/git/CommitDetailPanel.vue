@@ -19,6 +19,7 @@ import {
 } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { parseDiff } from "@/lib/diff";
 import { buildFileTree, type FileTreeNode } from "@/lib/file-tree";
 import { cmd } from "@/lib/tauri";
 import { useSettingsStore } from "@/stores/settings";
@@ -135,56 +136,7 @@ function toggleFolder(fullPath: string) {
   collapsedFolders.value = next;
 }
 
-// --- diff 解析:逐行旧/新行号;文件头(diff --git / index / --- / +++ 等)不展示 ---
-interface DiffLine {
-  kind: "hunk" | "add" | "del" | "ctx" | "meta";
-  text: string;
-  oldLine: number | null;
-  newLine: number | null;
-}
-
-function parseDiff(text: string): DiffLine[] {
-  const out: DiffLine[] = [];
-  let oldN = 0;
-  let newN = 0;
-  let seenHunk = false;
-  for (const raw of text.split("\n")) {
-    if (!raw) {
-      continue;
-    }
-    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
-    if (hunk) {
-      oldN = Number(hunk[1]);
-      newN = Number(hunk[2]);
-      seenHunk = true;
-      out.push({ kind: "hunk", text: raw, oldLine: null, newLine: null });
-      continue;
-    }
-    // 首个 hunk 之前是文件头(diff --git / index / --- / +++ 等),仅保留二进制提示
-    if (!seenHunk) {
-      if (raw.startsWith("Binary files")) {
-        out.push({ kind: "meta", text: raw, oldLine: null, newLine: null });
-      }
-      continue;
-    }
-    if (raw.startsWith("+")) {
-      out.push({ kind: "add", text: raw, oldLine: null, newLine: newN });
-      newN++;
-    } else if (raw.startsWith("-")) {
-      out.push({ kind: "del", text: raw, oldLine: oldN, newLine: newN });
-      oldN++;
-    } else if (raw.startsWith(" ")) {
-      out.push({ kind: "ctx", text: raw, oldLine: oldN, newLine: newN });
-      oldN++;
-      newN++;
-    } else {
-      // "\ No newline at end of file" 等
-      out.push({ kind: "meta", text: raw, oldLine: null, newLine: null });
-    }
-  }
-  return out;
-}
-
+// --- diff 解析:lib/diff.ts 的 parseDiff(与提交对话框变更预览共用) ---
 const diffLines = computed(() => (diff.value ? parseDiff(diff.value.diff) : []));
 
 /** 当前选中文件(已删除的文件不提供 IDE 打开:工作区已不存在) */

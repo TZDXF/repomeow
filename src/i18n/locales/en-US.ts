@@ -373,9 +373,12 @@ export default {
       submittingAndPushing: "Committing and pushing...",
       submitAndPushSuccess: "Committed and pushed successfully",
       success: "Committed successfully",
-      empty: "Nothing to commit",
       generate: "Generate with AI",
       generating: "Generating...",
+      showChanges: "Show changes",
+      hideChanges: "Hide changes",
+      selectAll: "Select all",
+      includeFile: "Include in this commit",
     },
     pull: {
       pulling: "Pulling...",

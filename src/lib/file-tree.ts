@@ -4,17 +4,17 @@ import type { GitCommitFile } from "@/types";
  * 提交文件树节点:按 "/" 切分文件路径后逐层聚合;
  * file 仅在节点本身是文件(叶子)时有值,中间目录节点 file 为 null
  */
-export interface FileTreeNode {
+export interface FileTreeNode<T extends GitCommitFile = GitCommitFile> {
   name: string;
   fullPath: string;
-  file: GitCommitFile | null;
-  children: FileTreeNode[];
+  file: T | null;
+  children: FileTreeNode<T>[];
 }
 
 /** 把提交的文件列表按目录层级聚合成树(目录在前、文件在后,同层按名称排序) */
-export function buildFileTree(files: GitCommitFile[]): FileTreeNode[] {
-  const roots: FileTreeNode[] = [];
-  const byPath = new Map<string, FileTreeNode>();
+export function buildFileTree<T extends GitCommitFile>(files: T[]): FileTreeNode<T>[] {
+  const roots: FileTreeNode<T>[] = [];
+  const byPath = new Map<string, FileTreeNode<T>>();
   for (const file of files) {
     const segs = file.path.split("/");
     let prefix = "";
@@ -33,7 +33,7 @@ export function buildFileTree(files: GitCommitFile[]): FileTreeNode[] {
       siblings = node.children;
     }
   }
-  const sortLevel = (nodes: FileTreeNode[]) => {
+  const sortLevel = (nodes: FileTreeNode<T>[]) => {
     nodes.sort((a, b) => {
       const dirDiff = Number(b.file === null) - Number(a.file === null);
       return dirDiff || a.name.localeCompare(b.name);

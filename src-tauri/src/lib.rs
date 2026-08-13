@@ -144,6 +144,8 @@ pub fn run() {
             commands::git::git_graph_log,
             commands::git::git_commit_files,
             commands::git::git_commit_file_diff,
+            commands::git::git_worktree_files,
+            commands::git::git_worktree_file_diff,
             commands::git::git_current_user,
             commands::git::git_clone,
             commands::git::cancel_git_clone,
