@@ -444,6 +444,7 @@ export default {
       filterAll: "All branches",
       filterCurrent: "Current branch",
       toggleSidebar: "Toggle branch list",
+      toggleDetail: "Toggle commit details",
       showRemote: "Show remote branches",
       tags: "Tags",
       noTags: "No tags",

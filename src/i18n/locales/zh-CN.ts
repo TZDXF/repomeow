@@ -429,6 +429,7 @@ export default {
       filterAll: "所有分支",
       filterCurrent: "当前分支",
       toggleSidebar: "展开/折叠分支列表",
+      toggleDetail: "展开/折叠提交详情",
       showRemote: "显示远程分支",
       tags: "标签",
       noTags: "暂无标签",

@@ -18,6 +18,7 @@ import {
   Loader2,
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRightOpen,
   RefreshCw,
   Search,
   Tag as TagIcon,
@@ -204,6 +205,8 @@ function startColResize(key: ColKey, e: PointerEvent) {
 
 // --- 右侧提交详情分栏:选中提交时展示,拖拽分隔条调宽(持久化) ---
 const detailWidth = useLocalStorage("repomeow:graph-detail-width", 480);
+/** 详情面板折叠状态(持久化):折叠后保留窄条,点击重新展开 */
+const detailOpen = useLocalStorage("repomeow:graph-detail-open", true);
 const DETAIL_MIN_W = 320;
 const DETAIL_MAX_W = 800;
 
@@ -1125,21 +1128,33 @@ function tagName(refName: string) {
         </template>
       </div>
 
-      <!-- 右侧提交详情分栏:选中提交行时展示,拖拽分隔条调宽(把手以边线为中心) -->
+      <!-- 右侧提交详情分栏:选中提交行时展示,拖拽分隔条调宽(把手以边线为中心);
+           面板头部可折叠,折叠后保留窄条,点击窄条重新展开 -->
       <template v-if="selected">
-        <div class="relative w-0 shrink-0">
-          <div
-            class="absolute inset-y-0 left-0 z-10 w-1.5 -translate-x-1/2 cursor-col-resize transition-colors hover:bg-primary/50"
-            @pointerdown="startDetailResize"
-          />
-        </div>
-        <aside class="shrink-0 border-l" :style="{ width: `${detailWidth}px` }">
-          <CommitDetailPanel
-            :commit="selected"
-            :project-path="project.path"
-            @close="selected = null"
-          />
-        </aside>
+        <template v-if="detailOpen">
+          <div class="relative w-0 shrink-0">
+            <div
+              class="absolute inset-y-0 left-0 z-10 w-1.5 -translate-x-1/2 cursor-col-resize transition-colors hover:bg-primary/50"
+              @pointerdown="startDetailResize"
+            />
+          </div>
+          <aside class="shrink-0 border-l" :style="{ width: `${detailWidth}px` }">
+            <CommitDetailPanel
+              :commit="selected"
+              :project-path="project.path"
+              @collapse="detailOpen = false"
+            />
+          </aside>
+        </template>
+        <!-- 折叠后的窄条:整条可点击重新展开 -->
+        <button
+          v-else
+          class="flex w-8 shrink-0 items-start justify-center border-l pt-2.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          :title="t('git.graph.toggleDetail')"
+          @click="detailOpen = true"
+        >
+          <PanelRightOpen class="h-3.5 w-3.5" />
+        </button>
       </template>
     </div>
 

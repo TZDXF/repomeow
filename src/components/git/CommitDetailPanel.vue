@@ -12,8 +12,8 @@ import {
   GitBranch,
   List,
   Loader2,
+  PanelRightClose,
   Tag as TagIcon,
-  X,
 } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,7 +29,8 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  close: [];
+  /** 折叠为右侧窄条(窄条由父组件渲染,点击重新展开) */
+  collapse: [];
 }>();
 
 const { t } = useI18n();
@@ -264,8 +265,14 @@ function startListResize(e: PointerEvent) {
         <p class="max-h-15 min-w-0 overflow-y-auto text-sm font-medium break-all">
           {{ commit.subject }}
         </p>
-        <Button variant="ghost" size="sm" class="h-6 w-6 shrink-0 p-0" @click="emit('close')">
-          <X class="h-4 w-4" />
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-6 w-6 shrink-0 p-0"
+          :title="t('git.graph.toggleDetail')"
+          @click="emit('collapse')"
+        >
+          <PanelRightClose class="h-4 w-4" />
         </Button>
       </div>
       <div class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
