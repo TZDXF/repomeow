@@ -136,6 +136,11 @@ function toggleFolder(fullPath: string) {
   collapsedFolders.value = next;
 }
 
+/** 平铺模式只显示文件名(完整路径放 title) */
+function baseName(path: string) {
+  return path.split("/").pop() ?? path;
+}
+
 // --- diff 解析:lib/diff.ts 的 parseDiff(与提交对话框变更预览共用) ---
 const diffLines = computed(() => (diff.value ? parseDiff(diff.value.diff) : []));
 
@@ -337,8 +342,12 @@ function startListResize(e: PointerEvent) {
               <span class="w-3 shrink-0 font-mono font-semibold" :class="statusClass(file.status)">
                 {{ file.status }}
               </span>
-              <span class="min-w-0 flex-1 truncate font-mono" :title="file.path">
-                <template v-if="file.old_path">{{ file.old_path }} → </template>{{ file.path }}
+              <span
+                class="min-w-0 flex-1 truncate font-mono"
+                :title="file.old_path ? `${file.old_path} → ${file.path}` : file.path"
+              >
+                <template v-if="file.old_path">{{ baseName(file.old_path) }} → </template
+                >{{ baseName(file.path) }}
               </span>
               <span
                 v-if="file.additions != null"
