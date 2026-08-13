@@ -132,12 +132,11 @@ function toggleFolder(fullPath: string) {
   collapsedFolders.value = next;
 }
 
-// --- diff 解析:逐行旧/新行号,点击行可带行号跳转 IDE ---
+// --- diff 解析:逐行旧/新行号;文件头(diff --git / index / --- / +++ 等)不展示 ---
 interface DiffLine {
   kind: "hunk" | "add" | "del" | "ctx" | "meta";
   text: string;
   oldLine: number | null;
-  /** 该行对应的新文件行号(del 行映射到其后的新行,用于"定位到源文件") */
   newLine: number | null;
 }
 
@@ -150,10 +149,6 @@ function parseDiff(text: string): DiffLine[] {
     if (!raw) {
       continue;
     }
-    if (raw.startsWith("diff --git")) {
-      out.push({ kind: "meta", text: raw, oldLine: null, newLine: null });
-      continue;
-    }
     const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
     if (hunk) {
       oldN = Number(hunk[1]);
@@ -162,9 +157,11 @@ function parseDiff(text: string): DiffLine[] {
       out.push({ kind: "hunk", text: raw, oldLine: null, newLine: null });
       continue;
     }
-    // 首个 hunk 之前的 +/- 行是文件头(--- / +++),不是内容
+    // 首个 hunk 之前是文件头(diff --git / index / --- / +++ 等),仅保留二进制提示
     if (!seenHunk) {
-      out.push({ kind: "meta", text: raw, oldLine: null, newLine: null });
+      if (raw.startsWith("Binary files")) {
+        out.push({ kind: "meta", text: raw, oldLine: null, newLine: null });
+      }
       continue;
     }
     if (raw.startsWith("+")) {
@@ -188,30 +185,20 @@ function parseDiff(text: string): DiffLine[] {
 const diffLines = computed(() => (diff.value ? parseDiff(diff.value.diff) : []));
 
 /** 当前选中文件(已删除的文件不提供 IDE 打开:工作区已不存在) */
-const selectedFile = computed(
-  () => files.value.find((f) => f.path === selectedPath.value) ?? null,
-);
+const selectedFile = computed(() => files.value.find((f) => f.path === selectedPath.value) ?? null);
 const canOpenInIde = computed(() => selectedFile.value?.status !== "D");
 
-// --- 在 IDE 打开(默认编辑器;行号定位由后端按编辑器 CLI 语法构造) ---
-async function openFile(file: GitCommitFile, line?: number) {
+// --- 在 IDE 打开(默认编辑器) ---
+async function openFile(file: GitCommitFile) {
   try {
     await cmd("open_in_editor", {
       path: `${props.projectPath}/${file.path}`,
       kind: settings.defaultOpenWith,
-      line: line ?? null,
+      line: null,
     });
   } catch (e) {
     toast.error(String(e));
   }
-}
-
-function openAtLine(line: DiffLine) {
-  const file = selectedFile.value;
-  if (!file || !canOpenInIde.value) {
-    return;
-  }
-  void openFile(file, line.newLine ?? undefined);
 }
 
 // --- 提交信息辅助(与图谱页底部旧面板一致) ---
@@ -255,7 +242,10 @@ function startListResize(e: PointerEvent) {
   const startY = e.clientY;
   const startH = listHeight.value;
   const onMove = (ev: PointerEvent) => {
-    listHeight.value = Math.min(LIST_MAX_H, Math.max(LIST_MIN_H, Math.round(startH + ev.clientY - startY)));
+    listHeight.value = Math.min(
+      LIST_MAX_H,
+      Math.max(LIST_MIN_H, Math.round(startH + ev.clientY - startY)),
+    );
   };
   const onUp = () => {
     window.removeEventListener("pointermove", onMove);
@@ -432,7 +422,7 @@ function startListResize(e: PointerEvent) {
       @pointerdown="startListResize"
     />
 
-    <!-- diff 区:自实现逐行渲染,点击行带行号跳转 IDE -->
+    <!-- diff 区:自实现逐行渲染(行号 + 增删底色) -->
     <div class="flex min-h-0 flex-1 flex-col">
       <div class="flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
         <span class="min-w-0 flex-1 truncate font-mono text-xs" :title="selectedFile?.path">
@@ -476,19 +466,12 @@ function startListResize(e: PointerEvent) {
             <div v-else-if="line.kind === 'meta'" class="px-3 text-muted-foreground select-none">
               {{ line.text }}
             </div>
-            <button
+            <div
               v-else
-              class="flex w-full text-left"
-              :class="[
-                line.kind === 'add'
-                  ? 'bg-green-500/10 hover:bg-green-500/20'
-                  : line.kind === 'del'
-                    ? 'bg-red-500/10 hover:bg-red-500/20'
-                    : 'hover:bg-accent/60',
-                canOpenInIde ? 'cursor-pointer' : 'cursor-default',
-              ]"
-              :title="canOpenInIde ? t('git.graph.detail.openAtLine') : undefined"
-              @click="openAtLine(line)"
+              class="flex w-full"
+              :class="
+                line.kind === 'add' ? 'bg-green-500/10' : line.kind === 'del' ? 'bg-red-500/10' : ''
+              "
             >
               <span class="w-10 shrink-0 pr-2 text-right text-muted-foreground/50 select-none">
                 {{ line.oldLine ?? "" }}
@@ -497,7 +480,7 @@ function startListResize(e: PointerEvent) {
                 {{ line.newLine ?? "" }}
               </span>
               <span class="whitespace-pre">{{ line.text }}</span>
-            </button>
+            </div>
           </template>
         </div>
       </div>

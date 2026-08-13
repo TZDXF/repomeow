@@ -16,6 +16,7 @@ import {
   Globe,
   ListFilter,
   Loader2,
+  PanelLeft,
   RefreshCw,
   Search,
   Tag as TagIcon,
@@ -306,6 +307,9 @@ const hasSidebar = computed(
   () =>
     branches.value.local.length > 0 || branches.value.remote.length > 0 || tags.value.length > 0,
 );
+
+/** 左侧分支/标签列表整体折叠(持久化) */
+const sidebarOpen = useLocalStorage("repomeow:graph-sidebar-open", true);
 
 // --- 左侧列表:分组/目录折叠 ---
 /** 已折叠的分组(local/remote/tags) */
@@ -652,6 +656,18 @@ function tagName(refName: string) {
         <ArrowLeft class="h-4 w-4" />
         {{ t("git.graph.back") }}
       </Button>
+      <!-- 左侧分支/标签列表折叠开关 -->
+      <Button
+        v-if="hasSidebar"
+        variant="ghost"
+        size="sm"
+        class="px-2"
+        :class="sidebarOpen ? '' : 'text-muted-foreground'"
+        :title="t('git.graph.toggleSidebar')"
+        @click="sidebarOpen = !sidebarOpen"
+      >
+        <PanelLeft class="h-4 w-4" />
+      </Button>
       <div class="min-w-0 flex-1">
         <h1 class="truncate text-sm font-medium">
           {{ project.name }} · {{ t("git.graph.title") }}
@@ -733,8 +749,8 @@ function tagName(refName: string) {
     </header>
 
     <div class="flex min-h-0 flex-1">
-      <!-- 左侧分支/标签列表(SourceTree 风格),点击定位到顶端提交 -->
-      <aside v-if="hasSidebar" class="flex w-56 shrink-0 flex-col border-r">
+      <!-- 左侧分支/标签列表(SourceTree 风格),点击定位到顶端提交;可整体折叠 -->
+      <aside v-if="hasSidebar && sidebarOpen" class="flex w-56 shrink-0 flex-col border-r">
         <div class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 pt-2 pb-2">
           <template v-if="branches.local.length">
             <button
@@ -928,7 +944,7 @@ function tagName(refName: string) {
             >
               {{ t("git.graph.columns.graph") }}
               <span
-                class="absolute top-0 right-0 h-full w-1.5 cursor-col-resize transition-colors hover:bg-primary/50"
+                class="absolute top-0 right-0 z-10 h-full w-1.5 translate-x-1/2 cursor-col-resize transition-colors hover:bg-primary/50"
                 @pointerdown="startColResize('graph', $event)"
               />
             </div>
@@ -938,7 +954,7 @@ function tagName(refName: string) {
             >
               {{ t("git.graph.columns.description") }}
               <span
-                class="absolute top-0 right-0 h-full w-1.5 cursor-col-resize transition-colors hover:bg-primary/50"
+                class="absolute top-0 right-0 z-10 h-full w-1.5 translate-x-1/2 cursor-col-resize transition-colors hover:bg-primary/50"
                 @pointerdown="startColResize('desc', $event)"
               />
             </div>
@@ -948,7 +964,7 @@ function tagName(refName: string) {
             >
               {{ t("git.graph.columns.author") }}
               <span
-                class="absolute top-0 right-0 h-full w-1.5 cursor-col-resize transition-colors hover:bg-primary/50"
+                class="absolute top-0 right-0 z-10 h-full w-1.5 translate-x-1/2 cursor-col-resize transition-colors hover:bg-primary/50"
                 @pointerdown="startColResize('author', $event)"
               />
             </div>
@@ -958,7 +974,7 @@ function tagName(refName: string) {
             >
               {{ t("git.graph.columns.commit") }}
               <span
-                class="absolute top-0 right-0 h-full w-1.5 cursor-col-resize transition-colors hover:bg-primary/50"
+                class="absolute top-0 right-0 z-10 h-full w-1.5 translate-x-1/2 cursor-col-resize transition-colors hover:bg-primary/50"
                 @pointerdown="startColResize('commit', $event)"
               />
             </div>
@@ -968,7 +984,7 @@ function tagName(refName: string) {
             >
               {{ t("git.graph.columns.date") }}
               <span
-                class="absolute top-0 right-0 h-full w-1.5 cursor-col-resize transition-colors hover:bg-primary/50"
+                class="absolute top-0 right-0 z-10 h-full w-1.5 translate-x-1/2 cursor-col-resize transition-colors hover:bg-primary/50"
                 @pointerdown="startColResize('date', $event)"
               />
             </div>
@@ -1101,12 +1117,14 @@ function tagName(refName: string) {
         </template>
       </div>
 
-      <!-- 右侧提交详情分栏:选中提交行时展示,拖拽分隔条调宽 -->
+      <!-- 右侧提交详情分栏:选中提交行时展示,拖拽分隔条调宽(把手以边线为中心) -->
       <template v-if="selected">
-        <div
-          class="w-1.5 shrink-0 cursor-col-resize transition-colors hover:bg-primary/50"
-          @pointerdown="startDetailResize"
-        />
+        <div class="relative w-0 shrink-0">
+          <div
+            class="absolute inset-y-0 left-0 z-10 w-1.5 -translate-x-1/2 cursor-col-resize transition-colors hover:bg-primary/50"
+            @pointerdown="startDetailResize"
+          />
+        </div>
         <aside class="shrink-0 border-l" :style="{ width: `${detailWidth}px` }">
           <CommitDetailPanel
             :commit="selected"
