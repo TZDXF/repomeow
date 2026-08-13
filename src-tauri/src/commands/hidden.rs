@@ -48,12 +48,7 @@ pub fn set_hidden(
 }
 
 // ---- Tauri 命令包装 ----
-
-#[tauri::command]
-pub fn list_hidden_items(db: State<'_, Db>, project_id: i64) -> AppResult<Vec<HiddenItem>> {
-    let conn = db.0.lock().unwrap();
-    list(&conn, project_id)
-}
+// (列表查询已并入 commands::overview::get_project_overview,详情页一次 IPC 取全)
 
 #[tauri::command]
 pub fn set_hidden_item(

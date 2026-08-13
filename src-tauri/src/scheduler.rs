@@ -350,8 +350,8 @@ pub(crate) fn work_week_start_with(
 }
 
 /// 今天所在工作周的起始日
-pub(crate) fn work_week_start(today: NaiveDate, data_dir: &PathBuf) -> NaiveDate {
-    work_week_start_with(today, &|d| workday::is_workday(d, data_dir))
+pub(crate) fn work_week_start(today: NaiveDate, cache_root: &PathBuf) -> NaiveDate {
+    work_week_start_with(today, &|d| workday::is_workday(d, cache_root))
 }
 
 /// 指定日期是否为所在工作周的最后一个工作日(判定逻辑由闭包注入)。
@@ -388,15 +388,15 @@ pub(crate) fn is_work_week_last_day_with(
 }
 
 /// 今天是否为所在工作周的最后一个工作日(周报触发条件)
-fn is_work_week_last_day(today: NaiveDate, data_dir: &PathBuf) -> bool {
-    is_work_week_last_day_with(today, &|d| workday::is_workday(d, data_dir))
+fn is_work_week_last_day(today: NaiveDate, cache_root: &PathBuf) -> bool {
+    is_work_week_last_day_with(today, &|d| workday::is_workday(d, cache_root))
 }
 
 /// 筛选当前时刻应该触发的 schedule(±1 分钟容差)
 fn due_schedules(
     schedules: &[ReportSchedule],
     now_local: &chrono::DateTime<Local>,
-    data_dir: &PathBuf,
+    cache_root: &PathBuf,
 ) -> Vec<ReportSchedule> {
     let now_time = now_local.time();
     let today = now_local.date_naive();
@@ -433,7 +433,7 @@ fn due_schedules(
             // (均不使用日报的星期过滤)
             if s.report_type == "weekly" {
                 if s.weekly_workweek {
-                    return is_work_week_last_day(today, data_dir);
+                    return is_work_week_last_day(today, cache_root);
                 }
                 return today.weekday().number_from_monday() == s.weekly_end_weekday;
             }
@@ -447,7 +447,7 @@ fn due_schedules(
             }
 
             // 日报:中国工作日过滤
-            if s.chinese_workday_only && !workday::is_workday(today, data_dir) {
+            if s.chinese_workday_only && !workday::is_workday(today, cache_root) {
                 return false;
             }
 
@@ -587,7 +587,8 @@ pub(crate) async fn fire_schedule(
     let (date_from, date_to) = if is_weekly {
         if schedule.weekly_workweek {
             // 工作周模式:工作周起始日(含前挂的调休周日)~ 今天
-            let start = work_week_start(today, data_dir);
+            // (chinese-days 缓存在安装目录 data/,与 data_dir 分开解析)
+            let start = work_week_start(today, &workday::cache_root());
             (start.format("%Y-%m-%d").to_string(), today_str.clone())
         } else {
             // 自定义模式:本周 weekly_start_weekday 日 ~ 今天(起始日晚于今天时取上周对应日)
@@ -739,7 +740,9 @@ fn load_schedules(app: &AppHandle) -> AppResult<Vec<ReportSchedule>> {
 /// 启动调度器后台循环。
 /// 应在 `tauri::Builder::setup` 中通过 `tauri::async_runtime::spawn` 调用。
 pub async fn run(app: AppHandle) {
+    // data_dir:~/.repomeow(settings.json / prompts);cache_root:安装目录 data/(chinese-days 缓存)
     let data_dir = workday::data_dir(&app);
+    let cache_root = workday::cache_root();
     let notify = app
         .state::<crate::commands::report::ScheduleNotify>()
         .0
@@ -760,7 +763,7 @@ pub async fn run(app: AppHandle) {
         let now_local = Local::now();
 
         // 先检查是否有当前时刻应触发的任务(±1 分钟容差,防止 sleep_until 因重算延迟漏掉)
-        let due = due_schedules(&schedules, &now_local, &data_dir);
+        let due = due_schedules(&schedules, &now_local, &cache_root);
         for s in &due {
             if let Err(e) = fire_schedule(&app, &client, &data_dir, s).await {
                 eprintln!("[scheduler] {}: 执行失败: {e}", s.name);

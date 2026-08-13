@@ -28,6 +28,8 @@ const updateStore = useUpdateStore();
 const isTrayPopup = getCurrentWindow().label === "tray-popup";
 
 let unlistenFocus: UnlistenFn | undefined;
+/** 上次聚焦触发 git 兜底刷新的时间戳(配合 30s 节流) */
+let lastFocusGitRefresh = 0;
 
 onMounted(async () => {
   // 托盘弹窗窗口已开 OS 级透明,body 不再刷底色,让玻璃皮肤能透出桌面
@@ -71,9 +73,14 @@ onMounted(async () => {
   );
   if (isTrayPopup) return;
   // git 状态由 Rust 后台循环每 30s 批量推送;窗口重新聚焦时兜底拉一次,
-  // 覆盖循环异常退出/事件通道重建后错过推送的场景(命中缓存,开销可忽略)
+  // 覆盖循环异常退出/事件通道重建后错过推送的场景(命中缓存,开销可忽略)。
+  // 聚焦是高频事件(切换窗口/详情页来回都会触发),做 30s 节流,避免与后台循环叠加重复查询
   unlistenFocus = await getCurrentWindow().onFocusChanged(({ payload }) => {
-    if (payload) store.refreshAllGitStatus();
+    if (!payload) return;
+    const now = Date.now();
+    if (now - lastFocusGitRefresh < 30_000) return;
+    lastFocusGitRefresh = now;
+    store.refreshAllGitStatus();
   });
   onListen<GitStatusItem[]>("git://status-updated", (items) => {
     store.applyGitStatusItems(items);

@@ -584,26 +584,34 @@ pub async fn list_git_remotes(path: String) -> AppResult<Vec<GitRemote>> {
 }
 
 fn list_remotes_blocking(path: &str) -> AppResult<Vec<GitRemote>> {
-    let remotes = git_command(path).arg("remote").output()?;
-    if !remotes.status.success() {
+    // git remote -v 一次进程取全(替代 git remote + 逐 remote get-url 的 N+1 子进程)
+    let output = git_command(path).args(["remote", "-v"]).output()?;
+    if !output.status.success() {
         return Ok(vec![]);
     }
-    let stdout = String::from_utf8_lossy(&remotes.stdout);
-    let mut out = Vec::new();
-    for name in stdout.lines().map(str::trim).filter(|l| !l.is_empty()) {
-        if let Ok(o) = git_command(path).args(["remote", "get-url", name]).output() {
-            if o.status.success() {
-                let url = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                if !url.is_empty() {
-                    out.push(GitRemote {
-                        name: name.to_string(),
-                        url,
-                    });
-                }
-            }
+    Ok(parse_remote_verbose(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
+}
+
+/// 解析 `git remote -v` 输出:每行形如 "origin\t<url> (fetch)" / "origin\t<url> (push)",
+/// 每个 remote 取首个(fetch)条目;无 URL 的 remote 不会出现在输出中
+fn parse_remote_verbose(stdout: &str) -> Vec<GitRemote> {
+    let mut out: Vec<GitRemote> = Vec::new();
+    for line in stdout.lines() {
+        let mut parts = line.split_whitespace();
+        let (Some(name), Some(url)) = (parts.next(), parts.next()) else {
+            continue;
+        };
+        if url.is_empty() || out.iter().any(|r| r.name == name) {
+            continue;
         }
+        out.push(GitRemote {
+            name: name.to_string(),
+            url: url.to_string(),
+        });
     }
-    Ok(out)
+    out
 }
 
 /// 带超时的后台 fetch:
@@ -2181,6 +2189,20 @@ mod tests {
         git(dir, &["init", "-b", "main"]);
         git(dir, &["config", "user.email", "test@example.com"]);
         git(dir, &["config", "user.name", "test"]);
+    }
+
+    #[test]
+    fn parse_remote_verbose_dedups_and_takes_fetch() {
+        let stdout = "origin\tgit@github.com:user/repo.git (fetch)\norigin\tgit@github.com:user/repo.git (push)\nupstream\thttps://example.com/a/b.git (fetch)\nupstream\thttps://example.com/a/b.git (push)\n";
+        let remotes = parse_remote_verbose(stdout);
+        assert_eq!(remotes.len(), 2);
+        assert_eq!(remotes[0].name, "origin");
+        assert_eq!(remotes[0].url, "git@github.com:user/repo.git");
+        assert_eq!(remotes[1].name, "upstream");
+        assert_eq!(remotes[1].url, "https://example.com/a/b.git");
+        // 空输出 / 残缺行
+        assert!(parse_remote_verbose("").is_empty());
+        assert!(parse_remote_verbose("origin\n").is_empty());
     }
 
     #[test]

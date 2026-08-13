@@ -33,7 +33,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useCollapsibleOpen } from "@/composables/useCollapsibleOpen";
 import { cmd, runInTerminal } from "@/lib/tauri";
 import { usePinsStore } from "@/stores/pins";
-import { useHiddenItemsStore } from "@/stores/hidden-items";
+import { useProjectOverviewStore } from "@/stores/project-overview";
 import { useProjectAssetsStore } from "@/stores/project-assets";
 import type { ComposeFile, ComposeServiceState, Project } from "@/types";
 
@@ -41,7 +41,7 @@ const { t } = useI18n();
 const props = defineProps<{ project: Project }>();
 const pinsStore = usePinsStore();
 const assetsStore = useProjectAssetsStore();
-const hiddenStore = useHiddenItemsStore();
+const overviewStore = useProjectOverviewStore();
 
 const { isOpen, setOpen } = useCollapsibleOpen("compose");
 
@@ -91,13 +91,14 @@ watch(
     loaded.value = false;
     showHidden.value = false;
     try {
-      // refresh 内部去重:与 PackageScripts 同时挂载只触发一次 scan_project_assets / list_hidden_items
-      const [, items] = await Promise.all([
+      // refresh 内部去重:与 PackageScripts / CustomCommands 同时挂载只触发一次
+      // scan_project_assets / get_project_overview
+      const [, overview] = await Promise.all([
         assetsStore.refresh(props.project),
-        hiddenStore.refresh(props.project.id),
+        overviewStore.refresh(props.project.id),
       ]);
       hiddenFiles.value = new Set(
-        items.filter((i) => i.kind === "composeFile").map((i) => i.targetKey),
+        overview.hidden_items.filter((i) => i.kind === "composeFile").map((i) => i.targetKey),
       );
     } catch {
       hiddenFiles.value = new Set();

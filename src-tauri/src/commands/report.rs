@@ -397,7 +397,6 @@ fn append_history_filters(
 #[tauri::command]
 pub fn get_calendar_meta(
     db: State<'_, Db>,
-    app: AppHandle,
     year: i32,
     month: u32,
     project_ids: Vec<i64>,
@@ -408,12 +407,7 @@ pub fn get_calendar_meta(
     let dates = get_calendar_meta_impl(&conn, year, month, &project_ids, &tag_ids, &report_type)?;
 
     // 节假日/调休数据
-    let data_dir = app
-        .path()
-        .home_dir()
-        .map_err(|e| AppError::coded(ErrorCode::IoError, e.to_string()))?
-        .join(crate::APP_DATA_DIR_NAME);
-    let (holidays, workdays) = workday::load_data(&data_dir).unwrap_or_default();
+    let (holidays, workdays) = workday::load_data(&workday::cache_root()).unwrap_or_default();
     let holidays: Vec<String> = holidays.into_iter().collect();
     let workdays: Vec<String> = workdays.into_iter().collect();
 
@@ -489,13 +483,8 @@ pub struct HolidayData {
 /// 返回全部法定节假日/调休补班日期列表(数据源覆盖 2004–2026,体积小,一次返回全集)。
 /// 数据加载失败时回退空集合,前端日历退化为常规周末着色。
 #[tauri::command]
-pub fn get_holiday_data(app: AppHandle) -> AppResult<HolidayData> {
-    let data_dir = app
-        .path()
-        .home_dir()
-        .map_err(|e| AppError::coded(ErrorCode::IoError, e.to_string()))?
-        .join(crate::APP_DATA_DIR_NAME);
-    let (holidays, workdays) = workday::load_data(&data_dir).unwrap_or_default();
+pub fn get_holiday_data() -> AppResult<HolidayData> {
+    let (holidays, workdays) = workday::load_data(&workday::cache_root()).unwrap_or_default();
     Ok(HolidayData {
         holidays: holidays.into_iter().collect(),
         workdays: workdays.into_iter().collect(),
@@ -610,23 +599,23 @@ pub struct WorkWeekRanges {
 /// 数据识别):本周 = 当前工作周起点 ~ 今天;上周 = 上一个完整工作周。
 /// 同步 #[tauri::command] 在主线程跑,is_workday 可能读盘/拉 CDN,放入线程池。
 #[tauri::command]
-pub async fn get_work_week_ranges(app: AppHandle) -> AppResult<WorkWeekRanges> {
+pub async fn get_work_week_ranges() -> AppResult<WorkWeekRanges> {
     tokio::task::spawn_blocking(move || {
-        let data_dir = workday::data_dir(&app);
+        let cache_root = workday::cache_root();
         let today = chrono::Local::now().date_naive();
         let fmt = |d: NaiveDate| d.format("%Y-%m-%d").to_string();
 
-        let this_start = crate::scheduler::work_week_start(today, &data_dir);
+        let this_start = crate::scheduler::work_week_start(today, &cache_root);
         // 上一个工作周:本周工作周起点之前最近的工作日即其末日
         // (14 天上限覆盖整周法定节假日的情况)
         let mut last_end = this_start - chrono::Duration::days(1);
         for _ in 0..14 {
-            if workday::is_workday(last_end, &data_dir) {
+            if workday::is_workday(last_end, &cache_root) {
                 break;
             }
             last_end -= chrono::Duration::days(1);
         }
-        let last_start = crate::scheduler::work_week_start(last_end, &data_dir);
+        let last_start = crate::scheduler::work_week_start(last_end, &cache_root);
 
         Ok(WorkWeekRanges {
             this_week: WorkWeekRange {
@@ -678,7 +667,6 @@ fn parse_date(s: &str) -> AppResult<NaiveDate> {
 /// is_workday 可能读盘/拉 CDN,放入线程池执行。
 #[tauri::command]
 pub async fn plan_batch_report_ranges(
-    app: AppHandle,
     period_type: String,
     date_from: String,
     date_to: String,
@@ -692,8 +680,7 @@ pub async fn plan_batch_report_ranges(
         let span = (to - from).num_days();
         let fmt = |d: NaiveDate| d.format("%Y-%m-%d").to_string();
 
-        let data_dir = workday::data_dir(&app);
-        let checker = workday::WorkdayChecker::load(&data_dir);
+        let checker = workday::WorkdayChecker::load(&workday::cache_root());
         let is_workday = |d: NaiveDate| checker.is_workday(d);
 
         if period_type == "weekly" {

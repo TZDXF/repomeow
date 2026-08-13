@@ -19,11 +19,13 @@ import ScriptItem from "@/components/scripts/ScriptItem.vue";
 import { COMMAND_ICONS } from "@/lib/command-icons";
 import { cmd, runInTerminal } from "@/lib/tauri";
 import { usePinsStore } from "@/stores/pins";
+import { useProjectOverviewStore } from "@/stores/project-overview";
 import type { CustomCommand, Project } from "@/types";
 
 const { t } = useI18n();
 const props = defineProps<{ project: Project }>();
 const pinsStore = usePinsStore();
+const overviewStore = useProjectOverviewStore();
 
 const commands = ref<CustomCommand[]>([]);
 
@@ -36,13 +38,10 @@ const formIcon = ref("");
 const submitting = ref(false);
 
 async function load() {
-  try {
-    commands.value = await cmd<CustomCommand[]>("list_custom_commands", {
-      projectId: props.project.id,
-    });
-  } catch (e) {
-    toast.error(String(e));
-  }
+  // 聚合 store 与 PackageScripts / DockerCompose 共享一次 get_project_overview IPC,
+  // 内部已做失败兜底(返回空数据),失败时卡片按无命令显示
+  const overview = await overviewStore.refresh(props.project.id);
+  commands.value = overview.custom_commands;
 }
 
 watch(() => props.project.id, load, { immediate: true });

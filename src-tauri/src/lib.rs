@@ -15,6 +15,18 @@ use tokio::sync::Notify;
 /// 应用数据目录名(位于用户主目录下)
 pub(crate) const APP_DATA_DIR_NAME: &str = ".repomeow";
 
+/// 运行期缓存根目录:安装目录(exe 所在目录)下的 `data/` 子目录,
+/// 用于编辑器图标提取产物(icons/)与 chinese-days 缓存等可再生的运行期文件。
+/// 安装目录不可写时缓存写入静默失败,功能按既有降级语义处理
+/// (图标回退 lucide 通用图标、chinese-days 每次重新拉取)。
+/// dev 模式(tauri dev)下 exe 位于 target/debug/,缓存随之落在 target/debug/data/。
+pub(crate) fn runtime_data_root() -> std::path::PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("data")))
+        .unwrap_or_default()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -161,7 +173,7 @@ pub fn run() {
             commands::tag::delete_tag,
             commands::tag::set_project_tags,
             commands::scan::scan_project_assets,
-            commands::script::list_custom_commands,
+            commands::overview::get_project_overview,
             commands::script::create_custom_command,
             commands::script::update_custom_command,
             commands::script::delete_custom_command,
@@ -170,7 +182,6 @@ pub fn run() {
             commands::files::save_text_file,
             commands::docker::compose_ps_batch,
             commands::docker::compose_export,
-            commands::hidden::list_hidden_items,
             commands::hidden::set_hidden_item,
             commands::pin::list_pinned_commands,
             commands::pin::set_pinned_command,

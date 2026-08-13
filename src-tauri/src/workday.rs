@@ -7,6 +7,7 @@
 //! 缓存结构:把 `chinese-days.json` 包成 `{ "downloaded_at": <unix_ts>, "data": <原 JSON> }`,
 //! 仅在包络解析成功且 `downloaded_at` 位于 TTL 内时使用缓存。
 //! 文件不存在、解析失败、字段缺失或 TTL 过期时重新拉取数据。
+//! 缓存文件位于安装目录 data/ 下(见 cache_root)。
 
 use std::collections::HashSet;
 use std::fs;
@@ -41,8 +42,9 @@ struct CacheEnvelope {
 
 /// 加载工作日数据:优先读缓存,过期或不存在时从 CDN 拉取并写入缓存。
 /// 返回 holidays 与 workdays 两个日期集合(均为 "YYYY-MM-DD" 格式)。
-pub fn load_data(data_dir: &PathBuf) -> AppResult<(HashSet<String>, HashSet<String>)> {
-    let cache_path = data_dir.join(CACHE_FILE);
+/// `cache_root` 为运行时数据根目录(`runtime_data_root`,缓存文件直接位于其下)。
+pub fn load_data(cache_root: &PathBuf) -> AppResult<(HashSet<String>, HashSet<String>)> {
+    let cache_path = cache_root.join(CACHE_FILE);
 
     // 缓存仅在包络合法且 TTL 未过期时命中
     if let Some(parsed) = try_load_envelope(&cache_path) {
@@ -137,10 +139,10 @@ fn parse_data(json: &str) -> AppResult<(HashSet<String>, HashSet<String>)> {
 /// * 若日期不在 holidays 集合中且为周一～周五 → `true`(常规工作日)
 /// * 其他情况 → `false`
 ///
-/// `data_dir` 为 `~/.repomeow` 目录路径。
-pub fn is_workday(date: NaiveDate, data_dir: &PathBuf) -> bool {
+/// `cache_root` 为运行时数据根目录(安装目录 data/)。
+pub fn is_workday(date: NaiveDate, cache_root: &PathBuf) -> bool {
     // 数据拉取失败时回退为常规周一～周五判断
-    let (holidays, workdays) = match load_data(data_dir) {
+    let (holidays, workdays) = match load_data(cache_root) {
         Ok(d) => d,
         Err(e) => {
             eprintln!("[workday] 加载工作日数据失败,回退常规判断: {e}");
@@ -175,8 +177,8 @@ pub struct WorkdayChecker {
 }
 
 impl WorkdayChecker {
-    pub fn load(data_dir: &PathBuf) -> Self {
-        let (holidays, workdays) = match load_data(data_dir) {
+    pub fn load(cache_root: &PathBuf) -> Self {
+        let (holidays, workdays) = match load_data(cache_root) {
             Ok(d) => d,
             Err(e) => {
                 eprintln!("[workday] 加载工作日数据失败,回退常规判断: {e}");
@@ -206,6 +208,11 @@ pub fn data_dir(app: &tauri::AppHandle) -> PathBuf {
         .home_dir()
         .unwrap_or_default()
         .join(APP_DATA_DIR_NAME)
+}
+
+/// chinese-days 缓存所在目录:安装目录 data/
+pub fn cache_root() -> PathBuf {
+    crate::runtime_data_root()
 }
 
 #[cfg(test)]

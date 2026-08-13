@@ -1,19 +1,18 @@
 //! 编辑器真实图标提取:Windows 解析 exe 内嵌图标资源(pelite 重组 ICO + ico 解码),
 //! macOS 解析 .app 包的 .icns(plist 读 CFBundleIconFile + icns 解码),统一缩放成
-//! 64px PNG 缓存到 ~/.repomeow/icons/<kind>.png,前端经 asset 协议展示。
+//! 64px PNG 缓存到 <安装目录>/data/icons/<kind>.png,前端经 asset 协议展示。
 //! 任何一步失败都返回 None,前端静默回退 lucide 通用图标。
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::State;
 
 use crate::commands::open;
 use crate::db::{self, Db};
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::EditorKind;
-use crate::APP_DATA_DIR_NAME;
 
 const ICONS_DIR_NAME: &str = "icons";
 /// 图标缓存(目标路径 + mtime)在 settings 表中的 key(JSON: { "<kind>": { target, mtime } })
@@ -54,12 +53,8 @@ fn kind_id(kind: EditorKind) -> String {
     format!("{kind:?}").to_ascii_lowercase()
 }
 
-fn icons_dir(app: &AppHandle) -> AppResult<PathBuf> {
-    let home = app
-        .path()
-        .home_dir()
-        .map_err(|e| AppError::coded(ErrorCode::IoError, e.to_string()))?;
-    Ok(home.join(APP_DATA_DIR_NAME).join(ICONS_DIR_NAME))
+fn icons_dir() -> PathBuf {
+    crate::runtime_data_root().join(ICONS_DIR_NAME)
 }
 
 fn file_mtime(path: &Path) -> Option<u64> {
@@ -99,28 +94,43 @@ fn icon_for_kind(kind: EditorKind, dir: &Path, cache: &mut IconCache, dirty: &mu
 
 /// 取全部打开方式的真实图标:kind id → PNG 绝对路径(提取失败为 null)
 #[tauri::command]
-pub fn get_editor_icons(
-    app: AppHandle,
+pub async fn get_editor_icons(
     db: State<'_, Db>,
 ) -> AppResult<HashMap<String, Option<String>>> {
-    let dir = icons_dir(&app)?;
-    std::fs::create_dir_all(&dir)?;
-    let conn = db.0.lock().unwrap();
-    let mut cache: IconCache = match db::get_setting(&conn, ICON_CACHE_SETTING_KEY)? {
-        Some(json) => serde_json::from_str(&json).unwrap_or_default(),
-        None => IconCache::new(),
+    let dir = icons_dir();
+    // 锁内只读缓存:图标提取(PE/icns 解析 + PNG 缩放编码写盘)是重 IO,必须在锁外执行,
+    // 否则冷缓存时长时间持有全局唯一 DB 连接,阻塞 hidden/script 等其他命令(数百 ms 级)
+    let cache: IconCache = {
+        let conn = db.0.lock().unwrap();
+        match db::get_setting(&conn, ICON_CACHE_SETTING_KEY)? {
+            Some(json) => serde_json::from_str(&json).unwrap_or_default(),
+            None => IconCache::new(),
+        }
     };
+    let (result, cache, dirty) = tokio::task::spawn_blocking(move || extract_all(dir, cache))
+        .await
+        .map_err(|e| AppError::coded(ErrorCode::IoError, e.to_string()))?;
+    if dirty {
+        let conn = db.0.lock().unwrap();
+        let json = serde_json::to_string(&cache).unwrap_or_else(|_| "{}".into());
+        db::set_setting(&conn, ICON_CACHE_SETTING_KEY, &json)?;
+    }
+    Ok(result)
+}
+
+/// 全部 kind 的提取流程(阻塞 IO,由 spawn_blocking 承载):建目录 → 逐 kind 解析/提取/写 PNG
+fn extract_all(
+    dir: PathBuf,
+    mut cache: IconCache,
+) -> (HashMap<String, Option<String>>, IconCache, bool) {
+    let _ = std::fs::create_dir_all(&dir);
     let mut dirty = false;
     let mut result = HashMap::new();
     for kind in ALL_KINDS {
         let path = icon_for_kind(kind, &dir, &mut cache, &mut dirty);
         result.insert(kind_id(kind), path.map(|p| p.to_string_lossy().into_owned()));
     }
-    if dirty {
-        let json = serde_json::to_string(&cache).unwrap_or_else(|_| "{}".into());
-        db::set_setting(&conn, ICON_CACHE_SETTING_KEY, &json)?;
-    }
-    Ok(result)
+    (result, cache, dirty)
 }
 
 // ---------------------------------------------------------------------------

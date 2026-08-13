@@ -255,6 +255,12 @@ export interface HiddenItem {
   targetKey: string;
 }
 
+/** 详情页首屏聚合数据(get_project_overview 一次 IPC 返回) */
+export interface ProjectOverview {
+  hidden_items: HiddenItem[];
+  custom_commands: CustomCommand[];
+}
+
 /** 可标记为「常用」的命令类型 */
 export type PinKind = "packageScript" | "composeFile" | "composeService" | "customCommand";
 

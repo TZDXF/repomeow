@@ -5,6 +5,7 @@ pub mod files;
 pub mod git;
 pub mod hidden;
 pub mod open;
+pub mod overview;
 pub mod pin;
 pub mod project;
 pub mod prompt;

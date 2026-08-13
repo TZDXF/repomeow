@@ -191,12 +191,7 @@ pub fn delete_command(conn: &Connection, id: i64) -> AppResult<()> {
 }
 
 // ---- Tauri 命令包装 ----
-
-#[tauri::command]
-pub fn list_custom_commands(db: State<'_, Db>, project_id: i64) -> AppResult<Vec<CustomCommand>> {
-    let conn = db.0.lock().unwrap();
-    list_commands(&conn, project_id)
-}
+// (列表查询已并入 commands::overview::get_project_overview,详情页一次 IPC 取全)
 
 #[tauri::command]
 pub fn create_custom_command(

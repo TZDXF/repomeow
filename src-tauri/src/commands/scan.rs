@@ -1,17 +1,24 @@
 use std::path::Path;
 
 use crate::commands::{files, script, walk};
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::ProjectAssets;
 
 /// 进入详情页时的资产扫描:单次目录遍历同时产出 package scripts 与 compose 文件,
 /// 替代原先 list_package_scripts / scan_compose_files 两条命令各扫一遍。
 /// walk 结果带 30s TTL 缓存(见 walk::project_files_cached),
 /// 反复进出详情页、多个卡片同时挂载不会重复遍历目录。
+/// 缓存未命中时是全量递归磁盘遍历,放入 spawn_blocking,避免同步命令阻塞主线程。
 #[tauri::command]
-pub fn scan_project_assets(path: String) -> AppResult<ProjectAssets> {
-    files::ensure_dir(&path)?;
-    let dir = Path::new(&path);
+pub async fn scan_project_assets(path: String) -> AppResult<ProjectAssets> {
+    tokio::task::spawn_blocking(move || scan_assets(&path))
+        .await
+        .map_err(|e| AppError::coded(ErrorCode::IoError, e.to_string()))?
+}
+
+fn scan_assets(path: &str) -> AppResult<ProjectAssets> {
+    files::ensure_dir(path)?;
+    let dir = Path::new(path);
     let walked = walk::project_files_cached(dir);
     Ok(ProjectAssets {
         package_scripts: script::package_scripts_from_files(dir, &walked),
@@ -43,7 +50,7 @@ mod tests {
         fs::create_dir_all(p.join("deploy")).unwrap();
         fs::write(p.join("deploy/app.yml"), "services:\n  web:\n    image: nginx\n").unwrap();
 
-        let assets = scan_project_assets(dir.clone()).unwrap();
+        let assets = scan_assets(&dir).unwrap();
         assert_eq!(assets.package_scripts.len(), 1);
         assert_eq!(assets.package_scripts[0].dir, ".");
         assert_eq!(assets.compose_files.len(), 1);
@@ -55,7 +62,7 @@ mod tests {
     #[test]
     fn rejects_missing_dir() {
         assert!(matches!(
-            scan_project_assets("D:/no/such/dir-xyz".into()),
+            scan_assets("D:/no/such/dir-xyz"),
             Err(ref e) if e.is_code(crate::error::ErrorCode::InvalidPath)
         ));
     }
