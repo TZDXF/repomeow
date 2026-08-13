@@ -13,9 +13,9 @@ use crate::commands::account;
 use crate::db::Db;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::{
-    GitBranchTrack, GitBranches, GitCommitContext, GitCommitInfo, GitGraphBatch, GitGraphCommit,
-    GitMergeResult, GitPullResult, GitRebaseResult, GitStatus, GitUntrackedFile, GitUser,
-    GitWorktree,
+    GitBranchTrack, GitBranches, GitCommitContext, GitCommitFile, GitCommitFileDiff, GitCommitInfo,
+    GitGraphBatch, GitGraphCommit, GitMergeResult, GitPullResult, GitRebaseResult, GitStatus,
+    GitUntrackedFile, GitUser, GitWorktree,
 };
 
 /// 后台 fetch 并发上限(超出排队)
@@ -857,18 +857,33 @@ fn list_branches_blocking(path: &str) -> AppResult<GitBranches> {
     })
 }
 
-/// 在项目目录初始化 git 仓库(默认分支 main),返回最新状态。
-/// `git init -b` 需要 git 2.28+,旧版本回退到不带 -b 的 init(分支名由用户配置决定)
+/// 在项目目录初始化 git 仓库,返回最新状态。
+/// branch 为初始分支名(空回退 main);`git init -b` 需要 git 2.28+,
+/// 旧版本回退到不带 -b 的 init 后用 `checkout -b` 改名未出生分支。
+/// remote_url 非空时将其添加为 origin;失败返回错误,但 init 幂等,
+/// 用户修正后重试不会产生副作用
 #[tauri::command]
-pub async fn git_init(path: String) -> AppResult<GitStatus> {
+pub async fn git_init(
+    path: String,
+    branch: String,
+    remote_url: Option<String>,
+) -> AppResult<GitStatus> {
     run_blocking(move || {
-        if let Err(e) = run_git(&path, &["init", "-b", "main"]) {
+        let branch = {
+            let b = branch.trim();
+            if b.is_empty() { "main" } else { b }
+        };
+        if let Err(e) = run_git(&path, &["init", "-b", branch]) {
             let msg = e.to_string();
             if msg.contains("unknown switch") || msg.contains("unrecognized option") {
                 run_git(&path, &["init"])?;
+                run_git(&path, &["checkout", "-b", branch])?;
             } else {
                 return Err(e);
             }
+        }
+        if let Some(url) = remote_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+            run_git(&path, &["remote", "add", "origin", url])?;
         }
         let st = status(&path)?;
         cache_status(&path, &st);
@@ -1924,6 +1939,114 @@ fn parse_graph_commit_line(line: &str) -> Option<GitGraphCommit> {
     })
 }
 
+/// 提交详情面板单文件 diff 的长度上限(超出截断,避免大文件撑爆 IPC)
+const COMMIT_DIFF_MAX_CHARS: usize = 200_000;
+
+/// 读取某次提交触及的文件清单(状态 + 增删行数,提交详情面板文件列表用)。
+/// diff-tree --root 兼容根提交(相对空树,全部视为新增);-M 识别重命名;
+/// --numstat 与 --name-status 两个输出块文件顺序一致,解析后按索引配对。
+/// 合并提交(多父)diff-tree 默认无输出,返回空数组由前端提示
+#[tauri::command]
+pub async fn git_commit_files(path: String, hash: String) -> AppResult<Vec<GitCommitFile>> {
+    run_blocking(move || {
+        let out = run_git(
+            &path,
+            &[
+                "-c",
+                "core.quotepath=false",
+                "diff-tree",
+                "--root",
+                "-r",
+                "-M",
+                "--no-commit-id",
+                "--numstat",
+                "--name-status",
+                &hash,
+            ],
+        )?;
+        Ok(parse_commit_files(&String::from_utf8_lossy(&out.stdout)))
+    })
+    .await
+}
+
+/// 解析 `diff-tree --numstat --name-status` 的组合输出。
+/// 输出为两块(numstat 在前、name-status 在后,空行分隔),按行首列区分:
+/// numstat 行首列是数字或 "-"(二进制),name-status 行首列是状态字母。
+/// 两块文件顺序一致,按索引把增删行数配到状态条目上
+fn parse_commit_files(text: &str) -> Vec<GitCommitFile> {
+    let mut stats: Vec<(Option<u32>, Option<u32>)> = Vec::new();
+    let mut files: Vec<GitCommitFile> = Vec::new();
+    for line in text.lines() {
+        let mut cols = line.split('\t');
+        let Some(first) = cols.next() else { continue };
+        if first.is_empty() {
+            continue;
+        }
+        if first.as_bytes()[0].is_ascii_digit() || first == "-" {
+            // numstat 行:"-" 表示二进制文件,行数记 None
+            stats.push((
+                first.parse::<u32>().ok(),
+                cols.next().and_then(|s| s.parse::<u32>().ok()),
+            ));
+            continue;
+        }
+        let status = first.chars().next().unwrap_or('\0');
+        if !"ACDMRT".contains(status) {
+            continue;
+        }
+        let p1 = cols.next().unwrap_or("").to_string();
+        let p2 = cols.next().map(str::to_string);
+        // 重命名 / 复制(R100 / C123):后随旧、新两个路径
+        let (old_path, path) = if matches!(status, 'R' | 'C') {
+            (Some(p1), p2.unwrap_or_default())
+        } else {
+            (None, p1)
+        };
+        if path.is_empty() {
+            continue;
+        }
+        files.push(GitCommitFile {
+            path,
+            old_path,
+            status: status.to_string(),
+            additions: None,
+            deletions: None,
+        });
+    }
+    for (i, file) in files.iter_mut().enumerate() {
+        if let Some((adds, dels)) = stats.get(i) {
+            file.additions = *adds;
+            file.deletions = *dels;
+        }
+    }
+    files
+}
+
+/// 读取某次提交中单个文件的 diff(提交详情面板用)。
+/// 用 `git show --format=` 而非 `diff <hash>^ <hash>`:根提交无父提交,前者天然兼容;
+/// 重命名时新旧路径都作为 pathspec 传入。超长按字符截断(二进制 diff 天然很短)
+#[tauri::command]
+pub async fn git_commit_file_diff(
+    path: String,
+    hash: String,
+    file_path: String,
+    old_path: Option<String>,
+) -> AppResult<GitCommitFileDiff> {
+    run_blocking(move || {
+        let mut args: Vec<&str> =
+            vec!["-c", "core.quotepath=false", "show", "--format=", &hash, "--"];
+        if let Some(old) = old_path.as_deref() {
+            args.push(old);
+        }
+        args.push(&file_path);
+        let out = run_git(&path, &args)?;
+        let (diff, truncated) =
+            truncate_chars(&String::from_utf8_lossy(&out.stdout), COMMIT_DIFF_MAX_CHARS);
+        Ok(GitCommitFileDiff { diff, truncated })
+    })
+    .await
+}
+
 /// 读取仓库当前 git 用户身份(日报"仅自己"过滤用)。
 /// `git config user.name/email` 本身含全局配置回退;非仓库或未配置时返回空串而非报错
 #[tauri::command]
@@ -2189,6 +2312,35 @@ mod tests {
         git(dir, &["init", "-b", "main"]);
         git(dir, &["config", "user.email", "test@example.com"]);
         git(dir, &["config", "user.name", "test"]);
+    }
+
+    #[test]
+    fn parse_commit_files_pairs_numstat_and_name_status() {
+        let text = "10\t2\tsrc/foo.ts\n3\t1\tsrc/bar.vue\n-\t-\tassets/logo.png\n\nM\tsrc/foo.ts\nD\tsrc/bar.vue\nA\tassets/logo.png\n";
+        let files = parse_commit_files(text);
+        assert_eq!(files.len(), 3);
+        assert_eq!(files[0].status, "M");
+        assert_eq!(files[0].path, "src/foo.ts");
+        assert_eq!(files[0].additions, Some(10));
+        assert_eq!(files[0].deletions, Some(2));
+        assert_eq!(files[1].status, "D");
+        assert_eq!(files[1].additions, Some(3));
+        // 二进制:numstat 为 "-",行数为 None
+        assert_eq!(files[2].status, "A");
+        assert_eq!(files[2].additions, None);
+        assert_eq!(files[2].deletions, None);
+    }
+
+    #[test]
+    fn parse_commit_files_handles_rename_and_garbage() {
+        let text = "5\t0\tsrc/new.ts\n\nR100\tsrc/old.ts\tsrc/new.ts\nX\n\t\n";
+        let files = parse_commit_files(text);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].status, "R");
+        assert_eq!(files[0].old_path.as_deref(), Some("src/old.ts"));
+        assert_eq!(files[0].path, "src/new.ts");
+        assert_eq!(files[0].additions, Some(5));
+        assert!(parse_commit_files("").is_empty());
     }
 
     #[test]

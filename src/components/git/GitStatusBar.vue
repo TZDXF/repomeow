@@ -1,22 +1,21 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { toast } from "vue-sonner";
 import { ChevronDown, FolderGit2, GitBranch, Loader2 } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import GitBranchMenu from "@/components/git/GitBranchMenu.vue";
 import GitBranchTrackBadges from "@/components/git/GitBranchTrackBadges.vue";
+import GitInitDialog from "@/components/git/GitInitDialog.vue";
 import GitRemoteLink from "@/components/git/GitRemoteLink.vue";
-import { useProjectsStore } from "@/stores/projects";
 import type { Project } from "@/types";
 
 const { t } = useI18n();
 const props = defineProps<{ project: Project }>();
-const store = useProjectsStore();
 
 const git = computed(() => props.project.git);
-const initializing = ref(false);
+/** 非 git 仓库时展示「初始化仓库」配置对话框 */
+const initDialogOpen = ref(false);
 
 const ahead = computed(() => git.value?.ahead ?? 0);
 const behind = computed(() => git.value?.behind ?? 0);
@@ -30,34 +29,15 @@ const changesTitle = computed(
   () =>
     `${t("git.staged")} ${git.value?.staged ?? 0} · ${t("git.modified")} ${git.value?.modified ?? 0} · ${t("git.untracked")} ${git.value?.untracked ?? 0}`,
 );
-
-async function initRepo() {
-  if (initializing.value) return;
-  initializing.value = true;
-  try {
-    await store.initRepository(props.project);
-    toast.success(t("git.init.success"));
-  } catch (e) {
-    toast.error(String(e));
-  } finally {
-    initializing.value = false;
-  }
-}
 </script>
 
 <template>
   <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
-    <Button
-      v-if="git && !git.is_repo"
-      variant="outline"
-      size="xs"
-      :disabled="initializing"
-      @click="initRepo"
-    >
-      <Loader2 v-if="initializing" class="h-3.5 w-3.5 animate-spin" />
-      <FolderGit2 v-else class="h-3.5 w-3.5" />
+    <Button v-if="git && !git.is_repo" variant="outline" size="xs" @click="initDialogOpen = true">
+      <FolderGit2 class="h-3.5 w-3.5" />
       {{ t("git.init.action") }}
     </Button>
+    <GitInitDialog v-if="git && !git.is_repo" v-model:open="initDialogOpen" :project="project" />
     <template v-else-if="git">
       <GitBranchMenu :project="project">
         <!-- 拉取/推送进行中:菜单点击后已关闭,loading 展示在触发徽标上 -->

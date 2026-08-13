@@ -138,6 +138,27 @@ export interface GitUser {
   email: string;
 }
 
+/** 某次提交触及的一个文件(git_commit_files) */
+export interface GitCommitFile {
+  /** 仓库相对路径(重命名时为新路径) */
+  path: string;
+  /** 重命名前的旧路径(仅 status = R 时有值) */
+  old_path: string | null;
+  /** 变更类型:A 新增 / M 修改 / D 删除 / R 重命名 / T 类型变更 */
+  status: string;
+  /** 新增行数;二进制文件为 null */
+  additions: number | null;
+  /** 删除行数;二进制文件为 null */
+  deletions: number | null;
+}
+
+/** 某次提交中单个文件的 diff(git_commit_file_diff) */
+export interface GitCommitFileDiff {
+  diff: string;
+  /** diff 是否因超长被截断 */
+  truncated: boolean;
+}
+
 /** 用户自定义 AI 提示词(~/.repomeow/prompts/*.md);空字符串表示使用内置默认模板 */
 export interface AiPrompts {
   /** 提交信息生成提示词 */

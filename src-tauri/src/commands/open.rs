@@ -231,6 +231,93 @@ pub fn open_with(path: String, kind: EditorKind) -> AppResult<()> {
     }
 }
 
+/// 用指定编辑器打开文件(可选行号定位)或目录,提交详情"在 IDE 打开"用。
+/// 与 open_with 的区别:允许文件路径;行号语法按各编辑器 CLI 约定构造,
+/// 不支持行号的编辑器降级为仅打开文件;explorer 选中文件、terminal 在父目录开终端
+#[tauri::command]
+pub fn open_in_editor(path: String, kind: EditorKind, line: Option<u32>) -> AppResult<()> {
+    let p = std::path::Path::new(&path);
+    if !p.exists() {
+        return Err(AppError::coded(ErrorCode::InvalidPath, path));
+    }
+    match kind {
+        EditorKind::Explorer => {
+            if p.is_file() {
+                open_explorer_reveal(&path)
+            } else {
+                open_explorer(&path)
+            }
+        }
+        EditorKind::Terminal => {
+            let dir = if p.is_dir() {
+                path.as_str()
+            } else {
+                p.parent().and_then(|d| d.to_str()).unwrap_or(&path)
+            };
+            spawn_terminal(dir, "Terminal", None)
+        }
+        other => match cli_command(other) {
+            Some(cli) => {
+                let args = editor_open_args(other, &path, line);
+                #[cfg(windows)]
+                {
+                    let mut full = vec!["/C".to_string(), cli.to_string()];
+                    full.extend(args);
+                    hidden(Command::new("cmd")).args(&full).spawn()?;
+                }
+                #[cfg(not(windows))]
+                Command::new(cli).args(&args).spawn()?;
+                Ok(())
+            }
+            None => Err(AppError::coded(ErrorCode::OpenMethodUnknown, format!("{other:?}"))),
+        },
+    }
+}
+
+/// 编辑器 CLI 的打开参数:带行号时按各 CLI 语法拼接,无行号时仅传路径。
+/// VSCode 系用 `-g file:line`(-g 复用已有窗口);Zed / Sublime 直接 `file:line`;
+/// JetBrains 系启动器用 `--line <n> <path>`
+fn editor_open_args(kind: EditorKind, path: &str, line: Option<u32>) -> Vec<String> {
+    match line {
+        Some(n) if n > 0 => match kind {
+            EditorKind::Vscode
+            | EditorKind::Cursor
+            | EditorKind::Windsurf
+            | EditorKind::Trae
+            | EditorKind::Vscodium => vec!["-g".into(), format!("{path}:{n}")],
+            EditorKind::Zed | EditorKind::Sublime => vec![format!("{path}:{n}")],
+            _ => vec!["--line".into(), n.to_string(), path.into()],
+        },
+        _ => vec![path.into()],
+    }
+}
+
+/// 在文件管理器中选中文件(而非仅打开所在目录)
+#[cfg(windows)]
+fn open_explorer_reveal(path: &str) -> AppResult<()> {
+    // explorer /select, 对正斜杠路径处理不佳,统一为反斜杠(前端拼接 git 相对路径用的是 "/")
+    Command::new("explorer")
+        .arg(format!("/select,{}", path.replace('/', "\\")))
+        .spawn()?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn open_explorer_reveal(path: &str) -> AppResult<()> {
+    Command::new("open").arg("-R").arg(path).spawn()?;
+    Ok(())
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
+fn open_explorer_reveal(path: &str) -> AppResult<()> {
+    // 无通用"选中文件"语义,退化为打开所在目录
+    let dir = std::path::Path::new(path)
+        .parent()
+        .and_then(|d| d.to_str())
+        .unwrap_or(path);
+    open_explorer(dir)
+}
+
 /// 探测所有命令类编辑器的 CLI 是否在 PATH 中,结果以 JSON 缓存进 settings(仅首次真实探测)
 #[tauri::command]
 pub fn detect_editors(db: State<'_, Db>) -> AppResult<HashMap<String, bool>> {
@@ -286,6 +373,38 @@ mod tests {
         assert_eq!(cli_command(EditorKind::Rustrover), Some("rustrover"));
         assert_eq!(cli_command(EditorKind::Explorer), None);
         assert_eq!(cli_command(EditorKind::Terminal), None);
+    }
+
+    #[test]
+    fn editor_open_args_line_syntax_per_kind() {
+        // VSCode 系:-g file:line
+        assert_eq!(
+            editor_open_args(EditorKind::Vscode, r"D:\p\f.ts", Some(12)),
+            vec!["-g".to_string(), r"D:\p\f.ts:12".to_string()]
+        );
+        assert_eq!(
+            editor_open_args(EditorKind::Cursor, "/p/f.ts", Some(3)),
+            vec!["-g".to_string(), "/p/f.ts:3".to_string()]
+        );
+        // Zed / Sublime:file:line
+        assert_eq!(
+            editor_open_args(EditorKind::Zed, "/p/f.ts", Some(3)),
+            vec!["/p/f.ts:3".to_string()]
+        );
+        // JetBrains 系:--line n file
+        assert_eq!(
+            editor_open_args(EditorKind::Idea, "/p/f.ts", Some(3)),
+            vec!["--line".to_string(), "3".to_string(), "/p/f.ts".to_string()]
+        );
+        // 无行号 / 行号 0:仅传路径
+        assert_eq!(
+            editor_open_args(EditorKind::Vscode, "/p/f.ts", None),
+            vec!["/p/f.ts".to_string()]
+        );
+        assert_eq!(
+            editor_open_args(EditorKind::Vscode, "/p/f.ts", Some(0)),
+            vec!["/p/f.ts".to_string()]
+        );
     }
 
     #[test]

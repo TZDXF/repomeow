@@ -142,6 +142,29 @@ pub struct GitGraphBatch {
     pub done: bool,
 }
 
+/// 某次提交触及的一个文件(git_commit_files)
+#[derive(Debug, Clone, Serialize)]
+pub struct GitCommitFile {
+    /// 仓库相对路径(重命名时为新路径)
+    pub path: String,
+    /// 重命名前的旧路径(仅 status = R 时有值)
+    pub old_path: Option<String>,
+    /// 变更类型:A 新增 / M 修改 / D 删除 / R 重命名 / T 类型变更
+    pub status: String,
+    /// 新增行数;二进制文件为 None(numstat 显示 -)
+    pub additions: Option<u32>,
+    /// 删除行数;二进制文件为 None
+    pub deletions: Option<u32>,
+}
+
+/// 某次提交中单个文件的 diff(git_commit_file_diff;超长时截断)
+#[derive(Debug, Clone, Serialize)]
+pub struct GitCommitFileDiff {
+    pub diff: String,
+    /// diff 是否因超长被截断
+    pub truncated: bool,
+}
+
 /// 仓库当前 git 用户身份(user.name / user.email,含全局配置回退)
 #[derive(Debug, Clone, Serialize)]
 pub struct GitUser {

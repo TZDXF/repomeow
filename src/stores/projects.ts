@@ -245,9 +245,13 @@ export const useProjectsStore = defineStore("projects", () => {
     return cmd<GitBranches>("list_git_branches", { path: project.path });
   }
 
-  /** 在项目目录初始化 git 仓库(默认分支 main) */
-  async function initRepository(project: Project) {
-    project.git = await cmd<GitStatus>("git_init", { path: project.path });
+  /** 在项目目录初始化 git 仓库;branch 空回退 main,remoteUrl 非空时添加为 origin */
+  async function initRepository(project: Project, branch: string, remoteUrl?: string) {
+    project.git = await cmd<GitStatus>("git_init", {
+      path: project.path,
+      branch,
+      remoteUrl: remoteUrl || null,
+    });
   }
 
   /**

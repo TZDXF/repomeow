@@ -11,7 +11,6 @@ import {
   ArrowUpToLine,
   ChevronDown,
   ChevronRight,
-  Copy,
   Folder,
   GitBranch,
   Globe,
@@ -49,6 +48,7 @@ import {
 import { cmd } from "@/lib/tauri";
 import { useProjectsStore } from "@/stores/projects";
 import ConflictDialog from "@/components/git/ConflictDialog.vue";
+import CommitDetailPanel from "@/components/git/CommitDetailPanel.vue";
 import GitBranchDeleteDialog from "@/components/git/GitBranchDeleteDialog.vue";
 import GitBranchTrackBadges from "@/components/git/GitBranchTrackBadges.vue";
 import type { GitBranches, GitBranchTrack, GitGraphCommit } from "@/types";
@@ -191,6 +191,29 @@ function startColResize(key: ColKey, e: PointerEvent) {
   const minW = key === "graph" ? GRAPH_COL_MIN_W : COL_MIN_W[key];
   const onMove = (ev: PointerEvent) => {
     colWidths.value[key] = Math.max(minW, Math.round(startW + ev.clientX - startX));
+  };
+  const onUp = () => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+}
+
+// --- 右侧提交详情分栏:选中提交时展示,拖拽分隔条调宽(持久化) ---
+const detailWidth = useLocalStorage("repomeow:graph-detail-width", 480);
+const DETAIL_MIN_W = 320;
+const DETAIL_MAX_W = 800;
+
+function startDetailResize(e: PointerEvent) {
+  e.preventDefault();
+  const startX = e.clientX;
+  const startW = detailWidth.value;
+  const onMove = (ev: PointerEvent) => {
+    detailWidth.value = Math.min(
+      DETAIL_MAX_W,
+      Math.max(DETAIL_MIN_W, Math.round(startW - (ev.clientX - startX))),
+    );
   };
   const onUp = () => {
     window.removeEventListener("pointermove", onMove);
@@ -619,11 +642,6 @@ function isTag(refName: string) {
 }
 function tagName(refName: string) {
   return refName.slice(5);
-}
-
-async function copyHash(hash: string) {
-  await navigator.clipboard.writeText(hash);
-  toast.success(t("git.graph.copied"));
 }
 </script>
 
@@ -1082,49 +1100,21 @@ async function copyHash(hash: string) {
           </p>
         </template>
       </div>
-    </div>
 
-    <!-- 底部提交详情面板 -->
-    <div v-if="selected" class="shrink-0 border-t bg-muted/30 px-4 py-3">
-      <div class="flex items-start justify-between gap-4">
-        <div class="min-w-0 flex-1 space-y-1.5 text-sm">
-          <p class="font-medium break-all">{{ selected.subject }}</p>
-          <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            <span class="flex items-center gap-1">
-              {{ t("git.graph.detail.hash") }}
-              <code class="font-mono text-foreground">{{ shortHash(selected.hash) }}</code>
-              <button
-                class="text-muted-foreground transition-colors hover:text-foreground"
-                :title="t('git.graph.copyHash')"
-                @click="copyHash(selected.hash)"
-              >
-                <Copy class="h-3 w-3" />
-              </button>
-            </span>
-            <span>{{ t("git.graph.detail.author") }} {{ selected.author }}</span>
-            <span>{{ t("git.graph.detail.date") }} {{ selected.date }}</span>
-            <span v-if="selected.parents.length" class="font-mono">
-              {{ t("git.graph.detail.parents") }}
-              {{ selected.parents.map(shortHash).join(", ") }}
-            </span>
-          </div>
-          <div v-if="selected.refs.length" class="flex flex-wrap gap-1 pt-0.5">
-            <Badge
-              v-for="r in selected.refs"
-              :key="r"
-              :variant="isTag(r) ? 'outline' : 'secondary'"
-              class="h-5 gap-1 px-1.5 text-[10px]"
-            >
-              <TagIcon v-if="isTag(r)" class="h-2.5 w-2.5" />
-              <GitBranch v-else class="h-2.5 w-2.5" />
-              {{ isTag(r) ? tagName(r) : r }}
-            </Badge>
-          </div>
-        </div>
-        <Button variant="ghost" size="sm" class="shrink-0" @click="selected = null">
-          <X class="h-4 w-4" />
-        </Button>
-      </div>
+      <!-- 右侧提交详情分栏:选中提交行时展示,拖拽分隔条调宽 -->
+      <template v-if="selected">
+        <div
+          class="w-1.5 shrink-0 cursor-col-resize transition-colors hover:bg-primary/50"
+          @pointerdown="startDetailResize"
+        />
+        <aside class="shrink-0 border-l" :style="{ width: `${detailWidth}px` }">
+          <CommitDetailPanel
+            :commit="selected"
+            :project-path="project.path"
+            @close="selected = null"
+          />
+        </aside>
+      </template>
     </div>
 
     <!-- 拉取产生合并冲突时的解决引导(仅当前分支的 pull 可能出现) -->
