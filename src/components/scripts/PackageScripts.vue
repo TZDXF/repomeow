@@ -13,7 +13,7 @@ import { cmd, runInTerminal } from "@/lib/tauri";
 import { usePinsStore } from "@/stores/pins";
 import { useProjectOverviewStore } from "@/stores/project-overview";
 import { useProjectAssetsStore } from "@/stores/project-assets";
-import type { HiddenKind, PackageScript, PackageScriptsGroup, Project } from "@/types";
+import type { HiddenItem, HiddenKind, PackageScript, PackageScriptsGroup, Project } from "@/types";
 
 const { t } = useI18n();
 const props = defineProps<{ project: Project }>();
@@ -24,7 +24,7 @@ const overviewStore = useProjectOverviewStore();
 const { isOpen, setOpen } = useCollapsibleOpen("scripts");
 
 /** 扫描结果来自共享 store(与 DockerCompose 卡片合并为一次后端扫描) */
-const groups = computed(() => assetsStore.assetsOf(props.project.id)?.package_scripts ?? []);
+const groups = computed(() => assetsStore.assetsOf(props.project)?.package_scripts ?? []);
 const loaded = ref(false);
 /** 各分组展开状态,key 为分组目录 */
 const openStates = ref<Record<string, boolean>>({});
@@ -69,38 +69,46 @@ const displayGroups = computed<DisplayGroup[]>(() =>
 watch(
   () => [props.project.id, props.project.path],
   async () => {
-    loaded.value = false;
     showHidden.value = false;
     pinsStore.ensureLoaded();
-    try {
-      // refresh 内部去重:与 DockerCompose / CustomCommands 同时挂载只触发一次
-      // scan_project_assets / get_project_overview
-      const [, overview] = await Promise.all([
-        assetsStore.refresh(props.project),
-        overviewStore.refresh(props.project.id),
-      ]);
-      const items = overview.hidden_items;
-      hiddenGroups.value = new Set(
-        items.filter((i) => i.kind === "packageFile").map((i) => i.targetKey),
-      );
-      hiddenScripts.value = new Set(
-        items.filter((i) => i.kind === "packageScript").map((i) => i.targetKey),
-      );
-    } catch {
-      hiddenGroups.value = new Set();
-      hiddenScripts.value = new Set();
-    } finally {
-      loaded.value = true;
-    }
-    openStates.value = Object.fromEntries(
-      groups.value.map((g) => [
-        g.dir,
-        isOpen(`${props.project.id}:${g.dir}`, groups.value.length === 1),
-      ]),
-    );
+    // stale-while-revalidate:旧扫描结果与旧隐藏项都齐备时,立即按旧数据渲染
+    // (隐藏项必须先就位,否则已隐藏分组会在首屏闪现再消失),
+    // 后台刷新完成后 groups / 隐藏项自动替换;仅首次进入(无旧数据)才等首轮请求
+    const staleOverview = overviewStore.cached(props.project.id);
+    if (staleOverview) applyHiddenItems(staleOverview.hidden_items);
+    const hasStale = !!assetsStore.assetsOf(props.project) && !!staleOverview;
+    loaded.value = hasStale;
+    if (hasStale) resetOpenStates();
+    // refresh 内部去重:与 DockerCompose / CustomCommands 同时挂载只触发一次
+    // scan_project_assets / get_project_overview;两者失败均回退旧数据/空数据,不抛错
+    const [, overview] = await Promise.all([
+      assetsStore.refresh(props.project),
+      overviewStore.refresh(props.project.id),
+    ]);
+    applyHiddenItems(overview.hidden_items);
+    loaded.value = true;
+    resetOpenStates();
   },
   { immediate: true },
 );
+
+function applyHiddenItems(items: HiddenItem[]) {
+  hiddenGroups.value = new Set(
+    items.filter((i) => i.kind === "packageFile").map((i) => i.targetKey),
+  );
+  hiddenScripts.value = new Set(
+    items.filter((i) => i.kind === "packageScript").map((i) => i.targetKey),
+  );
+}
+
+function resetOpenStates() {
+  openStates.value = Object.fromEntries(
+    groups.value.map((g) => [
+      g.dir,
+      isOpen(`${props.project.id}:${g.dir}`, groups.value.length === 1),
+    ]),
+  );
+}
 
 function onToggle(g: PackageScriptsGroup, open: boolean) {
   openStates.value[g.dir] = open;
@@ -114,6 +122,8 @@ function groupLabel(g: PackageScriptsGroup): string {
 async function setHidden(kind: HiddenKind, key: string, hidden: boolean) {
   try {
     await cmd("set_hidden_item", { projectId: props.project.id, kind, targetKey: key, hidden });
+    // 同步 overview 缓存,下次进入详情时 stale 首屏就是最新隐藏状态
+    overviewStore.setHiddenLocal(props.project.id, kind, key, hidden);
     const target = kind === "packageFile" ? hiddenGroups : hiddenScripts;
     const next = new Set(target.value);
     if (hidden) next.add(key);

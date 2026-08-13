@@ -6,7 +6,7 @@ use crate::models::ProjectAssets;
 
 /// 进入详情页时的资产扫描:单次目录遍历同时产出 package scripts 与 compose 文件,
 /// 替代原先 list_package_scripts / scan_compose_files 两条命令各扫一遍。
-/// walk 结果带 30s TTL 缓存(见 walk::project_files_cached),
+/// walk 结果带缓存(见 walk::project_files_cached:文件变更监听即时失效 + TTL 兜底),
 /// 反复进出详情页、多个卡片同时挂载不会重复遍历目录。
 /// 缓存未命中时是全量递归磁盘遍历,放入 spawn_blocking,避免同步命令阻塞主线程。
 #[tauri::command]

@@ -35,7 +35,7 @@ import { cmd, runInTerminal } from "@/lib/tauri";
 import { usePinsStore } from "@/stores/pins";
 import { useProjectOverviewStore } from "@/stores/project-overview";
 import { useProjectAssetsStore } from "@/stores/project-assets";
-import type { ComposeFile, ComposeServiceState, Project } from "@/types";
+import type { ComposeFile, ComposeServiceState, HiddenItem, Project } from "@/types";
 
 const { t } = useI18n();
 const props = defineProps<{ project: Project }>();
@@ -46,7 +46,7 @@ const overviewStore = useProjectOverviewStore();
 const { isOpen, setOpen } = useCollapsibleOpen("compose");
 
 /** 扫描结果来自共享 store(与 PackageScripts 卡片合并为一次后端扫描) */
-const files = computed(() => assetsStore.assetsOf(props.project.id)?.compose_files ?? []);
+const files = computed(() => assetsStore.assetsOf(props.project)?.compose_files ?? []);
 const loaded = ref(false);
 /** 各 compose 文件展开状态,key 为文件路径 */
 const openStates = ref<Record<string, boolean>>({});
@@ -88,34 +88,48 @@ const displayFiles = computed(() =>
 watch(
   () => [props.project.id, props.project.path],
   async () => {
-    loaded.value = false;
     showHidden.value = false;
-    try {
-      // refresh 内部去重:与 PackageScripts / CustomCommands 同时挂载只触发一次
-      // scan_project_assets / get_project_overview
-      const [, overview] = await Promise.all([
-        assetsStore.refresh(props.project),
-        overviewStore.refresh(props.project.id),
-      ]);
-      hiddenFiles.value = new Set(
-        overview.hidden_items.filter((i) => i.kind === "composeFile").map((i) => i.targetKey),
-      );
-    } catch {
-      hiddenFiles.value = new Set();
-    } finally {
-      loaded.value = true;
-    }
-    openStates.value = Object.fromEntries(
-      files.value.map((f) => [
-        f.path,
-        isOpen(`${props.project.id}:${f.path}`, files.value.length === 1),
-      ]),
-    );
     pinsStore.ensureLoaded();
+    // stale-while-revalidate:旧扫描结果与旧隐藏项都齐备时,立即按旧数据渲染
+    // (隐藏项必须先就位,否则已隐藏文件会在首屏闪现再消失),
+    // 并先用旧文件列表查服务状态,后台刷新完成后再按新列表补一次;
+    // 仅首次进入(无旧数据)才等首轮请求
+    const staleOverview = overviewStore.cached(props.project.id);
+    if (staleOverview) applyHiddenFiles(staleOverview.hidden_items);
+    const hasStale = !!assetsStore.assetsOf(props.project) && !!staleOverview;
+    loaded.value = hasStale;
+    if (hasStale) {
+      resetOpenStates();
+      loadStatuses();
+    }
+    // refresh 内部去重:与 PackageScripts / CustomCommands 同时挂载只触发一次
+    // scan_project_assets / get_project_overview;两者失败均回退旧数据/空数据,不抛错
+    const [, overview] = await Promise.all([
+      assetsStore.refresh(props.project),
+      overviewStore.refresh(props.project.id),
+    ]);
+    applyHiddenFiles(overview.hidden_items);
+    loaded.value = true;
+    resetOpenStates();
     loadStatuses();
   },
   { immediate: true },
 );
+
+function applyHiddenFiles(items: HiddenItem[]) {
+  hiddenFiles.value = new Set(
+    items.filter((i) => i.kind === "composeFile").map((i) => i.targetKey),
+  );
+}
+
+function resetOpenStates() {
+  openStates.value = Object.fromEntries(
+    files.value.map((f) => [
+      f.path,
+      isOpen(`${props.project.id}:${f.path}`, files.value.length === 1),
+    ]),
+  );
+}
 
 function onToggle(f: ComposeFile, open: boolean) {
   openStates.value[f.path] = open;
@@ -130,6 +144,8 @@ async function toggleFileHidden(path: string, hidden: boolean) {
       targetKey: path,
       hidden: !hidden,
     });
+    // 同步 overview 缓存,下次进入详情时 stale 首屏就是最新隐藏状态
+    overviewStore.setHiddenLocal(props.project.id, "composeFile", path, !hidden);
     const next = new Set(hiddenFiles.value);
     if (hidden) next.delete(path);
     else next.add(path);

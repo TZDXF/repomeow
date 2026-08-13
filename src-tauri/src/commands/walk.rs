@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use ignore::WalkBuilder;
+use notify::Watcher;
 
 /// 递归列出项目内未被 git 排除的文件,返回相对 root 的路径。
 ///
@@ -14,18 +15,32 @@ use ignore::WalkBuilder;
 /// - 无条件跳过 node_modules:未被 gitignore 时(如非 git 项目)扫描它既慢又吵,
 ///   其内部的 package.json / yml 对本工具没有价值。
 ///
-/// 结果按路径排序,保证输出确定性。
+/// 并行遍历:大项目(数万文件)单线程做 gitignore 匹配要数百毫秒,
+/// build_parallel 按核数分发目录缩短冷扫描;输出顺序不确定,最后统一排序保证确定性。
 pub fn project_files(root: &Path) -> Vec<PathBuf> {
-    let mut files: Vec<PathBuf> = WalkBuilder::new(root)
+    let (tx, rx) = std::sync::mpsc::channel::<PathBuf>();
+    WalkBuilder::new(root)
         .require_git(false)
         .filter_entry(|e| {
             // 目录(或文件)名为 node_modules 时不再深入
             e.file_name() != "node_modules"
         })
-        .build()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
-        .filter_map(|e| e.path().strip_prefix(root).ok().map(PathBuf::from))
+        .build_parallel()
+        .run(|| {
+            let tx = tx.clone();
+            Box::new(move |entry| {
+                if let Ok(e) = entry {
+                    if e.file_type().is_some_and(|t| t.is_file()) {
+                        let _ = tx.send(e.into_path());
+                    }
+                }
+                ignore::WalkState::Continue
+            })
+        });
+    drop(tx);
+    let mut files: Vec<PathBuf> = rx
+        .into_iter()
+        .filter_map(|p| p.strip_prefix(root).ok().map(PathBuf::from))
         .collect();
     files.sort();
     files
@@ -36,11 +51,12 @@ pub fn to_slash(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
-// ── walk 结果 TTL 缓存 ──────────────────────────────────────────────────
+// ── walk 结果缓存(notify 变更即时失效 + TTL 兜底) ─────────────────────────
 
-/// 缓存 TTL:与 git 状态刷新节奏(30s)对齐,反复进出详情页不重复遍历目录;
-/// 无文件变更监听,容忍 TTL 内新增 package.json / compose 文件晚一点被发现
-const WALK_CACHE_TTL: Duration = Duration::from_secs(30);
+/// 缓存 TTL 仅作兜底:正常路径下文件监听会在 package.json / yaml / gitignore
+/// 变更时即时删掉缓存条目,TTL 只覆盖监听安装失败、事件丢失(缓冲区溢出等)
+/// 的场景,故可以从 30s 放宽到 5 分钟,大项目反复进出详情页不再周期性重扫
+const WALK_CACHE_TTL: Duration = Duration::from_secs(300);
 
 /// 缓存条目上限:单个大项目的文件清单可达数十 MB,超限直接清空重建,
 /// 避免多项目缓存堆积占用内存
@@ -53,7 +69,13 @@ struct CachedWalk {
 
 static WALK_CACHE: OnceLock<Mutex<HashMap<PathBuf, CachedWalk>>> = OnceLock::new();
 
-/// 带 TTL 缓存的 project_files:命中且未过期直接共享同一份结果(Arc,不复制)。
+/// 已缓存根目录的递归文件监听器。回调里只做缓存失效(map.remove),
+/// 真正的重扫延迟到下次请求时按需进行;锁顺序:回调只拿 WALK_CACHE,
+/// 其余路径先 WALK_CACHE 后 WALK_WATCHERS,无循环等待
+static WALK_WATCHERS: OnceLock<Mutex<HashMap<PathBuf, notify::RecommendedWatcher>>> =
+    OnceLock::new();
+
+/// 带缓存的 project_files:命中且未过期直接共享同一份结果(Arc,不复制)。
 /// 详情页资产扫描等高频只读场景使用;需要保证新鲜的调用方(如测试)用 project_files。
 pub fn project_files_cached(root: &Path) -> Arc<Vec<PathBuf>> {
     let cache = WALK_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
@@ -79,7 +101,79 @@ pub fn project_files_cached(root: &Path) -> Arc<Vec<PathBuf>> {
             at: Instant::now(),
         },
     );
+    // 撤掉已不在缓存里的根目录监听,避免 watcher 无限堆积
+    WALK_WATCHERS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap()
+        .retain(|dir, _| map.contains_key(dir));
+    drop(map);
+    ensure_watcher(root);
     files
+}
+
+/// 为已缓存的根目录安装递归文件监听(幂等)。
+/// 监听安装失败(权限、平台不支持等)时静默降级为纯 TTL 失效。
+fn ensure_watcher(root: &Path) {
+    let watchers = WALK_WATCHERS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut map = watchers.lock().unwrap();
+    if map.contains_key(root) {
+        return;
+    }
+    // 根目录的 .gitignore/.ignore 用来过滤构建目录(target/ 等)里的事件,
+    // 避免构建产物抖动反复让缓存失效;嵌套 .gitignore 不纳入判断,
+    // 漏过滤的代价只是偶发的一次重扫
+    let mut gi_builder = ignore::gitignore::GitignoreBuilder::new(root);
+    gi_builder.add(root.join(".gitignore"));
+    gi_builder.add(root.join(".ignore"));
+    // 规则文件本身解析失败时退化为不过滤(多失效几次缓存,无害)
+    let gitignore = gi_builder
+        .build()
+        .unwrap_or_else(|_| ignore::gitignore::Gitignore::empty());
+    let root_owned = root.to_path_buf();
+    let Ok(mut watcher) = notify::recommended_watcher(move |res| {
+        let Ok(event) = res else { return };
+        if !event_affects_assets(&event, &gitignore) {
+            return;
+        }
+        if let Some(cache) = WALK_CACHE.get() {
+            cache.lock().unwrap().remove(&root_owned);
+        }
+    }) else {
+        return;
+    };
+    if watcher.watch(root, notify::RecursiveMode::Recursive).is_ok() {
+        map.insert(root.to_path_buf(), watcher);
+    }
+}
+
+/// 路径是否参与资产提取:仅 package.json、yaml 与 ignore 规则文件
+/// (gitignore 变更会改变遍历集合本身);node_modules 遍历时被跳过,其内部变更同样无关
+fn is_asset_relevant(path: &Path) -> bool {
+    if path.components().any(|c| c.as_os_str() == "node_modules") {
+        return false;
+    }
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    if name == "package.json" || name == ".gitignore" || name == ".ignore" {
+        return true;
+    }
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("yml") || e.eq_ignore_ascii_case("yaml"))
+}
+
+/// 文件事件是否可能改变扫描结果:无法判断时(paths 为空,如事件缓冲区溢出)
+/// 保守按失效处理;否则要求至少一条相关路径且未被根 gitignore 排除
+/// (排除 target/ 等构建目录的写入抖动)
+fn event_affects_assets(event: &notify::Event, gitignore: &ignore::gitignore::Gitignore) -> bool {
+    if event.paths.is_empty() {
+        return true;
+    }
+    event.paths.iter().any(|p| {
+        is_asset_relevant(p) && !gitignore.matched_path_or_any_parents(p, p.is_dir()).is_ignore()
+    })
 }
 
 #[cfg(test)]
@@ -134,6 +228,44 @@ mod tests {
         let files = project_files(&dir);
         let names: Vec<String> = files.iter().map(|p| to_slash(p)).collect();
         assert_eq!(names, vec!["app.yml"]);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn asset_relevance_matches_scan_inputs() {
+        assert!(is_asset_relevant(Path::new("/p/package.json")));
+        assert!(is_asset_relevant(Path::new("/p/a/b/docker-compose.yml")));
+        assert!(is_asset_relevant(Path::new("/p/x.YAML")));
+        // ignore 规则变更会改变遍历集合本身,也算相关
+        assert!(is_asset_relevant(Path::new("/p/.gitignore")));
+        assert!(is_asset_relevant(Path::new("/p/sub/.ignore")));
+        assert!(!is_asset_relevant(Path::new("/p/README.md")));
+        assert!(!is_asset_relevant(Path::new("/p/src/main.rs")));
+        // node_modules 被遍历跳过,内部 package.json 变更无关
+        assert!(!is_asset_relevant(Path::new("/p/node_modules/dep/package.json")));
+    }
+
+    #[test]
+    fn watcher_invalidates_cache_on_yaml_change() {
+        let dir = temp_dir("watch");
+        fs::write(dir.join("app.yml"), "a: 1").unwrap();
+        let first = project_files_cached(&dir);
+        assert_eq!(first.len(), 1);
+
+        // project_files_cached 返回时监听已安装,之后新增 yaml 应让缓存失效
+        fs::write(dir.join("b.yml"), "b: 2").unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            if project_files_cached(&dir).len() == 2 {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "文件监听未在超时内让 walk 缓存失效"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
 
         let _ = fs::remove_dir_all(&dir);
     }

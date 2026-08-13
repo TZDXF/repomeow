@@ -215,6 +215,21 @@ fn is_yaml_file(path: &Path) -> bool {
         .is_some_and(|e| e.eq_ignore_ascii_case("yml") || e.eq_ignore_ascii_case("yaml"))
 }
 
+/// compose 判定的廉价粗筛(在完整 YAML 解析之前):
+/// - 文件名含 compose(docker-compose.yml / compose.yaml 等惯例命名)直接通过;
+/// - 否则只认第 0 列的顶层 `services:` 键——compose 规范要求 services 位于顶层,
+///   缩进的同名键是嵌套字段(如 CI 配置里的 services),不算;
+/// - 引号包裹键名等罕见写法可能漏过,但只要文件名带 compose 仍会被识别。
+fn maybe_compose_file(file_name: &str, content: &str) -> bool {
+    if file_name.to_ascii_lowercase().contains("compose") {
+        return true;
+    }
+    content.lines().any(|line| {
+        line.strip_prefix("services")
+            .is_some_and(|rest| rest.trim_start().starts_with(':'))
+    })
+}
+
 /// 递归扫描项目内的 Docker Compose 文件(尊重 git 排除规则,按内容识别)。
 /// 前端走合并扫描 scan_project_assets,此入口保留给测试
 #[cfg_attr(not(test), allow(dead_code))]
@@ -239,8 +254,13 @@ pub(crate) fn compose_files_from_files(
         })
         .filter_map(|rel| {
             let content = std::fs::read_to_string(dir.join(rel)).ok()?;
+            let file_name = rel.file_name()?.to_string_lossy().into_owned();
+            // 廉价粗筛:大项目里 yaml 文件可达上百个,逐个完整解析 YAML 开销可观,
+            // 先按文件名/顶层 services 键过滤,只对疑似文件做完整解析
+            if !maybe_compose_file(&file_name, &content) {
+                return None;
+            }
             let services = parse_compose(&content)?;
-            let file_name = rel.file_name().map(|n| n.to_string_lossy().into_owned())?;
             Some(ComposeFile {
                 path: walk::to_slash(rel),
                 file_name,
@@ -367,6 +387,22 @@ mod tests {
         assert_eq!(paths, vec!["a.yml", "z.yml", "abc/x.yml"]);
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn maybe_compose_prefilter() {
+        // 文件名含 compose 直接通过(哪怕内容暂未嗅探到顶层 services)
+        assert!(maybe_compose_file("docker-compose.yml", "name: demo\n"));
+        assert!(maybe_compose_file("COMPOSE.YAML", "x: 1\n"));
+        // 顶层 services 键:标准写法、键后空格、CRLF 行尾都认
+        assert!(maybe_compose_file("app.yml", "services:\n  web: {}\n"));
+        assert!(maybe_compose_file("app.yml", "services :\n  web: {}\n"));
+        assert!(maybe_compose_file("app.yml", "---\nservices:\r\n  web: {}\n"));
+        // 缩进的嵌套 services(如 CI 配置)不算顶层键
+        assert!(!maybe_compose_file("ci.yaml", "jobs:\n  build:\n    services:\n      db: {}\n"));
+        // 注释与普通键不误判
+        assert!(!maybe_compose_file("a.yml", "# services:\nx: 1\n"));
+        assert!(!maybe_compose_file("a.yml", "serviceName: web\n"));
     }
 
     #[test]
