@@ -11,10 +11,13 @@ import type { Project, ProjectAssets } from "@/types";
  * stale-while-revalidate:扫描结果按「项目 id + 路径」保留,再次进入时先拿旧数据
  * 渲染、后台刷新完成后自动替换——大项目全量目录遍历要数百毫秒,不等结果才不卡首屏。
  * key 含 path:worktree 切换(id 同 path 不同)各自保留各自的旧数据,互不覆盖。
+ *
+ * 缓存是 Map 实现的真 LRU:读取即移到最新,超限淘汰最久未用
+ * (对象 key 枚举顺序不是插入序,整数样 key 会按数值排序,不能做 LRU)。
  */
 export const useProjectAssetsStore = defineStore("project-assets", () => {
   /** 按「项目 id + 路径」存放最近一次扫描结果,作为下次进入时的 stale 数据 */
-  const byProject = ref<Record<string, ProjectAssets>>({});
+  const byProject = ref(new Map<string, ProjectAssets>());
   /** 进行中的请求,key 同 byProject:两个卡片同时挂载只发一次 IPC */
   const inflight = new Map<string, Promise<void>>();
   /** 缓存条目上限:卡片同时只展示一个项目,积攒的多项目旧数据定期修剪 */
@@ -22,8 +25,20 @@ export const useProjectAssetsStore = defineStore("project-assets", () => {
 
   const keyOf = (project: Project) => `${project.id}\n${project.path}`;
 
+  /** 写入并维持 LRU 上限(同 key 先删后插刷新热度) */
+  function setCapped(key: string, assets: ProjectAssets) {
+    const map = byProject.value;
+    map.delete(key);
+    map.set(key, assets);
+    const oldest = map.keys().next().value;
+    if (map.size > MAX_ENTRIES && oldest !== undefined) map.delete(oldest);
+  }
+
   function assetsOf(project: Project): ProjectAssets | undefined {
-    return byProject.value[keyOf(project)];
+    const key = keyOf(project);
+    const cached = byProject.value.get(key);
+    if (cached) setCapped(key, cached); // 读取刷新热度
+    return cached;
   }
 
   /** 拉取(或复用进行中的)扫描结果;失败保留旧数据(没有则写空),不向上抛错 */
@@ -36,18 +51,11 @@ export const useProjectAssetsStore = defineStore("project-assets", () => {
         const assets = await cmd<ProjectAssets>("scan_project_assets", {
           path: project.path,
         });
-        const map = { ...byProject.value };
-        const keys = Object.keys(map);
-        if (keys.length >= MAX_ENTRIES && !(key in map)) delete map[keys[0]];
-        map[key] = assets;
-        byProject.value = map;
+        setCapped(key, assets);
       } catch {
         // 刷新失败不冲掉可用的旧数据;仅在没有任何数据时写空结果(卡片按无数据显示)
-        if (!byProject.value[key]) {
-          byProject.value = {
-            ...byProject.value,
-            [key]: { package_scripts: [], compose_files: [] },
-          };
+        if (!byProject.value.has(key)) {
+          setCapped(key, { package_scripts: [], compose_files: [] });
         }
       }
     })().finally(() => {

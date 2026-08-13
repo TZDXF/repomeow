@@ -2,6 +2,7 @@ mod commands;
 mod db;
 mod error;
 mod models;
+mod path_util;
 mod scheduler;
 mod tray;
 mod workday;
@@ -53,6 +54,8 @@ pub fn run() {
             // (Windows: C:\Users\<user>\.repomeow\projects.db)
             let dir = app.path().home_dir()?.join(APP_DATA_DIR_NAME);
             let db = Db::open(&dir.join("projects.db"))?;
+            // 清洗入库归一化前的存量登记路径(统一分隔符风格,消除同目录重复登记)
+            commands::project::normalize_stored_paths(&db.0.lock().unwrap());
             app.manage(db);
 
             // 调度通知:用于定时任务变更时唤醒后台 scheduler

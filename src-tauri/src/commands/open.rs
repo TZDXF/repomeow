@@ -297,7 +297,7 @@ fn editor_open_args(kind: EditorKind, path: &str, line: Option<u32>) -> Vec<Stri
 fn open_explorer_reveal(path: &str) -> AppResult<()> {
     // explorer /select, 对正斜杠路径处理不佳,统一为反斜杠(前端拼接 git 相对路径用的是 "/")
     Command::new("explorer")
-        .arg(format!("/select,{}", path.replace('/', "\\")))
+        .arg(format!("/select,{}", crate::path_util::to_native_separator(path)))
         .spawn()?;
     Ok(())
 }

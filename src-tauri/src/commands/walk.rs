@@ -46,9 +46,10 @@ pub fn project_files(root: &Path) -> Vec<PathBuf> {
     files
 }
 
-/// 相对路径转 '/' 分隔字符串(Windows 下 '\' 归一化)
+/// 相对路径转 '/' 分隔字符串(Windows 下 '\' 归一化)。
+/// 统一辅助在 crate::path_util,此处保留旧名兼容既有调用
 pub fn to_slash(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
+    crate::path_util::to_forward_slash(path)
 }
 
 // ── walk 结果缓存(notify 变更即时失效 + TTL 兜底) ─────────────────────────
@@ -77,7 +78,9 @@ static WALK_WATCHERS: OnceLock<Mutex<HashMap<PathBuf, notify::RecommendedWatcher
 
 /// 带缓存的 project_files:命中且未过期直接共享同一份结果(Arc,不复制)。
 /// 详情页资产扫描等高频只读场景使用;需要保证新鲜的调用方(如测试)用 project_files。
+/// key 归一化:同一目录的正反斜杠/尾斜杠写法共享缓存与监听器,不会重复装 watcher
 pub fn project_files_cached(root: &Path) -> Arc<Vec<PathBuf>> {
+    let root = &crate::path_util::clean(root);
     let cache = WALK_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     {
         let map = cache.lock().unwrap();
@@ -112,6 +115,19 @@ pub fn project_files_cached(root: &Path) -> Arc<Vec<PathBuf>> {
     files
 }
 
+/// 项目路径变更(重定向/移动/删除)后清理该路径的缓存条目与文件监听器。
+/// 否则旧路径 watcher 要等 TTL 才被回收,期间旧目录的变更还会无效地触发失效回调
+pub fn invalidate(root: &Path) {
+    let root = &crate::path_util::clean(root);
+    if let Some(cache) = WALK_CACHE.get() {
+        cache.lock().unwrap().remove(root);
+    }
+    if let Some(watchers) = WALK_WATCHERS.get() {
+        // watcher 随条目移除 drop,递归监听随之注销
+        watchers.lock().unwrap().remove(root);
+    }
+}
+
 /// 为已缓存的根目录安装递归文件监听(幂等)。
 /// 监听安装失败(权限、平台不支持等)时静默降级为纯 TTL 失效。
 fn ensure_watcher(root: &Path) {
@@ -140,10 +156,16 @@ fn ensure_watcher(root: &Path) {
             cache.lock().unwrap().remove(&root_owned);
         }
     }) else {
+        eprintln!("[walk] 创建文件监听器失败({}),降级为纯 TTL 失效", root.display());
         return;
     };
-    if watcher.watch(root, notify::RecursiveMode::Recursive).is_ok() {
-        map.insert(root.to_path_buf(), watcher);
+    match watcher.watch(root, notify::RecursiveMode::Recursive) {
+        Ok(()) => {
+            map.insert(root.to_path_buf(), watcher);
+        }
+        Err(e) => {
+            eprintln!("[walk] 监听安装失败({}): {e},降级为纯 TTL 失效", root.display());
+        }
     }
 }
 

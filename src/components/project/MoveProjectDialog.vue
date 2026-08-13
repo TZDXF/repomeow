@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useProjectsStore } from "@/stores/projects";
+import { splitDirName } from "@/lib/path";
 import type { Project } from "@/types";
 
 const { t } = useI18n();
@@ -27,18 +28,10 @@ const parentDir = ref("");
 const dirName = ref("");
 const saving = ref(false);
 
-function splitPath(path: string): [string, string] {
-  const segments = path.split(/[\\/]/).filter(Boolean);
-  const name = segments.pop() ?? "";
-  // 保留原路径的分隔符风格(Windows 盘符下用 \)
-  const sep = path.includes("\\") ? "\\" : "/";
-  return [segments.join(sep) || sep, name];
-}
-
 // 每次打开重置为当前位置与目录名
 watch(open, (v) => {
   if (!v) return;
-  const [parent, name] = splitPath(props.project.path);
+  const { parent, name } = splitDirName(props.project.path);
   parentDir.value = parent;
   dirName.value = name;
 });

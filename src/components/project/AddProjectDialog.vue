@@ -36,6 +36,7 @@ import {
 } from "@/lib/accounts";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
+import { baseName, cleanPath } from "@/lib/path";
 
 const { t } = useI18n();
 const store = useProjectsStore();
@@ -55,7 +56,7 @@ function saveLastLocation(dir: string) {
 
 /** 取路径的父目录(本地目录模式下项目路径本身即选中文件夹,记录其父目录作为存放位置) */
 function parentPathOf(p: string): string {
-  const trimmed = p.replace(/[\\/]+$/, "");
+  const trimmed = cleanPath(p);
   const idx = Math.max(trimmed.lastIndexOf("\\"), trimmed.lastIndexOf("/"));
   return idx > 0 ? trimmed.slice(0, idx) : "";
 }
@@ -215,13 +216,7 @@ function formatRepoTime(iso: string): string {
 
 /** 从仓库 URL 推导目录名:取末段并去掉 .git 后缀 */
 function dirNameFromUrl(raw: string): string {
-  const segment =
-    raw
-      .trim()
-      .replace(/[\\/]+$/, "")
-      .split(/[\\/]/)
-      .pop() ?? "";
-  return segment.replace(/\.git$/i, "");
+  return baseName(cleanPath(raw)).replace(/\.git$/i, "");
 }
 
 watch(url, (value) => {
@@ -254,7 +249,7 @@ async function pickFolder() {
   if (typeof selected === "string") {
     path.value = selected;
     if (!name.value) {
-      name.value = selected.split(/[\\/]/).filter(Boolean).pop() ?? "";
+      name.value = baseName(selected);
     }
   }
 }

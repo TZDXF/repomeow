@@ -127,8 +127,11 @@ fn projects_with_tags(conn: &Connection, rows: Vec<ProjectRow>) -> AppResult<Vec
 }
 
 pub fn add(conn: &Connection, path: &str, name: &str, description: &str) -> AppResult<Project> {
-    if !std::path::Path::new(path).is_dir() {
-        return Err(AppError::coded(ErrorCode::InvalidPath, path));
+    // 入库前统一路径形态:同一目录的正反斜杠/尾斜杠写法归一,
+    // 否则 SQLite UNIQUE 是字面比较,`C:\repo` 与 `C:/repo` 会登记成两个项目
+    let path = crate::path_util::clean_str(path);
+    if !std::path::Path::new(&path).is_dir() {
+        return Err(AppError::coded(ErrorCode::InvalidPath, &path));
     }
     let name = name.trim();
     if name.is_empty() {
@@ -144,7 +147,7 @@ pub fn add(conn: &Connection, path: &str, name: &str, description: &str) -> AppR
         rusqlite::Error::SqliteFailure(err, _)
             if err.code == rusqlite::ErrorCode::ConstraintViolation =>
         {
-            AppError::coded(ErrorCode::ProjectPathConflict, path)
+            AppError::coded(ErrorCode::ProjectPathConflict, &path)
         }
         other => AppError::Db(other),
     })?;
@@ -217,9 +220,9 @@ pub fn update(conn: &Connection, id: i64, name: &str, description: &str) -> AppR
 
 /// 重新指定项目目录（项目被移动后修复登记路径；标签、自定义命令等关联随 id 保留）
 pub fn update_path(conn: &Connection, id: i64, path: &str) -> AppResult<Project> {
-    let path = path.trim();
-    if path.is_empty() || !std::path::Path::new(path).is_dir() {
-        return Err(AppError::coded(ErrorCode::InvalidPath, path));
+    let path = crate::path_util::clean_str(path);
+    if path.is_empty() || !std::path::Path::new(&path).is_dir() {
+        return Err(AppError::coded(ErrorCode::InvalidPath, &path));
     }
     let changed = conn
         .execute(
@@ -230,7 +233,7 @@ pub fn update_path(conn: &Connection, id: i64, path: &str) -> AppResult<Project>
             rusqlite::Error::SqliteFailure(err, _)
                 if err.code == rusqlite::ErrorCode::ConstraintViolation =>
             {
-                AppError::coded(ErrorCode::ProjectPathConflict, path)
+                AppError::coded(ErrorCode::ProjectPathConflict, &path)
             }
             other => AppError::Db(other),
         })?;
@@ -265,8 +268,11 @@ fn prepare_move(conn: &Connection, id: i64, target_parent: &str, dir_name: &str)
         return Err(AppError::coded(ErrorCode::MoveInvalidDirName, dir_name));
     }
     let target = parent.join(dir_name);
+    // 目标路径归一化后再比较与落库:用户输入的 parent 可能是正斜杠风格,
+    // 与库里登记的反斜杠路径字面不等会让"移动到自身位置"绕过 MoveSameLocation 检查
+    let target_str = crate::path_util::clean(&target).to_string_lossy().to_string();
     // Windows 文件系统大小写不敏感,统一按忽略大小写判断"位置未变化"
-    if target.to_string_lossy().eq_ignore_ascii_case(&project.path) {
+    if target_str.eq_ignore_ascii_case(&project.path) {
         return Err(AppError::coded(ErrorCode::MoveSameLocation, ""));
     }
     if target.starts_with(&src) {
@@ -278,7 +284,6 @@ fn prepare_move(conn: &Connection, id: i64, target_parent: &str, dir_name: &str)
             target.to_string_lossy().to_string(),
         ));
     }
-    let target_str = target.to_string_lossy().to_string();
     // 目标路径已被其他项目登记时提前报错,避免移动后数据库唯一键冲突
     let registered = conn
         .query_row(
@@ -443,6 +448,33 @@ pub fn remove(conn: &Connection, id: i64) -> AppResult<()> {
     Ok(())
 }
 
+/// 启动时清洗存量登记路径:统一分隔符、去尾随分隔符(入库归一化前的历史数据)。
+/// 当前版本未发布,直接原地改写;清洗后与其他行冲突(历史重复登记)时跳过该行并记日志
+pub fn normalize_stored_paths(conn: &Connection) -> usize {
+    let rows: Vec<(i64, String)> = conn
+        .prepare("SELECT id, path FROM projects")
+        .and_then(|mut stmt| stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect())
+        .unwrap_or_default();
+    let mut changed = 0;
+    for (id, path) in rows {
+        let cleaned = crate::path_util::clean_str(&path);
+        if cleaned == path {
+            continue;
+        }
+        match conn.execute(
+            "UPDATE projects SET path = ?1 WHERE id = ?2",
+            params![cleaned, id],
+        ) {
+            Ok(_) => changed += 1,
+            Err(e) => eprintln!("[project] 路径清洗跳过(id={id} path={path}): {e}"),
+        }
+    }
+    if changed > 0 {
+        eprintln!("[project] 已清洗 {changed} 条存量登记路径的分隔符风格");
+    }
+    changed
+}
+
 // ---- Tauri 命令包装 ----
 
 #[tauri::command]
@@ -489,9 +521,11 @@ pub fn update_project_path(db: State<'_, Db>, id: i64, path: String) -> AppResul
     let conn = db.0.lock().unwrap();
     let old_path = get(&conn, id)?.path;
     let project = update_path(&conn, id, &path)?;
-    if old_path != path {
-        // 旧路径不再指向该项目,清理其 git 状态缓存(新路径由前端主动刷新回填)
+    if old_path != crate::path_util::clean_str(&path) {
+        // 旧路径不再指向该项目,清理其 git 状态与 walk 缓存/文件监听
+        // (新路径由前端主动刷新回填,walk 监听在下次扫描时按需安装)
         crate::commands::git::invalidate_status(&old_path);
+        crate::commands::walk::invalidate(std::path::Path::new(&old_path));
     }
     Ok(project)
 }
@@ -510,8 +544,9 @@ pub async fn move_project_dir(
         prepare_move(&conn, id, &target_parent, &dir_name)?
     };
     move_folder(&plan.src, &plan.target)?;
-    // 磁盘移动成功后,旧路径的 git 状态缓存已失效
+    // 磁盘移动成功后,旧路径的 git 状态与 walk 缓存/文件监听已失效
     crate::commands::git::invalidate_status(&plan.src.to_string_lossy());
+    crate::commands::walk::invalidate(&plan.src);
     let conn = db.0.lock().unwrap();
     apply_move(&conn, id, &plan)?;
     get(&conn, id)
@@ -560,6 +595,7 @@ pub fn delete_project(db: State<'_, Db>, id: i64) -> AppResult<()> {
     let project = get(&conn, id)?;
     remove(&conn, id)?;
     crate::commands::git::invalidate_status(&project.path);
+    crate::commands::walk::invalidate(std::path::Path::new(&project.path));
     Ok(())
 }
 
@@ -673,6 +709,43 @@ mod tests {
             add(&conn, &dir, "b", ""),
             Err(ref e) if e.is_code(crate::error::ErrorCode::ProjectPathConflict)
         ));
+    }
+
+    #[test]
+    fn add_normalizes_path_style_before_insert() {
+        let conn = test_conn();
+        let dir = std::env::temp_dir();
+        // 正斜杠 + 尾斜杠写法登记,库里存的是归一化形态
+        let styled = format!("{}/", crate::path_util::to_forward_slash(&dir));
+        let p = add(&conn, &styled, "a", "").unwrap();
+        assert_eq!(p.path, crate::path_util::clean_str(&dir.to_string_lossy()));
+        // 同一目录换原生分隔符写法再登记 → 冲突,不会重复登记成两个项目
+        assert!(matches!(
+            add(&conn, &dir.to_string_lossy(), "b", ""),
+            Err(ref e) if e.is_code(crate::error::ErrorCode::ProjectPathConflict)
+        ));
+    }
+
+    #[test]
+    fn normalize_stored_paths_cleans_legacy_rows() {
+        let conn = test_conn();
+        let dir = std::env::temp_dir();
+        // 模拟归一化之前的历史数据:正斜杠 + 尾斜杠
+        let legacy = format!("{}/", crate::path_util::to_forward_slash(&dir));
+        conn.execute(
+            "INSERT INTO projects (path, name, description, created_at, updated_at)
+             VALUES (?1, 'legacy', '', 0, 0)",
+            params![legacy],
+        )
+        .unwrap();
+        let changed = normalize_stored_paths(&conn);
+        assert_eq!(changed, 1);
+        // 再跑幂等
+        assert_eq!(normalize_stored_paths(&conn), 0);
+        let stored: String = conn
+            .query_row("SELECT path FROM projects", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(stored, crate::path_util::clean_str(&legacy));
     }
 
     #[test]

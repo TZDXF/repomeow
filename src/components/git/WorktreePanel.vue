@@ -36,6 +36,7 @@ import { Switch } from "@/components/ui/switch";
 import ConflictDialog from "@/components/git/ConflictDialog.vue";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
+import { displayRelativeTo } from "@/lib/path";
 import type { GitBranches, GitWorktree, Project } from "@/types";
 
 const { t } = useI18n();
@@ -114,15 +115,10 @@ const effectiveBranch = computed(() => {
   return branches.value.local.includes(b) ? b : remoteShortName(b);
 });
 
-/** 展示用路径:相对主工作区的尽量显示相对路径 */
+/** 展示用路径:相对主工作区的尽量显示相对路径(分隔符经 lib/path 归一后比较) */
 const mainPath = computed(() => worktrees.value.find((w) => w.is_main)?.path ?? "");
 function displayPath(w: GitWorktree) {
-  const root = mainPath.value;
-  if (root && w.path.startsWith(root)) {
-    const rel = w.path.slice(root.length).replace(/^[/\\]/, "");
-    if (rel) return rel;
-  }
-  return w.path;
+  return displayRelativeTo(mainPath.value, w.path);
 }
 
 /** 该行是否可合回/变基:游离 HEAD 或与当前分支同名时无意义 */

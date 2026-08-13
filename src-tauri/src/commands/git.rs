@@ -510,10 +510,12 @@ fn status_cache() -> &'static Mutex<HashMap<String, CachedStatus>> {
 }
 
 /// 缓存化状态查询:命中且未过期直接返回,否则执行 status() 并回填。
-/// force 为 true 时绕过缓存强制重查(用户主动刷新/git 写操作后)
+/// force 为 true 时绕过缓存强制重查(用户主动刷新/git 写操作后)。
+/// key 归一化:同一仓库的不同路径写法共享缓存,invalidate 才能稳定命中
 fn status_cached(path: &str, force: bool) -> AppResult<GitStatus> {
+    let key = crate::path_util::clean_str(path);
     if !force {
-        if let Some(entry) = status_cache().lock().unwrap().get(path) {
+        if let Some(entry) = status_cache().lock().unwrap().get(&key) {
             if entry.at.elapsed() < STATUS_TTL {
                 return Ok(entry.status.clone());
             }
@@ -521,7 +523,7 @@ fn status_cached(path: &str, force: bool) -> AppResult<GitStatus> {
     }
     let st = status(path)?;
     status_cache().lock().unwrap().insert(
-        path.to_string(),
+        key,
         CachedStatus {
             status: st.clone(),
             at: Instant::now(),
@@ -533,7 +535,7 @@ fn status_cached(path: &str, force: bool) -> AppResult<GitStatus> {
 /// 写操作完成后回填缓存(返回的新状态即最新,不等待 TTL 过期)
 fn cache_status(path: &str, st: &GitStatus) {
     status_cache().lock().unwrap().insert(
-        path.to_string(),
+        crate::path_util::clean_str(path),
         CachedStatus {
             status: st.clone(),
             at: Instant::now(),
@@ -543,7 +545,10 @@ fn cache_status(path: &str, st: &GitStatus) {
 
 /// 路径变更(重定向/移动/删除)后清除旧路径缓存
 pub fn invalidate_status(path: &str) {
-    status_cache().lock().unwrap().remove(path);
+    status_cache()
+        .lock()
+        .unwrap()
+        .remove(&crate::path_util::clean_str(path));
 }
 
 /// fetch 远端(无 remote 时跳过),返回最新状态。
@@ -1332,11 +1337,7 @@ fn push_blocking(path: &str) -> AppResult<GitStatus> {
 /// 路径统一为 '/' 分隔(与原 `git worktree list --porcelain` 在 Windows 上的输出一致)
 fn worktree_info_of(wt_repo: &Repository, wt_path: &Path, is_main: bool) -> GitWorktree {
     let mut w = GitWorktree {
-        path: wt_path
-            .to_string_lossy()
-            .replace('\\', "/")
-            .trim_end_matches('/')
-            .to_string(),
+        path: crate::path_util::to_forward_slash(wt_path),
         branch: None,
         head: String::new(),
         is_main,
@@ -1375,11 +1376,7 @@ fn list_worktrees_blocking(path: &str) -> AppResult<Vec<GitWorktree>> {
         match Repository::open(&wt_path) {
             Ok(wt_repo) => list.push(worktree_info_of(&wt_repo, &wt_path, false)),
             Err(_) => list.push(GitWorktree {
-                path: wt_path
-                    .to_string_lossy()
-                    .replace('\\', "/")
-                    .trim_end_matches('/')
-                    .to_string(),
+                path: crate::path_util::to_forward_slash(&wt_path),
                 branch: None,
                 head: String::new(),
                 is_main: false,
@@ -1404,7 +1401,7 @@ fn ensure_worktree_excluded(commondir: &Path, workdir: &Path, worktree_path: &Pa
     let Ok(rel) = worktree_path.strip_prefix(workdir) else {
         return; // 工作区外的 worktree 不影响本仓库状态
     };
-    let rel = rel.to_string_lossy().replace('\\', "/");
+    let rel = crate::path_util::to_forward_slash(rel);
     if rel.is_empty() {
         return;
     }
@@ -1415,7 +1412,8 @@ fn ensure_worktree_excluded(commondir: &Path, workdir: &Path, worktree_path: &Pa
     if existing.lines().any(|l| l.trim() == line) {
         return;
     }
-    if std::fs::create_dir_all(&info_dir).is_err() {
+    if let Err(e) = std::fs::create_dir_all(&info_dir) {
+        eprintln!("[git] 写入 worktree 排除失败(创建 {}): {e}", info_dir.display());
         return;
     }
     let mut content = existing;
@@ -1425,7 +1423,9 @@ fn ensure_worktree_excluded(commondir: &Path, workdir: &Path, worktree_path: &Pa
     content.push_str("# RepoMeow worktree\n");
     content.push_str(&line);
     content.push('\n');
-    let _ = std::fs::write(&exclude, content);
+    if let Err(e) = std::fs::write(&exclude, content) {
+        eprintln!("[git] 写入 worktree 排除失败({}): {e}", exclude.display());
+    }
 }
 
 #[tauri::command]
@@ -2287,14 +2287,17 @@ fn commit_files_blocking(path: &str, hash: &str) -> AppResult<Vec<GitCommitFile>
         let path = delta
             .new_file()
             .path()
-            .map(|p| p.to_string_lossy().to_string())
+            .map(|p| crate::path_util::to_forward_slash_str(&p.to_string_lossy()))
             .unwrap_or_default();
         if path.is_empty() {
             continue;
         }
         // 重命名 / 复制:记录旧路径
         let old_path = if matches!(status, 'R' | 'C') {
-            delta.old_file().path().map(|p| p.to_string_lossy().to_string())
+            delta
+                .old_file()
+                .path()
+                .map(|p| crate::path_util::to_forward_slash_str(&p.to_string_lossy()))
         } else {
             None
         };
@@ -2397,10 +2400,9 @@ fn worktree_diff<'r>(
     configure(&mut opts);
     let mut diff = match &head_tree {
         Some(tree) => repo.diff_tree_to_workdir_with_index(Some(tree), Some(&mut opts)),
-        None => {
-            let index = repo.index().map_err(git_err)?;
-            repo.diff_tree_to_index(None, Some(&index), Some(&mut opts))
-        }
+        // 无 HEAD(未出生分支):空树对工作区+索引。不能用 diff_tree_to_index:
+        // 它不涉及工作目录,include_untracked 无效,新仓库里的未跟踪文件会全部漏掉
+        None => repo.diff_tree_to_workdir_with_index(None, Some(&mut opts)),
     }
     .map_err(git_err)?;
     diff.find_similar(Some(&mut DiffFindOptions::new().renames(true)))
@@ -2442,7 +2444,7 @@ fn worktree_files_blocking(path: &str) -> AppResult<Vec<GitWorktreeFile>> {
         let path = delta
             .new_file()
             .path()
-            .map(|p| p.to_string_lossy().to_string())
+            .map(|p| crate::path_util::to_forward_slash_str(&p.to_string_lossy()))
             .unwrap_or_default();
         if path.is_empty() {
             continue;
@@ -2452,7 +2454,10 @@ fn worktree_files_blocking(path: &str) -> AppResult<Vec<GitWorktreeFile>> {
             continue;
         }
         let old_path = if matches!(status, 'R' | 'C') {
-            delta.old_file().path().map(|p| p.to_string_lossy().to_string())
+            delta
+                .old_file()
+                .path()
+                .map(|p| crate::path_util::to_forward_slash_str(&p.to_string_lossy()))
         } else {
             None
         };
@@ -3184,6 +3189,38 @@ mod tests {
         // 未跟踪文件的单文件 diff 是全新增补丁
         let d = worktree_file_diff_blocking(dir.to_str().unwrap(), "b.txt", None).unwrap();
         assert!(d.diff.contains("+b"), "未跟踪文件 diff: {}", d.diff);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn worktree_files_include_untracked_on_unborn_head() {
+        // 新初始化仓库(尚无提交):未跟踪文件必须出现在提交预览里,
+        // 否则 GitInitDialog 初始化后的首次提交对话框清单为空
+        let dir = temp_dir("worktree-files-unborn");
+        init_repo(&dir);
+        fs::write(dir.join("a.txt"), "a").unwrap(); // 未跟踪
+        fs::create_dir_all(dir.join("sub")).unwrap();
+        fs::write(dir.join("sub/b.txt"), "b").unwrap(); // 未跟踪(嵌套目录)
+
+        let files = worktree_files_blocking(dir.to_str().unwrap()).unwrap();
+        let by_path: HashMap<_, _> = files.iter().map(|f| (f.path.as_str(), f)).collect();
+        assert_eq!(by_path.len(), 2, "文件清单: {files:?}");
+        assert_eq!(by_path["a.txt"].status, "A");
+        assert!(by_path["a.txt"].untracked);
+        assert!(by_path["sub/b.txt"].untracked);
+
+        // 暂存后(仍未提交)同样可见:暂存的不再是 untracked 标记
+        git(&dir, &["add", "a.txt"]);
+        let files = worktree_files_blocking(dir.to_str().unwrap()).unwrap();
+        let by_path: HashMap<_, _> = files.iter().map(|f| (f.path.as_str(), f)).collect();
+        assert_eq!(by_path.len(), 2, "文件清单: {files:?}");
+        assert!(!by_path["a.txt"].untracked);
+        assert!(by_path["sub/b.txt"].untracked);
+
+        // 单文件 diff 同样可用
+        let d = worktree_file_diff_blocking(dir.to_str().unwrap(), "a.txt", None).unwrap();
+        assert!(d.diff.contains("+a"), "未出生 HEAD 单文件 diff: {}", d.diff);
 
         let _ = fs::remove_dir_all(&dir);
     }

@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useProjectsStore } from "@/stores/projects";
+import { displayRelativeTo } from "@/lib/path";
 import type { GitWorktree, Project } from "@/types";
 
 /**
@@ -50,12 +51,7 @@ const currentLabel = computed(() => {
 
 /** 相对主工作区根的路径展示,与 WorktreePanel 的 displayPath 一致 */
 function displayPath(w: GitWorktree) {
-  const root = mainWorktree.value?.path ?? "";
-  if (root && w.path.startsWith(root)) {
-    const rel = w.path.slice(root.length).replace(/^[/\\]/, "");
-    if (rel) return rel;
-  }
-  return w.path;
+  return displayRelativeTo(mainWorktree.value?.path ?? "", w.path);
 }
 
 async function load() {

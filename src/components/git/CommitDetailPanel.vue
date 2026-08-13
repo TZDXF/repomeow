@@ -2,7 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
-import { useLocalStorage } from "@vueuse/core";
+import { useElementSize, useLocalStorage } from "@vueuse/core";
 import {
   ChevronRight,
   Columns2,
@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { parseDiff } from "@/lib/diff";
 import { buildFileTree, type FileTreeNode } from "@/lib/file-tree";
+import { baseName } from "@/lib/path";
 import { cmd } from "@/lib/tauri";
 import { useSettingsStore } from "@/stores/settings";
 import type { GitCommitFile, GitCommitFileDiff, GitGraphCommit } from "@/types";
@@ -136,12 +137,7 @@ function toggleFolder(fullPath: string) {
   collapsedFolders.value = next;
 }
 
-/** 平铺模式只显示文件名(完整路径放 title) */
-function baseName(path: string) {
-  return path.split("/").pop() ?? path;
-}
-
-// --- diff 解析:lib/diff.ts 的 parseDiff(与提交对话框变更预览共用) ---
+// --- diff 解析:lib/diff.ts 的 parseDiff(与提交对话框变更预览共用);baseName 走 @/lib/path ---
 const diffLines = computed(() => (diff.value ? parseDiff(diff.value.diff) : []));
 
 /** 当前选中文件(已删除的文件不提供 IDE 打开:工作区已不存在) */
@@ -206,6 +202,20 @@ const LIST_MIN_H = 120;
 const LIST_MAX_H = 600;
 const LIST_MIN_W = 180;
 const LIST_MAX_W = 560;
+/** 左右布局下 diff 列的最小宽度:listWidth 持久化值可能超过当前面板宽度(面板被拖窄过),
+ * 列表宽度按容器实测宽度自适应 clamp,避免把 diff 挤成负宽、列表溢出容器 */
+const DIFF_MIN_W = 120;
+const rootEl = ref<HTMLElement | null>(null);
+const { width: panelWidth } = useElementSize(rootEl);
+
+/** 列表宽度实际上限:取静态上限与「面板宽 - diff 最小宽」的较小者 */
+function listWidthCap() {
+  if (layout.value !== "horizontal" || !panelWidth.value) return LIST_MAX_W;
+  return Math.max(LIST_MIN_W, Math.min(LIST_MAX_W, Math.floor(panelWidth.value) - DIFF_MIN_W));
+}
+
+/** 渲染用列表宽度(不改持久化值,面板变宽后用户原设定自然恢复) */
+const effectiveListWidth = computed(() => Math.min(listWidth.value, listWidthCap()));
 
 function startListResize(e: PointerEvent) {
   e.preventDefault();
@@ -215,7 +225,7 @@ function startListResize(e: PointerEvent) {
   const onMove = (ev: PointerEvent) => {
     const size = Math.round(startSize + (horizontal ? ev.clientX : ev.clientY) - startPos);
     if (horizontal) {
-      listWidth.value = Math.min(LIST_MAX_W, Math.max(LIST_MIN_W, size));
+      listWidth.value = Math.min(listWidthCap(), Math.max(LIST_MIN_W, size));
     } else {
       listHeight.value = Math.min(LIST_MAX_H, Math.max(LIST_MIN_H, size));
     }
@@ -230,7 +240,7 @@ function startListResize(e: PointerEvent) {
 </script>
 
 <template>
-  <div class="flex h-full flex-col">
+  <div ref="rootEl" class="flex h-full flex-col">
     <!-- 提交信息 -->
     <div class="shrink-0 border-b px-3 py-2.5">
       <div class="flex items-start justify-between gap-2">
@@ -286,7 +296,9 @@ function startListResize(e: PointerEvent) {
       <div
         class="flex min-h-0 min-w-0 shrink-0 flex-col"
         :style="
-          layout === 'horizontal' ? { width: `${listWidth}px` } : { height: `${listHeight}px` }
+          layout === 'horizontal'
+            ? { width: `${effectiveListWidth}px` }
+            : { height: `${listHeight}px` }
         "
       >
         <div class="flex shrink-0 items-center justify-between border-b px-3 py-1.5">

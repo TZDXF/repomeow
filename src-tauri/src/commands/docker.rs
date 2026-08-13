@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
 
 use serde::Deserialize;
 
@@ -14,6 +15,19 @@ fn docker_command() -> Command {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
+    cmd
+}
+
+/// tokio 版 docker 命令(异步 ps 用):kill_on_drop 保证超时/取消后子进程被回收,
+/// 不会像 sync `Command::output()` 那样在 docker daemon 卡死时永久悬挂
+fn docker_tokio_command() -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new("docker");
+    #[cfg(windows)]
+    {
+        // tokio::process::Command 自带 creation_flags(Windows)
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    cmd.kill_on_drop(true);
     cmd
 }
 
@@ -51,27 +65,33 @@ fn parse_ps(output: &str) -> Vec<ComposeServiceState> {
         .collect()
 }
 
-fn ps_blocking(path: &str, file: &str) -> AppResult<Vec<ComposeServiceState>> {
+/// 单次 ps 的超时:daemon 卡死时 sync `Command::output()` 会无限期挂起,
+/// 占用并发许可与线程;超时后子进程经 kill_on_drop 回收,该文件按无服务处理
+const PS_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// 查询单个 compose 文件的服务状态。docker 未安装 / 守护进程未运行 /
+/// 项目未启动 / 超时:一律视为无运行中服务(返回空,不报错打扰)
+async fn ps_async(path: &str, file: &str) -> Vec<ComposeServiceState> {
     let dir = Path::new(path);
     if !dir.is_dir() {
-        return Err(AppError::coded(ErrorCode::DockerDirNotFound, path));
+        return Vec::new();
     }
     // 与前端 up/down 的执行方式保持一致:项目根目录 + 相对 -f 路径,
     // 这样 compose 项目名解析一致,ps 才能命中同一组容器。
-    // docker 未安装 / 守护进程未运行 / 项目未启动:一律视为无运行中服务(不报错打扰)
-    let output = docker_command()
+    let output = docker_tokio_command()
         .args(["compose", "-f", file, "ps", "--format", "json"])
         .current_dir(dir)
-        .output();
+        .output()
+        .await;
     match output {
-        Ok(out) if out.status.success() => Ok(parse_ps(&String::from_utf8_lossy(&out.stdout))),
-        _ => Ok(Vec::new()),
+        Ok(out) if out.status.success() => parse_ps(&String::from_utf8_lossy(&out.stdout)),
+        _ => Vec::new(),
     }
 }
 
 /// 批量查询多个 compose 文件的服务运行状态:一次 IPC 完成全部文件的 ps,
 /// 避免前端逐文件发起请求造成大量 HTTP 往返;后端限并发并行拉起 docker 进程。
-/// 单文件失败(目录不存在等)降级为空列表,不影响其他文件
+/// 单文件失败/超时/任务异常都降级为空列表,不影响其他文件
 #[tauri::command]
 pub async fn compose_ps_batch(
     path: String,
@@ -85,18 +105,22 @@ pub async fn compose_ps_batch(
         let sem = sem.clone();
         handles.push(tokio::spawn(async move {
             let _permit = sem.acquire_owned().await;
-            tokio::task::spawn_blocking(move || ps_blocking(&path, &file))
-                .await
-                .unwrap_or_else(|_| Ok(Vec::new()))
-                .unwrap_or_default()
+            match tokio::time::timeout(PS_TIMEOUT, ps_async(&path, &file)).await {
+                Ok(states) => states,
+                Err(_) => {
+                    eprintln!("[docker] compose ps 超时({file}),按无运行中服务处理");
+                    Vec::new()
+                }
+            }
         }));
     }
     let mut results = Vec::with_capacity(handles.len());
     for h in handles {
-        results.push(
-            h.await
-                .map_err(|e| AppError::coded(ErrorCode::DockerTaskFailed, e.to_string()))?,
-        );
+        // 单任务异常(panic/取消)只降级该文件,不中断整批
+        results.push(h.await.unwrap_or_else(|e| {
+            eprintln!("[docker] compose ps 任务异常: {e}");
+            Vec::new()
+        }));
     }
     Ok(results)
 }

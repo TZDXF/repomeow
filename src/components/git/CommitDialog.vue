@@ -26,6 +26,7 @@ import {
 import { generateCommitMessage } from "@/lib/ai";
 import { parseDiff } from "@/lib/diff";
 import { buildFileTree, type FileTreeNode } from "@/lib/file-tree";
+import { baseName } from "@/lib/path";
 import { cmd } from "@/lib/tauri";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
@@ -234,10 +235,7 @@ function toggleFolderChecked(node: FileTreeNode<GitWorktreeFile>) {
   setChecked(paths, !state.all);
 }
 
-/** 平铺模式只显示文件名(完整路径放 title) */
-function baseName(path: string) {
-  return path.split("/").pop() ?? path;
-}
+/** 平铺模式只显示文件名(完整路径放 title);baseName 走 @/lib/path */
 
 const diffLines = computed(() => (diff.value ? parseDiff(diff.value.diff) : []));
 const selectedFile = computed(() => files.value.find((f) => f.path === selectedPath.value) ?? null);
