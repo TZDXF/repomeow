@@ -132,6 +132,55 @@ export const useSettingsStore = defineStore("settings", () => {
     applyMdTheme();
   }
 
+  /** 把当前打开方式顺序写入 localStorage(设置页拖拽排序与外部同步共用) */
+  function persistOpenWithOrderCache() {
+    try {
+      window.localStorage.setItem(OPEN_WITH_ORDER_CACHE_KEY, JSON.stringify(openWithOrder.value));
+    } catch {
+      /* localStorage 不可用时静默降级:本次会话内顺序仍生效 */
+    }
+  }
+
+  /** 从 localStorage 重读打开方式顺序(init 与托盘弹窗刷新兜底共用) */
+  function reloadOpenWithOrderCache() {
+    try {
+      const raw = window.localStorage.getItem(OPEN_WITH_ORDER_CACHE_KEY);
+      if (raw) {
+        const parsed: unknown = JSON.parse(raw);
+        openWithOrder.value = normalizeOpenWithOrder(Array.isArray(parsed) ? parsed : []);
+      }
+    } catch {
+      /* localStorage 不可用或 JSON 非法时保持当前顺序 */
+    }
+  }
+
+  /**
+   * 同步其他窗口广播过来的打开方式快照(排序 + 默认项),覆盖本地 ref 并镜像到 localStorage。
+   * 各 webview 的 Pinia store 互相独立,浏览器 storage 事件也不跨 Tauri 窗口派发,
+   * 主窗口在设置页调整后,托盘弹窗只能靠这条广播保持一致。
+   */
+  function syncOpenWithFromExternal(snapshot: { order: unknown; defaultOpenWith: unknown }) {
+    if (Array.isArray(snapshot.order)) {
+      openWithOrder.value = normalizeOpenWithOrder(snapshot.order);
+      persistOpenWithOrderCache();
+    }
+    if (OPEN_WITH_OPTIONS.some((opt) => opt.kind === snapshot.defaultOpenWith)) {
+      defaultOpenWith.value = snapshot.defaultOpenWith as EditorKind;
+    }
+  }
+
+  /**
+   * 从持久层重读打开方式设置(localStorage 顺序 + settings.json 默认项)。
+   * 托盘弹窗每次显示时调用,兜底广播注册前错过的变更。
+   */
+  async function reloadOpenWith() {
+    reloadOpenWithOrderCache();
+    const saved = await fileStore?.get<string>("defaultOpenWith");
+    if (OPEN_WITH_OPTIONS.some((opt) => opt.kind === saved)) {
+      defaultOpenWith.value = saved as EditorKind;
+    }
+  }
+
   // ── lifecycle ─────────────────────────────────────────────
 
   async function init() {
@@ -185,15 +234,7 @@ export const useSettingsStore = defineStore("settings", () => {
       defaultOpenWith.value = savedOpenWith as EditorKind;
     }
     // 打开方式排序:localStorage 里的 JSON 数组,过滤无效 kind 并补齐新增项,非法值回退默认顺序
-    try {
-      const raw = window.localStorage.getItem(OPEN_WITH_ORDER_CACHE_KEY);
-      if (raw) {
-        const parsed: unknown = JSON.parse(raw);
-        openWithOrder.value = normalizeOpenWithOrder(Array.isArray(parsed) ? parsed : []);
-      }
-    } catch {
-      /* localStorage 不可用或 JSON 非法时保持默认顺序 */
-    }
+    reloadOpenWithOrderCache();
     // AI 配置为自由文本:trim 后非空才赋值,空值保持初始空(无默认值可回退)
     const savedAiBaseUrl = await fileStore.get<string>("aiBaseUrl");
     if (typeof savedAiBaseUrl === "string" && savedAiBaseUrl.trim()) {
@@ -297,18 +338,24 @@ export const useSettingsStore = defineStore("settings", () => {
     await persist("language", value);
   }
 
+  /** 打开方式变更广播:带全量快照(排序 + 默认项),接收方覆盖本地 ref 即可,无需再读持久层 */
+  async function emitOpenWithChanged() {
+    await emit(OPEN_WITH_CHANGED_EVENT, {
+      order: openWithOrder.value,
+      defaultOpenWith: defaultOpenWith.value,
+    });
+  }
+
   async function setDefaultOpenWith(value: EditorKind) {
     defaultOpenWith.value = value;
     await persist("defaultOpenWith", value);
+    await emitOpenWithChanged();
   }
 
   async function setOpenWithOrder(value: EditorKind[]) {
     openWithOrder.value = normalizeOpenWithOrder(value);
-    try {
-      window.localStorage.setItem(OPEN_WITH_ORDER_CACHE_KEY, JSON.stringify(openWithOrder.value));
-    } catch {
-      /* localStorage 不可用时静默降级:本次会话内顺序仍生效 */
-    }
+    persistOpenWithOrderCache();
+    await emitOpenWithChanged();
   }
 
   async function setAiBaseUrl(value: string) {
@@ -388,6 +435,8 @@ export const useSettingsStore = defineStore("settings", () => {
     applyTheme,
     applyMdTheme,
     syncThemeFromExternal,
+    syncOpenWithFromExternal,
+    reloadOpenWith,
     setTheme,
     setThemeSkin,
     setMdTheme,

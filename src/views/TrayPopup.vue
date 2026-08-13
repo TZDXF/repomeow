@@ -16,11 +16,13 @@ import { compareFavorited } from "@/lib/favorites";
 import { cmd, onListen } from "@/lib/tauri";
 import { usePinsStore } from "@/stores/pins";
 import { useProjectsStore } from "@/stores/projects";
+import { useSettingsStore } from "@/stores/settings";
 import type { Project } from "@/types";
 
 const { t } = useI18n();
 const store = useProjectsStore();
 const pinsStore = usePinsStore();
+const settingsStore = useSettingsStore();
 const searchInput = ref("");
 
 // 常用命令展开状态:与详情页同一套 localStorage 持久化(scope trayPins),默认折叠
@@ -100,6 +102,8 @@ onMounted(() => {
   onListen("tray-popup://refresh", () => {
     store.fetchProjects({ withGit: false });
     pinsStore.fetchPins();
+    // 打开方式排序/默认项兜底重读:实时广播之外的保险(如广播注册前错过的变更)
+    settingsStore.reloadOpenWith();
   });
 });
 

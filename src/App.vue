@@ -62,6 +62,13 @@ onMounted(async () => {
       settingsStore.syncThemeFromExternal(payload);
     },
   );
+  // 另一窗口变更打开方式(排序/默认项)后同步当前窗口(托盘弹窗的打开方式菜单与主窗口设置页保持一致)
+  onListen<{ order: unknown; defaultOpenWith: unknown }>(
+    "settings://open-with-changed",
+    (payload) => {
+      settingsStore.syncOpenWithFromExternal(payload);
+    },
+  );
   if (isTrayPopup) return;
   // git 状态由 Rust 后台循环每 30s 批量推送;窗口重新聚焦时兜底拉一次,
   // 覆盖循环异常退出/事件通道重建后错过推送的场景(命中缓存,开销可忽略)
