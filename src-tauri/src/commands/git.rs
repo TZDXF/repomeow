@@ -1,13 +1,18 @@
 use std::collections::{HashMap, HashSet};
-use std::io::{BufRead, BufReader, Read};
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Output};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State, Window, ipc::Channel};
 use tokio::sync::Semaphore;
+
+use git2::{
+    BranchType, Delta, DiffFindOptions, DiffOptions, Patch, Repository, Sort,
+    Status as Git2Status, StatusOptions,
+};
 
 use crate::commands::account;
 use crate::db::Db;
@@ -321,30 +326,169 @@ async fn run_blocking<T: Send + 'static>(
         .map_err(|e| AppError::coded(ErrorCode::GitTaskFailed, e.to_string()))?
 }
 
-pub fn status(path: &str) -> AppResult<GitStatus> {
-    let output = git_command(path)
-        .args(["status", "--porcelain=v2", "--branch"])
-        .output()?;
-    if !output.status.success() {
-        // 不是 git 仓库(git 退出码 128)
-        return Ok(GitStatus::default());
+// ── git2(libgit2)读操作层 ────────────────────────────────────────────────
+// 所有只读查询(status/分支/log/diff 等)走 libgit2,避免每次查询创建 git 子进程
+// (Windows 上进程创建约 10-30ms,批量状态/图谱等高频路径收益显著);
+// 写操作与网络操作(fetch/pull/push/clone)仍走下方 CLI 辅助以继承用户凭证环境。
+
+/// 打开仓库(向上查找父目录,与 `git -C <path>` 语义一致)。
+/// 非 git 仓库返回 Ok(None),其他错误(权限/损坏等)透传
+fn open_repo(path: &str) -> AppResult<Option<Repository>> {
+    match Repository::discover(path) {
+        Ok(repo) => Ok(Some(repo)),
+        Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(None),
+        Err(e) => Err(AppError::coded(ErrorCode::GitCommandFailed, e.to_string())),
     }
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut st = parse_porcelain(path, &text);
-    st.last_commit_at = last_commit_at(path);
-    Ok(st)
 }
 
-/// HEAD 最新提交时间(Unix 秒)。无提交(空仓库)或命令失败时返回 None
-fn last_commit_at(path: &str) -> Option<i64> {
-    let output = git_command(path)
-        .args(["log", "-1", "--format=%ct"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
+/// 非仓库场景的统一错误(与原 CLI `fatal: not a git repository` 映射一致)
+fn not_a_repo() -> AppError {
+    AppError::coded(ErrorCode::NotGitRepository, "")
+}
+
+/// 提交的短 hash(等价 %h,长度随仓库规模自动消歧)
+fn short_hash(commit: &git2::Commit) -> String {
+    commit
+        .as_object()
+        .short_id()
+        .map(|b| String::from_utf8_lossy(&b).to_string())
+        .unwrap_or_else(|_| commit.id().to_string())
+}
+
+/// 按 `git --date=format:%Y-%m-%d %H:%M` 语义格式化时间(使用提交自带时区偏移)
+fn format_git_time(t: git2::Time) -> String {
+    let offset = chrono::FixedOffset::east_opt(t.offset_minutes() * 60)
+        .unwrap_or_else(|| chrono::FixedOffset::east_opt(0).expect("零时区恒合法"));
+    chrono::DateTime::from_timestamp(t.seconds(), 0)
+        .map(|dt| dt.with_timezone(&offset).format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_default()
+}
+
+/// 解析 git_log 的 since/until 参数(调用方统一传本地时间 "YYYY-MM-DD[ HH:MM:SS]",
+/// 与 git --since/--until 的本地时区解释一致),解析失败回退 None(不过滤)
+fn parse_log_datetime(s: &str) -> Option<i64> {
+    use chrono::{Local, NaiveDate, NaiveDateTime, TimeZone};
+    let s = s.trim();
+    let naive = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+        .ok()
+        .or_else(|| {
+            NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                .ok()
+                .and_then(|d| d.and_hms_opt(0, 0, 0))
+        })?;
+    // single():夏令时歧义/不存在时刻放弃过滤而非误过滤
+    Local.from_local_datetime(&naive).single().map(|dt| dt.timestamp())
+}
+
+/// 当前 HEAD 的分支显示名(复刻 porcelain v2 `# branch.head` 语义):
+/// 普通分支 → 短名;detached → "(detached from <short>)";unborn(尚无提交)→
+/// HEAD 符号引用指向的分支名
+fn head_branch_name(repo: &Repository) -> Option<String> {
+    match repo.head() {
+        Ok(head) => {
+            if let Some(name) = head.shorthand().filter(|_| head.is_branch()) {
+                return Some(name.to_string());
+            }
+            // detached HEAD
+            head.target().map(|oid| {
+                let short = repo
+                    .find_commit(oid)
+                    .map(|c| short_hash(&c))
+                    .unwrap_or_else(|_| oid.to_string());
+                format!("(detached from {short})")
+            })
+        }
+        Err(e) if e.code() == git2::ErrorCode::UnbornBranch => repo
+            .find_reference("HEAD")
+            .ok()
+            .and_then(|r| r.symbolic_target().map(String::from))
+            .map(|t| t.strip_prefix("refs/heads/").unwrap_or(&t).to_string()),
+        Err(_) => None,
     }
-    String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+}
+
+/// 本地分支的 upstream 跟踪差值(ahead, behind);未配置/上游已删除/解析失败返回 None
+fn upstream_ahead_behind(repo: &Repository, branch_ref: &str) -> Option<(usize, usize)> {
+    let upstream_name = repo.branch_upstream_name(branch_ref).ok()?;
+    let upstream_ref = repo
+        .find_reference(String::from_utf8_lossy(&upstream_name).as_ref())
+        .ok()?;
+    let local_oid = repo.find_reference(branch_ref).ok()?.target()?;
+    let upstream_oid = upstream_ref.target()?;
+    repo.graph_ahead_behind(local_oid, upstream_oid).ok()
+}
+
+pub fn status(path: &str) -> AppResult<GitStatus> {
+    let Some(repo) = open_repo(path)? else {
+        // 不是 git 仓库
+        return Ok(GitStatus::default());
+    };
+    let mut st = GitStatus {
+        is_repo: true,
+        branch: head_branch_name(&repo),
+        ..Default::default()
+    };
+    // HEAD 最新提交时间;无提交(空仓库)时为 None
+    if let Ok(commit) = repo.head().and_then(|h| h.peel_to_commit()) {
+        st.last_commit_at = Some(commit.time().seconds());
+    }
+    // ahead/behind:相对当前分支的 upstream(未配置/已删除保持 0)
+    if let Some(branch) = st.branch.as_deref().filter(|b| !b.starts_with('(')) {
+        if let Some((ahead, behind)) = upstream_ahead_behind(&repo, &format!("refs/heads/{branch}"))
+        {
+            st.ahead = ahead as i32;
+            st.behind = behind as i32;
+        }
+    }
+    st.remote_ahead = st.behind;
+
+    // 工作区计数(与 status --porcelain=v2 语义对齐):
+    // index 侧改动计 staged,worktree 侧改动计 modified;冲突同时计 modified + conflicted;
+    // 未跟踪条目不递归目录(与 porcelain 默认折叠一致),嵌套 git 仓库(含 .git 的目录)
+    // 是独立项目不计入未跟踪
+    let mut opts = StatusOptions::new();
+    opts.include_untracked(true)
+        .recurse_untracked_dirs(false)
+        .include_ignored(false);
+    let workdir = repo.workdir().map(|p| p.to_string_lossy().to_string());
+    let statuses = repo
+        .statuses(Some(&mut opts))
+        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+    for entry in statuses.iter() {
+        let s = entry.status();
+        if s.contains(Git2Status::CONFLICTED) {
+            // 冲突文件仍计入未暂存,保持「干净」判断语义
+            st.modified += 1;
+            st.conflicted += 1;
+            continue;
+        }
+        if s.intersects(
+            Git2Status::INDEX_NEW
+                | Git2Status::INDEX_MODIFIED
+                | Git2Status::INDEX_DELETED
+                | Git2Status::INDEX_RENAMED
+                | Git2Status::INDEX_TYPECHANGE,
+        ) {
+            st.staged += 1;
+        }
+        if s.contains(Git2Status::WT_NEW) {
+            let entry_path = String::from_utf8_lossy(entry.path_bytes()).to_string();
+            let nested = workdir
+                .as_deref()
+                .is_some_and(|wd| is_nested_repo(wd, &entry_path));
+            if !nested {
+                st.untracked += 1;
+            }
+        } else if s.intersects(
+            Git2Status::WT_MODIFIED
+                | Git2Status::WT_DELETED
+                | Git2Status::WT_RENAMED
+                | Git2Status::WT_TYPECHANGE,
+        ) {
+            st.modified += 1;
+        }
+    }
+    Ok(st)
 }
 
 // ── 本地状态缓存 ─────────────────────────────────────────────────────────
@@ -408,8 +552,7 @@ pub fn invalidate_status(path: &str) {
 /// 后台 fetch 走 fetch_with_timeout(带进程 kill 兜底),此同步版保留给测试
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn fetch_and_status(path: &str) -> AppResult<GitStatus> {
-    let remotes = git_command(path).arg("remote").output()?;
-    if remotes.status.success() && !String::from_utf8_lossy(&remotes.stdout).trim().is_empty() {
+    if repo_has_remote(path) {
         // 失败(如离线)不阻断,退回本地已知状态
         let _ = git_command(path)
             .args([
@@ -427,49 +570,13 @@ pub fn fetch_and_status(path: &str) -> AppResult<GitStatus> {
     status(path)
 }
 
-/// 解析 `git status --porcelain=v2 --branch` 输出。
-/// 嵌套 git 仓库(含 .git 的未跟踪目录)不计入未跟踪数:它是独立项目,不算本仓库的改动
-fn parse_porcelain(path: &str, text: &str) -> GitStatus {
-    let mut st = GitStatus {
-        is_repo: true,
-        ..Default::default()
-    };
-    for line in text.lines() {
-        if let Some(head) = line.strip_prefix("# branch.head ") {
-            st.branch = Some(head.trim().to_string());
-        } else if let Some(ab) = line.strip_prefix("# branch.ab ") {
-            // 形如 "+2 -1"
-            for part in ab.split_whitespace() {
-                if let Some(a) = part.strip_prefix('+') {
-                    st.ahead = a.parse().unwrap_or(0);
-                } else if let Some(b) = part.strip_prefix('-') {
-                    st.behind = b.parse().unwrap_or(0);
-                }
-            }
-        } else if line.starts_with("1 ") || line.starts_with("2 ") {
-            // 普通/重命名条目: 第 3-4 字节是 XY 状态码
-            let bytes = line.as_bytes();
-            if bytes.len() >= 4 {
-                if bytes[2] != b'.' {
-                    st.staged += 1;
-                }
-                if bytes[3] != b'.' {
-                    st.modified += 1;
-                }
-            }
-        } else if line.starts_with("u ") {
-            st.modified += 1; // 冲突文件仍计入未暂存,保持「干净」判断语义
-            st.conflicted += 1;
-        } else if let Some(entry) = line.strip_prefix("? ") {
-            // porcelain 对特殊字符路径做 C 风格引号转义,去掉外层引号再判断
-            let entry = entry.trim().trim_matches('"');
-            if !is_nested_repo(path, entry) {
-                st.untracked += 1;
-            }
-        }
-    }
-    st.remote_ahead = st.behind;
-    st
+/// 仓库是否有任一 remote(读取失败按无 remote 处理,跳过 fetch)
+fn repo_has_remote(path: &str) -> bool {
+    open_repo(path)
+        .ok()
+        .flatten()
+        .and_then(|r| r.remotes().ok())
+        .is_some_and(|names| !names.is_empty())
 }
 
 #[tauri::command]
@@ -584,34 +691,26 @@ pub async fn list_git_remotes(path: String) -> AppResult<Vec<GitRemote>> {
 }
 
 fn list_remotes_blocking(path: &str) -> AppResult<Vec<GitRemote>> {
-    // git remote -v 一次进程取全(替代 git remote + 逐 remote get-url 的 N+1 子进程)
-    let output = git_command(path).args(["remote", "-v"]).output()?;
-    if !output.status.success() {
+    // 非仓库或无 remote 返回空列表
+    let Some(repo) = open_repo(path)? else {
         return Ok(vec![]);
-    }
-    Ok(parse_remote_verbose(&String::from_utf8_lossy(
-        &output.stdout,
-    )))
-}
-
-/// 解析 `git remote -v` 输出:每行形如 "origin\t<url> (fetch)" / "origin\t<url> (push)",
-/// 每个 remote 取首个(fetch)条目;无 URL 的 remote 不会出现在输出中
-fn parse_remote_verbose(stdout: &str) -> Vec<GitRemote> {
+    };
+    let names = repo
+        .remotes()
+        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
     let mut out: Vec<GitRemote> = Vec::new();
-    for line in stdout.lines() {
-        let mut parts = line.split_whitespace();
-        let (Some(name), Some(url)) = (parts.next(), parts.next()) else {
-            continue;
-        };
-        if url.is_empty() || out.iter().any(|r| r.name == name) {
-            continue;
+    for name in names.iter().flatten() {
+        // 无 URL 的 remote(纯 pushurl 等)跳过,与 `git remote -v` 一致取 fetch 地址
+        let url = repo.find_remote(name).ok().and_then(|r| r.url().map(String::from));
+        if let Some(url) = url.filter(|u| !u.is_empty()) {
+            out.push(GitRemote {
+                name: name.to_string(),
+                url,
+            });
         }
-        out.push(GitRemote {
-            name: name.to_string(),
-            url: url.to_string(),
-        });
     }
-    out
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
 }
 
 /// 带超时的后台 fetch:
@@ -619,12 +718,7 @@ fn parse_remote_verbose(stdout: &str) -> Vec<GitRemote> {
 /// - ssh 等其他协议由外层 timeout 兜底,超时 kill 进程树
 /// 无 remote 的仓库直接视为成功(无需退避)
 async fn fetch_with_timeout(path: &str) -> bool {
-    let has_remote = git_command(path)
-        .arg("remote")
-        .output()
-        .map(|o| o.status.success() && !String::from_utf8_lossy(&o.stdout).trim().is_empty())
-        .unwrap_or(false);
-    if !has_remote {
+    if !repo_has_remote(path) {
         return true;
     }
     let mut cmd = tokio::process::Command::new("git");
@@ -743,85 +837,28 @@ fn unmerged_files(path: &str) -> Vec<String> {
 }
 
 fn local_branch_names(path: &str) -> AppResult<Vec<String>> {
-    // 不用 %(refname:short):存在与分支同名的 remote 时(如分支 zc + remote zc),
-    // git 为消歧会输出 "heads/zc",而 git log %D 装饰只做 refs/heads/ 前缀剥离(仍显示 "zc"),
-    // 两套命名不一致会导致图谱按分支名定位顶端提交失败;这里与 %D 保持一致
-    let out = run_git(path, &["for-each-ref", "--format=%(refname)", "refs/heads"])?;
-    Ok(String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter_map(|l| l.trim().strip_prefix("refs/heads/").map(String::from))
-        .collect())
+    let Some(repo) = open_repo(path)? else {
+        return Err(not_a_repo());
+    };
+    local_branch_names_of(&repo)
 }
 
-/// 解析 `%(upstream:track)` 的输出:`[ahead 2, behind 3]` / `[ahead 1]` / `[behind 5]` / `[gone]` / 空。
-/// for-each-ref 是 plumbing,该格式硬编码不受本地化影响;gone/空 均返回 (0, 0)
-fn parse_upstream_track(track: &str) -> (u32, u32) {
-    let mut ahead = 0;
-    let mut behind = 0;
-    let inner = track.trim().trim_start_matches('[').trim_end_matches(']');
-    for part in inner.split(',') {
-        let mut segs = part.trim().split_whitespace();
-        let Some(word) = segs.next() else { continue };
-        let num: u32 = segs.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-        match word {
-            "ahead" => ahead = num,
-            "behind" => behind = num,
-            _ => {}
-        }
-    }
-    (ahead, behind)
-}
-
-/// 本地分支名 + upstream 跟踪差值,一次 for-each-ref 取全。
-/// 与 local_branch_names 同样不用 %(refname:short)(同名 remote 消歧问题);
-/// upstream 取完整 refname 自行剥前缀,避免 %(upstream:short) 的同类歧义
-fn local_branches_with_tracking(path: &str) -> AppResult<(Vec<String>, Vec<GitBranchTrack>)> {
-    let out = run_git(
-        path,
-        &[
-            "for-each-ref",
-            "--format=%(refname)%09%(upstream)%09%(upstream:track)",
-            "refs/heads",
-        ],
-    )?;
+/// 本地分支短名列表(剥 refs/heads/ 前缀,与 git log %D 装饰命名一致;
+/// 不用 short 消歧规则,避免分支与 remote 同名时输出 "heads/zc" 导致图谱定位失败)
+fn local_branch_names_of(repo: &Repository) -> AppResult<Vec<String>> {
+    let iter = repo
+        .branches(Some(BranchType::Local))
+        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
     let mut names = Vec::new();
-    let mut tracking = Vec::new();
-    for line in String::from_utf8_lossy(&out.stdout).lines() {
-        let mut cols = line.split('\t');
-        let Some(name) = cols
-            .next()
-            .and_then(|r| r.trim().strip_prefix("refs/heads/"))
-        else {
-            continue;
-        };
-        names.push(name.to_string());
-        let upstream_ref = cols.next().unwrap_or("").trim();
-        if upstream_ref.is_empty() {
-            continue; // 无 upstream 的分支不收录
+    for item in iter {
+        let (branch, _) =
+            item.map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+        if let Some(name) = branch.name().ok().flatten() {
+            names.push(name.to_string());
         }
-        let track = cols.next().unwrap_or("");
-        if track.trim() == "[gone]" {
-            tracking.push(GitBranchTrack {
-                name: name.to_string(),
-                upstream: None,
-                ahead: 0,
-                behind: 0,
-            });
-            continue;
-        }
-        let upstream = upstream_ref
-            .strip_prefix("refs/remotes/")
-            .or_else(|| upstream_ref.strip_prefix("refs/heads/"))
-            .unwrap_or(upstream_ref);
-        let (ahead, behind) = parse_upstream_track(track);
-        tracking.push(GitBranchTrack {
-            name: name.to_string(),
-            upstream: Some(upstream.to_string()),
-            ahead,
-            behind,
-        });
     }
-    Ok((names, tracking))
+    names.sort();
+    Ok(names)
 }
 
 #[tauri::command]
@@ -830,26 +867,69 @@ pub async fn list_git_branches(path: String) -> AppResult<GitBranches> {
 }
 
 fn list_branches_blocking(path: &str) -> AppResult<GitBranches> {
-    // 远程分支:附带 symref 列(tab 分隔),过滤掉 origin/HEAD 这类符号引用;
-    // 名称取完整 refname 剥 refs/remotes/ 前缀,与 git log %D 装饰命名一致
-    // (不用 %(refname:short),它与本地分支同名 remote 歧义时会输出 remotes/zc 等消歧形式)
-    let remote_out = run_git(
-        path,
-        &["for-each-ref", "--format=%(refname)%09%(symref)", "refs/remotes"],
-    )?;
-    let remote = String::from_utf8_lossy(&remote_out.stdout)
-        .lines()
-        .filter_map(|l| {
-            let (name, symref) = l.split_once('\t').unwrap_or((l, ""));
-            let short = name.strip_prefix("refs/remotes/").unwrap_or(name);
-            if short.is_empty() || !symref.is_empty() {
-                None
-            } else {
-                Some(short.to_string())
+    let Some(repo) = open_repo(path)? else {
+        return Err(not_a_repo());
+    };
+    let local = local_branch_names_of(&repo)?;
+
+    // 远程分支:剥 refs/remotes/ 前缀,过滤 origin/HEAD 这类符号引用
+    let mut remote = Vec::new();
+    let remote_iter = repo
+        .branches(Some(BranchType::Remote))
+        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+    for item in remote_iter {
+        let (branch, _) =
+            item.map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+        if branch.get().kind() == Some(git2::ReferenceType::Symbolic) {
+            continue;
+        }
+        if let Some(name) = branch.name().ok().flatten() {
+            remote.push(name.to_string());
+        }
+    }
+    remote.sort();
+
+    // 本地分支的 upstream 跟踪:未配置不收录;上游引用已删除([gone])记 upstream=None
+    let mut tracking = Vec::new();
+    for name in &local {
+        let branch_ref = format!("refs/heads/{name}");
+        let Ok(upstream_buf) = repo.branch_upstream_name(&branch_ref) else {
+            continue;
+        };
+        let upstream_full = String::from_utf8_lossy(&upstream_buf).to_string();
+        let upstream_short = upstream_full
+            .strip_prefix("refs/remotes/")
+            .or_else(|| upstream_full.strip_prefix("refs/heads/"))
+            .unwrap_or(&upstream_full)
+            .to_string();
+        let upstream_oid = repo
+            .find_reference(&upstream_full)
+            .ok()
+            .and_then(|r| r.target());
+        match upstream_oid {
+            // 上游引用解析失败(已删除):与原 %(upstream:track)=[gone] 一致
+            None => tracking.push(GitBranchTrack {
+                name: name.clone(),
+                upstream: None,
+                ahead: 0,
+                behind: 0,
+            }),
+            Some(up_oid) => {
+                let (ahead, behind) = repo
+                    .find_reference(&branch_ref)
+                    .ok()
+                    .and_then(|r| r.target())
+                    .and_then(|local| repo.graph_ahead_behind(local, up_oid).ok())
+                    .unwrap_or((0, 0));
+                tracking.push(GitBranchTrack {
+                    name: name.clone(),
+                    upstream: Some(upstream_short),
+                    ahead: ahead as u32,
+                    behind: behind as u32,
+                });
             }
-        })
-        .collect();
-    let (local, tracking) = local_branches_with_tracking(path)?;
+        }
+    }
     Ok(GitBranches {
         local,
         remote,
@@ -1225,48 +1305,66 @@ fn push_blocking(path: &str) -> AppResult<GitStatus> {
 
 // ── worktree / merge / rebase ─────────────────────────────
 
-/// 解析 `git worktree list --porcelain` 输出。
-/// 块格式:`worktree <path>` 起始,后跟 `HEAD <sha>`、`branch refs/heads/<name>` 或 `detached`;
-/// 第一条记录为主工作区
-fn parse_worktree_porcelain(text: &str) -> Vec<GitWorktree> {
+/// 从已打开的仓库读 worktree 展示信息(主工作区或链接 worktree 通用)。
+/// 路径统一为 '/' 分隔(与原 `git worktree list --porcelain` 在 Windows 上的输出一致)
+fn worktree_info_of(wt_repo: &Repository, wt_path: &Path, is_main: bool) -> GitWorktree {
+    let mut w = GitWorktree {
+        path: wt_path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .trim_end_matches('/')
+            .to_string(),
+        branch: None,
+        head: String::new(),
+        is_main,
+        detached: false,
+    };
+    if let Ok(head) = wt_repo.head() {
+        w.head = head.target().map(|oid| oid.to_string()).unwrap_or_default();
+        if head.is_branch() {
+            w.branch = head.shorthand().map(String::from);
+        } else {
+            w.detached = true;
+        }
+    }
+    w
+}
+
+fn list_worktrees_blocking(path: &str) -> AppResult<Vec<GitWorktree>> {
+    let Some(repo) = open_repo(path)? else {
+        return Err(not_a_repo());
+    };
     let mut list = Vec::new();
-    let mut cur: Option<GitWorktree> = None;
-    for line in text.lines() {
-        if let Some(p) = line.strip_prefix("worktree ") {
-            if let Some(w) = cur.take() {
-                list.push(w);
-            }
-            cur = Some(GitWorktree {
-                path: p.trim().to_string(),
+    // 主工作区始终第一条
+    if let Some(workdir) = repo.workdir() {
+        list.push(worktree_info_of(&repo, workdir, true));
+    }
+    let names = repo
+        .worktrees()
+        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+    for name in names.iter().flatten() {
+        let Ok(wt) = repo.find_worktree(name) else {
+            continue;
+        };
+        let wt_path = wt.path().to_path_buf();
+        // 打开 worktree 读其 HEAD(.git 为 gitfile,libgit2 自动解析);
+        // 打开失败(目录已被手工删除等)仍列出,保留路径供移除
+        match Repository::open(&wt_path) {
+            Ok(wt_repo) => list.push(worktree_info_of(&wt_repo, &wt_path, false)),
+            Err(_) => list.push(GitWorktree {
+                path: wt_path
+                    .to_string_lossy()
+                    .replace('\\', "/")
+                    .trim_end_matches('/')
+                    .to_string(),
                 branch: None,
                 head: String::new(),
                 is_main: false,
                 detached: false,
-            });
-        } else if let Some(w) = cur.as_mut() {
-            if let Some(h) = line.strip_prefix("HEAD ") {
-                w.head = h.trim().to_string();
-            } else if let Some(b) = line.strip_prefix("branch refs/heads/") {
-                w.branch = Some(b.trim().to_string());
-            } else if line.trim() == "detached" {
-                w.detached = true;
-            }
+            }),
         }
     }
-    if let Some(w) = cur.take() {
-        list.push(w);
-    }
-    if let Some(first) = list.first_mut() {
-        first.is_main = true;
-    }
-    list
-}
-
-fn list_worktrees_blocking(path: &str) -> AppResult<Vec<GitWorktree>> {
-    let out = run_git(path, &["worktree", "list", "--porcelain"])?;
-    Ok(parse_worktree_porcelain(&String::from_utf8_lossy(
-        &out.stdout,
-    )))
+    Ok(list)
 }
 
 #[tauri::command]
@@ -1601,6 +1699,15 @@ fn truncate_chars(text: &str, max: usize) -> (String, bool) {
     (text[..end].to_string(), true)
 }
 
+/// diff 噪声文件判断:pathspec `*` 可跨目录匹配,等价于按后缀匹配文件名。
+/// stat 仍保留这些文件(摘要成本低且"锁文件变了"本身有价值)
+fn is_diff_excluded(path: &str) -> bool {
+    DIFF_EXCLUDES.iter().any(|p| {
+        p.strip_prefix(":(exclude)*")
+            .is_some_and(|suffix| path.ends_with(suffix))
+    })
+}
+
 /// 读取未跟踪新文件的文本内容;非常规文件/二进制/读失败返回 None(由调用方回退到仅列文件名)
 fn read_untracked_file(repo: &str, rel: &str) -> Option<GitUntrackedFile> {
     let full = Path::new(repo).join(rel);
@@ -1641,27 +1748,77 @@ pub async fn git_commit_context(path: String) -> AppResult<GitCommitContext> {
 }
 
 fn commit_context_blocking(path: &str) -> AppResult<GitCommitContext> {
-    let has_head = git_command(path)
-        .args(["rev-parse", "--verify", "HEAD"])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-    let base: &[&str] = if has_head { &["HEAD"] } else { &["--cached"] };
+    let Some(repo) = open_repo(path)? else {
+        return Err(not_a_repo());
+    };
+    let git_err = |e: git2::Error| AppError::coded(ErrorCode::GitCommandFailed, e.to_string());
 
-    let stat_out = run_git(path, &[&["diff", "--stat"], base].concat())?;
-    let diff_out = run_git(
-        path,
-        &[&["diff"], base, &["--", "."], DIFF_EXCLUDES].concat(),
-    )?;
+    // diff:相对 HEAD(等价 git diff HEAD,覆盖已暂存+已跟踪未暂存修改,与 git_commit 语义一致);
+    // 仓库尚无提交(无 HEAD)时回退到暂存区 diff(相对空树,等价 git diff --cached)
+    let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+    let diff = match &head_tree {
+        Some(tree) => repo.diff_tree_to_workdir_with_index(Some(tree), None),
+        None => {
+            let index = repo.index().map_err(git_err)?;
+            repo.diff_tree_to_index(None, Some(&index), None)
+        }
+    }
+    .map_err(git_err)?;
 
-    let untracked_out = run_git(path, &["ls-files", "--others", "--exclude-standard"])?;
+    // stat 全量保留(含锁文件等噪声文件);
+    // 空 diff 时 libgit2 也会输出 "0 files changed..." 摘要行,与 git --stat 对齐为空串
+    let stat = if diff.deltas().len() == 0 {
+        String::new()
+    } else {
+        diff.stats()
+            .and_then(|s| {
+                s.to_buf(
+                    git2::DiffStatsFormat::FULL | git2::DiffStatsFormat::INCLUDE_SUMMARY,
+                    80,
+                )
+            })
+            .map(|b| String::from_utf8_lossy(&b).trim().to_string())
+            .unwrap_or_default()
+    };
+
+    // diff 文本排除锁文件/min/map 等噪声文件(节省 token 预算)
+    let mut diff_text = String::new();
+    for (idx, delta) in diff.deltas().enumerate() {
+        let path = delta
+            .new_file()
+            .path()
+            .or_else(|| delta.old_file().path())
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if is_diff_excluded(&path) {
+            continue;
+        }
+        if let Ok(Some(mut patch)) = Patch::from_diff(&diff, idx) {
+            if let Ok(buf) = patch.to_buf() {
+                diff_text.push_str(&String::from_utf8_lossy(&buf));
+            }
+        }
+    }
+    let (diff_text, truncated) = truncate_chars(&diff_text, DIFF_MAX_CHARS);
+
+    // 未跟踪清单(等价 ls-files --others --exclude-standard:递归目录、不含忽略文件),
+    // 剔除嵌套 git 仓库目录(子仓库是独立项目,不算本仓库内容)
+    let mut sopts = StatusOptions::new();
+    sopts.include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .include_ignored(false);
+    let statuses = repo.statuses(Some(&mut sopts)).map_err(git_err)?;
+    let workdir = repo
+        .workdir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string());
     // 缓存本次扫描中已确认的嵌套仓库
     let mut nested_cache: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let untracked: Vec<String> = String::from_utf8_lossy(&untracked_out.stdout)
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !is_nested_repo_cached(path, l, &mut nested_cache))
-        .map(String::from)
+    let untracked: Vec<String> = statuses
+        .iter()
+        .filter(|e| e.status().contains(Git2Status::WT_NEW))
+        .map(|e| String::from_utf8_lossy(e.path_bytes()).to_string())
+        .filter(|p| !is_nested_repo_cached(&workdir, p, &mut nested_cache))
         .collect();
 
     let mut untracked_files = Vec::new();
@@ -1670,7 +1827,7 @@ fn commit_context_blocking(path: &str) -> AppResult<GitCommitContext> {
         if budget == 0 {
             break;
         }
-        if let Some(mut f) = read_untracked_file(path, name) {
+        if let Some(mut f) = read_untracked_file(&workdir, name) {
             let (content, hit_budget) = truncate_chars(&f.content, budget);
             f.truncated = f.truncated || hit_budget;
             budget -= content.chars().count();
@@ -1679,34 +1836,33 @@ fn commit_context_blocking(path: &str) -> AppResult<GitCommitContext> {
         }
     }
 
-    let recent_commits = if has_head {
-        run_git(
-            path,
-            &[
-                "log",
-                "--no-merges",
-                &format!("-{RECENT_COMMITS_COUNT}"),
-                "--pretty=%s",
-            ],
-        )
-        .map(|o| {
-            String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .map(str::trim)
-                .filter(|l| !l.is_empty())
-                .map(String::from)
-                .collect()
-        })
-        .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
+    // 最近若干条提交 subject(无合并),供模型对齐仓库提交风格
+    let recent_commits = (|| -> Option<Vec<String>> {
+        let mut walk = repo.revwalk().ok()?;
+        walk.push_head().ok()?;
+        walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME).ok()?;
+        let mut out = Vec::new();
+        for oid in walk.flatten() {
+            let Ok(commit) = repo.find_commit(oid) else {
+                continue;
+            };
+            if commit.parent_count() >= 2 {
+                continue;
+            }
+            if let Some(s) = commit.summary() {
+                out.push(s.to_string());
+            }
+            if out.len() >= RECENT_COMMITS_COUNT {
+                break;
+            }
+        }
+        Some(out)
+    })()
+    .unwrap_or_default();
 
-    let (diff, truncated) =
-        truncate_chars(&String::from_utf8_lossy(&diff_out.stdout), DIFF_MAX_CHARS);
     Ok(GitCommitContext {
-        stat: String::from_utf8_lossy(&stat_out.stdout).trim().to_string(),
-        diff,
+        stat,
+        diff: diff_text,
         truncated,
         untracked,
         untracked_files,
@@ -1737,34 +1893,8 @@ pub async fn git_log(
     .await
 }
 
-/// "良性空结果"的 git log stderr 特征(非仓库/无提交/坏默认分支)
-fn is_benign_log_stderr(stderr: &str) -> bool {
-    stderr.contains("not a git repository")
-        || stderr.contains("does not have any commits")
-        || stderr.contains("your current branch")
-        || stderr.contains("bad default revision")
-}
-
-/// 执行 git log 类命令并处理"良性空结果"(非仓库/无提交/坏默认分支 → Ok(None))
-fn run_git_log_raw(path: &str, args: &[String]) -> AppResult<Option<Output>> {
-    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let output = git_command(path).args(&arg_refs).output()?;
-    if output.status.success() {
-        return Ok(Some(output));
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if is_benign_log_stderr(&stderr) {
-        return Ok(None);
-    }
-    let detail = stderr.trim();
-    Err(if detail.is_empty() {
-        AppError::coded(ErrorCode::GitLogFailed, output.status.to_string())
-    } else {
-        friendly_git_error(detail)
-    })
-}
-
-/// git_log 核心逻辑,供 scheduler 等内部模块复用;参数均为引用以避免不必要的 clone
+/// git_log 核心逻辑,供 scheduler 等内部模块复用;参数均为引用以避免不必要的 clone。
+/// 非 git 仓库或尚无提交时返回空数组而非报错(多项目汇总时容错)
 pub(crate) fn run_git_log(
     path: &str,
     since: Option<&str>,
@@ -1772,56 +1902,72 @@ pub(crate) fn run_git_log(
     max_count: Option<u32>,
     author: Option<&str>,
 ) -> AppResult<Vec<GitCommitInfo>> {
-    let mut args: Vec<String> = vec![
-        "log".into(),
-        "--no-merges".into(),
-        "--pretty=format:%h%x1f%an%x1f%ad%x1f%s".into(),
-        "--date=format:%Y-%m-%d %H:%M".into(),
-    ];
-    if let Some(s) = since.filter(|s| !s.trim().is_empty()) {
-        args.push(format!("--since={s}"));
-    }
-    if let Some(u) = until.filter(|u| !u.trim().is_empty()) {
-        args.push(format!("--until={u}"));
-    }
-    if let Some(a) = author.filter(|a| !a.trim().is_empty()) {
-        args.push(format!("--author={a}"));
-    }
-    let limit = max_count.unwrap_or(200).min(1000);
-    args.push(format!("--max-count={limit}"));
-
-    let Some(output) = run_git_log_raw(path, &args)? else {
+    let Some(repo) = open_repo(path)? else {
         return Ok(Vec::new());
     };
+    let mut walk = repo
+        .revwalk()
+        .map_err(|e| AppError::coded(ErrorCode::GitLogFailed, e.to_string()))?;
+    // 尚无提交(未出生 HEAD)→ 空
+    if walk.push_head().is_err() {
+        return Ok(Vec::new());
+    }
+    // git log 默认按提交时间倒序;加 TOPOLOGICAL 保证同秒时间戳下父提交不会跑到
+    // 子提交前面(libgit2 的时间堆在完全相等时不保证稳定,线性历史也观察到乱序)
+    walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)
+        .map_err(|e| AppError::coded(ErrorCode::GitLogFailed, e.to_string()))?;
 
-    let commits = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| {
-            let mut parts = line.splitn(4, '\x1f');
-            let hash = parts.next()?.trim();
-            let author = parts.next()?.trim();
-            let date = parts.next()?.trim();
-            let subject = parts.next()?.trim();
-            if hash.is_empty() {
-                return None;
+    let since_ts = since
+        .filter(|s| !s.trim().is_empty())
+        .and_then(parse_log_datetime);
+    let until_ts = until
+        .filter(|s| !s.trim().is_empty())
+        .and_then(parse_log_datetime);
+    let author = author.map(str::trim).filter(|a| !a.is_empty());
+    let limit = max_count.unwrap_or(200).min(1000) as usize;
+
+    let mut commits = Vec::new();
+    for oid in walk.flatten() {
+        let Ok(commit) = repo.find_commit(oid) else {
+            continue;
+        };
+        // --no-merges
+        if commit.parent_count() >= 2 {
+            continue;
+        }
+        // --since/--until 比较的是提交(committer)时间
+        let committed = commit.time().seconds();
+        if since_ts.is_some_and(|s| committed < s) || until_ts.is_some_and(|u| committed > u) {
+            continue;
+        }
+        let author_sig = commit.author();
+        let author_name = author_sig.name().unwrap_or_default();
+        // --author 语义:匹配 "Name <email>"(git 为正则,这里用包含匹配覆盖常规用法)
+        if let Some(a) = author {
+            let full = format!("{} <{}>", author_name, author_sig.email().unwrap_or_default());
+            if !full.contains(a) {
+                continue;
             }
-            Some(GitCommitInfo {
-                hash: hash.to_string(),
-                author: author.to_string(),
-                date: date.to_string(),
-                subject: subject.to_string(),
-            })
-        })
-        .collect();
+        }
+        commits.push(GitCommitInfo {
+            hash: short_hash(&commit),
+            author: author_name.to_string(),
+            date: format_git_time(author_sig.when()),
+            subject: commit.summary().unwrap_or_default().to_string(),
+        });
+        if commits.len() >= limit {
+            break;
+        }
+    }
     Ok(commits)
 }
 
 /// 读取提交图谱数据(含合并提交与引用装饰),按拓扑序流式输出,支持全量历史。
-/// --topo-order 保证子提交先于父提交,是前端泳道布局的前提;
+/// 拓扑排序保证子提交先于父提交,是前端泳道布局的前提;
 /// 非 git 仓库或尚无提交时仅推送一个 done 批次而非报错。
 /// 修订范围:branches 非空时按指定分支(本地或 origin/xxx)取日志;
-/// 否则 include_remote 为 false 时仅本地分支+标签(--branches --tags),默认 --all 含远程。
-/// 结果按 batch_size 分批经 channel 推送(单次 git walk 边读边发),最后一批 done = true
+/// 否则 include_remote 为 false 时仅本地分支+标签(refs/heads + refs/tags),默认全量引用。
+/// 结果按 batch_size 分批经 channel 推送,最后一批 done = true
 #[tauri::command]
 pub async fn git_graph_log(
     path: String,
@@ -1832,68 +1978,37 @@ pub async fn git_graph_log(
 ) -> AppResult<()> {
     run_blocking(move || {
         let size = batch_size.unwrap_or(500).clamp(50, 2000) as usize;
-        let revs: Vec<String> = match branches {
-            Some(list) => list
-                .into_iter()
-                .map(|b| b.trim().to_string())
-                .filter(|b| !b.is_empty())
-                .collect(),
-            None if include_remote == Some(false) => {
-                vec!["--branches".into(), "--tags".into()]
-            }
-            None => vec!["--all".into()],
-        };
-        if revs.is_empty() {
+        let Some(repo) = open_repo(&path)? else {
             let _ = on_batch.send(GitGraphBatch {
                 commits: Vec::new(),
                 done: true,
             });
             return Ok(());
-        }
-        let mut args: Vec<String> = vec![
-            "log".into(),
-            "--topo-order".into(),
-            "--pretty=format:%H%x1f%P%x1f%an%x1f%ad%x1f%s%x1f%D".into(),
-            "--date=format:%Y-%m-%d %H:%M".into(),
-        ];
-        args.extend(revs);
-
-        let mut child = git_command(&path)
-            .args(&args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| AppError::coded(ErrorCode::GitLogFailed, e.to_string()))?;
-        let stdout = child.stdout.take().expect("stdout 已通过管道捕获");
-        let mut batch: Vec<GitGraphCommit> = Vec::with_capacity(size);
-        for line in BufReader::new(stdout).lines() {
-            let line = line.map_err(|e| AppError::coded(ErrorCode::GitLogFailed, e.to_string()))?;
-            if let Some(commit) = parse_graph_commit_line(&line) {
-                batch.push(commit);
-                if batch.len() >= size {
-                    let _ = on_batch.send(GitGraphBatch {
-                        commits: std::mem::take(&mut batch),
-                        done: false,
-                    });
-                }
-            }
-        }
-        let output = child.wait_with_output()?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            if batch.is_empty() && is_benign_log_stderr(&stderr) {
+        };
+        let walk = match build_graph_revwalk(&repo, branches, include_remote)? {
+            Some(w) => w,
+            // 空修订范围/空仓库:仅推 done 批次
+            None => {
                 let _ = on_batch.send(GitGraphBatch {
                     commits: Vec::new(),
                     done: true,
                 });
                 return Ok(());
             }
-            let detail = stderr.trim();
-            return Err(if detail.is_empty() {
-                AppError::coded(ErrorCode::GitLogFailed, output.status.to_string())
-            } else {
-                friendly_git_error(detail)
-            });
+        };
+        let deco = GraphDeco::collect(&repo);
+        let mut batch: Vec<GitGraphCommit> = Vec::with_capacity(size);
+        for oid in walk.flatten() {
+            let Ok(commit) = repo.find_commit(oid) else {
+                continue;
+            };
+            batch.push(deco.commit_entry(&commit));
+            if batch.len() >= size {
+                let _ = on_batch.send(GitGraphBatch {
+                    commits: std::mem::take(&mut batch),
+                    done: false,
+                });
+            }
         }
         let _ = on_batch.send(GitGraphBatch {
             commits: batch,
@@ -1904,126 +2019,256 @@ pub async fn git_graph_log(
     .await
 }
 
-/// 解析 %H%x1f%P%x1f%an%x1f%ad%x1f%s%x1f%D 格式的一行 git log 输出
-fn parse_graph_commit_line(line: &str) -> Option<GitGraphCommit> {
-    let mut parts = line.splitn(6, '\x1f');
-    let hash = parts.next()?.trim();
-    let parents = parts.next()?.trim();
-    let author = parts.next()?.trim();
-    let date = parts.next()?.trim();
-    let subject = parts.next()?.trim();
-    let decorations = parts.next().unwrap_or("").trim();
-    if hash.is_empty() {
-        return None;
-    }
-    let mut refs = Vec::new();
-    let mut is_head = false;
-    for deco in decorations.split(", ").map(str::trim).filter(|d| !d.is_empty()) {
-        if let Some(target) = deco.strip_prefix("HEAD -> ") {
-            is_head = true;
-            refs.push(target.to_string());
-        } else if deco == "HEAD" {
-            is_head = true;
-        } else {
-            refs.push(deco.to_string());
+/// 构建图谱 revwalk:返回 None 表示修订范围为空或仓库无提交(调用方推 done 批次)。
+/// branches 中无法解析的修订名报 git_log_failed(与原 git log 的 bad revision 一致)
+fn build_graph_revwalk<'r>(
+    repo: &'r Repository,
+    branches: Option<Vec<String>>,
+    include_remote: Option<bool>,
+) -> AppResult<Option<git2::Revwalk<'r>>> {
+    let walk_err = |e: git2::Error| AppError::coded(ErrorCode::GitLogFailed, e.to_string());
+    let mut tips: Vec<git2::Oid> = Vec::new();
+    match branches {
+        Some(list) => {
+            let revs: Vec<String> = list
+                .into_iter()
+                .map(|b| b.trim().to_string())
+                .filter(|b| !b.is_empty())
+                .collect();
+            if revs.is_empty() {
+                return Ok(None);
+            }
+            for b in &revs {
+                let commit = repo
+                    .revparse_single(b)
+                    .and_then(|o| o.peel_to_commit())
+                    .map_err(|_| {
+                        AppError::coded(ErrorCode::GitLogFailed, format!("bad revision: {b}"))
+                    })?;
+                tips.push(commit.id());
+            }
+        }
+        None => {
+            let all = include_remote != Some(false);
+            let iter = repo.references().map_err(walk_err)?;
+            for r in iter.flatten() {
+                let name = r.name().unwrap_or_default();
+                let include = if all {
+                    name.starts_with("refs/")
+                } else {
+                    name.starts_with("refs/heads/") || name.starts_with("refs/tags/")
+                };
+                if include {
+                    if let Ok(c) = r.peel_to_commit() {
+                        tips.push(c.id());
+                    }
+                }
+            }
+            if all {
+                // --all 语义含 HEAD(detached 时 HEAD 可能不在任何 refs 下)
+                if let Ok(c) = repo.head().and_then(|h| h.peel_to_commit()) {
+                    tips.push(c.id());
+                }
+            }
         }
     }
-    Some(GitGraphCommit {
-        hash: hash.to_string(),
-        parents: parents.split_whitespace().map(str::to_string).collect(),
-        author: author.to_string(),
-        date: date.to_string(),
-        subject: subject.to_string(),
-        refs,
-        is_head,
-    })
+    if tips.is_empty() {
+        return Ok(None);
+    }
+    let mut walk = repo.revwalk().map_err(walk_err)?;
+    walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME).map_err(walk_err)?;
+    for tip in tips {
+        walk.push(tip).map_err(walk_err)?;
+    }
+    Ok(Some(walk))
+}
+
+/// 引用装饰映射(Oid → 名称列表 + HEAD 指向),命名与 `git log %D` 一致:
+/// refs/heads/x → "x",refs/remotes/o/x → "o/x",refs/tags/t → "tag: t",
+/// origin/HEAD 这类符号引用不显示
+struct GraphDeco {
+    by_oid: HashMap<git2::Oid, Vec<String>>,
+    head_oid: Option<git2::Oid>,
+    head_branch: Option<String>,
+}
+
+impl GraphDeco {
+    fn collect(repo: &Repository) -> Self {
+        let mut by_oid: HashMap<git2::Oid, Vec<String>> = HashMap::new();
+        if let Ok(iter) = repo.references() {
+            for r in iter.flatten() {
+                if r.kind() == Some(git2::ReferenceType::Symbolic) {
+                    continue;
+                }
+                let Some(name) = r.name() else { continue };
+                let display = name
+                    .strip_prefix("refs/heads/")
+                    .map(String::from)
+                    .or_else(|| name.strip_prefix("refs/remotes/").map(String::from))
+                    .or_else(|| name.strip_prefix("refs/tags/").map(|t| format!("tag: {t}")))
+                    .unwrap_or_else(|| name.to_string());
+                if let Ok(c) = r.peel_to_commit() {
+                    by_oid.entry(c.id()).or_default().push(display);
+                }
+            }
+        }
+        let head = repo.head().ok();
+        let head_oid = head.as_ref().and_then(|h| h.target());
+        let head_branch = head
+            .as_ref()
+            .filter(|h| h.is_branch())
+            .and_then(|h| h.shorthand().map(String::from));
+        GraphDeco {
+            by_oid,
+            head_oid,
+            head_branch,
+        }
+    }
+
+    /// 单条提交转图谱条目:HEAD 分支名在 refs 中置顶(等价 %D 的 "HEAD -> x"),
+    /// detached 时仅置 is_head
+    fn commit_entry(&self, commit: &git2::Commit) -> GitGraphCommit {
+        let is_head = self.head_oid == Some(commit.id());
+        let mut refs = Vec::new();
+        if is_head {
+            if let Some(b) = &self.head_branch {
+                refs.push(b.clone());
+            }
+        }
+        if let Some(names) = self.by_oid.get(&commit.id()) {
+            for n in names {
+                // "HEAD -> x" 已消费的分支名不重复列出
+                if is_head && self.head_branch.as_deref() == Some(n.as_str()) {
+                    continue;
+                }
+                refs.push(n.clone());
+            }
+        }
+        GitGraphCommit {
+            hash: commit.id().to_string(),
+            parents: commit.parent_ids().map(|p| p.to_string()).collect(),
+            author: commit.author().name().unwrap_or_default().to_string(),
+            date: format_git_time(commit.author().when()),
+            subject: commit.summary().unwrap_or_default().to_string(),
+            refs,
+            is_head,
+        }
+    }
 }
 
 /// 提交详情面板单文件 diff 的长度上限(超出截断,避免大文件撑爆 IPC)
 const COMMIT_DIFF_MAX_CHARS: usize = 200_000;
 
-/// 读取某次提交触及的文件清单(状态 + 增删行数,提交详情面板文件列表用)。
-/// diff-tree --root 兼容根提交(相对空树,全部视为新增);-M 识别重命名;
-/// --numstat 与 --name-status 两个输出块文件顺序一致,解析后按索引配对。
-/// 合并提交(多父)diff-tree 默认无输出,返回空数组由前端提示
-#[tauri::command]
-pub async fn git_commit_files(path: String, hash: String) -> AppResult<Vec<GitCommitFile>> {
-    run_blocking(move || {
-        let out = run_git(
-            &path,
-            &[
-                "-c",
-                "core.quotepath=false",
-                "diff-tree",
-                "--root",
-                "-r",
-                "-M",
-                "--no-commit-id",
-                "--numstat",
-                "--name-status",
-                &hash,
-            ],
-        )?;
-        Ok(parse_commit_files(&String::from_utf8_lossy(&out.stdout)))
-    })
-    .await
+/// 读取某次提交的树间 diff(详情面板文件清单与单文件 diff 共用)。
+/// 根提交相对空树(等价 diff-tree --root);-M 重命名识别;
+/// 合并提交(多父)无单 diff 语义,返回 None(与原 diff-tree 默认无输出一致)
+fn commit_diff<'r>(
+    repo: &'r Repository,
+    hash: &str,
+    configure: impl FnOnce(&mut DiffOptions),
+) -> AppResult<Option<git2::Diff<'r>>> {
+    let commit = repo
+        .revparse_single(hash)
+        .and_then(|o| o.peel_to_commit())
+        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+    if commit.parent_count() > 1 {
+        return Ok(None);
+    }
+    let new_tree = commit
+        .tree()
+        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+    let old_tree = if commit.parent_count() == 1 {
+        Some(
+            commit
+                .parent(0)
+                .and_then(|p| p.tree())
+                .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?,
+        )
+    } else {
+        None
+    };
+    let mut opts = DiffOptions::new();
+    opts.include_typechange(true);
+    configure(&mut opts);
+    let mut diff = repo
+        .diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut opts))
+        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+    diff.find_similar(Some(&mut DiffFindOptions::new().renames(true)))
+        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+    Ok(Some(diff))
 }
 
-/// 解析 `diff-tree --numstat --name-status` 的组合输出。
-/// 输出为两块(numstat 在前、name-status 在后,空行分隔),按行首列区分:
-/// numstat 行首列是数字或 "-"(二进制),name-status 行首列是状态字母。
-/// 两块文件顺序一致,按索引把增删行数配到状态条目上
-fn parse_commit_files(text: &str) -> Vec<GitCommitFile> {
-    let mut stats: Vec<(Option<u32>, Option<u32>)> = Vec::new();
-    let mut files: Vec<GitCommitFile> = Vec::new();
-    for line in text.lines() {
-        let mut cols = line.split('\t');
-        let Some(first) = cols.next() else { continue };
-        if first.is_empty() {
-            continue;
-        }
-        if first.as_bytes()[0].is_ascii_digit() || first == "-" {
-            // numstat 行:"-" 表示二进制文件,行数记 None
-            stats.push((
-                first.parse::<u32>().ok(),
-                cols.next().and_then(|s| s.parse::<u32>().ok()),
-            ));
-            continue;
-        }
-        let status = first.chars().next().unwrap_or('\0');
-        if !"ACDMRT".contains(status) {
-            continue;
-        }
-        let p1 = cols.next().unwrap_or("").to_string();
-        let p2 = cols.next().map(str::to_string);
-        // 重命名 / 复制(R100 / C123):后随旧、新两个路径
-        let (old_path, path) = if matches!(status, 'R' | 'C') {
-            (Some(p1), p2.unwrap_or_default())
-        } else {
-            (None, p1)
+/// 读取某次提交触及的文件清单(状态 + 增删行数,提交详情面板文件列表用)。
+/// 合并提交(多父)返回空数组由前端提示
+#[tauri::command]
+pub async fn git_commit_files(path: String, hash: String) -> AppResult<Vec<GitCommitFile>> {
+    run_blocking(move || commit_files_blocking(&path, &hash)).await
+}
+
+fn commit_files_blocking(path: &str, hash: &str) -> AppResult<Vec<GitCommitFile>> {
+    let Some(repo) = open_repo(path)? else {
+        return Err(not_a_repo());
+    };
+    let Some(diff) = commit_diff(&repo, hash, |_| {})? else {
+        return Ok(Vec::new());
+    };
+    let mut files = Vec::new();
+    for (idx, delta) in diff.deltas().enumerate() {
+        let status = match delta.status() {
+            Delta::Added => 'A',
+            Delta::Copied => 'C',
+            Delta::Deleted => 'D',
+            Delta::Modified => 'M',
+            Delta::Renamed => 'R',
+            Delta::Typechange => 'T',
+            _ => continue,
         };
+        let path = delta
+            .new_file()
+            .path()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
         if path.is_empty() {
             continue;
         }
+        // 重命名 / 复制:记录旧路径
+        let old_path = if matches!(status, 'R' | 'C') {
+            delta.old_file().path().map(|p| p.to_string_lossy().to_string())
+        } else {
+            None
+        };
+        // 增删行数;二进制行数记 None(与 numstat 的 "-" 一致)。
+        // 注意:delta 的 binary 标志要在 Patch::from_diff 加载内容后才置位
+        let patch = Patch::from_diff(&diff, idx).ok().flatten();
+        let is_binary = diff
+            .get_delta(idx)
+            .map(|d| d.flags().is_binary())
+            .unwrap_or(false);
+        let (additions, deletions) = if is_binary {
+            (None, None)
+        } else {
+            match patch {
+                // Patch 为 None(纯模式变更等空补丁):numstat 记 0 0
+                None => (Some(0), Some(0)),
+                Some(p) => p
+                    .line_stats()
+                    .ok()
+                    .map(|(_, a, d)| (Some(a as u32), Some(d as u32)))
+                    .unwrap_or((None, None)),
+            }
+        };
         files.push(GitCommitFile {
             path,
             old_path,
             status: status.to_string(),
-            additions: None,
-            deletions: None,
+            additions,
+            deletions,
         });
     }
-    for (i, file) in files.iter_mut().enumerate() {
-        if let Some((adds, dels)) = stats.get(i) {
-            file.additions = *adds;
-            file.deletions = *dels;
-        }
-    }
-    files
+    Ok(files)
 }
 
 /// 读取某次提交中单个文件的 diff(提交详情面板用)。
-/// 用 `git show --format=` 而非 `diff <hash>^ <hash>`:根提交无父提交,前者天然兼容;
 /// 重命名时新旧路径都作为 pathspec 传入。超长按字符截断(二进制 diff 天然很短)
 #[tauri::command]
 pub async fn git_commit_file_diff(
@@ -2033,18 +2278,43 @@ pub async fn git_commit_file_diff(
     old_path: Option<String>,
 ) -> AppResult<GitCommitFileDiff> {
     run_blocking(move || {
-        let mut args: Vec<&str> =
-            vec!["-c", "core.quotepath=false", "show", "--format=", &hash, "--"];
-        if let Some(old) = old_path.as_deref() {
-            args.push(old);
-        }
-        args.push(&file_path);
-        let out = run_git(&path, &args)?;
-        let (diff, truncated) =
-            truncate_chars(&String::from_utf8_lossy(&out.stdout), COMMIT_DIFF_MAX_CHARS);
-        Ok(GitCommitFileDiff { diff, truncated })
+        commit_file_diff_blocking(&path, &hash, &file_path, old_path.as_deref())
     })
     .await
+}
+
+fn commit_file_diff_blocking(
+    path: &str,
+    hash: &str,
+    file_path: &str,
+    old_path: Option<&str>,
+) -> AppResult<GitCommitFileDiff> {
+    let Some(repo) = open_repo(path)? else {
+        return Err(not_a_repo());
+    };
+    let Some(diff) = commit_diff(&repo, hash, |opts| {
+        opts.pathspec(file_path);
+        if let Some(old) = old_path {
+            opts.pathspec(old);
+        }
+    })?
+    else {
+        // 合并提交:前端不会对合并提交调本接口,返回空
+        return Ok(GitCommitFileDiff {
+            diff: String::new(),
+            truncated: false,
+        });
+    };
+    let mut text = String::new();
+    for (idx, _) in diff.deltas().enumerate() {
+        if let Ok(Some(mut patch)) = Patch::from_diff(&diff, idx) {
+            if let Ok(buf) = patch.to_buf() {
+                text.push_str(&String::from_utf8_lossy(&buf));
+            }
+        }
+    }
+    let (diff, truncated) = truncate_chars(&text, COMMIT_DIFF_MAX_CHARS);
+    Ok(GitCommitFileDiff { diff, truncated })
 }
 
 /// 读取仓库当前 git 用户身份(日报"仅自己"过滤用)。
@@ -2055,17 +2325,17 @@ pub async fn git_current_user(path: String) -> AppResult<GitUser> {
 }
 
 pub(crate) fn run_git_current_user(path: &str) -> AppResult<GitUser> {
+    // 仓库配置(libgit2 自动合并 local/global/system);非仓库回退全局配置,
+    // 与 `git config user.name` 在仓库外仍读全局的行为一致
+    let cfg = open_repo(path)
+        .ok()
+        .flatten()
+        .and_then(|r| r.config().ok())
+        .or_else(|| git2::Config::open_default().ok());
     let read = |key: &str| -> String {
-        git_command(path)
-            .args(["config", key])
-            .output()
-            .map(|o| {
-                if o.status.success() {
-                    String::from_utf8_lossy(&o.stdout).trim().to_string()
-                } else {
-                    String::new()
-                }
-            })
+        cfg.as_ref()
+            .and_then(|c| c.get_string(key).ok())
+            .map(|s| s.trim().to_string())
             .unwrap_or_default()
     };
     Ok(GitUser {
@@ -2242,16 +2512,14 @@ pub async fn list_project_remote_urls(db: State<'_, Db>) -> AppResult<Vec<String
     run_blocking(move || {
         let mut urls = Vec::new();
         for path in paths {
-            if let Ok(o) = git_command(&path)
-                .args(["remote", "get-url", "origin"])
-                .output()
-            {
-                if o.status.success() {
-                    let url = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                    if !url.is_empty() {
-                        urls.push(url);
-                    }
-                }
+            // 非仓库/无 origin 的项目跳过
+            let url = open_repo(&path).ok().flatten().and_then(|r| {
+                r.find_remote("origin")
+                    .ok()
+                    .and_then(|remote| remote.url().map(String::from))
+            });
+            if let Some(url) = url.map(|u| u.trim().to_string()).filter(|u| !u.is_empty()) {
+                urls.push(url);
             }
         }
         Ok(urls)
@@ -2315,46 +2583,107 @@ mod tests {
     }
 
     #[test]
-    fn parse_commit_files_pairs_numstat_and_name_status() {
-        let text = "10\t2\tsrc/foo.ts\n3\t1\tsrc/bar.vue\n-\t-\tassets/logo.png\n\nM\tsrc/foo.ts\nD\tsrc/bar.vue\nA\tassets/logo.png\n";
-        let files = parse_commit_files(text);
-        assert_eq!(files.len(), 3);
-        assert_eq!(files[0].status, "M");
-        assert_eq!(files[0].path, "src/foo.ts");
-        assert_eq!(files[0].additions, Some(10));
-        assert_eq!(files[0].deletions, Some(2));
-        assert_eq!(files[1].status, "D");
-        assert_eq!(files[1].additions, Some(3));
-        // 二进制:numstat 为 "-",行数为 None
-        assert_eq!(files[2].status, "A");
-        assert_eq!(files[2].additions, None);
-        assert_eq!(files[2].deletions, None);
+    fn commit_files_reports_status_and_line_counts() {
+        let dir = temp_dir("commit-files");
+        init_repo(&dir);
+        fs::write(dir.join("a.txt"), "a\n").unwrap();
+        fs::write(dir.join("b.txt"), "b\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-m", "init"]);
+
+        // M: a.txt 改两行;D: b.txt;A: 二进制 bin.dat
+        fs::write(dir.join("a.txt"), "a1\na2\na3\n").unwrap();
+        fs::remove_file(dir.join("b.txt")).unwrap();
+        fs::write(dir.join("bin.dat"), [0u8, 159, 146, 150]).unwrap();
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-m", "second"]);
+
+        let files = commit_files_blocking(dir.to_str().unwrap(), "HEAD").unwrap();
+        let by_path = |p: &str| files.iter().find(|f| f.path == p).cloned();
+        let a = by_path("a.txt").expect("a.txt 应在清单中");
+        assert_eq!(a.status, "M");
+        assert_eq!(a.additions, Some(3));
+        assert_eq!(a.deletions, Some(1));
+        let b = by_path("b.txt").expect("b.txt 应在清单中");
+        assert_eq!(b.status, "D");
+        assert_eq!(b.deletions, Some(1));
+        // 二进制:行数记 None
+        let bin = by_path("bin.dat").expect("bin.dat 应在清单中");
+        assert_eq!(bin.status, "A");
+        assert_eq!(bin.additions, None);
+        assert_eq!(bin.deletions, None);
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn parse_commit_files_handles_rename_and_garbage() {
-        let text = "5\t0\tsrc/new.ts\n\nR100\tsrc/old.ts\tsrc/new.ts\nX\n\t\n";
-        let files = parse_commit_files(text);
+    fn commit_files_detects_rename_and_merge_returns_empty() {
+        let dir = temp_dir("commit-files-rename");
+        init_repo(&dir);
+        fs::write(dir.join("old.txt"), "same content\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-m", "init"]);
+        git(&dir, &["mv", "old.txt", "new.txt"]);
+        git(&dir, &["commit", "-m", "rename"]);
+
+        let files = commit_files_blocking(dir.to_str().unwrap(), "HEAD").unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].status, "R");
-        assert_eq!(files[0].old_path.as_deref(), Some("src/old.ts"));
-        assert_eq!(files[0].path, "src/new.ts");
-        assert_eq!(files[0].additions, Some(5));
-        assert!(parse_commit_files("").is_empty());
+        assert_eq!(files[0].old_path.as_deref(), Some("old.txt"));
+        assert_eq!(files[0].path, "new.txt");
+
+        // 合并提交(多父)返回空,由前端提示
+        git(&dir, &["checkout", "-b", "side", "HEAD~1"]);
+        fs::write(dir.join("side.txt"), "s\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-m", "side"]);
+        git(&dir, &["checkout", "main"]);
+        git(&dir, &["merge", "--no-ff", "-m", "merge", "side"]);
+        let head = rev_parse(&dir, "HEAD");
+        let files = commit_files_blocking(dir.to_str().unwrap(), &head).unwrap();
+        assert!(files.is_empty(), "合并提交应返回空清单");
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn parse_remote_verbose_dedups_and_takes_fetch() {
-        let stdout = "origin\tgit@github.com:user/repo.git (fetch)\norigin\tgit@github.com:user/repo.git (push)\nupstream\thttps://example.com/a/b.git (fetch)\nupstream\thttps://example.com/a/b.git (push)\n";
-        let remotes = parse_remote_verbose(stdout);
+    fn commit_file_diff_contains_hunks() {
+        let dir = temp_dir("commit-diff");
+        init_repo(&dir);
+        fs::write(dir.join("a.txt"), "hello\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-m", "init"]);
+        fs::write(dir.join("a.txt"), "hello world\n").unwrap();
+        git(&dir, &["commit", "-am", "update"]);
+
+        let d = commit_file_diff_blocking(dir.to_str().unwrap(), "HEAD", "a.txt", None).unwrap();
+        assert!(d.diff.contains("@@"), "应含 hunk 头: {}", d.diff);
+        assert!(d.diff.contains("+hello world"), "实际: {}", d.diff);
+        assert!(!d.truncated);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn remotes_list_names_and_urls() {
+        let dir = temp_dir("remotes");
+        init_repo(&dir);
+        git(&dir, &["remote", "add", "origin", "git@github.com:user/repo.git"]);
+        git(&dir, &["remote", "add", "upstream", "https://example.com/a/b.git"]);
+
+        let remotes = list_remotes_blocking(dir.to_str().unwrap()).unwrap();
         assert_eq!(remotes.len(), 2);
         assert_eq!(remotes[0].name, "origin");
         assert_eq!(remotes[0].url, "git@github.com:user/repo.git");
         assert_eq!(remotes[1].name, "upstream");
         assert_eq!(remotes[1].url, "https://example.com/a/b.git");
-        // 空输出 / 残缺行
-        assert!(parse_remote_verbose("").is_empty());
-        assert!(parse_remote_verbose("origin\n").is_empty());
+
+        // 非仓库 → 空列表
+        let plain = temp_dir("remotes-plain");
+        assert!(list_remotes_blocking(plain.to_str().unwrap()).unwrap().is_empty());
+
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&plain);
     }
 
     #[test]
@@ -3047,15 +3376,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_upstream_track_formats() {
-        assert_eq!(parse_upstream_track("[ahead 2, behind 3]"), (2, 3));
-        assert_eq!(parse_upstream_track("[ahead 1]"), (1, 0));
-        assert_eq!(parse_upstream_track("[behind 5]"), (0, 5));
-        assert_eq!(parse_upstream_track("[gone]"), (0, 0));
-        assert_eq!(parse_upstream_track(""), (0, 0));
-    }
-
-    #[test]
     fn list_branches_reports_upstream_tracking() {
         let origin = temp_dir("track-origin");
         git(&origin, &["init", "--bare", "-b", "main"]);
@@ -3236,8 +3556,8 @@ mod tests {
         // 外层只看到 b.txt;嵌套仓库不出现在 untracked,其内部改动不进 diff
         let ctx = commit_context_blocking(dir.to_str().unwrap()).unwrap();
         assert_eq!(ctx.untracked, vec!["b.txt".to_string()]);
-        assert!(ctx.stat.is_empty());
-        assert!(ctx.diff.is_empty());
+        assert!(ctx.stat.is_empty(), "stat 应为空,实际: {:?}", ctx.stat);
+        assert!(ctx.diff.is_empty(), "diff 应为空,实际: {:?}", ctx.diff);
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -3416,28 +3736,95 @@ mod tests {
     }
 
     #[test]
-    fn parse_worktree_porcelain_parses_blocks() {
-        let text = "worktree D:/repo\n\
-                    HEAD 1111111111111111111111111111111111111111\n\
-                    branch refs/heads/main\n\
-                    \n\
-                    worktree D:/repo/.worktrees/feature-x\n\
-                    HEAD 2222222222222222222222222222222222222222\n\
-                    branch refs/heads/feature/x\n\
-                    \n\
-                    worktree D:/repo/.worktrees/det\n\
-                    HEAD 3333333333333333333333333333333333333333\n\
-                    detached\n";
-        let list = parse_worktree_porcelain(text);
-        assert_eq!(list.len(), 3);
-        assert!(list[0].is_main);
-        assert_eq!(list[0].branch.as_deref(), Some("main"));
-        assert_eq!(list[1].branch.as_deref(), Some("feature/x"));
-        assert!(!list[1].is_main);
-        assert!(!list[1].detached);
-        assert!(list[2].detached);
-        assert_eq!(list[2].branch, None);
-        assert_eq!(list[2].head, "3333333333333333333333333333333333333333");
+    fn graph_log_walks_topo_with_decorations() {
+        // 线性历史 + 分支 + 标签:验证拓扑序、refs 装饰、HEAD 标记
+        let dir = temp_dir("graph");
+        init_repo(&dir);
+        fs::write(dir.join("a.txt"), "a").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-m", "c1"]);
+        fs::write(dir.join("a.txt"), "a2").unwrap();
+        git(&dir, &["commit", "-am", "c2"]);
+        git(&dir, &["branch", "feature"]);
+        git(&dir, &["tag", "v1.0"]);
+
+        let repo = open_repo(dir.to_str().unwrap()).unwrap().unwrap();
+        let walk = build_graph_revwalk(&repo, None, None).unwrap().unwrap();
+        let deco = GraphDeco::collect(&repo);
+        let commits: Vec<GitGraphCommit> = walk
+            .flatten()
+            .filter_map(|oid| repo.find_commit(oid).ok())
+            .map(|c| deco.commit_entry(&c))
+            .collect();
+
+        assert_eq!(commits.len(), 2);
+        // 拓扑序:子提交(c2)先于父提交(c1)
+        assert_eq!(commits[0].subject, "c2");
+        assert_eq!(commits[1].subject, "c1");
+        assert_eq!(commits[0].parents, vec![commits[1].hash.clone()]);
+        // HEAD -> main 置顶;同提交上的 feature 分支与 tag 装饰一并列出
+        assert!(commits[0].is_head);
+        assert_eq!(commits[0].refs[0], "main");
+        assert!(commits[0].refs.contains(&"feature".to_string()));
+        assert!(commits[0].refs.contains(&"tag: v1.0".to_string()));
+        assert!(!commits[1].is_head);
+        assert!(commits[1].parents.is_empty());
+
+        // 指定分支范围与空仓库的 done 语义
+        assert!(
+            build_graph_revwalk(&repo, Some(vec!["feature".to_string()]), None)
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            build_graph_revwalk(&repo, Some(vec!["no-such".to_string()]), None).is_err(),
+            "无法解析的修订名应报错"
+        );
+        let empty = temp_dir("graph-empty");
+        init_repo(&empty);
+        let empty_repo = open_repo(empty.to_str().unwrap()).unwrap().unwrap();
+        assert!(build_graph_revwalk(&empty_repo, None, None).unwrap().is_none());
+        assert!(
+            build_graph_revwalk(&empty_repo, Some(vec![]), None)
+                .unwrap()
+                .is_none()
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&empty);
+    }
+
+    #[test]
+    fn graph_log_excludes_remote_refs_when_disabled() {
+        let (origin, _clone_a) = setup_origin_with_feature("graph-scope");
+        let clone_b = clone_with_config("graph-scope-b", &origin);
+        let repo = open_repo(clone_b.to_str().unwrap()).unwrap().unwrap();
+
+        // 默认(全量):含 origin/feature 装饰
+        let deco = GraphDeco::collect(&repo);
+        let walk = build_graph_revwalk(&repo, None, None).unwrap().unwrap();
+        let commits: Vec<GitGraphCommit> = walk
+            .flatten()
+            .filter_map(|oid| repo.find_commit(oid).ok())
+            .map(|c| deco.commit_entry(&c))
+            .collect();
+        let all_refs: Vec<&str> = commits.iter().flat_map(|c| c.refs.iter().map(String::as_str)).collect();
+        assert!(all_refs.contains(&"origin/main"), "实际: {all_refs:?}");
+        // origin/HEAD 符号引用不出现在装饰中
+        assert!(!all_refs.contains(&"origin/HEAD"), "实际: {all_refs:?}");
+
+        // include_remote=false:只走本地分支+标签,feature 提交不可达
+        let walk = build_graph_revwalk(&repo, None, Some(false)).unwrap().unwrap();
+        let deco = GraphDeco::collect(&repo);
+        let subjects: Vec<String> = walk
+            .flatten()
+            .filter_map(|oid| repo.find_commit(oid).ok())
+            .map(|c| c.summary().unwrap_or_default().to_string())
+            .collect();
+        assert_eq!(subjects, vec!["c1".to_string()]);
+
+        let _ = fs::remove_dir_all(&origin);
+        let _ = fs::remove_dir_all(&clone_b);
     }
 
     #[test]

@@ -32,6 +32,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 serde_yaml_ng = "0.10"
 ignore = "0.4"
+# walk 缓存的失效监听:项目内 package.json / yaml 变更时即时让目录遍历缓存失效
+notify = "8"
 rusqlite = { version = "0.31", features = ["bundled"] }
 tokio = { version = "1", features = ["full"] }
 chrono = { version = "0.4", features = ["serde"] }
@@ -45,6 +47,10 @@ pelite = "0.10.0"
 ico = "0.5.0"
 icns = "0.4.0"
 plist = "1.10.0"
+# git 读操作(status/分支/log/diff 等)走 libgit2 避免子进程开销;
+# 写操作与网络操作(fetch/pull/push/clone)仍走系统 git CLI。
+# default-features = false:只读本地操作不需要 https/ssh,避免引入 OpenSSL/libssh2
+git2 = { version = "0.20", default-features = false }
 
 [dev-dependencies]
 urlpattern = "0.3"

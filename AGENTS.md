@@ -61,6 +61,7 @@ src-tauri/migrations/ SQL 迁移,NNN_name.sql
 
 ## 注意事项(Gotchas)
 
+- **git 双层实现**:只读查询(status/分支/worktree 列表/log/graph/commit 文件与 diff/remote 列表/当前用户)走 git2(libgit2,`Cargo.toml` 里 default-features = false);写操作(checkout/commit/merge/rebase/worktree 增删/init)与网络操作(fetch/pull/push/clone)仍走系统 git CLI(`git_command`/`run_git`),以继承用户凭证环境(GCM 等)。新增 git 读路径优先复用 git2 层的 `open_repo`/`format_git_time`/`commit_diff` 等辅助;libgit2 revwalk 的纯时间排序在完全相同时间戳下不稳定,需排序时加 `Sort::TOPOLOGICAL` 保底。
 - git 相关命令已禁用终端凭据交互询问;涉及凭证的改动注意保持非交互。
 - `run_in_terminal` 在系统终端新窗口执行命令,Windows 优先 Windows Terminal。
 - Vite dev 端口 1420 被占用会直接失败(strictPort),`tauri dev` 前先确认端口空闲。
