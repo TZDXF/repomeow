@@ -55,6 +55,8 @@ pub enum ErrorCode {
     GitPushRejected,
     GitDiverged,
     GitNoTracking,
+    /// 上游远程分支已被删除,pull/fetch 找不到对应 ref
+    GitRemoteBranchGone,
     NotGitRepository,
     /// 分支已被其它 worktree 检出,不能重复检出
     GitBranchCheckedOut,
@@ -204,6 +206,7 @@ impl ErrorCode {
             Self::GitPushRejected => "git_push_rejected",
             Self::GitDiverged => "git_diverged",
             Self::GitNoTracking => "git_no_tracking",
+            Self::GitRemoteBranchGone => "git_remote_branch_gone",
             Self::NotGitRepository => "not_git_repository",
             Self::GitBranchCheckedOut => "git_branch_checked_out",
             Self::GitWorktreeDirty => "git_worktree_dirty",

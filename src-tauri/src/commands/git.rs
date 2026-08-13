@@ -278,6 +278,13 @@ fn friendly_git_error(raw: &str) -> AppError {
     {
         return coded(ErrorCode::GitDiverged, "");
     }
+    // 上游远程分支已被删除:pull 当前分支时报 "no such ref was fetched",
+    // fetch/pull 指定分支时报 "couldn't find remote ref"(不同 git 版本大小写不一)
+    if text.contains("no such ref was fetched")
+        || text.to_ascii_lowercase().contains("couldn't find remote ref")
+    {
+        return coded(ErrorCode::GitRemoteBranchGone, "");
+    }
     if text.contains("There is no tracking information") {
         return coded(ErrorCode::GitNoTracking, "");
     }
@@ -2280,6 +2287,29 @@ mod tests {
     }
 
     #[test]
+    fn friendly_error_maps_remote_branch_gone() {
+        // 当前分支上游被删:git pull 的实际输出
+        let pull_raw = "Your configuration specifies to merge with the ref 'refs/heads/feature'\n\
+                        from the remote, but no such ref was fetched.";
+        let err = friendly_git_error(pull_raw);
+        assert!(
+            err.is_code(ErrorCode::GitRemoteBranchGone),
+            "实际输出: {err}"
+        );
+        // 指定分支拉取/抓取:git fetch origin feature:feature 的实际输出(版本间大小写不一)
+        for raw in [
+            "fatal: couldn't find remote ref feature",
+            "fatal: Couldn't find remote ref feature",
+        ] {
+            let err = friendly_git_error(raw);
+            assert!(
+                err.is_code(ErrorCode::GitRemoteBranchGone),
+                "输入 {raw:?} 实际输出: {err}"
+            );
+        }
+    }
+
+    #[test]
     fn parses_working_tree_counts() {
         let dir = temp_dir("repo");
         init_repo(&dir);
@@ -2648,6 +2678,44 @@ mod tests {
         assert_ne!(
             rev_parse(&clone_b, "feature"),
             rev_parse(&clone_b, "origin/feature")
+        );
+
+        let _ = fs::remove_dir_all(&origin);
+        let _ = fs::remove_dir_all(&clone_a);
+        let _ = fs::remove_dir_all(&clone_b);
+    }
+
+    #[test]
+    fn pull_branch_remote_deleted_returns_gone_error() {
+        let (origin, clone_a) = setup_origin_with_feature("pullbr-gone");
+        let clone_b = clone_with_config("pullbr-gone-b", &origin);
+        git(&clone_b, &["branch", "--track", "feature", "origin/feature"]);
+        // 远端删除 feature
+        git(&clone_a, &["push", "origin", "--delete", "feature"]);
+
+        let err = pull_branch_blocking(clone_b.to_str().unwrap(), "feature").unwrap_err();
+        assert!(
+            err.is_code(crate::error::ErrorCode::GitRemoteBranchGone),
+            "实际输出: {err}"
+        );
+
+        let _ = fs::remove_dir_all(&origin);
+        let _ = fs::remove_dir_all(&clone_a);
+        let _ = fs::remove_dir_all(&clone_b);
+    }
+
+    #[test]
+    fn pull_current_branch_remote_deleted_returns_gone_error() {
+        let (origin, clone_a) = setup_origin_with_feature("pull-gone");
+        let clone_b = clone_with_config("pull-gone-b", &origin);
+        git(&clone_b, &["checkout", "feature"]);
+        // 远端删除 feature(不带 --prune,本地仍保留 origin/feature 引用)
+        git(&clone_a, &["push", "origin", "--delete", "feature"]);
+
+        let err = pull_blocking(clone_b.to_str().unwrap()).unwrap_err();
+        assert!(
+            err.is_code(crate::error::ErrorCode::GitRemoteBranchGone),
+            "实际输出: {err}"
         );
 
         let _ = fs::remove_dir_all(&origin);

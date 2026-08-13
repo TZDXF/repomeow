@@ -80,6 +80,9 @@ const commitTitle = computed(
 /** 任一 git 操作进行中时锁定菜单内全部操作项 */
 const opsLocked = computed(() => busy.value !== "" || switching.value || !!branchOp.value);
 
+/** 暴露给触发按钮的同步状态:点击菜单项后菜单即关闭,loading 需展示在外部按钮上 */
+const triggerOp = computed<Op>(() => busy.value || branchOp.value?.op || "");
+
 // --- 新建分支对话框 ---
 const createOpen = ref(false);
 const newBranch = ref("");
@@ -95,7 +98,7 @@ const trackByName = computed(() => {
   return m;
 });
 
-/** 本地/远程分支按 "/" 聚合为树:目录内联展开/收起,分支悬停展开操作子菜单 */
+/** 本地/远程分支按 "/" 聚合为树:目录内联展开/收起,分支点击展开操作子菜单 */
 const localTree = computed(() => buildBranchTree(branches.value.local));
 const remoteTree = computed(() => buildBranchTree(branches.value.remote));
 
@@ -368,7 +371,7 @@ async function confirmDeleteBranch() {
 <template>
   <DropdownMenu v-model:open="open">
     <DropdownMenuTrigger as-child>
-      <slot />
+      <slot :op="triggerOp" />
     </DropdownMenuTrigger>
     <DropdownMenuContent align="start" class="max-h-96 w-60 overflow-y-auto">
       <!-- 当前分支操作组:提交 / 拉取 / 推送 -->
@@ -399,8 +402,8 @@ async function confirmDeleteBranch() {
           :title="behind > 0 ? t('git.behind') : undefined"
           @click="pull"
         >
-          <Loader2 v-if="busy === 'pull'" class="h-3.5 w-3.5 animate-spin" />
-          <ArrowDownToLine v-else class="h-3.5 w-3.5" />
+          <!-- 点击后菜单即关闭,loading 展示在外部触发按钮上(triggerOp) -->
+          <ArrowDownToLine class="h-3.5 w-3.5" />
           {{ busy === "pull" ? t("git.pull.pulling") : t("git.actions.pull") }}
           <span
             v-if="behind > 0 && busy !== 'pull'"
@@ -414,8 +417,7 @@ async function confirmDeleteBranch() {
           :title="ahead > 0 ? t('git.ahead') : undefined"
           @click="push"
         >
-          <Loader2 v-if="busy === 'push'" class="h-3.5 w-3.5 animate-spin" />
-          <ArrowUpToLine v-else class="h-3.5 w-3.5" />
+          <ArrowUpToLine class="h-3.5 w-3.5" />
           {{ busy === "push" ? t("git.push.pushing") : t("git.actions.push") }}
           <span
             v-if="ahead > 0 && busy !== 'push'"

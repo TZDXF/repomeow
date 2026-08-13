@@ -9,6 +9,8 @@ import type { EditorKind } from "@/types";
 
 /** 主题相关设置变更的跨窗口广播:通知托盘弹窗等其它窗口同步重渲自身 DOM */
 const THEME_CHANGED_EVENT = "settings://theme-changed";
+/** 打开方式(排序 + 默认项)变更的跨窗口广播:各 webview 的 Pinia store 与 localStorage 读写互不可见 */
+const OPEN_WITH_CHANGED_EVENT = "settings://open-with-changed";
 
 export type ThemeMode = "system" | "light" | "dark";
 export type ThemeSkin = "default" | "island" | "glass";

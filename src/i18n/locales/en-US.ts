@@ -78,6 +78,8 @@ export default {
     git_diverged:
       "Local and remote branches have diverged. Please run `git pull --rebase` in the terminal or configure a merge strategy before trying again.",
     git_no_tracking: "Current branch has no upstream. Run git push -u origin <branch> first",
+    git_remote_branch_gone:
+      "The remote branch has been deleted, so pull failed. Check the remote branch, or re-push the local one (git push -u origin <branch>)",
     not_git_repository: "Current directory is not a Git repository",
     git_branch_checked_out: "This branch is already checked out in another worktree",
     git_worktree_dirty:

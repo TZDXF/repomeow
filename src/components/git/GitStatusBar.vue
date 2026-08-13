@@ -60,22 +60,32 @@ async function initRepo() {
     </Button>
     <template v-else-if="git">
       <GitBranchMenu :project="project">
-        <Badge
-          variant="secondary"
-          class="cursor-pointer gap-1 transition-colors hover:bg-accent"
-          :title="t('git.branch.switch')"
-        >
-          <GitBranch class="h-3 w-3" />
-          {{ git.branch ?? t("git.unknownBranch") }}
-          <!-- 远端更新(领先/落后)与未提交变更标记,点开下拉可执行对应操作 -->
-          <GitBranchTrackBadges :ahead="ahead" :behind="behind" />
-          <span
-            v-if="changes > 0"
-            class="h-1.5 w-1.5 rounded-full bg-amber-500"
-            :title="changesTitle"
-          />
-          <ChevronDown class="h-3 w-3 opacity-60" />
-        </Badge>
+        <!-- 拉取/推送进行中:菜单点击后已关闭,loading 展示在触发徽标上 -->
+        <template #default="{ op }">
+          <Badge
+            variant="secondary"
+            class="cursor-pointer gap-1 transition-colors hover:bg-accent"
+            :title="
+              op === 'pull'
+                ? t('git.pull.pulling')
+                : op === 'push'
+                  ? t('git.push.pushing')
+                  : t('git.branch.switch')
+            "
+          >
+            <Loader2 v-if="op" class="h-3 w-3 animate-spin" />
+            <GitBranch v-else class="h-3 w-3" />
+            {{ git.branch ?? t("git.unknownBranch") }}
+            <!-- 远端更新(领先/落后)与未提交变更标记,点开下拉可执行对应操作 -->
+            <GitBranchTrackBadges :ahead="ahead" :behind="behind" />
+            <span
+              v-if="changes > 0"
+              class="h-1.5 w-1.5 rounded-full bg-amber-500"
+              :title="changesTitle"
+            />
+            <ChevronDown class="h-3 w-3 opacity-60" />
+          </Badge>
+        </template>
       </GitBranchMenu>
       <GitRemoteLink :project="project" />
       <span v-if="git.conflicted > 0" class="text-red-600">

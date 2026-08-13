@@ -762,6 +762,11 @@ async function copyHash(hash: string) {
                     <GitBranch v-else class="h-3 w-3 shrink-0 text-muted-foreground" />
                     <span class="truncate">{{ row.node.name }}</span>
                     <span class="ml-auto flex shrink-0 items-center gap-1.5">
+                      <!-- 右键菜单点击后已关闭,拉取/推送 loading 展示在分支行上 -->
+                      <Loader2
+                        v-if="branchOp?.branch === row.node.branch"
+                        class="h-3 w-3 animate-spin text-muted-foreground"
+                      />
                       <GitBranchTrackBadges
                         :ahead="trackOf(row.node.branch)?.ahead ?? 0"
                         :behind="trackOf(row.node.branch)?.behind ?? 0"
@@ -779,11 +784,7 @@ async function copyHash(hash: string) {
                     :disabled="!!branchOp"
                     @click="pullBranch(row.node.branch!)"
                   >
-                    <Loader2
-                      v-if="branchOp?.branch === row.node.branch && branchOp.op === 'pull'"
-                      class="h-3.5 w-3.5 animate-spin"
-                    />
-                    <ArrowDownToLine v-else class="h-3.5 w-3.5" />
+                    <ArrowDownToLine class="h-3.5 w-3.5" />
                     {{ t("git.actions.pull") }}
                   </ContextMenuItem>
                   <ContextMenuItem
@@ -791,11 +792,7 @@ async function copyHash(hash: string) {
                     :disabled="!!branchOp"
                     @click="pushBranch(row.node.branch!)"
                   >
-                    <Loader2
-                      v-if="branchOp?.branch === row.node.branch && branchOp.op === 'push'"
-                      class="h-3.5 w-3.5 animate-spin"
-                    />
-                    <ArrowUpToLine v-else class="h-3.5 w-3.5" />
+                    <ArrowUpToLine class="h-3.5 w-3.5" />
                     {{ t("git.actions.push") }}
                   </ContextMenuItem>
                   <!-- 当前检出分支不可删除(git 会拒绝),直接禁用 -->

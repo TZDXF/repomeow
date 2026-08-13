@@ -73,6 +73,8 @@ export default {
     git_push_rejected: "推送被拒绝：远端有本地没有的新提交，请先拉取合并后再推送",
     git_diverged: "本地与远端分支已分叉，请在终端执行 git pull --rebase 或配置合并策略后再试",
     git_no_tracking: "当前分支未关联远端分支，请先执行 git push -u origin <分支名>",
+    git_remote_branch_gone:
+      "远端分支已被删除，无法拉取；请确认远端分支状态，或重新推送本地分支（git push -u origin <分支名>）",
     not_git_repository: "当前目录不是 Git 仓库",
     git_branch_checked_out: "该分支已在另一个 worktree 中检出，不能重复使用",
     git_worktree_dirty: "该 worktree 存在未提交修改或未跟踪文件，如需删除请勾选强制删除",

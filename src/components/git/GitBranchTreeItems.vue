@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from "vue";
 import { useI18n } from "vue-i18n";
 import {
   ArrowDownToLine,
@@ -21,9 +22,9 @@ import GitBranchTrackBadges from "@/components/git/GitBranchTrackBadges.vue";
 import type { BranchTreeNode } from "@/lib/branch-tree";
 
 const { t } = useI18n();
-// 树结构渲染分支:目录节点内联展开/收起(chevron 切换),分支节点悬停/点击展开嵌套操作子菜单。
+// 树结构渲染分支:目录节点内联展开/收起(chevron 切换),分支节点点击展开嵌套操作子菜单。
 // 既是分支又是目录的节点(如 feature 与 feature/x 并存):行内 chevron 控制子级内联展开,
-// 行本身悬停展开自身操作子菜单
+// 行本身点击展开自身操作子菜单
 const props = withDefaults(
   defineProps<{
     nodes: BranchTreeNode[];
@@ -69,15 +70,35 @@ function trackOf(branch: string | null) {
 function opOf(branch: string | null, op: "pull" | "push") {
   return !!branch && props.branchOp?.branch === branch && props.branchOp.op === op;
 }
+
+// 分支操作子菜单改为点击展开:reka 默认悬停 100ms 自动打开,这里接管 open 状态——
+// 打开/关闭只由点击触发;update:open 仅放行关闭请求(hover 其它行、Escape、焦点移出等),
+// 悬停产生的打开请求一律忽略
+const openSubKey = ref<string | null>(null);
+
+function toggleSub(key: string) {
+  openSubKey.value = openSubKey.value === key ? null : key;
+}
+
+function onSubOpenUpdate(key: string, open: boolean) {
+  if (!open && openSubKey.value === key) {
+    openSubKey.value = null;
+  }
+}
 </script>
 
 <template>
   <template v-for="node in nodes" :key="node.fullPath">
-    <!-- 分支节点:行即子菜单触发器,悬停/点击展开操作列表 -->
-    <DropdownMenuSub v-if="node.branch">
+    <!-- 分支节点:行即子菜单触发器,点击展开/收起操作列表(悬停不展开) -->
+    <DropdownMenuSub
+      v-if="node.branch"
+      :open="openSubKey === folderKey(node)"
+      @update:open="(v) => onSubOpenUpdate(folderKey(node), v)"
+    >
       <DropdownMenuSubTrigger
         class="gap-1.5 py-1 text-xs"
         :style="{ paddingLeft: `${6 + depth * 12}px` }"
+        @click="toggleSub(folderKey(node))"
       >
         <span
           v-if="node.children.length"
