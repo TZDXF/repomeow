@@ -6,11 +6,15 @@ import Settings from "@/views/Settings.vue";
 import ReportHistory from "@/views/ReportHistory.vue";
 import TrayPopup from "@/views/TrayPopup.vue";
 
+// 文件预览页引用完整的 vscode-icons 图标集(约 3.5MB),懒加载避免拖累首屏
+const ProjectFiles = () => import("@/views/ProjectFiles.vue");
+
 export const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     { path: "/", name: "home", component: ProjectsHome },
     { path: "/projects/:id", name: "project", component: ProjectDetail },
+    { path: "/projects/:id/files", name: "project-files", component: ProjectFiles },
     { path: "/projects/:id/graph", name: "project-graph", component: GitGraph },
     { path: "/settings", name: "settings", component: Settings },
     { path: "/report-history", name: "history", component: ReportHistory },

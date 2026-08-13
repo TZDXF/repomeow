@@ -185,6 +185,8 @@ pub fn run() {
             commands::script::run_in_terminal,
             commands::files::read_readme,
             commands::files::save_text_file,
+            commands::files::list_project_files,
+            commands::files::read_file_preview,
             commands::docker::compose_ps_batch,
             commands::docker::compose_export,
             commands::hidden::set_hidden_item,

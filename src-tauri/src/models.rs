@@ -239,6 +239,23 @@ pub struct ReadmeContent {
     pub content: String,
 }
 
+/// 文件预览内容(read_file_preview):text 为 None 表示二进制文件不可预览
+#[derive(Debug, Clone, Serialize)]
+pub struct FilePreview {
+    pub text: Option<String>,
+    /// 文本是否因超过大小上限被截断
+    pub truncated: bool,
+}
+
+/// 项目文件清单条目(list_project_files)
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectFileEntry {
+    /// 项目相对路径('/' 分隔)
+    pub path: String,
+    /// 是否被 .gitignore / .ignore 排除(前端灰显用)
+    pub ignored: bool,
+}
+
 /// 一条可浏览器访问的端口映射:宿主机发布端口 -> 容器端口
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ComposePort {
