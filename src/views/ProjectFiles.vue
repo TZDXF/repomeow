@@ -24,6 +24,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import MdImage from "@/components/markdown/MdImage.vue";
 import MdLink from "@/components/markdown/MdLink.vue";
 import { MD_BASE_PATH_KEY } from "@/components/markdown/keys";
+import ImageViewer from "@/components/files/ImageViewer.vue";
 import { cmd } from "@/lib/tauri";
 import { hasScheme, resolvePath } from "@/lib/markdown";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
@@ -188,6 +189,11 @@ function extOf(path: string): string {
 const selectedExt = computed(() => (selected.value ? extOf(selected.value) : ""));
 const isImage = computed(() => IMAGE_EXTS.has(selectedExt.value));
 const isMarkdown = computed(() => MD_EXTS.has(selectedExt.value));
+const isSvg = computed(() => selectedExt.value === "svg");
+
+// svg 兼具图像与文本两种形态:源码模式下按文本读取走代码视图,其余图片 asset 直显
+const svgMode = ref<"preview" | "source">("preview");
+const svgSource = computed(() => isSvg.value && svgMode.value === "source");
 
 const imageSrc = computed(() =>
   selected.value && isImage.value && project.value
@@ -202,7 +208,7 @@ function onRowClick(row: FileRow) {
 
 // 切换文件不显示 loading:本地读取很快,loading 只会闪烁;
 // 保留旧内容直到新内容就位(序号防串台),仅错误/二进制等状态标记随切换即清
-watch(selected, async (path) => {
+watch([selected, svgSource], async ([path]) => {
   const mySeq = ++previewSeq;
   previewError.value = false;
   previewBinary.value = false;
@@ -211,8 +217,8 @@ watch(selected, async (path) => {
     previewText.value = null;
     return;
   }
-  if (IMAGE_EXTS.has(extOf(path))) {
-    previewText.value = null; // 图片走 asset 协议直显,不读内容
+  if (IMAGE_EXTS.has(extOf(path)) && !svgSource.value) {
+    previewText.value = null; // 图片走 asset 协议直显,不读内容(svg 源码模式除外)
     return;
   }
   try {
@@ -263,6 +269,7 @@ const LANG_BY_EXT: Record<string, string> = {
   html: "html",
   htm: "html",
   xml: "xml",
+  svg: "xml",
   yml: "yaml",
   yaml: "yaml",
   toml: "toml",
@@ -534,6 +541,28 @@ function startTreeResize(e: PointerEvent) {
               <Code class="h-3.5 w-3.5" />
             </Button>
           </div>
+          <div v-if="isSvg" class="flex shrink-0 items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              class="h-7 w-7"
+              :class="svgMode === 'preview' ? 'bg-accent' : ''"
+              :title="t('files.rendered')"
+              @click="svgMode = 'preview'"
+            >
+              <Eye class="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              class="h-7 w-7"
+              :class="svgMode === 'source' ? 'bg-accent' : ''"
+              :title="t('files.source')"
+              @click="svgMode = 'source'"
+            >
+              <Code class="h-3.5 w-3.5" />
+            </Button>
+          </div>
           <Button
             v-if="codeVisible"
             variant="ghost"
@@ -569,9 +598,12 @@ function startTreeResize(e: PointerEvent) {
           <p v-else-if="previewBinary" class="p-6 text-sm text-muted-foreground">
             {{ t("files.binary") }}
           </p>
-          <div v-else-if="isImage" class="flex items-start justify-center p-6">
-            <img :src="imageSrc" :alt="selected" class="max-w-full" />
-          </div>
+          <ImageViewer
+            v-else-if="isImage && !svgSource"
+            :src="imageSrc"
+            :svg="isSvg"
+            :alt="selected ?? undefined"
+          />
           <div
             v-else-if="isMarkdown && mdMode === 'rendered' && previewText !== null"
             class="p-6 text-sm"
@@ -629,11 +661,31 @@ function startTreeResize(e: PointerEvent) {
 }
 
 /* 自动换行:pre 的 UA 默认 white-space:pre 不吃继承,内外两层 pre(Shiki/纯文本回退)
-   都要直接覆盖;width 还原铺满,否则 w-max 会让盒子仍撑到最宽行 */
+   都要直接覆盖;width 还原铺满,否则 w-max 会让盒子仍撑到最宽行。
+   续行悬挂缩进:.line 转块级 + 行号 ::before 绝对定位到左侧留白,正文(含折行续行)
+   从行号分割线之后起排;外层 white-space 必须 normal 折叠行间 \n 文本节点
+   (否则块级 .line 之间多出空行),行内容自身恢复 pre-wrap 保住缩进 */
 :global(.file-code.code-wrap pre) {
   width: auto;
+  white-space: normal;
+}
+
+:global(.file-code.code-wrap code) {
+  display: block;
+}
+
+:global(.file-code.code-wrap .line) {
+  position: relative;
+  display: block;
+  min-height: 1.25rem; /* 空行没有行盒,补足一行高度 */
+  padding-left: 4.25rem; /* 行号列(2.75+0.75+边框)再加 0.75 间距 */
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+:global(.file-code.code-wrap .line::before) {
+  position: absolute;
+  left: 0;
 }
 
 /* 行号:Shiki 输出与纯文本(超大文件/高亮失败)统一为 pre>code>.line 结构,

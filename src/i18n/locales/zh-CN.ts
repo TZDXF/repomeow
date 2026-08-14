@@ -719,6 +719,11 @@ export default {
     rendered: "渲染",
     source: "源码",
     wrap: "自动换行",
+    zoomIn: "放大",
+    zoomOut: "缩小",
+    zoomFit: "适应窗口",
+    zoomActual: "实际大小",
+    zoomHint: "滚轮缩放,拖拽平移,双击切换实际大小",
   },
   markdown: {
     saveDialogTitle: "另存为",

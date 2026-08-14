@@ -741,6 +741,11 @@ export default {
     rendered: "Rendered",
     source: "Source",
     wrap: "Word wrap",
+    zoomIn: "Zoom In",
+    zoomOut: "Zoom Out",
+    zoomFit: "Fit to Window",
+    zoomActual: "Actual Size",
+    zoomHint: "Scroll to zoom, drag to pan, double-click toggles actual size",
   },
   markdown: {
     saveDialogTitle: "Save as",
