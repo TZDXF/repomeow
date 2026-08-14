@@ -656,9 +656,14 @@ function tagName(refName: string) {
 <template>
   <div v-if="project" class="flex h-full flex-col">
     <header class="flex items-center gap-2 border-b px-4 py-3">
-      <Button variant="ghost" size="sm" @click="router.push(`/projects/${project.id}`)">
+      <Button
+        variant="ghost"
+        size="icon"
+        class="h-8 w-8 shrink-0"
+        :title="t('git.graph.back')"
+        @click="router.push(`/projects/${project.id}`)"
+      >
         <ArrowLeft class="h-4 w-4" />
-        {{ t("git.graph.back") }}
       </Button>
       <div class="min-w-0 flex-1">
         <h1 class="truncate text-sm font-medium">

@@ -189,6 +189,7 @@ pub fn run() {
             commands::files::read_readme,
             commands::files::save_text_file,
             commands::files::list_project_files,
+            commands::files::search_project_files,
             commands::files::read_file_preview,
             commands::files::search_project_text,
             commands::docker::compose_ps_batch,

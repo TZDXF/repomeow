@@ -735,6 +735,7 @@ export default {
     searchPlaceholder: "Search files...",
     empty: "No files to show",
     noMatch: "No matching files",
+    searchLimited: "Showing first {count} matches",
     listFailed: "Failed to load file list",
     loadFailed: "Failed to load file",
     selectHint: "Select a file on the left to preview",

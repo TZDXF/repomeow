@@ -713,6 +713,7 @@ export default {
     searchPlaceholder: "搜索文件...",
     empty: "没有可展示的文件",
     noMatch: "没有匹配的文件",
+    searchLimited: "仅显示前 {count} 条匹配",
     listFailed: "文件列表加载失败",
     loadFailed: "文件加载失败",
     selectHint: "从左侧选择文件以预览",

@@ -167,12 +167,14 @@ export interface FilePreview {
   truncated: boolean;
 }
 
-/** 项目文件清单条目(list_project_files) */
+/** 项目文件清单条目(list_project_files / search_project_files) */
 export interface ProjectFileEntry {
   /** 项目相对路径('/' 分隔) */
   path: string;
   /** 是否被 .gitignore / .ignore 排除(灰显用) */
   ignored: boolean;
+  /** 是否目录(list_project_files 逐层返回会包含目录,空目录可见) */
+  isDir: boolean;
 }
 
 /** 全文搜索结果(search_project_text) */

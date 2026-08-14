@@ -247,13 +247,16 @@ pub struct FilePreview {
     pub truncated: bool,
 }
 
-/// 项目文件清单条目(list_project_files)
+/// 项目文件清单条目(list_project_files / search_project_files)
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProjectFileEntry {
     /// 项目相对路径('/' 分隔)
     pub path: String,
     /// 是否被 .gitignore / .ignore 排除(前端灰显用)
     pub ignored: bool,
+    /// 是否目录(list_project_files 逐层返回会包含目录,空目录因此可见)
+    pub is_dir: bool,
 }
 
 /// 全文搜索结果中的一行命中(search_project_text)
