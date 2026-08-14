@@ -131,6 +131,7 @@ export default {
     terminal_not_supported: "当前平台暂不支持打开终端",
     file_manager_not_supported: "当前平台暂不支持打开文件管理器",
     open_method_unknown: "未知的打开方式",
+    custom_open_command_required: "自定义打开方式的启动命令不能为空",
     // 标签
     tag_name_required: "标签名不能为空",
     tag_color_invalid: "颜色格式不正确",
@@ -682,6 +683,23 @@ export default {
     openInExplorer: "资源管理器",
     terminal: "终端",
     openInTerminal: "终端",
+    custom: {
+      new: "新建",
+      dialogNew: "新建自定义打开方式",
+      dialogEdit: "编辑自定义打开方式",
+      nameLabel: "名称",
+      namePlaceholder: "例如: 用 Trae 打开",
+      commandLabel: "启动命令",
+      commandPlaceholder: "例如: {example}",
+      commandHint:
+        "可用变量: {pathVariable} 为待打开路径,{lineVariable} 为行号;未使用 {pathVariable} 时自动追加路径",
+      iconLabel: "图标",
+      noIcon: "不使用图标",
+      created: "已添加自定义打开方式",
+      updated: "已更新自定义打开方式",
+      deleted: "已删除自定义打开方式",
+      deleteConfirm: "确定删除自定义打开方式「{name}」吗?",
+    },
   },
   docker: {
     title: "Docker Compose",

@@ -325,6 +325,17 @@ export type EditorKind =
   | "rustrover"
   | "terminal";
 
+/** 用户在设置中配置的外部打开方式。命令支持 {path} 与 {line} 占位符。 */
+export interface CustomOpenWith {
+  id: string;
+  name: string;
+  command: string;
+  icon: string;
+}
+
+/** 内置打开方式或以 custom: 前缀标识的自定义打开方式。 */
+export type OpenWithId = EditorKind | `custom:${string}`;
+
 /** 可隐藏的 UI 项类型:package.json 分组 / 分组内单条命令 / compose 文件 */
 export type HiddenKind = "packageFile" | "packageScript" | "composeFile";
 

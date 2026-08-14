@@ -48,7 +48,11 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         // 开机自启(Windows 注册表 Run 项 / macOS LaunchAgent,由设置页开关控制);
         // 自启时附带 --autostart 参数,用于静默启动(只驻留托盘、不弹主窗口)
-        .plugin(tauri_plugin_autostart::Builder::new().args(["--autostart"]).build())
+        .plugin(
+            tauri_plugin_autostart::Builder::new()
+                .args(["--autostart"])
+                .build(),
+        )
         .setup(|app| {
             // 数据库文件: ~/.repomeow/projects.db
             // (Windows: C:\Users\<user>\.repomeow\projects.db)
@@ -167,6 +171,7 @@ pub fn run() {
             commands::account::list_account_repos,
             commands::account::get_gh_cli_account,
             commands::open::open_with,
+            commands::open::open_with_custom_command,
             commands::open::open_in_editor,
             commands::open::detect_editors,
             commands::editor_icon::get_editor_icons,

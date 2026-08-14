@@ -128,6 +128,7 @@ pub enum ErrorCode {
     #[allow(dead_code)]
     FileManagerNotSupported,
     OpenMethodUnknown,
+    CustomOpenCommandRequired,
 
     // ── 标签 ──────────────────────────────────────────────────────────
     TagNameRequired,
@@ -267,6 +268,7 @@ impl ErrorCode {
             Self::TerminalNotSupported => "terminal_not_supported",
             Self::FileManagerNotSupported => "file_manager_not_supported",
             Self::OpenMethodUnknown => "open_method_unknown",
+            Self::CustomOpenCommandRequired => "custom_open_command_required",
             // 标签
             Self::TagNameRequired => "tag_name_required",
             Self::TagColorInvalid => "tag_color_invalid",
@@ -385,7 +387,10 @@ mod tests {
         // 防止重构时手抖改 snake_case 字符串(前端 i18n key 依赖此值)
         assert_eq!(ErrorCode::ProjectNotFound.as_str(), "project_not_found");
         assert_eq!(ErrorCode::GitCloneFailed.as_str(), "git_clone_failed");
-        assert_eq!(ErrorCode::AccountTokenInvalid.as_str(), "account_token_invalid");
+        assert_eq!(
+            ErrorCode::AccountTokenInvalid.as_str(),
+            "account_token_invalid"
+        );
         assert_eq!(ErrorCode::InvalidPath.as_str(), "invalid_path");
         assert_eq!(ErrorCode::AiNotConfigured.as_str(), "ai_not_configured");
     }

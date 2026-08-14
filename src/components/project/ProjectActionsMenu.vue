@@ -15,12 +15,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { getEditorAvailability, isEditorUnavailable, sortOpenWithOptions } from "@/lib/open-with";
-import type { EditorAvailability } from "@/lib/open-with";
-import { cmd } from "@/lib/tauri";
+import {
+  getEditorAvailability,
+  isEditorUnavailable,
+  openProjectWith,
+  sortOpenWithOptions,
+} from "@/lib/open-with";
+import type { EditorAvailability, OpenWithOption } from "@/lib/open-with";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
-import type { EditorKind, Project } from "@/types";
+import type { Project } from "@/types";
 
 const { t } = useI18n();
 const props = defineProps<{ project: Project }>();
@@ -37,14 +41,18 @@ onMounted(async () => {
 
 // 只展示已扫描到的编辑器;探测中途(null)不过滤,避免闪烁。顺序遵循设置页拖拽结果
 const visibleOptions = computed(() =>
-  sortOpenWithOptions(settings.openWithOrder).filter(
-    (opt) => !isEditorUnavailable(opt.kind, availability.value),
+  sortOpenWithOptions(settings.openWithOrder, settings.customOpenWith).filter(
+    (option) => !isEditorUnavailable(option, availability.value),
   ),
 );
 
-async function openWith(kind: EditorKind) {
+function optionLabel(option: OpenWithOption): string {
+  return option.custom ? option.name : t(option.descKey);
+}
+
+async function openWith(option: OpenWithOption) {
   try {
-    await cmd("open_with", { path: props.project.path, kind });
+    await openProjectWith(option, props.project.path);
   } catch (e) {
     toast.error(String(e));
   }
@@ -93,13 +101,17 @@ async function toggleFavorite() {
     </DropdownMenuTrigger>
     <DropdownMenuContent align="end" class="w-44" @click.stop>
       <DropdownMenuItem
-        v-for="opt in visibleOptions"
-        :key="opt.kind"
+        v-for="option in visibleOptions"
+        :key="option.id"
         class="gap-2 text-xs"
-        @click="openWith(opt.kind)"
+        @click="openWith(option)"
       >
-        <OpenWithIcon :kind="opt.kind" :icon="opt.icon" icon-class="h-3.5 w-3.5" />
-        {{ t(opt.descKey) }}
+        <OpenWithIcon
+          :kind="option.custom ? undefined : option.kind"
+          :icon="option.icon"
+          icon-class="h-3.5 w-3.5"
+        />
+        {{ optionLabel(option) }}
       </DropdownMenuItem>
       <DropdownMenuSeparator />
       <DropdownMenuItem class="gap-2 text-xs" @click="toggleFavorite">

@@ -64,8 +64,8 @@ onMounted(async () => {
       settingsStore.syncThemeFromExternal(payload);
     },
   );
-  // 另一窗口变更打开方式(排序/默认项)后同步当前窗口(托盘弹窗的打开方式菜单与主窗口设置页保持一致)
-  onListen<{ order: unknown; defaultOpenWith: unknown }>(
+  // 另一窗口变更打开方式(自定义项/排序/默认项)后同步当前窗口(托盘弹窗菜单与主窗口设置页保持一致)
+  onListen<{ customOpenWith: unknown; order: unknown; defaultOpenWith: unknown }>(
     "settings://open-with-changed",
     (payload) => {
       settingsStore.syncOpenWithFromExternal(payload);

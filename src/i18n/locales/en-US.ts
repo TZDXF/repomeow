@@ -139,6 +139,7 @@ export default {
     terminal_not_supported: "Opening a terminal is not supported on this platform",
     file_manager_not_supported: "Opening the file manager is not supported on this platform",
     open_method_unknown: "Unknown open method",
+    custom_open_command_required: "Custom open with command is required",
     // tag
     tag_name_required: "Tag name is required",
     tag_color_invalid: "Invalid color format",
@@ -704,6 +705,23 @@ export default {
     openInExplorer: "Explorer",
     terminal: "Terminal",
     openInTerminal: "Terminal",
+    custom: {
+      new: "New",
+      dialogNew: "New custom open with",
+      dialogEdit: "Edit custom open with",
+      nameLabel: "Name",
+      namePlaceholder: "e.g. Open with Trae",
+      commandLabel: "Launch command",
+      commandPlaceholder: "e.g. {example}",
+      commandHint:
+        "Variables: {pathVariable} is the path to open; {lineVariable} is the line number. The path is appended when {pathVariable} is omitted.",
+      iconLabel: "Icon",
+      noIcon: "No icon",
+      created: "Custom open with added.",
+      updated: "Custom open with updated.",
+      deleted: "Custom open with deleted.",
+      deleteConfirm: 'Delete custom open with "{name}"?',
+    },
   },
   docker: {
     title: "Docker Compose",

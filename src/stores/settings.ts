@@ -4,8 +4,8 @@ import { emit } from "@tauri-apps/api/event";
 import { load, type Store } from "@tauri-apps/plugin-store";
 import { homeDir, join } from "@tauri-apps/api/path";
 import { setI18nLocale, type SupportedLocale } from "@/i18n";
-import { OPEN_WITH_OPTIONS, normalizeOpenWithOrder } from "@/lib/open-with";
-import type { EditorKind } from "@/types";
+import { isOpenWithId, normalizeOpenWithOrder } from "@/lib/open-with";
+import type { CustomOpenWith, OpenWithId } from "@/types";
 
 /** 主题相关设置变更的跨窗口广播:通知托盘弹窗等其它窗口同步重渲自身 DOM */
 const THEME_CHANGED_EVENT = "settings://theme-changed";
@@ -35,9 +35,11 @@ export const useSettingsStore = defineStore("settings", () => {
   const themeSkin = ref<ThemeSkin>("default");
   const mdTheme = ref<MdTheme>("default");
   const language = ref<Language>("zh-CN");
-  const defaultOpenWith = ref<EditorKind>("explorer");
+  /** 用户配置的外部打开方式。 */
+  const customOpenWith = ref<CustomOpenWith[]>([]);
+  const defaultOpenWith = ref<OpenWithId>("explorer");
   /** 打开方式列表顺序(设置页可拖拽调整,下拉菜单同步遵循) */
-  const openWithOrder = ref<EditorKind[]>(normalizeOpenWithOrder([]));
+  const openWithOrder = ref<OpenWithId[]>(normalizeOpenWithOrder([], customOpenWith.value));
   const aiBaseUrl = ref("");
   const aiApiKey = ref("");
   const aiModel = ref("");
@@ -132,6 +134,47 @@ export const useSettingsStore = defineStore("settings", () => {
     applyMdTheme();
   }
 
+  function normalizeCustomOpenWith(saved: unknown): CustomOpenWith[] {
+    if (typeof saved === "string") {
+      try {
+        return normalizeCustomOpenWith(JSON.parse(saved));
+      } catch {
+        return [];
+      }
+    }
+    if (!Array.isArray(saved)) return [];
+    const ids = new Set<string>();
+    return saved.flatMap((item) => {
+      if (
+        !item ||
+        typeof item !== "object" ||
+        !("id" in item) ||
+        !("name" in item) ||
+        !("command" in item) ||
+        !("icon" in item) ||
+        typeof item.id !== "string" ||
+        typeof item.name !== "string" ||
+        typeof item.command !== "string" ||
+        typeof item.icon !== "string" ||
+        !item.id.trim() ||
+        !item.name.trim() ||
+        !item.command.trim() ||
+        ids.has(item.id)
+      ) {
+        return [];
+      }
+      ids.add(item.id);
+      return [
+        {
+          id: item.id,
+          name: item.name.trim(),
+          command: item.command.trim(),
+          icon: item.icon,
+        },
+      ];
+    });
+  }
+
   /** 把当前打开方式顺序写入 localStorage(设置页拖拽排序与外部同步共用) */
   function persistOpenWithOrderCache() {
     try {
@@ -147,7 +190,10 @@ export const useSettingsStore = defineStore("settings", () => {
       const raw = window.localStorage.getItem(OPEN_WITH_ORDER_CACHE_KEY);
       if (raw) {
         const parsed: unknown = JSON.parse(raw);
-        openWithOrder.value = normalizeOpenWithOrder(Array.isArray(parsed) ? parsed : []);
+        openWithOrder.value = normalizeOpenWithOrder(
+          Array.isArray(parsed) ? parsed : [],
+          customOpenWith.value,
+        );
       }
     } catch {
       /* localStorage 不可用或 JSON 非法时保持当前顺序 */
@@ -155,17 +201,24 @@ export const useSettingsStore = defineStore("settings", () => {
   }
 
   /**
-   * 同步其他窗口广播过来的打开方式快照(排序 + 默认项),覆盖本地 ref 并镜像到 localStorage。
+   * 同步其他窗口广播过来的打开方式快照(自定义项 + 排序 + 默认项),覆盖本地 ref 并镜像到 localStorage。
    * 各 webview 的 Pinia store 互相独立,浏览器 storage 事件也不跨 Tauri 窗口派发,
    * 主窗口在设置页调整后,托盘弹窗只能靠这条广播保持一致。
    */
-  function syncOpenWithFromExternal(snapshot: { order: unknown; defaultOpenWith: unknown }) {
+  function syncOpenWithFromExternal(snapshot: {
+    customOpenWith: unknown;
+    order: unknown;
+    defaultOpenWith: unknown;
+  }) {
+    customOpenWith.value = normalizeCustomOpenWith(snapshot.customOpenWith);
     if (Array.isArray(snapshot.order)) {
-      openWithOrder.value = normalizeOpenWithOrder(snapshot.order);
+      openWithOrder.value = normalizeOpenWithOrder(snapshot.order, customOpenWith.value);
       persistOpenWithOrderCache();
     }
-    if (OPEN_WITH_OPTIONS.some((opt) => opt.kind === snapshot.defaultOpenWith)) {
-      defaultOpenWith.value = snapshot.defaultOpenWith as EditorKind;
+    if (isOpenWithId(snapshot.defaultOpenWith, customOpenWith.value)) {
+      defaultOpenWith.value = snapshot.defaultOpenWith;
+    } else {
+      defaultOpenWith.value = "explorer";
     }
   }
 
@@ -174,10 +227,14 @@ export const useSettingsStore = defineStore("settings", () => {
    * 托盘弹窗每次显示时调用,兜底广播注册前错过的变更。
    */
   async function reloadOpenWith() {
+    const savedCustom = await fileStore?.get<unknown>("customOpenWith");
+    customOpenWith.value = normalizeCustomOpenWith(savedCustom);
     reloadOpenWithOrderCache();
     const saved = await fileStore?.get<string>("defaultOpenWith");
-    if (OPEN_WITH_OPTIONS.some((opt) => opt.kind === saved)) {
-      defaultOpenWith.value = saved as EditorKind;
+    if (isOpenWithId(saved, customOpenWith.value)) {
+      defaultOpenWith.value = saved;
+    } else {
+      defaultOpenWith.value = "explorer";
     }
   }
 
@@ -194,6 +251,7 @@ export const useSettingsStore = defineStore("settings", () => {
         mdTheme: "default",
         language: "zh-CN",
         defaultOpenWith: "explorer",
+        customOpenWith: "[]",
         aiBaseUrl: "",
         aiApiKey: "",
         aiModel: "",
@@ -228,12 +286,13 @@ export const useSettingsStore = defineStore("settings", () => {
       language.value = savedLanguage;
       setI18nLocale(savedLanguage);
     }
+    const savedCustomOpenWith = await fileStore.get<unknown>("customOpenWith");
+    customOpenWith.value = normalizeCustomOpenWith(savedCustomOpenWith);
     const savedOpenWith = await fileStore.get<string>("defaultOpenWith");
-    // 以 OPEN_WITH_OPTIONS 为白名单校验,新增打开方式无需改这里
-    if (OPEN_WITH_OPTIONS.some((opt) => opt.kind === savedOpenWith)) {
-      defaultOpenWith.value = savedOpenWith as EditorKind;
+    if (isOpenWithId(savedOpenWith, customOpenWith.value)) {
+      defaultOpenWith.value = savedOpenWith;
     }
-    // 打开方式排序:localStorage 里的 JSON 数组,过滤无效 kind 并补齐新增项,非法值回退默认顺序
+    // 打开方式排序:localStorage 里的 JSON 数组,过滤已删除项并补齐新增项,非法值回退默认顺序
     reloadOpenWithOrderCache();
     // AI 配置为自由文本:trim 后非空才赋值,空值保持初始空(无默认值可回退)
     const savedAiBaseUrl = await fileStore.get<string>("aiBaseUrl");
@@ -338,23 +397,61 @@ export const useSettingsStore = defineStore("settings", () => {
     await persist("language", value);
   }
 
-  /** 打开方式变更广播:带全量快照(排序 + 默认项),接收方覆盖本地 ref 即可,无需再读持久层 */
+  /** 打开方式变更广播:带全量快照(自定义项 + 排序 + 默认项),接收方无需再读持久层 */
   async function emitOpenWithChanged() {
     await emit(OPEN_WITH_CHANGED_EVENT, {
+      customOpenWith: customOpenWith.value,
       order: openWithOrder.value,
       defaultOpenWith: defaultOpenWith.value,
     });
   }
 
-  async function setDefaultOpenWith(value: EditorKind) {
+  async function setDefaultOpenWith(value: OpenWithId) {
+    if (!isOpenWithId(value, customOpenWith.value)) return;
     defaultOpenWith.value = value;
     await persist("defaultOpenWith", value);
     await emitOpenWithChanged();
   }
 
-  async function setOpenWithOrder(value: EditorKind[]) {
-    openWithOrder.value = normalizeOpenWithOrder(value);
+  async function setOpenWithOrder(value: OpenWithId[]) {
+    openWithOrder.value = normalizeOpenWithOrder(value, customOpenWith.value);
     persistOpenWithOrderCache();
+    await emitOpenWithChanged();
+  }
+
+  async function saveCustomOpenWith(value: CustomOpenWith) {
+    const next = {
+      id: value.id,
+      name: value.name.trim(),
+      command: value.command.trim(),
+      icon: value.icon,
+    };
+    if (!next.id || !next.name || !next.command) return;
+    const existing = customOpenWith.value.findIndex((option) => option.id === next.id);
+    if (existing === -1) {
+      customOpenWith.value = [...customOpenWith.value, next];
+    } else {
+      customOpenWith.value = customOpenWith.value.map((option, index) =>
+        index === existing ? next : option,
+      );
+    }
+    openWithOrder.value = normalizeOpenWithOrder(openWithOrder.value, customOpenWith.value);
+    persistOpenWithOrderCache();
+    await persist("customOpenWith", JSON.stringify(customOpenWith.value));
+    await emitOpenWithChanged();
+  }
+
+  async function removeCustomOpenWith(id: string) {
+    if (!customOpenWith.value.some((option) => option.id === id)) return;
+    const customId = `custom:${id}` as const;
+    customOpenWith.value = customOpenWith.value.filter((option) => option.id !== id);
+    openWithOrder.value = normalizeOpenWithOrder(openWithOrder.value, customOpenWith.value);
+    if (defaultOpenWith.value === customId) {
+      defaultOpenWith.value = "explorer";
+      await persist("defaultOpenWith", defaultOpenWith.value);
+    }
+    persistOpenWithOrderCache();
+    await persist("customOpenWith", JSON.stringify(customOpenWith.value));
     await emitOpenWithChanged();
   }
 
@@ -419,6 +516,7 @@ export const useSettingsStore = defineStore("settings", () => {
     themeSkin,
     mdTheme,
     language,
+    customOpenWith,
     defaultOpenWith,
     openWithOrder,
     aiBaseUrl,
@@ -443,6 +541,8 @@ export const useSettingsStore = defineStore("settings", () => {
     setLanguage,
     setDefaultOpenWith,
     setOpenWithOrder,
+    saveCustomOpenWith,
+    removeCustomOpenWith,
     setAiBaseUrl,
     setAiApiKey,
     setAiModel,

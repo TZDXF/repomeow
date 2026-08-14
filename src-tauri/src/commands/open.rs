@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::process::Command;
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use tauri::State;
 
 use crate::db::{self, Db};
@@ -77,7 +79,6 @@ pub fn spawn_terminal(path: &str, title: &str, command: Option<&str>) -> AppResu
     // - 内层 cmd /K 首字符是引号,剥掉首尾引号后得到 `cd /d "<path>" && <command>`,
     //   在同一窗口内依次执行,跑完窗口保留。
     let cmdline = build_start_cmdline(path, title, command);
-    use std::os::windows::process::CommandExt;
     hidden(Command::new("cmd")).raw_arg(&cmdline).spawn()?;
     Ok(())
 }
@@ -206,6 +207,63 @@ pub(crate) fn open_explorer(path: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// 渲染用户配置的打开命令。路径和行号经环境变量传入 shell,不会直接插入命令文本。
+/// 未使用 {path} 时在命令末尾追加引用后的路径,保留简洁配置方式。
+fn render_custom_open_command(command: &str, line: Option<u32>) -> String {
+    let path_var = if cfg!(windows) {
+        "\"%REPOMEOW_OPEN_PATH%\""
+    } else {
+        "\"$REPOMEOW_OPEN_PATH\""
+    };
+    let line = line
+        .filter(|n| *n > 0)
+        .map_or_else(String::new, |n| n.to_string());
+    let has_path = command.contains("{path}");
+    let rendered = command.replace("{path}", path_var).replace("{line}", &line);
+    if has_path {
+        rendered
+    } else {
+        format!("{rendered} {path_var}")
+    }
+}
+
+#[cfg(windows)]
+fn custom_open_cmdline(rendered: &str) -> String {
+    format!("/C {rendered}")
+}
+
+/// 用用户配置的 shell 命令打开文件或目录。命令模板支持 {path} 与 {line};
+/// 不含 {path} 时自动在末尾追加目标路径。
+#[tauri::command]
+pub fn open_with_custom_command(path: String, command: String, line: Option<u32>) -> AppResult<()> {
+    if !std::path::Path::new(&path).exists() {
+        return Err(AppError::coded(ErrorCode::InvalidPath, path));
+    }
+    let command = command.trim();
+    if command.is_empty() {
+        return Err(AppError::coded(ErrorCode::CustomOpenCommandRequired, ""));
+    }
+    let rendered = render_custom_open_command(command, line);
+    #[cfg(windows)]
+    {
+        // `args(["/C", &rendered])` 会把整条 `code "路径"` 再包成一个参数,
+        // cmd 随后按自己的首尾引号规则重解释,导致裸 CLI 命令收不到路径。
+        // raw_arg 保留 `/C <完整命令>` 的原始命令尾部,与用户在 cmd 中手动输入一致。
+        hidden(Command::new("cmd"))
+            .raw_arg(custom_open_cmdline(&rendered))
+            .env("REPOMEOW_OPEN_PATH", &path)
+            .spawn()?;
+    }
+    #[cfg(not(windows))]
+    {
+        Command::new("sh")
+            .args(["-c", &rendered])
+            .env("REPOMEOW_OPEN_PATH", &path)
+            .spawn()?;
+    }
+    Ok(())
+}
+
 /// 纯 PATH 探测:Windows 用 where,其他平台用 which。
 /// 不用 `<cli> --version` —— JetBrains 系启动器收到 --version 可能直接拉起 GUI。
 fn command_on_path(cli: &str) -> bool {
@@ -226,7 +284,10 @@ pub fn open_with(path: String, kind: EditorKind) -> AppResult<()> {
         EditorKind::Terminal => spawn_terminal(&path, "Terminal", None),
         other => match cli_command(other) {
             Some(cli) => open_editor(cli, &path),
-            None => Err(AppError::coded(ErrorCode::OpenMethodUnknown, format!("{other:?}"))),
+            None => Err(AppError::coded(
+                ErrorCode::OpenMethodUnknown,
+                format!("{other:?}"),
+            )),
         },
     }
 }
@@ -269,7 +330,10 @@ pub fn open_in_editor(path: String, kind: EditorKind, line: Option<u32>) -> AppR
                 Command::new(cli).args(&args).spawn()?;
                 Ok(())
             }
-            None => Err(AppError::coded(ErrorCode::OpenMethodUnknown, format!("{other:?}"))),
+            None => Err(AppError::coded(
+                ErrorCode::OpenMethodUnknown,
+                format!("{other:?}"),
+            )),
         },
     }
 }
@@ -297,7 +361,10 @@ fn editor_open_args(kind: EditorKind, path: &str, line: Option<u32>) -> Vec<Stri
 fn open_explorer_reveal(path: &str) -> AppResult<()> {
     // explorer /select, 对正斜杠路径处理不佳,统一为反斜杠(前端拼接 git 相对路径用的是 "/")
     Command::new("explorer")
-        .arg(format!("/select,{}", crate::path_util::to_native_separator(path)))
+        .arg(format!(
+            "/select,{}",
+            crate::path_util::to_native_separator(path)
+        ))
         .spawn()?;
     Ok(())
 }
@@ -408,6 +475,37 @@ mod tests {
     }
 
     #[test]
+    fn custom_open_command_substitutes_placeholders() {
+        let command = render_custom_open_command("my-editor --goto {path}:{line}", Some(42));
+        if cfg!(windows) {
+            assert_eq!(command, "my-editor --goto \"%REPOMEOW_OPEN_PATH%\":42");
+        } else {
+            assert_eq!(command, "my-editor --goto \"$REPOMEOW_OPEN_PATH\":42");
+        }
+    }
+
+    #[test]
+    fn custom_open_command_appends_missing_path_and_blanks_missing_line() {
+        let command = render_custom_open_command("my-editor --line={line}", None);
+        if cfg!(windows) {
+            assert_eq!(command, "my-editor --line= \"%REPOMEOW_OPEN_PATH%\"");
+        } else {
+            assert_eq!(command, "my-editor --line= \"$REPOMEOW_OPEN_PATH\"");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn bare_code_command_keeps_appended_path_in_raw_cmdline() {
+        let rendered = render_custom_open_command("code", None);
+        assert_eq!(rendered, "code \"%REPOMEOW_OPEN_PATH%\"");
+        assert_eq!(
+            custom_open_cmdline(&rendered),
+            "/C code \"%REPOMEOW_OPEN_PATH%\""
+        );
+    }
+
+    #[test]
     fn command_on_path_does_not_panic() {
         let _available = command_on_path("definitely-not-a-real-editor-cli");
     }
@@ -513,8 +611,7 @@ mod tests {
         let s = build_start_cmdline(
             r"D:\p",
             "t",
-            flatten_multiline(Some("echo a\necho b"), " & ")
-                .as_deref(),
+            flatten_multiline(Some("echo a\necho b"), " & ").as_deref(),
         );
         assert!(s.ends_with("&& echo a & echo b\""));
     }

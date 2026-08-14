@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { parseDiff } from "@/lib/diff";
 import { buildFileTree, type FileTreeNode } from "@/lib/file-tree";
+import { openPathWith, sortOpenWithOptions } from "@/lib/open-with";
 import { baseName } from "@/lib/path";
 import { cmd } from "@/lib/tauri";
 import { useSettingsStore } from "@/stores/settings";
@@ -146,12 +147,12 @@ const canOpenInIde = computed(() => selectedFile.value?.status !== "D");
 
 // --- 在 IDE 打开(默认编辑器) ---
 async function openFile(file: GitCommitFile) {
+  const option = sortOpenWithOptions(settings.openWithOrder, settings.customOpenWith).find(
+    (candidate) => candidate.id === settings.defaultOpenWith,
+  );
+  if (!option) return;
   try {
-    await cmd("open_in_editor", {
-      path: `${props.projectPath}/${file.path}`,
-      kind: settings.defaultOpenWith,
-      line: null,
-    });
+    await openPathWith(option, `${props.projectPath}/${file.path}`);
   } catch (e) {
     toast.error(String(e));
   }
