@@ -50,6 +50,15 @@ export const cmViewerTheme = EditorView.theme({
   ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
     backgroundColor: "var(--color-accent)",
   },
+  // 文件内查找高亮:普通匹配黄底,当前项橙底描边(VS Code 观感)
+  ".cm-find-match": {
+    backgroundColor: "rgba(234, 179, 8, 0.35)",
+    borderRadius: "2px",
+  },
+  ".cm-find-match.cm-find-match-current": {
+    backgroundColor: "rgba(249, 115, 22, 0.5)",
+    outline: "1px solid rgba(249, 115, 22, 0.9)",
+  },
 });
 
 export const cmViewerHighlight = HighlightStyle.define([

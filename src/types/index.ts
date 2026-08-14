@@ -175,6 +175,30 @@ export interface ProjectFileEntry {
   ignored: boolean;
 }
 
+/** 全文搜索结果(search_project_text) */
+export interface TextSearchLine {
+  /** 1-based 行号 */
+  line: number;
+  /** 行内容(超长行为匹配附近窗口片段) */
+  text: string;
+}
+
+export interface TextSearchHit {
+  /** 项目相对路径('/' 分隔) */
+  path: string;
+  /** 该文件内的匹配总数 */
+  count: number;
+  /** 命中行(按行号升序) */
+  lines: TextSearchLine[];
+}
+
+export interface TextSearchOutcome {
+  /** 命中文件(按路径排序) */
+  hits: TextSearchHit[];
+  /** 是否因命中数/文件数上限被截断 */
+  truncated: boolean;
+}
+
 /** 工作区待提交的一个变更文件(git_worktree_files,提交对话框变更预览用) */
 export interface GitWorktreeFile {
   /** 仓库相对路径(重命名时为新路径) */

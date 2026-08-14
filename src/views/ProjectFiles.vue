@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, provide, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { convertFileSrc } from "@tauri-apps/api/core";
@@ -21,6 +21,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import CodeViewer from "@/components/files/CodeViewer.vue";
+import FindBar from "@/components/files/FindBar.vue";
+import TextSearchPanel from "@/components/files/TextSearchPanel.vue";
 import MdImage from "@/components/markdown/MdImage.vue";
 import MdLink from "@/components/markdown/MdLink.vue";
 import { MD_BASE_PATH_KEY } from "@/components/markdown/keys";
@@ -30,6 +32,7 @@ import { hasScheme, resolvePath } from "@/lib/markdown";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
 import { buildFileTree, type FileTreeNode } from "@/lib/file-tree";
 import { fileIcon, folderIcon } from "@/lib/file-icons";
+import { buildFindRegExp, type FindQuery } from "@/lib/text-search";
 import { Icon } from "@iconify/vue";
 import { useSettingsStore } from "@/stores/settings";
 import { useProjectsStore } from "@/stores/projects";
@@ -252,6 +255,131 @@ const codeVisible = computed(
   () => previewText.value !== null && !(isMarkdown.value && mdMode.value === "rendered"),
 );
 
+// ── 搜索:左栏全文搜索面板 + 文件内查找条 ─────────────────────────────────────
+const codeViewer = ref<InstanceType<typeof CodeViewer> | null>(null);
+const findBarRef = ref<InstanceType<typeof FindBar> | null>(null);
+const searchPanelRef = ref<InstanceType<typeof TextSearchPanel> | null>(null);
+
+const leftView = ref<"tree" | "search">("tree");
+
+const findOpen = ref(false);
+const findText = ref("");
+const findCase = ref(false);
+const findWord = ref(false);
+const findRegex = ref(false);
+const findTotal = ref(0);
+const findIndex = ref(-1);
+
+const findQuery = computed<FindQuery>(() => ({
+  text: findText.value,
+  caseSensitive: findCase.value,
+  wholeWord: findWord.value,
+  useRegex: findRegex.value,
+}));
+
+const findInvalid = computed(() => {
+  if (!findRegex.value || !findText.value.trim()) return false;
+  return buildFindRegExp({ text: findText.value, caseSensitive: true, wholeWord: true, useRegex: true }) === null;
+});
+
+function refreshFind(scrollToCurrent: boolean) {
+  const cv = codeViewer.value;
+  if (!cv) return;
+  const ranges = cv.runFind(findQuery.value);
+  findTotal.value = ranges.length;
+  findIndex.value = cv.getFindCursor();
+  if (scrollToCurrent && ranges.length) findIndex.value = cv.gotoMatch(cv.getFindCursor());
+}
+
+// 输入/模式变化即重查;文档就位或切换(切文件)后若查找条仍开着则重跑
+watch([findText, findCase, findWord, findRegex], () => {
+  if (findOpen.value) refreshFind(true);
+});
+watch([codeVisible, previewText], () => {
+  if (findOpen.value && codeVisible.value) refreshFind(false);
+});
+
+function findStep(delta: number) {
+  if (!findTotal.value) return;
+  findIndex.value = codeViewer.value?.gotoMatch(findIndex.value + delta) ?? -1;
+}
+
+function onFindToggle(key: "caseSensitive" | "wholeWord" | "useRegex") {
+  if (key === "caseSensitive") findCase.value = !findCase.value;
+  else if (key === "wholeWord") findWord.value = !findWord.value;
+  else findRegex.value = !findRegex.value;
+}
+
+function openFind() {
+  if (!codeVisible.value) return;
+  findOpen.value = true;
+  refreshFind(true);
+  findBarRef.value?.focusInput();
+}
+
+function closeFind() {
+  findOpen.value = false;
+  findTotal.value = 0;
+  findIndex.value = -1;
+  codeViewer.value?.clearFind();
+}
+
+// ── 全文搜索结果跳转:打开文件并定位到命中行 ──────────────────────────────────
+const pendingJump = ref<{ path: string; line: number; query: FindQuery } | null>(null);
+
+function onSearchOpen(path: string, line: number, query: FindQuery) {
+  selected.value = path;
+  // 渲染态(Markdown/SVG)没有代码视图,强制源码模式保证可定位
+  if (MD_EXTS.has(extOf(path))) mdMode.value = "source";
+  if (extOf(path) === "svg") svgMode.value = "source";
+  pendingJump.value = { path, line, query };
+  tryJump();
+}
+
+function tryJump() {
+  const j = pendingJump.value;
+  if (!j || selected.value !== j.path || !codeVisible.value || previewText.value === null) return;
+  pendingJump.value = null;
+  const cv = codeViewer.value;
+  if (!cv) return;
+  // 文件内跑同一查询,优先精确定位到命中行上的匹配;行上无匹配退化到行首
+  const ranges = cv.runFind(j.query);
+  const idx = ranges.findIndex((r) => r.line === j.line);
+  if (idx >= 0) {
+    findTotal.value = ranges.length;
+    findIndex.value = cv.gotoMatch(idx);
+  } else {
+    cv.revealLine(j.line);
+  }
+}
+
+watch([selected, previewText, codeVisible], () => void nextTick(tryJump), { flush: "post" });
+
+// ── 快捷键:Ctrl+F 文件内查找 / Ctrl+Shift+F 全文搜索 / F3 与 Esc ────────────
+function onKeydown(e: KeyboardEvent) {
+  const key = e.key.toLowerCase();
+  if (e.ctrlKey && key === "f") {
+    if (e.shiftKey) {
+      e.preventDefault();
+      leftView.value = "search";
+      searchPanelRef.value?.focusInput();
+    } else if (codeVisible.value) {
+      e.preventDefault();
+      openFind();
+    }
+  } else if (e.key === "F3" || (e.ctrlKey && key === "g")) {
+    if (findOpen.value) {
+      e.preventDefault();
+      findStep(e.shiftKey ? -1 : 1);
+    }
+  } else if (e.key === "Escape" && findOpen.value) {
+    closeFind();
+  }
+}
+
+onMounted(() => window.addEventListener("keydown", onKeydown));
+onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
+
 // ── Markdown 渲染(复用 README 抽屉的渲染器与控件配置) ────────────────────────
 // 相对路径图片/链接的解析基准 = 文件所在目录
 const mdBasePath = computed(() =>
@@ -340,13 +468,13 @@ function startTreeResize(e: PointerEvent) {
     </header>
 
     <div class="flex min-h-0 flex-1">
-      <!-- 左侧文件树 -->
+      <!-- 左侧:文件树 / 全文搜索双视图 -->
       <div
         class="flex h-full min-h-0 shrink-0 flex-col border-r"
         :style="{ width: `${treeWidth}px` }"
       >
-        <div class="shrink-0 border-b p-2">
-          <div class="relative">
+        <div class="flex shrink-0 items-center gap-1.5 border-b px-2 py-2">
+          <div v-if="leftView === 'tree'" class="relative min-w-0 flex-1">
             <Search
               class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
             />
@@ -356,7 +484,33 @@ function startTreeResize(e: PointerEvent) {
               class="h-8 pl-8 text-sm"
             />
           </div>
+          <span v-else class="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
+            {{ t("files.textSearchTitle") }}
+          </span>
+          <div class="flex shrink-0 items-center gap-0.5">
+            <Button
+              variant="ghost"
+              size="icon"
+              class="h-7 w-7"
+              :class="leftView === 'tree' ? 'bg-accent' : ''"
+              :title="t('files.treeView')"
+              @click="leftView = 'tree'"
+            >
+              <FolderTree class="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              class="h-7 w-7"
+              :class="leftView === 'search' ? 'bg-accent' : ''"
+              :title="t('files.searchView')"
+              @click="leftView = 'search'"
+            >
+              <Search class="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </div>
+        <template v-if="leftView === 'tree'">
         <ScrollArea class="min-h-0 flex-1">
           <p v-if="listLoading" class="p-4 text-sm text-muted-foreground">
             {{ t("common.loading") }}
@@ -396,6 +550,13 @@ function startTreeResize(e: PointerEvent) {
             </button>
           </div>
         </ScrollArea>
+        </template>
+        <TextSearchPanel
+          v-else
+          ref="searchPanelRef"
+          :root="project.path"
+          @open="onSearchOpen"
+        />
       </div>
 
       <!-- 拖拽条 -->
@@ -477,6 +638,21 @@ function startTreeResize(e: PointerEvent) {
           {{ t("files.truncated") }}
         </div>
 
+        <!-- 文件内查找条(Ctrl+F) -->
+        <FindBar
+          v-if="findOpen && codeVisible"
+          ref="findBarRef"
+          v-model:text="findText"
+          :modes="{ caseSensitive: findCase, wholeWord: findWord, useRegex: findRegex }"
+          :total="findTotal"
+          :current="findIndex"
+          :invalid="findInvalid"
+          @toggle="onFindToggle"
+          @next="findStep(1)"
+          @prev="findStep(-1)"
+          @close="closeFind"
+        />
+
         <!-- 非代码分支(空态/错误/二进制/图片/MD 渲染):原生双向滚动容器 -->
         <div v-if="!codeVisible" class="min-h-0 flex-1 overflow-auto">
           <div
@@ -511,7 +687,13 @@ function startTreeResize(e: PointerEvent) {
           </div>
         </div>
         <!-- 代码视图:CodeMirror 只读,行号/折叠/换行/滚动均由其自带能力承担 -->
-        <CodeViewer v-else :text="previewText ?? ''" :path="selected ?? ''" :wrap="codeWrap" />
+        <CodeViewer
+          v-else
+          ref="codeViewer"
+          :text="previewText ?? ''"
+          :path="selected ?? ''"
+          :wrap="codeWrap"
+        />
       </div>
     </div>
   </div>
