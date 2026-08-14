@@ -2,7 +2,10 @@ use std::path::Path;
 
 use crate::commands::walk;
 use crate::error::{AppError, AppResult, ErrorCode};
-use crate::models::{ComposeFile, ComposePort, ComposeService, FilePreview, ProjectFileEntry, ReadmeContent};
+use crate::models::{
+    ComposeFile, ComposePort, ComposeService, FilePreview, ProjectFileEntry, ReadmeContent,
+    TextSearchHit, TextSearchLine, TextSearchOutcome,
+};
 
 /// README 候选文件名,按优先级排列(大小写常见变体)
 const README_CANDIDATES: &[&str] = &[
@@ -124,6 +127,202 @@ pub fn read_file_preview(root: String, rel_path: String) -> AppResult<FilePrevie
         text: Some(String::from_utf8_lossy(&bytes[..end]).into_owned()),
         truncated,
     })
+}
+
+/// 单文件搜索的读取上限,与预览一致(512KB):预览只展示这么多,
+/// 超出部分的命中跳不过去,搜了也无法定位
+const SEARCH_MAX_FILE_BYTES: u64 = 512 * 1024;
+/// 匹配总数 / 命中文件数上限,防止超大仓库的结果拖垮前端渲染
+const SEARCH_MAX_MATCHES: u32 = 1000;
+const SEARCH_MAX_FILES: usize = 200;
+/// 结果行预览最大字节数,超出截取首个匹配附近窗口(首尾以 … 标记)
+const SEARCH_LINE_PREVIEW_MAX: usize = 500;
+/// 窗口在匹配前后保留的上下文字节数
+const SEARCH_LINE_CONTEXT: usize = 80;
+
+/// 搜索匹配器:大小写敏感的纯文本走 find 循环,其余统一走 regex——
+/// Unicode 大小写折叠可能改变字节长度(İ → i̇),小写化后的下标无法映射回原文
+enum SearchMatcher {
+    Literal(String),
+    Regex(regex::Regex),
+}
+
+impl SearchMatcher {
+    fn build(
+        query: &str,
+        case_sensitive: bool,
+        whole_word: bool,
+        use_regex: bool,
+    ) -> AppResult<Self> {
+        if case_sensitive && !whole_word && !use_regex {
+            return Ok(Self::Literal(query.to_string()));
+        }
+        let pattern = match (use_regex, whole_word) {
+            (true, true) => format!(r"\b(?:{query})\b"),
+            (true, false) => query.to_string(),
+            (false, true) => format!(r"\b{}\b", regex::escape(query)),
+            (false, false) => regex::escape(query),
+        };
+        let re = regex::RegexBuilder::new(&pattern)
+            .case_insensitive(!case_sensitive)
+            .build()
+            .map_err(|e| AppError::coded(ErrorCode::SearchInvalidRegex, e.to_string()))?;
+        Ok(Self::Regex(re))
+    }
+
+    /// 行内全部匹配的 [起,止) 字节偏移(升序)
+    fn find_all(&self, line: &str) -> Vec<(usize, usize)> {
+        match self {
+            Self::Literal(needle) => {
+                let mut out = Vec::new();
+                let mut from = 0;
+                while let Some(i) = line[from..].find(needle) {
+                    let start = from + i;
+                    from = start + needle.len();
+                    out.push((start, from));
+                }
+                out
+            }
+            Self::Regex(re) => re.find_iter(line).map(|m| (m.start(), m.end())).collect(),
+        }
+    }
+}
+
+/// 超长行(压缩产物等)截取首个匹配前后的窗口,窗口边界向下取整到 UTF-8 字符边界
+fn window_line(line: &str, matches: &[(usize, usize)]) -> String {
+    if line.len() <= SEARCH_LINE_PREVIEW_MAX {
+        return line.to_string();
+    }
+    let first = matches.first().map_or(0, |m| m.0);
+    let last = matches.last().map_or(line.len(), |m| m.1);
+    let floor = |i: usize| {
+        let mut i = i.min(line.len());
+        while i > 0 && !line.is_char_boundary(i) {
+            i -= 1;
+        }
+        i
+    };
+    let start = floor(first.saturating_sub(SEARCH_LINE_CONTEXT));
+    let end = floor(last + SEARCH_LINE_CONTEXT).max(start);
+    let mut out = String::new();
+    if start > 0 {
+        out.push('…');
+    }
+    out.push_str(&line[start..end]);
+    if end < line.len() {
+        out.push('…');
+    }
+    out
+}
+
+/// 搜索单个文件:返回 (匹配总数, 命中行);二进制 / 读取失败 / 已达上限返回 None。
+/// 行号口径与前端预览一致:按 \n 切行,1-based
+fn search_one_file(
+    root: &Path,
+    rel: &Path,
+    matcher: &SearchMatcher,
+    total: &std::sync::atomic::AtomicU32,
+) -> Option<(u32, Vec<TextSearchLine>)> {
+    use std::io::Read as _;
+    if total.load(std::sync::atomic::Ordering::Relaxed) >= SEARCH_MAX_MATCHES {
+        return None;
+    }
+    let mut file = std::fs::File::open(root.join(rel)).ok()?;
+    let mut bytes = Vec::new();
+    // 先读 8KB 做二进制嗅探,非二进制再补足到 512KB 上限,避免给大文件整段无谓 IO
+    (&mut file)
+        .take(BINARY_SNIFF_BYTES as u64)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.contains(&0) {
+        return None;
+    }
+    if bytes.len() == BINARY_SNIFF_BYTES {
+        (&mut file)
+            .take(SEARCH_MAX_FILE_BYTES - BINARY_SNIFF_BYTES as u64)
+            .read_to_end(&mut bytes)
+            .ok()?;
+    }
+    let text = String::from_utf8_lossy(&bytes);
+    let mut lines = Vec::new();
+    let mut count = 0u32;
+    for (idx, line) in text.split('\n').enumerate() {
+        // 达到总上限后停止累计(标志位由调用方在汇总时判定)
+        if total.load(std::sync::atomic::Ordering::Relaxed) >= SEARCH_MAX_MATCHES {
+            break;
+        }
+        let matches = matcher.find_all(line);
+        if matches.is_empty() {
+            continue;
+        }
+        count += matches.len() as u32;
+        total.fetch_add(matches.len() as u32, std::sync::atomic::Ordering::Relaxed);
+        lines.push(TextSearchLine {
+            line: idx as u32 + 1,
+            text: window_line(line, &matches),
+        });
+    }
+    if count == 0 {
+        None
+    } else {
+        Some((count, lines))
+    }
+}
+
+/// 项目全文搜索(文件预览页左栏"搜索"视图)。遍历范围见 walk::searchable_files:
+/// 尊重 git 忽略规则、含隐藏文件、跳过 node_modules 与 .git;
+/// 二进制跳过,单文件只搜前 512KB(与预览一致,保证命中行可跳转)。
+/// 匹配按线程并行;结果按路径排序,超上限时置 truncated 并截断。
+#[tauri::command]
+pub fn search_project_text(
+    root: String,
+    query: String,
+    case_sensitive: bool,
+    whole_word: bool,
+    use_regex: bool,
+) -> AppResult<TextSearchOutcome> {
+    ensure_dir(&root)?;
+    let query = query.trim();
+    if query.is_empty() {
+        return Ok(TextSearchOutcome {
+            hits: Vec::new(),
+            truncated: false,
+        });
+    }
+    let matcher = SearchMatcher::build(query, case_sensitive, whole_word, use_regex)?;
+    let root_path = Path::new(&root);
+    let files = walk::searchable_files(root_path);
+
+    let total = std::sync::atomic::AtomicU32::new(0);
+    let hits: std::sync::Mutex<Vec<TextSearchHit>> = std::sync::Mutex::new(Vec::new());
+    std::thread::scope(|scope| {
+        let threads = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
+        let chunk_size = (files.len() + threads - 1) / threads;
+        let matcher = &matcher;
+        for chunk in files.chunks(chunk_size.max(1)) {
+            let hits = &hits;
+            let total = &total;
+            scope.spawn(move || {
+                for rel in chunk {
+                    if let Some((count, lines)) = search_one_file(root_path, rel, &matcher, total) {
+                        hits.lock().unwrap().push(TextSearchHit {
+                            path: walk::to_slash(rel),
+                            count,
+                            lines,
+                        });
+                    }
+                }
+            });
+        }
+    });
+    let mut hits = hits.into_inner().unwrap();
+    hits.sort_by(|a, b| a.path.cmp(&b.path));
+    let truncated = total.load(std::sync::atomic::Ordering::Relaxed) >= SEARCH_MAX_MATCHES
+        || hits.len() > SEARCH_MAX_FILES;
+    hits.truncate(SEARCH_MAX_FILES);
+    Ok(TextSearchOutcome { hits, truncated })
 }
 
 /// 写入文本到指定路径(供 Markdown 代码块/表格"下载"按钮走 Tauri save dialog 后调用)。
@@ -615,5 +814,136 @@ services:
         );
         assert_eq!(services[1].ports, vec![port(8000, 8000)]);
         assert!(services[2].ports.is_empty());
+    }
+
+    // ── 全文搜索 ────────────────────────────────────────────────────────────
+
+    /// 便捷:断言某文件的命中行号集合
+    fn hit_lines(outcome: &TextSearchOutcome, path: &str) -> Vec<u32> {
+        outcome
+            .hits
+            .iter()
+            .find(|h| h.path == path)
+            .unwrap_or_else(|| panic!("缺少命中文件 {path}"))
+            .lines
+            .iter()
+            .map(|l| l.line)
+            .collect()
+    }
+
+    #[test]
+    fn search_project_text_modes() {
+        let dir = temp_project_dir("search-modes");
+        let p = Path::new(&dir);
+        // 默认大小写不敏感:第 1、2 行命中
+        fs::write(p.join("a.txt"), "Hello world\nhello WORLD\nbye\n").unwrap();
+
+        let r = search_project_text(dir.clone(), "hello".into(), false, false, false).unwrap();
+        assert_eq!(hit_lines(&r, "a.txt"), vec![1, 2]);
+        assert_eq!(r.hits[0].count, 2);
+        assert!(!r.truncated);
+
+        // 大小写敏感:仅第 2 行(hello WORLD)
+        let r = search_project_text(dir.clone(), "hello".into(), true, false, false).unwrap();
+        assert_eq!(hit_lines(&r, "a.txt"), vec![2]);
+
+        // 全字匹配:"world" 不命中 "worldwide"
+        fs::write(p.join("b.txt"), "world\nworldwide\n").unwrap();
+        let r = search_project_text(dir.clone(), "world".into(), false, true, false).unwrap();
+        assert_eq!(hit_lines(&r, "b.txt"), vec![1]);
+
+        // 正则模式 + 全字组合:\b(?:c.t)\b
+        fs::write(p.join("c.txt"), "cat cut\nconcat\n").unwrap();
+        let r = search_project_text(dir.clone(), "c.t".into(), false, true, true).unwrap();
+        assert_eq!(hit_lines(&r, "c.txt"), vec![1]);
+
+        // 同行多次匹配计入 count,行只出现一次
+        fs::write(p.join("d.txt"), "ab ab ab\n").unwrap();
+        let r = search_project_text(dir.clone(), "ab".into(), false, false, false).unwrap();
+        assert_eq!(hit_lines(&r, "d.txt"), vec![1]);
+        let d = r.hits.iter().find(|h| h.path == "d.txt").unwrap();
+        assert_eq!(d.count, 3);
+        assert_eq!(d.lines.len(), 1);
+
+        // 空查询返回空结果
+        let r = search_project_text(dir.clone(), "  ".into(), false, false, false).unwrap();
+        assert!(r.hits.is_empty());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn search_project_text_scope_and_binary() {
+        let dir = temp_project_dir("search-scope");
+        let p = Path::new(&dir);
+        fs::write(p.join(".env"), "SECRET_TOKEN=x\n").unwrap();
+        fs::write(p.join("b.bin"), b"to\0ken").unwrap();
+        fs::create_dir_all(p.join("node_modules/dep")).unwrap();
+        fs::write(p.join("node_modules/dep/token.txt"), "token\n").unwrap();
+        fs::create_dir_all(p.join("logs")).unwrap();
+        fs::write(p.join("logs/token.log"), "token\n").unwrap();
+        fs::write(p.join(".gitignore"), "logs/\n").unwrap();
+        fs::create_dir_all(p.join(".git")).unwrap();
+        fs::write(p.join(".git/token"), "token\n").unwrap();
+
+        let r = search_project_text(dir.clone(), "token".into(), false, false, false).unwrap();
+        let paths: Vec<&str> = r.hits.iter().map(|h| h.path.as_str()).collect();
+        // 隐藏文件可搜;二进制、node_modules、git 忽略目录、.git 内部跳过
+        assert_eq!(paths, vec![".env"]);
+        // .gitignore 自身无命中,不出现在结果里
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn search_project_text_long_line_window() {
+        let dir = temp_project_dir("search-window");
+        let p = Path::new(&dir);
+        let mut line = "x".repeat(3000);
+        line.push_str("NEEDLE");
+        line.push_str(&"y".repeat(100));
+        fs::write(p.join("min.js"), &line).unwrap();
+
+        let r = search_project_text(dir.clone(), "NEEDLE".into(), false, false, false).unwrap();
+        let text = &r.hits[0].lines[0].text;
+        assert!(text.starts_with('…'), "超长行窗口应带前省略号:{text}");
+        assert!(text.ends_with('…'), "超长行窗口应带后省略号:{text}");
+        assert!(text.contains("NEEDLE"));
+        assert!(text.len() < line.len());
+
+        // 短行原样返回
+        fs::write(p.join("short.txt"), "NEEDLE here\n").unwrap();
+        let r = search_project_text(dir.clone(), "NEEDLE".into(), false, false, false).unwrap();
+        let short = r.hits.iter().find(|h| h.path == "short.txt").unwrap();
+        assert_eq!(short.lines[0].text, "NEEDLE here");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn search_project_text_caps_truncated() {
+        let dir = temp_project_dir("search-caps");
+        let p = Path::new(&dir);
+        // 单文件 1100 个匹配:达到 1000 上限后停止累计并置 truncated
+        let content = (0..1100).map(|i| format!("hit {i}")).collect::<Vec<_>>().join("\n");
+        fs::write(p.join("many.txt"), &content).unwrap();
+
+        let r = search_project_text(dir.clone(), "hit".into(), false, false, false).unwrap();
+        assert!(r.truncated);
+        let hit = &r.hits[0];
+        assert_eq!(hit.count, SEARCH_MAX_MATCHES);
+        assert_eq!(hit.lines.len(), SEARCH_MAX_MATCHES as usize);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn search_project_text_invalid_regex() {
+        let dir = temp_project_dir("search-badre");
+        assert!(matches!(
+            search_project_text(dir.clone(), "([".into(), false, false, true),
+            Err(ref e) if e.is_code(ErrorCode::SearchInvalidRegex)
+        ));
+        let _ = fs::remove_dir_all(&dir);
     }
 }

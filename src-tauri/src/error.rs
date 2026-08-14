@@ -108,6 +108,10 @@ pub enum ErrorCode {
     SaveContentTooLarge,
     SaveParentDirMissing,
 
+    // ── 全文搜索 ──────────────────────────────────────────────────────
+    /// 正则模式的搜索表达式非法(message 携带 regex 解析错误原文)
+    SearchInvalidRegex,
+
     // ── 隐藏项 / 标记 ─────────────────────────────────────────────────
     HiddenItemTypeUnknown,
     HiddenItemKeyRequired,
@@ -249,6 +253,7 @@ impl ErrorCode {
             Self::SavePathRequired => "save_path_required",
             Self::SaveContentTooLarge => "save_content_too_large",
             Self::SaveParentDirMissing => "save_parent_dir_missing",
+            Self::SearchInvalidRegex => "search_invalid_regex",
             // 隐藏 / 标记
             Self::HiddenItemTypeUnknown => "hidden_item_type_unknown",
             Self::HiddenItemKeyRequired => "hidden_item_key_required",

@@ -74,6 +74,36 @@ pub fn unignored_files(root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// 全文搜索的遍历范围(search_project_text):尊重 .gitignore / .ignore
+/// (与 VSCode 默认搜索一致),但保留隐藏文件(.env / .gitignore 本身可搜),
+/// 并跳过 node_modules 与 .git 内部——node_modules 全文搜索既慢又几乎全是噪音。
+pub fn searchable_files(root: &Path) -> Vec<PathBuf> {
+    let (tx, rx) = std::sync::mpsc::channel::<PathBuf>();
+    WalkBuilder::new(root)
+        .require_git(false)
+        .hidden(false)
+        .filter_entry(|e| e.file_name() != ".git" && e.file_name() != "node_modules")
+        .build_parallel()
+        .run(|| {
+            let tx = tx.clone();
+            Box::new(move |entry| {
+                if let Ok(e) = entry {
+                    if e.file_type().is_some_and(|t| t.is_file()) {
+                        let _ = tx.send(e.into_path());
+                    }
+                }
+                ignore::WalkState::Continue
+            })
+        });
+    drop(tx);
+    let mut files: Vec<PathBuf> = rx
+        .into_iter()
+        .filter_map(|p| p.strip_prefix(root).ok().map(PathBuf::from))
+        .collect();
+    files.sort();
+    files
+}
+
 /// 相对路径转 '/' 分隔字符串(Windows 下 '\' 归一化)。
 /// 统一辅助在 crate::path_util,此处保留旧名兼容既有调用
 pub fn to_slash(path: &Path) -> String {

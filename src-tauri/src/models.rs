@@ -256,6 +256,35 @@ pub struct ProjectFileEntry {
     pub ignored: bool,
 }
 
+/// 全文搜索结果中的一行命中(search_project_text)
+#[derive(Debug, Clone, Serialize)]
+pub struct TextSearchLine {
+    /// 1-based 行号
+    pub line: u32,
+    /// 行内容(超长行截取首个匹配附近窗口,首尾以 … 标记)
+    pub text: String,
+}
+
+/// 全文搜索结果中单个文件的命中(search_project_text)
+#[derive(Debug, Clone, Serialize)]
+pub struct TextSearchHit {
+    /// 项目相对路径('/' 分隔)
+    pub path: String,
+    /// 该文件内的匹配总数
+    pub count: u32,
+    /// 命中行(按行号升序)
+    pub lines: Vec<TextSearchLine>,
+}
+
+/// 全文搜索结果(search_project_text)
+#[derive(Debug, Clone, Serialize)]
+pub struct TextSearchOutcome {
+    /// 命中文件(按路径排序)
+    pub hits: Vec<TextSearchHit>,
+    /// 是否因命中数/文件数上限被截断(前端提示仍有更多匹配)
+    pub truncated: bool,
+}
+
 /// 一条可浏览器访问的端口映射:宿主机发布端口 -> 容器端口
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ComposePort {

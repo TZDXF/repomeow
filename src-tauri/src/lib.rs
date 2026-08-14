@@ -190,6 +190,7 @@ pub fn run() {
             commands::files::save_text_file,
             commands::files::list_project_files,
             commands::files::read_file_preview,
+            commands::files::search_project_text,
             commands::docker::compose_ps_batch,
             commands::docker::compose_export,
             commands::hidden::set_hidden_item,

@@ -17,10 +17,10 @@ import {
 } from "@lucide/vue";
 import { useLocalStorage } from "@vueuse/core";
 import { Markdown, type ControlsConfig, type NodeRenderers } from "vue-stream-markdown";
-import { codeToHtml } from "shiki";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import CodeViewer from "@/components/files/CodeViewer.vue";
 import MdImage from "@/components/markdown/MdImage.vue";
 import MdLink from "@/components/markdown/MdLink.vue";
 import { MD_BASE_PATH_KEY } from "@/components/markdown/keys";
@@ -242,121 +242,15 @@ watch([selected, svgSource], async ([path]) => {
   }
 });
 
-// ── 代码视图:Shiki 高亮,超大文件/失败回退纯文本(均带行号) ────────────────────
+// ── 代码视图:CodeMirror 只读查看(行号/折叠/语法高亮/换行由 CodeViewer 承担) ───
 const mdMode = ref<"rendered" | "source">("rendered");
-// 代码自动换行(持久化);关闭时超宽行靠预览容器横向滚动
+// 代码自动换行(持久化),经 prop 驱动 CodeViewer 的 lineWrapping 热切换
 const codeWrap = useLocalStorage("repomeow:files-code-wrap", false);
-const codeHtml = ref("");
-let highlightSeq = 0;
 
-const LANG_BY_EXT: Record<string, string> = {
-  ts: "typescript",
-  tsx: "tsx",
-  mts: "typescript",
-  cts: "typescript",
-  js: "javascript",
-  jsx: "jsx",
-  mjs: "javascript",
-  cjs: "javascript",
-  vue: "vue",
-  json: "json",
-  jsonc: "jsonc",
-  rs: "rust",
-  py: "python",
-  css: "css",
-  scss: "scss",
-  less: "less",
-  html: "html",
-  htm: "html",
-  xml: "xml",
-  svg: "xml",
-  yml: "yaml",
-  yaml: "yaml",
-  toml: "toml",
-  ini: "ini",
-  sh: "shell",
-  bash: "shell",
-  zsh: "shell",
-  ps1: "powershell",
-  bat: "bat",
-  sql: "sql",
-  go: "go",
-  java: "java",
-  kt: "kotlin",
-  c: "c",
-  h: "c",
-  cpp: "cpp",
-  hpp: "cpp",
-  cs: "csharp",
-  rb: "ruby",
-  php: "php",
-  swift: "swift",
-  lua: "lua",
-  md: "markdown",
-  markdown: "markdown",
-};
-
-const LANG_BY_NAME: Record<string, string> = {
-  dockerfile: "dockerfile",
-  makefile: "makefile",
-  ".gitignore": "ignore",
-  ".ignore": "ignore",
-  ".env": "ini",
-};
-
-function shikiLang(path: string): string {
-  const name = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
-  // 未知类型回退 text(Shiki 内置纯文本语言),统一走 .line 结构以显示行号
-  return LANG_BY_NAME[name] ?? LANG_BY_EXT[extOf(path)] ?? "text";
-}
-
-/** 行数超过该值的大文件跳过 Shiki(高亮耗时且易卡顿),直接纯文本 + 行号呈现 */
-const HIGHLIGHT_MAX_LINES = 2000;
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[ch] ?? ch);
-}
-
-/** 转义纯文本包成与 Shiki 相同的 pre>code>.line 结构,复用行号样式 */
-function plainCodeHtml(text: string): string {
-  const lines = text
-    .split("\n")
-    .map((line) => `<span class="line">${escapeHtml(line)}</span>`)
-    .join("\n");
-  return `<pre class="code-plain"><code>${lines}</code></pre>`;
-}
-
-/** 是否以代码视图展示(Markdown 渲染模式下不走高亮) */
+/** 是否以代码视图展示(Markdown 渲染模式下不显示代码) */
 const codeVisible = computed(
   () => previewText.value !== null && !(isMarkdown.value && mdMode.value === "rendered"),
 );
-
-watch([codeVisible, previewText, selected], async ([visible]) => {
-  const mySeq = ++highlightSeq;
-  if (!visible) {
-    codeHtml.value = "";
-    return;
-  }
-  const text = previewText.value;
-  if (text === null || !selected.value) return;
-  // 超大文件同步走纯文本;其余等 Shiki 完成后一次性替换,期间保留旧内容——
-  // 避免先渲染无样式纯文本、再跳成带行号高亮的闪动
-  if (text.split("\n").length > HIGHLIGHT_MAX_LINES) {
-    codeHtml.value = plainCodeHtml(text);
-    return;
-  }
-  try {
-    const html = await codeToHtml(text, {
-      lang: shikiLang(selected.value),
-      themes: { light: "github-light", dark: "github-dark" },
-      defaultColor: false,
-    });
-    if (mySeq === highlightSeq) codeHtml.value = html;
-  } catch {
-    // 语言包缺失等情况回退纯文本(仍带行号)
-    if (mySeq === highlightSeq) codeHtml.value = plainCodeHtml(text);
-  }
-});
 
 // ── Markdown 渲染(复用 README 抽屉的渲染器与控件配置) ────────────────────────
 // 相对路径图片/链接的解析基准 = 文件所在目录
@@ -583,8 +477,8 @@ function startTreeResize(e: PointerEvent) {
           {{ t("files.truncated") }}
         </div>
 
-        <!-- 原生双向滚动:ScrollArea 只注册了竖向滚动条,横向内容会被裁掉 -->
-        <div class="min-h-0 flex-1 overflow-auto">
+        <!-- 非代码分支(空态/错误/二进制/图片/MD 渲染):原生双向滚动容器 -->
+        <div v-if="!codeVisible" class="min-h-0 flex-1 overflow-auto">
           <div
             v-if="!selected"
             class="flex h-full flex-col items-center justify-center gap-2 p-10 text-muted-foreground"
@@ -604,14 +498,10 @@ function startTreeResize(e: PointerEvent) {
             :svg="isSvg"
             :alt="selected ?? undefined"
           />
-          <div
-            v-else-if="isMarkdown && mdMode === 'rendered' && previewText !== null"
-            class="p-6 text-sm"
-            @click="onBodyClick"
-          >
+          <div v-else class="p-6 text-sm" @click="onBodyClick">
             <Markdown
               mode="static"
-              :content="previewText"
+              :content="previewText ?? ''"
               :controls="controls"
               :node-renderers="nodeRenderers"
               :theme-element="themeElement"
@@ -619,18 +509,9 @@ function startTreeResize(e: PointerEvent) {
               :before-download="beforeDownload"
             />
           </div>
-          <div
-            v-else-if="previewText !== null"
-            class="file-code p-4"
-            :class="{ 'code-wrap': codeWrap }"
-          >
-            <pre
-              v-if="codeHtml"
-              class="w-max min-w-full font-mono text-[13px] leading-5"
-              v-html="codeHtml"
-            />
-          </div>
         </div>
+        <!-- 代码视图:CodeMirror 只读,行号/折叠/换行/滚动均由其自带能力承担 -->
+        <CodeViewer v-else :text="previewText ?? ''" :path="selected ?? ''" :wrap="codeWrap" />
       </div>
     </div>
   </div>
@@ -645,70 +526,3 @@ function startTreeResize(e: PointerEvent) {
     </Button>
   </div>
 </template>
-
-<style scoped>
-/* Shiki 双主题:token 上的 --shiki-light/--shiki-dark 变量按 .dark 切换,
-   清掉主题自带背景透出页面底色;pre 默认不折行,横向滚动交给 overflow-auto 容器 */
-:global(.file-code .shiki),
-:global(.file-code .shiki span) {
-  color: var(--shiki-light);
-  background-color: transparent;
-}
-
-:global(html.dark .file-code .shiki),
-:global(html.dark .file-code .shiki span) {
-  color: var(--shiki-dark);
-}
-
-/* 自动换行:pre 的 UA 默认 white-space:pre 不吃继承,内外两层 pre(Shiki/纯文本回退)
-   都要直接覆盖;width 还原铺满,否则 w-max 会让盒子仍撑到最宽行。
-   续行悬挂缩进:.line 转块级 + 行号 ::before 绝对定位到左侧留白,正文(含折行续行)
-   从行号分割线之后起排;外层 white-space 必须 normal 折叠行间 \n 文本节点
-   (否则块级 .line 之间多出空行),行内容自身恢复 pre-wrap 保住缩进 */
-:global(.file-code.code-wrap pre) {
-  width: auto;
-  white-space: normal;
-}
-
-:global(.file-code.code-wrap code) {
-  display: block;
-}
-
-:global(.file-code.code-wrap .line) {
-  position: relative;
-  display: block;
-  min-height: 1.25rem; /* 空行没有行盒,补足一行高度 */
-  padding-left: 4.25rem; /* 行号列(2.75+0.75+边框)再加 0.75 间距 */
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-:global(.file-code.code-wrap .line::before) {
-  position: absolute;
-  left: 0;
-}
-
-/* 行号:Shiki 输出与纯文本(超大文件/高亮失败)统一为 pre>code>.line 结构,
-   行首 ::before 用 CSS 计数器生成行号,user-select:none 保证复制代码时不带行号;
-   注意选择器(含伪元素)必须整段包进 :global(),scoped 编译器会丢弃 :global() 之后的片段 */
-:global(.file-code pre code) {
-  counter-reset: line;
-}
-
-:global(.file-code .line) {
-  counter-increment: line;
-}
-
-:global(.file-code .line::before) {
-  content: counter(line);
-  display: inline-block;
-  min-width: 2.75rem;
-  margin-right: 0.75rem;
-  padding-right: 0.75rem;
-  border-right: 1px solid var(--color-border);
-  text-align: right;
-  color: var(--color-muted-foreground);
-  opacity: 0.6;
-  user-select: none;
-}
-</style>

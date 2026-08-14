@@ -118,6 +118,8 @@ export default {
     save_path_required: "保存路径不能为空",
     save_content_too_large: "内容超过字节上限",
     save_parent_dir_missing: "目标目录不存在",
+    // 全文搜索
+    search_invalid_regex: "搜索表达式无效",
     // 隐藏项 / 标记
     hidden_item_type_unknown: "未知的隐藏项类型",
     hidden_item_key_required: "隐藏项标识不能为空",

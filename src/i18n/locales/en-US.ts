@@ -126,6 +126,8 @@ export default {
     save_path_required: "Save path is required",
     save_content_too_large: "Content exceeds the byte limit",
     save_parent_dir_missing: "Target directory does not exist",
+    // full-text search
+    search_invalid_regex: "Invalid search pattern",
     // hidden / pin
     hidden_item_type_unknown: "Unknown hidden item type",
     hidden_item_key_required: "Hidden item key is required",

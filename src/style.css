@@ -82,6 +82,16 @@
   --sidebar-ring: oklch(0.708 0 0);
   --scrollbar-thumb: oklch(0.87 0 0);
   --scrollbar-thumb-hover: oklch(0.708 0 0);
+  /* CodeMirror 代码查看器 token 色(取自 Shiki github-light,暗色见 .dark) */
+  --cm-keyword: #cf222e;
+  --cm-string: #0a3069;
+  --cm-comment: #6e7781;
+  --cm-number: #0550ae;
+  --cm-function: #8250df;
+  --cm-type: #953800;
+  --cm-tag: #116329;
+  --cm-attribute: #0550ae;
+  --cm-variable: #1f2328;
   color-scheme: light;
 }
 
@@ -119,6 +129,15 @@
   --sidebar-ring: oklch(0.556 0 0);
   --scrollbar-thumb: oklch(1 0 0 / 20%);
   --scrollbar-thumb-hover: oklch(1 0 0 / 35%);
+  --cm-keyword: #ff7b72;
+  --cm-string: #a5d6ff;
+  --cm-comment: #8b949e;
+  --cm-number: #79c0ff;
+  --cm-function: #d2a8ff;
+  --cm-type: #ffa657;
+  --cm-tag: #7ee787;
+  --cm-attribute: #79c0ff;
+  --cm-variable: #c9d1d9;
   color-scheme: dark;
 }
 
