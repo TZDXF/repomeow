@@ -176,6 +176,9 @@ watch(() => project.value?.id, loadFiles, { immediate: true });
 const selected = ref<string | null>(null);
 const previewError = ref(false);
 const previewText = ref<string | null>(null);
+// 当前 previewText 所属文件(与 text 同步赋值/清空):区分「选中了什么」与「内容就位没有」,
+// 旧文件残留内容不得进新文件的渲染分支(代码→MD 切换闪旧文本即此因)
+const previewPath = ref<string | null>(null);
 const previewTruncated = ref(false);
 const previewBinary = ref(false);
 let previewSeq = 0;
@@ -218,10 +221,12 @@ watch([selected, svgSource], async ([path]) => {
   previewTruncated.value = false;
   if (!path || !project.value) {
     previewText.value = null;
+    previewPath.value = null;
     return;
   }
   if (IMAGE_EXTS.has(extOf(path)) && !svgSource.value) {
     previewText.value = null; // 图片走 asset 协议直显,不读内容(svg 源码模式除外)
+    previewPath.value = null;
     return;
   }
   try {
@@ -232,14 +237,17 @@ watch([selected, svgSource], async ([path]) => {
     if (mySeq !== previewSeq) return;
     if (res.text === null) {
       previewText.value = null;
+      previewPath.value = null;
       previewBinary.value = true;
     } else {
       previewText.value = res.text;
+      previewPath.value = path;
       previewTruncated.value = res.truncated;
     }
   } catch {
     if (mySeq === previewSeq) {
       previewText.value = null;
+      previewPath.value = null;
       previewError.value = true;
     }
   }
@@ -253,6 +261,12 @@ const codeWrap = useLocalStorage("repomeow:files-code-wrap", false);
 /** 是否以代码视图展示(Markdown 渲染模式下不显示代码) */
 const codeVisible = computed(
   () => previewText.value !== null && !(isMarkdown.value && mdMode.value === "rendered"),
+);
+
+/** Markdown 渲染分支可否使用当前内容:残留内容须本身来自 md 文件——
+ *  代码文件的旧文本以 MD 渲染会闪现错内容,等待新内容期间显示空白(md→md 仍保留旧文防闪) */
+const mdRenderable = computed(
+  () => previewPath.value !== null && MD_EXTS.has(extOf(previewPath.value)),
 );
 
 // ── 搜索:左栏全文搜索面板 + 文件内查找条 ─────────────────────────────────────
@@ -338,7 +352,8 @@ function onSearchOpen(path: string, line: number, query: FindQuery) {
 
 function tryJump() {
   const j = pendingJump.value;
-  if (!j || selected.value !== j.path || !codeVisible.value || previewText.value === null) return;
+  // 目标文件内容就位(previewPath 对上)才跳,防止在残留文本上定位到错误位置
+  if (!j || selected.value !== j.path || !codeVisible.value || previewPath.value !== j.path) return;
   pendingJump.value = null;
   const cv = codeViewer.value;
   if (!cv) return;
@@ -674,6 +689,8 @@ function startTreeResize(e: PointerEvent) {
             :svg="isSvg"
             :alt="selected ?? undefined"
           />
+          <!-- md 内容未就位(残留文本来自非 md 文件)时短暂空白,防止上一个文件的文本被当 Markdown 渲染闪现 -->
+          <div v-else-if="!mdRenderable" />
           <div v-else class="p-6 text-sm" @click="onBodyClick">
             <Markdown
               mode="static"
@@ -686,12 +703,13 @@ function startTreeResize(e: PointerEvent) {
             />
           </div>
         </div>
-        <!-- 代码视图:CodeMirror 只读,行号/折叠/换行/滚动均由其自带能力承担 -->
+        <!-- 代码视图:CodeMirror 只读,行号/折叠/换行/滚动均由其自带能力承担;path 传 previewPath
+             保证语言高亮与文本恒为同一文件(保留旧内容期间不会旧文本配新扩展名高亮) -->
         <CodeViewer
           v-else
           ref="codeViewer"
           :text="previewText ?? ''"
-          :path="selected ?? ''"
+          :path="previewPath ?? ''"
           :wrap="codeWrap"
         />
       </div>
