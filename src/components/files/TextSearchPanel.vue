@@ -13,9 +13,9 @@ import type { TextSearchHit, TextSearchOutcome } from "@/types";
 
 // ── 任务描述 ─────────────────────────────────────────────────────────────────
 // 左栏全文搜索面板:输入即搜(300ms 防抖,Enter 立即),大小写/全字/正则三模式,
-// 与后端 search_project_text 的 SearchMatcher 同口径;结果按文件分组可折叠,
-// 行片段用前端同一正则标记命中(转义渲染,不走 v-html);点击行 emit open,
-// 由父组件打开文件并把该查询带过去做文件内定位。
+// 与后端 search_project_text 的 SearchMatcher 同口径;文件包含/排除 glob 也由后端筛选;
+// 结果按文件分组可折叠,行片段用前端同一正则标记命中(转义渲染,不走 v-html);
+// 点击行 emit open,由父组件打开文件并把文本查询带过去做文件内定位。
 
 const props = defineProps<{ root: string }>();
 
@@ -26,6 +26,8 @@ const emit = defineEmits<{
 const { t } = useI18n();
 
 const query = ref("");
+const include = ref("");
+const exclude = ref("");
 const caseSensitive = ref(false);
 const wholeWord = ref(false);
 const useRegex = ref(false);
@@ -58,7 +60,7 @@ const highlightRe = computed(() => {
 let timer: ReturnType<typeof setTimeout> | undefined;
 let seq = 0;
 
-watch([query, caseSensitive, wholeWord, useRegex], () => {
+watch([query, include, exclude, caseSensitive, wholeWord, useRegex], () => {
   clearTimeout(timer);
   timer = setTimeout(runSearch, 300);
 });
@@ -94,6 +96,8 @@ async function runSearch() {
       caseSensitive: q.caseSensitive,
       wholeWord: q.wholeWord,
       useRegex: q.useRegex,
+      include: include.value,
+      exclude: exclude.value,
     });
     if (mySeq !== seq) return;
     results.value = out.hits;
@@ -155,40 +159,42 @@ defineExpose({ focusInput });
         <Input
           v-model="query"
           :placeholder="t('files.textSearchPlaceholder')"
-          class="h-8 pl-8 text-sm"
+          class="h-8 pl-8 pr-[5.5rem] text-sm"
           :class="invalidRegex ? 'border-destructive focus-visible:ring-destructive/30' : ''"
           @keydown.enter.prevent="runSearch"
         />
+        <div class="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
+          <Button
+            v-for="m in [
+              { key: 'caseSensitive', label: 'Aa', title: t('files.matchCase') },
+              { key: 'wholeWord', label: 'ab', title: t('files.wholeWord') },
+              { key: 'useRegex', label: '.*', title: t('files.useRegex') },
+            ]"
+            :key="m.key"
+            variant="ghost"
+            size="icon"
+            class="pointer-events-auto h-6 w-7 rounded-sm font-mono text-[11px]"
+            :class="
+              (m.key === 'caseSensitive' && caseSensitive) ||
+              (m.key === 'wholeWord' && wholeWord) ||
+              (m.key === 'useRegex' && useRegex)
+                ? 'bg-accent'
+                : 'text-muted-foreground'
+            "
+            :title="m.title"
+            @click.stop="
+              m.key === 'caseSensitive'
+                ? (caseSensitive = !caseSensitive)
+                : m.key === 'wholeWord'
+                  ? (wholeWord = !wholeWord)
+                  : (useRegex = !useRegex)
+            "
+          >
+            {{ m.label }}
+          </Button>
+        </div>
       </div>
-      <div class="flex items-center gap-1">
-        <Button
-          v-for="m in [
-            { key: 'caseSensitive', label: 'Aa', title: t('files.matchCase') },
-            { key: 'wholeWord', label: 'ab', title: t('files.wholeWord') },
-            { key: 'useRegex', label: '.*', title: t('files.useRegex') },
-          ]"
-          :key="m.key"
-          variant="ghost"
-          size="icon"
-          class="h-6 w-7 rounded-sm font-mono text-[11px]"
-          :class="
-            (m.key === 'caseSensitive' && caseSensitive) ||
-            (m.key === 'wholeWord' && wholeWord) ||
-            (m.key === 'useRegex' && useRegex)
-              ? 'bg-accent'
-              : 'text-muted-foreground'
-          "
-          :title="m.title"
-          @click="
-            m.key === 'caseSensitive'
-              ? (caseSensitive = !caseSensitive)
-              : m.key === 'wholeWord'
-                ? (wholeWord = !wholeWord)
-                : (useRegex = !useRegex)
-          "
-        >
-          {{ m.label }}
-        </Button>
+      <div class="flex min-h-6 items-center gap-1.5">
         <span class="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
           <Loader2 v-if="searching" class="h-3 w-3 animate-spin" />
           <template v-else-if="invalidRegex">{{ t("files.findInvalid") }}</template>
@@ -196,6 +202,30 @@ defineExpose({ focusInput });
             {{ t("files.textSearchSummary", { files: results.length, matches: totalMatches }) }}
           </template>
         </span>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span class="w-14 shrink-0 text-[11px] text-muted-foreground">{{
+          t("files.textSearchInclude")
+        }}</span>
+        <Input
+          v-model="include"
+          :placeholder="t('files.textSearchIncludePlaceholder')"
+          :title="t('files.textSearchIncludeHint')"
+          class="h-7 text-xs"
+          @keydown.enter.prevent="runSearch"
+        />
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span class="w-14 shrink-0 text-[11px] text-muted-foreground">{{
+          t("files.textSearchExclude")
+        }}</span>
+        <Input
+          v-model="exclude"
+          :placeholder="t('files.textSearchExcludePlaceholder')"
+          :title="t('files.textSearchExcludeHint')"
+          class="h-7 text-xs"
+          @keydown.enter.prevent="runSearch"
+        />
       </div>
     </div>
 
@@ -205,10 +235,7 @@ defineExpose({ focusInput });
         {{ query.trim() ? t("files.textSearchNoResults") : t("files.textSearchHint") }}
       </p>
       <div v-else class="py-1">
-        <p
-          v-if="truncated"
-          class="border-b px-3 py-1.5 text-xs text-muted-foreground"
-        >
+        <p v-if="truncated" class="border-b px-3 py-1.5 text-xs text-muted-foreground">
           {{ t("files.textSearchTruncated") }}
         </p>
         <div v-for="hit in results" :key="hit.path">
@@ -221,9 +248,14 @@ defineExpose({ focusInput });
               :is="collapsed.has(hit.path) ? ChevronRight : ChevronDown"
               class="h-3 w-3 shrink-0 text-muted-foreground"
             />
-            <Icon :icon="fileIcon(hit.path.slice(hit.path.lastIndexOf('/') + 1))" class="h-3.5 w-3.5 shrink-0" />
+            <Icon
+              :icon="fileIcon(hit.path.slice(hit.path.lastIndexOf('/') + 1))"
+              class="h-3.5 w-3.5 shrink-0"
+            />
             <span class="min-w-0 flex-1 truncate font-mono text-xs">{{ hit.path }}</span>
-            <span class="shrink-0 rounded-sm bg-muted px-1 font-mono text-[10px] text-muted-foreground">
+            <span
+              class="shrink-0 rounded-sm bg-muted px-1 font-mono text-[10px] text-muted-foreground"
+            >
               {{ hit.count }}
             </span>
           </button>
@@ -234,7 +266,9 @@ defineExpose({ focusInput });
               class="flex w-full items-start gap-2 py-0.5 pl-8 pr-2 text-left hover:bg-accent"
               @click="emit('open', hit.path, ln.line, findQuery)"
             >
-              <span class="w-8 shrink-0 pt-px text-right font-mono text-[11px] text-muted-foreground">
+              <span
+                class="w-8 shrink-0 pt-px text-right font-mono text-[11px] text-muted-foreground"
+              >
                 {{ ln.line }}
               </span>
               <span class="min-w-0 flex-1 truncate font-mono text-[11px]">

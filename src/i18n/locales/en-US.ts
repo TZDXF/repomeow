@@ -128,6 +128,7 @@ export default {
     save_parent_dir_missing: "Target directory does not exist",
     // full-text search
     search_invalid_regex: "Invalid search pattern",
+    search_invalid_glob: "Invalid file filter pattern",
     // hidden / pin
     hidden_item_type_unknown: "Unknown hidden item type",
     hidden_item_key_required: "Hidden item key is required",
@@ -759,6 +760,12 @@ export default {
     textSearchNoResults: "No matching results",
     textSearchSummary: "{files} files, {matches} matches",
     textSearchTruncated: "Too many matches, showing partial results",
+    textSearchInclude: "Files to include",
+    textSearchIncludePlaceholder: "e.g. src/**/*.ts, **/*.vue",
+    textSearchIncludeHint: "Separate multiple file or folder patterns with commas",
+    textSearchExclude: "Exclude",
+    textSearchExcludePlaceholder: "e.g. **/node_modules/**, dist/**",
+    textSearchExcludeHint: "Separate multiple file or folder patterns to exclude with commas",
     treeView: "File Tree",
     searchView: "Full-Text Search (Ctrl+Shift+F)",
     zoomIn: "Zoom In",

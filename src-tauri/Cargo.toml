@@ -52,6 +52,7 @@ plist = "1.10.0"
 # default-features = false:只读本地操作不需要 https/ssh,避免引入 OpenSSL/libssh2
 git2 = { version = "0.20", default-features = false }
 # 全文搜索(search_project_text)的单词边界与用户正则模式
+globset = "0.4"
 regex = "1"
 
 [dev-dependencies]

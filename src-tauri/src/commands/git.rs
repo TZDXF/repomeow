@@ -1609,6 +1609,13 @@ fn worktree_remove_blocking(
         ));
     }
     let branch = target.branch.clone();
+    // 目录已被外部删除时,`git worktree remove` 会因缺少 `.git` 先验校验失败;
+    // 交给 Git prune 清理悬挂登记,避免把可恢复的清理操作报成删除失败。
+    // 仅对目录本身不存在的情况自动处理,避免误删仍可能含有用户文件的目录。
+    if !Path::new(worktree_path).exists() {
+        run_git(path, &["worktree", "prune"])?;
+        return list_worktrees_blocking(path);
+    }
     let mut args = vec!["worktree", "remove"];
     if force {
         args.push("--force");
@@ -4214,6 +4221,31 @@ mod tests {
             .unwrap()
             .iter()
             .any(|b| b == "feature/x"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn worktree_remove_prunes_missing_directory() {
+        let dir = temp_dir("worktree-prune-missing-directory");
+        init_repo(&dir);
+        fs::write(dir.join("a.txt"), "hello").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-m", "init"]);
+        let path = dir.to_str().unwrap();
+
+        let added =
+            worktree_add_blocking(path, ".worktrees/feature", "feature", true, None).unwrap();
+        let wt = added.iter().find(|w| !w.is_main).unwrap();
+        fs::remove_dir_all(&wt.path).unwrap();
+
+        let remaining = worktree_remove_blocking(path, &wt.path, false, false).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert!(remaining[0].is_main);
+        assert!(!list_worktrees_blocking(path)
+            .unwrap()
+            .iter()
+            .any(|w| w.path == wt.path));
 
         let _ = fs::remove_dir_all(&dir);
     }

@@ -111,6 +111,8 @@ pub enum ErrorCode {
     // ── 全文搜索 ──────────────────────────────────────────────────────
     /// 正则模式的搜索表达式非法(message 携带 regex 解析错误原文)
     SearchInvalidRegex,
+    /// 文件包含/排除 glob 非法(message 携带 glob 解析错误原文)
+    SearchInvalidGlob,
 
     // ── 隐藏项 / 标记 ─────────────────────────────────────────────────
     HiddenItemTypeUnknown,
@@ -254,6 +256,7 @@ impl ErrorCode {
             Self::SaveContentTooLarge => "save_content_too_large",
             Self::SaveParentDirMissing => "save_parent_dir_missing",
             Self::SearchInvalidRegex => "search_invalid_regex",
+            Self::SearchInvalidGlob => "search_invalid_glob",
             // 隐藏 / 标记
             Self::HiddenItemTypeUnknown => "hidden_item_type_unknown",
             Self::HiddenItemKeyRequired => "hidden_item_key_required",

@@ -120,6 +120,7 @@ export default {
     save_parent_dir_missing: "目标目录不存在",
     // 全文搜索
     search_invalid_regex: "搜索表达式无效",
+    search_invalid_glob: "文件筛选模式无效",
     // 隐藏项 / 标记
     hidden_item_type_unknown: "未知的隐藏项类型",
     hidden_item_key_required: "隐藏项标识不能为空",
@@ -737,6 +738,12 @@ export default {
     textSearchNoResults: "没有匹配的结果",
     textSearchSummary: "{files} 个文件 {matches} 处匹配",
     textSearchTruncated: "匹配过多,仅显示部分结果",
+    textSearchInclude: "包含的文件",
+    textSearchIncludePlaceholder: "例如 src/**/*.ts, **/*.vue",
+    textSearchIncludeHint: "用逗号分隔多个文件或文件夹模式",
+    textSearchExclude: "排除的文件",
+    textSearchExcludePlaceholder: "例如 **/node_modules/**, dist/**",
+    textSearchExcludeHint: "用逗号分隔要排除的文件或文件夹模式",
     treeView: "文件树",
     searchView: "全文搜索 (Ctrl+Shift+F)",
     zoomIn: "放大",

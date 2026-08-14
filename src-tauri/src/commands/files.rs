@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
+
 use crate::commands::walk;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::{
@@ -224,6 +226,113 @@ impl SearchMatcher {
     }
 }
 
+/// 文件包含/排除筛选,匹配工作区根目录下的 '/' 分隔相对路径。
+/// VS Code 搜索视图中不带路径分隔符的模式默认匹配任意层级;
+/// 目录模式通过同时检查文件路径及其祖先路径实现。
+struct SearchFileFilter {
+    include: GlobSet,
+    exclude: GlobSet,
+}
+
+impl SearchFileFilter {
+    fn build(include: &str, exclude: &str) -> AppResult<Self> {
+        Ok(Self {
+            include: build_search_glob_set(include)?,
+            exclude: build_search_glob_set(exclude)?,
+        })
+    }
+
+    fn matches(&self, path: &str) -> bool {
+        let included = self.include.is_empty() || path_matches_glob(&self.include, path);
+        included && !path_matches_glob(&self.exclude, path)
+    }
+}
+
+/// 编译 VS Code Search view 风格的逗号分隔 glob 列表。
+fn build_search_glob_set(input: &str) -> AppResult<GlobSet> {
+    let mut builder = GlobSetBuilder::new();
+    let mut count = 0;
+    for raw in split_search_globs(input) {
+        let Some(pattern) = normalize_search_glob(&raw) else {
+            continue;
+        };
+        let mut glob = GlobBuilder::new(&pattern);
+        glob.literal_separator(true)
+            .backslash_escape(false)
+            .case_insensitive(cfg!(windows) || cfg!(target_os = "macos"));
+        let glob = glob
+            .build()
+            .map_err(|e| AppError::coded(ErrorCode::SearchInvalidGlob, e.to_string()))?;
+        builder.add(glob);
+        count += 1;
+    }
+    if count == 0 {
+        return Ok(GlobSet::empty());
+    }
+    builder
+        .build()
+        .map_err(|e| AppError::coded(ErrorCode::SearchInvalidGlob, e.to_string()))
+}
+
+/// 在逗号分隔时保留 `{a,b}` 和 `[a,b]` 内部的逗号。
+fn split_search_globs(input: &str) -> Vec<String> {
+    let mut patterns = Vec::new();
+    let mut current = String::new();
+    let mut braces = 0usize;
+    let mut classes = 0usize;
+    for ch in input.chars() {
+        match ch {
+            '{' => braces += 1,
+            '}' => braces = braces.saturating_sub(1),
+            '[' => classes += 1,
+            ']' => classes = classes.saturating_sub(1),
+            ',' if braces == 0 && classes == 0 => {
+                patterns.push(std::mem::take(&mut current));
+                continue;
+            }
+            _ => {}
+        }
+        current.push(ch);
+    }
+    patterns.push(current);
+    patterns
+}
+
+fn normalize_search_glob(raw: &str) -> Option<String> {
+    let mut pattern = raw.trim().replace('\\', "/");
+    if pattern.is_empty() {
+        return None;
+    }
+    let root_only = pattern.starts_with("./");
+    if root_only {
+        pattern.drain(..2);
+    }
+    if pattern.ends_with('/') {
+        pattern.push_str("**");
+    }
+    if !root_only && !pattern.contains('/') {
+        pattern = format!("**/{pattern}");
+    }
+    Some(pattern)
+}
+
+fn path_matches_glob(set: &GlobSet, path: &str) -> bool {
+    if set.is_empty() {
+        return false;
+    }
+    let mut candidate = path;
+    loop {
+        if set.is_match(candidate) {
+            return true;
+        }
+        let Some((parent, _)) = candidate.rsplit_once('/') else {
+            break;
+        };
+        candidate = parent;
+    }
+    false
+}
+
 /// 超长行(压缩产物等)截取首个匹配前后的窗口,窗口边界向下取整到 UTF-8 字符边界
 fn window_line(line: &str, matches: &[(usize, usize)]) -> String {
     if line.len() <= SEARCH_LINE_PREVIEW_MAX {
@@ -316,6 +425,8 @@ pub fn search_project_text(
     case_sensitive: bool,
     whole_word: bool,
     use_regex: bool,
+    include: String,
+    exclude: String,
 ) -> AppResult<TextSearchOutcome> {
     ensure_dir(&root)?;
     let query = query.trim();
@@ -326,8 +437,12 @@ pub fn search_project_text(
         });
     }
     let matcher = SearchMatcher::build(query, case_sensitive, whole_word, use_regex)?;
+    let filter = SearchFileFilter::build(&include, &exclude)?;
     let root_path = Path::new(&root);
-    let files = walk::searchable_files(root_path);
+    let files: Vec<_> = walk::searchable_files(root_path)
+        .into_iter()
+        .filter(|rel| filter.matches(&walk::to_slash(rel)))
+        .collect();
 
     let total = std::sync::atomic::AtomicU32::new(0);
     let hits: std::sync::Mutex<Vec<TextSearchHit>> = std::sync::Mutex::new(Vec::new());
@@ -917,35 +1032,35 @@ services:
         // 默认大小写不敏感:第 1、2 行命中
         fs::write(p.join("a.txt"), "Hello world\nhello WORLD\nbye\n").unwrap();
 
-        let r = search_project_text(dir.clone(), "hello".into(), false, false, false).unwrap();
+        let r = search_project_text(dir.clone(), "hello".into(), false, false, false, "".into(), "".into()).unwrap();
         assert_eq!(hit_lines(&r, "a.txt"), vec![1, 2]);
         assert_eq!(r.hits[0].count, 2);
         assert!(!r.truncated);
 
         // 大小写敏感:仅第 2 行(hello WORLD)
-        let r = search_project_text(dir.clone(), "hello".into(), true, false, false).unwrap();
+        let r = search_project_text(dir.clone(), "hello".into(), true, false, false, "".into(), "".into()).unwrap();
         assert_eq!(hit_lines(&r, "a.txt"), vec![2]);
 
         // 全字匹配:"world" 不命中 "worldwide"
         fs::write(p.join("b.txt"), "world\nworldwide\n").unwrap();
-        let r = search_project_text(dir.clone(), "world".into(), false, true, false).unwrap();
+        let r = search_project_text(dir.clone(), "world".into(), false, true, false, "".into(), "".into()).unwrap();
         assert_eq!(hit_lines(&r, "b.txt"), vec![1]);
 
         // 正则模式 + 全字组合:\b(?:c.t)\b
         fs::write(p.join("c.txt"), "cat cut\nconcat\n").unwrap();
-        let r = search_project_text(dir.clone(), "c.t".into(), false, true, true).unwrap();
+        let r = search_project_text(dir.clone(), "c.t".into(), false, true, true, "".into(), "".into()).unwrap();
         assert_eq!(hit_lines(&r, "c.txt"), vec![1]);
 
         // 同行多次匹配计入 count,行只出现一次
         fs::write(p.join("d.txt"), "ab ab ab\n").unwrap();
-        let r = search_project_text(dir.clone(), "ab".into(), false, false, false).unwrap();
+        let r = search_project_text(dir.clone(), "ab".into(), false, false, false, "".into(), "".into()).unwrap();
         assert_eq!(hit_lines(&r, "d.txt"), vec![1]);
         let d = r.hits.iter().find(|h| h.path == "d.txt").unwrap();
         assert_eq!(d.count, 3);
         assert_eq!(d.lines.len(), 1);
 
         // 空查询返回空结果
-        let r = search_project_text(dir.clone(), "  ".into(), false, false, false).unwrap();
+        let r = search_project_text(dir.clone(), "  ".into(), false, false, false, "".into(), "".into()).unwrap();
         assert!(r.hits.is_empty());
 
         let _ = fs::remove_dir_all(&dir);
@@ -965,7 +1080,7 @@ services:
         fs::create_dir_all(p.join(".git")).unwrap();
         fs::write(p.join(".git/token"), "token\n").unwrap();
 
-        let r = search_project_text(dir.clone(), "token".into(), false, false, false).unwrap();
+        let r = search_project_text(dir.clone(), "token".into(), false, false, false, "".into(), "".into()).unwrap();
         let paths: Vec<&str> = r.hits.iter().map(|h| h.path.as_str()).collect();
         // 隐藏文件可搜;二进制、node_modules、git 忽略目录、.git 内部跳过
         assert_eq!(paths, vec![".env"]);
@@ -983,7 +1098,7 @@ services:
         line.push_str(&"y".repeat(100));
         fs::write(p.join("min.js"), &line).unwrap();
 
-        let r = search_project_text(dir.clone(), "NEEDLE".into(), false, false, false).unwrap();
+        let r = search_project_text(dir.clone(), "NEEDLE".into(), false, false, false, "".into(), "".into()).unwrap();
         let text = &r.hits[0].lines[0].text;
         assert!(text.starts_with('…'), "超长行窗口应带前省略号:{text}");
         assert!(text.ends_with('…'), "超长行窗口应带后省略号:{text}");
@@ -992,7 +1107,7 @@ services:
 
         // 短行原样返回
         fs::write(p.join("short.txt"), "NEEDLE here\n").unwrap();
-        let r = search_project_text(dir.clone(), "NEEDLE".into(), false, false, false).unwrap();
+        let r = search_project_text(dir.clone(), "NEEDLE".into(), false, false, false, "".into(), "".into()).unwrap();
         let short = r.hits.iter().find(|h| h.path == "short.txt").unwrap();
         assert_eq!(short.lines[0].text, "NEEDLE here");
 
@@ -1007,7 +1122,7 @@ services:
         let content = (0..1100).map(|i| format!("hit {i}")).collect::<Vec<_>>().join("\n");
         fs::write(p.join("many.txt"), &content).unwrap();
 
-        let r = search_project_text(dir.clone(), "hit".into(), false, false, false).unwrap();
+        let r = search_project_text(dir.clone(), "hit".into(), false, false, false, "".into(), "".into()).unwrap();
         assert!(r.truncated);
         let hit = &r.hits[0];
         assert_eq!(hit.count, SEARCH_MAX_MATCHES);
@@ -1017,10 +1132,84 @@ services:
     }
 
     #[test]
+    fn search_project_text_filters_by_include_and_exclude_globs() {
+        let dir = temp_project_dir("search-globs");
+        let p = Path::new(&dir);
+        fs::create_dir_all(p.join("src/nested")).unwrap();
+        fs::create_dir_all(p.join("tests")).unwrap();
+        fs::create_dir_all(p.join("dist")).unwrap();
+        fs::write(p.join("src/main.ts"), "needle\n").unwrap();
+        fs::write(p.join("src/nested/worker.ts"), "needle\n").unwrap();
+        fs::write(p.join("tests/main.ts"), "needle\n").unwrap();
+        fs::write(p.join("dist/bundle.ts"), "needle\n").unwrap();
+        fs::write(p.join("README.md"), "needle\n").unwrap();
+
+        let r = search_project_text(
+            dir.clone(),
+            "needle".into(),
+            false,
+            false,
+            false,
+            "src/**/*.ts, README.md".into(),
+            "src/nested/**".into(),
+        )
+        .unwrap();
+        let paths: Vec<&str> = r.hits.iter().map(|h| h.path.as_str()).collect();
+        assert_eq!(paths, vec!["README.md", "src/main.ts"]);
+
+        // 无斜杠模式按 VS Code Search view 语义匹配任意层级;
+        // ./ 只匹配工作区根层文件。
+        let r = search_project_text(
+            dir.clone(),
+            "needle".into(),
+            false,
+            false,
+            false,
+            "*.ts".into(),
+            "".into(),
+        )
+        .unwrap();
+        let paths: Vec<&str> = r.hits.iter().map(|h| h.path.as_str()).collect();
+        assert_eq!(paths, vec!["dist/bundle.ts", "src/main.ts", "src/nested/worker.ts", "tests/main.ts"]);
+
+        let r = search_project_text(
+            dir.clone(),
+            "needle".into(),
+            false,
+            false,
+            false,
+            "./*.md".into(),
+            "".into(),
+        )
+        .unwrap();
+        assert_eq!(r.hits.iter().map(|h| h.path.as_str()).collect::<Vec<_>>(), vec!["README.md"]);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn search_project_text_rejects_invalid_glob() {
+        let dir = temp_project_dir("search-badglob");
+        assert!(matches!(
+            search_project_text(
+                dir.clone(),
+                "needle".into(),
+                false,
+                false,
+                false,
+                "src/[".into(),
+                "".into(),
+            ),
+            Err(ref e) if e.is_code(ErrorCode::SearchInvalidGlob)
+        ));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn search_project_text_invalid_regex() {
         let dir = temp_project_dir("search-badre");
         assert!(matches!(
-            search_project_text(dir.clone(), "([".into(), false, false, true),
+            search_project_text(dir.clone(), "([".into(), false, false, true, "".into(), "".into()),
             Err(ref e) if e.is_code(ErrorCode::SearchInvalidRegex)
         ));
         let _ = fs::remove_dir_all(&dir);

@@ -28,6 +28,7 @@ const GENERIC_DETAIL_CODES = new Set([
   "git_clone_failed",
   "git_task_failed",
   "git_noise_fallback",
+  "search_invalid_glob",
 ]);
 
 /**
