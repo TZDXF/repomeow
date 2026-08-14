@@ -65,6 +65,22 @@ describe("translateCommandError / cmd 本地化路径(新契约)", () => {
       expect(translateCommandErrorForTest(serialized)).toBe("请先在设置页配置 AI 的 API Key");
     });
 
+    it("通用兜底码 (git_command_failed):i18n 文案过笼统,追加后端原始 stderr", () => {
+      // 否则用户只看到一句无信息的"git 命令失败",真实原因(repository not found)被丢弃
+      const serialized = {
+        code: "git_command_failed",
+        message: "fatal: repository 'http://example.com/x.git/' not found",
+      };
+      expect(translateCommandErrorForTest(serialized)).toBe(
+        "git 命令失败\nfatal: repository 'http://example.com/x.git/' not found",
+      );
+    });
+
+    it("特定码 (git_repo_not_found):仅展示友好文案,message 为空不追加", () => {
+      const serialized = { code: "git_repo_not_found", message: "" };
+      expect(translateCommandErrorForTest(serialized)).toBe("远端仓库不存在或当前账号没有访问权限");
+    });
+
     it("未知错误码:回退到 message,不让用户看到英文 code key", () => {
       const serialized = {
         code: "some_unknown_code",

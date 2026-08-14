@@ -718,6 +718,7 @@ export default {
     truncated: "文件过大,仅显示前 512KB 内容",
     rendered: "渲染",
     source: "源码",
+    wrap: "自动换行",
   },
   markdown: {
     saveDialogTitle: "另存为",

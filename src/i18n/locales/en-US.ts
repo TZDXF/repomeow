@@ -740,6 +740,7 @@ export default {
     truncated: "File too large, showing first 512 KB only",
     rendered: "Rendered",
     source: "Source",
+    wrap: "Word wrap",
   },
   markdown: {
     saveDialogTitle: "Save as",

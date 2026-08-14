@@ -250,7 +250,16 @@ fn friendly_git_error(raw: &str) -> AppError {
     if text.contains("Authentication failed") || text.contains("Invalid username or password") {
         return coded(ErrorCode::GitAuthFailed, "");
     }
-    if text.contains("Repository not found") || text.contains("repository not found") {
+    // 远端仓库不存在或当前账号无权限(私有库认证失败时服务端同样回 not found 而非 403,
+    // 故置于认证类之后无碍:git 若明确报 "Authentication failed" 已在上面优先命中):
+    //   - GitHub:"Repository not found." / "fatal: repository '<url>' not found"
+    //   - GitLab:"The project you were looking for could not be found."
+    //   - 通用:  "fatal: repository '<url>' not found"(URL 夹在 repository 与 not found 之间,
+    //            不能用 "repository not found" 连续子串匹配,需拆成两个 contains)
+    if text.contains("Repository not found")
+        || text.contains("could not be found")
+        || (text.contains("repository") && text.contains("not found"))
+    {
         return coded(ErrorCode::GitRepoNotFound, "");
     }
 
@@ -2980,6 +2989,17 @@ mod tests {
             ),
             (
                 "remote: Repository not found.",
+                ErrorCode::GitRepoNotFound,
+            ),
+            // 通用 git:"fatal: repository '<url>' not found"(URL 夹在中间,旧连续子串匹配漏判)
+            (
+                "fatal: repository 'http://192.168.1.3:12580/RD/ai-chat/graphrag-web-flask.git/' not found",
+                ErrorCode::GitRepoNotFound,
+            ),
+            // GitLab:远端 404 时打印的 "project could not be found"
+            (
+                "remote: The project you were looking for could not be found.\n\
+                 fatal: repository 'http://192.168.1.3:12580/RD/ai-chat/graphrag-web-flask.git/' not found",
                 ErrorCode::GitRepoNotFound,
             ),
             (

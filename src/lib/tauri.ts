@@ -15,8 +15,24 @@ type WrappedCommandError = Error & {
 };
 
 /**
+ * 通用兜底错误码:i18n 文案仅笼统的"X 失败",诊断价值几乎全靠后端附带的原始
+ * stderr / 错误细节(message)。命中这些码时把 message 追加展示,避免用户只看到
+ * 一句无信息的"git 命令失败"。特定码(如 git_repo_not_found)后端 message 为空,
+ * 不在此列,仅展示友好的 i18n 文案。
+ */
+const GENERIC_DETAIL_CODES = new Set([
+  "git_command_failed",
+  "git_push_failed",
+  "git_pull_failed",
+  "git_log_failed",
+  "git_clone_failed",
+  "git_task_failed",
+  "git_noise_fallback",
+]);
+
+/**
  * 将 Tauri 拒绝对象翻译为本地化文本。
- * - 命中 `errors.<code>` i18n key → 返回本地化文本
+ * - 命中 `errors.<code>` i18n key → 返回本地化文本(通用兜底码额外追加原始 message)
  * - 未命中但有 `code` → 返回 `code` + `message`(技术上下文)
  * - 有 `message` → 返回 `message`
  * - 兜底 → "未知错误"
@@ -31,7 +47,9 @@ function translateCommandError(error: unknown): string {
     const message = typeof serialized.message === "string" ? serialized.message : "";
     const code = typeof serialized.code === "string" ? serialized.code : "";
     if (code && i18n.global.te(`errors.${code}`)) {
-      return i18n.global.t(`errors.${code}`);
+      const base = i18n.global.t(`errors.${code}`);
+      // 通用兜底码:i18n 文案过笼统,需把后端携带的原始细节一并展示才有诊断价值
+      return GENERIC_DETAIL_CODES.has(code) && message ? `${base}\n${message}` : base;
     }
     // 未命中 i18n:有 message 用 message,否则兜底("code:message" 形式对用户无意义)
     if (message) {

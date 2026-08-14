@@ -13,6 +13,7 @@ import {
   FileQuestion,
   FolderTree,
   Search,
+  WrapText,
 } from "@lucide/vue";
 import { useLocalStorage } from "@vueuse/core";
 import { Markdown, type ControlsConfig, type NodeRenderers } from "vue-stream-markdown";
@@ -235,9 +236,11 @@ watch(selected, async (path) => {
   }
 });
 
-// ── 代码高亮(Shiki) ─────────────────────────────────────────────────────────
+// ── 代码视图:Shiki 高亮,超大文件/失败回退纯文本(均带行号) ────────────────────
 const mdMode = ref<"rendered" | "source">("rendered");
-const highlighted = ref("");
+// 代码自动换行(持久化);关闭时超宽行靠预览容器横向滚动
+const codeWrap = useLocalStorage("repomeow:files-code-wrap", false);
+const codeHtml = ref("");
 let highlightSeq = 0;
 
 const LANG_BY_EXT: Record<string, string> = {
@@ -300,6 +303,22 @@ function shikiLang(path: string): string {
   return LANG_BY_NAME[name] ?? LANG_BY_EXT[extOf(path)] ?? "text";
 }
 
+/** 行数超过该值的大文件跳过 Shiki(高亮耗时且易卡顿),直接纯文本 + 行号呈现 */
+const HIGHLIGHT_MAX_LINES = 2000;
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[ch] ?? ch);
+}
+
+/** 转义纯文本包成与 Shiki 相同的 pre>code>.line 结构,复用行号样式 */
+function plainCodeHtml(text: string): string {
+  const lines = text
+    .split("\n")
+    .map((line) => `<span class="line">${escapeHtml(line)}</span>`)
+    .join("\n");
+  return `<pre class="code-plain"><code>${lines}</code></pre>`;
+}
+
 /** 是否以代码视图展示(Markdown 渲染模式下不走高亮) */
 const codeVisible = computed(
   () => previewText.value !== null && !(isMarkdown.value && mdMode.value === "rendered"),
@@ -307,19 +326,28 @@ const codeVisible = computed(
 
 watch([codeVisible, previewText, selected], async ([visible]) => {
   const mySeq = ++highlightSeq;
-  highlighted.value = "";
+  if (!visible) {
+    codeHtml.value = "";
+    return;
+  }
   const text = previewText.value;
-  if (!visible || text === null || !selected.value) return;
-  const lang = shikiLang(selected.value);
+  if (text === null || !selected.value) return;
+  // 超大文件同步走纯文本;其余等 Shiki 完成后一次性替换,期间保留旧内容——
+  // 避免先渲染无样式纯文本、再跳成带行号高亮的闪动
+  if (text.split("\n").length > HIGHLIGHT_MAX_LINES) {
+    codeHtml.value = plainCodeHtml(text);
+    return;
+  }
   try {
     const html = await codeToHtml(text, {
-      lang,
+      lang: shikiLang(selected.value),
       themes: { light: "github-light", dark: "github-dark" },
       defaultColor: false,
     });
-    if (mySeq === highlightSeq) highlighted.value = html;
+    if (mySeq === highlightSeq) codeHtml.value = html;
   } catch {
-    // 语言包缺失等情况回退纯文本
+    // 语言包缺失等情况回退纯文本(仍带行号)
+    if (mySeq === highlightSeq) codeHtml.value = plainCodeHtml(text);
   }
 });
 
@@ -506,6 +534,17 @@ function startTreeResize(e: PointerEvent) {
               <Code class="h-3.5 w-3.5" />
             </Button>
           </div>
+          <Button
+            v-if="codeVisible"
+            variant="ghost"
+            size="icon"
+            class="h-7 w-7 shrink-0"
+            :class="codeWrap ? 'bg-accent' : ''"
+            :title="t('files.wrap')"
+            @click="codeWrap = !codeWrap"
+          >
+            <WrapText class="h-3.5 w-3.5" />
+          </Button>
         </div>
 
         <div
@@ -515,7 +554,8 @@ function startTreeResize(e: PointerEvent) {
           {{ t("files.truncated") }}
         </div>
 
-        <ScrollArea class="min-h-0 flex-1">
+        <!-- 原生双向滚动:ScrollArea 只注册了竖向滚动条,横向内容会被裁掉 -->
+        <div class="min-h-0 flex-1 overflow-auto">
           <div
             v-if="!selected"
             class="flex h-full flex-col items-center justify-center gap-2 p-10 text-muted-foreground"
@@ -547,17 +587,18 @@ function startTreeResize(e: PointerEvent) {
               :before-download="beforeDownload"
             />
           </div>
-          <div v-else-if="previewText !== null" class="file-code p-4">
+          <div
+            v-else-if="previewText !== null"
+            class="file-code p-4"
+            :class="{ 'code-wrap': codeWrap }"
+          >
             <pre
-              v-if="highlighted"
-              class="w-fit min-w-full font-mono text-[13px] leading-5"
-              v-html="highlighted"
+              v-if="codeHtml"
+              class="w-max min-w-full font-mono text-[13px] leading-5"
+              v-html="codeHtml"
             />
-            <pre v-else class="w-fit min-w-full font-mono text-[13px] leading-5">{{
-              previewText
-            }}</pre>
           </div>
-        </ScrollArea>
+        </div>
       </div>
     </div>
   </div>
@@ -575,7 +616,7 @@ function startTreeResize(e: PointerEvent) {
 
 <style scoped>
 /* Shiki 双主题:token 上的 --shiki-light/--shiki-dark 变量按 .dark 切换,
-   清掉主题自带背景透出页面底色;保持 pre 不折行,横向滚动交给 ScrollArea */
+   清掉主题自带背景透出页面底色;pre 默认不折行,横向滚动交给 overflow-auto 容器 */
 :global(.file-code .shiki),
 :global(.file-code .shiki span) {
   color: var(--shiki-light);
@@ -587,18 +628,26 @@ function startTreeResize(e: PointerEvent) {
   color: var(--shiki-dark);
 }
 
-/* 行号:Shiki 每行一个 .line span,行首 ::before 用 CSS 计数器生成行号,
-   user-select:none 保证复制代码时不带行号;
+/* 自动换行:pre 的 UA 默认 white-space:pre 不吃继承,内外两层 pre(Shiki/纯文本回退)
+   都要直接覆盖;width 还原铺满,否则 w-max 会让盒子仍撑到最宽行 */
+:global(.file-code.code-wrap pre) {
+  width: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* 行号:Shiki 输出与纯文本(超大文件/高亮失败)统一为 pre>code>.line 结构,
+   行首 ::before 用 CSS 计数器生成行号,user-select:none 保证复制代码时不带行号;
    注意选择器(含伪元素)必须整段包进 :global(),scoped 编译器会丢弃 :global() 之后的片段 */
-:global(.file-code .shiki code) {
+:global(.file-code pre code) {
   counter-reset: line;
 }
 
-:global(.file-code .shiki .line) {
+:global(.file-code .line) {
   counter-increment: line;
 }
 
-:global(.file-code .shiki .line::before) {
+:global(.file-code .line::before) {
   content: counter(line);
   display: inline-block;
   min-width: 2.75rem;
