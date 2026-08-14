@@ -69,9 +69,11 @@ watch([query, include, exclude, caseSensitive, wholeWord, useRegex], () => {
 watch(
   () => props.root,
   () => {
+    seq++;
     results.value = [];
     truncated.value = false;
     error.value = "";
+    searching.value = false;
   },
 );
 
@@ -204,7 +206,7 @@ defineExpose({ focusInput });
         </span>
       </div>
       <div class="flex items-center gap-1.5">
-        <span class="w-14 shrink-0 text-[11px] text-muted-foreground">{{
+        <span class="w-20 shrink-0 whitespace-nowrap text-[11px] text-muted-foreground">{{
           t("files.textSearchInclude")
         }}</span>
         <Input
@@ -216,7 +218,7 @@ defineExpose({ focusInput });
         />
       </div>
       <div class="flex items-center gap-1.5">
-        <span class="w-14 shrink-0 text-[11px] text-muted-foreground">{{
+        <span class="w-20 shrink-0 whitespace-nowrap text-[11px] text-muted-foreground">{{
           t("files.textSearchExclude")
         }}</span>
         <Input

@@ -763,7 +763,7 @@ export default {
     textSearchInclude: "Files to include",
     textSearchIncludePlaceholder: "e.g. src/**/*.ts, **/*.vue",
     textSearchIncludeHint: "Separate multiple file or folder patterns with commas",
-    textSearchExclude: "Exclude",
+    textSearchExclude: "Files to exclude",
     textSearchExcludePlaceholder: "e.g. **/node_modules/**, dist/**",
     textSearchExcludeHint: "Separate multiple file or folder patterns to exclude with commas",
     treeView: "File Tree",
