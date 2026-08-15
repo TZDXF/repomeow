@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { Check, FolderOpen, Plus, ScanSearch, Trash2 } from "@lucide/vue";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import type { AcceptableValue } from "reka-ui";
+import { Check, Download, FolderOpen, Plus, ScanSearch, Trash2 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -13,9 +15,17 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { cmd } from "@/lib/tauri";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { cmd, onListen } from "@/lib/tauri";
 import { useSettingsStore } from "@/stores/settings";
-import type { JdkCandidate, JdkConfig } from "@/types";
+import type { JdkCandidate, JdkConfig, JdkVendor, RemoteJdkRelease } from "@/types";
 
 const { t } = useI18n();
 const store = useSettingsStore();
@@ -131,6 +141,117 @@ async function remove(jdk: JdkConfig) {
   if (!window.confirm(t("settings.devEnv.deleteConfirm", { name: jdk.name }))) return;
   await store.removeJdk(jdk.id);
 }
+
+// ---- 在线安装 ──────────────────────────────────────────────────────────────
+
+/** 安装源选项(厂商名为专有名词,不走 i18n) */
+const VENDORS: { value: JdkVendor; label: string }[] = [
+  { value: "adoptium", label: "Adoptium (Temurin)" },
+  { value: "zulu", label: "Azul Zulu" },
+];
+
+const installOpen = ref(false);
+const installVendor = ref<JdkVendor>("adoptium");
+/** Select 的 v-model 用字符串,安装时转回数字 */
+const installMajor = ref("");
+const releases = ref<RemoteJdkRelease[]>([]);
+const loadingReleases = ref(false);
+const installing = ref(false);
+/** 后端 jdk://install-progress 事件载荷(下载字节量/解压阶段) */
+const progress = ref<{ stage: string; received: number; total: number } | null>(null);
+let unlistenProgress: UnlistenFn | undefined;
+
+onUnmounted(() => unlistenProgress?.());
+
+/** 下载进度百分比;解压阶段/未知总量返回 null(转不确定态样式) */
+const progressPct = computed(() => {
+  const p = progress.value;
+  if (!p || p.stage !== "download" || !p.total) return null;
+  return Math.min(100, Math.round((p.received / p.total) * 100));
+});
+
+function fmtMB(bytes: number): string {
+  return `${(bytes / 1048576).toFixed(1)} MB`;
+}
+
+function vendorLabel(vendor: JdkVendor): string {
+  return VENDORS.find((v) => v.value === vendor)?.label ?? vendor;
+}
+
+async function openInstall() {
+  installVendor.value = "adoptium";
+  installMajor.value = "";
+  releases.value = [];
+  progress.value = null;
+  installOpen.value = true;
+  await loadReleases();
+}
+
+async function loadReleases() {
+  loadingReleases.value = true;
+  try {
+    releases.value = await cmd<RemoteJdkRelease[]>("list_remote_jdks", {
+      vendor: installVendor.value,
+    });
+    // 默认选 17(Spring Boot 3.x 的基线),没有则退首个
+    const preferred = releases.value.find((r) => r.major === 17) ?? releases.value[0];
+    installMajor.value = preferred ? String(preferred.major) : "";
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    loadingReleases.value = false;
+  }
+}
+
+async function onVendorChange(value: AcceptableValue) {
+  if (typeof value !== "string" || value === installVendor.value) return;
+  installVendor.value = value as JdkVendor;
+  installMajor.value = "";
+  releases.value = [];
+  await loadReleases();
+}
+
+async function startInstall() {
+  const major = Number(installMajor.value);
+  if (!major || installing.value) return;
+  installing.value = true;
+  progress.value = { stage: "download", received: 0, total: 0 };
+  unlistenProgress?.();
+  unlistenProgress = await onListen<{ stage: string; received: number; total: number }>(
+    "jdk://install-progress",
+    (p) => {
+      progress.value = p;
+    },
+  );
+  try {
+    const installed = await cmd<JdkCandidate>("install_jdk", {
+      vendor: installVendor.value,
+      major,
+    });
+    if (store.jdkList.some((j) => pathKey(j.path) === pathKey(installed.path))) {
+      toast.info(t("settings.devEnv.alreadyInList"));
+    } else {
+      await store.saveJdk({
+        id: crypto.randomUUID(),
+        name: `Java ${majorVersion(installed.version)}`,
+        path: installed.path,
+      });
+      toast.success(
+        t("settings.devEnv.installed", {
+          vendor: vendorLabel(installVendor.value),
+          version: installed.version,
+        }),
+      );
+    }
+    installOpen.value = false;
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    installing.value = false;
+    unlistenProgress?.();
+    unlistenProgress = undefined;
+  }
+}
 </script>
 
 <template>
@@ -141,6 +262,10 @@ async function remove(jdk: JdkConfig) {
         <Button size="sm" variant="outline" :disabled="detecting" @click="detect">
           <ScanSearch class="h-4 w-4" />
           {{ detecting ? t("settings.devEnv.detecting") : t("settings.devEnv.detect") }}
+        </Button>
+        <Button size="sm" variant="outline" @click="openInstall">
+          <Download class="h-4 w-4" />
+          {{ t("settings.devEnv.installOnline") }}
         </Button>
         <Button size="sm" variant="outline" @click="openCreate">
           <Plus class="h-4 w-4" />
@@ -223,6 +348,85 @@ async function remove(jdk: JdkConfig) {
           </Button>
         </DialogFooter>
       </form>
+    </DialogContent>
+  </Dialog>
+
+  <Dialog v-model:open="installOpen">
+    <DialogContent class="sm:max-w-[min(30rem,calc(100%-2rem))]">
+      <DialogHeader>
+        <DialogTitle>{{ t("settings.devEnv.installTitle") }}</DialogTitle>
+      </DialogHeader>
+      <div class="flex flex-col gap-3">
+        <div class="flex flex-col gap-1.5">
+          <label class="text-sm font-medium">{{ t("settings.devEnv.vendorLabel") }}</label>
+          <Select :model-value="installVendor" @update:model-value="onVendorChange">
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem v-for="v in VENDORS" :key="v.value" :value="v.value">
+                  {{ v.label }}
+                </SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label class="text-sm font-medium">{{ t("settings.devEnv.versionLabel") }}</label>
+          <Select v-model="installMajor" :disabled="loadingReleases || !releases.length">
+            <SelectTrigger>
+              <SelectValue
+                :placeholder="
+                  loadingReleases
+                    ? t('settings.devEnv.versionLoading')
+                    : t('settings.devEnv.versionEmpty')
+                "
+              />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem v-for="r in releases" :key="r.major" :value="String(r.major)">
+                  Java {{ r.major }}({{ r.version }})
+                </SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </div>
+        <p class="text-xs text-muted-foreground">
+          {{ t("settings.devEnv.installTargetHint") }}
+        </p>
+        <div v-if="installing && progress" class="flex flex-col gap-1.5">
+          <div class="flex justify-between text-xs text-muted-foreground">
+            <span>
+              {{
+                progress.stage === "download"
+                  ? t("settings.devEnv.downloading")
+                  : t("settings.devEnv.extracting")
+              }}
+            </span>
+            <span v-if="progress.stage === 'download' && progress.total">
+              {{ fmtMB(progress.received) }} / {{ fmtMB(progress.total) }}
+            </span>
+          </div>
+          <div class="h-1.5 overflow-hidden rounded-full bg-muted">
+            <div
+              class="h-full rounded-full bg-primary transition-all"
+              :class="progressPct === null && 'animate-pulse'"
+              :style="{ width: `${progressPct ?? 100}%` }"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button
+            type="button"
+            :disabled="!installMajor || loadingReleases || installing"
+            @click="startInstall"
+          >
+            {{ installing ? t("settings.devEnv.installing") : t("settings.devEnv.installBtn") }}
+          </Button>
+        </DialogFooter>
+      </div>
     </DialogContent>
   </Dialog>
 </template>

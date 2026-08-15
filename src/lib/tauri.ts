@@ -35,6 +35,8 @@ const GENERIC_DETAIL_CODES = new Set([
   "docker_compose_parse_failed",
   "docker_exec_failed",
   "docker_task_failed",
+  // JDK 在线安装:文案只有一句"安装失败",message 里的 URL/HTTP 状态/目标路径是排障关键
+  "jdk_install_failed",
 ]);
 
 /**

@@ -363,12 +363,31 @@ pub struct ProjectAssets {
     pub java_builds: Vec<JavaBuildGroup>,
 }
 
-/// 自动探测到的 JDK 候选(detect_jdks)
+/// 自动探测到的 JDK 候选(detect_jdks);install_jdk 安装成功也返回同一结构
 #[derive(Debug, Clone, Serialize)]
 pub struct JdkCandidate {
     /// JDK 根目录(JAVA_HOME)
     pub path: String,
     /// `java -version` 解析出的版本串,如 "17.0.2" / "1.8.0_392"
+    pub version: String,
+}
+
+/// 在线安装 JDK 的发行源(list_remote_jdks / install_jdk 命令参数)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum JdkVendor {
+    /// Eclipse Adoptium(Temurin),元数据 api.adoptium.net
+    Adoptium,
+    /// Azul Zulu,元数据 api.azul.com
+    Zulu,
+}
+
+/// 某安装源可在线安装的 JDK 大版本(list_remote_jdks)
+#[derive(Debug, Clone, Serialize)]
+pub struct RemoteJdkRelease {
+    /// 主版本号(8 / 11 / 17 / 21 / 25 ...)
+    pub major: u32,
+    /// 该主版本当前最新的完整版本串,如 "17.0.20+8"
     pub version: String,
 }
 

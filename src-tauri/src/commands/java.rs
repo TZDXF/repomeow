@@ -1,11 +1,16 @@
 use std::collections::HashSet;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use serde::Deserialize;
+use tauri::{AppHandle, Emitter};
+
 use crate::commands::walk;
 use crate::error::{AppError, AppResult, ErrorCode};
-use crate::models::{JavaBuildGroup, JavaBuildTool, JavaCommandAction, JdkCandidate};
+use crate::models::{
+    JavaBuildGroup, JavaBuildTool, JavaCommandAction, JdkCandidate, JdkVendor, RemoteJdkRelease,
+};
 
 /// 构建文件内容读取上限:spring-boot 标记检测只需读文件头部,超大文件截断防卡顿
 const MAX_BUILD_FILE_BYTES: usize = 1024 * 1024;
@@ -397,6 +402,493 @@ pub fn check_jdk(path: String) -> AppResult<String> {
     probe_java_version(&java).ok_or_else(|| AppError::coded(ErrorCode::JdkInvalid, path))
 }
 
+// ---- JDK 在线安装 ───────────────────────────────────────────────────────────
+
+/// 安装进度事件(install_jdk 向前端 emit),stage = "download" | "extract"
+const JDK_PROGRESS_EVENT: &str = "jdk://install-progress";
+/// 下载进度事件的最小发射间隔(字节):约 2MB 一次,避免高频 IPC 刷屏
+const PROGRESS_EMIT_BYTES: u64 = 2 * 1024 * 1024;
+/// Zulu 全量列表一次拉取的条数:按最新在前排序,前 200 条覆盖近几个大版本的
+/// 全部变体;jdk 8/11 靠后,由 list_zulu_releases 的兜底探测补齐
+const ZULU_LIST_PAGE_SIZE: u32 = 200;
+/// 下拉里要展示的 Zulu LTS 主版本(与 Adoptium 的 available_lts_releases 对齐)
+const ZULU_LTS_MAJORS: [u32; 5] = [8, 11, 17, 21, 25];
+
+/// 解析到的一个可下载发行包
+struct RemoteAsset {
+    url: String,
+    file_name: String,
+    /// Windows 两个源都有 zip;非 Windows 的 Adoptium 只有 tar.gz(用系统 tar 解)
+    is_zip: bool,
+    /// 展示用完整版本串(如 "17.0.20+8")
+    version: String,
+}
+
+// -- API 响应结构(只建模用到的字段) --
+
+/// Adoptium `/v3/info/available_releases`
+#[derive(Deserialize)]
+struct AdoptiumAvailable {
+    available_lts_releases: Vec<u32>,
+    most_recent_feature_release: u32,
+}
+
+/// Adoptium `/v3/assets/feature_releases/{major}/ga` 的单条发布
+#[derive(Deserialize)]
+struct AdoptiumRelease {
+    /// 如 "jdk-17.0.20+8"
+    release_name: String,
+    #[serde(default)]
+    binaries: Vec<AdoptiumBinary>,
+}
+
+#[derive(Deserialize)]
+struct AdoptiumBinary {
+    #[serde(default)]
+    package: Option<AdoptiumPackage>,
+}
+
+#[derive(Deserialize)]
+struct AdoptiumPackage {
+    name: String,
+    link: String,
+}
+
+/// Azul `/metadata/v1/zulu/packages/` 的单条包
+#[derive(Deserialize)]
+struct ZuluPackage {
+    name: String,
+    #[serde(default)]
+    java_version: Vec<u64>,
+    download_url: String,
+}
+
+fn http_client(timeout: Option<Duration>) -> AppResult<reqwest::blocking::Client> {
+    reqwest::blocking::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(timeout)
+        .build()
+        .map_err(|e| AppError::coded(ErrorCode::JdkInstallFailed, e.to_string()))
+}
+
+/// GET 一个 JSON 元数据端点,网络/状态码/解析错误统一映射 JdkInstallFailed,
+/// message 携带 URL 与原因(前端经 GENERIC_DETAIL_CODES 附带展示)
+fn http_json<T: serde::de::DeserializeOwned>(url: &str) -> AppResult<T> {
+    let client = http_client(Some(Duration::from_secs(20)))?;
+    let resp = client
+        .get(url)
+        .send()
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| AppError::coded(ErrorCode::JdkInstallFailed, format!("{url}: {e}")))?;
+    resp.json::<T>()
+        .map_err(|e| AppError::coded(ErrorCode::JdkInstallFailed, format!("{url}: {e}")))
+}
+
+fn adoptium_os() -> &'static str {
+    if cfg!(windows) {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "mac"
+    } else {
+        "linux"
+    }
+}
+
+fn adoptium_arch() -> &'static str {
+    if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else {
+        "x64"
+    }
+}
+
+fn zulu_os() -> &'static str {
+    if cfg!(windows) {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macosx"
+    } else {
+        "linux"
+    }
+}
+
+fn zulu_arch() -> &'static str {
+    if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else {
+        "x64"
+    }
+}
+
+/// Zulu 包名里「纯 JDK zip」的判定:`-ca-jdk` 排除 fx(含 JavaFX)/crac/jre 变体,
+/// `.zip` 结尾排除 msi/deb/rpm/tar.gz(安装到用户目录只接受解压即用的 zip)
+fn is_zulu_jdk_zip(name: &str) -> bool {
+    name.contains("-ca-jdk") && name.ends_with(".zip")
+}
+
+/// Zulu 的 java_version 数组([17, 0, 20])拼成点分版本串
+fn zulu_version_label(parts: &[u64]) -> String {
+    parts
+        .iter()
+        .map(|p| p.to_string())
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+/// 解析 Adoptium 某主版本最新 GA 发布的发行包
+fn resolve_adoptium_asset(major: u32) -> AppResult<RemoteAsset> {
+    let url = format!(
+        "https://api.adoptium.net/v3/assets/feature_releases/{major}/ga?architecture={}&image_type=jdk&os={}&page_size=1",
+        adoptium_arch(),
+        adoptium_os(),
+    );
+    let releases: Vec<AdoptiumRelease> = http_json(&url)?;
+    let release = releases
+        .into_iter()
+        .next()
+        .ok_or_else(|| AppError::coded(ErrorCode::JdkInstallFailed, format!("java {major}: no GA release")))?;
+    // Windows 用 zip 解压安装;非 Windows 的 package 资产是 tar.gz
+    let want_zip = cfg!(windows);
+    let package = release
+        .binaries
+        .iter()
+        .filter_map(|b| b.package.as_ref())
+        .find(|p| {
+            if want_zip {
+                p.name.ends_with(".zip")
+            } else {
+                p.name.ends_with(".tar.gz")
+            }
+        })
+        .ok_or_else(|| AppError::coded(ErrorCode::JdkInstallFailed, format!("java {major}: no archive asset")))?;
+    let version = release
+        .release_name
+        .strip_prefix("jdk-")
+        .unwrap_or(&release.release_name)
+        .to_string();
+    Ok(RemoteAsset {
+        url: package.link.clone(),
+        file_name: package.name.clone(),
+        is_zip: want_zip,
+        version,
+    })
+}
+
+/// 解析 Zulu 某主版本最新 GA 的纯 JDK zip
+fn resolve_zulu_asset(major: u32) -> AppResult<RemoteAsset> {
+    let url = format!(
+        "https://api.azul.com/metadata/v1/zulu/packages/?java_version={major}&os={}&arch={}&package_type=jdk&release_status=ga&availability=ready_for_download&javafx=false&page=1&page_size=50",
+        zulu_os(),
+        zulu_arch(),
+    );
+    let packages: Vec<ZuluPackage> = http_json(&url)?;
+    // 响应按新到旧排序,首个命中即该主版本最新
+    let package = packages
+        .iter()
+        .find(|p| is_zulu_jdk_zip(&p.name) && !p.java_version.is_empty())
+        .ok_or_else(|| AppError::coded(ErrorCode::JdkInstallFailed, format!("java {major}: no jdk zip asset")))?;
+    Ok(RemoteAsset {
+        url: package.download_url.clone(),
+        file_name: package.name.clone(),
+        is_zip: true,
+        version: zulu_version_label(&package.java_version),
+    })
+}
+
+fn resolve_asset(vendor: JdkVendor, major: u32) -> AppResult<RemoteAsset> {
+    match vendor {
+        JdkVendor::Adoptium => resolve_adoptium_asset(major),
+        JdkVendor::Zulu => resolve_zulu_asset(major),
+    }
+}
+
+/// Adoptium 可安装的大版本:LTS 全集 + 最新 feature 版(EA-only 的主版本查 ga 会落空,
+/// 单项失败跳过不阻塞整个列表)
+fn list_adoptium_releases() -> AppResult<Vec<RemoteJdkRelease>> {
+    let available: AdoptiumAvailable =
+        http_json("https://api.adoptium.net/v3/info/available_releases")?;
+    let mut majors = available.available_lts_releases;
+    let latest = available.most_recent_feature_release;
+    if !majors.contains(&latest) {
+        majors.push(latest);
+    }
+    majors.sort_unstable_by(|a, b| b.cmp(a));
+    let mut out = Vec::new();
+    for major in majors {
+        if let Ok(asset) = resolve_adoptium_asset(major) {
+            out.push(RemoteJdkRelease {
+                major,
+                version: asset.version,
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// Zulu 可安装的大版本:一次全量列表按主版本去重(取各自最新),下拉只保留
+/// LTS 主版本 + 最新的两个非 LTS;jdk 8/11 排不进前 200 条时单独探测兜底
+fn list_zulu_releases() -> AppResult<Vec<RemoteJdkRelease>> {
+    let url = format!(
+        "https://api.azul.com/metadata/v1/zulu/packages/?os={}&arch={}&package_type=jdk&release_status=ga&availability=ready_for_download&javafx=false&page=1&page_size={ZULU_LIST_PAGE_SIZE}",
+        zulu_os(),
+        zulu_arch(),
+    );
+    let packages: Vec<ZuluPackage> = http_json(&url)?;
+    let mut seen: HashSet<u32> = HashSet::new();
+    let mut all: Vec<RemoteJdkRelease> = Vec::new();
+    for package in &packages {
+        if !is_zulu_jdk_zip(&package.name) || package.java_version.is_empty() {
+            continue;
+        }
+        let major = package.java_version[0] as u32;
+        if seen.insert(major) {
+            all.push(RemoteJdkRelease {
+                major,
+                version: zulu_version_label(&package.java_version),
+            });
+        }
+    }
+    for major in ZULU_LTS_MAJORS {
+        if seen.contains(&major) {
+            continue;
+        }
+        if let Ok(asset) = resolve_zulu_asset(major) {
+            all.push(RemoteJdkRelease {
+                major,
+                version: asset.version,
+            });
+        }
+    }
+    all.sort_unstable_by(|a, b| b.major.cmp(&a.major));
+    // 下拉降噪:与 Adoptium 列表规模对齐(LTS + 最近两个大版本)
+    let newest = all.first().map(|r| r.major).unwrap_or(0);
+    let second = all.get(1).map(|r| r.major).unwrap_or(0);
+    Ok(all
+        .into_iter()
+        .filter(|r| ZULU_LTS_MAJORS.contains(&r.major) || r.major == newest || r.major == second)
+        .collect())
+}
+
+/// 安装根目录 ~/.jdks(与 IntelliJ 下载 JDK 的目录一致,自动探测也覆盖该目录)
+fn jdks_root() -> AppResult<PathBuf> {
+    let home = env_dir("USERPROFILE")
+        .or_else(|| env_dir("HOME"))
+        .ok_or_else(|| AppError::coded(ErrorCode::JdkInstallFailed, "no user home dir"))?;
+    let root = home.join(".jdks");
+    std::fs::create_dir_all(&root)?;
+    Ok(root)
+}
+
+/// 下载发行包到临时文件,期间按字节量节流 emit 下载进度
+fn download_with_progress(app: &AppHandle, url: &str, dest: &Path) -> AppResult<()> {
+    // 不设总超时:近 200MB 的包在慢网下远超常规超时,连接超时已兜住坏网络
+    let client = http_client(None)?;
+    let mut resp = client
+        .get(url)
+        .send()
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| AppError::coded(ErrorCode::JdkInstallFailed, format!("{url}: {e}")))?;
+    let total = resp.content_length().unwrap_or(0);
+    let mut file = std::fs::File::create(dest)?;
+    let mut received = 0u64;
+    let mut emitted = 0u64;
+    let mut buf = vec![0u8; 256 * 1024];
+    loop {
+        let n = resp.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        file.write_all(&buf[..n])?;
+        received += n as u64;
+        if received - emitted >= PROGRESS_EMIT_BYTES {
+            emitted = received;
+            let _ = app.emit(
+                JDK_PROGRESS_EVENT,
+                serde_json::json!({ "stage": "download", "received": received, "total": total }),
+            );
+        }
+    }
+    file.flush()?;
+    let _ = app.emit(
+        JDK_PROGRESS_EVENT,
+        serde_json::json!({ "stage": "download", "received": received, "total": total.max(received) }),
+    );
+    Ok(())
+}
+
+/// 解压 zip 到目标目录(enclosed_name 拒绝 zip-slip 路径穿越;Unix 上恢复可执行位)
+fn extract_zip(archive: &Path, dest: &Path) -> AppResult<()> {
+    let file = std::fs::File::open(archive)?;
+    let mut zip = zip::ZipArchive::new(file)
+        .map_err(|e| AppError::coded(ErrorCode::JdkInstallFailed, format!("zip: {e}")))?;
+    for i in 0..zip.len() {
+        let mut entry = zip
+            .by_index(i)
+            .map_err(|e| AppError::coded(ErrorCode::JdkInstallFailed, format!("zip: {e}")))?;
+        let Some(rel) = entry.enclosed_name() else {
+            continue;
+        };
+        let out = dest.join(rel);
+        if entry.is_dir() {
+            std::fs::create_dir_all(&out)?;
+            continue;
+        }
+        if let Some(parent) = out.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut outfile = std::fs::File::create(&out)?;
+        std::io::copy(&mut entry, &mut outfile)?;
+        #[cfg(unix)]
+        if let Some(mode) = entry.unix_mode() {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&out, std::fs::Permissions::from_mode(mode));
+        }
+    }
+    Ok(())
+}
+
+/// 非 Windows 的 Adoptium tar.gz 用系统 tar 解(bsdtar/gnu tar 均支持 -xzf)
+fn extract_tar_gz(archive: &Path, dest: &Path) -> AppResult<()> {
+    let out = crate::commands::open::hidden(std::process::Command::new("tar"))
+        .arg("-xzf")
+        .arg(archive)
+        .arg("-C")
+        .arg(dest)
+        .output()?;
+    if !out.status.success() {
+        return Err(AppError::coded(
+            ErrorCode::JdkInstallFailed,
+            String::from_utf8_lossy(&out.stderr).trim().to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// 递归复制目录(rename 跨卷失败时的兜底,如临时目录与用户目录不在同一盘)
+fn copy_dir_recursive(src: &Path, dest: &Path) -> AppResult<()> {
+    std::fs::create_dir_all(dest)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let from = entry.path();
+        let to = dest.join(entry.file_name());
+        if from.is_dir() {
+            copy_dir_recursive(&from, &to)?;
+        } else {
+            std::fs::copy(&from, &to)?;
+        }
+    }
+    Ok(())
+}
+
+fn move_dir(src: &Path, dest: &Path) -> AppResult<()> {
+    if std::fs::rename(src, dest).is_ok() {
+        return Ok(());
+    }
+    copy_dir_recursive(src, dest)?;
+    let _ = std::fs::remove_dir_all(src);
+    Ok(())
+}
+
+/// install_jdk 的阻塞实现:解析资产 -> 下载(进度事件)-> 解压 -> 挪进 ~/.jdks -> 校验。
+/// 目标目录已是有效 JDK 时幂等返回(重复点击安装不报错)
+fn install_jdk_blocking(app: &AppHandle, vendor: JdkVendor, major: u32) -> AppResult<JdkCandidate> {
+    let asset = resolve_asset(vendor, major)?;
+    let jdk_root = jdks_root()?;
+    let tmp_file =
+        std::env::temp_dir().join(format!("repomeow-jdk-{}", asset.file_name.replace(['/', '\\'], "_")));
+    if let Err(e) = download_with_progress(app, &asset.url, &tmp_file) {
+        let _ = std::fs::remove_file(&tmp_file);
+        return Err(e);
+    }
+    let extract_dir = std::env::temp_dir().join(format!(
+        "repomeow-jdk-extract-{}-{}",
+        std::process::id(),
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),
+    ));
+    let extracted = (|| -> AppResult<PathBuf> {
+        std::fs::create_dir_all(&extract_dir)?;
+        let _ = app.emit(
+            JDK_PROGRESS_EVENT,
+            serde_json::json!({ "stage": "extract", "received": 0, "total": 0 }),
+        );
+        if asset.is_zip {
+            extract_zip(&tmp_file, &extract_dir)?;
+        } else {
+            extract_tar_gz(&tmp_file, &extract_dir)?;
+        }
+        // 发行包标准布局:解压出来唯一一个顶层目录即 JDK 根
+        let tops: Vec<PathBuf> = std::fs::read_dir(&extract_dir)?
+            .flatten()
+            .map(|e| e.path())
+            .collect();
+        if tops.len() != 1 || !tops[0].is_dir() {
+            return Err(AppError::coded(
+                ErrorCode::JdkInstallFailed,
+                format!("unexpected archive layout in {}", tops.len()),
+            ));
+        }
+        Ok(tops[0].clone())
+    })();
+    let _ = std::fs::remove_file(&tmp_file);
+    let top = match extracted {
+        Ok(top) => top,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&extract_dir);
+            return Err(e);
+        }
+    };
+
+    let target = jdk_root.join(top.file_name().unwrap_or_default());
+    let result = (|| -> AppResult<JdkCandidate> {
+        // 幂等:目标已存在且是有效 JDK 直接返回现有安装
+        if java_bin(&target).is_some() {
+            let version = probe_java_version(&java_bin(&target).expect("checked"))
+                .ok_or_else(|| AppError::coded(ErrorCode::JdkInstallFailed, display_path(&target)))?;
+            return Ok(JdkCandidate {
+                path: display_path(&target),
+                version,
+            });
+        }
+        if target.exists() {
+            return Err(AppError::coded(ErrorCode::JdkInstallFailed, display_path(&target)));
+        }
+        move_dir(&top, &target)?;
+        let java = java_bin(&target)
+            .ok_or_else(|| AppError::coded(ErrorCode::JdkInstallFailed, display_path(&target)))?;
+        let version = probe_java_version(&java)
+            .ok_or_else(|| AppError::coded(ErrorCode::JdkInstallFailed, display_path(&target)))?;
+        Ok(JdkCandidate {
+            path: display_path(&target),
+            version,
+        })
+    })();
+    let _ = std::fs::remove_dir_all(&extract_dir);
+    result
+}
+
+/// 列出某安装源可在线安装的 JDK 大版本(设置页在线安装对话框的版本下拉)
+#[tauri::command]
+pub async fn list_remote_jdks(vendor: JdkVendor) -> AppResult<Vec<RemoteJdkRelease>> {
+    tokio::task::spawn_blocking(move || match vendor {
+        JdkVendor::Adoptium => list_adoptium_releases(),
+        JdkVendor::Zulu => list_zulu_releases(),
+    })
+    .await
+    .map_err(|e| AppError::coded(ErrorCode::IoError, e.to_string()))?
+}
+
+/// 在线下载并安装 JDK 到 ~/.jdks(install_jdk_blocking 见块注释)
+#[tauri::command]
+pub async fn install_jdk(
+    app: AppHandle,
+    vendor: JdkVendor,
+    major: u32,
+) -> AppResult<JdkCandidate> {
+    tokio::task::spawn_blocking(move || install_jdk_blocking(&app, vendor, major))
+        .await
+        .map_err(|e| AppError::coded(ErrorCode::IoError, e.to_string()))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -556,6 +1048,80 @@ mod tests {
             println!("detect: {} -> {}", c.path, c.version);
             let checked = check_jdk(c.path.clone()).unwrap();
             assert_eq!(checked, c.version);
+        }
+    }
+
+    #[test]
+    fn filters_zulu_jdk_zip_names() {
+        // 纯 JDK zip 命中
+        assert!(is_zulu_jdk_zip("zulu17.68.17-ca-jdk17.0.20-win_x64.zip"));
+        assert!(is_zulu_jdk_zip("zulu8.84.0.15-ca-jdk8.0.452-win_x64.zip"));
+        // fx / crac / jre 变体排除
+        assert!(!is_zulu_jdk_zip("zulu17.68.17-ca-fx-jdk17.0.20-win_x64.zip"));
+        assert!(!is_zulu_jdk_zip("zulu17.66.19-ca-crac-jdk17.0.19-win_x64.zip"));
+        assert!(!is_zulu_jdk_zip("zulu17.68.17-ca-jre17.0.20-win_x64.zip"));
+        // 非 zip 安装包排除
+        assert!(!is_zulu_jdk_zip("zulu17.68.17-ca-jdk17.0.20-win_x64.msi"));
+        assert!(!is_zulu_jdk_zip("zulu17.68.17-ca-jdk17.0.20-win_x64.tar.gz"));
+    }
+
+    #[test]
+    fn labels_zulu_versions() {
+        assert_eq!(zulu_version_label(&[17, 0, 20]), "17.0.20");
+        assert_eq!(zulu_version_label(&[8, 0, 452]), "8.0.452");
+        assert_eq!(zulu_version_label(&[]), "");
+    }
+
+    /// 覆盖 install_jdk 的解压->顶层目录->搬移路径(不触网):用 zip crate 造一个
+    /// 标准布局(唯一顶层目录)的归档,验证 extract_zip 与 move_dir
+    #[test]
+    fn extracts_zip_and_moves_top_dir() {
+        let dir = temp_project_dir("zip");
+        let zip_path = dir.join("pkg.zip");
+        let mut writer = zip::ZipWriter::new(fs::File::create(&zip_path).unwrap());
+        let options = zip::write::SimpleFileOptions::default();
+        writer.start_file("jdk-17.0.1/bin/java", options).unwrap();
+        writer.write_all(b"fake").unwrap();
+        writer.start_file("jdk-17.0.1/release", options).unwrap();
+        writer.write_all(b"JAVA_VERSION=17").unwrap();
+        writer.finish().unwrap();
+
+        let extract_dir = dir.join("out");
+        fs::create_dir_all(&extract_dir).unwrap();
+        extract_zip(&zip_path, &extract_dir).unwrap();
+        let tops: Vec<PathBuf> = fs::read_dir(&extract_dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .collect();
+        assert_eq!(tops.len(), 1);
+        assert!(tops[0].is_dir());
+
+        let target = dir.join("dest");
+        move_dir(&tops[0], &target).unwrap();
+        assert!(target.join("bin").join("java").is_file());
+        assert!(target.join("release").is_file());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 手动验证:对两个安装源拉真实元数据(cargo test real_world -- --ignored --nocapture)
+    #[test]
+    #[ignore]
+    fn real_world_list_remote_jdks() {
+        for vendor in [JdkVendor::Adoptium, JdkVendor::Zulu] {
+            match vendor {
+                JdkVendor::Adoptium => {
+                    for r in list_adoptium_releases().unwrap() {
+                        println!("adoptium: java {} ({})", r.major, r.version);
+                    }
+                }
+                JdkVendor::Zulu => {
+                    for r in list_zulu_releases().unwrap() {
+                        println!("zulu: java {} ({})", r.major, r.version);
+                    }
+                }
+            }
         }
     }
 }

@@ -340,10 +340,21 @@ export interface JdkConfig {
   path: string;
 }
 
-/** 自动探测到的 JDK 候选(detect_jdks) */
+/** 自动探测到的 JDK 候选(detect_jdks);install_jdk 安装成功也返回同一结构 */
 export interface JdkCandidate {
   path: string;
   /** `java -version` 解析出的版本串,如 "17.0.2" / "1.8.0_392" */
+  version: string;
+}
+
+/** 在线安装源(list_remote_jdks / install_jdk 的 vendor 参数) */
+export type JdkVendor = "adoptium" | "zulu";
+
+/** 某安装源可在线安装的 JDK 大版本(list_remote_jdks) */
+export interface RemoteJdkRelease {
+  /** 主版本号(8 / 11 / 17 / 21 / 25 ...) */
+  major: number;
+  /** 该主版本当前最新的完整版本串,如 "17.0.20+8" */
   version: string;
 }
 
