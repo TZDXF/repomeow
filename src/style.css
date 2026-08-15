@@ -222,13 +222,13 @@
     "Microsoft YaHei", sans-serif;
   --background: #e9eef7;
   --foreground: #1b2438;
-  --card: rgb(255 255 255 / 0.55);
+  --card: rgb(255 255 255 / 0.75);
   --card-foreground: #1b2438;
-  --popover: rgb(255 255 255 / 0.6);
+  --popover: rgb(255 255 255 / 0.85);
   --popover-foreground: #1b2438;
   --primary: #0891b2;
   --primary-foreground: #ffffff;
-  --secondary: rgb(255 255 255 / 0.4);
+  --secondary: rgb(255 255 255 / 0.55);
   --secondary-foreground: #1b2438;
   --muted: #dde6f2;
   --muted-foreground: #5b6b8c;
@@ -244,7 +244,7 @@
   --chart-4: #ec4899;
   --chart-5: #ef4444;
   --radius: 0.75rem;
-  --sidebar: rgb(255 255 255 / 0.5);
+  --sidebar: rgb(255 255 255 / 0.7);
   --sidebar-foreground: #1b2438;
   --sidebar-primary: #0891b2;
   --sidebar-primary-foreground: #ffffff;
@@ -260,9 +260,9 @@
 [data-theme="glass"].dark {
   --background: #070d1f;
   --foreground: #dbe7ff;
-  --card: rgb(30 42 80 / 0.5);
+  --card: rgb(30 42 80 / 0.65);
   --card-foreground: #dbe7ff;
-  --popover: rgb(13 20 45 / 0.7);
+  --popover: rgb(13 20 45 / 0.88);
   --popover-foreground: #dbe7ff;
   --primary: #22d3ee;
   --primary-foreground: #062430;
@@ -281,7 +281,7 @@
   --chart-3: #a78bfa;
   --chart-4: #f472b6;
   --chart-5: #f87171;
-  --sidebar: rgb(13 20 45 / 0.7);
+  --sidebar: rgb(13 20 45 / 0.85);
   --sidebar-foreground: #dbe7ff;
   --sidebar-primary: #22d3ee;
   --sidebar-primary-foreground: #062430;
@@ -423,9 +423,11 @@
 [data-theme="glass"] [data-slot="popover-content"],
 [data-theme="glass"] [data-slot="dialog-content"],
 [data-theme="glass"] [data-slot="dropdown-menu-content"],
+[data-theme="glass"] [data-slot="dropdown-menu-sub-content"],
+[data-theme="glass"] [data-slot="context-menu-content"],
 [data-theme="glass"] [data-slot="select-content"] {
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
-  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(28px) saturate(1.6);
+  backdrop-filter: blur(28px) saturate(1.6);
 }
 
 /* 主按钮：科技辉光 */

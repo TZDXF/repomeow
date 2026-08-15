@@ -150,6 +150,22 @@ function sideText(line: DiffLine | null) {
   return line ? line.text.slice(1) : "";
 }
 
+// --- 并排视图滚动:左右窗格横向各自滚动;两侧行序列与行高完全一致,纵向 scrollTop 直接同步 ---
+const leftPaneEl = ref<HTMLElement | null>(null);
+const rightPaneEl = ref<HTMLElement | null>(null);
+let paneSyncing = false;
+function syncPaneScroll(source: "left" | "right") {
+  if (paneSyncing) return;
+  const from = source === "left" ? leftPaneEl.value : rightPaneEl.value;
+  const to = source === "left" ? rightPaneEl.value : leftPaneEl.value;
+  if (!from || !to || to.scrollTop === from.scrollTop) return;
+  paneSyncing = true;
+  to.scrollTop = from.scrollTop;
+  requestAnimationFrame(() => {
+    paneSyncing = false;
+  });
+}
+
 /** 当前选中文件(已删除的文件不提供 IDE 打开:工作区已不存在) */
 const selectedFile = computed(() => files.value.find((f) => f.path === selectedPath.value) ?? null);
 const canOpenInIde = computed(() => selectedFile.value?.status !== "D");
@@ -483,7 +499,74 @@ function startListResize(e: PointerEvent) {
           </button>
         </div>
 
-        <div class="min-h-0 flex-1 overflow-auto">
+        <!-- 并排(split)视图:左右窗格各自 overflow-auto,横向滚动互不影响,纵向经 syncPaneScroll 同步 -->
+        <div
+          v-if="splitDiff && !diffLoading && !diffError && selectedPath"
+          class="flex min-h-0 flex-1"
+        >
+          <div ref="leftPaneEl" class="min-w-0 flex-1 overflow-auto" @scroll="syncPaneScroll('left')">
+            <div class="min-w-max py-1 font-mono text-xs leading-5">
+              <template v-for="(row, i) in sideRows" :key="i">
+                <div
+                  v-if="row.kind === 'hunk'"
+                  class="bg-muted/60 px-3 whitespace-pre text-muted-foreground select-none"
+                >
+                  {{ row.text }}
+                </div>
+                <div
+                  v-else-if="row.kind === 'meta'"
+                  class="px-3 whitespace-pre text-muted-foreground select-none"
+                >
+                  {{ row.text }}
+                </div>
+                <div
+                  v-else
+                  :class="
+                    row.left?.kind === 'del'
+                      ? 'bg-red-500/10'
+                      : !row.left && row.right?.kind === 'add'
+                        ? 'bg-green-500/5'
+                        : ''
+                  "
+                ><span class="inline-block w-10 pr-2 text-right text-muted-foreground/50 select-none">{{ row.left?.oldLine ?? "" }}</span><span class="whitespace-pre">{{ sideText(row.left) }}</span></div>
+              </template>
+            </div>
+          </div>
+          <div
+            ref="rightPaneEl"
+            class="min-w-0 flex-1 overflow-auto border-l border-border/60"
+            @scroll="syncPaneScroll('right')"
+          >
+            <div class="min-w-max py-1 font-mono text-xs leading-5">
+              <template v-for="(row, i) in sideRows" :key="i">
+                <div
+                  v-if="row.kind === 'hunk'"
+                  class="bg-muted/60 px-3 whitespace-pre text-muted-foreground select-none"
+                >
+                  {{ row.text }}
+                </div>
+                <div
+                  v-else-if="row.kind === 'meta'"
+                  class="px-3 whitespace-pre text-muted-foreground select-none"
+                >
+                  {{ row.text }}
+                </div>
+                <div
+                  v-else
+                  :class="
+                    row.right?.kind === 'add'
+                      ? 'bg-green-500/10'
+                      : !row.right && row.left?.kind === 'del'
+                        ? 'bg-red-500/5'
+                        : ''
+                  "
+                ><span class="inline-block w-10 pr-2 text-right text-muted-foreground/50 select-none">{{ row.right?.newLine ?? "" }}</span><span class="whitespace-pre">{{ sideText(row.right) }}</span></div>
+              </template>
+            </div>
+          </div>
+        </div>
+
+        <div v-else class="min-h-0 flex-1 overflow-auto">
           <div v-if="diffLoading" class="flex h-full items-center justify-center">
             <Loader2 class="h-4 w-4 animate-spin text-muted-foreground" />
           </div>
@@ -558,7 +641,12 @@ function startListResize(e: PointerEvent) {
                         ? 'bg-green-500/5'
                         : ''
                   "
-                ><span class="inline-block w-10 pr-2 text-right text-muted-foreground/50 select-none">{{ row.left?.oldLine ?? "" }}</span><span class="whitespace-pre">{{ sideText(row.left) }}</span></td>
+                >
+                  <span
+                    class="inline-block w-10 pr-2 text-right text-muted-foreground/50 select-none"
+                    >{{ row.left?.oldLine ?? "" }}</span
+                  ><span class="whitespace-pre">{{ sideText(row.left) }}</span>
+                </td>
                 <td
                   class="w-1/2 border-l border-border/60"
                   :class="
@@ -568,7 +656,12 @@ function startListResize(e: PointerEvent) {
                         ? 'bg-red-500/5'
                         : ''
                   "
-                ><span class="inline-block w-10 pr-2 text-right text-muted-foreground/50 select-none">{{ row.right?.newLine ?? "" }}</span><span class="whitespace-pre">{{ sideText(row.right) }}</span></td>
+                >
+                  <span
+                    class="inline-block w-10 pr-2 text-right text-muted-foreground/50 select-none"
+                    >{{ row.right?.newLine ?? "" }}</span
+                  ><span class="whitespace-pre">{{ sideText(row.right) }}</span>
+                </td>
               </template>
             </tr>
           </table>

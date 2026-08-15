@@ -445,6 +445,8 @@ export default {
         openInIde: "Open in editor",
         selectFile: "Select a file on the left to view changes",
         diffTruncated: "Truncated",
+        diffSplit: "Side-by-side view (old left, new right)",
+        diffUnified: "Unified view",
         mergeCommit: "Merge commit, no diff available",
         emptyFiles: "No changed files",
         filesLoadFailed: "Failed to load file list",

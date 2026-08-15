@@ -430,6 +430,8 @@ export default {
         openInIde: "在编辑器中打开",
         selectFile: "选择左侧文件查看变动内容",
         diffTruncated: "已截断",
+        diffSplit: "并排查看(左旧右新)",
+        diffUnified: "逐行查看",
         mergeCommit: "合并提交,无差异内容",
         emptyFiles: "无变动文件",
         filesLoadFailed: "文件列表加载失败",
