@@ -4,6 +4,7 @@ pub mod editor_icon;
 pub mod files;
 pub mod git;
 pub mod hidden;
+pub mod java;
 pub mod open;
 pub mod overview;
 pub mod pin;

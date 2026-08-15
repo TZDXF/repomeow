@@ -322,12 +322,54 @@ pub struct ComposeServiceState {
     pub status: String,
 }
 
+/// Java 构建工具类型
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum JavaBuildTool {
+    Maven,
+    Gradle,
+}
+
+/// 「更多操作」下拉里的一条常用命令(maven/gradle 生命周期目标)
+#[derive(Debug, Clone, Serialize)]
+pub struct JavaCommandAction {
+    /// 前端 i18n 键(java.clean / java.package / java.install / java.test / java.build)
+    pub key: String,
+    pub command: String,
+}
+
+/// 一个 Spring Boot 构建文件的运行分组(monorepo 下可能有多个)。
+/// 只收录构建文件声明了 spring-boot 运行插件的目录,普通 Java 项目不产出。
+#[derive(Debug, Clone, Serialize)]
+pub struct JavaBuildGroup {
+    /// 构建文件所在目录的相对路径('/' 分隔),根目录为 "."
+    pub dir: String,
+    pub tool: JavaBuildTool,
+    /// 运行命令应执行的工作目录的相对路径:
+    /// 多模块 Maven/Gradle 子模块统一在项目根执行(见 build_run_spec)
+    pub run_dir: String,
+    /// 平台相关的运行命令(优先项目内 wrapper,否则用 PATH 上的 mvn/gradle)
+    pub run_command: String,
+    /// 常用操作(clean/package/install/test 等),与 run_command 同一执行目录
+    pub more_actions: Vec<JavaCommandAction>,
+}
+
 /// 详情页资产扫描结果(scan_project_assets):单次目录遍历同时产出,
-/// 避免 package scripts 与 compose 文件分别全量扫描
+/// 避免 package scripts / compose 文件 / java 构建文件分别全量扫描
 #[derive(Debug, Clone, Serialize)]
 pub struct ProjectAssets {
     pub package_scripts: Vec<PackageScriptsGroup>,
     pub compose_files: Vec<ComposeFile>,
+    pub java_builds: Vec<JavaBuildGroup>,
+}
+
+/// 自动探测到的 JDK 候选(detect_jdks)
+#[derive(Debug, Clone, Serialize)]
+pub struct JdkCandidate {
+    /// JDK 根目录(JAVA_HOME)
+    pub path: String,
+    /// `java -version` 解析出的版本串,如 "17.0.2" / "1.8.0_392"
+    pub version: String,
 }
 
 /// 项目维度被隐藏的 UI 项

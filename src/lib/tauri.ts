@@ -97,12 +97,21 @@ export function onListen<T>(event: string, handler: (payload: T) => void): Promi
   return listen<T>(event, (e) => handler(e.payload));
 }
 
-/** 在系统终端里执行命令(新窗口,跑完不关);cwd 缺省为项目根目录 */
-export function runInTerminal(project: Project, command: string, cwd?: string): Promise<unknown> {
+/**
+ * 在系统终端里执行命令(新窗口,跑完不关);cwd 缺省为项目根目录。
+ * javaHome 非空时后端在命令前注入 JAVA_HOME(Spring Boot 运行用)。
+ */
+export function runInTerminal(
+  project: Project,
+  command: string,
+  cwd?: string,
+  javaHome?: string,
+): Promise<unknown> {
   return cmd("run_in_terminal", {
     path: project.path,
     projectName: project.name,
     command,
     ...(cwd ? { cwd } : {}),
+    ...(javaHome ? { javaHome } : {}),
   });
 }

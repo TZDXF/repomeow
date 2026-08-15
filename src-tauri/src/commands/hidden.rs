@@ -5,7 +5,7 @@ use crate::db::Db;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::HiddenItem;
 
-const KINDS: [&str; 3] = ["packageFile", "packageScript", "composeFile"];
+const KINDS: [&str; 4] = ["packageFile", "packageScript", "composeFile", "javaBuild"];
 
 pub fn list(conn: &Connection, project_id: i64) -> AppResult<Vec<HiddenItem>> {
     let mut stmt = conn.prepare(

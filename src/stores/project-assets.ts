@@ -1,4 +1,4 @@
-import { ref } from "vue";
+import { shallowRef, triggerRef } from "vue";
 import { defineStore } from "pinia";
 import { cmd } from "@/lib/tauri";
 import type { Project, ProjectAssets } from "@/types";
@@ -16,8 +16,12 @@ import type { Project, ProjectAssets } from "@/types";
  * (对象 key 枚举顺序不是插入序,整数样 key 会按数值排序,不能做 LRU)。
  */
 export const useProjectAssetsStore = defineStore("project-assets", () => {
-  /** 按「项目 id + 路径」存放最近一次扫描结果,作为下次进入时的 stale 数据 */
-  const byProject = ref(new Map<string, ProjectAssets>());
+  /**
+   * 按「项目 id + 路径」存放最近一次扫描结果,作为下次进入时的 stale 数据。
+   * shallowRef:assetsOf 会在渲染依赖(computed)里被调用,LRU 读时挪序不能触发
+   * 订阅者重算(否则渲染→读缓存→改 Map→再渲染,递归更新超限),只有写入新数据才 triggerRef。
+   */
+  const byProject = shallowRef(new Map<string, ProjectAssets>());
   /** 进行中的请求,key 同 byProject:两个卡片同时挂载只发一次 IPC */
   const inflight = new Map<string, Promise<void>>();
   /** 缓存条目上限:卡片同时只展示一个项目,积攒的多项目旧数据定期修剪 */
@@ -25,20 +29,29 @@ export const useProjectAssetsStore = defineStore("project-assets", () => {
 
   const keyOf = (project: Project) => `${project.id}\n${project.path}`;
 
-  /** 写入并维持 LRU 上限(同 key 先删后插刷新热度) */
+  /** 写入并维持 LRU 上限(同 key 先删后插刷新热度);数据变化经 triggerRef 通知订阅者 */
   function setCapped(key: string, assets: ProjectAssets) {
     const map = byProject.value;
     map.delete(key);
     map.set(key, assets);
     const oldest = map.keys().next().value;
     if (map.size > MAX_ENTRIES && oldest !== undefined) map.delete(oldest);
+    triggerRef(byProject);
+  }
+
+  /** 读取并刷新 LRU 热度:只挪顺序不写数据,不触发订阅者重算 */
+  function touch(key: string): ProjectAssets | undefined {
+    const map = byProject.value;
+    const hit = map.get(key);
+    if (hit !== undefined && map.keys().next().value !== key) {
+      map.delete(key);
+      map.set(key, hit);
+    }
+    return hit;
   }
 
   function assetsOf(project: Project): ProjectAssets | undefined {
-    const key = keyOf(project);
-    const cached = byProject.value.get(key);
-    if (cached) setCapped(key, cached); // 读取刷新热度
-    return cached;
+    return touch(keyOf(project));
   }
 
   /** 拉取(或复用进行中的)扫描结果;失败保留旧数据(没有则写空),不向上抛错 */
@@ -55,7 +68,7 @@ export const useProjectAssetsStore = defineStore("project-assets", () => {
       } catch {
         // 刷新失败不冲掉可用的旧数据;仅在没有任何数据时写空结果(卡片按无数据显示)
         if (!byProject.value.has(key)) {
-          setCapped(key, { package_scripts: [], compose_files: [] });
+          setCapped(key, { package_scripts: [], compose_files: [], java_builds: [] });
         }
       }
     })().finally(() => {

@@ -199,6 +199,8 @@ pub fn run() {
             commands::files::search_project_text,
             commands::docker::compose_ps_batch,
             commands::docker::compose_export,
+            commands::java::detect_jdks,
+            commands::java::check_jdk,
             commands::hidden::set_hidden_item,
             commands::pin::list_pinned_commands,
             commands::pin::set_pinned_command,

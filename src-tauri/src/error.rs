@@ -145,6 +145,9 @@ pub enum ErrorCode {
     CommandNotFound,
     ScriptDirNotFound,
 
+    // ── Java / 开发环境 ───────────────────────────────────────────────
+    JdkInvalid,
+
     // ── 报告 ──────────────────────────────────────────────────────────
     ReportInvalidYearMonth,
     ReportInvalidDate,
@@ -283,6 +286,8 @@ impl ErrorCode {
             Self::CommandNameConflict => "command_name_conflict",
             Self::CommandNotFound => "command_not_found",
             Self::ScriptDirNotFound => "script_dir_not_found",
+            // Java / 开发环境
+            Self::JdkInvalid => "jdk_invalid",
             // 报告
             Self::ReportInvalidYearMonth => "report_invalid_year_month",
             Self::ReportInvalidDate => "report_invalid_date",

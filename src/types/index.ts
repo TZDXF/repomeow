@@ -306,6 +306,45 @@ export interface ComposeServiceState {
 export interface ProjectAssets {
   package_scripts: PackageScriptsGroup[];
   compose_files: ComposeFile[];
+  java_builds: JavaBuildGroup[];
+}
+
+/** Java 构建工具类型 */
+export type JavaBuildTool = "maven" | "gradle";
+
+/** 「更多操作」下拉里的一条常用命令(maven/gradle 生命周期目标) */
+export interface JavaCommandAction {
+  /** 前端 i18n 键(java.clean / java.package / ...) */
+  key: string;
+  command: string;
+}
+
+/** 一个 Spring Boot 构建文件的运行分组(monorepo 下可能有多个) */
+export interface JavaBuildGroup {
+  /** 构建文件所在目录的相对路径('/' 分隔),根目录为 "." */
+  dir: string;
+  tool: JavaBuildTool;
+  /** 运行命令应执行的工作目录的相对路径(多模块工程统一在项目根执行) */
+  run_dir: string;
+  /** 平台相关的运行命令(优先项目内 wrapper,否则用 PATH 上的 mvn/gradle) */
+  run_command: string;
+  /** 常用操作(clean/package/install/test 等),与 run_command 同一执行目录 */
+  more_actions: JavaCommandAction[];
+}
+
+/** 用户在设置页登记的 JDK(开发环境配置) */
+export interface JdkConfig {
+  id: string;
+  name: string;
+  /** JDK 根目录(JAVA_HOME) */
+  path: string;
+}
+
+/** 自动探测到的 JDK 候选(detect_jdks) */
+export interface JdkCandidate {
+  path: string;
+  /** `java -version` 解析出的版本串,如 "17.0.2" / "1.8.0_392" */
+  version: string;
 }
 
 export type EditorKind =
@@ -336,8 +375,8 @@ export interface CustomOpenWith {
 /** 内置打开方式或以 custom: 前缀标识的自定义打开方式。 */
 export type OpenWithId = EditorKind | `custom:${string}`;
 
-/** 可隐藏的 UI 项类型:package.json 分组 / 分组内单条命令 / compose 文件 */
-export type HiddenKind = "packageFile" | "packageScript" | "composeFile";
+/** 可隐藏的 UI 项类型:package.json 分组 / 分组内单条命令 / compose 文件 / Spring Boot 构建分组 */
+export type HiddenKind = "packageFile" | "packageScript" | "composeFile" | "javaBuild";
 
 /** 项目维度被隐藏的 UI 项(targetKey 含义见各使用处) */
 export interface HiddenItem {
@@ -352,7 +391,12 @@ export interface ProjectOverview {
 }
 
 /** 可标记为「常用」的命令类型 */
-export type PinKind = "packageScript" | "composeFile" | "composeService" | "customCommand";
+export type PinKind =
+  | "packageScript"
+  | "composeFile"
+  | "composeService"
+  | "customCommand"
+  | "javaBuild";
 
 /**
  * 一条被标记为「常用」的命令,在托盘弹窗项目列表中可直接执行
