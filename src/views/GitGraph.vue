@@ -216,15 +216,36 @@ const detailWidth = useLocalStorage("repomeow:graph-detail-width", 480);
 /** 详情面板折叠状态(持久化):折叠后保留窄条,点击重新展开 */
 const detailOpen = useLocalStorage("repomeow:graph-detail-open", true);
 const DETAIL_MIN_W = 320;
-const DETAIL_MAX_W = 800;
+/** 详情面板拖宽时为提交表格保留的最小宽度 */
+const TABLE_MIN_W = 480;
+
+/** 主内容行(侧栏 + 表格 + 详情)实测宽度:详情面板的宽度上限随它动态计算,不设固定上限 */
+const mainRowEl = ref<HTMLElement | null>(null);
+const { width: mainRowWidth } = useElementSize(mainRowEl);
+
+/** 详情面板宽度上限:主行宽减去左侧栏与表格最小宽度;窗口缩放、左栏开合时自适应 */
+const detailMaxWidth = computed(() => {
+  if (!mainRowWidth.value) {
+    return DETAIL_MIN_W;
+  }
+  let sidebarW = 0;
+  if (hasSidebar.value) {
+    sidebarW = sidebarOpen.value ? 224 : 32;
+  }
+  return Math.max(DETAIL_MIN_W, Math.floor(mainRowWidth.value) - sidebarW - TABLE_MIN_W);
+});
+
+/** 渲染用详情宽度:持久化值可能超过当前可用空间(窗口被拖窄过),按上限 clamp,变宽后原设定自然恢复 */
+const effectiveDetailWidth = computed(() => Math.min(detailWidth.value, detailMaxWidth.value));
 
 function startDetailResize(e: PointerEvent) {
   e.preventDefault();
   const startX = e.clientX;
-  const startW = detailWidth.value;
+  const startW = effectiveDetailWidth.value;
+  const maxW = detailMaxWidth.value;
   const onMove = (ev: PointerEvent) => {
     detailWidth.value = Math.min(
-      DETAIL_MAX_W,
+      maxW,
       Math.max(DETAIL_MIN_W, Math.round(startW - (ev.clientX - startX))),
     );
   };
@@ -753,7 +774,7 @@ function tagName(refName: string) {
       </Button>
     </header>
 
-    <div class="flex min-h-0 flex-1">
+    <div ref="mainRowEl" class="flex min-h-0 flex-1">
       <!-- 左侧分支/标签列表(SourceTree 风格),点击定位到顶端提交;
            展开时列表顶部可折叠,收起后保留窄条,点击窄条重新展开 -->
       <aside v-if="hasSidebar && sidebarOpen" class="flex w-56 shrink-0 flex-col border-r">
@@ -1153,7 +1174,7 @@ function tagName(refName: string) {
               @pointerdown="startDetailResize"
             />
           </div>
-          <aside class="shrink-0 border-l" :style="{ width: `${detailWidth}px` }">
+          <aside class="shrink-0 border-l" :style="{ width: `${effectiveDetailWidth}px` }">
             <CommitDetailPanel
               :commit="selected"
               :project-path="project.path"

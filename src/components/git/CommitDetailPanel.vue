@@ -19,7 +19,7 @@ import {
 } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { parseDiff } from "@/lib/diff";
+import { parseDiff, toSideBySideRows, type DiffLine } from "@/lib/diff";
 import { buildFileTree, type FileTreeNode } from "@/lib/file-tree";
 import { openPathWith, sortOpenWithOptions } from "@/lib/open-with";
 import { baseName } from "@/lib/path";
@@ -141,6 +141,15 @@ function toggleFolder(fullPath: string) {
 // --- diff 解析:lib/diff.ts 的 parseDiff(与提交对话框变更预览共用);baseName 走 @/lib/path ---
 const diffLines = computed(() => (diff.value ? parseDiff(diff.value.diff) : []));
 
+/** 并排查看(持久化):旧版本在左、新版本在右 */
+const splitDiff = useLocalStorage("repomeow:commit-diff-split", false);
+const sideRows = computed(() => toSideBySideRows(diffLines.value));
+
+/** 并排视图去掉行首 diff 标记(+ / - / 空格) */
+function sideText(line: DiffLine | null) {
+  return line ? line.text.slice(1) : "";
+}
+
 /** 当前选中文件(已删除的文件不提供 IDE 打开:工作区已不存在) */
 const selectedFile = computed(() => files.value.find((f) => f.path === selectedPath.value) ?? null);
 const canOpenInIde = computed(() => selectedFile.value?.status !== "D");
@@ -202,17 +211,16 @@ const listWidth = useLocalStorage("repomeow:commit-detail-list-w", 280);
 const LIST_MIN_H = 120;
 const LIST_MAX_H = 600;
 const LIST_MIN_W = 180;
-const LIST_MAX_W = 560;
 /** 左右布局下 diff 列的最小宽度:listWidth 持久化值可能超过当前面板宽度(面板被拖窄过),
  * 列表宽度按容器实测宽度自适应 clamp,避免把 diff 挤成负宽、列表溢出容器 */
 const DIFF_MIN_W = 120;
 const rootEl = ref<HTMLElement | null>(null);
 const { width: panelWidth } = useElementSize(rootEl);
 
-/** 列表宽度实际上限:取静态上限与「面板宽 - diff 最小宽」的较小者 */
+/** 列表宽度实际上限:面板宽减去 diff 列最小宽度,随面板宽度动态伸缩(不设固定上限) */
 function listWidthCap() {
-  if (layout.value !== "horizontal" || !panelWidth.value) return LIST_MAX_W;
-  return Math.max(LIST_MIN_W, Math.min(LIST_MAX_W, Math.floor(panelWidth.value) - DIFF_MIN_W));
+  if (layout.value !== "horizontal" || !panelWidth.value) return LIST_MIN_W;
+  return Math.max(LIST_MIN_W, Math.floor(panelWidth.value) - DIFF_MIN_W);
 }
 
 /** 渲染用列表宽度(不改持久化值,面板变宽后用户原设定自然恢复) */
@@ -457,6 +465,15 @@ function startListResize(e: PointerEvent) {
             {{ t("git.graph.detail.diffTruncated") }}
           </Badge>
           <button
+            v-if="diff"
+            class="shrink-0 rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            :title="t(splitDiff ? 'git.graph.detail.diffUnified' : 'git.graph.detail.diffSplit')"
+            @click="splitDiff = !splitDiff"
+          >
+            <Rows2 v-if="splitDiff" class="h-3.5 w-3.5" />
+            <Columns2 v-else class="h-3.5 w-3.5" />
+          </button>
+          <button
             v-if="selectedFile && canOpenInIde"
             class="shrink-0 rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             :title="t('git.graph.detail.openInIde')"
@@ -480,7 +497,8 @@ function startListResize(e: PointerEvent) {
             {{ t("git.graph.detail.selectFile") }}
           </p>
 
-          <div v-else class="min-w-max py-1 font-mono text-xs leading-5">
+          <!-- 逐行(unified)视图 -->
+          <div v-else-if="!splitDiff" class="min-w-max py-1 font-mono text-xs leading-5">
             <template v-for="(line, i) in diffLines" :key="i">
               <div
                 v-if="line.kind === 'hunk'"
@@ -512,6 +530,48 @@ function startListResize(e: PointerEvent) {
               </div>
             </template>
           </div>
+
+          <!-- 并排(split)视图:table 自动布局保证两列跨行对齐,长行整体横向滚动 -->
+          <table v-else class="min-w-full border-collapse font-mono text-xs leading-5">
+            <tr v-for="(row, i) in sideRows" :key="i">
+              <td
+                v-if="row.kind === 'hunk'"
+                colspan="2"
+                class="bg-muted/60 px-3 whitespace-pre text-muted-foreground select-none"
+              >
+                {{ row.text }}
+              </td>
+              <td
+                v-else-if="row.kind === 'meta'"
+                colspan="2"
+                class="px-3 whitespace-pre text-muted-foreground select-none"
+              >
+                {{ row.text }}
+              </td>
+              <template v-else>
+                <td
+                  class="w-1/2"
+                  :class="
+                    row.left?.kind === 'del'
+                      ? 'bg-red-500/10'
+                      : !row.left && row.right?.kind === 'add'
+                        ? 'bg-green-500/5'
+                        : ''
+                  "
+                ><span class="inline-block w-10 pr-2 text-right text-muted-foreground/50 select-none">{{ row.left?.oldLine ?? "" }}</span><span class="whitespace-pre">{{ sideText(row.left) }}</span></td>
+                <td
+                  class="w-1/2 border-l border-border/60"
+                  :class="
+                    row.right?.kind === 'add'
+                      ? 'bg-green-500/10'
+                      : !row.right && row.left?.kind === 'del'
+                        ? 'bg-red-500/5'
+                        : ''
+                  "
+                ><span class="inline-block w-10 pr-2 text-right text-muted-foreground/50 select-none">{{ row.right?.newLine ?? "" }}</span><span class="whitespace-pre">{{ sideText(row.right) }}</span></td>
+              </template>
+            </tr>
+          </table>
         </div>
       </div>
     </div>
