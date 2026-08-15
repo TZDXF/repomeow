@@ -162,10 +162,21 @@ fn shallow_entries(dir: &Path, respect_ignore: bool) -> Vec<(PathBuf, bool)> {
         .filter(|e| e.depth() > 0)
         .filter_map(|e| {
             let ft = e.file_type()?;
-            let is_dir = ft.is_dir();
-            if !is_dir && !ft.is_file() {
-                return None; // 符号链接等不收集
-            }
+            // file_type 不跟随符号链接:指向目录的软链(如 pnpm 的 node_modules)
+            // 按目标类型归类,悬空链接不收集;std::fs::metadata 会跟随链接
+            let is_dir = if ft.is_symlink() {
+                match std::fs::metadata(e.path()) {
+                    Ok(meta) if meta.is_dir() => true,
+                    Ok(meta) if meta.is_file() => false,
+                    _ => return None,
+                }
+            } else if ft.is_dir() {
+                true
+            } else if ft.is_file() {
+                false
+            } else {
+                return None; // socket/设备文件等不收集
+            };
             e.path()
                 .strip_prefix(dir)
                 .ok()
@@ -458,6 +469,54 @@ mod tests {
             .collect();
         assert!(by_path["build/output.txt"].ignored);
         assert!(!by_path["build/keep.txt"].ignored);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn dir_entries_follows_symlinks_to_dir_and_file() {
+        let dir = temp_dir("dirents-symlink");
+        fs::create_dir_all(dir.join("real_dir")).unwrap();
+        fs::write(dir.join("real_dir/inside.txt"), "x").unwrap();
+        fs::write(dir.join("real.txt"), "x").unwrap();
+
+        let link_dir = dir.join("linked_dir");
+        let link_file = dir.join("linked.txt");
+        let dangling = dir.join("dangling");
+        #[cfg(unix)]
+        let results = [
+            std::os::unix::fs::symlink(dir.join("real_dir"), &link_dir),
+            std::os::unix::fs::symlink(dir.join("real.txt"), &link_file),
+            std::os::unix::fs::symlink(dir.join("missing"), &dangling),
+        ];
+        #[cfg(windows)]
+        let results = [
+            std::os::windows::fs::symlink_dir(dir.join("real_dir"), &link_dir),
+            std::os::windows::fs::symlink_file(dir.join("real.txt"), &link_file),
+            std::os::windows::fs::symlink_dir(dir.join("missing"), &dangling),
+        ];
+        if results.iter().any(|r| r.is_err()) {
+            // Windows 无开发者模式/权限时无法创建符号链接,跳过
+            let _ = fs::remove_dir_all(&dir);
+            return;
+        }
+
+        // 软链按目标类型归类:指向目录的是目录、指向文件的是文件,悬空链接不出现
+        let entries = dir_entries(&dir, Path::new(""));
+        let by_path: std::collections::HashMap<String, &DirEntry> = entries
+            .iter()
+            .map(|e| (to_slash(&e.path), e))
+            .collect();
+        assert!(by_path["linked_dir"].is_dir, "指向目录的软链应为目录");
+        assert!(!by_path["linked.txt"].is_dir, "指向文件的软链应为文件");
+        assert!(!by_path.contains_key("dangling"), "悬空软链不应出现");
+
+        // 展开软链目录能列出目标内容(pnpm node_modules 场景)
+        let entries = dir_entries(&dir, Path::new("linked_dir"));
+        assert!(
+            entries.iter().any(|e| e.path == Path::new("linked_dir/inside.txt")),
+            "软链目录的子项应可列出"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }

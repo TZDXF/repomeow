@@ -196,14 +196,15 @@ defineExpose({ focusInput });
           </Button>
         </div>
       </div>
-      <div class="flex min-h-6 items-center gap-1.5">
-        <span class="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Loader2 v-if="searching" class="h-3 w-3 animate-spin" />
-          <template v-else-if="invalidRegex">{{ t("files.findInvalid") }}</template>
-          <template v-else-if="results.length">
-            {{ t("files.textSearchSummary", { files: results.length, matches: totalMatches }) }}
-          </template>
-        </span>
+      <div
+        v-if="searching || invalidRegex || results.length"
+        class="flex items-center gap-1.5 text-[11px] text-muted-foreground"
+      >
+        <Loader2 v-if="searching" class="h-3 w-3 animate-spin" />
+        <template v-else-if="invalidRegex">{{ t("files.findInvalid") }}</template>
+        <template v-else-if="results.length">
+          {{ t("files.textSearchSummary", { files: results.length, matches: totalMatches }) }}
+        </template>
       </div>
       <div class="flex items-center gap-1.5">
         <span class="w-20 shrink-0 whitespace-nowrap text-[11px] text-muted-foreground">{{
