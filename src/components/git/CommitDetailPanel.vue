@@ -296,6 +296,13 @@ function hlOf(line: DiffLine | null | undefined) {
 const splitDiff = useLocalStorage("repomeow:commit-diff-split", false);
 const sideRows = computed(() => toSideBySideRows(displayLines.value));
 
+/** 并排左右内容窗格的宽度比(持久化,拖拽中间连接条调整;0.5 = 各占一半) */
+const splitRatio = useLocalStorage("repomeow:commit-diff-split-ratio", 0.5);
+const SPLIT_RATIO_MIN = 0.2;
+const SPLIT_RATIO_MAX = 0.8;
+/** 并排视图整行容器(左内容 | 左行号 | 连接条 | 右行号 | 右内容),拖拽换算宽度比的基准 */
+const splitWrapEl = ref<HTMLElement | null>(null);
+
 /** 并排视图去掉行首 diff 标记(+ / - / 空格) */
 function sideText(line: DiffLine | null) {
   return line ? line.text.slice(1) : "";
@@ -552,7 +559,7 @@ const dividerShapes = computed(() => {
     const ly = yL(idx) + h / 2;
     const ry = yR(idx) + h / 2;
     if (ly >= -h && ry >= -h && (ly <= vh + h || ry <= vh + h)) {
-      shapes.push({ kind: "line", points: "", y1: ly, y2: ry, cls: "divider-fold" });
+      shapes.push({ kind: "line", d: "", y1: ly, y2: ry, cls: "divider-fold" });
     }
   });
   for (const block of changeBlocks.value) {
@@ -689,10 +696,14 @@ async function syncHbarPad() {
   };
 }
 
-// 内容 / 布局 / 面板与列表宽度变化都可能改变横向滚动条的出现与否
-watch([displayLines, splitActive, panelWidth, listWidth, layout], () => void syncHbarPad(), {
-  flush: "post",
-});
+// 内容 / 布局 / 面板与列表宽度变化都可能改变横向滚动条的出现与否(连接条拖拽改两侧窗格宽度同理)
+watch(
+  [displayLines, splitActive, panelWidth, listWidth, layout, splitRatio],
+  () => void syncHbarPad(),
+  {
+    flush: "post",
+  },
+);
 
 // --- 差异导航:上/下一个差异;逐行模式按 px(行索引 × 行高 + py-1 上内边距),
 // 并排模式按 sideRow 空间行位置(经 scrollTopAt 换算到两侧窗格) ---
@@ -788,6 +799,34 @@ const effectiveListWidth = computed(() => Math.min(listWidth.value, listWidthCap
 
 // 分隔条拖拽中的全局监听器,unmount 时统一摘掉,避免组件被卸载而监听器还活着
 let listResizeCleanups: (() => void)[] = [];
+
+// --- 中间连接条拖拽:调整并排左右内容窗格的宽度比 ---
+// 连接条中心相对整行容器定位,扣除两侧行号栏与连接条本身宽度后换算成比值
+function startSplitResize(e: PointerEvent) {
+  e.preventDefault();
+  const wrap = splitWrapEl.value;
+  const lg = leftGutterEl.value;
+  const rg = rightGutterEl.value;
+  const dv = dividerEl.value;
+  if (!wrap || !lg || !rg || !dv) return;
+  const paneArea = wrap.clientWidth - lg.offsetWidth - rg.offsetWidth - dv.offsetWidth;
+  if (paneArea <= 0) return;
+  const baseX = wrap.getBoundingClientRect().left + lg.offsetWidth + dv.offsetWidth / 2;
+  const onMove = (ev: PointerEvent) => {
+    splitRatio.value = Math.min(
+      SPLIT_RATIO_MAX,
+      Math.max(SPLIT_RATIO_MIN, (ev.clientX - baseX) / paneArea),
+    );
+  };
+  const onUp = () => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    listResizeCleanups = listResizeCleanups.filter((fn) => fn !== onUp);
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+  listResizeCleanups.push(onUp);
+}
 
 function startListResize(e: PointerEvent) {
   e.preventDefault();
@@ -1107,16 +1146,19 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <!-- 并排(split)视图:左内容 | 左行号 | 右行号 | 右内容;同侧两栏镜像滚动,两侧经 sideRow 空间锚点映射同步 -->
+        <!-- 并排(split)视图:左内容 | 左行号 | 连接条 | 右行号 | 右内容;同侧两栏镜像滚动,两侧经 sideRow 空间锚点映射同步;
+             左右内容窗格宽度按 splitRatio(连接条拖拽调整)分配 -->
         <div
           v-if="splitActive && !diffLoading && !diffError && selectedPath"
+          ref="splitWrapEl"
           class="flex min-h-0 flex-1"
         >
           <!-- 左窗格 -scale-x-100 双翻转:容器翻转把纵向滚动条移到左边,内容层再翻转回正;
                代价是 scrollLeft 镜像化(0=内容末尾、最大值=行首),横向同步经 visualScrollLeft/applyVisualScrollLeft 换算 -->
           <div
             ref="leftPaneEl"
-            class="min-w-0 flex-1 -scale-x-100 overflow-auto"
+            class="min-w-0 -scale-x-100 overflow-auto"
+            :style="{ flex: `${splitRatio} 1 0%` }"
             @scroll="syncPaneScroll('left')"
             @wheel="onLeftPaneWheel"
           >
@@ -1191,7 +1233,7 @@ onBeforeUnmount(() => {
                 </button>
                 <div
                   v-else
-                  class="h-5 w-10 pr-1 text-right text-muted-foreground/50 select-none"
+                  class="h-5 w-10 text-center text-muted-foreground/50 select-none"
                   :class="row.line?.kind === 'del' ? 'bg-red-500/10' : ''"
                 >
                   {{ row.line?.oldLine ?? "" }}
@@ -1207,11 +1249,15 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- 中间连接条:变更块多边形 + 折叠波浪连接线(IntelliJ divider 风格),纯展示不响应事件 -->
-          <div ref="dividerEl" class="relative w-3 shrink-0 select-none">
+          <!-- 中间连接条:变更块曲线带 + 折叠波浪连接线(IntelliJ divider 风格);可拖拽调整左右窗格宽度比 -->
+          <div
+            ref="dividerEl"
+            class="relative w-5 shrink-0 cursor-col-resize select-none transition-colors hover:bg-primary/40"
+            @pointerdown="startSplitResize"
+          >
             <svg class="pointer-events-none absolute inset-0 h-full w-full">
               <template v-for="(shape, i) in dividerShapes" :key="i">
-                <polygon v-if="shape.kind === 'poly'" :points="shape.points" :class="shape.cls" />
+                <path v-if="shape.kind === 'poly'" :d="shape.d" :class="shape.cls" />
                 <line v-else x1="0" :y1="shape.y1" x2="100%" :y2="shape.y2" :class="shape.cls" />
               </template>
             </svg>
@@ -1240,7 +1286,7 @@ onBeforeUnmount(() => {
                 </button>
                 <div
                   v-else
-                  class="h-5 w-10 pl-1 text-right text-muted-foreground/50 select-none"
+                  class="h-5 w-10 text-center text-muted-foreground/50 select-none"
                   :class="row.line?.kind === 'add' ? 'bg-green-500/10' : ''"
                 >
                   {{ row.line?.newLine ?? "" }}
@@ -1258,7 +1304,8 @@ onBeforeUnmount(() => {
 
           <div
             ref="rightPaneEl"
-            class="min-w-0 flex-1 overflow-auto"
+            class="min-w-0 overflow-auto"
+            :style="{ flex: `${1 - splitRatio} 1 0%` }"
             @scroll="syncPaneScroll('right')"
           >
             <div class="diff-code relative min-w-max py-1 text-xs leading-5">
@@ -1401,7 +1448,13 @@ onBeforeUnmount(() => {
   background-position: center;
 }
 
-/* 中间连接条:变更块多边形(低透明填充 + 同色描边)与折叠连接线(取波浪线同款中性灰) */
+/* 中间连接条:变更块曲线带(低透明填充 + 同色描边,拐角圆滑)与折叠连接线(取波浪线同款中性灰) */
+.divider-del,
+.divider-add,
+.divider-mod {
+  stroke-linejoin: round;
+}
+
 .divider-del {
   fill: rgb(239 68 68 / 0.16);
   stroke: rgb(239 68 68 / 0.45);
