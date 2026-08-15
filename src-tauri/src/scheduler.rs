@@ -78,6 +78,17 @@ fn load_language(data_dir: &PathBuf) -> String {
         .unwrap_or_else(|| "zh-CN".into())
 }
 
+/// schedule.name 为空时的兜底展示名,沿界面语言分支
+/// (en-US 走英文,其他语言都按 zh-CN 处理 —— 目前只支持这两语言)
+fn default_schedule_name(is_weekly: bool, language: &str) -> &'static str {
+    match (is_weekly, language) {
+        (true, "en-US") => "Weekly Schedule",
+        (false, "en-US") => "Daily Schedule",
+        (true, _) => "周报定时任务",
+        (false, _) => "日报定时任务",
+    }
+}
+
 /// 按报告类型读取自定义提示词(日报 report.md / 周报 report-weekly.md)
 fn load_report_prompt(data_dir: &PathBuf, report_type: &str) -> String {
     let file = if report_type == "weekly" {
@@ -529,20 +540,9 @@ pub(crate) async fn fire_schedule(
     data_dir: &PathBuf,
     schedule: &ReportSchedule,
 ) -> AppResult<i64> {
-    let is_weekly = schedule.report_type == "weekly";
-    let default_name = if is_weekly {
-        "周报定时任务"
-    } else {
-        "日报定时任务"
-    };
-    let schedule_name = if schedule.name.is_empty() {
-        default_name.to_string()
-    } else {
-        schedule.name.clone()
-    };
-
     eprintln!(
-        "[scheduler] 触发定时任务: {schedule_name} @ {}",
+        "[scheduler] 触发任务({}) @ {}",
+        schedule.report_type,
         Local::now().format("%Y-%m-%d %H:%M")
     );
 
@@ -567,8 +567,17 @@ pub(crate) async fn fire_schedule(
         return Err(AppError::coded(ErrorCode::AiNotConfigured, "model"));
     }
 
-    // 3. 读取提示词模板(按报告类型)
+    // 3. 读取提示词模板(按报告类型) + 语言(决定 schedule 兜底名 / 报告连词 / AI 输出语言)
     let language = load_language(data_dir);
+    // schedule.name 为空时给个兜底展示名,沿界面语言;前端 UI 自己再 `s.name || t("reportSchedule.title")` 兜一次
+    let is_weekly = schedule.report_type == "weekly";
+    let default_name = default_schedule_name(is_weekly, &language);
+    let schedule_name = if schedule.name.is_empty() {
+        default_name.to_string()
+    } else {
+        schedule.name.clone()
+    };
+
     let custom_prompt = load_report_prompt(data_dir, &schedule.report_type);
     let system_prompt = if custom_prompt.trim().is_empty() {
         default_prompt(&schedule.report_type).to_string()
@@ -802,7 +811,18 @@ pub async fn run(app: AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::strip_thinking;
+    use super::{default_schedule_name, strip_thinking};
+
+    #[test]
+    fn default_schedule_name_follows_ui_language() {
+        // 中文(zh-CN 或其他未识别语言):周报/日报
+        assert_eq!(default_schedule_name(true, "zh-CN"), "周报定时任务");
+        assert_eq!(default_schedule_name(false, "zh-CN"), "日报定时任务");
+        assert_eq!(default_schedule_name(true, "ja-JP"), "周报定时任务");
+        // 英文(en-US):Weekly / Daily Schedule
+        assert_eq!(default_schedule_name(true, "en-US"), "Weekly Schedule");
+        assert_eq!(default_schedule_name(false, "en-US"), "Daily Schedule");
+    }
 
     #[test]
     fn strips_leading_think_block() {

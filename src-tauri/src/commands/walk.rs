@@ -102,18 +102,26 @@ pub fn dir_entries(root: &Path, rel_dir: &Path) -> Vec<DirEntry> {
     };
     // gitignore 的目录规则(如 logs/)只匹配目录本身,靠遍历时剪枝生效;
     // 直接以被排除目录为起点遍历时其内条目不命中任何规则,
-    // 需检测目录自身是否被排除,命中则按 git 语义让全部子项继承 ignored
-    let dir_ignored = !rel_dir.as_os_str().is_empty() && {
+    // 需检测目录自身是否被排除,命中则按 git 语义让全部子项继承 ignored。
+    // 根层(空 / "." / 父目录无意义)不需要走该检测:其 file_name 返 None
+    // 会让 name 变空串,shallow_entries 不可能命中空名,导致整根子项被错标 ignored
+    let dir_ignored = !is_root_level(rel_dir) && {
         let parent = rel_dir.parent().unwrap_or_else(|| Path::new(""));
         let parent_dir = if parent.as_os_str().is_empty() {
             root.to_path_buf()
         } else {
             root.join(parent)
         };
+        // file_name 返 None(Path::new(".") 等)时按非排除处理,
+        // 调用方不该传这类路径,但保险起见不再错判 ignored
         let name = rel_dir.file_name().unwrap_or_default();
-        !shallow_entries(&parent_dir, true)
-            .iter()
-            .any(|(p, _)| p.as_os_str() == name)
+        if name.is_empty() {
+            false
+        } else {
+            !shallow_entries(&parent_dir, true)
+                .iter()
+                .any(|(p, _)| p.as_os_str() == name)
+        }
     };
     let unignored: std::collections::HashSet<_> = shallow_entries(&dir, true)
         .into_iter()
@@ -122,7 +130,7 @@ pub fn dir_entries(root: &Path, rel_dir: &Path) -> Vec<DirEntry> {
     let mut entries: Vec<DirEntry> = shallow_entries(&dir, false)
         .into_iter()
         .map(|(rel, is_dir)| {
-            let path = if rel_dir.as_os_str().is_empty() {
+            let path = if is_root_level(rel_dir) {
                 rel.clone()
             } else {
                 rel_dir.join(&rel)
@@ -136,6 +144,12 @@ pub fn dir_entries(root: &Path, rel_dir: &Path) -> Vec<DirEntry> {
         .collect();
     entries.sort_by(|a, b| a.path.cmp(&b.path));
     entries
+}
+
+/// rel_dir 表示工作区根层:空串或 `.`(后者经 `as_os_str().is_empty()` 也按空处理之外,
+/// 调用方可能传 `Path::new(".")` 而逃过 is_empty 判定)
+fn is_root_level(rel_dir: &Path) -> bool {
+    rel_dir.as_os_str().is_empty() || rel_dir == Path::new(".")
 }
 
 /// max_depth(1) 收集 dir 的直接子项,返回相对 dir 的路径与是否目录。
@@ -284,26 +298,21 @@ pub fn invalidate(root: &Path) {
 
 /// 为已缓存的根目录安装递归文件监听(幂等)。
 /// 监听安装失败(权限、平台不支持等)时静默降级为纯 TTL 失效。
+/// 闭包不再持有根目录的 .gitignore/.ignore:规则文件被改后旧规则会持续
+/// 错过滤事件,漏掉应当让缓存失效的资产变更(例:`target/` 加入 .gitignore
+/// 后,旧规则不会排除它,target 下的 package.json 写入会跳过 invalidate);
+/// 改为只按 is_asset_relevant 判定,代价是构建目录(target/ 等)的写入
+/// 偶尔会触发一次额外重扫(忽略规则改在重扫时自然生效)
 fn ensure_watcher(root: &Path) {
     let watchers = WALK_WATCHERS.get_or_init(|| Mutex::new(HashMap::new()));
     let mut map = watchers.lock().unwrap();
     if map.contains_key(root) {
         return;
     }
-    // 根目录的 .gitignore/.ignore 用来过滤构建目录(target/ 等)里的事件,
-    // 避免构建产物抖动反复让缓存失效;嵌套 .gitignore 不纳入判断,
-    // 漏过滤的代价只是偶发的一次重扫
-    let mut gi_builder = ignore::gitignore::GitignoreBuilder::new(root);
-    gi_builder.add(root.join(".gitignore"));
-    gi_builder.add(root.join(".ignore"));
-    // 规则文件本身解析失败时退化为不过滤(多失效几次缓存,无害)
-    let gitignore = gi_builder
-        .build()
-        .unwrap_or_else(|_| ignore::gitignore::Gitignore::empty());
     let root_owned = root.to_path_buf();
     let Ok(mut watcher) = notify::recommended_watcher(move |res| {
         let Ok(event) = res else { return };
-        if !event_affects_assets(&event, &gitignore) {
+        if !event_affects_assets(&event) {
             return;
         }
         if let Some(cache) = WALK_CACHE.get() {
@@ -341,15 +350,12 @@ fn is_asset_relevant(path: &Path) -> bool {
 }
 
 /// 文件事件是否可能改变扫描结果:无法判断时(paths 为空,如事件缓冲区溢出)
-/// 保守按失效处理;否则要求至少一条相关路径且未被根 gitignore 排除
-/// (排除 target/ 等构建目录的写入抖动)
-fn event_affects_assets(event: &notify::Event, gitignore: &ignore::gitignore::Gitignore) -> bool {
+/// 保守按失效处理;否则只要任一相关路径命中即认为应 invalidate
+fn event_affects_assets(event: &notify::Event) -> bool {
     if event.paths.is_empty() {
         return true;
     }
-    event.paths.iter().any(|p| {
-        is_asset_relevant(p) && !gitignore.matched_path_or_any_parents(p, p.is_dir()).is_ignore()
-    })
+    event.paths.iter().any(|p| is_asset_relevant(p))
 }
 
 #[cfg(test)]

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { useElementSize, useLocalStorage } from "@vueuse/core";
@@ -98,16 +98,21 @@ async function selectFile(file: GitCommitFile) {
   expandedFolds.value = new Set();
   currentScrollTop.value = 0;
   try {
-    diff.value = await cmd<GitCommitFileDiff>("git_commit_file_diff", {
+    const result = await cmd<GitCommitFileDiff>("git_commit_file_diff", {
       path: props.projectPath,
       hash: props.commit.hash,
       filePath: file.path,
       oldPath: file.old_path,
     });
+    // 快速连点 A→B:旧响应解析后可能晚于新请求的 selectedPath,
+    // 不做 stale 校验会把 A 的 diff 写到 B 的标题下,先于 B 的真实结果
+    if (selectedPath.value !== file.path) return;
+    diff.value = result;
   } catch (e) {
+    if (selectedPath.value !== file.path) return;
     diffError.value = String(e);
   } finally {
-    diffLoading.value = false;
+    if (selectedPath.value === file.path) diffLoading.value = false;
   }
 }
 
@@ -145,11 +150,11 @@ function toggleFolder(fullPath: string) {
 }
 
 // --- diff 解析:lib/diff.ts 的 parseDiff(与提交对话框变更预览共用);baseName 走 @/lib/path ---
-// 后端 context_lines 已拉满,diff 含完整文件内容;过长的未更改区间折叠为可点击展开的占位行(IDEA 风格)
-// 全量上下文下 hunk 头恒为 @@ -1,N +1,M @@,无信息量,直接过滤不展示
-const diffLines = computed(() =>
-  (diff.value ? parseDiff(diff.value.diff) : []).filter((l) => l.kind !== "hunk"),
-);
+// 后端 context_lines 已拉满,diff 含完整文件内容;过长的未更改区间折叠为可点击展开的占位行(IDEA 风格)。
+// 保留 hunk 头:对超大文件(>10 万行)后端 libgit2 在 @@ 上报畸形头(2- 之类),
+// 此时 truncated 为 true,hunk 头是定位"被截断的变更段"的唯一线索;truncated=false 时仍是 @@ -1,N +1,M @@,
+// 展示一行灰色分隔对正常文件无明显影响
+const diffLines = computed(() => (diff.value ? parseDiff(diff.value.diff) : []));
 
 /** 超过该行数的连续未更改区间才折叠 */
 const FOLD_MIN = 12;
@@ -265,10 +270,10 @@ const rightRows = computed(() => buildPaneRows("right"));
 const leftPaneEl = ref<HTMLElement | null>(null);
 const rightPaneEl = ref<HTMLElement | null>(null);
 const gutterEl = ref<HTMLElement | null>(null);
-let paneSyncing = false;
+// per-instance 状态(用 ref 避免被 <script setup> 模块作用域共享,多实例并发时互不干扰)
+const paneSyncing = ref(false);
+let paneSyncFrame = 0;
 
-// 左窗格经 -scale-x-100 翻转(实测 Chromium):scrollLeft 与可视偏移互为镜像,scrollLeft=0
-// 停在内容末尾、最大值才对应行首;横向同步必须先换算成统一的「距行首可视偏移」再写到对侧
 function visualScrollLeft(el: HTMLElement) {
   return el === leftPaneEl.value ? el.scrollWidth - el.clientWidth - el.scrollLeft : el.scrollLeft;
 }
@@ -278,11 +283,11 @@ function applyVisualScrollLeft(el: HTMLElement, offset: number) {
 }
 
 function syncPaneScroll(source: "left" | "right" | "gutter") {
-  if (paneSyncing) return;
+  if (paneSyncing.value) return;
   const from = { left: leftPaneEl, right: rightPaneEl, gutter: gutterEl }[source].value;
   if (!from) return;
   currentScrollTop.value = from.scrollTop;
-  paneSyncing = true;
+  paneSyncing.value = true;
   const hOffset = from === gutterEl.value ? 0 : visualScrollLeft(from);
   for (const el of [leftPaneEl.value, rightPaneEl.value, gutterEl.value]) {
     if (!el || el === from) continue;
@@ -291,8 +296,8 @@ function syncPaneScroll(source: "left" | "right" | "gutter") {
       applyVisualScrollLeft(el, hOffset);
     }
   }
-  requestAnimationFrame(() => {
-    paneSyncing = false;
+  paneSyncFrame = requestAnimationFrame(() => {
+    paneSyncing.value = false;
   });
 }
 
@@ -365,6 +370,13 @@ const layout = useLocalStorage<"vertical" | "horizontal">(
   "repomeow:commit-detail-layout",
   "vertical",
 );
+
+// 布局切换(上下 ↔ 左右)后:旧 scrollTop 可能不再对应新容器的内容位置,
+// 直接归零让 chevron 上/下按钮按新视图的"顶端"重新判定 hasPrev/Next;
+/// syncHbarPad 已经在 watch 列表里,这里只补 currentScrollTop
+watch(layout, () => {
+  currentScrollTop.value = 0;
+});
 
 // --- 文件列表 / diff 区分隔拖拽:上下布局调列表高度,左右布局调列表宽度 ---
 const listHeight = useLocalStorage("repomeow:commit-detail-list-h", 240);
@@ -467,6 +479,9 @@ function collapseAllFolds() {
 /** 渲染用列表宽度(不改持久化值,面板变宽后用户原设定自然恢复) */
 const effectiveListWidth = computed(() => Math.min(listWidth.value, listWidthCap()));
 
+// 分隔条拖拽中的全局监听器,unmount 时统一摘掉,避免组件被卸载而监听器还活着
+let listResizeCleanups: (() => void)[] = [];
+
 function startListResize(e: PointerEvent) {
   e.preventDefault();
   const horizontal = layout.value === "horizontal";
@@ -483,10 +498,21 @@ function startListResize(e: PointerEvent) {
   const onUp = () => {
     window.removeEventListener("pointermove", onMove);
     window.removeEventListener("pointerup", onUp);
+    listResizeCleanups = listResizeCleanups.filter((fn) => fn !== cleanup);
   };
+  const cleanup = onUp;
   window.addEventListener("pointermove", onMove);
   window.addEventListener("pointerup", onUp);
+  listResizeCleanups.push(cleanup);
 }
+
+onBeforeUnmount(() => {
+  // 拖拽中组件被卸载:残留 pointermove/pointerup 监听器仍会引用已卸载组件的状态,
+  // 显式移除避免泄漏;rAF 同步锁也一并 cancel,防止回调在卸载后改 ref
+  for (const fn of listResizeCleanups) fn();
+  listResizeCleanups = [];
+  if (paneSyncFrame) cancelAnimationFrame(paneSyncFrame);
+});
 </script>
 
 <template>

@@ -83,6 +83,9 @@ async function runSearch() {
   clearTimeout(timer);
   const q = findQuery.value;
   if (!q.text.trim() || invalidRegex.value) {
+    // 自增 seq 让仍在飞行的旧请求在 await 解析后被 stale-check 挡掉,
+    // 避免把已清空的结果集再次填回
+    seq++;
     results.value = [];
     truncated.value = false;
     error.value = "";

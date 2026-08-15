@@ -62,7 +62,10 @@ export const cmViewerTheme = EditorView.theme({
 });
 
 export const cmViewerHighlight = HighlightStyle.define([
-  { tag: [t.keyword, t.controlKeyword, t.moduleKeyword, t.operatorKeyword], color: "var(--cm-keyword)" },
+  {
+    tag: [t.keyword, t.controlKeyword, t.moduleKeyword, t.operatorKeyword],
+    color: "var(--cm-keyword)",
+  },
   { tag: [t.string, t.special(t.string), t.regexp, t.escape], color: "var(--cm-string)" },
   {
     tag: [t.lineComment, t.blockComment, t.docComment, t.meta],

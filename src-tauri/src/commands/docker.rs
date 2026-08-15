@@ -69,11 +69,21 @@ fn parse_ps(output: &str) -> Vec<ComposeServiceState> {
 /// 占用并发许可与线程;超时后子进程经 kill_on_drop 回收,该文件按无服务处理
 const PS_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// 拒绝包含 `..` / 绝对路径 / 反斜杠转义的相对路径:
+/// docker compose -f 接受任意字符串,但项目根外文件无意义且会泄露同机其他目录信息
+fn is_safe_compose_rel_path(file: &str) -> bool {
+    !file.is_empty()
+        && !file.contains("..")
+        && !file.starts_with('/')
+        && !file.starts_with('\\')
+        && !(file.len() >= 2 && file.as_bytes()[1] == b':')
+}
+
 /// 查询单个 compose 文件的服务状态。docker 未安装 / 守护进程未运行 /
-/// 项目未启动 / 超时:一律视为无运行中服务(返回空,不报错打扰)
+/// 项目未启动 / 超时 / 路径非法:一律视为无运行中服务(返回空,不报错打扰)
 async fn ps_async(path: &str, file: &str) -> Vec<ComposeServiceState> {
     let dir = Path::new(path);
-    if !dir.is_dir() {
+    if !dir.is_dir() || !is_safe_compose_rel_path(file) {
         return Vec::new();
     }
     // 与前端 up/down 的执行方式保持一致:项目根目录 + 相对 -f 路径,
@@ -91,12 +101,18 @@ async fn ps_async(path: &str, file: &str) -> Vec<ComposeServiceState> {
 
 /// 批量查询多个 compose 文件的服务运行状态:一次 IPC 完成全部文件的 ps,
 /// 避免前端逐文件发起请求造成大量 HTTP 往返;后端限并发并行拉起 docker 进程。
-/// 单文件失败/超时/任务异常都降级为空列表,不影响其他文件
+/// 单文件失败/超时/任务异常都降级为空列表,不影响其他文件。
+/// 路径越界(file 含 `..` / 绝对路径)与项目根不是目录时整体按空列表处理,
+/// 不让前端误传路径打穿到项目根之外读 docker 元数据
 #[tauri::command]
 pub async fn compose_ps_batch(
     path: String,
     files: Vec<String>,
 ) -> AppResult<Vec<Vec<ComposeServiceState>>> {
+    let root = Path::new(&path);
+    if !root.is_dir() {
+        return Ok(Vec::new());
+    }
     // 最多同时 4 个 docker CLI 进程,防止文件多时瞬间拉起大量子进程争抢
     let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(4));
     let mut handles = Vec::with_capacity(files.len());

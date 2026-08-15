@@ -361,7 +361,10 @@ fn window_line(line: &str, matches: &[(usize, usize)]) -> String {
 }
 
 /// 搜索单个文件:返回 (匹配总数, 命中行);二进制 / 读取失败 / 已达上限返回 None。
-/// 行号口径与前端预览一致:按 \n 切行,1-based
+/// 行号口径与前端预览一致:按 \n 切行,1-based。
+/// 读取上限 SEARCH_MAX_FILE_BYTES(512KB,与 read_file_preview 一致):
+/// 超出部分的字节直接丢弃(被裁的尾部可能漏掉命中,但前端预览本来也只展示这么多,
+/// 搜到也无法在打开文件后跳转定位)
 fn search_one_file(
     root: &Path,
     rel: &Path,
@@ -470,8 +473,9 @@ pub fn search_project_text(
     });
     let mut hits = hits.into_inner().unwrap();
     hits.sort_by(|a, b| a.path.cmp(&b.path));
+    // 两侧都用 `>=`:达到上限即视为截断(用户能看到的范围就是 truncated 之后的内容)
     let truncated = total.load(std::sync::atomic::Ordering::Relaxed) >= SEARCH_MAX_MATCHES
-        || hits.len() > SEARCH_MAX_FILES;
+        || hits.len() >= SEARCH_MAX_FILES;
     hits.truncate(SEARCH_MAX_FILES);
     Ok(TextSearchOutcome { hits, truncated })
 }

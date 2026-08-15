@@ -207,8 +207,10 @@ pub(crate) fn open_explorer(path: &str) -> AppResult<()> {
     Ok(())
 }
 
-/// 渲染用户配置的打开命令。路径和行号经环境变量传入 shell,不会直接插入命令文本。
-/// 未使用 {path} 时在命令末尾追加引用后的路径,保留简洁配置方式。
+/// 渲染用户配置的打开命令。{path} 经环境变量(REPOMEOW_OPEN_PATH)传入 shell,
+/// 文本中只保留对应的引用占位符,避免直接拼接用户路径;
+/// {line} 走文本内插(参数类型 u32,无注入面)。
+/// 未使用 {path} 时在命令末尾追加引用后的路径占位符,保留简洁配置方式。
 fn render_custom_open_command(command: &str, line: Option<u32>) -> String {
     let path_var = if cfg!(windows) {
         "\"%REPOMEOW_OPEN_PATH%\""
@@ -233,10 +235,15 @@ fn custom_open_cmdline(rendered: &str) -> String {
 }
 
 /// 用用户配置的 shell 命令打开文件或目录。命令模板支持 {path} 与 {line};
-/// 不含 {path} 时自动在末尾追加目标路径。
+/// 不含 {path} 时自动在末尾追加目标路径(以 %REPOMEOW_OPEN_PATH% 占位符引用,
+/// 实际路径在子进程 env 中)。
+/// 入口用 path_util::clean 归一化(去尾斜杠、统一分隔符),与 STATUS_CACHE / WALK_CACHE
+/// 等共享 key 规范,避免 ad-hoc 路径写法绕过 exists 校验。
 #[tauri::command]
 pub fn open_with_custom_command(path: String, command: String, line: Option<u32>) -> AppResult<()> {
-    if !std::path::Path::new(&path).exists() {
+    // 路径归一化后再校验存在性;空串、纯空白、未归一化形态都进同一闸口
+    let normalized = crate::path_util::clean_str(&path);
+    if normalized.is_empty() || !std::path::Path::new(&normalized).exists() {
         return Err(AppError::coded(ErrorCode::InvalidPath, path));
     }
     let command = command.trim();
@@ -251,14 +258,14 @@ pub fn open_with_custom_command(path: String, command: String, line: Option<u32>
         // raw_arg 保留 `/C <完整命令>` 的原始命令尾部,与用户在 cmd 中手动输入一致。
         hidden(Command::new("cmd"))
             .raw_arg(custom_open_cmdline(&rendered))
-            .env("REPOMEOW_OPEN_PATH", &path)
+            .env("REPOMEOW_OPEN_PATH", &normalized)
             .spawn()?;
     }
     #[cfg(not(windows))]
     {
         Command::new("sh")
             .args(["-c", &rendered])
-            .env("REPOMEOW_OPEN_PATH", &path)
+            .env("REPOMEOW_OPEN_PATH", &normalized)
             .spawn()?;
     }
     Ok(())

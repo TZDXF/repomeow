@@ -199,7 +199,9 @@ const customById = computed(
           <label class="text-sm font-medium">{{ t("openWith.custom.commandLabel") }}</label>
           <CommandEditor
             v-model="formCommand"
-            :placeholder="t('openWith.custom.commandPlaceholder', { example: commandPlaceholderExample })"
+            :placeholder="
+              t('openWith.custom.commandPlaceholder', { example: commandPlaceholderExample })
+            "
           />
           <p class="text-xs text-muted-foreground">
             {{ t("openWith.custom.commandHint", commandVariables) }}

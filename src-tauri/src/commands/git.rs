@@ -33,7 +33,7 @@ const FETCH_RETRY_MAX: Duration = Duration::from_secs(15 * 60);
 
 /// fetch 治理状态:进行中去重 + 失败退避
 struct FetchTracker {
-    /// 正在 fetch 的路径(进行中不重复发起)
+    /// 正在 fetch 的路径(进行中不重复发起,key 与 STATUS_CACHE 同步走 clean_str)
     in_progress: HashSet<String>,
     /// 路径 → (下次允许 fetch 的时刻, 连续失败次数)
     retry_after: HashMap<String, (Instant, u32)>,
@@ -50,13 +50,16 @@ fn fetch_tracker() -> &'static Mutex<FetchTracker> {
     })
 }
 
-/// 该路径当前是否允许发起 fetch(不在进行中、不在退避期)
+/// 该路径当前是否允许发起 fetch(不在进行中、不在退避期)。
+/// key 与 STATUS_CACHE 同步走 clean_str,避免 Windows 上同一仓库的混合
+/// 分隔符路径撞出两条独立条目,绕过进行中去重 / 失败退避
 fn fetch_due(path: &str) -> bool {
+    let key = crate::path_util::clean_str(path);
     let tracker = fetch_tracker().lock().unwrap();
-    if tracker.in_progress.contains(path) {
+    if tracker.in_progress.contains(&key) {
         return false;
     }
-    match tracker.retry_after.get(path) {
+    match tracker.retry_after.get(&key) {
         Some((at, _)) => *at <= Instant::now(),
         None => true,
     }
@@ -65,14 +68,15 @@ fn fetch_due(path: &str) -> bool {
 /// fetch 结束回调:成功清除退避记录;失败按连续失败次数指数退避,
 /// 弱网/断网时后台循环不会每 30s 重复撞网络
 fn fetch_finished(path: &str, ok: bool) {
+    let key = crate::path_util::clean_str(path);
     let mut tracker = fetch_tracker().lock().unwrap();
-    tracker.in_progress.remove(path);
+    tracker.in_progress.remove(&key);
     if ok {
-        tracker.retry_after.remove(path);
+        tracker.retry_after.remove(&key);
     } else {
         let fails = tracker
             .retry_after
-            .get(path)
+            .get(&key)
             .map(|(_, f)| *f)
             .unwrap_or(0)
             + 1;
@@ -81,7 +85,7 @@ fn fetch_finished(path: &str, ok: bool) {
             .min(FETCH_RETRY_MAX);
         tracker
             .retry_after
-            .insert(path.to_string(), (Instant::now() + backoff, fails));
+            .insert(key, (Instant::now() + backoff, fails));
     }
 }
 
@@ -794,11 +798,10 @@ fn fetch_schedule(app: &AppHandle, project_id: i64, path: String) {
     if !fetch_due(&path) {
         return;
     }
-    fetch_tracker()
-        .lock()
-        .unwrap()
-        .in_progress
-        .insert(path.clone());
+    // 入登记也走 clean_str,与 fetch_due / fetch_finished 共享同一 key,
+    // 否则 fetch_finished 的 remove 找不到对应条目,会泄漏 in_progress
+    let key = crate::path_util::clean_str(&path);
+    fetch_tracker().lock().unwrap().in_progress.insert(key);
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let semaphore = FETCH_PERMITS.get_or_init(|| Semaphore::new(3));
@@ -954,8 +957,10 @@ fn list_branches_blocking(path: &str) -> AppResult<GitBranches> {
 /// 在项目目录初始化 git 仓库,返回最新状态。
 /// branch 为初始分支名(空回退 main);`git init -b` 需要 git 2.28+,
 /// 旧版本回退到不带 -b 的 init 后用 `checkout -b` 改名未出生分支。
-/// remote_url 非空时将其添加为 origin;失败返回错误,但 init 幂等,
-/// 用户修正后重试不会产生副作用
+/// remote_url 非空时将其绑定为 origin,重复调用时:
+/// - origin 已存在 → `git remote set-url` 覆盖(原 `add` 第二次会失败)
+/// - 不存在 → `git remote add`
+/// 让"绑定仓库 → 改仓库地址"这种二次操作不会因 git 拒绝而抛错
 #[tauri::command]
 pub async fn git_init(
     path: String,
@@ -977,7 +982,12 @@ pub async fn git_init(
             }
         }
         if let Some(url) = remote_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
-            run_git(&path, &["remote", "add", "origin", url])?;
+            // 先查 origin 是否存在:已存在走 set-url,不存在走 add,保证幂等
+            if run_git(&path, &["remote", "get-url", "origin"]).is_ok() {
+                run_git(&path, &["remote", "set-url", "origin", url])?;
+            } else {
+                run_git(&path, &["remote", "add", "origin", url])?;
+            }
         }
         let st = status(&path)?;
         cache_status(&path, &st);
@@ -1079,7 +1089,9 @@ fn nested_repo_dirs(path: &str) -> Vec<String> {
 
 /// 参考 IDEA 提交模型:已暂存内容与未暂存修改(含已解决的冲突文件)始终提交;
 /// 仅未跟踪文件需要显式勾选(include_untracked)才纳入;
-/// 嵌套 git 仓库始终排除,避免被误加成 embedded gitlink(只存 commit 指针)
+/// 嵌套 git 仓库始终排除,避免被误加成 embedded gitlink(只存 commit 指针)。
+/// paths 非空时走部分提交:仅暂存并提交指定路径(用 `commit --only`),
+/// 不在 paths 中的已暂存文件不进入本次提交(分批/挑选提交场景)
 #[tauri::command]
 pub async fn git_commit(
     path: String,

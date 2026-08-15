@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Compartment, EditorState, StateEffect, StateField } from "@codemirror/state";
-import { EditorView, Decoration, drawSelection, lineNumbers, type DecorationSet } from "@codemirror/view";
+import {
+  EditorView,
+  Decoration,
+  drawSelection,
+  lineNumbers,
+  type DecorationSet,
+} from "@codemirror/view";
 import { codeFolding, foldGutter, syntaxHighlighting } from "@codemirror/language";
 import { cmViewerHighlight, cmViewerTheme } from "@/lib/cm-theme";
 import { resolveCmLanguage } from "@/lib/cm-languages";

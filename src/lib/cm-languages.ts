@@ -14,12 +14,12 @@ type LangLoader = () => Promise<CmLanguage>;
 const EXT_LOADERS: Record<string, LangLoader> = {
   // 官方 lezer 语法
   ts: () => import("@codemirror/lang-javascript").then((m) => m.javascript({ typescript: true })),
-  mts: () =>
-    import("@codemirror/lang-javascript").then((m) => m.javascript({ typescript: true })),
-  cts: () =>
-    import("@codemirror/lang-javascript").then((m) => m.javascript({ typescript: true })),
+  mts: () => import("@codemirror/lang-javascript").then((m) => m.javascript({ typescript: true })),
+  cts: () => import("@codemirror/lang-javascript").then((m) => m.javascript({ typescript: true })),
   tsx: () =>
-    import("@codemirror/lang-javascript").then((m) => m.javascript({ typescript: true, jsx: true })),
+    import("@codemirror/lang-javascript").then((m) =>
+      m.javascript({ typescript: true, jsx: true }),
+    ),
   js: () => import("@codemirror/lang-javascript").then((m) => m.javascript()),
   mjs: () => import("@codemirror/lang-javascript").then((m) => m.javascript()),
   cjs: () => import("@codemirror/lang-javascript").then((m) => m.javascript()),
@@ -44,7 +44,8 @@ const EXT_LOADERS: Record<string, LangLoader> = {
   svg: () => import("@codemirror/lang-xml").then((m) => m.xml()),
   php: () => import("@codemirror/lang-php").then((m) => m.php()),
   // legacy StreamParser
-  yml: () => import("@codemirror/legacy-modes/mode/yaml").then((m) => StreamLanguage.define(m.yaml)),
+  yml: () =>
+    import("@codemirror/legacy-modes/mode/yaml").then((m) => StreamLanguage.define(m.yaml)),
   yaml: () =>
     import("@codemirror/legacy-modes/mode/yaml").then((m) => StreamLanguage.define(m.yaml)),
   toml: () =>
@@ -64,10 +65,8 @@ const EXT_LOADERS: Record<string, LangLoader> = {
       StreamLanguage.define(m.powerShell),
     ),
   go: () => import("@codemirror/legacy-modes/mode/go").then((m) => StreamLanguage.define(m.go)),
-  rb: () =>
-    import("@codemirror/legacy-modes/mode/ruby").then((m) => StreamLanguage.define(m.ruby)),
-  lua: () =>
-    import("@codemirror/legacy-modes/mode/lua").then((m) => StreamLanguage.define(m.lua)),
+  rb: () => import("@codemirror/legacy-modes/mode/ruby").then((m) => StreamLanguage.define(m.ruby)),
+  lua: () => import("@codemirror/legacy-modes/mode/lua").then((m) => StreamLanguage.define(m.lua)),
   swift: () =>
     import("@codemirror/legacy-modes/mode/swift").then((m) => StreamLanguage.define(m.swift)),
   scss: () =>

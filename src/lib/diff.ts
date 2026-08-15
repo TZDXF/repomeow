@@ -105,7 +105,13 @@ export function toSideBySideRows(lines: (DiffLine | DiffFold)[]): DiffSideRow[] 
     }
     const n = Math.max(dels.length, adds.length);
     for (let j = 0; j < n; j++) {
-      out.push({ kind: "line", text: "", left: dels[j] ?? null, right: adds[j] ?? null, fold: null });
+      out.push({
+        kind: "line",
+        text: "",
+        left: dels[j] ?? null,
+        right: adds[j] ?? null,
+        fold: null,
+      });
     }
   }
   return out;
