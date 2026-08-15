@@ -132,10 +132,11 @@ const COL_MIN_W = { desc: 160, author: 64, commit: 80, date: 96 } as const;
 const GRAPH_COL_MIN_W = LANE_W + GRAPH_PAD * 2;
 /** 图谱列默认展示的泳道数:更多泳道经 clip-path 裁剪,可拖宽 */
 const GRAPH_DEFAULT_LANES = 5;
-/** 显式列宽(px,持久化到 localStorage);graph/desc 为 0 表示自动(图谱列按默认泳道数、描述列占满剩余宽度) */
+/** 显式列宽(px,持久化到 localStorage);graph 为 0 表示自动(按默认泳道数展示);
+ *  descDelta 为描述列相对"占满剩余宽度"的拖拽增量,0 表示完全自适应 */
 const colWidths = useLocalStorage(
   "repomeow:graph-col-widths",
-  { graph: 0, desc: 0, author: 120, commit: 96, date: 150 },
+  { graph: 0, descDelta: 0, author: 120, commit: 96, date: 150 },
   { mergeDefaults: true },
 );
 
@@ -152,19 +153,19 @@ const graphClipPath = computed(() => {
   const overflow = graphWidth.value - graphColWidth.value;
   return overflow > 0 ? `inset(-9999px ${overflow}px -9999px -9999px)` : "none";
 });
-/** 描述列宽:未拖拽过时占满容器剩余宽度,至少保留最小宽度 */
-const descColWidth = computed(() => {
-  if (colWidths.value.desc > 0) {
-    return colWidths.value.desc;
-  }
-  const rest =
+/** 描述列可用的剩余宽度:容器减去其余列后的空间(容器过窄时可小于最小宽度) */
+const descRestWidth = computed(
+  () =>
     containerWidth.value -
     graphColWidth.value -
     colWidths.value.author -
     colWidths.value.commit -
-    colWidths.value.date;
-  return Math.max(rest, COL_MIN_W.desc);
-});
+    colWidths.value.date,
+);
+/** 描述列宽:占满容器剩余宽度并叠加拖拽增量;窗口尺寸变化、两侧面板开合时随剩余空间同步伸缩,不低于最小宽度 */
+const descColWidth = computed(() =>
+  Math.max(descRestWidth.value + colWidths.value.descDelta, COL_MIN_W.desc),
+);
 const totalWidth = computed(
   () =>
     graphColWidth.value +
@@ -174,7 +175,7 @@ const totalWidth = computed(
     colWidths.value.date,
 );
 
-type ColKey = keyof typeof colWidths.value;
+type ColKey = "graph" | "desc" | "author" | "commit" | "date";
 
 function colWidth(key: ColKey) {
   if (key === "graph") {
@@ -186,14 +187,21 @@ function colWidth(key: ColKey) {
   return colWidths.value[key];
 }
 
-/** 拖拽调整列宽:图谱列下限为单个泳道宽度,其余列有各自最小宽度 */
+/** 拖拽调整列宽:图谱列下限为单个泳道宽度,其余列有各自最小宽度;
+ *  描述列记录相对剩余宽度的增量而非绝对宽度,容器尺寸变化时保持自适应 */
 function startColResize(key: ColKey, e: PointerEvent) {
   e.preventDefault();
   const startX = e.clientX;
   const startW = colWidth(key);
   const minW = key === "graph" ? GRAPH_COL_MIN_W : COL_MIN_W[key];
+  const restAtStart = descRestWidth.value;
   const onMove = (ev: PointerEvent) => {
-    colWidths.value[key] = Math.max(minW, Math.round(startW + ev.clientX - startX));
+    const target = Math.max(minW, Math.round(startW + ev.clientX - startX));
+    if (key === "desc") {
+      colWidths.value.descDelta = target - restAtStart;
+    } else {
+      colWidths.value[key] = target;
+    }
   };
   const onUp = () => {
     window.removeEventListener("pointermove", onMove);
@@ -969,9 +977,11 @@ function tagName(refName: string) {
               :style="{ width: `${descColWidth}px` }"
             >
               {{ t("git.graph.columns.description") }}
+              <!-- 拖拽按增量调整;双击清除增量恢复完全自适应 -->
               <span
                 class="absolute top-0 right-0 z-10 h-full w-1.5 translate-x-1/2 cursor-col-resize transition-colors hover:bg-primary/50"
                 @pointerdown="startColResize('desc', $event)"
+                @dblclick="colWidths.descDelta = 0"
               />
             </div>
             <div
