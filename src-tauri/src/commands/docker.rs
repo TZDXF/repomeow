@@ -3,6 +3,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use serde::Deserialize;
+use tauri::AppHandle;
 
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::ComposeServiceState;
@@ -149,7 +150,10 @@ fn run_docker(dir: &Path, args: &[&str]) -> AppResult<std::process::Output> {
         .map_err(|e| AppError::coded(ErrorCode::DockerExecFailed, e.to_string()))
 }
 
-/// 校验 docker 子命令成功,失败时把 stderr 包成错误
+/// 校验 docker 子命令成功,失败时把 stderr 包成错误。
+/// `action` 是已按界面语言翻译好的可读标签(由调用方在 `compose_export` 入口处
+/// 一次解析 language 后传入);此处不再做语言分支,避免每个 ensure_ok 调用点都
+/// 重复读 settings
 fn ensure_ok(action: &str, out: std::process::Output) -> AppResult<std::process::Output> {
     if out.status.success() {
         Ok(out)
@@ -160,10 +164,25 @@ fn ensure_ok(action: &str, out: std::process::Output) -> AppResult<std::process:
     }
 }
 
+/// 按界面语言分支的 action 标签(供 ensure_ok 用);与 tray.rs load_tray_texts
+/// 读取 language 的方式保持一致(settings.json 的 language 字段)
+fn docker_action_label(zh: &'static str, en: &'static str, language: &str) -> &'static str {
+    if language == "en-US" {
+        en
+    } else {
+        zh
+    }
+}
+
 /// 服务的容器 id;容器未创建时返回 None
-fn container_id(dir: &Path, file: &str, service: &str) -> AppResult<Option<String>> {
+fn container_id(
+    dir: &Path,
+    file: &str,
+    service: &str,
+    language: &str,
+) -> AppResult<Option<String>> {
     let ps = ensure_ok(
-        "查询容器",
+        docker_action_label("查询容器", "list containers", language),
         run_docker(dir, &["compose", "-f", file, "ps", "-q", service])?,
     )?;
     let id = String::from_utf8_lossy(&ps.stdout).trim().to_string();
@@ -172,9 +191,9 @@ fn container_id(dir: &Path, file: &str, service: &str) -> AppResult<Option<Strin
 
 /// compose 配置中各服务的镜像名,按配置顺序返回 (service, image)。
 /// 不需要容器存在;build 型服务由 compose 计算出默认镜像名
-fn service_images(dir: &Path, file: &str) -> AppResult<Vec<(String, String)>> {
+fn service_images(dir: &Path, file: &str, language: &str) -> AppResult<Vec<(String, String)>> {
     let cfg = ensure_ok(
-        "读取 compose 配置",
+        docker_action_label("读取 compose 配置", "read compose config", language),
         run_docker(dir, &["compose", "-f", file, "config", "--format", "json"])?,
     )?;
     let v: serde_json::Value = serde_json::from_slice(&cfg.stdout)
@@ -210,18 +229,25 @@ fn save_image(dir: &Path, image: &str, dest: &Path) -> AppResult<()> {
 }
 
 /// 导出单个服务:container → docker export(需容器已创建);image → docker save(只需本地有镜像)
-fn export_one(dir: &Path, file: &str, service: &str, kind: &str, dest: &Path) -> AppResult<()> {
+fn export_one(
+    dir: &Path,
+    file: &str,
+    service: &str,
+    kind: &str,
+    dest: &Path,
+    language: &str,
+) -> AppResult<()> {
     match kind {
         "container" => {
-            let id = container_id(dir, file, service)?.ok_or_else(|| {
+            let id = container_id(dir, file, service, language)?.ok_or_else(|| {
                 AppError::coded(ErrorCode::DockerContainerNotCreated, service.to_string())
             })?;
             let out = run_docker(dir, &["export", "-o", &dest.to_string_lossy(), &id])?;
-            ensure_ok("导出", out)?;
+            ensure_ok(docker_action_label("导出", "export", language), out)?;
             Ok(())
         }
         "image" => {
-            let image = service_images(dir, file)?
+            let image = service_images(dir, file, language)?
                 .into_iter()
                 .find(|(name, _)| name == service)
                 .map(|(_, image)| image)
@@ -237,7 +263,13 @@ fn export_one(dir: &Path, file: &str, service: &str, kind: &str, dest: &Path) ->
 /// 导出 compose 文件全部服务到目录(dest 为目录):逐服务导出 `<service>-<kind>.tar`。
 /// container:需容器已创建,未创建的跳过;image:只需本地有镜像,按名去重避免重复 save,
 /// 本地缺失的镜像跳过。一个都没导出时才报错
-fn export_all(dir: &Path, file: &str, kind: &str, dest_dir: &str) -> AppResult<()> {
+fn export_all(
+    dir: &Path,
+    file: &str,
+    kind: &str,
+    dest_dir: &str,
+    language: &str,
+) -> AppResult<()> {
     let dest_dir = Path::new(dest_dir);
     if !dest_dir.is_dir() {
         return Err(AppError::coded(
@@ -248,7 +280,7 @@ fn export_all(dir: &Path, file: &str, kind: &str, dest_dir: &str) -> AppResult<(
     if kind == "image" {
         let mut exported = 0usize;
         let mut saved = std::collections::HashSet::new();
-        for (service, image) in service_images(dir, file)? {
+        for (service, image) in service_images(dir, file, language)? {
             if !saved.insert(image.clone()) {
                 continue;
             }
@@ -267,7 +299,7 @@ fn export_all(dir: &Path, file: &str, kind: &str, dest_dir: &str) -> AppResult<(
         return Err(AppError::coded(ErrorCode::DockerUnknownExportKind, kind.to_string()));
     }
     let cfg = ensure_ok(
-        "读取服务列表",
+        docker_action_label("读取服务列表", "list services", language),
         run_docker(dir, &["compose", "-f", file, "config", "--services"])?,
     )?;
     let services: Vec<String> = String::from_utf8_lossy(&cfg.stdout)
@@ -278,12 +310,12 @@ fn export_all(dir: &Path, file: &str, kind: &str, dest_dir: &str) -> AppResult<(
     let mut exported = 0usize;
     for service in &services {
         // 未创建容器的服务跳过,不打断整体导出
-        let Some(id) = container_id(dir, file, service)? else {
+        let Some(id) = container_id(dir, file, service, language)? else {
             continue;
         };
         let dest = dest_dir.join(format!("{service}-container.tar"));
         let out = run_docker(dir, &["export", "-o", &dest.to_string_lossy(), &id])?;
-        ensure_ok("导出", out)?;
+        ensure_ok(docker_action_label("导出", "export", language), out)?;
         exported += 1;
     }
     if exported == 0 {
@@ -297,21 +329,25 @@ fn export_all(dir: &Path, file: &str, kind: &str, dest_dir: &str) -> AppResult<(
 /// service 为空时导出该文件的全部服务,此时 dest 为目标目录
 #[tauri::command]
 pub async fn compose_export(
+    app: AppHandle,
     path: String,
     file: String,
     service: String,
     kind: String,
     dest: String,
 ) -> AppResult<()> {
+    // 一次性读界面语言并向下传递(避免 export_one / export_all 内每条
+    // ensure_ok 都重复读 settings.json)
+    let language = crate::tray::read_setting_string(&app, "language").unwrap_or_default();
     tokio::task::spawn_blocking(move || {
         let dir = Path::new(&path);
         if !dir.is_dir() {
             return Err(AppError::coded(ErrorCode::DockerDirNotFound, path));
         }
         if service.is_empty() {
-            export_all(dir, &file, &kind, &dest)
+            export_all(dir, &file, &kind, &dest, &language)
         } else {
-            export_one(dir, &file, &service, &kind, Path::new(&dest))
+            export_one(dir, &file, &service, &kind, Path::new(&dest), &language)
         }
     })
     .await

@@ -72,36 +72,45 @@ pub(crate) fn read_setting_string(app: &AppHandle, key: &str) -> Option<String> 
 
 /// 加载托盘 i18n 资源文件,按 settings.json 中的 language 字段选择 zh-CN/en-US。
 /// 资源文件 `src-tauri/i18n/tray/<lang>.json` 由 tauri-build 打包进 resources。
-/// 加载失败时返回硬编码中文兜底(原行为)。
+/// 加载失败时按 language 走对应语言的硬编码兜底(避免 en-US 用户资源加载失败
+/// 时回退到中文菜单造成界面语言不一致)
 fn load_tray_texts(app: &App) -> (String, String) {
-    let fallback = ("显示主窗口".to_string(), "退出".to_string());
     let lang = read_setting_string(&app.handle(), "language").unwrap_or_default();
+    // 兜底文案按界面语言分支(原行为是统一中文,en-US 用户资源加载失败会看到
+    // 英文界面 + 中文托盘菜单,界面风格不一致)
+    let fallback_zh = ("显示主窗口".to_string(), "退出".to_string());
+    let fallback_en = ("Show main window".to_string(), "Quit".to_string());
+    let fallback = if lang == "en-US" {
+        &fallback_en
+    } else {
+        &fallback_zh
+    };
     let file_name = if lang == "en-US" { "en-US.json" } else { "zh-CN.json" };
     let path = match app
         .path()
         .resolve(format!("i18n/tray/{file_name}"), tauri::path::BaseDirectory::Resource)
     {
         Ok(p) => p,
-        Err(_) => return fallback,
+        Err(_) => return fallback.clone(),
     };
     let raw = match std::fs::read_to_string(&path) {
         Ok(s) => s,
-        Err(_) => return fallback,
+        Err(_) => return fallback.clone(),
     };
     let value: serde_json::Value = match serde_json::from_str(&raw) {
         Ok(v) => v,
-        Err(_) => return fallback,
+        Err(_) => return fallback.clone(),
     };
     let open = value
         .get("showMainWindow")
         .and_then(|v| v.as_str())
         .map(str::to_owned)
-        .unwrap_or(fallback.0);
+        .unwrap_or_else(|| fallback.0.clone());
     let quit = value
         .get("quit")
         .and_then(|v| v.as_str())
         .map(str::to_owned)
-        .unwrap_or(fallback.1);
+        .unwrap_or_else(|| fallback.1.clone());
     (open, quit)
 }
 

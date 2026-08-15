@@ -1117,10 +1117,7 @@ fn commit_blocking(
         // 重命名的新旧路径由前端一并传入;commit --only 取这些路径的工作区内容,
         // 此前已暂存但未选中的文件不进入本次提交(合并进行中 git 会拒绝,错误透传)
         if paths.is_empty() {
-            return Err(AppError::coded(
-                ErrorCode::GitCommandFailed,
-                "未选择任何要提交的文件".to_string(),
-            ));
+            return Err(AppError::coded(ErrorCode::GitPathsRequired, ""));
         }
         let mut add_args: Vec<&str> = vec!["add", "-A", "--"];
         add_args.extend(paths.iter().map(String::as_str));

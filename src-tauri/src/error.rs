@@ -57,6 +57,8 @@ pub enum ErrorCode {
     GitNoTracking,
     /// 上游远程分支已被删除,pull/fetch 找不到对应 ref
     GitRemoteBranchGone,
+    /// 部分提交 paths 为空(提交对话框未勾选任何文件)
+    GitPathsRequired,
     NotGitRepository,
     /// 分支已被其它 worktree 检出,不能重复检出
     GitBranchCheckedOut,
@@ -214,6 +216,7 @@ impl ErrorCode {
             Self::GitDiverged => "git_diverged",
             Self::GitNoTracking => "git_no_tracking",
             Self::GitRemoteBranchGone => "git_remote_branch_gone",
+            Self::GitPathsRequired => "git_paths_required",
             Self::NotGitRepository => "not_git_repository",
             Self::GitBranchCheckedOut => "git_branch_checked_out",
             Self::GitWorktreeDirty => "git_worktree_dirty",

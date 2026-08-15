@@ -75,6 +75,7 @@ export default {
     git_no_tracking: "当前分支未关联远端分支，请先执行 git push -u origin <分支名>",
     git_remote_branch_gone:
       "远端分支已被删除，无法拉取；请确认远端分支状态，或重新推送本地分支（git push -u origin <分支名>）",
+    git_paths_required: "请至少勾选一个要提交的文件",
     not_git_repository: "当前目录不是 Git 仓库",
     git_branch_checked_out: "该分支已在另一个 worktree 中检出，不能重复使用",
     git_worktree_dirty: "该 worktree 存在未提交修改或未跟踪文件，如需删除请勾选强制删除",

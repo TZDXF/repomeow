@@ -29,6 +29,12 @@ const GENERIC_DETAIL_CODES = new Set([
   "git_task_failed",
   "git_noise_fallback",
   "search_invalid_glob",
+  // Docker:i18n 文案只有一句"操作失败",不附带 message 就丢了 stderr 诊断信息
+  "docker_action_failed",
+  "docker_save_failed",
+  "docker_compose_parse_failed",
+  "docker_exec_failed",
+  "docker_task_failed",
 ]);
 
 /**
