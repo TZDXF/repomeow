@@ -808,6 +808,7 @@ onBeforeUnmount(() => {
             ref="leftPaneEl"
             class="min-w-0 flex-1 -scale-x-100 overflow-auto"
             @scroll="syncPaneScroll('left')"
+            @wheel="onLeftPaneWheel"
           >
             <div
               class="min-w-max -scale-x-100 py-1 font-mono text-xs leading-5"
