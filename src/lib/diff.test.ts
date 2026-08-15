@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseDiff, toSideBySideRows, type DiffFold } from "./diff";
+import { intralineRanges, parseDiff, toSideBySideRows, type DiffFold, type DiffLine } from "./diff";
 
 describe("parseDiff", () => {
   it("忽略 hunk 之前的文件头(diff --git / index / --- /+++/空行),首个 hunk 之后的 hunk 头保留", () => {
@@ -123,5 +123,60 @@ describe("toSideBySideRows", () => {
     expect(rows[0].kind).toBe("hunk");
     expect(rows[1]).toMatchObject({ kind: "fold", fold });
     expect(rows[2].kind).toBe("line");
+  });
+});
+
+describe("intralineRanges", () => {
+  /** 取某行文本(去行首标记)的差异区间对应的子串,便于断言 */
+  function sliceOf(map: Map<DiffLine, [number, number]>, line: DiffLine) {
+    const range = map.get(line);
+    return range ? line.text.slice(1).slice(range[0], range[1]) : null;
+  }
+
+  it("成对 del/add:区间覆盖公共前后缀之外的不同片段", () => {
+    const text = ["@@ -1 +1 @@", '-const name = "old";', '+const name = "new";'].join("\n");
+    const lines = parseDiff(text);
+    const map = intralineRanges(lines);
+    const del = lines.find((l) => l.kind === "del")!;
+    const add = lines.find((l) => l.kind === "add")!;
+    expect(sliceOf(map, del)).toBe("old");
+    expect(sliceOf(map, add)).toBe("new");
+  });
+
+  it("多对增删按下标配对,未配对的多余行不产生区间", () => {
+    const text = ["@@ -1,3 +1,2 @@", "-aaa", "-bbb", "-ccc", "+aaX", "+bbb"].join("\n");
+    const lines = parseDiff(text);
+    const map = intralineRanges(lines);
+    const dels = lines.filter((l) => l.kind === "del");
+    // 第 1 对 aaa/aaX:X 不同;第 2 对 bbb/bbb 完全相同,无区间;第 3 个 del 无配对
+    expect(sliceOf(map, dels[0])).toBe("a");
+    expect(map.has(dels[1])).toBe(false);
+    expect(map.has(dels[2])).toBe(false);
+  });
+
+  it("完全不同(无公共前后缀)的行区间为整行", () => {
+    const text = ["@@ -1 +1 @@", "-aaaa", "+bbbb"].join("\n");
+    const lines = parseDiff(text);
+    const map = intralineRanges(lines);
+    const del = lines.find((l) => l.kind === "del")!;
+    const add = lines.find((l) => l.kind === "add")!;
+    expect(map.get(del)).toEqual([0, 4]);
+    expect(map.get(add)).toEqual([0, 4]);
+  });
+
+  it("前后缀不重叠:一侧是另一侧的子串时区间长度正确", () => {
+    const text = ["@@ -1 +1 @@", "-foobar", "+foo"].join("\n");
+    const lines = parseDiff(text);
+    const map = intralineRanges(lines);
+    const del = lines.find((l) => l.kind === "del")!;
+    const add = lines.find((l) => l.kind === "add")!;
+    // "foobar" vs "foo":公共前缀 foo,del 剩余 "bar" 为区间;add 区间为空不产生条目
+    expect(sliceOf(map, del)).toBe("bar");
+    expect(map.has(add)).toBe(false);
+  });
+
+  it("无增删行时返回空表", () => {
+    const text = ["@@ -1 +1 @@", " only-ctx"].join("\n");
+    expect(intralineRanges(parseDiff(text)).size).toBe(0);
   });
 });

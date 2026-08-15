@@ -71,6 +71,47 @@ export function parseDiff(text: string): DiffLine[] {
   return out;
 }
 
+/**
+ * 成对增删行的行内差异区间(行内高亮用):连续 del/add 块按下标配对,
+ * 取去掉行首标记后文本的公共前/后缀,区间 [start, end) 为两侧各自不同的片段;
+ * 区间基于各自文本的 UTF-16 下标(与 shiki token 拼接、字符串切片口径一致)。
+ * 配对后文本完全相同(区间为空)的行不产生条目。
+ */
+export function intralineRanges(lines: DiffLine[]): Map<DiffLine, [number, number]> {
+  const out = new Map<DiffLine, [number, number]>();
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].kind !== "del" && lines[i].kind !== "add") {
+      i++;
+      continue;
+    }
+    const dels: DiffLine[] = [];
+    const adds: DiffLine[] = [];
+    while (i < lines.length && (lines[i].kind === "del" || lines[i].kind === "add")) {
+      const change = lines[i];
+      if (change.kind === "del") {
+        dels.push(change);
+      } else if (change.kind === "add") {
+        adds.push(change);
+      }
+      i++;
+    }
+    const n = Math.min(dels.length, adds.length);
+    for (let j = 0; j < n; j++) {
+      const a = dels[j].text.slice(1);
+      const b = adds[j].text.slice(1);
+      const maxPre = Math.min(a.length, b.length);
+      let pre = 0;
+      while (pre < maxPre && a[pre] === b[pre]) pre++;
+      let suf = 0;
+      while (suf < maxPre - pre && a[a.length - 1 - suf] === b[b.length - 1 - suf]) suf++;
+      if (pre < a.length - suf) out.set(dels[j], [pre, a.length - suf]);
+      if (pre < b.length - suf) out.set(adds[j], [pre, b.length - suf]);
+    }
+  }
+  return out;
+}
+
 /** 把逐行 diff 配成并排行:连续 del/add 块按下标一一配对,多余的一侧留空;fold 行整行通栏透传 */
 export function toSideBySideRows(lines: (DiffLine | DiffFold)[]): DiffSideRow[] {
   const out: DiffSideRow[] = [];

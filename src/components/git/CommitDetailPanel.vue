@@ -9,10 +9,12 @@ import {
   ChevronUp,
   Columns2,
   Copy,
+  Eraser,
   ExternalLink,
   FoldVertical,
   FolderTree,
   GitBranch,
+  Highlighter,
   List,
   Loader2,
   PanelRightClose,
@@ -22,8 +24,21 @@ import {
 import { Icon } from "@iconify/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { parseDiff, toSideBySideRows, type DiffFold, type DiffLine } from "@/lib/diff";
-import { highlightDiffLines } from "@/lib/diff-highlight";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  intralineRanges,
+  parseDiff,
+  toSideBySideRows,
+  type DiffFold,
+  type DiffLine,
+} from "@/lib/diff";
+import { emphasisTextHtml, highlightDiffLines, wordClsOf } from "@/lib/diff-highlight";
 import { fileIcon, folderIcon } from "@/lib/file-icons";
 import { buildFileTree, type FileTreeNode } from "@/lib/file-tree";
 import { openPathWith, sortOpenWithOptions } from "@/lib/open-with";
@@ -60,6 +75,26 @@ const diff = ref<GitCommitFileDiff | null>(null);
 const diffLoading = ref(false);
 const diffError = ref("");
 
+/** 忽略空白差异模式(持久化):none 不忽略 / eol 行尾 / change 空白数量变化 / all 全部空白 */
+const ignoreWs = useLocalStorage<"none" | "eol" | "change" | "all">(
+  "repomeow:commit-diff-ignore-ws",
+  "none",
+);
+/** 行内差异高亮(持久化):成对增删行中实际不同的片段加强底色 */
+const wordDiff = useLocalStorage("repomeow:commit-diff-word", true);
+
+/** 行内差异区间(wordDiff 开启时按当前 diff 行集计算;shiki 未着色的行回退渲染也用它) */
+const wordRanges = shallowRef(new Map<DiffLine, [number, number]>());
+/** 着色并发序号:连切文件/连按开关时,旧的着色结果不得覆盖新的 */
+let highlightSeq = 0;
+
+/** diff 行模型:不是 computed——由 selectFile 在着色完成后与 diff / lineHtml 同帧写入(见 selectFile 注释)。
+ *  必须声明在 loadFiles 之前:watch immediate 会在 setup 阶段同步调用 loadFiles,声明在后会触发 TDZ 报错 */
+const diffLines = shallowRef<DiffLine[]>([]);
+
+/** 逐行着色结果:DiffLine → 行内 HTML;键就是 diffLines 里的对象引用(fold/sideRows 复用同一批) */
+const lineHtml = shallowRef(new Map<DiffLine, string>());
+
 /** 合并提交(多父)diff-tree 无输出,展示提示而非空列表 */
 const isMerge = computed(() => props.commit.parents.length > 1);
 
@@ -90,8 +125,8 @@ async function loadFiles() {
 
 watch(() => props.commit.hash, loadFiles, { immediate: true });
 
-async function selectFile(file: GitCommitFile) {
-  if (selectedPath.value === file.path && diff.value) {
+async function selectFile(file: GitCommitFile, force = false) {
+  if (!force && selectedPath.value === file.path && diff.value) {
     return;
   }
   selectedPath.value = file.path;
@@ -105,6 +140,7 @@ async function selectFile(file: GitCommitFile) {
       hash: props.commit.hash,
       filePath: file.path,
       oldPath: file.old_path,
+      ignoreWs: ignoreWs.value === "none" ? null : ignoreWs.value,
     });
     // 快速连点 A→B:旧响应解析后可能晚于新请求的 selectedPath,
     // 不做 stale 校验会把 A 的 diff 写到 B 的标题下,先于 B 的真实结果
@@ -113,13 +149,20 @@ async function selectFile(file: GitCommitFile) {
     // 行模型直接复用这份 parseDiff 结果,保证 lineHtml 的键与模板渲染的是同一批对象引用;
     // 折叠/滚动位置属旧 diff,也等这一帧一起重置
     const lines = parseDiff(result.diff);
-    const htmlMap = (await highlightDiffLines(lines, file.path)) ?? new Map<DiffLine, string>();
+    const ranges = wordDiff.value
+      ? intralineRanges(lines)
+      : new Map<DiffLine, [number, number]>();
+    const htmlMap =
+      (await highlightDiffLines(lines, file.path, ranges)) ?? new Map<DiffLine, string>();
     if (selectedPath.value !== file.path) return;
+    highlightSeq++;
+    wordRanges.value = ranges;
     lineHtml.value = htmlMap;
     diffLines.value = lines;
     diff.value = result;
     expandedFolds.value = new Set();
     currentScrollTop.value = 0;
+    currentRowPos.value = 0;
   } catch (e) {
     if (selectedPath.value !== file.path) return;
     diffError.value = String(e);
@@ -127,6 +170,30 @@ async function selectFile(file: GitCommitFile) {
     if (selectedPath.value === file.path) diffLoading.value = false;
   }
 }
+
+// 忽略空白模式变化:按新模式重取当前文件 diff(行集会变,折叠/滚动位置随 selectFile 一并重置)
+watch(ignoreWs, () => {
+  if (selectedFile.value) void selectFile(selectedFile.value, true);
+});
+
+/** 仅重算行内区间并重新着色(行内高亮开关用,不重新取 diff) */
+async function rehighlight(filePath: string, ranges: Map<DiffLine, [number, number]>) {
+  const seq = ++highlightSeq;
+  const htmlMap =
+    (await highlightDiffLines(diffLines.value, filePath, ranges)) ?? new Map<DiffLine, string>();
+  if (seq !== highlightSeq || selectedPath.value !== filePath) return;
+  wordRanges.value = ranges;
+  lineHtml.value = htmlMap;
+}
+
+watch(wordDiff, () => {
+  const path = selectedPath.value;
+  if (!path || !diffLines.value.length) return;
+  const ranges = wordDiff.value
+    ? intralineRanges(diffLines.value)
+    : new Map<DiffLine, [number, number]>();
+  void rehighlight(path, ranges);
+});
 
 // --- 树形展示:按目录层级聚合,折叠状态记忆 ---
 const fileTree = computed(() => buildFileTree(files.value));
@@ -166,11 +233,6 @@ function toggleFolder(fullPath: string) {
 // 保留 hunk 头:对超大文件(>10 万行)后端 libgit2 在 @@ 上报畸形头(2- 之类),
 // 此时 truncated 为 true,hunk 头是定位"被截断的变更段"的唯一线索;truncated=false 时仍是 @@ -1,N +1,M @@,
 // 展示一行灰色分隔对正常文件无明显影响。
-// diffLines 不是 computed:由 selectFile 在着色完成后与 diff / lineHtml 同帧写入(见 selectFile 注释)
-const diffLines = shallowRef<DiffLine[]>([]);
-
-/** 逐行着色结果:DiffLine → 行内 HTML;键就是 diffLines 里的对象引用(fold/sideRows 复用同一批) */
-const lineHtml = shallowRef(new Map<DiffLine, string>());
 
 /** 超过该行数的连续未更改区间才折叠 */
 const FOLD_MIN = 12;
@@ -221,9 +283,13 @@ function foldCountOf(line: DiffLine | DiffFold) {
 
 const displayLines = computed(() => foldCtxRuns(diffLines.value));
 
-/** 模板取行高亮 HTML(未着色时为空串,回退纯文本渲染) */
+/** 模板取行内 HTML:优先 shiki 着色结果;未着色但有行内差异区间的行退化为转义纯文本 + 差异底色 */
 function hlOf(line: DiffLine | null | undefined) {
-  return (line && lineHtml.value.get(line)) || "";
+  if (!line) return "";
+  const html = lineHtml.value.get(line);
+  if (html) return html;
+  const range = wordRanges.value.get(line);
+  return range ? emphasisTextHtml(line.text.slice(1), range, wordClsOf(line)) : "";
 }
 
 /** 并排查看(持久化):旧版本在左、新版本在右 */
@@ -235,15 +301,15 @@ function sideText(line: DiffLine | null) {
   return line ? line.text.slice(1) : "";
 }
 
-// --- 并排视图行模型:一侧空白的连续行压缩为一条示意线(gap) ---
-// gap 高度 = 行数 × 1.25rem(与模板 leading-5 行高一致),两窗格总高度不变,滚动同步不受影响
+// --- 并排视图行模型:对齐 IntelliJ/rebased 默认并排 diff(Align Changes 关闭)——
+// 一侧没有对应内容时不插入占位,两侧各自连续渲染本侧行,行号也随各自窗格走;
+// 滚动同步不靠等高镜像,而是经 paneRowOffsets 把滚动位置映射到 sideRow 空间再映回对侧 ---
 interface PaneRow {
-  kind: "hunk" | "meta" | "line" | "gap" | "fold";
+  kind: "hunk" | "meta" | "line" | "fold";
   text: string;
   line: DiffLine | null;
-  /** gap: 压缩的空白行数;fold: 折叠的行数 */
+  /** fold: 折叠的行数 */
   count: number;
-  tint: "red" | "green";
   /** fold 行的展开状态键(其余行为空串) */
   foldKey: string;
 }
@@ -257,28 +323,18 @@ function buildPaneRows(side: "left" | "right"): PaneRow[] {
         text: "",
         line: null,
         count: row.fold?.count ?? 0,
-        tint: "red",
         foldKey: row.fold?.key ?? "",
       });
       continue;
     }
     if (row.kind !== "line") {
-      out.push({ kind: row.kind, text: row.text, line: null, count: 0, tint: "red", foldKey: "" });
+      out.push({ kind: row.kind, text: row.text, line: null, count: 0, foldKey: "" });
       continue;
     }
     const line = side === "left" ? row.left : row.right;
+    // 本侧无对应内容:不占位,直接跳过(IntelliJ 默认并排 diff 行为)
     if (line) {
-      out.push({ kind: "line", text: "", line, count: 0, tint: "red", foldKey: "" });
-      continue;
-    }
-    // 本侧空白:染色跟随对侧内容(del 红 / add 绿),连续空白合并为一条示意线
-    const other = side === "left" ? row.right : row.left;
-    const tint = other?.kind === "del" ? "red" : "green";
-    const last = out[out.length - 1];
-    if (last?.kind === "gap" && last.tint === tint) {
-      last.count++;
-    } else {
-      out.push({ kind: "gap", text: "", line: null, count: 1, tint, foldKey: "" });
+      out.push({ kind: "line", text: "", line, count: 0, foldKey: "" });
     }
   }
   return out;
@@ -287,10 +343,36 @@ function buildPaneRows(side: "left" | "right"): PaneRow[] {
 const leftRows = computed(() => buildPaneRows("left"));
 const rightRows = computed(() => buildPaneRows("right"));
 
-// --- 并排视图滚动:内容窗格 + 中间行号栏三栏镜像同步;行号栏无横向滚动,横向只在两内容窗格间同步 ---
+/** 各 sideRow 在左/右窗格内容中的起始行偏移(单位:行,行高 1.25rem 全行统一;末尾带总量哨兵) */
+const paneRowOffsets = computed(() => {
+  const left: number[] = [];
+  const right: number[] = [];
+  let l = 0;
+  let r = 0;
+  for (const row of sideRows.value) {
+    left.push(l);
+    right.push(r);
+    if (row.kind === "line") {
+      if (row.left) l++;
+      if (row.right) r++;
+    } else {
+      // hunk/meta/fold 两侧同高
+      l++;
+      r++;
+    }
+  }
+  left.push(l);
+  right.push(r);
+  return { left, right };
+});
+
+// --- 并排视图滚动:左右内容窗格 + 各自行号栏共四栏;同侧行号栏与内容窗格等高直接镜像,
+// 两侧之间经 sideRow 空间锚点映射(变更块顶对齐、块内短侧停在块首,对齐 IntelliJ 的同步滚动);
+// 行号栏无横向滚动,横向只在两内容窗格间同步 ---
 const leftPaneEl = ref<HTMLElement | null>(null);
 const rightPaneEl = ref<HTMLElement | null>(null);
-const gutterEl = ref<HTMLElement | null>(null);
+const leftGutterEl = ref<HTMLElement | null>(null);
+const rightGutterEl = ref<HTMLElement | null>(null);
 // per-instance 状态(用 ref 避免被 <script setup> 模块作用域共享,多实例并发时互不干扰)
 const paneSyncing = ref(false);
 let paneSyncFrame = 0;
@@ -303,19 +385,62 @@ function applyVisualScrollLeft(el: HTMLElement, offset: number) {
   el.scrollLeft = el === leftPaneEl.value ? el.scrollWidth - el.clientWidth - offset : offset;
 }
 
-function syncPaneScroll(source: "left" | "right" | "gutter") {
-  if (paneSyncing.value) return;
-  const from = { left: leftPaneEl, right: rightPaneEl, gutter: gutterEl }[source].value;
-  if (!from) return;
-  currentScrollTop.value = from.scrollTop;
-  paneSyncing.value = true;
-  const hOffset = from === gutterEl.value ? 0 : visualScrollLeft(from);
-  for (const el of [leftPaneEl.value, rightPaneEl.value, gutterEl.value]) {
-    if (!el || el === from) continue;
-    el.scrollTop = from.scrollTop;
-    if (el !== gutterEl.value && from !== gutterEl.value) {
-      applyVisualScrollLeft(el, hOffset);
+/** 滚动位置(px)→ sideRow 空间的小数行位置(跨两侧统一的规范坐标) */
+function locateRowPos(side: "left" | "right", scrollTop: number) {
+  const offsets = paneRowOffsets.value[side];
+  if (offsets.length < 2) return 0;
+  const h = rowHeightPx();
+  const total = offsets[offsets.length - 1];
+  const s = Math.min(Math.max((scrollTop - h / 5) / h, 0), total);
+  let lo = 0;
+  let hi = offsets.length - 2;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (offsets[mid] <= s) {
+      lo = mid;
+    } else {
+      hi = mid - 1;
     }
+  }
+  const segLen = offsets[lo + 1] - offsets[lo];
+  return lo + (segLen > 0 ? (s - offsets[lo]) / segLen : 0);
+}
+
+/** sideRow 空间的小数行位置 → 该侧窗格的 scrollTop(px;内容容器有 py-1 上内边距 = 行高的 1/5) */
+function scrollTopAt(side: "left" | "right", rowPos: number) {
+  const offsets = paneRowOffsets.value[side];
+  if (offsets.length < 2) return 0;
+  const h = rowHeightPx();
+  const i = Math.min(Math.max(Math.floor(rowPos), 0), offsets.length - 2);
+  const f = Math.min(Math.max(rowPos - i, 0), 1);
+  return (offsets[i] + f * (offsets[i + 1] - offsets[i])) * h + h / 5;
+}
+
+function syncPaneScroll(source: "left" | "right" | "leftGutter" | "rightGutter") {
+  // 连接条坐标按两窗格实际 scrollTop 刷新,先于重入锁判断:被锁拦截的事件
+  // (对侧程序性滚动的回火)同样刷新,拖拽滚动条/连续滚轮时图形实时跟随不滞后
+  if (leftPaneEl.value) leftScrollPx.value = leftPaneEl.value.scrollTop;
+  if (rightPaneEl.value) rightScrollPx.value = rightPaneEl.value.scrollTop;
+  if (paneSyncing.value) return;
+  const side = source === "left" || source === "leftGutter" ? "left" : "right";
+  const other = side === "left" ? "right" : "left";
+  const panes = { left: leftPaneEl, right: rightPaneEl };
+  const gutters = { left: leftGutterEl, right: rightGutterEl };
+  const fromGutter = source === "leftGutter" || source === "rightGutter";
+  const from = (fromGutter ? gutters[side] : panes[side]).value;
+  if (!from) return;
+  const pos = locateRowPos(side, from.scrollTop);
+  currentRowPos.value = pos;
+  paneSyncing.value = true;
+  // 同侧行号栏 ↔ 内容窗格:等高镜像
+  const mate = (fromGutter ? panes[side] : gutters[side]).value;
+  if (mate) mate.scrollTop = from.scrollTop;
+  // 对侧:经 sideRow 空间锚点映射
+  const mapped = scrollTopAt(other, pos);
+  if (panes[other].value) panes[other].value.scrollTop = mapped;
+  if (gutters[other].value) gutters[other].value.scrollTop = mapped;
+  if (!fromGutter && panes[other].value) {
+    applyVisualScrollLeft(panes[other].value, visualScrollLeft(from));
   }
   paneSyncFrame = requestAnimationFrame(() => {
     paneSyncing.value = false;
@@ -332,6 +457,125 @@ function onLeftPaneWheel(e: WheelEvent) {
   const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientWidth : 1;
   el.scrollLeft -= delta * unit;
 }
+
+// --- 中间连接条(IntelliJ divider 风格):变更块画彩色多边形(红删/绿增/蓝改),
+// 折叠行画波浪色的连接线;左右纵边分别贴两侧窗格中块的 viewport 纵坐标,滚动时各自跟随 ---
+const dividerEl = ref<HTMLElement | null>(null);
+const { width: dividerWidth, height: dividerHeight } = useElementSize(dividerEl);
+const leftScrollPx = ref(0);
+const rightScrollPx = ref(0);
+
+interface DividerShape {
+  kind: "poly" | "line";
+  /** poly: path d(px,相对连接条左上角;左右纵边之间以三次贝塞尔曲线过渡) */
+  d: string;
+  /** line: 两端 viewport 纵坐标 */
+  y1: number;
+  y2: number;
+  cls: string;
+}
+
+/** 变更块:sideRow 空间的连续增删段(连接条多边形与空白侧插入位置线共用) */
+interface ChangeBlock {
+  start: number;
+  end: number;
+  cls: "divider-del" | "divider-add" | "divider-mod";
+  /** 左/右侧在该块内是否有内容行(无内容侧画插入位置线) */
+  hasLeft: boolean;
+  hasRight: boolean;
+}
+
+const changeBlocks = computed(() => {
+  const rows = sideRows.value;
+  const blocks: ChangeBlock[] = [];
+  const isChange = (idx: number) => {
+    const row = rows[idx];
+    return row.kind === "line" && (row.left?.kind === "del" || row.right?.kind === "add");
+  };
+  let i = 0;
+  while (i < rows.length) {
+    if (!isChange(i)) {
+      i++;
+      continue;
+    }
+    let j = i;
+    let hasDel = false;
+    let hasAdd = false;
+    while (j < rows.length && isChange(j)) {
+      if (rows[j].left?.kind === "del") hasDel = true;
+      if (rows[j].right?.kind === "add") hasAdd = true;
+      j++;
+    }
+    blocks.push({
+      start: i,
+      end: j,
+      cls: hasDel && hasAdd ? "divider-mod" : hasDel ? "divider-del" : "divider-add",
+      hasLeft: hasDel,
+      hasRight: hasAdd,
+    });
+    i = j;
+  }
+  return blocks;
+});
+
+/**
+ * 空白侧插入位置线:本侧无内容的变更块,在块应处的行缝画一条变更色细线。
+ * top 为内容坐标(行,乘 1.25rem 行高),标记渲染在窗格/行号栏内容里随滚动走,
+ * 顶端与连接条多边形塌缩的顶点同一纵坐标,连成一线
+ */
+function insertMarkersOf(side: "left" | "right") {
+  const has = side === "left" ? "hasLeft" : "hasRight";
+  return changeBlocks.value
+    .filter((b) => !b[has])
+    .map((b) => ({
+      top: paneRowOffsets.value[side][b.start],
+      cls: b.hasRight ? "insert-add" : "insert-del",
+    }));
+}
+
+const leftMarkers = computed(() => insertMarkersOf("left"));
+const rightMarkers = computed(() => insertMarkersOf("right"));
+
+const dividerShapes = computed(() => {
+  const w = dividerWidth.value || 20;
+  const vh = dividerHeight.value;
+  const lScroll = leftScrollPx.value;
+  const rScroll = rightScrollPx.value;
+  const h = rowHeightPx();
+  const yL = (pos: number) => scrollTopAt("left", pos) - lScroll;
+  const yR = (pos: number) => scrollTopAt("right", pos) - rScroll;
+  const shapes: DividerShape[] = [];
+  const rows = sideRows.value;
+  rows.forEach((row, idx) => {
+    // 折叠行:两侧 fold 行中点连线(未对齐时呈斜线,与 IntelliJ 连接条观感一致)
+    if (row.kind !== "fold") return;
+    const ly = yL(idx) + h / 2;
+    const ry = yR(idx) + h / 2;
+    if (ly >= -h && ry >= -h && (ly <= vh + h || ry <= vh + h)) {
+      shapes.push({ kind: "line", points: "", y1: ly, y2: ry, cls: "divider-fold" });
+    }
+  });
+  for (const block of changeBlocks.value) {
+    // 左右纵边 = 块首/末行在各自窗格的位置(空侧塌缩成点,顶点接插入位置线);
+    // 纵边之间用控制点在中点的三次贝塞尔(S 形曲线)过渡,比直线多边形更柔和
+    const lTop = yL(block.start);
+    const lBottom = yL(block.end);
+    const rTop = yR(block.start);
+    const rBottom = yR(block.end);
+    // 视口外(上下各留一行余量)跳过,避免大 diff 生成几千个路径
+    if ((lBottom >= -h || rBottom >= -h) && (lTop <= vh + h || rTop <= vh + h)) {
+      const mid = w / 2;
+      shapes.push({
+        kind: "poly",
+        d: `M0,${lTop} C${mid},${lTop} ${mid},${rTop} ${w},${rTop} L${w},${rBottom} C${mid},${rBottom} ${mid},${lBottom} 0,${lBottom} Z`,
+        y1: 0,
+        y2: 0,
+        cls: block.cls,
+      });
+    }
+  }
+  return shapes;
+});
 
 /** 当前选中文件(已删除的文件不提供 IDE 打开:工作区已不存在) */
 const selectedFile = computed(() => files.value.find((f) => f.path === selectedPath.value) ?? null);
@@ -404,11 +648,12 @@ const layout = useLocalStorage<"vertical" | "horizontal">(
   "vertical",
 );
 
-// 布局切换(上下 ↔ 左右)后:旧 scrollTop 可能不再对应新容器的内容位置,
+// 布局切换(上下 ↔ 左右)后:旧滚动位置可能不再对应新容器的内容位置,
 // 直接归零让 chevron 上/下按钮按新视图的"顶端"重新判定 hasPrev/Next;
-/// syncHbarPad 已经在 watch 列表里,这里只补 currentScrollTop
+/// syncHbarPad 已经在 watch 列表里,这里只补滚动位置
 watch(layout, () => {
   currentScrollTop.value = 0;
+  currentRowPos.value = 0;
 });
 
 // --- 文件列表 / diff 区分隔拖拽:上下布局调列表高度,左右布局调列表宽度 ---
@@ -429,16 +674,19 @@ function listWidthCap() {
   return Math.max(LIST_MIN_W, Math.floor(panelWidth.value) - DIFF_MIN_W);
 }
 
-// --- 三栏横向滚动条补偿:横向滚动条吃掉出现它的栏的可视高度,各栏最大 scrollTop 因此不一致
-// (滚到底时行号与代码错位);量出各栏横向滚动条高度,给没有的栏补等量底部内边距,拉平可滚范围 ---
-const hbarPad = ref({ left: 0, right: 0, gutter: 0 });
+// --- 行号栏横向滚动条补偿:内容窗格出现横向滚动条时可滚范围多出一个滚动条高度,
+// 同侧行号栏与内容窗格是等高镜像,给行号栏补等量底部内边距拉平可滚范围
+// (两侧窗格之间走 sideRow 空间映射,无需互相补齐) ---
+const hbarPad = ref({ leftGutter: 0, rightGutter: 0 });
 
 async function syncHbarPad() {
   await nextTick();
-  const els = [leftPaneEl.value, rightPaneEl.value, gutterEl.value];
-  const hb = els.map((el) => (el ? el.offsetHeight - el.clientHeight : 0));
-  const max = Math.max(...hb);
-  hbarPad.value = { left: max - hb[0], right: max - hb[1], gutter: max - hb[2] };
+  hbarPad.value = {
+    leftGutter: leftPaneEl.value ? leftPaneEl.value.offsetHeight - leftPaneEl.value.clientHeight : 0,
+    rightGutter: rightPaneEl.value
+      ? rightPaneEl.value.offsetHeight - rightPaneEl.value.clientHeight
+      : 0,
+  };
 }
 
 // 内容 / 布局 / 面板与列表宽度变化都可能改变横向滚动条的出现与否
@@ -446,9 +694,12 @@ watch([displayLines, splitActive, panelWidth, listWidth, layout], () => void syn
   flush: "post",
 });
 
-// --- 差异导航:上/下一个差异按行索引 × 行高定位;行高与模板 h-5 / leading-5(1.25rem)一致 ---
+// --- 差异导航:上/下一个差异;逐行模式按 px(行索引 × 行高 + py-1 上内边距),
+// 并排模式按 sideRow 空间行位置(经 scrollTopAt 换算到两侧窗格) ---
 const unifiedEl = ref<HTMLElement | null>(null);
 const currentScrollTop = ref(0);
+/** 并排模式当前滚动位置(sideRow 空间的小数行,与 scrollTopAt/locateRowPos 同坐标系) */
+const currentRowPos = ref(0);
 
 function rowHeightPx() {
   return parseFloat(getComputedStyle(document.documentElement).fontSize) * 1.25 || 20;
@@ -477,26 +728,49 @@ const changeRowIdx = computed(() => {
   return blockStarts(displayLines.value.map((line) => line.kind === "add" || line.kind === "del"));
 });
 
-/** 差异行顶部对应的 scrollTop(内容容器有 py-1 上内边距 = 行高的 1/5) */
+/** 差异块顶部位置:逐行为 scrollTop(px),并排为 sideRow 空间行位置 */
 function changeOffsets() {
+  if (splitActive.value) return changeRowIdx.value;
   const h = rowHeightPx();
   return changeRowIdx.value.map((i) => h / 5 + i * h);
 }
 
-const hasPrevChange = computed(() => changeOffsets().some((o) => o < currentScrollTop.value - 2));
-const hasNextChange = computed(() => changeOffsets().some((o) => o > currentScrollTop.value + 2));
+const hasPrevChange = computed(() =>
+  splitActive.value
+    ? changeOffsets().some((o) => o < currentRowPos.value - 0.1)
+    : changeOffsets().some((o) => o < currentScrollTop.value - 2),
+);
+const hasNextChange = computed(() =>
+  splitActive.value
+    ? changeOffsets().some((o) => o > currentRowPos.value + 0.1)
+    : changeOffsets().some((o) => o > currentScrollTop.value + 2),
+);
 
 function scrollToChange(dir: 1 | -1) {
   const offsets = changeOffsets();
+  if (splitActive.value) {
+    const cur = currentRowPos.value;
+    const target =
+      dir === 1
+        ? offsets.find((o) => o > cur + 0.1)
+        : [...offsets].reverse().find((o) => o < cur - 0.1);
+    if (target == null) return;
+    currentRowPos.value = target;
+    // 直接给各栏赋值,不等 scroll 事件传播
+    const left = scrollTopAt("left", target);
+    const right = scrollTopAt("right", target);
+    if (leftPaneEl.value) leftPaneEl.value.scrollTop = left;
+    if (leftGutterEl.value) leftGutterEl.value.scrollTop = left;
+    if (rightPaneEl.value) rightPaneEl.value.scrollTop = right;
+    if (rightGutterEl.value) rightGutterEl.value.scrollTop = right;
+    return;
+  }
   const cur = currentScrollTop.value;
   const target =
     dir === 1 ? offsets.find((o) => o > cur + 2) : [...offsets].reverse().find((o) => o < cur - 2);
   if (target == null) return;
   currentScrollTop.value = target;
-  // 直接给各栏赋值,不等 scroll 事件传播
-  for (const col of [leftPaneEl.value, rightPaneEl.value, gutterEl.value, unifiedEl.value]) {
-    if (col) col.scrollTop = target;
-  }
+  if (unifiedEl.value) unifiedEl.value.scrollTop = target;
 }
 
 function onUnifiedScroll() {
@@ -778,6 +1052,42 @@ onBeforeUnmount(() => {
               <FoldVertical class="h-3.5 w-3.5" />
             </button>
           </template>
+          <DropdownMenu v-if="diff">
+            <DropdownMenuTrigger as-child>
+              <button
+                class="shrink-0 rounded-sm p-1 transition-colors hover:bg-accent hover:text-foreground"
+                :class="ignoreWs !== 'none' ? 'bg-accent text-foreground' : 'text-muted-foreground'"
+                :title="t('git.graph.detail.diffIgnoreWs')"
+              >
+                <Eraser class="h-3.5 w-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" class="w-auto whitespace-nowrap">
+              <DropdownMenuRadioGroup v-model="ignoreWs">
+                <DropdownMenuRadioItem value="none">
+                  {{ t("git.graph.detail.diffIgnoreWsNone") }}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="eol">
+                  {{ t("git.graph.detail.diffIgnoreWsEol") }}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="change">
+                  {{ t("git.graph.detail.diffIgnoreWsChange") }}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="all">
+                  {{ t("git.graph.detail.diffIgnoreWsAll") }}
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <button
+            v-if="diff"
+            class="shrink-0 rounded-sm p-1 transition-colors hover:bg-accent hover:text-foreground"
+            :class="wordDiff ? 'bg-accent text-foreground' : 'text-muted-foreground'"
+            :title="t('git.graph.detail.diffWordHl')"
+            @click="wordDiff = !wordDiff"
+          >
+            <Highlighter class="h-3.5 w-3.5" />
+          </button>
           <button
             v-if="diff && splitApplicable"
             class="shrink-0 rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -797,7 +1107,7 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <!-- 并排(split)视图:左内容 | 中间行号栏 | 右内容,三栏纵向滚动经 syncPaneScroll 镜像同步 -->
+        <!-- 并排(split)视图:左内容 | 左行号 | 右行号 | 右内容;同侧两栏镜像滚动,两侧经 sideRow 空间锚点映射同步 -->
         <div
           v-if="splitActive && !diffLoading && !diffError && selectedPath"
           class="flex min-h-0 flex-1"
@@ -810,10 +1120,7 @@ onBeforeUnmount(() => {
             @scroll="syncPaneScroll('left')"
             @wheel="onLeftPaneWheel"
           >
-            <div
-              class="min-w-max -scale-x-100 py-1 font-mono text-xs leading-5"
-              :style="{ paddingBottom: `calc(0.25rem + ${hbarPad.left}px)` }"
-            >
+            <div class="diff-code relative min-w-max -scale-x-100 py-1 text-xs leading-5">
               <template v-for="(row, i) in leftRows" :key="i">
                 <div
                   v-if="row.kind === 'hunk'"
@@ -833,20 +1140,9 @@ onBeforeUnmount(() => {
                   :title="t('git.graph.detail.diffExpand', { count: row.count })"
                   @click="expandFold(row.foldKey)"
                 >
-                  <div class="diff-fold-wave ml-3 h-5" />
+                  <div class="diff-fold-wave h-5" />
                 </button>
-                <div
-                  v-else-if="row.kind === 'gap'"
-                  class="flex items-center px-2 select-none"
-                  :style="{ height: `${row.count * 1.25}rem` }"
-                  :title="t('git.graph.detail.diffGap', { count: row.count })"
-                >
-                  <div
-                    class="h-px flex-1"
-                    :class="row.tint === 'red' ? 'bg-red-500/40' : 'bg-green-500/40'"
-                  />
-                </div>
-                <!-- 行高固定 h-5:去掉行首标记后空行内容为空,行盒会塌缩成 0 高导致三栏错位 -->
+                <!-- 行高固定 h-5:去掉行首标记后空行内容为空,行盒会塌缩成 0 高导致与行号栏错位 -->
                 <div
                   v-else
                   class="h-5 pl-2"
@@ -860,64 +1156,112 @@ onBeforeUnmount(() => {
                   <span v-else class="whitespace-pre">{{ sideText(row.line) }}</span>
                 </div>
               </template>
+              <!-- 空白侧插入位置线:对侧纯新增块在本侧的行缝标记,顶端接连接条多边形顶点 -->
+              <div
+                v-for="(m, i) in leftMarkers"
+                :key="i"
+                class="pointer-events-none absolute inset-x-0 h-0.5 -translate-y-1/2"
+                :class="m.cls"
+                :style="{ top: `calc(0.25rem + ${m.top * 1.25}rem)` }"
+              />
             </div>
           </div>
 
-          <!-- 中间行号栏:左右行号并排放置,不参与横向滚动(滚动条隐藏但可滚),纵向经 syncPaneScroll 同步;
-               增删行行号格着色,本侧空白处淡色过渡,与内容区底色衔接 -->
+          <!-- 左侧行号栏:旧版本(del/ctx)行号,与左内容窗格等高镜像滚动;横向不滚,纵向滚动条隐藏但可滚 -->
           <div
-            ref="gutterEl"
-            class="shrink-0 overflow-auto border-x border-border/60 font-mono text-xs leading-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            @scroll="syncPaneScroll('gutter')"
+            ref="leftGutterEl"
+            class="shrink-0 overflow-auto border-l border-border/60 font-mono text-xs leading-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            @scroll="syncPaneScroll('leftGutter')"
           >
-            <div class="py-1" :style="{ paddingBottom: `calc(0.25rem + ${hbarPad.gutter}px)` }">
-              <template v-for="(row, i) in sideRows" :key="i">
+            <div
+              class="relative py-1"
+              :style="{ paddingBottom: `calc(0.25rem + ${hbarPad.leftGutter}px)` }"
+            >
+              <template v-for="(row, i) in leftRows" :key="i">
                 <div v-if="row.kind === 'hunk'" class="h-5 bg-muted/60 select-none" />
                 <div v-else-if="row.kind === 'meta'" class="h-5 select-none" />
-                <!-- 波浪线贯穿行号栏,与两侧窗格的折叠行连成一线;同样可点击展开 -->
+                <!-- 波浪线贯穿行号栏,与内容窗格的折叠行连成一线;同样可点击展开 -->
                 <button
                   v-else-if="row.kind === 'fold'"
                   class="block h-5 w-full bg-muted/40 select-none hover:bg-accent"
-                  :title="t('git.graph.detail.diffExpand', { count: row.fold?.count ?? 0 })"
-                  @click="expandFold(row.fold?.key ?? '')"
+                  :title="t('git.graph.detail.diffExpand', { count: row.count })"
+                  @click="expandFold(row.foldKey)"
                 >
                   <div class="diff-fold-wave h-full" />
                 </button>
-                <div v-else class="flex h-5">
-                  <span
-                    class="h-full w-10 pr-1 text-right text-muted-foreground/50 select-none"
-                    :class="
-                      row.left?.kind === 'del'
-                        ? 'bg-red-500/10'
-                        : !row.left && row.right?.kind === 'add'
-                          ? 'bg-green-500/5'
-                          : ''
-                    "
-                    >{{ row.left?.oldLine ?? "" }}</span
-                  ><span
-                    class="h-full w-10 pl-1 text-right text-muted-foreground/50 select-none"
-                    :class="
-                      row.right?.kind === 'add'
-                        ? 'bg-green-500/10'
-                        : !row.right && row.left?.kind === 'del'
-                          ? 'bg-red-500/5'
-                          : ''
-                    "
-                    >{{ row.right?.newLine ?? "" }}</span
-                  >
+                <div
+                  v-else
+                  class="h-5 w-10 pr-1 text-right text-muted-foreground/50 select-none"
+                  :class="row.line?.kind === 'del' ? 'bg-red-500/10' : ''"
+                >
+                  {{ row.line?.oldLine ?? "" }}
                 </div>
               </template>
+              <div
+                v-for="(m, i) in leftMarkers"
+                :key="i"
+                class="pointer-events-none absolute inset-x-0 h-0.5 -translate-y-1/2"
+                :class="m.cls"
+                :style="{ top: `calc(0.25rem + ${m.top * 1.25}rem)` }"
+              />
             </div>
           </div>
+
+          <!-- 中间连接条:变更块多边形 + 折叠波浪连接线(IntelliJ divider 风格),纯展示不响应事件 -->
+          <div ref="dividerEl" class="relative w-3 shrink-0 select-none">
+            <svg class="pointer-events-none absolute inset-0 h-full w-full">
+              <template v-for="(shape, i) in dividerShapes" :key="i">
+                <polygon v-if="shape.kind === 'poly'" :points="shape.points" :class="shape.cls" />
+                <line v-else x1="0" :y1="shape.y1" x2="100%" :y2="shape.y2" :class="shape.cls" />
+              </template>
+            </svg>
+          </div>
+
+          <!-- 右侧行号栏:新版本(add/ctx)行号,与右内容窗格等高镜像滚动 -->
+          <div
+            ref="rightGutterEl"
+            class="shrink-0 overflow-auto border-r border-border/60 font-mono text-xs leading-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            @scroll="syncPaneScroll('rightGutter')"
+          >
+            <div
+              class="relative py-1"
+              :style="{ paddingBottom: `calc(0.25rem + ${hbarPad.rightGutter}px)` }"
+            >
+              <template v-for="(row, i) in rightRows" :key="i">
+                <div v-if="row.kind === 'hunk'" class="h-5 bg-muted/60 select-none" />
+                <div v-else-if="row.kind === 'meta'" class="h-5 select-none" />
+                <button
+                  v-else-if="row.kind === 'fold'"
+                  class="block h-5 w-full bg-muted/40 select-none hover:bg-accent"
+                  :title="t('git.graph.detail.diffExpand', { count: row.count })"
+                  @click="expandFold(row.foldKey)"
+                >
+                  <div class="diff-fold-wave h-full" />
+                </button>
+                <div
+                  v-else
+                  class="h-5 w-10 pl-1 text-right text-muted-foreground/50 select-none"
+                  :class="row.line?.kind === 'add' ? 'bg-green-500/10' : ''"
+                >
+                  {{ row.line?.newLine ?? "" }}
+                </div>
+              </template>
+              <div
+                v-for="(m, i) in rightMarkers"
+                :key="i"
+                class="pointer-events-none absolute inset-x-0 h-0.5 -translate-y-1/2"
+                :class="m.cls"
+                :style="{ top: `calc(0.25rem + ${m.top * 1.25}rem)` }"
+              />
+            </div>
+          </div>
+
           <div
             ref="rightPaneEl"
             class="min-w-0 flex-1 overflow-auto"
             @scroll="syncPaneScroll('right')"
           >
-            <div
-              class="min-w-max py-1 font-mono text-xs leading-5"
-              :style="{ paddingBottom: `calc(0.25rem + ${hbarPad.right}px)` }"
-            >
+            <div class="diff-code relative min-w-max py-1 text-xs leading-5">
               <template v-for="(row, i) in rightRows" :key="i">
                 <div
                   v-if="row.kind === 'hunk'"
@@ -937,20 +1281,9 @@ onBeforeUnmount(() => {
                   :title="t('git.graph.detail.diffExpand', { count: row.count })"
                   @click="expandFold(row.foldKey)"
                 >
-                  <div class="diff-fold-wave mr-3 h-5" />
+                  <div class="diff-fold-wave h-5" />
                 </button>
-                <div
-                  v-else-if="row.kind === 'gap'"
-                  class="flex items-center px-2 select-none"
-                  :style="{ height: `${row.count * 1.25}rem` }"
-                  :title="t('git.graph.detail.diffGap', { count: row.count })"
-                >
-                  <div
-                    class="h-px flex-1"
-                    :class="row.tint === 'red' ? 'bg-red-500/40' : 'bg-green-500/40'"
-                  />
-                </div>
-                <!-- 行高固定 h-5:去掉行首标记后空行内容为空,行盒会塌缩成 0 高导致三栏错位 -->
+                <!-- 行高固定 h-5:去掉行首标记后空行内容为空,行盒会塌缩成 0 高导致与行号栏错位 -->
                 <div
                   v-else
                   class="h-5 pl-2"
@@ -964,6 +1297,14 @@ onBeforeUnmount(() => {
                   <span v-else class="whitespace-pre">{{ sideText(row.line) }}</span>
                 </div>
               </template>
+              <!-- 空白侧插入位置线:对侧纯删除块在本侧的行缝标记,顶端接连接条多边形顶点 -->
+              <div
+                v-for="(m, i) in rightMarkers"
+                :key="i"
+                class="pointer-events-none absolute inset-x-0 h-0.5 -translate-y-1/2"
+                :class="m.cls"
+                :style="{ top: `calc(0.25rem + ${m.top * 1.25}rem)` }"
+              />
             </div>
           </div>
         </div>
@@ -983,7 +1324,7 @@ onBeforeUnmount(() => {
           </p>
 
           <!-- 逐行(unified)视图 -->
-          <div v-else class="min-w-max py-1 font-mono text-xs leading-5">
+          <div v-else class="diff-code min-w-max py-1 text-xs leading-5">
             <template v-for="(line, i) in displayLines" :key="i">
               <div
                 v-if="line.kind === 'hunk'"
@@ -1034,6 +1375,15 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* diff 代码字体栈:Tailwind font-mono 以泛型 monospace 收尾,WebView2(zh-CN)按「等宽语境」
+   把栈内没有的 CJK 字符回退到系统中文等宽默认 NSimSun(宋体系),与 Consolas 的 ASCII 观感割裂;
+   在泛型前显式插入微软雅黑,汉字统一走雅黑。ASCII 仍按原栈取 Consolas(macOS 则前置条目取 SF Mono/Menlo) */
+.diff-code {
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    "Microsoft YaHei", monospace;
+}
+
 /* shiki 双主题产物只在 token span 上留 --shiki-light/--shiki-dark 变量,这里按 .dark 切换实际用哪组;
    token 经 v-html 注入没有 scoped 属性,选择器整段包 :global()(同 CommandEditor 的写法) */
 :global(.commit-diff .diff-hl span) {
@@ -1049,5 +1399,48 @@ onBeforeUnmount(() => {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='6'%3E%3Cpath d='M0 3 Q3 0.5 6 3 T12 3' fill='none' stroke='%239ca3af' stroke-width='1.2'/%3E%3C/svg%3E");
   background-repeat: repeat-x;
   background-position: center;
+}
+
+/* 中间连接条:变更块多边形(低透明填充 + 同色描边)与折叠连接线(取波浪线同款中性灰) */
+.divider-del {
+  fill: rgb(239 68 68 / 0.16);
+  stroke: rgb(239 68 68 / 0.45);
+  stroke-width: 1;
+}
+
+.divider-add {
+  fill: rgb(34 197 94 / 0.16);
+  stroke: rgb(34 197 94 / 0.45);
+  stroke-width: 1;
+}
+
+.divider-mod {
+  fill: rgb(59 130 246 / 0.16);
+  stroke: rgb(59 130 246 / 0.45);
+  stroke-width: 1;
+}
+
+.divider-fold {
+  stroke: #9ca3af;
+  stroke-width: 1.2;
+}
+
+/* 空白侧插入位置线:本侧无内容的变更块,在块应处的行缝画一条变更色细线(贯穿窗格与行号栏) */
+.insert-add {
+  background-color: rgb(34 197 94 / 0.55);
+}
+
+.insert-del {
+  background-color: rgb(239 68 68 / 0.55);
+}
+
+/* 行内差异底色:成对增删行中实际不同的片段;套在 shiki token span 外层,只加背景不改文字色。
+   token 经 v-html 注入没有 scoped 属性,选择器整段包 :global()(同 .diff-hl 的写法) */
+:global(.commit-diff .diff-word-del) {
+  background-color: rgb(239 68 68 / 0.28);
+}
+
+:global(.commit-diff .diff-word-add) {
+  background-color: rgb(34 197 94 / 0.28);
 }
 </style>

@@ -2360,15 +2360,17 @@ fn commit_files_blocking(path: &str, hash: &str) -> AppResult<Vec<GitCommitFile>
 /// 读取某次提交中单个文件的 diff(提交详情面板用)。
 /// 重命名时新旧路径都作为 pathspec 传入。超长按字符截断(二进制 diff 天然很短)
 /// context_lines 拉满:前端并排/逐行视图均展示完整文件内容(未更改区间由前端折叠)
+/// ignore_ws:前端"忽略空白差异"模式,None/"none" 不忽略
 #[tauri::command]
 pub async fn git_commit_file_diff(
     path: String,
     hash: String,
     file_path: String,
     old_path: Option<String>,
+    ignore_ws: Option<String>,
 ) -> AppResult<GitCommitFileDiff> {
     run_blocking(move || {
-        commit_file_diff_blocking(&path, &hash, &file_path, old_path.as_deref())
+        commit_file_diff_blocking(&path, &hash, &file_path, old_path.as_deref(), ignore_ws.as_deref())
     })
     .await
 }
@@ -2378,6 +2380,7 @@ fn commit_file_diff_blocking(
     hash: &str,
     file_path: &str,
     old_path: Option<&str>,
+    ignore_ws: Option<&str>,
 ) -> AppResult<GitCommitFileDiff> {
     let Some(repo) = open_repo(path)? else {
         return Err(not_a_repo());
@@ -2390,6 +2393,19 @@ fn commit_file_diff_blocking(
         opts.context_lines(100_000);
         if let Some(old) = old_path {
             opts.pathspec(old);
+        }
+        // 忽略空白差异:eol=仅行尾 / change=空白数量变化 / all=全部空白(对应 git 的 -b / -w 语义)
+        match ignore_ws {
+            Some("eol") => {
+                opts.ignore_whitespace_eol(true);
+            }
+            Some("change") => {
+                opts.ignore_whitespace_change(true);
+            }
+            Some("all") => {
+                opts.ignore_whitespace(true);
+            }
+            _ => {}
         }
     })?
     else {

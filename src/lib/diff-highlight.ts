@@ -100,35 +100,86 @@ interface LineToken {
 }
 
 /**
+ * 一段文本拼成内联 HTML:shiki 颜色双变量(--shiki-light / --shiki-dark)照原样保留;
+ * emphasis 命中([start, end),基于整行去掉行首标记后的 UTF-16 下标)的片段
+ * 额外套行内差异底色 span(del → diff-word-del / add → diff-word-add,配色在使用方组件)
+ */
+function segmentHtml(
+  content: string,
+  light: string | undefined,
+  dark: string | undefined,
+  emphasis: [number, number] | undefined,
+  emphasisCls: string,
+  base: number,
+): string {
+  const colorOf = (s: string) =>
+    !light && !dark
+      ? escapeHtml(s)
+      : `<span style="--shiki-light:${light ?? "inherit"};--shiki-dark:${dark ?? "inherit"}">${escapeHtml(s)}</span>`;
+  if (!emphasis) return colorOf(content);
+  const cs = Math.max(emphasis[0] - base, 0);
+  const ce = Math.min(emphasis[1] - base, content.length);
+  if (cs >= ce) return colorOf(content);
+  let html = "";
+  if (cs > 0) html += colorOf(content.slice(0, cs));
+  html += `<span class="${emphasisCls}">${colorOf(content.slice(cs, ce))}</span>`;
+  if (ce < content.length) html += colorOf(content.slice(ce));
+  return html;
+}
+
+/**
  * 一行 token 拼成内联 HTML:只取颜色双变量(--shiki-light / --shiki-dark),
  * 字号/斜体等字体样式不取,与 CommandEditor 的高亮观感保持一致;
  * 上色 CSS(按 .dark 切换变量)在使用方组件里,这里只输出变量。
  */
-export function tokensToLineHtml(tokens: LineToken[] | undefined): string {
+export function tokensToLineHtml(
+  tokens: LineToken[] | undefined,
+  emphasis?: [number, number],
+  emphasisCls = "",
+): string {
   if (!tokens) return "";
   let html = "";
+  let base = 0;
   for (const token of tokens) {
     if (!token.content) continue;
-    const light = token.htmlStyle?.["--shiki-light"];
-    const dark = token.htmlStyle?.["--shiki-dark"];
-    if (!light && !dark) {
-      html += escapeHtml(token.content);
-    } else {
-      html += `<span style="--shiki-light:${light ?? "inherit"};--shiki-dark:${dark ?? "inherit"}">${escapeHtml(token.content)}</span>`;
-    }
+    html += segmentHtml(
+      token.content,
+      token.htmlStyle?.["--shiki-light"],
+      token.htmlStyle?.["--shiki-dark"],
+      emphasis,
+      emphasisCls,
+      base,
+    );
+    base += token.content.length;
   }
   return html;
+}
+
+/** 未着色(纯文本回退)行的行内差异 HTML:转义后按区间三段拼接 */
+export function emphasisTextHtml(
+  text: string,
+  emphasis: [number, number],
+  emphasisCls: string,
+): string {
+  return segmentHtml(text, undefined, undefined, emphasis, emphasisCls, 0);
+}
+
+/** 行内差异底色 class(del / add 两侧配色不同) */
+export function wordClsOf(line: DiffLine): string {
+  return line.kind === "del" ? "diff-word-del" : "diff-word-add";
 }
 
 const THEMES = { light: "github-light", dark: "github-dark" } as const;
 
 /**
  * 逐行着色整份 diff:返回 DiffLine → 行内 HTML(不含行首 +/-/空格 标记)。
+ * emphasis 为行内差异区间(见 diff.ts 的 intralineRanges),命中的行在着色结果上叠加差异底色。
  * 返回 null 表示不着色(空 diff / 超大文件 / 分词失败),调用方回退纯文本渲染。
  */
 export async function highlightDiffLines(
   lines: DiffLine[],
   filePath: string,
+  emphasis?: Map<DiffLine, [number, number]>,
 ): Promise<Map<DiffLine, string> | null> {
   const oldSrc: string[] = [];
   const oldRefs: DiffLine[] = [];
@@ -153,6 +204,8 @@ export async function highlightDiffLines(
 
   const lang = diffLangOf(filePath) as BundledLanguage;
   const out = new Map<DiffLine, string>();
+  const htmlOf = (ref: DiffLine, tokens: LineToken[] | undefined) =>
+    tokensToLineHtml(tokens, emphasis?.get(ref), wordClsOf(ref));
   try {
     // 先旧后新:ctx 行两侧文本相同,新侧结果覆盖旧侧,视觉效果一致
     if (oldRefs.length) {
@@ -161,14 +214,14 @@ export async function highlightDiffLines(
         themes: THEMES,
         defaultColor: false,
       });
-      oldRefs.forEach((ref, i) => out.set(ref, tokensToLineHtml(tokens[i])));
+      oldRefs.forEach((ref, i) => out.set(ref, htmlOf(ref, tokens[i])));
     }
     const { tokens } = await codeToTokens(newSrc.join("\n"), {
       lang,
       themes: THEMES,
       defaultColor: false,
     });
-    newRefs.forEach((ref, i) => out.set(ref, tokensToLineHtml(tokens[i])));
+    newRefs.forEach((ref, i) => out.set(ref, htmlOf(ref, tokens[i])));
   } catch {
     return null;
   }
