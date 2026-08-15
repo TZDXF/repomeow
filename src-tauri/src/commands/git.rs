@@ -2350,6 +2350,7 @@ fn commit_files_blocking(path: &str, hash: &str) -> AppResult<Vec<GitCommitFile>
 
 /// 读取某次提交中单个文件的 diff(提交详情面板用)。
 /// 重命名时新旧路径都作为 pathspec 传入。超长按字符截断(二进制 diff 天然很短)
+/// context_lines 拉满:前端并排/逐行视图均展示完整文件内容(未更改区间由前端折叠)
 #[tauri::command]
 pub async fn git_commit_file_diff(
     path: String,
@@ -2374,6 +2375,10 @@ fn commit_file_diff_blocking(
     };
     let Some(diff) = commit_diff(&repo, hash, |opts| {
         opts.pathspec(file_path);
+        // 全量上下文(完整文件内容):u32::MAX 会使 libgit2 的 hunk 边界计算溢出,
+        // 产生 @@ -4,2- +4 @@ 畸形头且丢上下文;100k 已足够——行数超 10 万的文件
+        // 体积必然超过 COMMIT_DIFF_MAX_CHARS 字符上限,会先被截断
+        opts.context_lines(100_000);
         if let Some(old) = old_path {
             opts.pathspec(old);
         }
@@ -2889,6 +2894,25 @@ mod tests {
         assert!(d.diff.contains("@@"), "应含 hunk 头: {}", d.diff);
         assert!(d.diff.contains("+hello world"), "实际: {}", d.diff);
         assert!(!d.truncated);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn commit_file_diff_add_only_keeps_full_context() {
+        // 纯新增提交:hunk 头必须规整且包含全部上下文行(前端按完整文件内容渲染)
+        let dir = temp_dir("commit-diff-addonly");
+        init_repo(&dir);
+        fs::write(dir.join("a.txt"), "l1\nl2\nl3\nl4\nl5\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-m", "init"]);
+        fs::write(dir.join("a.txt"), "l1\nl2\na1\na2\nl3\nl4\nl5\n").unwrap();
+        git(&dir, &["commit", "-am", "add"]);
+
+        let d = commit_file_diff_blocking(dir.to_str().unwrap(), "HEAD", "a.txt", None).unwrap();
+        assert!(d.diff.contains("@@ -1,5 +1,7 @@"), "hunk 头应覆盖全文件: {}", d.diff);
+        assert!(d.diff.contains("+a1"), "实际: {}", d.diff);
+        assert!(d.diff.contains("\n l1\n"), "应保留上下文行: {}", d.diff);
 
         let _ = fs::remove_dir_all(&dir);
     }

@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { useElementSize, useLocalStorage } from "@vueuse/core";
 import {
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   Columns2,
   Copy,
   ExternalLink,
-  Folder,
+  FoldVertical,
   FolderTree,
   GitBranch,
   List,
@@ -17,9 +19,11 @@ import {
   Rows2,
   Tag as TagIcon,
 } from "@lucide/vue";
+import { Icon } from "@iconify/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { parseDiff, toSideBySideRows, type DiffLine } from "@/lib/diff";
+import { parseDiff, toSideBySideRows, type DiffFold, type DiffLine } from "@/lib/diff";
+import { fileIcon, folderIcon } from "@/lib/file-icons";
 import { buildFileTree, type FileTreeNode } from "@/lib/file-tree";
 import { openPathWith, sortOpenWithOptions } from "@/lib/open-with";
 import { baseName } from "@/lib/path";
@@ -91,6 +95,8 @@ async function selectFile(file: GitCommitFile) {
   diffLoading.value = true;
   diffError.value = "";
   diff.value = null;
+  expandedFolds.value = new Set();
+  currentScrollTop.value = 0;
   try {
     diff.value = await cmd<GitCommitFileDiff>("git_commit_file_diff", {
       path: props.projectPath,
@@ -139,28 +145,152 @@ function toggleFolder(fullPath: string) {
 }
 
 // --- diff 解析:lib/diff.ts 的 parseDiff(与提交对话框变更预览共用);baseName 走 @/lib/path ---
-const diffLines = computed(() => (diff.value ? parseDiff(diff.value.diff) : []));
+// 后端 context_lines 已拉满,diff 含完整文件内容;过长的未更改区间折叠为可点击展开的占位行(IDEA 风格)
+// 全量上下文下 hunk 头恒为 @@ -1,N +1,M @@,无信息量,直接过滤不展示
+const diffLines = computed(() =>
+  (diff.value ? parseDiff(diff.value.diff) : []).filter((l) => l.kind !== "hunk"),
+);
+
+/** 超过该行数的连续未更改区间才折叠 */
+const FOLD_MIN = 12;
+/** 折叠区间两端各保留的上下文行数 */
+const FOLD_EDGE = 3;
+/** 已手动展开的折叠区(换文件时重置) */
+const expandedFolds = ref(new Set<string>());
+
+function foldCtxRuns(lines: DiffLine[]): (DiffLine | DiffFold)[] {
+  const out: (DiffLine | DiffFold)[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].kind !== "ctx") {
+      out.push(lines[i]);
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < lines.length && lines[j].kind === "ctx") j++;
+    const len = j - i;
+    const key = `${i}:${len}`;
+    if (len > FOLD_MIN && !expandedFolds.value.has(key)) {
+      out.push(...lines.slice(i, i + FOLD_EDGE));
+      out.push({ kind: "fold", count: len - FOLD_EDGE * 2, key });
+      out.push(...lines.slice(j - FOLD_EDGE, j));
+    } else {
+      out.push(...lines.slice(i, j));
+    }
+    i = j;
+  }
+  return out;
+}
+
+function expandFold(key: string) {
+  if (!key) return;
+  const next = new Set(expandedFolds.value);
+  next.add(key);
+  expandedFolds.value = next;
+}
+
+/** 模板取 fold 字段的访问器(避免依赖模板内联合类型收窄) */
+function foldKeyOf(line: DiffLine | DiffFold) {
+  return line.kind === "fold" ? line.key : "";
+}
+function foldCountOf(line: DiffLine | DiffFold) {
+  return line.kind === "fold" ? line.count : 0;
+}
+
+const displayLines = computed(() => foldCtxRuns(diffLines.value));
 
 /** 并排查看(持久化):旧版本在左、新版本在右 */
 const splitDiff = useLocalStorage("repomeow:commit-diff-split", false);
-const sideRows = computed(() => toSideBySideRows(diffLines.value));
+const sideRows = computed(() => toSideBySideRows(displayLines.value));
 
 /** 并排视图去掉行首 diff 标记(+ / - / 空格) */
 function sideText(line: DiffLine | null) {
   return line ? line.text.slice(1) : "";
 }
 
-// --- 并排视图滚动:左右窗格横向各自滚动;两侧行序列与行高完全一致,纵向 scrollTop 直接同步 ---
+// --- 并排视图行模型:一侧空白的连续行压缩为一条示意线(gap) ---
+// gap 高度 = 行数 × 1.25rem(与模板 leading-5 行高一致),两窗格总高度不变,滚动同步不受影响
+interface PaneRow {
+  kind: "hunk" | "meta" | "line" | "gap" | "fold";
+  text: string;
+  line: DiffLine | null;
+  /** gap: 压缩的空白行数;fold: 折叠的行数 */
+  count: number;
+  tint: "red" | "green";
+  /** fold 行的展开状态键(其余行为空串) */
+  foldKey: string;
+}
+
+function buildPaneRows(side: "left" | "right"): PaneRow[] {
+  const out: PaneRow[] = [];
+  for (const row of sideRows.value) {
+    if (row.kind === "fold") {
+      out.push({
+        kind: "fold",
+        text: "",
+        line: null,
+        count: row.fold?.count ?? 0,
+        tint: "red",
+        foldKey: row.fold?.key ?? "",
+      });
+      continue;
+    }
+    if (row.kind !== "line") {
+      out.push({ kind: row.kind, text: row.text, line: null, count: 0, tint: "red", foldKey: "" });
+      continue;
+    }
+    const line = side === "left" ? row.left : row.right;
+    if (line) {
+      out.push({ kind: "line", text: "", line, count: 0, tint: "red", foldKey: "" });
+      continue;
+    }
+    // 本侧空白:染色跟随对侧内容(del 红 / add 绿),连续空白合并为一条示意线
+    const other = side === "left" ? row.right : row.left;
+    const tint = other?.kind === "del" ? "red" : "green";
+    const last = out[out.length - 1];
+    if (last?.kind === "gap" && last.tint === tint) {
+      last.count++;
+    } else {
+      out.push({ kind: "gap", text: "", line: null, count: 1, tint, foldKey: "" });
+    }
+  }
+  return out;
+}
+
+const leftRows = computed(() => buildPaneRows("left"));
+const rightRows = computed(() => buildPaneRows("right"));
+
+// --- 并排视图滚动:内容窗格 + 中间行号栏三栏镜像同步;行号栏无横向滚动,横向只在两内容窗格间同步 ---
 const leftPaneEl = ref<HTMLElement | null>(null);
 const rightPaneEl = ref<HTMLElement | null>(null);
+const gutterEl = ref<HTMLElement | null>(null);
 let paneSyncing = false;
-function syncPaneScroll(source: "left" | "right") {
+
+// 左窗格经 -scale-x-100 翻转(实测 Chromium):scrollLeft 与可视偏移互为镜像,scrollLeft=0
+// 停在内容末尾、最大值才对应行首;横向同步必须先换算成统一的「距行首可视偏移」再写到对侧
+function visualScrollLeft(el: HTMLElement) {
+  return el === leftPaneEl.value ? el.scrollWidth - el.clientWidth - el.scrollLeft : el.scrollLeft;
+}
+
+function applyVisualScrollLeft(el: HTMLElement, offset: number) {
+  el.scrollLeft = el === leftPaneEl.value ? el.scrollWidth - el.clientWidth - offset : offset;
+}
+
+function syncPaneScroll(source: "left" | "right" | "gutter") {
   if (paneSyncing) return;
-  const from = source === "left" ? leftPaneEl.value : rightPaneEl.value;
-  const to = source === "left" ? rightPaneEl.value : leftPaneEl.value;
-  if (!from || !to || to.scrollTop === from.scrollTop) return;
+  const from = { left: leftPaneEl, right: rightPaneEl, gutter: gutterEl }[source].value;
+  if (!from) return;
+  currentScrollTop.value = from.scrollTop;
   paneSyncing = true;
-  to.scrollTop = from.scrollTop;
+  const hOffset = from === gutterEl.value ? 0 : visualScrollLeft(from);
+  for (const el of [leftPaneEl.value, rightPaneEl.value, gutterEl.value]) {
+    if (!el || el === from) continue;
+    el.scrollTop = from.scrollTop;
+    if (el !== gutterEl.value && from !== gutterEl.value) {
+      applyVisualScrollLeft(el, hOffset);
+    }
+  }
   requestAnimationFrame(() => {
     paneSyncing = false;
   });
@@ -169,6 +299,21 @@ function syncPaneScroll(source: "left" | "right") {
 /** 当前选中文件(已删除的文件不提供 IDE 打开:工作区已不存在) */
 const selectedFile = computed(() => files.value.find((f) => f.path === selectedPath.value) ?? null);
 const canOpenInIde = computed(() => selectedFile.value?.status !== "D");
+
+/** 并排是否适用:新增/删除文件一侧必然全空,强制逐行视图并隐藏切换按钮 */
+const splitApplicable = computed(
+  () => selectedFile.value?.status !== "A" && selectedFile.value?.status !== "D",
+);
+const splitActive = computed(() => splitDiff.value && splitApplicable.value);
+
+// 打开并排视图 / 切文件加载完成后,把左窗格 scrollLeft 推到最大(翻转栏的可视起点),
+// 让两侧都从行首看起;赋值会触发 scroll 事件,经 syncPaneScroll 顺带把右窗格归零
+watch([splitActive, selectedPath, diffLoading], async ([active, , loading]) => {
+  if (!active || loading) return;
+  await nextTick();
+  const lp = leftPaneEl.value;
+  if (lp) lp.scrollLeft = lp.scrollWidth - lp.clientWidth;
+});
 
 // --- 在 IDE 打开(默认编辑器) ---
 async function openFile(file: GitCommitFile) {
@@ -237,6 +382,86 @@ const { width: panelWidth } = useElementSize(rootEl);
 function listWidthCap() {
   if (layout.value !== "horizontal" || !panelWidth.value) return LIST_MIN_W;
   return Math.max(LIST_MIN_W, Math.floor(panelWidth.value) - DIFF_MIN_W);
+}
+
+// --- 三栏横向滚动条补偿:横向滚动条吃掉出现它的栏的可视高度,各栏最大 scrollTop 因此不一致
+// (滚到底时行号与代码错位);量出各栏横向滚动条高度,给没有的栏补等量底部内边距,拉平可滚范围 ---
+const hbarPad = ref({ left: 0, right: 0, gutter: 0 });
+
+async function syncHbarPad() {
+  await nextTick();
+  const els = [leftPaneEl.value, rightPaneEl.value, gutterEl.value];
+  const hb = els.map((el) => (el ? el.offsetHeight - el.clientHeight : 0));
+  const max = Math.max(...hb);
+  hbarPad.value = { left: max - hb[0], right: max - hb[1], gutter: max - hb[2] };
+}
+
+// 内容 / 布局 / 面板与列表宽度变化都可能改变横向滚动条的出现与否
+watch([displayLines, splitActive, panelWidth, listWidth, layout], () => void syncHbarPad(), {
+  flush: "post",
+});
+
+// --- 差异导航:上/下一个差异按行索引 × 行高定位;行高与模板 h-5 / leading-5(1.25rem)一致 ---
+const unifiedEl = ref<HTMLElement | null>(null);
+const currentScrollTop = ref(0);
+
+function rowHeightPx() {
+  return parseFloat(getComputedStyle(document.documentElement).fontSize) * 1.25 || 20;
+}
+
+/** 取各连续变更块的首行下标(flags 中 false→true 的跳变位置) */
+function blockStarts(flags: boolean[]) {
+  const out: number[] = [];
+  flags.forEach((f, i) => {
+    if (f && !flags[i - 1]) {
+      out.push(i);
+    }
+  });
+  return out;
+}
+
+/** 差异块首行在滚动内容中的行索引(连续增删算一个差异):并排按 sideRows,逐行按 displayLines */
+const changeRowIdx = computed(() => {
+  if (splitActive.value) {
+    return blockStarts(
+      sideRows.value.map(
+        (row) => row.kind === "line" && (row.left?.kind === "del" || row.right?.kind === "add"),
+      ),
+    );
+  }
+  return blockStarts(displayLines.value.map((line) => line.kind === "add" || line.kind === "del"));
+});
+
+/** 差异行顶部对应的 scrollTop(内容容器有 py-1 上内边距 = 行高的 1/5) */
+function changeOffsets() {
+  const h = rowHeightPx();
+  return changeRowIdx.value.map((i) => h / 5 + i * h);
+}
+
+const hasPrevChange = computed(() => changeOffsets().some((o) => o < currentScrollTop.value - 2));
+const hasNextChange = computed(() => changeOffsets().some((o) => o > currentScrollTop.value + 2));
+
+function scrollToChange(dir: 1 | -1) {
+  const offsets = changeOffsets();
+  const cur = currentScrollTop.value;
+  const target =
+    dir === 1 ? offsets.find((o) => o > cur + 2) : [...offsets].reverse().find((o) => o < cur - 2);
+  if (target == null) return;
+  currentScrollTop.value = target;
+  // 直接给各栏赋值,不等 scroll 事件传播
+  for (const col of [leftPaneEl.value, rightPaneEl.value, gutterEl.value, unifiedEl.value]) {
+    if (col) col.scrollTop = target;
+  }
+}
+
+function onUnifiedScroll() {
+  currentScrollTop.value = unifiedEl.value?.scrollTop ?? 0;
+}
+
+/** 收起全部已展开的未更改片段 */
+const hasExpandedFolds = computed(() => expandedFolds.value.size > 0);
+function collapseAllFolds() {
+  expandedFolds.value = new Set();
 }
 
 /** 渲染用列表宽度(不改持久化值,面板变宽后用户原设定自然恢复) */
@@ -372,13 +597,14 @@ function startListResize(e: PointerEvent) {
             <div
               v-for="file in files"
               :key="file.path"
-              class="group flex w-full cursor-pointer items-center gap-1.5 px-3 py-1 text-xs transition-colors hover:bg-accent/60"
+              class="flex w-full cursor-pointer items-center gap-1.5 px-3 py-1 text-xs transition-colors hover:bg-accent/60"
               :class="selectedPath === file.path ? 'bg-accent' : ''"
               @click="selectFile(file)"
             >
               <span class="w-3 shrink-0 font-mono font-semibold" :class="statusClass(file.status)">
                 {{ file.status }}
               </span>
+              <Icon :icon="fileIcon(baseName(file.path))" class="h-3.5 w-3.5 shrink-0" />
               <span
                 class="min-w-0 flex-1 truncate font-mono"
                 :title="file.old_path ? `${file.old_path} → ${file.path}` : file.path"
@@ -386,23 +612,12 @@ function startListResize(e: PointerEvent) {
                 <template v-if="file.old_path">{{ baseName(file.old_path) }} → </template
                 >{{ baseName(file.path) }}
               </span>
-              <span
-                v-if="file.additions != null"
-                class="shrink-0 text-green-600 dark:text-green-400"
-              >
+              <span v-if="file.additions" class="shrink-0 text-green-600 dark:text-green-400">
                 +{{ file.additions }}
               </span>
-              <span v-if="file.deletions != null" class="shrink-0 text-red-600 dark:text-red-400">
+              <span v-if="file.deletions" class="shrink-0 text-red-600 dark:text-red-400">
                 -{{ file.deletions }}
               </span>
-              <button
-                v-if="file.status !== 'D'"
-                class="shrink-0 rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground"
-                :title="t('git.graph.detail.openInIde')"
-                @click.stop="openFile(file)"
-              >
-                <ExternalLink class="h-3 w-3" />
-              </button>
             </div>
           </template>
 
@@ -411,7 +626,7 @@ function startListResize(e: PointerEvent) {
             <div
               v-for="row in treeRows"
               :key="row.node.fullPath"
-              class="group flex w-full items-center gap-1.5 py-1 pr-3 text-xs transition-colors"
+              class="flex w-full items-center gap-1.5 py-1 pr-3 text-xs transition-colors"
               :class="[
                 row.node.file ? 'cursor-pointer hover:bg-accent/60' : '',
                 row.node.file && selectedPath === row.node.file.path ? 'bg-accent' : '',
@@ -426,38 +641,36 @@ function startListResize(e: PointerEvent) {
                   :class="collapsedFolders.has(row.node.fullPath) ? '' : 'rotate-90'"
                 />
               </span>
-              <Folder v-if="!row.node.file" class="h-3 w-3 shrink-0 text-muted-foreground" />
-              <span
-                v-else
-                class="w-3 shrink-0 font-mono font-semibold"
-                :class="statusClass(row.node.file.status)"
-              >
-                {{ row.node.file.status }}
-              </span>
+              <Icon
+                v-if="!row.node.file"
+                :icon="folderIcon(row.node.name, !collapsedFolders.has(row.node.fullPath))"
+                class="h-3.5 w-3.5 shrink-0"
+              />
+              <template v-else>
+                <span
+                  class="w-3 shrink-0 font-mono font-semibold"
+                  :class="statusClass(row.node.file.status)"
+                >
+                  {{ row.node.file.status }}
+                </span>
+                <Icon :icon="fileIcon(row.node.name)" class="h-3.5 w-3.5 shrink-0" />
+              </template>
               <span class="min-w-0 flex-1 truncate font-mono" :title="row.node.fullPath">
                 {{ row.node.name }}
               </span>
               <template v-if="row.node.file">
                 <span
-                  v-if="row.node.file.additions != null"
+                  v-if="row.node.file.additions"
                   class="shrink-0 text-green-600 dark:text-green-400"
                 >
                   +{{ row.node.file.additions }}
                 </span>
                 <span
-                  v-if="row.node.file.deletions != null"
+                  v-if="row.node.file.deletions"
                   class="shrink-0 text-red-600 dark:text-red-400"
                 >
                   -{{ row.node.file.deletions }}
                 </span>
-                <button
-                  v-if="row.node.file.status !== 'D'"
-                  class="shrink-0 rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground"
-                  :title="t('git.graph.detail.openInIde')"
-                  @click.stop="openFile(row.node.file!)"
-                >
-                  <ExternalLink class="h-3 w-3" />
-                </button>
               </template>
             </div>
           </template>
@@ -480,10 +693,36 @@ function startListResize(e: PointerEvent) {
           <Badge v-if="diff?.truncated" variant="outline" class="h-5 shrink-0 px-1.5 text-[10px]">
             {{ t("git.graph.detail.diffTruncated") }}
           </Badge>
+          <template v-if="diff">
+            <button
+              class="shrink-0 rounded-sm p-1 text-muted-foreground transition-colors not-disabled:hover:bg-accent not-disabled:hover:text-foreground disabled:opacity-40"
+              :disabled="!hasPrevChange"
+              :title="t('git.graph.detail.diffPrevChange')"
+              @click="scrollToChange(-1)"
+            >
+              <ChevronUp class="h-3.5 w-3.5" />
+            </button>
+            <button
+              class="shrink-0 rounded-sm p-1 text-muted-foreground transition-colors not-disabled:hover:bg-accent not-disabled:hover:text-foreground disabled:opacity-40"
+              :disabled="!hasNextChange"
+              :title="t('git.graph.detail.diffNextChange')"
+              @click="scrollToChange(1)"
+            >
+              <ChevronDown class="h-3.5 w-3.5" />
+            </button>
+            <button
+              class="shrink-0 rounded-sm p-1 text-muted-foreground transition-colors not-disabled:hover:bg-accent not-disabled:hover:text-foreground disabled:opacity-40"
+              :disabled="!hasExpandedFolds"
+              :title="t('git.graph.detail.diffCollapseFolds')"
+              @click="collapseAllFolds"
+            >
+              <FoldVertical class="h-3.5 w-3.5" />
+            </button>
+          </template>
           <button
-            v-if="diff"
+            v-if="diff && splitApplicable"
             class="shrink-0 rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            :title="t(splitDiff ? 'git.graph.detail.diffUnified' : 'git.graph.detail.diffSplit')"
+            :title="t(splitActive ? 'git.graph.detail.diffUnified' : 'git.graph.detail.diffSplit')"
             @click="splitDiff = !splitDiff"
           >
             <Rows2 v-if="splitDiff" class="h-3.5 w-3.5" />
@@ -499,14 +738,23 @@ function startListResize(e: PointerEvent) {
           </button>
         </div>
 
-        <!-- 并排(split)视图:左右窗格各自 overflow-auto,横向滚动互不影响,纵向经 syncPaneScroll 同步 -->
+        <!-- 并排(split)视图:左内容 | 中间行号栏 | 右内容,三栏纵向滚动经 syncPaneScroll 镜像同步 -->
         <div
-          v-if="splitDiff && !diffLoading && !diffError && selectedPath"
+          v-if="splitActive && !diffLoading && !diffError && selectedPath"
           class="flex min-h-0 flex-1"
         >
-          <div ref="leftPaneEl" class="min-w-0 flex-1 overflow-auto" @scroll="syncPaneScroll('left')">
-            <div class="min-w-max py-1 font-mono text-xs leading-5">
-              <template v-for="(row, i) in sideRows" :key="i">
+          <!-- 左窗格 -scale-x-100 双翻转:容器翻转把纵向滚动条移到左边,内容层再翻转回正;
+               代价是 scrollLeft 镜像化(0=内容末尾、最大值=行首),横向同步经 visualScrollLeft/applyVisualScrollLeft 换算 -->
+          <div
+            ref="leftPaneEl"
+            class="min-w-0 flex-1 -scale-x-100 overflow-auto"
+            @scroll="syncPaneScroll('left')"
+          >
+            <div
+              class="min-w-max -scale-x-100 py-1 font-mono text-xs leading-5"
+              :style="{ paddingBottom: `calc(0.25rem + ${hbarPad.left}px)` }"
+            >
+              <template v-for="(row, i) in leftRows" :key="i">
                 <div
                   v-if="row.kind === 'hunk'"
                   class="bg-muted/60 px-3 whitespace-pre text-muted-foreground select-none"
@@ -519,26 +767,93 @@ function startListResize(e: PointerEvent) {
                 >
                   {{ row.text }}
                 </div>
+                <button
+                  v-else-if="row.kind === 'fold'"
+                  class="block w-full bg-muted/40 select-none hover:bg-accent"
+                  :title="t('git.graph.detail.diffExpand', { count: row.count })"
+                  @click="expandFold(row.foldKey)"
+                >
+                  <div class="diff-fold-wave ml-3 h-5" />
+                </button>
+                <div
+                  v-else-if="row.kind === 'gap'"
+                  class="flex items-center px-2 select-none"
+                  :style="{ height: `${row.count * 1.25}rem` }"
+                  :title="t('git.graph.detail.diffGap', { count: row.count })"
+                >
+                  <div
+                    class="h-px flex-1"
+                    :class="row.tint === 'red' ? 'bg-red-500/40' : 'bg-green-500/40'"
+                  />
+                </div>
+                <!-- 行高固定 h-5:去掉行首标记后空行内容为空,行盒会塌缩成 0 高导致三栏错位 -->
                 <div
                   v-else
-                  :class="
-                    row.left?.kind === 'del'
-                      ? 'bg-red-500/10'
-                      : !row.left && row.right?.kind === 'add'
-                        ? 'bg-green-500/5'
-                        : ''
-                  "
-                ><span class="inline-block w-10 pr-2 text-right text-muted-foreground/50 select-none">{{ row.left?.oldLine ?? "" }}</span><span class="whitespace-pre">{{ sideText(row.left) }}</span></div>
+                  class="h-5 pl-2"
+                  :class="row.line?.kind === 'del' ? 'bg-red-500/10' : ''"
+                >
+                  <span class="whitespace-pre">{{ sideText(row.line) }}</span>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- 中间行号栏:左右行号并排放置,不参与横向滚动(滚动条隐藏但可滚),纵向经 syncPaneScroll 同步;
+               增删行行号格着色,本侧空白处淡色过渡,与内容区底色衔接 -->
+          <div
+            ref="gutterEl"
+            class="shrink-0 overflow-auto border-x border-border/60 font-mono text-xs leading-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            @scroll="syncPaneScroll('gutter')"
+          >
+            <div class="py-1" :style="{ paddingBottom: `calc(0.25rem + ${hbarPad.gutter}px)` }">
+              <template v-for="(row, i) in sideRows" :key="i">
+                <div v-if="row.kind === 'hunk'" class="h-5 bg-muted/60 select-none" />
+                <div v-else-if="row.kind === 'meta'" class="h-5 select-none" />
+                <!-- 波浪线贯穿行号栏,与两侧窗格的折叠行连成一线;同样可点击展开 -->
+                <button
+                  v-else-if="row.kind === 'fold'"
+                  class="block h-5 w-full bg-muted/40 select-none hover:bg-accent"
+                  :title="t('git.graph.detail.diffExpand', { count: row.fold?.count ?? 0 })"
+                  @click="expandFold(row.fold?.key ?? '')"
+                >
+                  <div class="diff-fold-wave h-full" />
+                </button>
+                <div v-else class="flex h-5">
+                  <span
+                    class="h-full w-10 pr-1 text-right text-muted-foreground/50 select-none"
+                    :class="
+                      row.left?.kind === 'del'
+                        ? 'bg-red-500/10'
+                        : !row.left && row.right?.kind === 'add'
+                          ? 'bg-green-500/5'
+                          : ''
+                    "
+                    >{{ row.left?.oldLine ?? "" }}</span
+                  ><span
+                    class="h-full w-10 pl-1 text-right text-muted-foreground/50 select-none"
+                    :class="
+                      row.right?.kind === 'add'
+                        ? 'bg-green-500/10'
+                        : !row.right && row.left?.kind === 'del'
+                          ? 'bg-red-500/5'
+                          : ''
+                    "
+                    >{{ row.right?.newLine ?? "" }}</span
+                  >
+                </div>
               </template>
             </div>
           </div>
           <div
             ref="rightPaneEl"
-            class="min-w-0 flex-1 overflow-auto border-l border-border/60"
+            class="min-w-0 flex-1 overflow-auto"
             @scroll="syncPaneScroll('right')"
           >
-            <div class="min-w-max py-1 font-mono text-xs leading-5">
-              <template v-for="(row, i) in sideRows" :key="i">
+            <div
+              class="min-w-max py-1 font-mono text-xs leading-5"
+              :style="{ paddingBottom: `calc(0.25rem + ${hbarPad.right}px)` }"
+            >
+              <template v-for="(row, i) in rightRows" :key="i">
                 <div
                   v-if="row.kind === 'hunk'"
                   class="bg-muted/60 px-3 whitespace-pre text-muted-foreground select-none"
@@ -551,22 +866,39 @@ function startListResize(e: PointerEvent) {
                 >
                   {{ row.text }}
                 </div>
+                <button
+                  v-else-if="row.kind === 'fold'"
+                  class="block w-full bg-muted/40 select-none hover:bg-accent"
+                  :title="t('git.graph.detail.diffExpand', { count: row.count })"
+                  @click="expandFold(row.foldKey)"
+                >
+                  <div class="diff-fold-wave mr-3 h-5" />
+                </button>
+                <div
+                  v-else-if="row.kind === 'gap'"
+                  class="flex items-center px-2 select-none"
+                  :style="{ height: `${row.count * 1.25}rem` }"
+                  :title="t('git.graph.detail.diffGap', { count: row.count })"
+                >
+                  <div
+                    class="h-px flex-1"
+                    :class="row.tint === 'red' ? 'bg-red-500/40' : 'bg-green-500/40'"
+                  />
+                </div>
+                <!-- 行高固定 h-5:去掉行首标记后空行内容为空,行盒会塌缩成 0 高导致三栏错位 -->
                 <div
                   v-else
-                  :class="
-                    row.right?.kind === 'add'
-                      ? 'bg-green-500/10'
-                      : !row.right && row.left?.kind === 'del'
-                        ? 'bg-red-500/5'
-                        : ''
-                  "
-                ><span class="inline-block w-10 pr-2 text-right text-muted-foreground/50 select-none">{{ row.right?.newLine ?? "" }}</span><span class="whitespace-pre">{{ sideText(row.right) }}</span></div>
+                  class="h-5 pl-2"
+                  :class="row.line?.kind === 'add' ? 'bg-green-500/10' : ''"
+                >
+                  <span class="whitespace-pre">{{ sideText(row.line) }}</span>
+                </div>
               </template>
             </div>
           </div>
         </div>
 
-        <div v-else class="min-h-0 flex-1 overflow-auto">
+        <div ref="unifiedEl" v-else class="min-h-0 flex-1 overflow-auto" @scroll="onUnifiedScroll">
           <div v-if="diffLoading" class="flex h-full items-center justify-center">
             <Loader2 class="h-4 w-4 animate-spin text-muted-foreground" />
           </div>
@@ -581,8 +913,8 @@ function startListResize(e: PointerEvent) {
           </p>
 
           <!-- 逐行(unified)视图 -->
-          <div v-else-if="!splitDiff" class="min-w-max py-1 font-mono text-xs leading-5">
-            <template v-for="(line, i) in diffLines" :key="i">
+          <div v-else class="min-w-max py-1 font-mono text-xs leading-5">
+            <template v-for="(line, i) in displayLines" :key="i">
               <div
                 v-if="line.kind === 'hunk'"
                 class="bg-muted/60 px-3 text-muted-foreground select-none"
@@ -592,6 +924,14 @@ function startListResize(e: PointerEvent) {
               <div v-else-if="line.kind === 'meta'" class="px-3 text-muted-foreground select-none">
                 {{ line.text }}
               </div>
+              <button
+                v-else-if="line.kind === 'fold'"
+                class="block w-full bg-muted/40 select-none hover:bg-accent"
+                :title="t('git.graph.detail.diffExpand', { count: foldCountOf(line) })"
+                @click="expandFold(foldKeyOf(line))"
+              >
+                <div class="diff-fold-wave mx-3 h-5" />
+              </button>
               <div
                 v-else
                 class="flex w-full"
@@ -613,60 +953,17 @@ function startListResize(e: PointerEvent) {
               </div>
             </template>
           </div>
-
-          <!-- 并排(split)视图:table 自动布局保证两列跨行对齐,长行整体横向滚动 -->
-          <table v-else class="min-w-full border-collapse font-mono text-xs leading-5">
-            <tr v-for="(row, i) in sideRows" :key="i">
-              <td
-                v-if="row.kind === 'hunk'"
-                colspan="2"
-                class="bg-muted/60 px-3 whitespace-pre text-muted-foreground select-none"
-              >
-                {{ row.text }}
-              </td>
-              <td
-                v-else-if="row.kind === 'meta'"
-                colspan="2"
-                class="px-3 whitespace-pre text-muted-foreground select-none"
-              >
-                {{ row.text }}
-              </td>
-              <template v-else>
-                <td
-                  class="w-1/2"
-                  :class="
-                    row.left?.kind === 'del'
-                      ? 'bg-red-500/10'
-                      : !row.left && row.right?.kind === 'add'
-                        ? 'bg-green-500/5'
-                        : ''
-                  "
-                >
-                  <span
-                    class="inline-block w-10 pr-2 text-right text-muted-foreground/50 select-none"
-                    >{{ row.left?.oldLine ?? "" }}</span
-                  ><span class="whitespace-pre">{{ sideText(row.left) }}</span>
-                </td>
-                <td
-                  class="w-1/2 border-l border-border/60"
-                  :class="
-                    row.right?.kind === 'add'
-                      ? 'bg-green-500/10'
-                      : !row.right && row.left?.kind === 'del'
-                        ? 'bg-red-500/5'
-                        : ''
-                  "
-                >
-                  <span
-                    class="inline-block w-10 pr-2 text-right text-muted-foreground/50 select-none"
-                    >{{ row.right?.newLine ?? "" }}</span
-                  ><span class="whitespace-pre">{{ sideText(row.right) }}</span>
-                </td>
-              </template>
-            </tr>
-          </table>
         </div>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+/* 折叠占位行的波浪线:SVG data-uri 平铺,background 文档隔离无法用 currentColor,取中性灰适配亮暗主题 */
+.diff-fold-wave {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='6'%3E%3Cpath d='M0 3 Q3 0.5 6 3 T12 3' fill='none' stroke='%239ca3af' stroke-width='1.2'/%3E%3C/svg%3E");
+  background-repeat: repeat-x;
+  background-position: center;
+}
+</style>

@@ -1,13 +1,13 @@
 import { createRouter, createWebHashHistory } from "vue-router";
 import ProjectsHome from "@/views/ProjectsHome.vue";
 import ProjectDetail from "@/views/ProjectDetail.vue";
-import GitGraph from "@/views/GitGraph.vue";
 import Settings from "@/views/Settings.vue";
 import ReportHistory from "@/views/ReportHistory.vue";
 import TrayPopup from "@/views/TrayPopup.vue";
 
-// 文件预览页引用完整的 vscode-icons 图标集(约 3.5MB),懒加载避免拖累首屏
+// 文件预览页与提交图(CommitDetailPanel)引用完整的 vscode-icons 图标集(约 3.5MB),懒加载避免拖累首屏
 const ProjectFiles = () => import("@/views/ProjectFiles.vue");
+const GitGraph = () => import("@/views/GitGraph.vue");
 
 export const router = createRouter({
   history: createWebHashHistory(),

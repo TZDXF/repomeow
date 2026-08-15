@@ -6,15 +6,26 @@ export interface DiffLine {
   newLine: number | null;
 }
 
-/** 并排视图的一行:左右各一格;ctx 两侧同文,hunk/meta 整行通栏 */
+/** 未更改区间折叠占位行(展示层生成,parseDiff 不产生) */
+export interface DiffFold {
+  kind: "fold";
+  /** 被折叠的行数 */
+  count: number;
+  /** 展开状态键(同一份 diff 内唯一) */
+  key: string;
+}
+
+/** 并排视图的一行:左右各一格;ctx 两侧同文,hunk/meta/fold 整行通栏 */
 export interface DiffSideRow {
-  kind: "hunk" | "meta" | "line";
-  /** hunk/meta 的通栏文本(line 行为空串) */
+  kind: "hunk" | "meta" | "line" | "fold";
+  /** hunk/meta 的通栏文本(line/fold 行为空串) */
   text: string;
   /** 旧版本侧(del / ctx),无对应行时为 null */
   left: DiffLine | null;
   /** 新版本侧(add / ctx),无对应行时为 null */
   right: DiffLine | null;
+  /** fold 行的折叠信息(其余行为 null) */
+  fold: DiffFold | null;
 }
 
 /** 解析 unified diff:逐行旧/新行号;文件头(diff --git / index / --- / +++ 等)不展示 */
@@ -60,31 +71,41 @@ export function parseDiff(text: string): DiffLine[] {
   return out;
 }
 
-/** 把逐行 diff 配成并排行:连续 del/add 块按下标一一配对,多余的一侧留空 */
-export function toSideBySideRows(lines: DiffLine[]): DiffSideRow[] {
+/** 把逐行 diff 配成并排行:连续 del/add 块按下标一一配对,多余的一侧留空;fold 行整行通栏透传 */
+export function toSideBySideRows(lines: (DiffLine | DiffFold)[]): DiffSideRow[] {
   const out: DiffSideRow[] = [];
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
     if (line.kind === "hunk" || line.kind === "meta") {
-      out.push({ kind: line.kind, text: line.text, left: null, right: null });
+      out.push({ kind: line.kind, text: line.text, left: null, right: null, fold: null });
+      i++;
+      continue;
+    }
+    if (line.kind === "fold") {
+      out.push({ kind: "fold", text: "", left: null, right: null, fold: line });
       i++;
       continue;
     }
     if (line.kind === "ctx") {
-      out.push({ kind: "line", text: "", left: line, right: line });
+      out.push({ kind: "line", text: "", left: line, right: line, fold: null });
       i++;
       continue;
     }
     const dels: DiffLine[] = [];
     const adds: DiffLine[] = [];
     while (i < lines.length && (lines[i].kind === "del" || lines[i].kind === "add")) {
-      (lines[i].kind === "del" ? dels : adds).push(lines[i]);
+      const change = lines[i];
+      if (change.kind === "del") {
+        dels.push(change);
+      } else if (change.kind === "add") {
+        adds.push(change);
+      }
       i++;
     }
     const n = Math.max(dels.length, adds.length);
     for (let j = 0; j < n; j++) {
-      out.push({ kind: "line", text: "", left: dels[j] ?? null, right: adds[j] ?? null });
+      out.push({ kind: "line", text: "", left: dels[j] ?? null, right: adds[j] ?? null, fold: null });
     }
   }
   return out;
