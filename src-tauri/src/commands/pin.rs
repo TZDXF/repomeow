@@ -5,7 +5,13 @@ use crate::db::Db;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::PinnedCommand;
 
-const KINDS: [&str; 4] = ["packageScript", "composeFile", "composeService", "customCommand"];
+const KINDS: [&str; 5] = [
+    "packageScript",
+    "composeFile",
+    "composeService",
+    "customCommand",
+    "javaBuild",
+];
 
 fn now() -> i64 {
     std::time::SystemTime::now()

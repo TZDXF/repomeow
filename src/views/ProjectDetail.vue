@@ -21,6 +21,7 @@ import WorktreePanel from "@/components/git/WorktreePanel.vue";
 import WorktreeSwitcher from "@/components/git/WorktreeSwitcher.vue";
 import OpenWithMenu from "@/components/open/OpenWithMenu.vue";
 import DockerCompose from "@/components/project/DockerCompose.vue";
+import SpringBootCard from "@/components/java/SpringBootCard.vue";
 import ReadmeDrawer from "@/components/project/ReadmeDrawer.vue";
 import RelocateProjectDialog from "@/components/project/RelocateProjectDialog.vue";
 import DailyReportDialog from "@/components/report/DailyReportDialog.vue";
@@ -349,6 +350,7 @@ async function saveDesc() {
     >
       <PackageScripts :project="worktreeProject ?? project" />
       <DockerCompose :project="worktreeProject ?? project" />
+      <SpringBootCard :project="worktreeProject ?? project" />
       <CustomCommands :project="project" />
     </div>
 

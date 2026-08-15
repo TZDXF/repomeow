@@ -54,6 +54,8 @@ git2 = { version = "0.20", default-features = false }
 # 全文搜索(search_project_text)的单词边界与用户正则模式
 globset = "0.4"
 regex = "1"
+# JDK 在线安装(install_jdk)解压发行包 zip;仅 deflate 即可覆盖 Adoptium/Zulu 的归档
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 urlpattern = "0.3"

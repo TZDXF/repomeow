@@ -17,11 +17,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { commandIcon } from "@/lib/command-icons";
+import { resolveJavaHome } from "@/lib/jdk";
 import { runInTerminal } from "@/lib/tauri";
+import { useSettingsStore } from "@/stores/settings";
 import type { PinnedCommand, Project } from "@/types";
 
 const { t } = useI18n();
 const props = defineProps<{ project: Project; pins: PinnedCommand[] }>();
+// 托盘窗口在 TrayPopup 挂载时已 init(含 JDK 配置),javaBuild 标记执行时按项目解析 JAVA_HOME
+const settingsStore = useSettingsStore();
 
 type ComposeAction = "up -d" | "up -d --build" | "build" | "restart" | "down" | "stop";
 
@@ -102,12 +106,15 @@ function runIcon(p: PinnedCommand) {
   return p.kind === "customCommand" && p.icon ? commandIcon(p.icon) : undefined;
 }
 
-/** npm/自定义命令:点行首 Play 按钮执行存好的命令(与详情页 ScriptItem 一致) */
+/** npm/自定义/javaBuild 命令:点行首 Play 按钮执行存好的命令(与详情页一致) */
 async function runPinned(p: PinnedCommand) {
   try {
     // cwd 存的是相对项目根的目录(monorepo 子包),执行时用当前 project.path 拼接,迁移目录后仍可用
     const cwd = p.cwd ? `${props.project.path}/${p.cwd}` : undefined;
-    await runInTerminal(props.project, p.command, cwd);
+    // Spring Boot 标记命令注入项目选择的 JAVA_HOME(与详情页卡片同一解析逻辑)
+    const javaHome =
+      p.kind === "javaBuild" ? resolveJavaHome(settingsStore, props.project.id) : undefined;
+    await runInTerminal(props.project, p.command, cwd, javaHome);
     toast.success(t("pins.started", { name: p.label }));
   } catch (e) {
     toast.error(String(e));

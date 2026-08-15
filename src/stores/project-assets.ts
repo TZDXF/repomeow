@@ -68,7 +68,7 @@ export const useProjectAssetsStore = defineStore("project-assets", () => {
       } catch {
         // 刷新失败不冲掉可用的旧数据;仅在没有任何数据时写空结果(卡片按无数据显示)
         if (!byProject.value.has(key)) {
-          setCapped(key, { package_scripts: [], compose_files: [] });
+          setCapped(key, { package_scripts: [], compose_files: [], java_builds: [] });
         }
       }
     })().finally(() => {

@@ -6,6 +6,7 @@ import {
   Archive,
   ArrowLeft,
   CalendarClock,
+  Coffee,
   Info,
   KeyRound,
   MessageSquareText,
@@ -16,6 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import GeneralSettings from "@/components/settings/GeneralSettings.vue";
+import DevEnvSettings from "@/components/settings/DevEnvSettings.vue";
 import TagSettings from "@/components/settings/TagSettings.vue";
 import ArchiveSettings from "@/components/settings/ArchiveSettings.vue";
 import AiSettings from "@/components/settings/AiSettings.vue";
@@ -40,6 +42,12 @@ const categories: Category[] = [
     component: GeneralSettings,
   },
   { id: "tags", labelKey: "settings.categories.tags", icon: Tags, component: TagSettings },
+  {
+    id: "devEnv",
+    labelKey: "settings.categories.devEnv",
+    icon: Coffee,
+    component: DevEnvSettings,
+  },
   {
     id: "archive",
     labelKey: "settings.categories.archive",

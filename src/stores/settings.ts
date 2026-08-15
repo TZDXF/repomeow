@@ -5,7 +5,7 @@ import { load, type Store } from "@tauri-apps/plugin-store";
 import { homeDir, join } from "@tauri-apps/api/path";
 import { setI18nLocale, type SupportedLocale } from "@/i18n";
 import { isOpenWithId, normalizeOpenWithOrder } from "@/lib/open-with";
-import type { CustomOpenWith, OpenWithId } from "@/types";
+import type { CustomOpenWith, JdkConfig, OpenWithId } from "@/types";
 
 /** 主题相关设置变更的跨窗口广播:通知托盘弹窗等其它窗口同步重渲自身 DOM */
 const THEME_CHANGED_EVENT = "settings://theme-changed";
@@ -57,6 +57,12 @@ export const useSettingsStore = defineStore("settings", () => {
   const enableGhCli = ref(false);
   /** 新建 worktree 的默认目录模板:支持 {branch} 占位符与相对路径(相对主工作区根解析) */
   const worktreeDirTemplate = ref(".worktrees/{branch}");
+  /** 用户登记的 JDK 列表(开发环境配置,Spring Boot 运行按项目选用) */
+  const jdkList = ref<JdkConfig[]>([]);
+  /** 默认 JDK 的 id(项目未单独选择时使用;空 = 不注入,走系统 PATH) */
+  const defaultJdkId = ref("");
+  /** 按项目选择的 JDK(projectId -> jdk id;缺省 = 跟随默认 JDK) */
+  const projectJdkMap = ref<Record<string, string>>({});
 
   let fileStore: Store | null = null;
   let initialized = false;
@@ -175,6 +181,59 @@ export const useSettingsStore = defineStore("settings", () => {
     });
   }
 
+  /** 解析持久化的 JDK 列表:逐字段校验,按 id 与路径去重 */
+  function normalizeJdkList(saved: unknown): JdkConfig[] {
+    if (typeof saved === "string") {
+      try {
+        return normalizeJdkList(JSON.parse(saved));
+      } catch {
+        return [];
+      }
+    }
+    if (!Array.isArray(saved)) return [];
+    const ids = new Set<string>();
+    const paths = new Set<string>();
+    return saved.flatMap((item) => {
+      if (
+        !item ||
+        typeof item !== "object" ||
+        !("id" in item) ||
+        !("name" in item) ||
+        !("path" in item) ||
+        typeof item.id !== "string" ||
+        typeof item.name !== "string" ||
+        typeof item.path !== "string" ||
+        !item.id.trim() ||
+        !item.name.trim() ||
+        !item.path.trim() ||
+        ids.has(item.id) ||
+        paths.has(item.path)
+      ) {
+        return [];
+      }
+      ids.add(item.id);
+      paths.add(item.path);
+      return [{ id: item.id, name: item.name.trim(), path: item.path.trim() }];
+    });
+  }
+
+  /** 解析持久化的按项目 JDK 选择:仅保留 projectId -> jdkId 的字符串映射 */
+  function normalizeProjectJdkMap(saved: unknown): Record<string, string> {
+    if (typeof saved === "string") {
+      try {
+        return normalizeProjectJdkMap(JSON.parse(saved));
+      } catch {
+        return {};
+      }
+    }
+    if (!saved || typeof saved !== "object" || Array.isArray(saved)) return {};
+    return Object.fromEntries(
+      Object.entries(saved as Record<string, unknown>).flatMap(([k, v]) =>
+        typeof v === "string" && v.trim() ? [[k, v] as const] : [],
+      ),
+    );
+  }
+
   /** 把当前打开方式顺序写入 localStorage(设置页拖拽排序与外部同步共用) */
   function persistOpenWithOrderCache() {
     try {
@@ -262,6 +321,9 @@ export const useSettingsStore = defineStore("settings", () => {
         closeAction: "tray",
         enableGhCli: "false",
         worktreeDirTemplate: ".worktrees/{branch}",
+        jdkList: "[]",
+        defaultJdkId: "",
+        projectJdkMap: "{}",
       },
     });
     const savedTheme = await fileStore.get<ThemeMode>("theme");
@@ -345,6 +407,13 @@ export const useSettingsStore = defineStore("settings", () => {
     if (typeof savedWorktreeDir === "string" && savedWorktreeDir.trim()) {
       worktreeDirTemplate.value = savedWorktreeDir.trim();
     }
+    // JDK 列表(JSON 字符串);默认项/项目选择引用了不存在的 id 时回退空
+    jdkList.value = normalizeJdkList(await fileStore.get<unknown>("jdkList"));
+    const savedDefaultJdk = await fileStore.get<string>("defaultJdkId");
+    if (savedDefaultJdk && jdkList.value.some((j) => j.id === savedDefaultJdk)) {
+      defaultJdkId.value = savedDefaultJdk;
+    }
+    projectJdkMap.value = normalizeProjectJdkMap(await fileStore.get<unknown>("projectJdkMap"));
     applyTheme();
     applyMdTheme();
     systemDark.addEventListener("change", onSystemThemeChange);
@@ -511,6 +580,85 @@ export const useSettingsStore = defineStore("settings", () => {
     await persist("worktreeDirTemplate", v);
   }
 
+  // ── 开发环境(JDK) ────────────────────────────────────────────
+
+  /** 新增或更新一个 JDK(按 id upsert,路径去重);首个条目自动成为默认 */
+  async function saveJdk(value: JdkConfig) {
+    const next = { id: value.id, name: value.name.trim(), path: value.path.trim() };
+    if (!next.id || !next.name || !next.path) return;
+    if (jdkList.value.some((j) => j.path === next.path && j.id !== next.id)) return;
+    const existing = jdkList.value.findIndex((j) => j.id === next.id);
+    if (existing === -1) {
+      jdkList.value = [...jdkList.value, next];
+      if (!defaultJdkId.value) {
+        defaultJdkId.value = next.id;
+        await persist("defaultJdkId", next.id);
+      }
+    } else {
+      jdkList.value = jdkList.value.map((j, i) => (i === existing ? next : j));
+    }
+    await persist("jdkList", JSON.stringify(jdkList.value));
+  }
+
+  /** 批量追加 JDK(自动探测用):过滤已存在路径后追加,单次落库;返回实际新增数 */
+  async function addJdks(jdks: JdkConfig[]) {
+    const known = new Set(jdkList.value.map((j) => j.path.toLowerCase()));
+    const additions: JdkConfig[] = [];
+    for (const jdk of jdks) {
+      const next = { id: jdk.id, name: jdk.name.trim(), path: jdk.path.trim() };
+      const key = next.path.toLowerCase();
+      if (!next.id || !next.name || !next.path || known.has(key)) continue;
+      known.add(key);
+      additions.push(next);
+    }
+    if (!additions.length) return 0;
+    jdkList.value = [...jdkList.value, ...additions];
+    if (!defaultJdkId.value) {
+      defaultJdkId.value = additions[0].id;
+      await persist("defaultJdkId", defaultJdkId.value);
+    }
+    await persist("jdkList", JSON.stringify(jdkList.value));
+    return additions.length;
+  }
+
+  /** 删除 JDK:若为默认项则回退到首个剩余项;同时清理引用它的项目选择 */
+  async function removeJdk(id: string) {
+    if (!jdkList.value.some((j) => j.id === id)) return;
+    jdkList.value = jdkList.value.filter((j) => j.id !== id);
+    if (defaultJdkId.value === id) {
+      defaultJdkId.value = jdkList.value[0]?.id ?? "";
+      await persist("defaultJdkId", defaultJdkId.value);
+    }
+    if (Object.values(projectJdkMap.value).includes(id)) {
+      projectJdkMap.value = Object.fromEntries(
+        Object.entries(projectJdkMap.value).filter(([, v]) => v !== id),
+      );
+      await persist("projectJdkMap", JSON.stringify(projectJdkMap.value));
+    }
+    await persist("jdkList", JSON.stringify(jdkList.value));
+  }
+
+  async function setDefaultJdk(id: string) {
+    if (!jdkList.value.some((j) => j.id === id)) return;
+    defaultJdkId.value = id;
+    await persist("defaultJdkId", id);
+  }
+
+  /** 设置/清除按项目选择的 JDK(jdkId 为空 = 跟随默认 JDK);projectId 接受项目 id(number) */
+  async function setProjectJdk(projectId: string | number, jdkId: string) {
+    const key = String(projectId);
+    if (!key) return;
+    if (jdkId) {
+      if (!jdkList.value.some((j) => j.id === jdkId)) return;
+      projectJdkMap.value = { ...projectJdkMap.value, [key]: jdkId };
+    } else {
+      const rest = { ...projectJdkMap.value };
+      delete rest[key];
+      projectJdkMap.value = rest;
+    }
+    await persist("projectJdkMap", JSON.stringify(projectJdkMap.value));
+  }
+
   return {
     theme,
     themeSkin,
@@ -529,6 +677,9 @@ export const useSettingsStore = defineStore("settings", () => {
     closeAction,
     enableGhCli,
     worktreeDirTemplate,
+    jdkList,
+    defaultJdkId,
+    projectJdkMap,
     init,
     applyTheme,
     applyMdTheme,
@@ -553,5 +704,10 @@ export const useSettingsStore = defineStore("settings", () => {
     setCloseAction,
     setEnableGhCli,
     setWorktreeDirTemplate,
+    saveJdk,
+    addJdks,
+    removeJdk,
+    setDefaultJdk,
+    setProjectJdk,
   };
 });
