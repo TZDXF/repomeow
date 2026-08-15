@@ -230,9 +230,8 @@ function toggleFolder(fullPath: string) {
 
 // --- diff 解析:lib/diff.ts 的 parseDiff(与提交对话框变更预览共用);baseName 走 @/lib/path ---
 // 后端 context_lines 已拉满,diff 含完整文件内容;过长的未更改区间折叠为可点击展开的占位行(IDEA 风格)。
-// 保留 hunk 头:对超大文件(>10 万行)后端 libgit2 在 @@ 上报畸形头(2- 之类),
-// 此时 truncated 为 true,hunk 头是定位"被截断的变更段"的唯一线索;truncated=false 时仍是 @@ -1,N +1,M @@,
-// 展示一行灰色分隔对正常文件无明显影响。
+// hunk 头:逐行视图保留;并排视图在非截断时隐藏(见 sideRows),截断 diff(>10 万行,libgit2 在 @@
+// 上报畸形头如 2-)仍展示——此时它是定位"被截断的变更段"的唯一线索。
 
 /** 超过该行数的连续未更改区间才折叠 */
 const FOLD_MIN = 12;
@@ -294,7 +293,16 @@ function hlOf(line: DiffLine | null | undefined) {
 
 /** 并排查看(持久化):旧版本在左、新版本在右 */
 const splitDiff = useLocalStorage("repomeow:commit-diff-split", false);
-const sideRows = computed(() => toSideBySideRows(displayLines.value));
+// 非截断 diff 整文件已铺开,hunk 头(@@ -1,N +1,M @@)只是噪音,并排两侧不渲染;
+// 截断 diff 保留 hunk 头作变更段定位线索。在进 toSideBySideRows 之前过滤,
+// sideRows / paneRowOffsets / changeBlocks 等下游全部随之保持一致
+const sideRows = computed(() =>
+  toSideBySideRows(
+    diff.value?.truncated
+      ? displayLines.value
+      : displayLines.value.filter((line) => line.kind !== "hunk"),
+  ),
+);
 
 /** 并排左右内容窗格的宽度比(持久化,拖拽中间连接条调整;0.5 = 各占一半) */
 const splitRatio = useLocalStorage("repomeow:commit-diff-split-ratio", 0.5);
@@ -392,13 +400,17 @@ function applyVisualScrollLeft(el: HTMLElement, offset: number) {
   el.scrollLeft = el === leftPaneEl.value ? el.scrollWidth - el.clientWidth - offset : offset;
 }
 
-/** 滚动位置(px)→ sideRow 空间的小数行位置(跨两侧统一的规范坐标) */
+/** 滚动位置(px)→ sideRow 空间的小数行位置(跨两侧统一的规范坐标)。
+ *  顶部内边距区(scrollTop < 行高 1/5)s 为负:不钳到 0、按斜率 1 外推成负的小数行位置,
+ *  scrollTopAt 对称还原——否则 0 与 h/5 都收敛到 pos 0 而映射取 h/5,两侧顶部
+ *  永远差一段内边距,向上滚到头各自"多滚一点"互相赶不齐 */
 function locateRowPos(side: "left" | "right", scrollTop: number) {
   const offsets = paneRowOffsets.value[side];
   if (offsets.length < 2) return 0;
   const h = rowHeightPx();
   const total = offsets[offsets.length - 1];
-  const s = Math.min(Math.max((scrollTop - h / 5) / h, 0), total);
+  const s = Math.min((scrollTop - h / 5) / h, total);
+  if (s <= 0) return s;
   let lo = 0;
   let hi = offsets.length - 2;
   while (lo < hi) {
@@ -413,8 +425,13 @@ function locateRowPos(side: "left" | "right", scrollTop: number) {
   return lo + (segLen > 0 ? (s - offsets[lo]) / segLen : 0);
 }
 
-/** sideRow 空间的小数行位置 → 该侧窗格的 scrollTop(px;内容容器有 py-1 上内边距 = 行高的 1/5) */
+/** sideRow 空间的小数行位置 → 该侧窗格的 scrollTop(px;内容容器有 py-1 上内边距 = 行高的 1/5)。
+ *  负的行位置(顶部内边距区)同样按斜率 1 外推,与 locateRowPos 互为逆映射 */
 function scrollTopAt(side: "left" | "right", rowPos: number) {
+  if (rowPos < 0) {
+    const h = rowHeightPx();
+    return Math.max(h / 5 + rowPos * h, 0);
+  }
   const offsets = paneRowOffsets.value[side];
   if (offsets.length < 2) return 0;
   const h = rowHeightPx();
