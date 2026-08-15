@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { useElementSize, useLocalStorage } from "@vueuse/core";
@@ -23,6 +23,7 @@ import { Icon } from "@iconify/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { parseDiff, toSideBySideRows, type DiffFold, type DiffLine } from "@/lib/diff";
+import { highlightDiffLines } from "@/lib/diff-highlight";
 import { fileIcon, folderIcon } from "@/lib/file-icons";
 import { buildFileTree, type FileTreeNode } from "@/lib/file-tree";
 import { openPathWith, sortOpenWithOptions } from "@/lib/open-with";
@@ -68,6 +69,8 @@ async function loadFiles() {
   files.value = [];
   selectedPath.value = null;
   diff.value = null;
+  diffLines.value = [];
+  lineHtml.value = new Map();
   diffError.value = "";
   try {
     files.value = await cmd<GitCommitFile[]>("git_commit_files", {
@@ -92,11 +95,10 @@ async function selectFile(file: GitCommitFile) {
     return;
   }
   selectedPath.value = file.path;
-  diffLoading.value = true;
+  // 切文件不清空旧 diff、不转圈:旧内容保留到新内容就绪后同帧替换;
+  // 仅首次加载(没有任何旧内容)时 diffLoading 才为 true,给空区域一个转圈
+  diffLoading.value = !diff.value;
   diffError.value = "";
-  diff.value = null;
-  expandedFolds.value = new Set();
-  currentScrollTop.value = 0;
   try {
     const result = await cmd<GitCommitFileDiff>("git_commit_file_diff", {
       path: props.projectPath,
@@ -107,7 +109,17 @@ async function selectFile(file: GitCommitFile) {
     // 快速连点 A→B:旧响应解析后可能晚于新请求的 selectedPath,
     // 不做 stale 校验会把 A 的 diff 写到 B 的标题下,先于 B 的真实结果
     if (selectedPath.value !== file.path) return;
+    // 先解析再着色,完成后 diff / 行模型 / 高亮同一帧落地:避免纯文本先闪现再上色。
+    // 行模型直接复用这份 parseDiff 结果,保证 lineHtml 的键与模板渲染的是同一批对象引用;
+    // 折叠/滚动位置属旧 diff,也等这一帧一起重置
+    const lines = parseDiff(result.diff);
+    const htmlMap = (await highlightDiffLines(lines, file.path)) ?? new Map<DiffLine, string>();
+    if (selectedPath.value !== file.path) return;
+    lineHtml.value = htmlMap;
+    diffLines.value = lines;
     diff.value = result;
+    expandedFolds.value = new Set();
+    currentScrollTop.value = 0;
   } catch (e) {
     if (selectedPath.value !== file.path) return;
     diffError.value = String(e);
@@ -153,8 +165,12 @@ function toggleFolder(fullPath: string) {
 // 后端 context_lines 已拉满,diff 含完整文件内容;过长的未更改区间折叠为可点击展开的占位行(IDEA 风格)。
 // 保留 hunk 头:对超大文件(>10 万行)后端 libgit2 在 @@ 上报畸形头(2- 之类),
 // 此时 truncated 为 true,hunk 头是定位"被截断的变更段"的唯一线索;truncated=false 时仍是 @@ -1,N +1,M @@,
-// 展示一行灰色分隔对正常文件无明显影响
-const diffLines = computed(() => (diff.value ? parseDiff(diff.value.diff) : []));
+// 展示一行灰色分隔对正常文件无明显影响。
+// diffLines 不是 computed:由 selectFile 在着色完成后与 diff / lineHtml 同帧写入(见 selectFile 注释)
+const diffLines = shallowRef<DiffLine[]>([]);
+
+/** 逐行着色结果:DiffLine → 行内 HTML;键就是 diffLines 里的对象引用(fold/sideRows 复用同一批) */
+const lineHtml = shallowRef(new Map<DiffLine, string>());
 
 /** 超过该行数的连续未更改区间才折叠 */
 const FOLD_MIN = 12;
@@ -204,6 +220,11 @@ function foldCountOf(line: DiffLine | DiffFold) {
 }
 
 const displayLines = computed(() => foldCtxRuns(diffLines.value));
+
+/** 模板取行高亮 HTML(未着色时为空串,回退纯文本渲染) */
+function hlOf(line: DiffLine | null | undefined) {
+  return (line && lineHtml.value.get(line)) || "";
+}
 
 /** 并排查看(持久化):旧版本在左、新版本在右 */
 const splitDiff = useLocalStorage("repomeow:commit-diff-split", false);
@@ -301,6 +322,17 @@ function syncPaneScroll(source: "left" | "right" | "gutter") {
   });
 }
 
+// 左窗格 -scale-x-100 翻转后,浏览器原生横向滚轮仍按翻转前的布局坐标增减 scrollLeft,
+// 方向与可视滚动条相反;拦截横向分量取反后手动滚动,纵向分量交给默认行为
+function onLeftPaneWheel(e: WheelEvent) {
+  const delta = e.deltaX !== 0 ? e.deltaX : e.shiftKey ? e.deltaY : 0;
+  const el = leftPaneEl.value;
+  if (!delta || !el) return;
+  e.preventDefault();
+  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientWidth : 1;
+  el.scrollLeft -= delta * unit;
+}
+
 /** 当前选中文件(已删除的文件不提供 IDE 打开:工作区已不存在) */
 const selectedFile = computed(() => files.value.find((f) => f.path === selectedPath.value) ?? null);
 const canOpenInIde = computed(() => selectedFile.value?.status !== "D");
@@ -311,10 +343,11 @@ const splitApplicable = computed(
 );
 const splitActive = computed(() => splitDiff.value && splitApplicable.value);
 
-// 打开并排视图 / 切文件加载完成后,把左窗格 scrollLeft 推到最大(翻转栏的可视起点),
-// 让两侧都从行首看起;赋值会触发 scroll 事件,经 syncPaneScroll 顺带把右窗格归零
-watch([splitActive, selectedPath, diffLoading], async ([active, , loading]) => {
-  if (!active || loading) return;
+// 打开并排视图 / 新 diff 内容落地后,把左窗格 scrollLeft 推到最大(翻转栏的可视起点),
+// 让两侧都从行首看起;赋值会触发 scroll 事件,经 syncPaneScroll 顺带把右窗格归零。
+// 依赖 diff 而非 selectedPath / diffLoading:切文件不再清空旧内容,只有新内容就绪这一帧才需要复位横向滚动
+watch([splitActive, diff], async ([active]) => {
+  if (!active) return;
   await nextTick();
   const lp = leftPaneEl.value;
   if (lp) lp.scrollLeft = lp.scrollWidth - lp.clientWidth;
@@ -710,8 +743,8 @@ onBeforeUnmount(() => {
         @pointerdown="startListResize"
       />
 
-      <!-- diff 区:自实现逐行渲染(行号 + 增删底色) -->
-      <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+      <!-- diff 区:自实现逐行渲染(行号 + 增删底色);commit-diff 类供 shiki 双主题变量按 .dark 切换 -->
+      <div class="commit-diff flex min-h-0 min-w-0 flex-1 flex-col">
         <div class="flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
           <span class="min-w-0 flex-1 truncate font-mono text-xs" :title="selectedFile?.path">
             {{ selectedFile?.path ?? "" }}
@@ -818,7 +851,12 @@ onBeforeUnmount(() => {
                   class="h-5 pl-2"
                   :class="row.line?.kind === 'del' ? 'bg-red-500/10' : ''"
                 >
-                  <span class="whitespace-pre">{{ sideText(row.line) }}</span>
+                  <span
+                    v-if="hlOf(row.line)"
+                    class="diff-hl whitespace-pre"
+                    v-html="hlOf(row.line)"
+                  />
+                  <span v-else class="whitespace-pre">{{ sideText(row.line) }}</span>
                 </div>
               </template>
             </div>
@@ -917,7 +955,12 @@ onBeforeUnmount(() => {
                   class="h-5 pl-2"
                   :class="row.line?.kind === 'add' ? 'bg-green-500/10' : ''"
                 >
-                  <span class="whitespace-pre">{{ sideText(row.line) }}</span>
+                  <span
+                    v-if="hlOf(row.line)"
+                    class="diff-hl whitespace-pre"
+                    v-html="hlOf(row.line)"
+                  />
+                  <span v-else class="whitespace-pre">{{ sideText(row.line) }}</span>
                 </div>
               </template>
             </div>
@@ -975,7 +1018,11 @@ onBeforeUnmount(() => {
                 <span class="w-10 shrink-0 pr-2 text-right text-muted-foreground/50 select-none">
                   {{ line.newLine ?? "" }}
                 </span>
-                <span class="whitespace-pre">{{ line.text }}</span>
+                <span class="whitespace-pre">
+                  <template v-if="hlOf(line)">{{ line.text.charAt(0) }}</template>
+                  <span v-if="hlOf(line)" class="diff-hl" v-html="hlOf(line)" />
+                  <template v-else>{{ line.text }}</template>
+                </span>
               </div>
             </template>
           </div>
@@ -986,6 +1033,16 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* shiki 双主题产物只在 token span 上留 --shiki-light/--shiki-dark 变量,这里按 .dark 切换实际用哪组;
+   token 经 v-html 注入没有 scoped 属性,选择器整段包 :global()(同 CommandEditor 的写法) */
+:global(.commit-diff .diff-hl span) {
+  color: var(--shiki-light);
+}
+
+:global(html.dark .commit-diff .diff-hl span) {
+  color: var(--shiki-dark);
+}
+
 /* 折叠占位行的波浪线:SVG data-uri 平铺,background 文档隔离无法用 currentColor,取中性灰适配亮暗主题 */
 .diff-fold-wave {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='6'%3E%3Cpath d='M0 3 Q3 0.5 6 3 T12 3' fill='none' stroke='%239ca3af' stroke-width='1.2'/%3E%3C/svg%3E");
