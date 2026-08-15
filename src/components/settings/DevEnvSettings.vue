@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from "vue";
+import { ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { AcceptableValue } from "reka-ui";
 import { Check, Download, FolderOpen, Plus, ScanSearch, Trash2 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
@@ -23,7 +22,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { cmd, onListen } from "@/lib/tauri";
+import { javaMajorVersion } from "@/lib/jdk";
+import { cmd } from "@/lib/tauri";
+import { JDK_VENDORS, useJdkInstallStore } from "@/stores/jdk-install";
 import { useSettingsStore } from "@/stores/settings";
 import type { JdkCandidate, JdkConfig, JdkVendor, RemoteJdkRelease } from "@/types";
 
@@ -39,13 +40,6 @@ const formError = ref("");
 const nameTouched = ref(false);
 const checking = ref(false);
 const submitting = ref(false);
-
-/** 从 `java -version` 版本串提取展示用主版本:"17.0.2" -> "17","1.8.0_392" -> "8" */
-function majorVersion(version: string): string {
-  const parts = version.split(/[._]/);
-  if (parts[0] === "1" && parts.length > 1) return parts[1];
-  return parts[0] || version;
-}
 
 /** 路径去重 key:Windows 路径大小写不敏感 */
 function pathKey(path: string): string {
@@ -65,7 +59,7 @@ async function detect() {
       seen.add(pathKey(c.path));
       jdks.push({
         id: crypto.randomUUID(),
-        name: `Java ${majorVersion(c.version)}`,
+        name: `Java ${javaMajorVersion(c.version)}`,
         path: c.path,
       });
     }
@@ -109,7 +103,7 @@ async function validatePath() {
   try {
     const version = await cmd<string>("check_jdk", { path });
     formVersion.value = version;
-    if (!nameTouched.value) formName.value = `Java ${majorVersion(version)}`;
+    if (!nameTouched.value) formName.value = `Java ${javaMajorVersion(version)}`;
   } catch (e) {
     formError.value = String(e);
   } finally {
@@ -142,48 +136,35 @@ async function remove(jdk: JdkConfig) {
   await store.removeJdk(jdk.id);
 }
 
-// ---- 在线安装 ──────────────────────────────────────────────────────────────
+// ---- 在线安装(任务状态在 jdk-install store,支持后台继续) ──────────────────
 
-/** 安装源选项(厂商名为专有名词,不走 i18n) */
-const VENDORS: { value: JdkVendor; label: string }[] = [
-  { value: "adoptium", label: "Adoptium (Temurin)" },
-  { value: "zulu", label: "Azul Zulu" },
-];
-
+const installStore = useJdkInstallStore();
 const installOpen = ref(false);
 const installVendor = ref<JdkVendor>("adoptium");
 /** Select 的 v-model 用字符串,安装时转回数字 */
 const installMajor = ref("");
 const releases = ref<RemoteJdkRelease[]>([]);
 const loadingReleases = ref(false);
-const installing = ref(false);
-/** 后端 jdk://install-progress 事件载荷(下载字节量/解压阶段) */
-const progress = ref<{ stage: string; received: number; total: number } | null>(null);
-let unlistenProgress: UnlistenFn | undefined;
 
-onUnmounted(() => unlistenProgress?.());
-
-/** 下载进度百分比;解压阶段/未知总量返回 null(转不确定态样式) */
-const progressPct = computed(() => {
-  const p = progress.value;
-  if (!p || p.stage !== "download" || !p.total) return null;
-  return Math.min(100, Math.round((p.received / p.total) * 100));
-});
+/** 安装结束(成功或失败)自动收起对话框;期间可随时关闭,任务在后台继续 */
+watch(
+  () => installStore.installing,
+  (now, was) => {
+    if (was && !now && installOpen.value) installOpen.value = false;
+  },
+);
 
 function fmtMB(bytes: number): string {
   return `${(bytes / 1048576).toFixed(1)} MB`;
 }
 
-function vendorLabel(vendor: JdkVendor): string {
-  return VENDORS.find((v) => v.value === vendor)?.label ?? vendor;
-}
-
 async function openInstall() {
+  installOpen.value = true;
+  // 后台任务进行中时只回看进度,不重置表单
+  if (installStore.installing) return;
   installVendor.value = "adoptium";
   installMajor.value = "";
   releases.value = [];
-  progress.value = null;
-  installOpen.value = true;
   await loadReleases();
 }
 
@@ -211,46 +192,11 @@ async function onVendorChange(value: AcceptableValue) {
   await loadReleases();
 }
 
-async function startInstall() {
+/** 启动安装:任务交给全局 store,完成/失败经全局 toast 通知,不阻塞对话框关闭 */
+function startInstall() {
   const major = Number(installMajor.value);
-  if (!major || installing.value) return;
-  installing.value = true;
-  progress.value = { stage: "download", received: 0, total: 0 };
-  unlistenProgress?.();
-  unlistenProgress = await onListen<{ stage: string; received: number; total: number }>(
-    "jdk://install-progress",
-    (p) => {
-      progress.value = p;
-    },
-  );
-  try {
-    const installed = await cmd<JdkCandidate>("install_jdk", {
-      vendor: installVendor.value,
-      major,
-    });
-    if (store.jdkList.some((j) => pathKey(j.path) === pathKey(installed.path))) {
-      toast.info(t("settings.devEnv.alreadyInList"));
-    } else {
-      await store.saveJdk({
-        id: crypto.randomUUID(),
-        name: `Java ${majorVersion(installed.version)}`,
-        path: installed.path,
-      });
-      toast.success(
-        t("settings.devEnv.installed", {
-          vendor: vendorLabel(installVendor.value),
-          version: installed.version,
-        }),
-      );
-    }
-    installOpen.value = false;
-  } catch (e) {
-    toast.error(e instanceof Error ? e.message : String(e));
-  } finally {
-    installing.value = false;
-    unlistenProgress?.();
-    unlistenProgress = undefined;
-  }
+  if (!major) return;
+  void installStore.start(installVendor.value, major);
 }
 </script>
 
@@ -265,7 +211,12 @@ async function startInstall() {
         </Button>
         <Button size="sm" variant="outline" @click="openInstall">
           <Download class="h-4 w-4" />
-          {{ t("settings.devEnv.installOnline") }}
+          {{
+            installStore.installing
+              ? t("settings.devEnv.installing") +
+                (installStore.downloadPct !== null ? ` ${installStore.downloadPct}%` : "")
+              : t("settings.devEnv.installOnline")
+          }}
         </Button>
         <Button size="sm" variant="outline" @click="openCreate">
           <Plus class="h-4 w-4" />
@@ -365,7 +316,7 @@ async function startInstall() {
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectItem v-for="v in VENDORS" :key="v.value" :value="v.value">
+                <SelectItem v-for="v in JDK_VENDORS" :key="v.value" :value="v.value">
                   {{ v.label }}
                 </SelectItem>
               </SelectGroup>
@@ -396,34 +347,41 @@ async function startInstall() {
         <p class="text-xs text-muted-foreground">
           {{ t("settings.devEnv.installTargetHint") }}
         </p>
-        <div v-if="installing && progress" class="flex flex-col gap-1.5">
+        <div v-if="installStore.installing && installStore.progress" class="flex flex-col gap-1.5">
           <div class="flex justify-between text-xs text-muted-foreground">
             <span>
               {{
-                progress.stage === "download"
+                installStore.progress.stage === "download"
                   ? t("settings.devEnv.downloading")
                   : t("settings.devEnv.extracting")
               }}
             </span>
-            <span v-if="progress.stage === 'download' && progress.total">
-              {{ fmtMB(progress.received) }} / {{ fmtMB(progress.total) }}
+            <span v-if="installStore.progress.stage === 'download' && installStore.progress.total">
+              {{ fmtMB(installStore.progress.received) }} / {{ fmtMB(installStore.progress.total) }}
             </span>
           </div>
           <div class="h-1.5 overflow-hidden rounded-full bg-muted">
             <div
               class="h-full rounded-full bg-primary transition-all"
-              :class="progressPct === null && 'animate-pulse'"
-              :style="{ width: `${progressPct ?? 100}%` }"
+              :class="installStore.downloadPct === null && 'animate-pulse'"
+              :style="{ width: `${installStore.downloadPct ?? 100}%` }"
             />
           </div>
+          <p class="text-xs text-muted-foreground">
+            {{ t("settings.devEnv.backgroundHint") }}
+          </p>
         </div>
         <DialogFooter>
           <Button
             type="button"
-            :disabled="!installMajor || loadingReleases || installing"
+            :disabled="!installMajor || loadingReleases || installStore.installing"
             @click="startInstall"
           >
-            {{ installing ? t("settings.devEnv.installing") : t("settings.devEnv.installBtn") }}
+            {{
+              installStore.installing
+                ? t("settings.devEnv.installing")
+                : t("settings.devEnv.installBtn")
+            }}
           </Button>
         </DialogFooter>
       </div>

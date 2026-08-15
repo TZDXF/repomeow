@@ -929,6 +929,8 @@ export default {
       installing: "Installing...",
       downloading: "Downloading",
       extracting: "Extracting...",
+      backgroundHint:
+        "You can close this dialog or leave this page; installation continues in the background and you will be notified on completion",
       installed: "{vendor} {version} installed",
       alreadyInList: "This JDK is already in the list",
     },

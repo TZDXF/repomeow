@@ -907,6 +907,7 @@ export default {
       installing: "安装中...",
       downloading: "下载中",
       extracting: "解压中...",
+      backgroundHint: "可关闭对话框或离开本页,安装将在后台继续,完成后通知",
       installed: "{vendor} {version} 安装完成",
       alreadyInList: "该 JDK 已在列表中",
     },

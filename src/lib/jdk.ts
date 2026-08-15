@@ -20,3 +20,10 @@ export function resolveJavaHome(
   const id = mode === JDK_FOLLOW_DEFAULT ? store.defaultJdkId : mode;
   return store.jdkList.find((j) => j.id === id)?.path;
 }
+
+/** 从 `java -version` 版本串提取展示用主版本:"17.0.2" -> "17","1.8.0_392" -> "8" */
+export function javaMajorVersion(version: string): string {
+  const parts = version.split(/[._]/);
+  if (parts[0] === "1" && parts.length > 1) return parts[1];
+  return parts[0] || version;
+}
