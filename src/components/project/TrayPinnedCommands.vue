@@ -24,7 +24,8 @@ import type { PinnedCommand, Project } from "@/types";
 
 const { t } = useI18n();
 const props = defineProps<{ project: Project; pins: PinnedCommand[] }>();
-// 托盘窗口在 TrayPopup 挂载时已 init(含 JDK 配置),javaBuild 标记执行时按项目解析 JAVA_HOME
+// 托盘窗口在 TrayPopup 挂载时已 init,且每次弹窗显示时经 tray-popup://refresh 从 localStorage
+// 补读 JDK 配置;javaBuild 标记执行时按项目解析 JAVA_HOME
 const settingsStore = useSettingsStore();
 
 type ComposeAction = "up -d" | "up -d --build" | "build" | "restart" | "down" | "stop";

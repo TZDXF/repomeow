@@ -2915,7 +2915,7 @@ mod tests {
         fs::write(dir.join("a.txt"), "hello world\n").unwrap();
         git(&dir, &["commit", "-am", "update"]);
 
-        let d = commit_file_diff_blocking(dir.to_str().unwrap(), "HEAD", "a.txt", None).unwrap();
+        let d = commit_file_diff_blocking(dir.to_str().unwrap(), "HEAD", "a.txt", None, None).unwrap();
         assert!(d.diff.contains("@@"), "应含 hunk 头: {}", d.diff);
         assert!(d.diff.contains("+hello world"), "实际: {}", d.diff);
         assert!(!d.truncated);
@@ -2934,7 +2934,7 @@ mod tests {
         fs::write(dir.join("a.txt"), "l1\nl2\na1\na2\nl3\nl4\nl5\n").unwrap();
         git(&dir, &["commit", "-am", "add"]);
 
-        let d = commit_file_diff_blocking(dir.to_str().unwrap(), "HEAD", "a.txt", None).unwrap();
+        let d = commit_file_diff_blocking(dir.to_str().unwrap(), "HEAD", "a.txt", None, None).unwrap();
         assert!(d.diff.contains("@@ -1,5 +1,7 @@"), "hunk 头应覆盖全文件: {}", d.diff);
         assert!(d.diff.contains("+a1"), "实际: {}", d.diff);
         assert!(d.diff.contains("\n l1\n"), "应保留上下文行: {}", d.diff);

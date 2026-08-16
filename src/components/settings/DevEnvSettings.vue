@@ -27,6 +27,7 @@ import { cmd } from "@/lib/tauri";
 import { JDK_VENDORS, useJdkInstallStore } from "@/stores/jdk-install";
 import { useSettingsStore } from "@/stores/settings";
 import type { JdkCandidate, JdkConfig, JdkVendor, RemoteJdkRelease } from "@/types";
+import ToolchainPanel from "@/components/settings/ToolchainPanel.vue";
 
 const { t } = useI18n();
 const store = useSettingsStore();
@@ -387,4 +388,6 @@ function startInstall() {
       </div>
     </DialogContent>
   </Dialog>
+
+  <ToolchainPanel class="mt-8" />
 </template>

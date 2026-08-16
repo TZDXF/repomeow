@@ -203,6 +203,8 @@ pub fn run() {
             commands::java::check_jdk,
             commands::java::list_remote_jdks,
             commands::java::install_jdk,
+            commands::toolchain::detect_toolchains,
+            commands::toolchain::toolchain_op,
             commands::hidden::set_hidden_item,
             commands::pin::list_pinned_commands,
             commands::pin::set_pinned_command,

@@ -14,5 +14,6 @@ pub mod report;
 pub mod scan;
 pub mod script;
 pub mod tag;
+pub mod toolchain;
 pub mod walk;
 pub mod window;

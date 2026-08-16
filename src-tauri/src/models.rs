@@ -391,6 +391,55 @@ pub struct RemoteJdkRelease {
     pub version: String,
 }
 
+/// 工具链所属生态(detect_toolchains 输出的分组)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolchainKind {
+    Rust,
+    Python,
+    Node,
+    Dotnet,
+    Git,
+}
+
+/// 版本管理器登记的一个版本(rustup 工具链 / nvm·fnm·vp 的 Node 版本 / dotnet SDK)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ToolchainVersion {
+    /// 版本或工具链名,如 "22.11.0" / "stable-x86_64-pc-windows-msvc"
+    pub name: String,
+    /// 是否为当前生效的全局默认
+    pub current: bool,
+}
+
+/// 该工具在当前平台/安装来源下支持的操作(设置页按钮可见性;
+/// detect_toolchains 与 toolchain_op 共用同一套判定,保证按钮与实际命令一致)
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct ToolchainCaps {
+    pub can_install: bool,
+    pub can_update: bool,
+    pub can_uninstall: bool,
+    /// 是否有版本管理能力(列出/切换全局版本/装卸指定版本;dotnet 只列出不可切换)
+    pub can_switch: bool,
+}
+
+/// 单个工具链工具的检测结果(detect_toolchains)
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolchainStatus {
+    /// CLI 名(rustup / rustc / cargo / uv / nvm / fnm / vp / dotnet / git / gh)
+    pub id: String,
+    pub kind: ToolchainKind,
+    pub found: bool,
+    /// `--version` 解析出的版本串;工具已装但输出无法解析时为 None
+    pub version: Option<String>,
+    /// PATH 上命中的可执行文件路径(unix nvm 是 shell 函数无二进制,为 None)
+    pub path: Option<String>,
+    /// 安装来源:"winget" / "rustup" / "brew" / "standalone"(决定更新/卸载命令)
+    pub source: Option<String>,
+    /// 版本管理器探测到的版本列表(无版本管理能力为空)
+    pub versions: Vec<ToolchainVersion>,
+    pub caps: ToolchainCaps,
+}
+
 /// 项目维度被隐藏的 UI 项
 /// kind: "packageFile"(整个 package.json 分组)/ "packageScript"(分组内单条命令)/ "composeFile"
 /// target_key: packageFile = 分组 dir;packageScript = "<dir>\n<name>";composeFile = 文件相对路径

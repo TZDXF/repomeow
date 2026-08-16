@@ -102,8 +102,10 @@ onMounted(() => {
   onListen("tray-popup://refresh", () => {
     store.fetchProjects({ withGit: false });
     pinsStore.fetchPins();
-    // 打开方式排序/默认项兜底重读:实时广播之外的保险(如广播注册前错过的变更)
+    // 打开方式与 JDK 配置兜底重读:实时广播之外的保险(如广播注册前错过的变更);
+    // JDK 三键存 localStorage,主窗口改过后托盘 webview 的 store 需在此补读
     settingsStore.reloadOpenWith();
+    settingsStore.reloadJdkConfig();
   });
 });
 

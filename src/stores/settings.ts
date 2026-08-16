@@ -26,6 +26,29 @@ const APP_DATA_DIR_NAME = ".repomeow";
 const STORE_FILE = "settings.json";
 /** 打开方式列表顺序的 localStorage 键(纯 UI 偏好,不进 settings.json) */
 const OPEN_WITH_ORDER_CACHE_KEY = "repomeow:open-with-order";
+/** JDK 配置三键的 localStorage 键(开发环境偏好,不进 settings.json;settings.json 里的历史数据不迁移) */
+const JDK_LIST_CACHE_KEY = "repomeow:jdk-list";
+const DEFAULT_JDK_CACHE_KEY = "repomeow:default-jdk-id";
+const PROJECT_JDK_MAP_CACHE_KEY = "repomeow:project-jdk-map";
+
+/** 从 localStorage 读 JSON;缺失/不可用/非法时返回 undefined,由调用方回退默认值 */
+function readLocalJson(key: string): unknown {
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as unknown) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** 把值序列化写入 localStorage;不可用时静默降级(本次会话内仍生效,重启后回退默认) */
+function persistLocalJson(key: string, value: unknown) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* localStorage 不可用时静默降级 */
+  }
+}
 
 // AI 接入参数(OpenAI Chat Completions 兼容):baseUrl/apiKey/model 均无默认值,
 // 由用户在设置页填写;任一缺失时调用方需先校验。
@@ -297,6 +320,21 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
+  /**
+   * 从 localStorage 重读 JDK 配置三键,托盘弹窗每次显示时的兜底:
+   * localStorage 数据跨 webview 共享但 storage 事件不跨 Tauri 窗口派发,
+   * 主窗口改过 JDK 后,托盘 webview 内的 store 实例需在此补读才能解析到最新 JAVA_HOME。
+   */
+  function reloadJdkConfig() {
+    jdkList.value = normalizeJdkList(readLocalJson(JDK_LIST_CACHE_KEY));
+    const savedDefault = readLocalJson(DEFAULT_JDK_CACHE_KEY);
+    defaultJdkId.value =
+      typeof savedDefault === "string" && jdkList.value.some((j) => j.id === savedDefault)
+        ? savedDefault
+        : "";
+    projectJdkMap.value = normalizeProjectJdkMap(readLocalJson(PROJECT_JDK_MAP_CACHE_KEY));
+  }
+
   // ── lifecycle ─────────────────────────────────────────────
 
   async function init() {
@@ -321,9 +359,6 @@ export const useSettingsStore = defineStore("settings", () => {
         closeAction: "tray",
         enableGhCli: "false",
         worktreeDirTemplate: ".worktrees/{branch}",
-        jdkList: "[]",
-        defaultJdkId: "",
-        projectJdkMap: "{}",
       },
     });
     const savedTheme = await fileStore.get<ThemeMode>("theme");
@@ -407,13 +442,17 @@ export const useSettingsStore = defineStore("settings", () => {
     if (typeof savedWorktreeDir === "string" && savedWorktreeDir.trim()) {
       worktreeDirTemplate.value = savedWorktreeDir.trim();
     }
-    // JDK 列表(JSON 字符串);默认项/项目选择引用了不存在的 id 时回退空
-    jdkList.value = normalizeJdkList(await fileStore.get<unknown>("jdkList"));
-    const savedDefaultJdk = await fileStore.get<string>("defaultJdkId");
-    if (savedDefaultJdk && jdkList.value.some((j) => j.id === savedDefaultJdk)) {
+    // JDK 配置存 localStorage,不进 settings.json(历史 settings.json 数据不迁移);
+    // 默认项引用了不存在的 id 时回退空
+    jdkList.value = normalizeJdkList(readLocalJson(JDK_LIST_CACHE_KEY));
+    const savedDefaultJdk = readLocalJson(DEFAULT_JDK_CACHE_KEY);
+    if (
+      typeof savedDefaultJdk === "string" &&
+      jdkList.value.some((j) => j.id === savedDefaultJdk)
+    ) {
       defaultJdkId.value = savedDefaultJdk;
     }
-    projectJdkMap.value = normalizeProjectJdkMap(await fileStore.get<unknown>("projectJdkMap"));
+    projectJdkMap.value = normalizeProjectJdkMap(readLocalJson(PROJECT_JDK_MAP_CACHE_KEY));
     applyTheme();
     applyMdTheme();
     systemDark.addEventListener("change", onSystemThemeChange);
@@ -582,6 +621,13 @@ export const useSettingsStore = defineStore("settings", () => {
 
   // ── 开发环境(JDK) ────────────────────────────────────────────
 
+  /** 把 JDK 配置三键统一写入 localStorage(任一键变更后调用) */
+  function persistJdkCache() {
+    persistLocalJson(JDK_LIST_CACHE_KEY, jdkList.value);
+    persistLocalJson(DEFAULT_JDK_CACHE_KEY, defaultJdkId.value);
+    persistLocalJson(PROJECT_JDK_MAP_CACHE_KEY, projectJdkMap.value);
+  }
+
   /** 新增或更新一个 JDK(按 id upsert,路径去重);首个条目自动成为默认 */
   async function saveJdk(value: JdkConfig) {
     const next = { id: value.id, name: value.name.trim(), path: value.path.trim() };
@@ -592,12 +638,11 @@ export const useSettingsStore = defineStore("settings", () => {
       jdkList.value = [...jdkList.value, next];
       if (!defaultJdkId.value) {
         defaultJdkId.value = next.id;
-        await persist("defaultJdkId", next.id);
       }
     } else {
       jdkList.value = jdkList.value.map((j, i) => (i === existing ? next : j));
     }
-    await persist("jdkList", JSON.stringify(jdkList.value));
+    persistJdkCache();
   }
 
   /** 批量追加 JDK(自动探测用):过滤已存在路径后追加,单次落库;返回实际新增数 */
@@ -615,9 +660,8 @@ export const useSettingsStore = defineStore("settings", () => {
     jdkList.value = [...jdkList.value, ...additions];
     if (!defaultJdkId.value) {
       defaultJdkId.value = additions[0].id;
-      await persist("defaultJdkId", defaultJdkId.value);
     }
-    await persist("jdkList", JSON.stringify(jdkList.value));
+    persistJdkCache();
     return additions.length;
   }
 
@@ -627,21 +671,19 @@ export const useSettingsStore = defineStore("settings", () => {
     jdkList.value = jdkList.value.filter((j) => j.id !== id);
     if (defaultJdkId.value === id) {
       defaultJdkId.value = jdkList.value[0]?.id ?? "";
-      await persist("defaultJdkId", defaultJdkId.value);
     }
     if (Object.values(projectJdkMap.value).includes(id)) {
       projectJdkMap.value = Object.fromEntries(
         Object.entries(projectJdkMap.value).filter(([, v]) => v !== id),
       );
-      await persist("projectJdkMap", JSON.stringify(projectJdkMap.value));
     }
-    await persist("jdkList", JSON.stringify(jdkList.value));
+    persistJdkCache();
   }
 
   async function setDefaultJdk(id: string) {
     if (!jdkList.value.some((j) => j.id === id)) return;
     defaultJdkId.value = id;
-    await persist("defaultJdkId", id);
+    persistJdkCache();
   }
 
   /** 设置/清除按项目选择的 JDK(jdkId 为空 = 跟随默认 JDK);projectId 接受项目 id(number) */
@@ -656,7 +698,7 @@ export const useSettingsStore = defineStore("settings", () => {
       delete rest[key];
       projectJdkMap.value = rest;
     }
-    await persist("projectJdkMap", JSON.stringify(projectJdkMap.value));
+    persistJdkCache();
   }
 
   return {
@@ -686,6 +728,7 @@ export const useSettingsStore = defineStore("settings", () => {
     syncThemeFromExternal,
     syncOpenWithFromExternal,
     reloadOpenWith,
+    reloadJdkConfig,
     setTheme,
     setThemeSkin,
     setMdTheme,

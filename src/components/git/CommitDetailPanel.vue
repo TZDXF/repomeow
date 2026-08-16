@@ -149,9 +149,7 @@ async function selectFile(file: GitCommitFile, force = false) {
     // 行模型直接复用这份 parseDiff 结果,保证 lineHtml 的键与模板渲染的是同一批对象引用;
     // 折叠/滚动位置属旧 diff,也等这一帧一起重置
     const lines = parseDiff(result.diff);
-    const ranges = wordDiff.value
-      ? intralineRanges(lines)
-      : new Map<DiffLine, [number, number]>();
+    const ranges = wordDiff.value ? intralineRanges(lines) : new Map<DiffLine, [number, number]>();
     const htmlMap =
       (await highlightDiffLines(lines, file.path, ranges)) ?? new Map<DiffLine, string>();
     if (selectedPath.value !== file.path) return;
@@ -706,7 +704,9 @@ const hbarPad = ref({ leftGutter: 0, rightGutter: 0 });
 async function syncHbarPad() {
   await nextTick();
   hbarPad.value = {
-    leftGutter: leftPaneEl.value ? leftPaneEl.value.offsetHeight - leftPaneEl.value.clientHeight : 0,
+    leftGutter: leftPaneEl.value
+      ? leftPaneEl.value.offsetHeight - leftPaneEl.value.clientHeight
+      : 0,
     rightGutter: rightPaneEl.value
       ? rightPaneEl.value.offsetHeight - rightPaneEl.value.clientHeight
       : 0,

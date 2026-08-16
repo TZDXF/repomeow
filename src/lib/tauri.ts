@@ -37,6 +37,9 @@ const GENERIC_DETAIL_CODES = new Set([
   "docker_task_failed",
   // JDK 在线安装:文案只有一句"安装失败",message 里的 URL/HTTP 状态/目标路径是排障关键
   "jdk_install_failed",
+  // 工具链操作:message 里的工具/操作名或非法版本值是定位问题的关键
+  "toolchain_op_unsupported",
+  "toolchain_version_invalid",
 ]);
 
 /**

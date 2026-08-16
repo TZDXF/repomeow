@@ -149,6 +149,10 @@ pub enum ErrorCode {
     JdkInvalid,
     /// JDK 在线安装失败(网络/资产解析/解压/校验;message 携带 URL、状态码或目标路径)
     JdkInstallFailed,
+    /// 工具链操作不支持(工具/操作/平台/来源组合未定义;message 携带工具与操作名)
+    ToolchainOpUnsupported,
+    /// 工具链版本参数非法(仅允许字母数字与 . _ - /;值会拼进终端命令,防注入)
+    ToolchainVersionInvalid,
 
     // ── 报告 ──────────────────────────────────────────────────────────
     ReportInvalidYearMonth,
@@ -291,6 +295,8 @@ impl ErrorCode {
             // Java / 开发环境
             Self::JdkInvalid => "jdk_invalid",
             Self::JdkInstallFailed => "jdk_install_failed",
+            Self::ToolchainOpUnsupported => "toolchain_op_unsupported",
+            Self::ToolchainVersionInvalid => "toolchain_version_invalid",
             // 报告
             Self::ReportInvalidYearMonth => "report_invalid_year_month",
             Self::ReportInvalidDate => "report_invalid_date",
