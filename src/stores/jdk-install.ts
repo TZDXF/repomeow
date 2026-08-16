@@ -27,7 +27,7 @@ export interface JdkInstallProgress {
 
 /**
  * JDK 在线安装的全局状态。install_jdk 一次要下载数十至两百 MB,状态放 store
- * 而非 DevEnvSettings 组件:关闭对话框或离开设置页安装继续(后端命令不随组件
+ * 而非 JavaSection 组件:关闭对话框或离开设置页安装继续(后端命令不随组件
  * 卸载取消),完成/失败经全局 toast 通知,设置页「在线安装」按钮实时显示进度,
  * 重新打开对话框可回看。同一时刻只允许一个安装任务(重复 start 直接忽略)。
  */

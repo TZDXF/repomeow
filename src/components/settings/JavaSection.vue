@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type { AcceptableValue } from "reka-ui";
-import { Check, Download, FolderOpen, Plus, ScanSearch, Trash2 } from "@lucide/vue";
+import { Check, Coffee, Download, FolderOpen, Plus, ScanSearch, Trash2 } from "@lucide/vue";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -27,10 +28,11 @@ import { cmd } from "@/lib/tauri";
 import { JDK_VENDORS, useJdkInstallStore } from "@/stores/jdk-install";
 import { useSettingsStore } from "@/stores/settings";
 import type { JdkCandidate, JdkConfig, JdkVendor, RemoteJdkRelease } from "@/types";
-import ToolchainPanel from "@/components/settings/ToolchainPanel.vue";
 
 const { t } = useI18n();
 const store = useSettingsStore();
+/** 行徽标与路径展示跟随默认 JDK(项目未单独选择时生效的那个) */
+const defaultJdk = computed(() => store.jdkList.find((j) => j.id === store.defaultJdkId));
 
 const detecting = ref(false);
 const dialogOpen = ref(false);
@@ -202,60 +204,88 @@ function startInstall() {
 </script>
 
 <template>
-  <section>
-    <div class="flex items-start justify-between gap-4">
-      <h2 class="text-base font-semibold">{{ t("settings.devEnv.title") }}</h2>
-      <div class="flex shrink-0 gap-2">
-        <Button size="sm" variant="outline" :disabled="detecting" @click="detect">
-          <ScanSearch class="h-4 w-4" />
-          {{ detecting ? t("settings.devEnv.detecting") : t("settings.devEnv.detect") }}
-        </Button>
-        <Button size="sm" variant="outline" @click="openInstall">
-          <Download class="h-4 w-4" />
-          {{
-            installStore.installing
-              ? t("settings.devEnv.installing") +
-                (installStore.downloadPct !== null ? ` ${installStore.downloadPct}%` : "")
-              : t("settings.devEnv.installOnline")
-          }}
-        </Button>
-        <Button size="sm" variant="outline" @click="openCreate">
-          <Plus class="h-4 w-4" />
-          {{ t("settings.devEnv.add") }}
-        </Button>
-      </div>
+  <div>
+    <div class="mb-2 mt-5 flex items-center gap-2 text-sm font-medium text-muted-foreground">
+      <Coffee class="h-4 w-4" />
+      {{ t("settings.devEnv.tools.groups.java") }}
     </div>
-
-    <div v-if="store.jdkList.length" class="mt-4 flex flex-col gap-2">
-      <div
-        v-for="jdk in store.jdkList"
-        :key="jdk.id"
-        class="flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors hover:bg-accent"
-        :class="store.defaultJdkId === jdk.id && 'border-primary'"
-      >
-        <button
-          type="button"
-          class="flex min-w-0 flex-1 items-center gap-3 text-left"
-          :title="t('settings.devEnv.setDefault')"
-          @click="store.setDefaultJdk(jdk.id)"
+    <div class="rounded-lg border" :class="!defaultJdk && 'border-dashed'">
+      <div class="flex items-center gap-3 px-3 py-2.5">
+        <span
+          class="w-24 shrink-0 font-mono text-sm font-medium"
+          :class="!defaultJdk && 'text-muted-foreground'"
         >
-          <span class="min-w-0 flex-1">
-            <span class="block truncate text-sm font-medium">{{ jdk.name }}</span>
-            <span class="block truncate font-mono text-xs text-muted-foreground" :title="jdk.path">
+          java
+        </span>
+        <Badge v-if="defaultJdk" variant="secondary" class="font-mono">
+          {{ defaultJdk.name }}
+        </Badge>
+        <Badge v-else variant="outline" class="text-muted-foreground">
+          {{ t("settings.devEnv.tools.jdkNone") }}
+        </Badge>
+        <span v-if="!defaultJdk" class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+          {{ t("settings.devEnv.tools.jdkNoDefault") }}
+        </span>
+        <span v-else class="min-w-0 flex-1"></span>
+        <div class="flex shrink-0 gap-1.5">
+          <Button size="sm" variant="outline" :disabled="detecting" @click="detect">
+            <ScanSearch class="h-4 w-4" />
+            {{ detecting ? t("settings.devEnv.detecting") : t("settings.devEnv.detect") }}
+          </Button>
+          <Button size="sm" variant="outline" @click="openInstall">
+            <Download class="h-4 w-4" />
+            {{
+              installStore.installing
+                ? t("settings.devEnv.installing") +
+                  (installStore.downloadPct !== null ? ` ${installStore.downloadPct}%` : "")
+                : t("settings.devEnv.installOnline")
+            }}
+          </Button>
+          <Button size="sm" variant="outline" @click="openCreate">
+            <Plus class="h-4 w-4" />
+            {{ t("settings.devEnv.add") }}
+          </Button>
+        </div>
+      </div>
+      <!-- JDK 列表:登记的多个 JDK,默认项高亮,行内设默认/删除 -->
+      <div class="border-t px-3 py-2">
+        <span class="text-xs text-muted-foreground">{{ t("settings.devEnv.tools.jdkLabel") }}</span>
+        <div v-if="store.jdkList.length" class="mt-1.5 flex flex-col gap-1">
+          <div
+            v-for="jdk in store.jdkList"
+            :key="jdk.id"
+            class="flex items-center gap-2 rounded-md border px-2 py-1"
+            :class="store.defaultJdkId === jdk.id ? 'border-primary bg-primary/5' : 'border-border'"
+          >
+            <Check v-if="store.defaultJdkId === jdk.id" class="h-3.5 w-3.5 shrink-0 text-primary" />
+            <span class="text-xs font-medium">{{ jdk.name }}</span>
+            <span
+              class="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground"
+              :title="jdk.path"
+            >
               {{ jdk.path }}
             </span>
-          </span>
-          <Check v-if="store.defaultJdkId === jdk.id" class="h-4 w-4 shrink-0 text-primary" />
-        </button>
-        <Button size="icon-sm" variant="ghost" :title="t('common.delete')" @click="remove(jdk)">
-          <Trash2 class="h-3.5 w-3.5" />
-        </Button>
+            <Button
+              v-if="store.defaultJdkId !== jdk.id"
+              size="sm"
+              variant="ghost"
+              class="h-6 px-2 text-xs"
+              :title="t('settings.devEnv.setDefault')"
+              @click="store.setDefaultJdk(jdk.id)"
+            >
+              {{ t("settings.devEnv.tools.setDefault") }}
+            </Button>
+            <Button size="icon-sm" variant="ghost" :title="t('common.delete')" @click="remove(jdk)">
+              <Trash2 class="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+        <p v-else class="mt-1.5 text-xs text-muted-foreground">
+          {{ t("settings.devEnv.empty") }}
+        </p>
       </div>
     </div>
-    <p v-else class="mt-4 text-sm text-muted-foreground">
-      {{ t("settings.devEnv.empty") }}
-    </p>
-  </section>
+  </div>
 
   <Dialog v-model:open="dialogOpen">
     <DialogContent class="sm:max-w-[min(34rem,calc(100%-2rem))]">
@@ -388,6 +418,4 @@ function startInstall() {
       </div>
     </DialogContent>
   </Dialog>
-
-  <ToolchainPanel class="mt-8" />
 </template>

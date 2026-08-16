@@ -205,6 +205,7 @@ pub fn run() {
             commands::java::install_jdk,
             commands::toolchain::detect_toolchains,
             commands::toolchain::toolchain_op,
+            commands::toolchain::list_toolchain_versions,
             commands::hidden::set_hidden_item,
             commands::pin::list_pinned_commands,
             commands::pin::set_pinned_command,

@@ -420,6 +420,19 @@ pub struct ToolchainCaps {
     pub can_uninstall: bool,
     /// 是否有版本管理能力(列出/切换全局版本/装卸指定版本;dotnet 只列出不可切换)
     pub can_switch: bool,
+    /// 「添加版本」能否拉取远端可安装列表(list_toolchain_versions);
+    /// 否(rustup 工具链名、unix nvm)时前端退化为自由输入
+    pub can_list_remote: bool,
+}
+
+/// 「添加版本」的远端可装版本(list_toolchain_versions)
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ToolchainRemoteVersion {
+    pub name: String,
+    /// 版本线标记文字,直接取自数据源原样展示:nvm 为表格列头
+    /// (CURRENT / LTS / OLD STABLE / OLD UNSTABLE),vp 为 LTS / Current;
+    /// 无从判定为 None
+    pub tag: Option<String>,
 }
 
 /// 单个工具链工具的检测结果(detect_toolchains)
@@ -437,6 +450,8 @@ pub struct ToolchainStatus {
     pub source: Option<String>,
     /// 版本管理器探测到的版本列表(无版本管理能力为空)
     pub versions: Vec<ToolchainVersion>,
+    /// gh:当前登录用户名(`gh auth status` 解析;未登录/探测失败为 None)
+    pub account: Option<String>,
     pub caps: ToolchainCaps,
 }
 

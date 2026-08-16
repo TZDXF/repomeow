@@ -17,7 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import GeneralSettings from "@/components/settings/GeneralSettings.vue";
-import DevEnvSettings from "@/components/settings/DevEnvSettings.vue";
+import ToolchainPanel from "@/components/settings/ToolchainPanel.vue";
 import TagSettings from "@/components/settings/TagSettings.vue";
 import ArchiveSettings from "@/components/settings/ArchiveSettings.vue";
 import AiSettings from "@/components/settings/AiSettings.vue";
@@ -46,7 +46,7 @@ const categories: Category[] = [
     id: "devEnv",
     labelKey: "settings.categories.devEnv",
     icon: Coffee,
-    component: DevEnvSettings,
+    component: ToolchainPanel,
   },
   {
     id: "archive",
