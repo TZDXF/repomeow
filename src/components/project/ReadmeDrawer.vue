@@ -2,7 +2,7 @@
 import { provide, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
-import { BookOpen, X } from "@lucide/vue";
+import { X } from "@lucide/vue";
 import { Markdown, type ControlsConfig, type NodeRenderers } from "vue-stream-markdown";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -122,33 +122,22 @@ async function onBodyClick(e: MouseEvent) {
         v-if="open"
         class="readme-surface fixed inset-y-0 right-0 z-50 flex w-full max-w-2xl flex-col border-l shadow-xl"
       >
-        <header class="flex shrink-0 items-center justify-between gap-2 border-b px-4 py-3">
-          <div class="flex min-w-0 items-center gap-2 text-sm font-semibold">
-            <BookOpen class="h-4 w-4 shrink-0" />
-            {{ t("readme.title") }}
-            <span v-if="readme" class="truncate text-xs font-normal text-muted-foreground">
-              {{ readme.file_name }}
-            </span>
-          </div>
-          <div class="flex shrink-0 items-center gap-1">
-            <Button
-              size="icon"
-              variant="ghost"
-              class="h-8 w-8"
-              :title="t('readme.closeEsc')"
-              @click="open = false"
-            >
-              <X class="h-4 w-4" />
-            </Button>
-          </div>
-        </header>
+        <Button
+          size="icon"
+          variant="secondary"
+          class="absolute right-3 top-3 z-10 h-8 w-8 shadow"
+          :title="t('readme.closeEsc')"
+          @click="open = false"
+        >
+          <X class="h-4 w-4" />
+        </Button>
 
         <ScrollArea class="min-h-0 flex-1">
           <p v-if="loading" class="p-6 text-sm text-muted-foreground">{{ t("readme.loading") }}</p>
           <p v-else-if="!readme" class="p-6 text-sm text-muted-foreground">
             {{ t("readme.notFound") }}
           </p>
-          <div v-else class="p-6 text-sm" @click="onBodyClick">
+          <div v-else class="p-6 pt-12 text-sm" @click="onBodyClick">
             <Markdown
               mode="static"
               :content="content"
