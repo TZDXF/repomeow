@@ -62,6 +62,10 @@ pub enum ErrorCode {
     NotGitRepository,
     /// 分支已被其它 worktree 检出,不能重复检出
     GitBranchCheckedOut,
+    /// fetch refspec 试图快进更新被 worktree 检出的分支引用,git 拒绝
+    /// (引用与工作区共用,推进会致该 worktree 文件与 HEAD 脱节;
+    /// message 携带该 worktree 路径,指引用户前往该 worktree 拉取)
+    GitFetchIntoCheckedOut,
     /// worktree 含未提交修改或未跟踪文件,需强制删除
     GitWorktreeDirty,
     /// 同名分支已存在
@@ -228,6 +232,7 @@ impl ErrorCode {
             Self::GitPathsRequired => "git_paths_required",
             Self::NotGitRepository => "not_git_repository",
             Self::GitBranchCheckedOut => "git_branch_checked_out",
+            Self::GitFetchIntoCheckedOut => "git_fetch_into_checked_out",
             Self::GitWorktreeDirty => "git_worktree_dirty",
             Self::GitBranchExists => "git_branch_exists",
             Self::GitBranchDiverged => "git_branch_diverged",

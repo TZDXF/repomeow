@@ -78,6 +78,8 @@ export default {
     git_paths_required: "请至少勾选一个要提交的文件",
     not_git_repository: "当前目录不是 Git 仓库",
     git_branch_checked_out: "该分支已在另一个 worktree 中检出，不能重复使用",
+    git_fetch_into_checked_out:
+      "无法更新该分支：它正在另一个 worktree 中检出，为避免该 worktree 的文件与分支脱节，请前往该 worktree 执行拉取",
     git_worktree_dirty: "该 worktree 存在未提交修改或未跟踪文件，如需删除请勾选强制删除",
     git_branch_exists: "同名分支已存在",
     git_branch_diverged:

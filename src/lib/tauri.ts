@@ -28,6 +28,8 @@ const GENERIC_DETAIL_CODES = new Set([
   "git_clone_failed",
   "git_task_failed",
   "git_noise_fallback",
+  // 拉取被 worktree 检出的分支:message 里的 worktree 路径是用户该去操作的地点
+  "git_fetch_into_checked_out",
   "search_invalid_glob",
   // Docker:i18n 文案只有一句"操作失败",不附带 message 就丢了 stderr 诊断信息
   "docker_action_failed",

@@ -311,6 +311,17 @@ fn friendly_git_error(raw: &str) -> AppError {
     }
 
     // worktree / 分支占用
+    // fetch refspec 更新被 worktree 检出的分支(拉取非当前分支时):
+    // "fatal: refusing to fetch into branch 'refs/heads/x' checked out at '<path>'"
+    // message 提取 worktree 路径透出,指引用户到该 worktree 拉取
+    if text.contains("refusing to fetch into branch") {
+        let worktree_path = text
+            .split("checked out at '")
+            .nth(1)
+            .and_then(|rest| rest.split('\'').next())
+            .unwrap_or("");
+        return coded(ErrorCode::GitFetchIntoCheckedOut, worktree_path);
+    }
     if text.contains("is already checked out at") {
         return coded(ErrorCode::GitBranchCheckedOut, "");
     }
@@ -3005,6 +3016,21 @@ mod tests {
             err.is_code(crate::error::ErrorCode::GitUntrackedConflict),
             "实际输出: {err}"
         );
+    }
+
+    #[test]
+    fn friendly_error_maps_fetch_into_checked_out_branch() {
+        // 拉取被 worktree 检出的分支:git 拒绝 fetch refspec 更新该引用,
+        // 映射为专属错误码且 message 携带 worktree 路径供前端透出
+        let raw = "From github.com:tzdxf/ruoyi-vue-pro\n\
+                   fatal: refusing to fetch into branch 'refs/heads/zc-dev' checked out at 'D:/code/ruoyi-vue-pro/.worktrees/zc-dev'";
+        let err = friendly_git_error(raw);
+        assert!(
+            err.is_code(crate::error::ErrorCode::GitFetchIntoCheckedOut),
+            "实际输出: {err}"
+        );
+        let msg = err.to_string();
+        assert!(msg.contains(".worktrees/zc-dev"), "实际输出: {msg}");
     }
 
     #[test]

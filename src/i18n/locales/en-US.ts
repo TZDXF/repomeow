@@ -83,6 +83,8 @@ export default {
     git_paths_required: "Select at least one file to commit",
     not_git_repository: "Current directory is not a Git repository",
     git_branch_checked_out: "This branch is already checked out in another worktree",
+    git_fetch_into_checked_out:
+      "Cannot update this branch: it is checked out in another worktree. To keep that worktree's files in sync with the branch, run the pull there instead",
     git_worktree_dirty:
       "This worktree has uncommitted changes or untracked files. Enable force to remove it",
     git_branch_exists: "A branch with this name already exists",
