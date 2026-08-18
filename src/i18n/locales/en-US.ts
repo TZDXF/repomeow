@@ -92,6 +92,8 @@ export default {
       "The local branch with the same name has diverged from this remote branch and cannot be aligned safely. Mount the local branch instead, or sync them in a terminal first",
     git_branch_not_merged:
       "This branch is not fully merged. Use force delete if you really want to remove it",
+    git_merge_needs_checkout:
+      "The target branch is not checked out in any worktree and cannot be fast-forwarded (diverged, or squash was requested). Create a worktree for it first, then merge. Target branch:",
     // account
     account_not_found: "Account not found",
     account_unsupported_provider: "Unsupported provider",
@@ -501,6 +503,8 @@ export default {
       count: "{count}",
       main: "Main",
       detached: "Detached HEAD",
+      current: "Current",
+      createFirst: "No worktrees yet — click to create one",
       create: "New worktree",
       sourceLabel: "Branch source",
       sourceNew: "New branch",
@@ -514,14 +518,26 @@ export default {
         "Supports the {branch} placeholder and relative paths (resolved against the repository root). Change the default template in Settings",
       creating: "Creating...",
       created: 'Worktree "{name}" created',
-      mergeBack: "Merge into current branch",
-      mergeTitle: 'Merge "{name}" into current branch',
+      mergeBack: "Merge into…",
+      mergeTitle: 'Merge "{name}"',
+      mergeTargetLabel: "Merge into branch",
+      mergeUncheckedHint:
+        "This branch is not checked out in any worktree: fast-forward only (moves the branch pointer, no merge commit), and squash is unavailable",
+      mergeAction: "Merge",
+      squashAction: "Squash merge",
       squash: "Squash merge: stage only, no auto commit",
       merging: "Merging...",
-      merged: 'Merged "{name}" into current branch',
-      squashStaged: 'Squash-merged "{name}" and staged the changes. Review and commit manually',
-      rebase: "Rebase onto current branch",
-      rebased: 'Rebased "{name}" onto current branch',
+      merged: 'Merged "{name}" into "{target}"',
+      squashStaged:
+        'Squash-merged "{name}" into "{target}" and staged the changes. Review and commit manually',
+      rebase: "Rebase",
+      rebaseTitle: 'Rebase "{name}"',
+      rebaseOntoLabel: "Rebase onto branch",
+      rebaseHint:
+        'Commits on "{name}" will be replayed one by one on top of the latest commit of "{onto}", keeping history linear',
+      rebaseBefore: "Before rebase",
+      rebaseAfter: "After rebase (commits replayed)",
+      rebased: 'Rebased "{name}" onto "{onto}"',
       rebaseInterrupted:
         "Rebase paused: resolve conflicts and continue (git rebase --continue), or abort",
       remove: "Remove",

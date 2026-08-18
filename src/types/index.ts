@@ -56,12 +56,16 @@ export interface GitWorktree {
   is_main: boolean;
   /** 是否 detached HEAD */
   detached: boolean;
+  /** 创建来源分支(新建分支时记录;无记录回退上游跟踪分支,如 origin/x;都没有为 null) */
+  base_branch: string | null;
 }
 
 /** `git merge` 的结果:最新状态 + 产生的合并冲突文件(为空表示无冲突) */
 export interface GitMergeResult {
   status: GitStatus;
   conflicts: string[];
+  /** 实际执行合并的工作区路径;目标分支未被检出时走快进,为空串 */
+  merged_in: string;
 }
 
 /** `git rebase` 的结果:最新状态 + 冲突文件 + 变基是否处于中断状态 */

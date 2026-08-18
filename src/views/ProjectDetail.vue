@@ -364,6 +364,7 @@ async function saveDesc() {
     <WorktreePanel
       v-model:open="worktreeOpen"
       :project="project"
+      :active-path="activeWorktreePath"
       @changed="switcherRef?.reload()"
     />
   </div>

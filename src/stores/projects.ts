@@ -341,7 +341,7 @@ export const useProjectsStore = defineStore("projects", () => {
     project: Project,
     worktreePath: string,
     branch: string,
-    options: { createBranch?: boolean; startPoint?: string } = {},
+    options: { createBranch?: boolean; startPoint?: string; baseBranch?: string } = {},
   ) {
     return cmd<GitWorktree[]>("git_worktree_add", {
       path: project.path,
@@ -349,6 +349,7 @@ export const useProjectsStore = defineStore("projects", () => {
       branch,
       createBranch: options.createBranch ?? true,
       startPoint: options.startPoint ?? null,
+      baseBranch: options.baseBranch ?? null,
     });
   }
 
@@ -366,15 +367,27 @@ export const useProjectsStore = defineStore("projects", () => {
     });
   }
 
-  /** 将 branch 合并进当前分支;squash 时只暂存不提交。返回冲突文件列表(非空表示有冲突) */
-  async function mergeBranch(project: Project, branch: string, options: { squash?: boolean } = {}) {
+  /**
+   * 将 branch 合并进目标分支(target 缺省为主工作区当前分支);squash 时只暂存不提交。
+   * 目标分支检出在其它 worktree 时在该 worktree 内合并(不回写 project.git);
+   * 未被任何 worktree 检出时仅快进。返回冲突文件列表(非空表示有冲突)与实际合并位置
+   */
+  async function mergeBranch(
+    project: Project,
+    branch: string,
+    options: { squash?: boolean; target?: string } = {},
+  ) {
     const result = await cmd<GitMergeResult>("git_merge", {
       path: project.path,
       branch,
+      target: options.target ?? null,
       squash: options.squash ?? false,
     });
-    project.git = result.status;
-    return result.conflicts;
+    // 仅当合并发生在主工作区(target 缺省或即主工作区当前分支)时回写状态
+    if (!options.target || options.target === project.git?.branch) {
+      project.git = result.status;
+    }
+    return { conflicts: result.conflicts, mergedIn: result.merged_in };
   }
 
   /** 中止进行中的合并(git merge --abort) */

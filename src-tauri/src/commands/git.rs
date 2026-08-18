@@ -1371,6 +1371,7 @@ fn worktree_info_of(wt_repo: &Repository, wt_path: &Path, is_main: bool) -> GitW
         head: String::new(),
         is_main,
         detached: false,
+        base_branch: None,
     };
     if let Ok(head) = wt_repo.head() {
         w.head = head.target().map(|oid| oid.to_string()).unwrap_or_default();
@@ -1380,7 +1381,42 @@ fn worktree_info_of(wt_repo: &Repository, wt_path: &Path, is_main: bool) -> GitW
             w.detached = true;
         }
     }
+    w.base_branch = base_branch_of(wt_repo, w.branch.as_deref());
     w
+}
+
+/// 分支的创建来源:`branch.<name>.repomeow-base`(本应用新建 worktree 分支时记录);
+/// 无记录时回退为上游跟踪分支,组装为 origin/x 形式(上游为本地分支 remote="." 时
+/// 直接返回本地分支名)。游离 HEAD 或无上游时为 None
+fn base_branch_of(repo: &Repository, branch: Option<&str>) -> Option<String> {
+    let name = branch?;
+    let cfg = repo.config().ok()?;
+    let key = format!("branch.{name}.repomeow-base");
+    if let Ok(base) = cfg.get_string(&key) {
+        let base = base.trim();
+        if !base.is_empty() {
+            return Some(base.to_string());
+        }
+    }
+    let remote = cfg
+        .get_string(&format!("branch.{name}.remote"))
+        .ok()?
+        .trim()
+        .to_string();
+    let merge = cfg
+        .get_string(&format!("branch.{name}.merge"))
+        .ok()?
+        .trim()
+        .to_string();
+    let short = merge.strip_prefix("refs/heads/").unwrap_or(&merge);
+    if short.is_empty() {
+        return None;
+    }
+    if remote.is_empty() || remote == "." {
+        Some(short.to_string())
+    } else {
+        Some(format!("{remote}/{short}"))
+    }
 }
 
 fn list_worktrees_blocking(path: &str) -> AppResult<Vec<GitWorktree>> {
@@ -1410,6 +1446,7 @@ fn list_worktrees_blocking(path: &str) -> AppResult<Vec<GitWorktree>> {
                 head: String::new(),
                 is_main: false,
                 detached: false,
+                base_branch: None,
             }),
         }
     }
@@ -1475,7 +1512,8 @@ fn resolve_worktree_target(main_root: &str, input: &str, branch: &str) -> PathBu
 }
 
 /// 创建 worktree。create_branch 为 true 时检出新分支
-/// (`git worktree add <dir> -b <branch> [start_point]`,start_point 缺省为 HEAD);
+/// (`git worktree add <dir> -b <branch> [start_point]`,start_point 缺省为 HEAD),
+/// 并把 base_branch(创建来源分支)写入 `branch.<branch>.repomeow-base` 配置;
 /// 为 false 时挂载已有分支:本地分支直接挂载;origin/xxx 远程引用在本地无同名分支时
 /// 显式创建跟踪分支(直接传 origin/x 只会得到游离 HEAD,不触发 checkout 式 DWIM),
 /// 本地已有同名分支时按安全快进对齐(见 attach_remote_worktree)。
@@ -1487,6 +1525,7 @@ pub async fn git_worktree_add(
     branch: String,
     create_branch: bool,
     start_point: Option<String>,
+    base_branch: Option<String>,
 ) -> AppResult<Vec<GitWorktree>> {
     run_blocking(move || {
         worktree_add_blocking(
@@ -1495,6 +1534,7 @@ pub async fn git_worktree_add(
             &branch,
             create_branch,
             start_point.as_deref(),
+            base_branch.as_deref(),
         )
     })
     .await
@@ -1506,6 +1546,7 @@ fn worktree_add_blocking(
     branch: &str,
     create_branch: bool,
     start_point: Option<&str>,
+    base_branch: Option<&str>,
 ) -> AppResult<Vec<GitWorktree>> {
     let branch = branch.trim();
     if branch.is_empty() {
@@ -1546,6 +1587,17 @@ fn worktree_add_blocking(
         run_git(path, &["worktree", "add", &target_str, branch])?;
     } else {
         attach_remote_worktree(path, &target_str, branch, local_name, &locals)?;
+    }
+    // 新建分支时记录创建来源(git config branch.<name>.repomeow-base),
+    // 供合并/变基默认回到来源分支;删分支时 git 会连带清掉该段配置。
+    // 配置写入失败不阻断创建(仅丢失来源记录)
+    if create_branch {
+        if let Some(base) = base_branch.map(str::trim).filter(|s| !s.is_empty()) {
+            let key = format!("branch.{branch}.repomeow-base");
+            if let Err(e) = run_git(path, &["config", &key, base]) {
+                eprintln!("[git] 记录 worktree 来源分支失败({key}={base}): {e}");
+            }
+        }
     }
     list_worktrees_blocking(path)
 }
@@ -1651,25 +1703,70 @@ fn worktree_remove_blocking(
     list_worktrees_blocking(path)
 }
 
-/// 将指定分支合并进当前分支;squash 时只暂存不自动提交(由用户确认后手动提交)。
+/// 将指定分支合并进目标分支(target 缺省为 path 所在工作区的当前分支);
+/// squash 时只暂存不自动提交(由用户确认后手动提交)。
+/// 目标分支检出在某个 worktree(含主工作区)时在该工作区内合并;未被任何 worktree
+/// 检出时只允许快进(预检祖先后 `git branch -f`,不产生工作区改动),分叉或要求
+/// squash 时报 git_merge_needs_checkout。
 /// 与 pull 一致:产生冲突不算失败,返回冲突文件列表由前端引导解决
 #[tauri::command]
-pub async fn git_merge(path: String, branch: String, squash: bool) -> AppResult<GitMergeResult> {
-    run_blocking(move || merge_blocking(&path, &branch, squash)).await
+pub async fn git_merge(
+    path: String,
+    branch: String,
+    target: Option<String>,
+    squash: bool,
+) -> AppResult<GitMergeResult> {
+    run_blocking(move || merge_blocking(&path, &branch, target.as_deref(), squash)).await
 }
 
-fn merge_blocking(path: &str, branch: &str, squash: bool) -> AppResult<GitMergeResult> {
+fn merge_blocking(
+    path: &str,
+    branch: &str,
+    target: Option<&str>,
+    squash: bool,
+) -> AppResult<GitMergeResult> {
     let branch = branch.trim();
     if branch.is_empty() {
         return Err(AppError::coded(ErrorCode::GitBranchNameRequired, ""));
+    }
+    // 合并执行位置:目标分支检出在哪个 worktree(含主工作区)就在哪里合并
+    let mut merge_path = path.to_string();
+    if let Some(t) = target.map(str::trim).filter(|s| !s.is_empty()) {
+        if t == branch {
+            return Err(AppError::coded(
+                ErrorCode::GitCommandFailed,
+                "merge: source and target are the same branch",
+            ));
+        }
+        if current_branch(path).as_deref() != Some(t) {
+            let wts = list_worktrees_blocking(path)?;
+            match wts.iter().find(|w| w.branch.as_deref() == Some(t)) {
+                Some(w) => merge_path = w.path.clone(),
+                None => {
+                    // 目标分支未被任何 worktree 检出:仅允许快进(移动分支指针,
+                    // 不动工作区;squash 需要暂存工作区改动,此场景无意义)
+                    if squash || !is_ancestor(path, t, branch)? {
+                        return Err(AppError::coded(ErrorCode::GitMergeNeedsCheckout, t));
+                    }
+                    run_git(path, &["branch", "-f", t, branch])?;
+                    let st = status(path)?;
+                    cache_status(path, &st);
+                    return Ok(GitMergeResult {
+                        status: st,
+                        conflicts: vec![],
+                        merged_in: String::new(),
+                    });
+                }
+            }
+        }
     }
     let args: Vec<&str> = if squash {
         vec!["merge", "--squash", branch]
     } else {
         vec!["merge", branch]
     };
-    let result = git_command(path).args(&args).output()?;
-    let conflicts = unmerged_files(path);
+    let result = git_command(&merge_path).args(&args).output()?;
+    let conflicts = unmerged_files(&merge_path);
     if !result.status.success() && conflicts.is_empty() {
         let stderr = String::from_utf8_lossy(&result.stderr).trim().to_string();
         let stdout = String::from_utf8_lossy(&result.stdout).trim().to_string();
@@ -1680,11 +1777,12 @@ fn merge_blocking(path: &str, branch: &str, squash: bool) -> AppResult<GitMergeR
             friendly_git_error(&detail)
         });
     }
-    let st = status(path)?;
-    cache_status(path, &st);
+    let st = status(&merge_path)?;
+    cache_status(&merge_path, &st);
     Ok(GitMergeResult {
         status: st,
         conflicts,
+        merged_in: merge_path,
     })
 }
 

@@ -65,6 +65,9 @@ pub struct GitWorktree {
     pub is_main: bool,
     /// 是否 detached HEAD
     pub detached: bool,
+    /// 创建来源分支:新建分支时记录在 `branch.<name>.repomeow-base`;
+    /// 无记录时回退为上游跟踪分支(origin/x 形式);都没有则为 None
+    pub base_branch: Option<String>,
 }
 
 /// `git merge` 的结果:最新状态 + 产生的合并冲突文件(为空表示无冲突)
@@ -72,6 +75,9 @@ pub struct GitWorktree {
 pub struct GitMergeResult {
     pub status: GitStatus,
     pub conflicts: Vec<String>,
+    /// 实际执行合并的工作区路径;目标分支未被任何 worktree 检出时走快进,
+    /// 不产生工作区改动,此字段为空串
+    pub merged_in: String,
 }
 
 /// `git rebase` 的结果:最新状态 + 冲突文件 + 变基是否处于中断状态(待解决后继续/中止)

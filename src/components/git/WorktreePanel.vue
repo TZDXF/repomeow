@@ -2,15 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
-import {
-  ArrowUpToLine,
-  GitBranchPlus,
-  GitMerge,
-  Loader2,
-  Trash2,
-  TriangleAlert,
-  Undo2,
-} from "@lucide/vue";
+import { GitBranchPlus, Loader2, TriangleAlert, Undo2 } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,13 +26,18 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import ConflictDialog from "@/components/git/ConflictDialog.vue";
+import WorktreeFlowDiagram from "@/components/git/WorktreeFlowDiagram.vue";
+import WorktreeGraph from "@/components/git/WorktreeGraph.vue";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
-import { displayRelativeTo } from "@/lib/path";
 import type { GitBranches, GitWorktree, Project } from "@/types";
 
 const { t } = useI18n();
-const props = defineProps<{ project: Project }>();
+const props = defineProps<{
+  project: Project;
+  /** 详情页当前选中的工作区路径(树形图上高亮),null = 主工作区 */
+  activePath?: string | null;
+}>();
 const open = defineModel<boolean>("open", { required: true });
 /** worktree 列表发生增删后通知父组件(切换下拉据此刷新并校验当前选中) */
 const emit = defineEmits<{ changed: [] }>();
@@ -64,10 +61,15 @@ const dirPath = ref("");
 const dirTouched = ref(false);
 const creating = ref(false);
 
-// --- 合回当前分支确认 ---
+// --- 合回确认(目标分支可选,默认创建来源分支) ---
 const mergeTarget = ref<GitWorktree | null>(null);
+const mergeInto = ref("");
 const mergeSquash = ref(false);
 const merging = ref(false);
+
+// --- 变基确认(执行前的流程图解;onto 默认创建来源分支) ---
+const rebaseTarget = ref<GitWorktree | null>(null);
+const rebaseOnto = ref("");
 
 // --- 删除确认 ---
 const removeTarget = ref<GitWorktree | null>(null);
@@ -97,6 +99,60 @@ const checkedOutBranches = computed(() => {
   return new Set(worktrees.value.map((w) => w.branch).filter((b): b is string => !!b));
 });
 
+/** 合并目标候选:除源分支外的全部本地分支 */
+const mergeTargetCandidates = computed(() =>
+  branches.value.local.filter((b) => b !== mergeTarget.value?.branch),
+);
+/** 选中的合并目标是否检出在某个 worktree(未检出时后端仅允许快进,不可 squash) */
+const mergeIntoCheckedOut = computed(() => checkedOutBranches.value.has(mergeInto.value));
+
+/** 变基 onto 候选:除自身分支外的本地 + 远程分支 */
+const rebaseOntoLocal = computed(() =>
+  branches.value.local.filter((b) => b !== rebaseTarget.value?.branch),
+);
+
+/** 来源分支解析为本地分支名(base 可能是 origin/x 远程引用,本地同名时映射过去) */
+function resolveLocalBase(base: string | null, self: string | null): string | null {
+  if (!base || base === self) return null;
+  if (branches.value.local.includes(base)) return base;
+  const short = remoteShortName(base);
+  return branches.value.local.includes(short) ? short : null;
+}
+
+/** 合并默认目标:优先创建来源分支(本地),否则主工作区当前分支 */
+function defaultMergeTarget(w: GitWorktree) {
+  return resolveLocalBase(w.base_branch, w.branch) ?? currentBranch.value ?? "";
+}
+
+/** 变基默认基点:创建来源分支(本地或远程引用均可作 onto),否则主工作区当前分支 */
+function defaultRebaseOnto(w: GitWorktree) {
+  const base = w.base_branch;
+  if (
+    base &&
+    base !== w.branch &&
+    (branches.value.local.includes(base) || branches.value.remote.includes(base))
+  ) {
+    return base;
+  }
+  return currentBranch.value ?? "";
+}
+
+function openMerge(w: GitWorktree) {
+  mergeTarget.value = w;
+  mergeSquash.value = false;
+  mergeInto.value = defaultMergeTarget(w);
+}
+
+function openRebase(w: GitWorktree) {
+  rebaseTarget.value = w;
+  rebaseOnto.value = defaultRebaseOnto(w);
+}
+
+// 目标分支未被检出时 squash 不可用(后端无工作区可暂存)
+watch(mergeInto, () => {
+  if (!mergeIntoCheckedOut.value) mergeSquash.value = false;
+});
+
 // 可挂载的已有分支:本地/远程均排除已被检出的。远程分支全量列出——本地与远程
 // 可能不同步,同名时两者是不同提交,由用户选择挂载哪一侧(后端按远程语义对齐)
 const attachableLocal = computed(() =>
@@ -114,17 +170,6 @@ const effectiveBranch = computed(() => {
   if (!b) return "";
   return branches.value.local.includes(b) ? b : remoteShortName(b);
 });
-
-/** 展示用路径:相对主工作区的尽量显示相对路径(分隔符经 lib/path 归一后比较) */
-const mainPath = computed(() => worktrees.value.find((w) => w.is_main)?.path ?? "");
-function displayPath(w: GitWorktree) {
-  return displayRelativeTo(mainPath.value, w.path);
-}
-
-/** 该行是否可合回/变基:游离 HEAD 或与当前分支同名时无意义 */
-function canMergeBack(w: GitWorktree) {
-  return !!w.branch && w.branch !== currentBranch.value;
-}
 
 async function load() {
   loading.value = true;
@@ -184,6 +229,8 @@ async function create() {
     worktrees.value = await store.addWorktree(props.project, dir, name, {
       createBranch: isNew,
       startPoint,
+      // 新建分支时记录创建来源(默认即当前分支),供合并/变基默认回到来源分支
+      baseBranch: isNew ? baseBranch.value || (current ?? undefined) : undefined,
     });
     toast.success(t("git.worktree.created", { name: effectiveBranch.value || name }));
     emit("changed");
@@ -204,19 +251,23 @@ function showConflicts(files: string[], path?: string) {
 
 async function mergeBack() {
   const w = mergeTarget.value;
-  if (!w?.branch || merging.value) return;
+  const target = mergeInto.value;
+  if (!w?.branch || !target || merging.value) return;
   merging.value = true;
   try {
-    const conflicts = await store.mergeBranch(props.project, w.branch, {
+    const { conflicts, mergedIn } = await store.mergeBranch(props.project, w.branch, {
       squash: mergeSquash.value,
+      target,
     });
     if (conflicts.length) {
-      showConflicts(conflicts);
+      // 冲突发生在目标分支所在的工作区;主工作区内合并不传 path(走主仓库语义)
+      const main = worktrees.value.find((x) => x.is_main)?.path;
+      showConflicts(conflicts, mergedIn && mergedIn !== main ? mergedIn : undefined);
     } else if (mergeSquash.value) {
       // squash 不自动提交:提示用户确认后走常规提交
-      toast.success(t("git.worktree.squashStaged", { name: w.branch }));
+      toast.success(t("git.worktree.squashStaged", { name: w.branch, target }));
     } else {
-      toast.success(t("git.worktree.merged", { name: w.branch }));
+      toast.success(t("git.worktree.merged", { name: w.branch, target }));
     }
     mergeTarget.value = null;
   } catch (e) {
@@ -226,9 +277,16 @@ async function mergeBack() {
   }
 }
 
-/** 在 worktree 内执行:将该 worktree 的分支变基到主工作区当前分支之上 */
+/** 确认对话框点"变基"后执行 */
+function confirmRebase() {
+  const w = rebaseTarget.value;
+  rebaseTarget.value = null;
+  if (w) rebase(w);
+}
+
+/** 在 worktree 内执行:将该 worktree 的分支变基到选定基点(默认创建来源分支)之上 */
 async function rebase(w: GitWorktree) {
-  const onto = currentBranch.value;
+  const onto = rebaseOnto.value || currentBranch.value;
   if (!onto || rebasingPath.value) return;
   rebasingPath.value = w.path;
   try {
@@ -241,7 +299,7 @@ async function rebase(w: GitWorktree) {
       toast.warning(t("git.worktree.rebaseInterrupted"));
     } else {
       rebaseInterruptedPath.value = null;
-      toast.success(t("git.worktree.rebased", { name: w.branch ?? w.head.slice(0, 7) }));
+      toast.success(t("git.worktree.rebased", { name: w.branch ?? w.head.slice(0, 7), onto }));
     }
   } catch (e) {
     toast.error(String(e));
@@ -328,75 +386,21 @@ async function remove() {
         {{ t("common.loading") }}
       </div>
 
-      <ScrollArea v-else class="max-h-72">
-        <ul class="flex flex-col gap-1 pr-3">
-          <li
-            v-for="w in worktrees"
-            :key="w.path"
-            class="flex items-center gap-2 rounded-md border px-3 py-2"
-          >
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-1.5">
-                <span class="truncate text-sm font-medium">
-                  {{ w.branch ?? w.head.slice(0, 7) }}
-                </span>
-                <Badge v-if="w.is_main" variant="secondary" class="text-[10px]">
-                  {{ t("git.worktree.main") }}
-                </Badge>
-                <Badge v-else-if="w.detached" variant="outline" class="text-[10px]">
-                  {{ t("git.worktree.detached") }}
-                </Badge>
-              </div>
-              <p class="mt-0.5 truncate font-mono text-xs text-muted-foreground" :title="w.path">
-                {{ displayPath(w) }}
-              </p>
-            </div>
-            <div class="flex shrink-0 items-center gap-1">
-              <template v-if="!w.is_main">
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  :disabled="!canMergeBack(w)"
-                  :title="t('git.worktree.mergeBack')"
-                  @click="((mergeTarget = w), (mergeSquash = false))"
-                >
-                  <GitMerge class="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  v-if="rebaseInterruptedPath === w.path"
-                  variant="ghost"
-                  size="xs"
-                  class="text-amber-600"
-                  :disabled="aborting"
-                  :title="t('git.worktree.abortRebase')"
-                  @click="abortRebase(w)"
-                >
-                  <Undo2 class="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  v-else
-                  variant="ghost"
-                  size="xs"
-                  :disabled="!canMergeBack(w) || rebasingPath === w.path"
-                  :title="t('git.worktree.rebase')"
-                  @click="rebase(w)"
-                >
-                  <Loader2 v-if="rebasingPath === w.path" class="h-3.5 w-3.5 animate-spin" />
-                  <ArrowUpToLine v-else class="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  class="text-destructive"
-                  :title="t('git.worktree.remove')"
-                  @click="((removeTarget = w), (removeForce = false), (removeDeleteBranch = false))"
-                >
-                  <Trash2 class="h-3.5 w-3.5" />
-                </Button>
-              </template>
-            </div>
-          </li>
-        </ul>
+      <ScrollArea v-else class="max-h-80">
+        <div class="pr-3">
+          <WorktreeGraph
+            :worktrees="worktrees"
+            :active-path="activePath ?? null"
+            :rebasing-path="rebasingPath"
+            :rebase-interrupted-path="rebaseInterruptedPath"
+            :aborting="aborting"
+            @merge="openMerge"
+            @rebase="openRebase"
+            @abort-rebase="abortRebase"
+            @remove="((removeTarget = $event), (removeForce = false), (removeDeleteBranch = false))"
+            @create="createOpen = true"
+          />
+        </div>
       </ScrollArea>
 
       <Separator />
@@ -502,7 +506,7 @@ async function remove() {
     </DialogContent>
   </Dialog>
 
-  <!-- 合回当前分支确认(可选 squash) -->
+  <!-- 合回确认:目标分支可选(默认创建来源分支),附流程图解 -->
   <Dialog :open="!!mergeTarget" @update:open="mergeTarget = null">
     <DialogContent>
       <DialogHeader>
@@ -510,14 +514,92 @@ async function remove() {
           {{ t("git.worktree.mergeTitle", { name: mergeTarget?.branch ?? "" }) }}
         </DialogTitle>
       </DialogHeader>
+      <label class="flex flex-col gap-1.5 text-xs text-muted-foreground">
+        {{ t("git.worktree.mergeTargetLabel") }}
+        <Select v-model="mergeInto">
+          <SelectTrigger class="w-full">
+            <SelectValue :placeholder="t('git.worktree.mergeTargetLabel')" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectLabel>{{ t("git.branch.local") }}</SelectLabel>
+              <SelectItem v-for="b in mergeTargetCandidates" :key="b" :value="b">
+                {{ b }}
+              </SelectItem>
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </label>
+      <p
+        v-if="mergeInto && !mergeIntoCheckedOut"
+        class="flex items-start gap-1.5 text-[11px] text-amber-600"
+      >
+        <TriangleAlert class="mt-0.5 h-3 w-3 shrink-0" />
+        {{ t("git.worktree.mergeUncheckedHint") }}
+      </p>
+      <WorktreeFlowDiagram
+        v-if="mergeTarget && mergeInto"
+        kind="merge"
+        :source="mergeTarget.branch ?? mergeTarget.head.slice(0, 7)"
+        :target="mergeInto"
+        :squash="mergeSquash"
+      />
       <label class="flex items-center gap-2 text-sm">
-        <Switch v-model="mergeSquash" />
+        <Switch v-model="mergeSquash" :disabled="!mergeIntoCheckedOut" />
         {{ t("git.worktree.squash") }}
       </label>
       <DialogFooter class="gap-2">
         <Button variant="ghost" @click="mergeTarget = null">{{ t("common.cancel") }}</Button>
-        <Button :disabled="merging" @click="mergeBack">
+        <Button :disabled="merging || !mergeInto" @click="mergeBack">
           {{ merging ? t("git.worktree.merging") : t("git.worktree.mergeBack") }}
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
+  <!-- 变基确认:onto 默认创建来源分支,附变基前后图解 -->
+  <Dialog :open="!!rebaseTarget" @update:open="rebaseTarget = null">
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>
+          {{ t("git.worktree.rebaseTitle", { name: rebaseTarget?.branch ?? "" }) }}
+        </DialogTitle>
+      </DialogHeader>
+      <label class="flex flex-col gap-1.5 text-xs text-muted-foreground">
+        {{ t("git.worktree.rebaseOntoLabel") }}
+        <Select v-model="rebaseOnto">
+          <SelectTrigger class="w-full">
+            <SelectValue :placeholder="t('git.worktree.rebaseOntoLabel')" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup v-if="rebaseOntoLocal.length">
+              <SelectLabel>{{ t("git.branch.local") }}</SelectLabel>
+              <SelectItem v-for="b in rebaseOntoLocal" :key="b" :value="b">
+                {{ b }}
+              </SelectItem>
+            </SelectGroup>
+            <SelectGroup v-if="branches.remote.length">
+              <SelectLabel>{{ t("git.branch.remote") }}</SelectLabel>
+              <SelectItem v-for="r in branches.remote" :key="r" :value="r">
+                {{ r }}
+              </SelectItem>
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </label>
+      <WorktreeFlowDiagram
+        v-if="rebaseTarget && rebaseOnto"
+        kind="rebase"
+        :source="rebaseTarget.branch ?? rebaseTarget.head.slice(0, 7)"
+        :target="rebaseOnto"
+      />
+      <p class="text-xs text-muted-foreground">
+        {{ t("git.worktree.rebaseHint", { name: rebaseTarget?.branch ?? "", onto: rebaseOnto }) }}
+      </p>
+      <DialogFooter class="gap-2">
+        <Button variant="ghost" @click="rebaseTarget = null">{{ t("common.cancel") }}</Button>
+        <Button :disabled="!rebaseOnto" @click="confirmRebase">
+          {{ t("git.worktree.rebase") }}
         </Button>
       </DialogFooter>
     </DialogContent>

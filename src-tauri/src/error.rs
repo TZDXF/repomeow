@@ -74,6 +74,9 @@ pub enum ErrorCode {
     GitBranchDiverged,
     /// 分支未完全合并,删除需强制(-D)
     GitBranchNotMerged,
+    /// 合并目标分支未被任何 worktree 检出,且无法快进(分叉或要求 squash);
+    /// message 携带目标分支名
+    GitMergeNeedsCheckout,
 
     // ── 账号 ──────────────────────────────────────────────────────────
     AccountNotFound,
@@ -237,6 +240,7 @@ impl ErrorCode {
             Self::GitBranchExists => "git_branch_exists",
             Self::GitBranchDiverged => "git_branch_diverged",
             Self::GitBranchNotMerged => "git_branch_not_merged",
+            Self::GitMergeNeedsCheckout => "git_merge_needs_checkout",
             // 账号
             Self::AccountNotFound => "account_not_found",
             Self::AccountUnsupportedProvider => "account_unsupported_provider",
