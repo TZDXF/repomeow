@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import GitBranchMenu from "@/components/git/GitBranchMenu.vue";
 import GitBranchTrackBadges from "@/components/git/GitBranchTrackBadges.vue";
 import GitInitDialog from "@/components/git/GitInitDialog.vue";
-import GitRemoteLink from "@/components/git/GitRemoteLink.vue";
 import type { Project } from "@/types";
 
 const { t } = useI18n();
@@ -67,7 +66,6 @@ const changesTitle = computed(
           </Badge>
         </template>
       </GitBranchMenu>
-      <GitRemoteLink :project="project" />
       <span v-if="git.conflicted > 0" class="text-red-600">
         {{ t("git.conflicted") }}
         <span class="font-medium">{{ git.conflicted }}</span>

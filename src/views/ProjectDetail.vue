@@ -17,6 +17,7 @@ import {
 import { useLocalStorage } from "@vueuse/core";
 import { Button } from "@/components/ui/button";
 import GitStatusBar from "@/components/git/GitStatusBar.vue";
+import GitRemoteLink from "@/components/git/GitRemoteLink.vue";
 import WorktreePanel from "@/components/git/WorktreePanel.vue";
 import WorktreeSwitcher from "@/components/git/WorktreeSwitcher.vue";
 import OpenWithMenu from "@/components/open/OpenWithMenu.vue";
@@ -76,9 +77,9 @@ const reportOpen = ref(false);
 // --- worktree 工作区切换 ---
 // activeWorktreePath: 详情页当前工作目录(null = 主工作区),按项目记忆在 localStorage;
 // worktreeProject: 切到 worktree 时基于 project 的副本(覆盖 path/git),传给 git 状态/操作
-// 与 npm/docker 卡片——store 的 git 读写均以 project.path 执行并把结果回填 project.git,
+// 与 npm/docker/自定义命令卡片——store 的 git 读写均以 project.path 执行并把结果回填 project.git,
 // 用副本即可让操作落在 worktree 上,且不污染列表里主工作区的状态;自定义命令按 project_id
-// 存取、跨工作区共享,仍传原 project。
+// 存取,副本保留原 id,增删改与「常用命令」标记仍跨工作区共享,仅执行目录跟随 worktree。
 const worktreeOpen = ref(false);
 const switcherRef = ref<InstanceType<typeof WorktreeSwitcher> | null>(null);
 const activeWorktreePath = ref<string | null>(null);
@@ -237,6 +238,16 @@ async function saveDesc() {
               class="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
             />
           </h1>
+          <!-- 打开远程仓库与工作区切换:跟随项目名展示(remote 为仓库级配置,与当前工作区无关) -->
+          <template v-if="project.path_exists && project.git?.is_repo">
+            <GitRemoteLink :project="project" />
+            <WorktreeSwitcher
+              ref="switcherRef"
+              v-model:path="activeWorktreePath"
+              :project="project"
+              @manage="worktreeOpen = true"
+            />
+          </template>
         </div>
         <div class="flex shrink-0 items-center gap-2">
           <Button
@@ -271,7 +282,7 @@ async function saveDesc() {
             <FolderTree class="h-4 w-4" />
             {{ t("files.entry") }}
           </Button>
-          <OpenWithMenu v-if="project.path_exists" :project="project" />
+          <OpenWithMenu v-if="project.path_exists" :project="worktreeProject ?? project" />
         </div>
       </div>
 
@@ -324,13 +335,6 @@ async function saveDesc() {
         <TagPicker :project="project" />
         <template v-if="project.path_exists">
           <GitStatusBar :project="worktreeProject ?? project" />
-          <WorktreeSwitcher
-            v-if="project.git?.is_repo"
-            ref="switcherRef"
-            v-model:path="activeWorktreePath"
-            :project="project"
-            @manage="worktreeOpen = true"
-          />
           <Button
             v-if="project.git?.is_repo"
             variant="outline"
@@ -351,7 +355,7 @@ async function saveDesc() {
       <PackageScripts :project="worktreeProject ?? project" />
       <DockerCompose :project="worktreeProject ?? project" />
       <SpringBootCard :project="worktreeProject ?? project" />
-      <CustomCommands :project="project" />
+      <CustomCommands :project="worktreeProject ?? project" />
     </div>
 
     <ReadmeDrawer v-model:open="readmeOpen" :project="project" />

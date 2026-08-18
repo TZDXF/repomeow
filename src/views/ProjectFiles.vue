@@ -55,6 +55,20 @@ const project = computed<Project | undefined>(() => {
   return Number.isFinite(id) ? store.projects.find((p) => p.id === id) : undefined;
 });
 
+// ── 工作区跟随:与 ProjectDetail 同一 localStorage 键(projectId -> worktree 绝对路径) ──
+// 文件树/预览/搜索全部以当前工作区为根,未选择 worktree 时回退主工作区路径;
+// 选中的 worktree 已被删除时由详情页 WorktreeSwitcher 校验并重置该键
+const worktreeSelection = useLocalStorage<Record<string, string>>(
+  "repomeow.worktree-selection",
+  {},
+);
+const rootPath = computed(() => {
+  const id = project.value?.id;
+  return (
+    (id != null ? worktreeSelection.value[String(id)] : undefined) ?? project.value?.path ?? ""
+  );
+});
+
 // ── 文件树(逐层懒加载 + 单层后台预取) ───────────────────────────────────────
 // childrenMap key 为目录相对路径(根为 ""),值为该层已排序子项;不变的预取策略:
 // 任何可见目录行的下一层已加载或在途——点击展开时数据已经就位,无需等待后端
@@ -81,7 +95,7 @@ async function ensureChildren(dir: string): Promise<void> {
   if (!project.value) {
     return;
   }
-  const path = project.value.path;
+  const path = rootPath.value;
   const seq = listSeq;
   const p = (async () => {
     try {
@@ -200,7 +214,8 @@ async function loadFiles() {
   }
 }
 
-watch(() => project.value?.id, loadFiles, { immediate: true });
+// 项目或工作区变化(根路径变化)时整树重载(选中/预览清理见下方预览状态声明处的 watch)
+watch(rootPath, () => void loadFiles(), { immediate: true });
 
 // ── 头部文件搜索:右侧按钮触发,顶部中间搜索框 + 下拉选项 ─────────────────────
 // 懒加载后前端没有全量清单,搜索下沉后端 search_project_files
@@ -237,7 +252,7 @@ async function runFileSearch(q: string) {
   const seq = ++fileSearchSeq;
   try {
     const res = await cmd<ProjectFileEntry[]>("search_project_files", {
-      path: project.value.path,
+      path: rootPath.value,
       query: q,
       limit: FILE_SEARCH_LIMIT + 1, // 多取一条判断是否截断
     });
@@ -341,6 +356,13 @@ const previewTruncated = ref(false);
 const previewBinary = ref(false);
 let previewSeq = 0;
 
+// 根路径变化(切项目/切工作区)时清掉选中与在途预览:旧工作区的文件在新根下无意义,
+// 序号递增作废旧根的在途读取,防止其内容回填到新工作区视图
+watch(rootPath, () => {
+  selected.value = null;
+  previewSeq++;
+});
+
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "ico", "bmp", "avif"]);
 const MD_EXTS = new Set(["md", "markdown"]);
 
@@ -361,7 +383,7 @@ const svgSource = computed(() => isSvg.value && svgMode.value === "source");
 
 const imageSrc = computed(() =>
   selected.value && isImage.value && project.value
-    ? convertFileSrc(resolvePath(project.value.path, selected.value))
+    ? convertFileSrc(resolvePath(rootPath.value, selected.value))
     : "",
 );
 
@@ -392,7 +414,7 @@ watch([selected, svgSource], async ([path]) => {
   }
   try {
     const res = await cmd<FilePreview>("read_file_preview", {
-      root: project.value.path,
+      root: rootPath.value,
       relPath: path,
     });
     if (mySeq !== previewSeq) return;
@@ -567,8 +589,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 // 相对路径图片/链接的解析基准 = 文件所在目录
 const mdBasePath = computed(() =>
   project.value && selected.value
-    ? resolvePath(project.value.path, selected.value.split("/").slice(0, -1).join("/") || ".")
-    : (project.value?.path ?? ""),
+    ? resolvePath(rootPath.value, selected.value.split("/").slice(0, -1).join("/") || ".")
+    : rootPath.value,
 );
 provide(MD_BASE_PATH_KEY, () => mdBasePath.value);
 
@@ -645,7 +667,7 @@ function startTreeResize(e: PointerEvent) {
         <ArrowLeft class="h-4 w-4" />
       </Button>
       <FolderTree class="h-4 w-4 shrink-0 text-muted-foreground" />
-      <span class="min-w-0 flex-1 truncate text-sm font-medium" :title="project.path">
+      <span class="min-w-0 flex-1 truncate text-sm font-medium" :title="rootPath">
         {{ project.name }}
       </span>
       <!-- 文件搜索:右侧按钮触发,顶部中间搜索框 + 下拉选项 -->
@@ -793,7 +815,7 @@ function startTreeResize(e: PointerEvent) {
             </div>
           </ScrollArea>
         </template>
-        <TextSearchPanel v-else ref="searchPanelRef" :root="project.path" @open="onSearchOpen" />
+        <TextSearchPanel v-else ref="searchPanelRef" :root="rootPath" @open="onSearchOpen" />
       </div>
 
       <!-- 拖拽条 -->
