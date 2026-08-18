@@ -353,7 +353,6 @@ export default {
     modified: "未暂存",
     untracked: "未跟踪",
     remoteAhead: "远端领先",
-    conflicted: "冲突",
     actions: {
       commit: "提交",
       pull: "拉取",

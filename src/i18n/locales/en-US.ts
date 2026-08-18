@@ -367,7 +367,6 @@ export default {
     modified: "Modified",
     untracked: "Untracked",
     remoteAhead: "Remote ahead",
-    conflicted: "Conflicts",
     actions: {
       commit: "Commit",
       pull: "Pull",

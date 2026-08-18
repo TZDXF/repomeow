@@ -66,10 +66,6 @@ const changesTitle = computed(
           </Badge>
         </template>
       </GitBranchMenu>
-      <span v-if="git.conflicted > 0" class="text-red-600">
-        {{ t("git.conflicted") }}
-        <span class="font-medium">{{ git.conflicted }}</span>
-      </span>
     </template>
   </div>
 </template>
