@@ -84,7 +84,19 @@ defineExpose({ reload: load });
 </script>
 
 <template>
-  <DropdownMenu v-model:open="open">
+  <!-- 主工作区且无其他 worktree:退化为普通按钮,点击直接打开管理面板(新建第一个 worktree) -->
+  <Button
+    v-if="!path && linkedWorktrees.length === 0"
+    variant="outline"
+    size="xs"
+    :title="t('git.worktree.manage')"
+    @click="emit('manage')"
+  >
+    <FolderGit2 class="h-3.5 w-3.5" />
+    <span class="max-w-48 truncate">{{ currentLabel }}</span>
+    <Settings2 class="h-3 w-3 opacity-60" />
+  </Button>
+  <DropdownMenu v-else v-model:open="open">
     <DropdownMenuTrigger as-child>
       <Button variant="outline" size="xs" :title="t('git.worktree.switchWorkspace')">
         <FolderGit2 class="h-3.5 w-3.5" />

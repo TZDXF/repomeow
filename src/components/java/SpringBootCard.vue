@@ -254,8 +254,10 @@ const ACTION_ICONS: Record<string, typeof Play> = {
           >
             {{ d.group.tool }}
           </span>
+          <!-- 目录标签不能 shrink-0:悬停出现星标/隐藏按钮时它必须能让位截断,
+               否则整行 min-content 超过卡片宽度,尾部按钮被挤出卡片 -->
           <span
-            class="min-w-0 shrink-0 truncate font-mono text-xs font-medium"
+            class="min-w-0 truncate font-mono text-xs font-medium"
             :title="d.group.dir === '.' ? undefined : d.group.dir"
           >
             {{ groupLabel(d.group) }}
