@@ -137,6 +137,14 @@ watch(project, (p) => {
   }
 });
 
+/** worktree 面板变更(增删/合回/变基)后:刷新切换下拉列表,并强制重拉
+ * 当前工作区状态(变基/被合入会改变 ahead/behind 与未提交统计) */
+function onWorktreeChanged() {
+  switcherRef.value?.reload();
+  const target = worktreeProject.value ?? project.value;
+  if (target) store.refreshGitStatus(target, { force: true });
+}
+
 // --- 收藏切换(收藏项目在列表中置顶) ---
 async function toggleFavorite() {
   if (!project.value) return;
@@ -365,7 +373,7 @@ async function saveDesc() {
       v-model:open="worktreeOpen"
       :project="project"
       :active-path="activeWorktreePath"
-      @changed="switcherRef?.reload()"
+      @changed="onWorktreeChanged"
     />
   </div>
 

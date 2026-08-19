@@ -7,6 +7,7 @@ import {
   ArrowUpToLine,
   GitBranchPlus,
   GitCommitHorizontal,
+  GitMerge,
   Loader2,
 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
@@ -36,12 +37,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { buildBranchTree, type BranchTreeNode } from "@/lib/branch-tree";
+import { toForwardSlash } from "@/lib/path";
 import { useProjectsStore } from "@/stores/projects";
 import CommitDialog from "@/components/git/CommitDialog.vue";
 import ConflictDialog from "@/components/git/ConflictDialog.vue";
 import GitBranchDeleteDialog from "@/components/git/GitBranchDeleteDialog.vue";
 import GitBranchTreeItems from "@/components/git/GitBranchTreeItems.vue";
-import type { GitBranches, Project } from "@/types";
+import WorktreeOpsDialogs from "@/components/git/WorktreeOpsDialogs.vue";
+import type { GitBranches, GitWorktree, Project } from "@/types";
 
 type Op = "pull" | "push" | "";
 
@@ -53,8 +56,18 @@ const git = computed(() => props.project.git);
 
 const open = ref(false);
 const branches = ref<GitBranches>({ local: [], remote: [], tracking: [] });
+const worktrees = ref<GitWorktree[]>([]);
 const loading = ref(false);
 const switching = ref(false);
+
+/** 当前目录若是仓库的 linked worktree 则进入 worktree 模式:切换分支会与其他
+ * 工作区冲突,菜单改为提供合回/变基,不展示新建分支与本地/远程分支列表 */
+const currentWorktree = computed(() => {
+  const p = toForwardSlash(props.project.path);
+  return worktrees.value.find((w) => !w.is_main && toForwardSlash(w.path) === p) ?? null;
+});
+/** 来源分支领先当前 worktree 的提交数(>0 时变基项带计数) */
+const baseBehind = computed(() => currentWorktree.value?.base_behind ?? 0);
 
 // --- 当前分支操作(提交/拉取/推送,从原 GitActions 并入) ---
 const busy = ref<Op>("");
@@ -161,12 +174,24 @@ async function loadBranches() {
   }
 }
 
-// 每次展开菜单时拉取最新分支列表,并重置树折叠状态(默认折叠,仅展开当前分支路径)
+/** worktree 列表(判定 worktree 模式与来源分支领先数);失败保持空列表即普通模式 */
+async function loadWorktrees() {
+  try {
+    worktrees.value = await store.listWorktrees(props.project);
+  } catch {
+    worktrees.value = [];
+  }
+}
+
+// 挂载即预取 worktree 列表,保证首次展开菜单时 worktree 模式已知,不会先闪出分支列表
+watch(() => props.project.path, loadWorktrees, { immediate: true });
+
+// 每次展开菜单时拉取最新分支与 worktree 列表,并重置树折叠状态(默认折叠,仅展开当前分支路径)
 watch(open, async (v) => {
   if (!v) {
     return;
   }
-  await loadBranches();
+  await Promise.all([loadBranches(), loadWorktrees()]);
   collapsedFolders.value = defaultCollapsed();
 });
 
@@ -366,6 +391,25 @@ async function confirmDeleteBranch() {
     deleting.value = false;
   }
 }
+
+// --- worktree 模式:合回 / 变基(确认对话框与执行逻辑在 WorktreeOpsDialogs) ---
+const opsRef = ref<InstanceType<typeof WorktreeOpsDialogs> | null>(null);
+
+function openMerge() {
+  const w = currentWorktree.value;
+  if (w) opsRef.value?.openMerge(w);
+}
+
+function openRebase() {
+  const w = currentWorktree.value;
+  if (w) opsRef.value?.openRebase(w);
+}
+
+/** 合回/变基落地后:当前工作区的 ahead/behind 与变更统计已变化,刷新状态与列表 */
+function onOpsChanged() {
+  store.refreshGitStatus(props.project);
+  loadWorktrees();
+}
 </script>
 
 <template>
@@ -428,50 +472,80 @@ async function confirmDeleteBranch() {
         <DropdownMenuSeparator />
       </template>
 
-      <!-- 新建分支单独一组,紧随当前分支操作组 -->
-      <DropdownMenuItem class="gap-2 text-xs" @click="createOpen = true">
-        <GitBranchPlus class="h-3.5 w-3.5" />
-        {{ t("git.branch.newBranch") }}
-      </DropdownMenuItem>
-      <DropdownMenuSeparator v-if="localTree.length || remoteTree.length || loading" />
-
-      <DropdownMenuItem v-if="loading" disabled class="gap-2 text-xs">
-        <Loader2 class="h-3.5 w-3.5 animate-spin" />
-        {{ t("common.loading") }}
-      </DropdownMenuItem>
+      <!-- worktree 模式:当前目录是 linked worktree。签出其他分支会与占用的工作区
+           冲突,改为提供合回/变基;不展示新建分支与本地/远程分支列表 -->
+      <template v-if="currentWorktree">
+        <DropdownMenuItem
+          class="gap-2 text-xs"
+          :disabled="opsLocked || !currentWorktree.branch"
+          @click="openMerge"
+        >
+          <GitMerge class="h-3.5 w-3.5" />
+          {{ t("git.worktree.mergeBack") }}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          class="gap-2 text-xs"
+          :disabled="opsLocked || !currentWorktree.branch"
+          :title="
+            baseBehind > 0 ? t('git.worktree.rebaseUpdates', { count: baseBehind }) : undefined
+          "
+          @click="openRebase"
+        >
+          <ArrowUpToLine class="h-3.5 w-3.5" />
+          {{ t("git.worktree.rebase") }}
+          <span
+            v-if="baseBehind > 0"
+            class="ml-auto text-[10px] font-medium leading-none text-amber-600"
+            >{{ baseBehind }}</span
+          >
+        </DropdownMenuItem>
+      </template>
       <template v-else>
-        <template v-if="localTree.length">
-          <DropdownMenuLabel class="text-xs">{{ t("git.branch.local") }}</DropdownMenuLabel>
-          <GitBranchTreeItems
-            :nodes="localTree"
-            :current-branch="git?.branch ?? ''"
-            :track-by-name="trackByName"
-            :branch-op="branchOp"
-            :locked="opsLocked"
-            :collapsed="collapsedFolders"
-            @toggle-folder="toggleFolder"
-            @checkout="checkoutBranch"
-            @pull="pullBranch"
-            @push="pushBranch"
-            @remove="askDeleteBranch"
-          />
-        </template>
-        <template v-if="remoteTree.length">
-          <DropdownMenuSeparator v-if="localTree.length" />
-          <DropdownMenuLabel class="text-xs">{{ t("git.branch.remote") }}</DropdownMenuLabel>
-          <GitBranchTreeItems
-            :nodes="remoteTree"
-            remote
-            :current-branch="git?.branch ?? ''"
-            :branch-op="branchOp"
-            :locked="opsLocked"
-            :collapsed="collapsedFolders"
-            @toggle-folder="toggleFolder"
-            @checkout="checkoutBranch"
-            @pull="pullBranch"
-            @push="pushBranch"
-            @remove="askDeleteBranch"
-          />
+        <!-- 新建分支单独一组,紧随当前分支操作组 -->
+        <DropdownMenuItem class="gap-2 text-xs" @click="createOpen = true">
+          <GitBranchPlus class="h-3.5 w-3.5" />
+          {{ t("git.branch.newBranch") }}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator v-if="localTree.length || remoteTree.length || loading" />
+
+        <DropdownMenuItem v-if="loading" disabled class="gap-2 text-xs">
+          <Loader2 class="h-3.5 w-3.5 animate-spin" />
+          {{ t("common.loading") }}
+        </DropdownMenuItem>
+        <template v-else>
+          <template v-if="localTree.length">
+            <DropdownMenuLabel class="text-xs">{{ t("git.branch.local") }}</DropdownMenuLabel>
+            <GitBranchTreeItems
+              :nodes="localTree"
+              :current-branch="git?.branch ?? ''"
+              :track-by-name="trackByName"
+              :branch-op="branchOp"
+              :locked="opsLocked"
+              :collapsed="collapsedFolders"
+              @toggle-folder="toggleFolder"
+              @checkout="checkoutBranch"
+              @pull="pullBranch"
+              @push="pushBranch"
+              @remove="askDeleteBranch"
+            />
+          </template>
+          <template v-if="remoteTree.length">
+            <DropdownMenuSeparator v-if="localTree.length" />
+            <DropdownMenuLabel class="text-xs">{{ t("git.branch.remote") }}</DropdownMenuLabel>
+            <GitBranchTreeItems
+              :nodes="remoteTree"
+              remote
+              :current-branch="git?.branch ?? ''"
+              :branch-op="branchOp"
+              :locked="opsLocked"
+              :collapsed="collapsedFolders"
+              @toggle-folder="toggleFolder"
+              @checkout="checkoutBranch"
+              @pull="pullBranch"
+              @push="pushBranch"
+              @remove="askDeleteBranch"
+            />
+          </template>
         </template>
       </template>
     </DropdownMenuContent>
@@ -479,6 +553,8 @@ async function confirmDeleteBranch() {
 
   <CommitDialog v-model:open="commitOpen" :project="project" />
   <ConflictDialog v-model:open="conflictOpen" :project="project" :conflicts="conflicts" />
+  <!-- worktree 模式的合回/变基确认对话框(与 WorktreePanel 共用) -->
+  <WorktreeOpsDialogs ref="opsRef" :project="project" @changed="onOpsChanged" />
   <GitBranchDeleteDialog
     v-model:open="deleteOpen"
     :branch="deleteTarget"

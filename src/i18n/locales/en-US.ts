@@ -513,6 +513,7 @@ export default {
       branchLabel: "New branch name",
       branchPlaceholder: "feature/xxx",
       baseLabel: "Base branch",
+      branchBase: "Base branch {name} (not checked out in any worktree)",
       pathLabel: "Directory",
       pathHint:
         "Supports the {branch} placeholder and relative paths (resolved against the repository root). Change the default template in Settings",
@@ -531,6 +532,8 @@ export default {
       squashStaged:
         'Squash-merged "{name}" into "{target}" and staged the changes. Review and commit manually',
       rebase: "Rebase",
+      rebaseUpdates:
+        "The base branch has {count} new commit — rebase to catch up | The base branch has {count} new commits — rebase to catch up",
       rebaseTitle: 'Rebase "{name}"',
       rebaseOntoLabel: "Rebase onto branch",
       rebaseHint:

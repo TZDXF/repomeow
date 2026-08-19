@@ -68,6 +68,9 @@ pub struct GitWorktree {
     /// 创建来源分支:新建分支时记录在 `branch.<name>.repomeow-base`;
     /// 无记录时回退为上游跟踪分支(origin/x 形式);都没有则为 None
     pub base_branch: Option<String>,
+    /// 来源分支领先 HEAD 的提交数(>0 表示变基可带入新提交);
+    /// 无来源分支或来源引用无法解析(已删除等)时为 None
+    pub base_behind: Option<usize>,
 }
 
 /// `git merge` 的结果:最新状态 + 产生的合并冲突文件(为空表示无冲突)

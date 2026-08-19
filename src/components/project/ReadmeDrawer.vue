@@ -118,9 +118,10 @@ async function onBodyClick(e: MouseEvent) {
     </Transition>
 
     <Transition name="slide">
+      <!-- top-9 避开自定义标题栏(TitleBar h-9 / z-[60],抽屉 z-50 会被其盖住右上角关闭按钮) -->
       <aside
         v-if="open"
-        class="readme-surface fixed inset-y-0 right-0 z-50 flex w-full max-w-2xl flex-col border-l shadow-xl"
+        class="readme-surface fixed bottom-0 right-0 top-9 z-50 flex w-full max-w-2xl flex-col border-l shadow-xl"
       >
         <Button
           size="icon"

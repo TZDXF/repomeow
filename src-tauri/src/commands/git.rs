@@ -1372,6 +1372,7 @@ fn worktree_info_of(wt_repo: &Repository, wt_path: &Path, is_main: bool) -> GitW
         is_main,
         detached: false,
         base_branch: None,
+        base_behind: None,
     };
     if let Ok(head) = wt_repo.head() {
         w.head = head.target().map(|oid| oid.to_string()).unwrap_or_default();
@@ -1382,7 +1383,23 @@ fn worktree_info_of(wt_repo: &Repository, wt_path: &Path, is_main: bool) -> GitW
         }
     }
     w.base_branch = base_branch_of(wt_repo, w.branch.as_deref());
+    w.base_behind = base_behind_of(wt_repo, w.base_branch.as_deref(), &w.head);
     w
+}
+
+/// 来源分支领先 HEAD 的提交数(>0 表示变基可带入新提交)。base 依次按本地分支、
+/// 远程引用(origin/x)解析;无 base、HEAD 为空或引用已不存在时为 None。
+/// graph_ahead_behind(base, head) 的 ahead 即 base 独有、变基会带入的提交数
+fn base_behind_of(repo: &Repository, base: Option<&str>, head: &str) -> Option<usize> {
+    let base = base?;
+    let head_oid = git2::Oid::from_str(head).ok()?;
+    let base_oid = ["refs/heads/", "refs/remotes/"]
+        .iter()
+        .find_map(|prefix| repo.revparse_single(&format!("{prefix}{base}")).ok())
+        .map(|obj| obj.id())?;
+    repo.graph_ahead_behind(base_oid, head_oid)
+        .ok()
+        .map(|(ahead, _)| ahead)
 }
 
 /// 分支的创建来源:`branch.<name>.repomeow-base`(本应用新建 worktree 分支时记录);
@@ -1447,6 +1464,7 @@ fn list_worktrees_blocking(path: &str) -> AppResult<Vec<GitWorktree>> {
                 is_main: false,
                 detached: false,
                 base_branch: None,
+                base_behind: None,
             }),
         }
     }

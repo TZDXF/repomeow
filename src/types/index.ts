@@ -58,6 +58,8 @@ export interface GitWorktree {
   detached: boolean;
   /** 创建来源分支(新建分支时记录;无记录回退上游跟踪分支,如 origin/x;都没有为 null) */
   base_branch: string | null;
+  /** 来源分支领先 HEAD 的提交数(>0 表示变基可带入新提交;无来源或引用已删除为 null) */
+  base_behind: number | null;
 }
 
 /** `git merge` 的结果:最新状态 + 产生的合并冲突文件(为空表示无冲突) */
