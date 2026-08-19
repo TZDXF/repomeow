@@ -57,7 +57,8 @@ export function parseDiff(text: string): DiffLine[] {
       out.push({ kind: "add", text: raw, oldLine: null, newLine: newN });
       newN++;
     } else if (raw.startsWith("-")) {
-      out.push({ kind: "del", text: raw, oldLine: oldN, newLine: newN });
+      // del 行在新版本不存在,无新行号(置 null;旧值 newN 会让纯删除文件的新行号栏显示 0)
+      out.push({ kind: "del", text: raw, oldLine: oldN, newLine: null });
       oldN++;
     } else if (raw.startsWith(" ")) {
       out.push({ kind: "ctx", text: raw, oldLine: oldN, newLine: newN });

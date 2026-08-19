@@ -18,9 +18,9 @@ describe("parseDiff", () => {
     // hunk 头是 add/del/ctx 的定位锚点,parseDiff 必须保留
     expect(lines[0].kind).toBe("hunk");
     expect(lines[0].text).toContain("@@ -1,2 +1,2 @@");
-    // add / del 各自推进对应计数器
+    // add / del 各自只有所在侧的行号
     expect(lines[2].oldLine).toBe(2);
-    expect(lines[2].newLine).toBe(2);
+    expect(lines[2].newLine).toBeNull();
     expect(lines[3].oldLine).toBeNull();
     expect(lines[3].newLine).toBe(2);
   });
@@ -34,7 +34,7 @@ describe("parseDiff", () => {
       ["hunk", null, null],
       ["ctx", 10, 10],
       ["ctx", 11, 11],
-      ["del", 12, 12],
+      ["del", 12, null],
       ["add", null, 12],
       ["add", null, 13],
       ["ctx", 13, 14],

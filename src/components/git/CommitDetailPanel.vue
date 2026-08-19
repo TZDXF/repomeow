@@ -403,12 +403,14 @@ const rightGutterEl = ref<HTMLElement | null>(null);
 const paneSyncing = ref(false);
 let paneSyncFrame = 0;
 
+// 左窗格 direction: rtl 的 scrollLeft 为负值语义:0 = 行尾、向行首滚动递减至 -(scrollWidth - clientWidth);
+// visual 坐标与右窗格统一为"距行首的像素数"(0 = 行首),即 scrollLeft 相对负值尽头的偏移
 function visualScrollLeft(el: HTMLElement) {
-  return el === leftPaneEl.value ? el.scrollWidth - el.clientWidth - el.scrollLeft : el.scrollLeft;
+  return el === leftPaneEl.value ? el.scrollWidth - el.clientWidth + el.scrollLeft : el.scrollLeft;
 }
 
 function applyVisualScrollLeft(el: HTMLElement, offset: number) {
-  el.scrollLeft = el === leftPaneEl.value ? el.scrollWidth - el.clientWidth - offset : offset;
+  el.scrollLeft = el === leftPaneEl.value ? offset - (el.scrollWidth - el.clientWidth) : offset;
 }
 
 /** 滚动位置(px)→ sideRow 空间的小数行位置(跨两侧统一的规范坐标)。
@@ -480,17 +482,6 @@ function syncPaneScroll(source: "left" | "right" | "leftGutter" | "rightGutter")
   paneSyncFrame = requestAnimationFrame(() => {
     paneSyncing.value = false;
   });
-}
-
-// 左窗格 -scale-x-100 翻转后,浏览器原生横向滚轮仍按翻转前的布局坐标增减 scrollLeft,
-// 方向与可视滚动条相反;拦截横向分量取反后手动滚动,纵向分量交给默认行为
-function onLeftPaneWheel(e: WheelEvent) {
-  const delta = e.deltaX !== 0 ? e.deltaX : e.shiftKey ? e.deltaY : 0;
-  const el = leftPaneEl.value;
-  if (!delta || !el) return;
-  e.preventDefault();
-  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientWidth : 1;
-  el.scrollLeft -= delta * unit;
 }
 
 // --- 中间连接条(IntelliJ divider 风格):变更块画彩色多边形(红删/绿增/蓝改),
@@ -622,14 +613,14 @@ const splitApplicable = computed(
 );
 const splitActive = computed(() => splitDiff.value && splitApplicable.value);
 
-// 打开并排视图 / 新 diff 内容落地后,把左窗格 scrollLeft 推到最大(翻转栏的可视起点),
+// 打开并排视图 / 新 diff 内容落地后,把左窗格 scrollLeft 推到负值尽头(RTL 下的可视行首),
 // 让两侧都从行首看起;赋值会触发 scroll 事件,经 syncPaneScroll 顺带把右窗格归零。
 // 依赖 diff 而非 selectedPath / diffLoading:切文件不再清空旧内容,只有新内容就绪这一帧才需要复位横向滚动
 watch([splitActive, diff], async ([active]) => {
   if (!active) return;
   await nextTick();
   const lp = leftPaneEl.value;
-  if (lp) lp.scrollLeft = lp.scrollWidth - lp.clientWidth;
+  if (lp) lp.scrollLeft = -(lp.scrollWidth - lp.clientWidth);
 });
 
 // --- 在 IDE 打开(默认编辑器) ---
@@ -1183,16 +1174,17 @@ onBeforeUnmount(() => {
           ref="splitWrapEl"
           class="flex min-h-0 flex-1"
         >
-          <!-- 左窗格 -scale-x-100 双翻转:容器翻转把纵向滚动条移到左边,内容层再翻转回正;
-               代价是 scrollLeft 镜像化(0=内容末尾、最大值=行首),横向同步经 visualScrollLeft/applyVisualScrollLeft 换算 -->
+          <!-- 左窗格 direction: rtl 把纵向滚动条移到左边,内层恢复 ltr;
+               不用 -scale-x-100 翻转:transform 会把窗格提升为合成层,ClearType 次像素抗锯齿失效且翻转移位会半像素重采样,文字比右侧模糊;
+               代价是 scrollLeft 变 RTL 负值语义(0=行尾、负值尽头=行首),横向同步经 visualScrollLeft/applyVisualScrollLeft 换算;
+               原生滚轮方向在 RTL 下本就正确,无需 transform 方案那样的滚轮取反拦截 -->
           <div
             ref="leftPaneEl"
-            class="min-w-0 -scale-x-100 overflow-auto"
+            class="min-w-0 overflow-auto [direction:rtl]"
             :style="{ flex: `${splitRatio} 1 0%` }"
             @scroll="syncPaneScroll('left')"
-            @wheel="onLeftPaneWheel"
           >
-            <div class="diff-code relative min-w-max -scale-x-100 py-1 text-xs leading-5">
+            <div class="diff-code relative min-w-max py-1 text-xs leading-5 [direction:ltr]">
               <template v-for="(row, i) in leftRows" :key="i">
                 <div
                   v-if="row.kind === 'hunk'"
