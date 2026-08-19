@@ -228,8 +228,13 @@ function toggleFolder(fullPath: string) {
 
 // --- diff 解析:lib/diff.ts 的 parseDiff(与提交对话框变更预览共用);baseName 走 @/lib/path ---
 // 后端 context_lines 已拉满,diff 含完整文件内容;过长的未更改区间折叠为可点击展开的占位行(IDEA 风格)。
-// hunk 头:逐行视图保留;并排视图在非截断时隐藏(见 sideRows),截断 diff(>10 万行,libgit2 在 @@
-// 上报畸形头如 2-)仍展示——此时它是定位"被截断的变更段"的唯一线索。
+// hunk 头:逐行视图保留(新增/删除文件除外,见 displayLines);并排视图在非截断时隐藏(见 sideRows),
+// 截断 diff(>10 万行,libgit2 在 @@ 上报畸形头如 2-)仍展示——此时它是定位"被截断的变更段"的唯一线索。
+
+/** 整文件单边变更(新增/删除):所有行同为 + 或 -,行首标记与 @@ 头都是噪音,逐行视图一并去掉 */
+const wholeFileChange = computed(
+  () => selectedFile.value?.status === "A" || selectedFile.value?.status === "D",
+);
 
 /** 超过该行数的连续未更改区间才折叠 */
 const FOLD_MIN = 12;
@@ -278,7 +283,15 @@ function foldCountOf(line: DiffLine | DiffFold) {
   return line.kind === "fold" ? line.count : 0;
 }
 
-const displayLines = computed(() => foldCtxRuns(diffLines.value));
+const displayLines = computed(() => {
+  const lines = diffLines.value;
+  // 新增/删除文件隐藏 hunk 头(截断 diff 除外:此时它是定位被截断变更段的唯一线索)
+  return foldCtxRuns(
+    wholeFileChange.value && !diff.value?.truncated
+      ? lines.filter((line) => line.kind !== "hunk")
+      : lines,
+  );
+});
 
 /** 模板取行内 HTML:优先 shiki 着色结果;未着色但有行内差异区间的行退化为转义纯文本 + 差异底色 */
 function hlOf(line: DiffLine | null | undefined) {
@@ -1425,9 +1438,11 @@ onBeforeUnmount(() => {
                   {{ line.newLine ?? "" }}
                 </span>
                 <span class="whitespace-pre">
-                  <template v-if="hlOf(line)">{{ line.text.charAt(0) }}</template>
+                  <template v-if="hlOf(line) && !wholeFileChange">{{
+                    line.text.charAt(0)
+                  }}</template>
                   <span v-if="hlOf(line)" class="diff-hl" v-html="hlOf(line)" />
-                  <template v-else>{{ line.text }}</template>
+                  <template v-else>{{ wholeFileChange ? line.text.slice(1) : line.text }}</template>
                 </span>
               </div>
             </template>
