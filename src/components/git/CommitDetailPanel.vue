@@ -228,10 +228,10 @@ function toggleFolder(fullPath: string) {
 
 // --- diff 解析:lib/diff.ts 的 parseDiff(与提交对话框变更预览共用);baseName 走 @/lib/path ---
 // 后端 context_lines 已拉满,diff 含完整文件内容;过长的未更改区间折叠为可点击展开的占位行(IDEA 风格)。
-// hunk 头:逐行视图保留(新增/删除文件除外,见 displayLines);并排视图在非截断时隐藏(见 sideRows),
-// 截断 diff(>10 万行,libgit2 在 @@ 上报畸形头如 2-)仍展示——此时它是定位"被截断的变更段"的唯一线索。
+// hunk 头:非截断 diff 整文件已铺开,逐行/并排视图都不渲染(见 displayLines);截断 diff(>10 万行,
+// libgit2 在 @@ 上报畸形头如 2-)仍展示——此时它是定位"被截断的变更段"的唯一线索。
 
-/** 整文件单边变更(新增/删除):所有行同为 + 或 -,行首标记与 @@ 头都是噪音,逐行视图一并去掉 */
+/** 整文件单边变更(新增/删除):所有行同为 + 或 -,行首标记是噪音,逐行视图去掉 */
 const wholeFileChange = computed(
   () => selectedFile.value?.status === "A" || selectedFile.value?.status === "D",
 );
@@ -285,12 +285,8 @@ function foldCountOf(line: DiffLine | DiffFold) {
 
 const displayLines = computed(() => {
   const lines = diffLines.value;
-  // 新增/删除文件隐藏 hunk 头(截断 diff 除外:此时它是定位被截断变更段的唯一线索)
-  return foldCtxRuns(
-    wholeFileChange.value && !diff.value?.truncated
-      ? lines.filter((line) => line.kind !== "hunk")
-      : lines,
-  );
+  // 隐藏 hunk 头(截断 diff 除外:此时它是定位被截断变更段的唯一线索)
+  return foldCtxRuns(diff.value?.truncated ? lines : lines.filter((line) => line.kind !== "hunk"));
 });
 
 /** 模板取行内 HTML:优先 shiki 着色结果;未着色但有行内差异区间的行退化为转义纯文本 + 差异底色 */
@@ -304,16 +300,9 @@ function hlOf(line: DiffLine | null | undefined) {
 
 /** 并排查看(持久化):旧版本在左、新版本在右 */
 const splitDiff = useLocalStorage("repomeow:commit-diff-split", false);
-// 非截断 diff 整文件已铺开,hunk 头(@@ -1,N +1,M @@)只是噪音,并排两侧不渲染;
-// 截断 diff 保留 hunk 头作变更段定位线索。在进 toSideBySideRows 之前过滤,
+// hunk 头已在 displayLines 统一过滤(截断 diff 保留,作变更段定位线索),
 // sideRows / paneRowOffsets / changeBlocks 等下游全部随之保持一致
-const sideRows = computed(() =>
-  toSideBySideRows(
-    diff.value?.truncated
-      ? displayLines.value
-      : displayLines.value.filter((line) => line.kind !== "hunk"),
-  ),
-);
+const sideRows = computed(() => toSideBySideRows(displayLines.value));
 
 /** 并排左右内容窗格的宽度比(持久化,拖拽中间连接条调整;0.5 = 各占一半) */
 const splitRatio = useLocalStorage("repomeow:commit-diff-split-ratio", 0.5);
