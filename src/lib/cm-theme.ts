@@ -38,6 +38,23 @@ export const cmViewerTheme = EditorView.theme({
   ".cm-foldGutter .cm-gutterElement": {
     color: "var(--color-muted-foreground)",
     cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "0 3px",
+  },
+  // 折叠箭头(空心 SVG)默认隐藏,悬停折叠槽整列显现;已折叠的常显以便找回
+  ".cm-fold-marker": {
+    display: "flex",
+    opacity: "0",
+    transition: "opacity 0.12s ease",
+  },
+  ".cm-foldGutter:hover .cm-fold-marker, .cm-fold-marker.cm-fold-closed": {
+    opacity: "0.8",
+  },
+  ".cm-foldGutter .cm-gutterElement:hover .cm-fold-marker": {
+    opacity: "1",
+    color: "var(--color-foreground)",
   },
   ".cm-foldPlaceholder": {
     backgroundColor: "var(--color-muted)",

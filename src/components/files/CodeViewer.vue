@@ -40,6 +40,21 @@ async function applyLanguage() {
   view.dispatch({ effects: languageConf.reconfigure(lang ?? []) });
 }
 
+// ── 折叠槽箭头 ────────────────────────────────────────────────────────────────
+// 空心描边 chevron(同 lucide 图形),比文字三角更大更清晰;开/合各挂一个 class,
+// 显隐与配色交给 cm-theme(默认隐藏,悬停折叠槽显现,已折叠的常显以便发现)
+const FOLD_ICON_OPEN =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
+const FOLD_ICON_CLOSED =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>';
+
+function foldMarkerDOM(open: boolean): HTMLElement {
+  const span = document.createElement("span");
+  span.className = open ? "cm-fold-marker cm-fold-open" : "cm-fold-marker cm-fold-closed";
+  span.innerHTML = open ? FOLD_ICON_OPEN : FOLD_ICON_CLOSED;
+  return span;
+}
+
 // ── 文件内查找 ────────────────────────────────────────────────────────────────
 const setFindRanges = StateEffect.define<{ ranges: TextRange[]; current: number }>();
 
@@ -133,9 +148,8 @@ onMounted(() => {
         syntaxHighlighting(cmViewerHighlight),
         lineNumbers(),
         // foldGutter 只渲染折叠槽标记,实际折叠状态/效果由 codeFolding 注册;
-        // 默认 openText "⌄" 的墨迹悬在基线下方,视觉上比行中心低约 5px,换
-        // 实心小三角(墨迹中心与字体盒中心对齐,形似 VS Code 折叠箭头)
-        foldGutter({ openText: "▾", closedText: "▸" }),
+        // 箭头经 markerDOM 换成空心 SVG chevron(见上方 foldMarkerDOM)
+        foldGutter({ markerDOM: foldMarkerDOM }),
         codeFolding(),
         drawSelection(),
         EditorState.readOnly.of(true),
