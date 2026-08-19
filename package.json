@@ -1,9 +1,8 @@
 {
   "name": "repomeow",
-  "private": true,
   "version": "0.1.11",
+  "private": true,
   "type": "module",
-  "packageManager": "pnpm@11.10.0",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
@@ -22,11 +21,6 @@
     "release:latest": "node scripts/release/release.mjs latest",
     "release:all": "node scripts/release/release.mjs all",
     "release:local": "node scripts/release/release.mjs all --skip-build"
-  },
-  "pnpm": {
-    "ignoredBuiltDependencies": [
-      "esbuild"
-    ]
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.16",
@@ -92,5 +86,11 @@
     "vite": "^8.1.5",
     "vitest": "^3.2.4",
     "vue-tsc": "^3.3.7"
+  },
+  "packageManager": "pnpm@11.10.0",
+  "pnpm": {
+    "ignoredBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

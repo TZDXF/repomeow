@@ -344,6 +344,7 @@ async function remove() {
     worktrees.value = await store.removeWorktree(props.project, w.path, {
       force: removeForce.value,
       deleteBranch: removeDeleteBranch.value,
+      branch: w.branch,
     });
     toast.success(t("git.worktree.removed"));
     emit("changed");

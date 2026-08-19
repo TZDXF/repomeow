@@ -4,3 +4,5 @@ allowBuilds:
 ignoredBuiltDependencies:
   - esbuild
   - vue-demi
+minimumReleaseAgeExclude:
+  - element-source-dev

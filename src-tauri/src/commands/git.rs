@@ -1650,17 +1650,21 @@ fn is_ancestor(path: &str, a: &str, b: &str) -> AppResult<bool> {
     }
 }
 /// 删除 worktree(`git worktree remove [--force]`),可选同时删除其检出的本地分支
-/// (force 时用 -D,否则 -d 安全删除;未合并的分支会因 -d 报错,此时 worktree 已删,
-/// 用户可勾选强制重试)。主工作区不可删除。返回最新 worktree 列表
+/// (force 时用 -D,否则 -d 安全删除)。主工作区不可删除。返回最新 worktree 列表。
+/// 幂等可重试:worktree 登记或目录已不存在(目录被外部删除,或上次删 worktree 成功但
+/// 分支 -d 因未合并失败后的强制重试)时改为 prune 清理登记,并按 branch 继续删分支
 #[tauri::command]
 pub async fn git_worktree_remove(
     path: String,
     worktree_path: String,
     force: bool,
     delete_branch: bool,
+    branch: Option<String>,
 ) -> AppResult<Vec<GitWorktree>> {
-    run_blocking(move || worktree_remove_blocking(&path, &worktree_path, force, delete_branch))
-        .await
+    run_blocking(move || {
+        worktree_remove_blocking(&path, &worktree_path, force, delete_branch, branch.as_deref())
+    })
+    .await
 }
 
 fn worktree_remove_blocking(
@@ -1668,32 +1672,35 @@ fn worktree_remove_blocking(
     worktree_path: &str,
     force: bool,
     delete_branch: bool,
+    branch_hint: Option<&str>,
 ) -> AppResult<Vec<GitWorktree>> {
     let existing = list_worktrees_blocking(path)?;
-    let target = existing
-        .iter()
-        .find(|w| w.path == worktree_path)
-        .ok_or_else(|| AppError::coded(ErrorCode::InvalidPath, worktree_path))?;
-    if target.is_main {
-        return Err(AppError::coded(
-            ErrorCode::GitCommandFailed,
-            "cannot remove main worktree",
-        ));
+    let target = existing.iter().find(|w| w.path == worktree_path);
+    if let Some(t) = target {
+        if t.is_main {
+            return Err(AppError::coded(
+                ErrorCode::GitCommandFailed,
+                "cannot remove main worktree",
+            ));
+        }
     }
-    let branch = target.branch.clone();
-    // 目录已被外部删除时,`git worktree remove` 会因缺少 `.git` 先验校验失败;
-    // 交给 Git prune 清理悬挂登记,避免把可恢复的清理操作报成删除失败。
-    // 仅对目录本身不存在的情况自动处理,避免误删仍可能含有用户文件的目录。
-    if !Path::new(worktree_path).exists() {
+    // 分支名优先取 worktree 登记;登记已不在(上次删 worktree 成功、分支未删的重试)
+    // 时用前端传入的候选名
+    let branch = target
+        .and_then(|t| t.branch.clone())
+        .or_else(|| branch_hint.map(str::trim).filter(|s| !s.is_empty()).map(str::to_string));
+    if target.is_some() && Path::new(worktree_path).exists() {
+        let mut args = vec!["worktree", "remove"];
+        if force {
+            args.push("--force");
+        }
+        args.push(worktree_path);
+        run_git(path, &args)?;
+    } else {
+        // 登记或目录已缺失:`git worktree remove` 会因缺少 `.git` 先验校验失败,
+        // 交给 prune 清理悬挂登记,避免把可恢复的清理/重试报成删除失败
         run_git(path, &["worktree", "prune"])?;
-        return list_worktrees_blocking(path);
     }
-    let mut args = vec!["worktree", "remove"];
-    if force {
-        args.push("--force");
-    }
-    args.push(worktree_path);
-    run_git(path, &args)?;
     if delete_branch {
         if let Some(b) = branch {
             let flag = if force { "-D" } else { "-d" };

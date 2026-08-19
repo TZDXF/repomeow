@@ -353,17 +353,19 @@ export const useProjectsStore = defineStore("projects", () => {
     });
   }
 
-  /** 删除 worktree;force 强制(含未提交修改时),deleteBranch 同时删除其检出的本地分支 */
+  /** 删除 worktree;force 强制(含未提交修改时),deleteBranch 同时删除其检出的本地分支;
+   *  branch 为 worktree 检出分支名,供上次部分成功(登记已删、分支未删)后的强制重试使用 */
   function removeWorktree(
     project: Project,
     worktreePath: string,
-    options: { force?: boolean; deleteBranch?: boolean } = {},
+    options: { force?: boolean; deleteBranch?: boolean; branch?: string | null } = {},
   ) {
     return cmd<GitWorktree[]>("git_worktree_remove", {
       path: project.path,
       worktreePath,
       force: options.force ?? false,
       deleteBranch: options.deleteBranch ?? false,
+      branch: options.branch ?? null,
     });
   }
 
