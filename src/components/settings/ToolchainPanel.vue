@@ -62,10 +62,10 @@ const groups = computed(() =>
   })).filter((group) => group.tools.length > 0),
 );
 
-/** 版本管理器各自管理的东西不同,版本区标签随之区分 */
+/** 版本管理器各自管理的东西不同,版本区标签随之区分(uv 行管的是 python) */
 function versionLabel(tool: ToolchainStatus): string {
   if (tool.id === "dotnet") return t("settings.devEnv.tools.sdksLabel");
-  if (tool.id === "python") return t("settings.devEnv.tools.pythonVersionsLabel");
+  if (tool.id === "uv") return t("settings.devEnv.tools.pythonVersionsLabel");
   return t("settings.devEnv.tools.nodeVersionsLabel");
 }
 
@@ -117,7 +117,7 @@ function uninstall(tool: ToolchainStatus) {
   void run(tool.id, "uninstall");
 }
 
-// ---- 版本管理(nvm/fnm/vp/rustup) ─────────────────────────────────────────
+  // ---- 版本管理(nvm/fnm/vp/uv) ───────────────────────────────────────────
 
 /** 各版本管理器行内的「安装指定版本」输入框 */
 const versionInputs = ref<Record<string, string>>({});
@@ -310,7 +310,7 @@ onMounted(() => {
               </Button>
             </div>
           </div>
-          <!-- 版本区:nvm/fnm/vp/rustup/python 可切换装卸,dotnet 只读展示已装 SDK;
+          <!-- 版本区:nvm/fnm/vp/uv 可切换装卸(uv 行管 python 版本),dotnet 只读展示已装 SDK;
                can_switch 且尚未装任何版本时也展示,让用户能装第一个版本 -->
           <div v-if="tool.versions.length > 0 || tool.caps.can_switch" class="border-t px-3 py-2">
             <span class="text-xs text-muted-foreground">{{ versionLabel(tool) }}</span>

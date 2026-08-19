@@ -4352,7 +4352,7 @@ mod tests {
 
         // include_remote=false:只走本地分支+标签,feature 提交不可达
         let walk = build_graph_revwalk(&repo, None, Some(false)).unwrap().unwrap();
-        let deco = GraphDeco::collect(&repo);
+        let _deco = GraphDeco::collect(&repo);
         let subjects: Vec<String> = walk
             .flatten()
             .filter_map(|oid| repo.find_commit(oid).ok())
@@ -4380,7 +4380,7 @@ mod tests {
 
         // 相对路径 + {branch} 占位符创建
         let added =
-            worktree_add_blocking(path, ".worktrees/{branch}", "feature/x", true, None).unwrap();
+            worktree_add_blocking(path, ".worktrees/{branch}", "feature/x", true, None, None).unwrap();
         assert_eq!(added.len(), 2);
         let wt = added.iter().find(|w| !w.is_main).unwrap();
         assert_eq!(wt.branch.as_deref(), Some("feature/x"));
@@ -4389,13 +4389,13 @@ mod tests {
 
         // 分支已被 worktree 检出 → git_branch_checked_out
         let dup =
-            worktree_add_blocking(path, ".worktrees/dup", "feature/x", true, None).unwrap_err();
+            worktree_add_blocking(path, ".worktrees/dup", "feature/x", true, None, None).unwrap_err();
         assert!(dup.is_code(ErrorCode::GitBranchCheckedOut));
 
         // 挂载已有(未检出)分支
         git(&dir, &["branch", "topic"]);
         let attached =
-            worktree_add_blocking(path, ".worktrees/topic", "topic", false, None).unwrap();
+            worktree_add_blocking(path, ".worktrees/topic", "topic", false, None, None).unwrap();
         assert!(
             attached
                 .iter()
@@ -4404,15 +4404,15 @@ mod tests {
 
         // 挂载已被其它 worktree 检出的分支 → git_branch_checked_out
         let occupied =
-            worktree_add_blocking(path, ".worktrees/topic2", "topic", false, None).unwrap_err();
+            worktree_add_blocking(path, ".worktrees/topic2", "topic", false, None, None).unwrap_err();
         assert!(occupied.is_code(ErrorCode::GitBranchCheckedOut));
 
         // 主工作区不可删除
-        let rm_main = worktree_remove_blocking(path, &initial[0].path, false, false).unwrap_err();
+        let rm_main = worktree_remove_blocking(path, &initial[0].path, false, false, None).unwrap_err();
         assert!(rm_main.is_code(ErrorCode::GitCommandFailed));
 
         // 删除 worktree 并删分支
-        let left = worktree_remove_blocking(path, &wt.path, false, true).unwrap();
+        let left = worktree_remove_blocking(path, &wt.path, false, true, None).unwrap();
         assert_eq!(left.len(), 2);
         assert!(!Path::new(&wt.path).exists());
         assert!(!local_branch_names(path)
@@ -4433,11 +4433,11 @@ mod tests {
         let path = dir.to_str().unwrap();
 
         let added =
-            worktree_add_blocking(path, ".worktrees/feature", "feature", true, None).unwrap();
+            worktree_add_blocking(path, ".worktrees/feature", "feature", true, None, None).unwrap();
         let wt = added.iter().find(|w| !w.is_main).unwrap();
         fs::remove_dir_all(&wt.path).unwrap();
 
-        let remaining = worktree_remove_blocking(path, &wt.path, false, false).unwrap();
+        let remaining = worktree_remove_blocking(path, &wt.path, false, false, None).unwrap();
         assert_eq!(remaining.len(), 1);
         assert!(remaining[0].is_main);
         assert!(!list_worktrees_blocking(path)
@@ -4459,7 +4459,7 @@ mod tests {
 
         // 创建工作区内的 worktree 前:.worktrees/ 是一条未跟踪目录(嵌套仓库边界,
         // 提交对话框排除它,与状态计数不一致)
-        worktree_add_blocking(path, ".worktrees/feature", "feature", true, None).unwrap();
+        worktree_add_blocking(path, ".worktrees/feature", "feature", true, None, None).unwrap();
         let exclude = fs::read_to_string(dir.join(".git/info/exclude")).unwrap();
         assert!(exclude.contains("/.worktrees/feature/"), "exclude: {exclude}");
         let st = status(path).unwrap();
@@ -4511,7 +4511,7 @@ mod tests {
 
         // 1. 本地无同名分支:挂载 origin/feature → 显式创建跟踪分支(而非游离 HEAD)
         let list =
-            worktree_add_blocking(path_b, ".worktrees/feature", "origin/feature", false, None)
+            worktree_add_blocking(path_b, ".worktrees/feature", "origin/feature", false, None, None)
                 .unwrap();
         let wt = list.iter().find(|w| !w.is_main).unwrap();
         assert_eq!(wt.branch.as_deref(), Some("feature"));
@@ -4525,7 +4525,7 @@ mod tests {
 
         // 远程引用落地名已被 worktree 检出 → git_branch_checked_out
         let occupied =
-            worktree_add_blocking(path_b, ".worktrees/feature2", "origin/feature", false, None)
+            worktree_add_blocking(path_b, ".worktrees/feature2", "origin/feature", false, None, None)
                 .unwrap_err();
         assert!(occupied.is_code(ErrorCode::GitBranchCheckedOut));
 
@@ -4538,7 +4538,7 @@ mod tests {
         git(&clone_a, &["push", "origin", "topic"]);
         git(&clone_b, &["fetch", "origin"]);
         let list =
-            worktree_add_blocking(path_b, ".worktrees/topic", "origin/topic", false, None).unwrap();
+            worktree_add_blocking(path_b, ".worktrees/topic", "origin/topic", false, None, None).unwrap();
         let wt = list.iter().find(|w| w.branch.as_deref() == Some("topic")).unwrap();
         // 远程新提交在 worktree 中可见,且本地 topic 已对齐 origin/topic
         assert!(Path::new(&wt.path).join("t2.txt").exists());
@@ -4561,7 +4561,7 @@ mod tests {
         git(&clone_a, &["commit", "-m", "h2"]);
         git(&clone_a, &["push", "origin", "hotfix"]);
         git(&clone_b, &["fetch", "origin"]);
-        let err = worktree_add_blocking(path_b, ".worktrees/hotfix", "origin/hotfix", false, None)
+        let err = worktree_add_blocking(path_b, ".worktrees/hotfix", "origin/hotfix", false, None, None)
             .unwrap_err();
         assert!(err.is_code(ErrorCode::GitBranchDiverged));
 
@@ -4572,7 +4572,7 @@ mod tests {
         git(&clone_b, &["commit", "-m", "ahead-local"]);
         git(&clone_b, &["checkout", "main"]);
         let list =
-            worktree_add_blocking(path_b, ".worktrees/ahead", "origin/ahead", false, None).unwrap();
+            worktree_add_blocking(path_b, ".worktrees/ahead", "origin/ahead", false, None, None).unwrap();
         let wt = list.iter().find(|w| w.branch.as_deref() == Some("ahead")).unwrap();
         assert!(Path::new(&wt.path).join("ahead-local.txt").exists());
 

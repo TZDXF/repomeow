@@ -1,8 +1,9 @@
 //! 设置页「工具链」面板:常用开发 CLI 的检测与安装/更新/卸载/版本切换。
 //!
 //! 检测(detect_toolchains):where/which 找 PATH 上的可执行文件,跑 `--version`
-//! 解析版本,版本管理器(nvm/fnm/vp/dotnet)额外列出可切换的版本;
-//! Python 的版本管理挂在 uv 上(uv python install --default 下载并设为全局)。
+//! 解析版本,版本管理器(nvm/fnm/vp/dotnet/uv)额外列出可切换的版本;
+//! python 不单列——uv 行承载 python 版本管理(uv python install 装卸,
+//! --default 建 python/python3 全局别名),uv 自身安装走官方脚本(irm/curl)。
 //! 操作(toolchain_op):按 平台+安装来源 解析出命令串,直接 spawn_terminal
 //! 在系统终端新窗口执行——安装/升级可能需要 UAC、网络与进度展示,交给终端
 //! 是与应用「命令在终端跑」一致的选择,失败信息也直接可见。
@@ -51,11 +52,6 @@ const TOOLS: &[ToolSpec] = &[
     ToolSpec {
         id: "cargo",
         kind: ToolchainKind::Rust,
-        version_args: &["--version"],
-    },
-    ToolSpec {
-        id: "python",
-        kind: ToolchainKind::Python,
         version_args: &["--version"],
     },
     ToolSpec {
@@ -143,23 +139,10 @@ fn detect_toolchains_blocking() -> Vec<ToolchainStatus> {
                 .filter(|(ok, _)| *ok)
                 .map(|(_, out)| parse_dotnet_sdks(&out))
                 .unwrap_or_default(),
+            // uv 行承载 python 版本管理:列出 uv 托管的解释器并标记当前全局版本
+            "uv" => uv_python_versions(&exe),
             _ => Vec::new(),
         };
-    }
-
-    // python 的版本管理挂在 uv 上:即便 PATH 上还没有 python(uv --default 别名未建),
-    // 也能先经 uv 下载,故不走上面「仅已找到」的循环;uv 未装时 python 行退化为
-    // 纯展示(版本+路径),版本区由 caps.can_switch=false 隐藏
-    let uv_exe = statuses
-        .iter()
-        .find(|s| s.id == "uv" && s.found)
-        .and_then(|s| s.path.clone())
-        .map(PathBuf::from);
-    if let (Some(status), Some(uv)) = (
-        statuses.iter_mut().find(|s| s.id == "python"),
-        uv_exe.as_deref(),
-    ) {
-        status.versions = uv_python_versions(uv);
     }
 
     // gh 额外探测当前登录账号(`gh auth status` 会联网校验 token,给更长超时)
@@ -172,12 +155,8 @@ fn detect_toolchains_blocking() -> Vec<ToolchainStatus> {
     }
 
     let rustup_found = statuses.iter().any(|s| s.id == "rustup" && s.found);
-    let ctx = FamilyCtx {
-        rustup_found,
-        uv_found: uv_exe.is_some(),
-    };
     for status in &mut statuses {
-        status.caps = caps_for(&status.id, status.found, status.source.as_deref(), &ctx);
+        status.caps = caps_for(&status.id, status.found, status.source.as_deref(), rustup_found);
         // nvm 的远端列表只有 windows(nvm-windows 的 `nvm list available`)能拉
         if status.id == "nvm" {
             status.caps.can_list_remote = nvm_binary;
@@ -188,11 +167,7 @@ fn detect_toolchains_blocking() -> Vec<ToolchainStatus> {
 
 /// 探测单个工具:PATH 命中 → 来源判定 → 版本探测
 fn detect_one(spec: &ToolSpec) -> ToolchainStatus {
-    // WindowsApps 下的 python.exe 是 Store 存根(执行会拉起商店页),与 java.rs 跳过
-    // java 存根同理;其余工具不经 Store 分发,不受影响
-    let hit = cli_hits_on_path(spec.id).into_iter().find(|p| {
-        !(spec.id == "python" && cfg!(windows) && p.to_string_lossy().contains("WindowsApps"))
-    });
+    let hit = cli_hits_on_path(spec.id).into_iter().next();
     let mut status = ToolchainStatus {
         id: spec.id.to_string(),
         kind: spec.kind,
@@ -445,6 +420,27 @@ fn parse_uv_python_list(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// `uv python list --only-downloads` 行如
+/// `cpython-3.14.4+freethreaded-windows-x86_64-none    <download available>`:
+/// 取首 token(cpython-/pypy- 前缀)的版本段——保留 3.15.0a8 这类预发布后缀,
+/// 安装时按原样请求;freethreaded 等变体与普通版同号,按版本去重
+fn parse_uv_python_remote(text: &str) -> Vec<ToolchainRemoteVersion> {
+    let mut seen: HashSet<String> = HashSet::new();
+    text.lines()
+        .filter_map(|line| {
+            let token = line.split_whitespace().next()?;
+            let rest = token
+                .strip_prefix("cpython-")
+                .or_else(|| token.strip_prefix("pypy-"))?;
+            let version = rest.split(['-', '+']).next()?.to_string();
+            seen.insert(version.clone()).then_some(ToolchainRemoteVersion {
+                name: version,
+                tag: None,
+            })
+        })
+        .collect()
+}
+
 /// 从 `uv python find` 输出的解释器路径提取版本:
 /// uv 托管 `...\uv\python\cpython-3.12.7-windows-x86_64-none\python.exe`;
 /// Windows 系统 `...\Programs\Python\Python312\python.exe`;unix `/usr/bin/python3.11`
@@ -585,13 +581,8 @@ fn manageable(source: Option<&str>) -> bool {
     }
 }
 
-/// 同族管理器的在场情况:决定被管理工具(rustc/cargo 随 rustup、python 随 uv)的能力
-struct FamilyCtx {
-    rustup_found: bool,
-    uv_found: bool,
-}
-
-fn caps_for(id: &str, found: bool, source: Option<&str>, ctx: &FamilyCtx) -> ToolchainCaps {
+/// rustup 的在场情况:决定被管理工具(rustc/cargo)的安装入口是否开放
+fn caps_for(id: &str, found: bool, source: Option<&str>, rustup_found: bool) -> ToolchainCaps {
     match id {
         // rustup / vp 自带升级与卸载子命令,与安装来源无关;远端可装列表只有 vp 有;
         // rustup 不做版本切换展示(工具链由 rustup update 统一维护),vp 支持
@@ -604,27 +595,19 @@ fn caps_for(id: &str, found: bool, source: Option<&str>, ctx: &FamilyCtx) -> Too
         },
         // rustc/cargo 随 rustup 工具链走,自身无独立装卸
         "rustc" | "cargo" => ToolchainCaps {
-            can_install: !found && !ctx.rustup_found,
-            can_update: found && ctx.rustup_found,
+            can_install: !found && !rustup_found,
+            can_update: found && rustup_found,
             can_uninstall: false,
             can_switch: false,
             can_list_remote: false,
         },
-        // python 的装卸与全局默认都经 uv(--default 建 python/python3 别名);
-        // 无 uv 时退化为纯展示,系统自装的 python 不提供管理
-        "python" => ToolchainCaps {
-            can_install: !found && ctx.uv_found,
-            can_update: false,
-            can_uninstall: false,
-            can_switch: ctx.uv_found,
-            can_list_remote: ctx.uv_found,
-        },
+        // uv 行承载 python 版本管理:版本区(装/卸/切)与远端可装列表随 uv 在场开放
         "uv" => ToolchainCaps {
             can_install: !found,
             can_update: found,
-            can_uninstall: found && (cfg!(windows) || source == Some("brew")),
-            can_switch: false,
-            can_list_remote: false,
+            can_uninstall: found,
+            can_switch: found,
+            can_list_remote: found,
         },
         // nvm/fnm:版本管理;dotnet/git/gh:无
         "nvm" | "fnm" => {
@@ -677,15 +660,14 @@ fn sanitize_version<'a>(version: &'a str) -> AppResult<&'a str> {
     }
 }
 
-/// 把 (tool, op, version, source, uv_on_path) 解析为要在终端执行的命令串。
-/// source 为操作时刻重新探测的安装来源、uv_on_path 为 uv 是否在 PATH 上
-/// (均轻量,仅 where/which 不跑版本命令),保证与检测时刻判定一致。
+/// 把 (tool, op, version, source) 解析为要在终端执行的命令串。
+/// source 为操作时刻重新探测的安装来源(轻量,仅 where/which 不跑版本命令),
+/// 保证与检测时刻判定一致。
 fn resolve_op(
     tool: &str,
     op: &str,
     version: Option<&str>,
     source: Option<&str>,
-    uv_on_path: bool,
 ) -> AppResult<String> {
     let version = match version.map(str::trim).filter(|v| !v.is_empty()) {
         Some(v) => Some(sanitize_version(v)?),
@@ -717,60 +699,40 @@ fn resolve_op(
             "update" => Ok("rustup update".to_string()),
             _ => Err(unsupported(tool, op)),
         },
-        // python 的装卸与全局默认都经 uv:--default 额外创建 python/python3
-        // 可执行别名,即「设为全局」;uv 不在场时无从操作
-        "python" => match op {
-            "install" => {
-                if !uv_on_path {
-                    return Err(unsupported(tool, op));
-                }
-                // 「安装 python」直接装最新版并设为全局
-                Ok("uv python install --default".to_string())
-            }
-            "use" => {
-                if !uv_on_path {
-                    return Err(unsupported(tool, op));
-                }
-                Ok(format!("uv python install {} --default", need_version()?))
-            }
-            "install_version" => {
-                if !uv_on_path {
-                    return Err(unsupported(tool, op));
-                }
-                Ok(format!("uv python install {}", need_version()?))
-            }
-            "uninstall_version" => {
-                if !uv_on_path {
-                    return Err(unsupported(tool, op));
-                }
-                Ok(format!("uv python uninstall {}", need_version()?))
-            }
-            _ => Err(unsupported(tool, op)),
-        },
+        // uv 安装走官方脚本(uv 文档推荐方式):脚本装的 uv 在 ~/.local/bin,
+        // 可 uv self update;版本级操作即 python 版本管理(--default 额外创建
+        // python/python3 可执行别名,即「设为全局」)
         "uv" => match op {
             "install" => Ok(if cfg!(windows) {
-                winget("install", "astral-sh.uv")
-            } else if cfg!(target_os = "macos") {
-                "brew install uv".to_string()
+                r#"powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex""#
+                    .to_string()
             } else {
                 "curl -LsSf https://astral.sh/uv/install.sh | sh".to_string()
             }),
+            // 包管理来源(winget/brew)的 uv 被 self update 拒绝,走对应包管理升级
             "update" => Ok(if source == Some("winget") {
                 winget("upgrade", "astral-sh.uv")
-            } else if cfg!(target_os = "macos") && source == Some("brew") {
+            } else if source == Some("brew") {
                 "brew upgrade uv".to_string()
             } else {
                 "uv self update".to_string()
             }),
-            "uninstall" => {
-                if cfg!(windows) {
-                    Ok(winget("uninstall", "astral-sh.uv"))
-                } else if cfg!(target_os = "macos") && source == Some("brew") {
-                    Ok("brew uninstall uv".to_string())
-                } else {
-                    Err(unsupported(tool, op))
+            "uninstall" => Ok(match source {
+                Some("winget") => winget("uninstall", "astral-sh.uv"),
+                Some("brew") => "brew uninstall uv".to_string(),
+                // cargo 装的 uv 在 ~/.cargo/bin,官方脚本的清理路径删不到
+                Some("rustup") => "cargo uninstall uv".to_string(),
+                // 官方脚本安装无包管理记录:清缓存并删除二进制(uv 文档的卸载步骤)
+                _ if cfg!(windows) => {
+                    r#"uv cache clean & del /f "%USERPROFILE%\.local\bin\uv.exe" "%USERPROFILE%\.local\bin\uvx.exe""#
+                        .to_string()
                 }
-            }
+                _ => "uv cache clean; rm -f \"$HOME/.local/bin/uv\" \"$HOME/.local/bin/uvx\""
+                    .to_string(),
+            }),
+            "use" => Ok(format!("uv python install {} --default", need_version()?)),
+            "install_version" => Ok(format!("uv python install {}", need_version()?)),
+            "uninstall_version" => Ok(format!("uv python uninstall {}", need_version()?)),
             _ => Err(unsupported(tool, op)),
         },
         "nvm" => match op {
@@ -998,7 +960,8 @@ pub async fn detect_toolchains() -> AppResult<Vec<ToolchainStatus>> {
 /// 获取版本管理器可安装的远端版本列表(「添加版本」选择器的数据源),按版本降序:
 /// nvm-windows 解析 `nvm list available` 表格(列头自带 LTS/UNSTABLE 语义);
 /// fnm/vp 走各自的 list-remote(vp 的 LTS 行带 `(代号)` 后缀);
-/// python 经 uv 的 `uv python list --only-available`。走网络,耗时秒级。
+/// uv 行的远端列表是可下载的 python 版本:`uv python list --only-downloads`。
+/// 走网络,耗时秒级。
 #[tauri::command]
 pub async fn list_toolchain_versions(tool: String) -> AppResult<Vec<ToolchainRemoteVersion>> {
     tokio::task::spawn_blocking(move || list_toolchain_versions_blocking(&tool))
@@ -1015,10 +978,9 @@ fn list_toolchain_versions_blocking(tool: &str) -> AppResult<Vec<ToolchainRemote
     };
     let run = |exe: Option<PathBuf>, args: &[&str]| exe.and_then(|e| run_with_timeout(&e, args));
     let parsed = match tool {
-        // python 未装也能先看可装列表,数据源是 uv
-        "python" => run(
+        "uv" => run(
             cli_hits_on_path("uv").into_iter().next(),
-            &["python", "list", "--only-available"],
+            &["python", "list", "--only-downloads"],
         ),
         // unix nvm 是 shell 函数拉不了;windows 的 nvm list available 是表格
         "nvm" => {
@@ -1041,7 +1003,9 @@ fn list_toolchain_versions_blocking(tool: &str) -> AppResult<Vec<ToolchainRemote
     let mut versions = match tool {
         "nvm" => parse_nvm_available_table(&out),
         "vp" => parse_vp_remote(&out),
-        // fnm / python 的列表无 LTS 标注,不加 tag
+        // uv 的行带 cpython-/pypy- 前缀,通用 token 解析不认,走专用解析
+        "uv" => parse_uv_python_remote(&out),
+        // fnm 的列表无 LTS 标注,不加 tag
         _ => parse_remote_tokens(&out)
             .into_iter()
             .map(|name| ToolchainRemoteVersion { name, tag: None })
@@ -1139,9 +1103,7 @@ pub fn toolchain_op(tool: String, op: String, version: Option<String>) -> AppRes
             .next()
             .as_ref()
             .map(|p| classify_source(p));
-        // python 的操作依赖 uv 在场,与检测时刻的 uv_found 判定保持同一依据
-        let uv_on_path = tool == "python" && !cli_hits_on_path("uv").is_empty();
-        let command = resolve_op(tool, op, version.as_deref(), source.as_deref(), uv_on_path)?;
+        let command = resolve_op(tool, op, version.as_deref(), source.as_deref())?;
         let home = user_home_path()
             .map(|p| display_path(&p))
             .unwrap_or_else(|| ".".to_string());
@@ -1280,17 +1242,17 @@ mod tests {
         assert!(sanitize_version("22 && rm -rf ~").is_err());
         assert!(sanitize_version("22; calc").is_err());
         assert!(sanitize_version("").is_err());
-        let err = resolve_op("nvm", "use", Some("22 && calc"), None, false).unwrap_err();
+        let err = resolve_op("nvm", "use", Some("22 && calc"), None).unwrap_err();
         assert!(err.is_code(ErrorCode::ToolchainVersionInvalid));
     }
 
     #[test]
     fn unknown_tool_or_op_is_unsupported() {
-        let err = resolve_op("npm", "update", None, None, false).unwrap_err();
+        let err = resolve_op("npm", "update", None, None).unwrap_err();
         assert!(err.is_code(ErrorCode::ToolchainOpUnsupported));
-        let err = resolve_op("dotnet", "use", Some("8"), None, false).unwrap_err();
+        let err = resolve_op("dotnet", "use", Some("8"), None).unwrap_err();
         assert!(err.is_code(ErrorCode::ToolchainOpUnsupported));
-        let err = resolve_op("nvm", "use", None, None, false).unwrap_err();
+        let err = resolve_op("nvm", "use", None, None).unwrap_err();
         assert!(err.is_code(ErrorCode::ToolchainOpUnsupported));
     }
 
@@ -1299,63 +1261,80 @@ mod tests {
     fn resolves_windows_matrix() {
         // rustup 全套;不做版本切换展示(use/装卸工具链不再开放)
         assert_eq!(
-            resolve_op("rustup", "install", None, None, false).unwrap(),
+            resolve_op("rustup", "install", None, None).unwrap(),
             "winget install --id Rustlang.Rustup -e"
         );
         assert_eq!(
-            resolve_op("rustup", "update", None, None, false).unwrap(),
+            resolve_op("rustup", "update", None, None).unwrap(),
             "rustup update"
         );
         assert_eq!(
-            resolve_op("rustup", "uninstall", None, None, false).unwrap(),
+            resolve_op("rustup", "uninstall", None, None).unwrap(),
             "rustup self uninstall -y"
         );
-        assert!(resolve_op("rustup", "use", Some("stable"), None, false).is_err());
+        assert!(resolve_op("rustup", "use", Some("stable"), None).is_err());
         // rustc/cargo 只开放安装(=装 rustup)与更新(=rustup update)
         assert_eq!(
-            resolve_op("cargo", "update", None, None, false).unwrap(),
+            resolve_op("cargo", "update", None, None).unwrap(),
             "rustup update"
         );
-        assert!(resolve_op("rustc", "uninstall", None, None, false).is_err());
-        // uv:winget 源走 winget 升级,standalone 走 self update
+        assert!(resolve_op("rustc", "uninstall", None, None).is_err());
+        // uv:安装走官方 PowerShell 脚本;winget 源走 winget 升级/卸载,
+        // cargo 源走 cargo uninstall,standalone 走 self update 与缓存清理+删二进制
         assert_eq!(
-            resolve_op("uv", "update", None, Some("winget"), false).unwrap(),
+            resolve_op("uv", "install", None, None).unwrap(),
+            r#"powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex""#
+        );
+        assert_eq!(
+            resolve_op("uv", "update", None, Some("winget")).unwrap(),
             "winget upgrade --id astral-sh.uv -e"
         );
         assert_eq!(
-            resolve_op("uv", "update", None, Some("standalone"), false).unwrap(),
+            resolve_op("uv", "update", None, Some("standalone")).unwrap(),
             "uv self update"
+        );
+        assert_eq!(
+            resolve_op("uv", "uninstall", None, Some("winget")).unwrap(),
+            "winget uninstall --id astral-sh.uv -e"
+        );
+        assert_eq!(
+            resolve_op("uv", "uninstall", None, Some("rustup")).unwrap(),
+            "cargo uninstall uv"
+        );
+        assert_eq!(
+            resolve_op("uv", "uninstall", None, Some("standalone")).unwrap(),
+            r#"uv cache clean & del /f "%USERPROFILE%\.local\bin\uv.exe" "%USERPROFILE%\.local\bin\uvx.exe""#
         );
         // nvm:windows 上 use 是全局符号链接切换
         assert_eq!(
-            resolve_op("nvm", "use", Some("22.11.0"), None, false).unwrap(),
+            resolve_op("nvm", "use", Some("22.11.0"), None).unwrap(),
             "nvm use 22.11.0"
         );
         // fnm/vp 的全局默认走 default 别名
         assert_eq!(
-            resolve_op("fnm", "use", Some("20"), None, false).unwrap(),
+            resolve_op("fnm", "use", Some("20"), None).unwrap(),
             "fnm default 20"
         );
         assert_eq!(
-            resolve_op("vp", "use", Some("lts/hydro"), None, false).unwrap(),
+            resolve_op("vp", "use", Some("lts/hydro"), None).unwrap(),
             "vp env default lts/hydro"
         );
         // vp 安装显式走 powershell(默认终端 profile 可能是 cmd)
         assert_eq!(
-            resolve_op("vp", "install", None, None, false).unwrap(),
+            resolve_op("vp", "install", None, None).unwrap(),
             r#"powershell -NoProfile -Command "irm https://vite.plus/ps1 | iex""#
         );
         assert_eq!(
-            resolve_op("vp", "uninstall", None, None, false).unwrap(),
+            resolve_op("vp", "uninstall", None, None).unwrap(),
             "vp implode"
         );
         // git/gh/dotnet 安装
         assert_eq!(
-            resolve_op("git", "install", None, None, false).unwrap(),
+            resolve_op("git", "install", None, None).unwrap(),
             "winget install --id Git.Git -e"
         );
         assert_eq!(
-            resolve_op("dotnet", "install", Some("10"), None, false).unwrap(),
+            resolve_op("dotnet", "install", Some("10"), None).unwrap(),
             "winget install --id Microsoft.DotNet.SDK.10 -e"
         );
     }
@@ -1364,8 +1343,8 @@ mod tests {
     fn caps_match_resolvable_ops() {
         // 运行时不变量:按钮可见(caps)时,以同一来源调 resolve_op 必须能解析出命令;
         // 反向不要求——命令串可能永远可拼(如 `rustup update`),按钮隐藏即不可达。
-        // 操作时刻来源/uv 在场与检测时刻一致(found=false 时探不到路径,source=None)。
-        let check = |id: &str, caps: ToolchainCaps, source: Option<&str>, uv_on_path: bool| {
+        // 操作时刻来源与检测时刻一致(found=false 时探不到路径,source=None)。
+        let check = |id: &str, caps: ToolchainCaps, source: Option<&str>| {
             for (op, need_version) in [
                 ("install", false),
                 ("update", false),
@@ -1374,8 +1353,7 @@ mod tests {
                 ("install_version", true),
                 ("uninstall_version", true),
             ] {
-                let resolvable =
-                    resolve_op(id, op, need_version.then_some("22"), source, uv_on_path).is_ok();
+                let resolvable = resolve_op(id, op, need_version.then_some("22"), source).is_ok();
                 let visible = match op {
                     "install" => caps.can_install,
                     "update" => caps.can_update,
@@ -1384,117 +1362,61 @@ mod tests {
                 };
                 assert!(
                     !visible || resolvable,
-                    "{id} {op}: 按钮可见但命令不可解析(source={source:?}, uv={uv_on_path})"
+                    "{id} {op}: 按钮可见但命令不可解析(source={source:?})"
                 );
             }
         };
-        let ctx = |rustup_found: bool, uv_found: bool| FamilyCtx {
-            rustup_found,
-            uv_found,
-        };
         check(
             "uv",
-            caps_for("uv", true, Some("standalone"), &ctx(false, true)),
+            caps_for("uv", true, Some("standalone"), false),
             Some("standalone"),
-            true,
         );
-        check(
-            "rustup",
-            caps_for("rustup", true, None, &ctx(true, false)),
-            None,
-            false,
-        );
-        check(
-            "rustup",
-            caps_for("rustup", false, None, &ctx(false, false)),
-            None,
-            false,
-        );
+        check("uv", caps_for("uv", false, None, false), None);
+        check("rustup", caps_for("rustup", true, None, true), None);
+        check("rustup", caps_for("rustup", false, None, false), None);
         check(
             "rustc",
-            caps_for("rustc", true, Some("rustup"), &ctx(true, false)),
+            caps_for("rustc", true, Some("rustup"), true),
             Some("rustup"),
-            false,
         );
         check(
             "nvm",
-            caps_for("nvm", true, Some("standalone"), &ctx(false, false)),
+            caps_for("nvm", true, Some("standalone"), false),
             Some("standalone"),
-            false,
         );
         check(
             "fnm",
-            caps_for("fnm", true, Some("standalone"), &ctx(false, false)),
+            caps_for("fnm", true, Some("standalone"), false),
             Some("standalone"),
-            false,
         );
         check(
             "vp",
-            caps_for("vp", true, Some("standalone"), &ctx(false, false)),
+            caps_for("vp", true, Some("standalone"), false),
             Some("standalone"),
-            false,
         );
         check(
             "git",
-            caps_for("git", true, Some("standalone"), &ctx(false, false)),
+            caps_for("git", true, Some("standalone"), false),
             Some("standalone"),
-            false,
         );
-        check(
-            "gh",
-            caps_for("gh", false, None, &ctx(false, false)),
-            None,
-            false,
-        );
-        // python:版本区与安装按钮随 uv 在场开合
-        check(
-            "python",
-            caps_for("python", true, Some("standalone"), &ctx(false, true)),
-            Some("standalone"),
-            true,
-        );
-        check(
-            "python",
-            caps_for("python", false, None, &ctx(false, true)),
-            None,
-            true,
-        );
-        check(
-            "python",
-            caps_for("python", true, Some("standalone"), &ctx(false, false)),
-            Some("standalone"),
-            false,
-        );
+        check("gh", caps_for("gh", false, None, false), None);
     }
 
     #[test]
-    fn resolves_python_via_uv() {
-        // 安装=最新版设全局;use/装卸指定版本;--default 创建 python/python3 全局别名
+    fn resolves_uv_python_version_ops() {
+        // uv 行的版本级操作即 python 版本管理;--default 创建 python/python3 全局别名
         assert_eq!(
-            resolve_op("python", "install", None, None, true).unwrap(),
-            "uv python install --default"
-        );
-        assert_eq!(
-            resolve_op("python", "use", Some("3.12"), None, true).unwrap(),
+            resolve_op("uv", "use", Some("3.12"), None).unwrap(),
             "uv python install 3.12 --default"
         );
         assert_eq!(
-            resolve_op("python", "install_version", Some("3.11.9"), None, true).unwrap(),
+            resolve_op("uv", "install_version", Some("3.11.9"), None).unwrap(),
             "uv python install 3.11.9"
         );
         assert_eq!(
-            resolve_op("python", "uninstall_version", Some("3.10"), None, true).unwrap(),
+            resolve_op("uv", "uninstall_version", Some("3.10"), None).unwrap(),
             "uv python uninstall 3.10"
         );
-        // uv 不在场时全部不可操作;python 无行级更新/卸载
-        for op in ["install", "use", "install_version", "uninstall_version"] {
-            assert!(
-                resolve_op("python", op, Some("3.12"), None, false).is_err(),
-                "python {op} 无 uv 时应不可操作"
-            );
-        }
-        assert!(resolve_op("python", "update", None, None, true).is_err());
-        assert!(resolve_op("python", "uninstall", None, None, true).is_err());
     }
 
     #[test]
@@ -1517,6 +1439,20 @@ mod tests {
             ]
         );
         assert!(parse_uv_python_list("not-a-python-line").is_empty());
+    }
+
+    #[test]
+    fn parses_uv_python_remote() {
+        let out = parse_uv_python_remote(
+            "cpython-3.15.0a8-windows-x86_64-none                 <download available>\n\
+             cpython-3.14.4+freethreaded-windows-x86_64-none      <download available>\n\
+             cpython-3.14.4-windows-x86_64-none                   <download available>\n\
+             pypy-3.11.13-windows-x86_64-none                     <download available>\n",
+        );
+        let names: Vec<&str> = out.iter().map(|v| v.name.as_str()).collect();
+        // freethreaded 与普通版同号去重;预发布后缀原样保留(安装按全版本号请求)
+        assert_eq!(names, vec!["3.15.0a8", "3.14.4", "3.11.13"]);
+        assert!(parse_uv_python_remote("v22.11.0").is_empty());
     }
 
     #[test]
