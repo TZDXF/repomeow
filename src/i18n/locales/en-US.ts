@@ -689,8 +689,12 @@ export default {
     reportType: "Report type",
     typeDaily: "Daily",
     typeWeekly: "Weekly",
-    typeDailyHint:
-      "Generates the previous day's commit report at the set time (covers the full previous day, so overtime commits made after the run time are not missed)",
+    typeDailyHint: "Generates a commit report for the selected day at the set time",
+    dailyRangeLabel: "Report day",
+    dailyRangePrevious: "Previous day",
+    dailyRangeToday: "Same day",
+    dailyTodayHint:
+      'Commits made after the run time on the same day won\'t be included; choose "Previous day" if you often work late.',
     typeWeeklyHint:
       "By work week or a custom weekday range, fires at the set time on the period's end day, covering from the start day through that day.",
     timeLabel: "Run time",

@@ -34,6 +34,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { TimeField } from "@/components/ui/time-field";
 import TagCheckList from "@/components/tags/TagCheckList.vue";
 import { cmd } from "@/lib/tauri";
 import { useProjectsStore } from "@/stores/projects";
@@ -120,6 +121,7 @@ const editing = ref<ReportSchedule | null>(null);
 const formName = ref("");
 const formTime = ref("18:00");
 const formReportType = ref<"daily" | "weekly">("daily");
+const formPreviousDay = ref(true);
 const formWeekdayMode = ref<"everyday" | "weekdays" | "chineseWorkday">("everyday");
 const formWeeklyWorkweek = ref(true);
 const formWeeklyStart = ref(1);
@@ -173,6 +175,7 @@ function openCreate() {
   formName.value = "";
   formTime.value = "09:00";
   formReportType.value = "daily";
+  formPreviousDay.value = true;
   formWeekdayMode.value = "everyday";
   formWeeklyWorkweek.value = true;
   formWeeklyStart.value = 1;
@@ -190,6 +193,7 @@ function openEdit(s: ReportSchedule) {
   formName.value = s.name;
   formTime.value = s.timeOfDay;
   formReportType.value = s.reportType;
+  formPreviousDay.value = s.previousDay;
   formAuthorMode.value = s.authorMode;
   formProjectIds.value = [...s.projectIds];
   formTagIds.value = [...s.tagIds];
@@ -221,6 +225,7 @@ async function submit() {
     timeOfDay: formTime.value,
     weekdaysOnly: isDaily && formWeekdayMode.value === "weekdays",
     chineseWorkdayOnly: isDaily && formWeekdayMode.value === "chineseWorkday",
+    previousDay: formPreviousDay.value,
     weeklyWorkweek: formWeeklyWorkweek.value,
     weeklyStartWeekday: formWeeklyStart.value,
     weeklyEndWeekday: formWeeklyEnd.value,
@@ -336,7 +341,14 @@ watch(
               {{ s.timeOfDay }}
             </span>
             <span v-if="s.reportType === 'weekly'">{{ weeklyLabel(s) }}</span>
-            <span v-else>{{ weekdayLabel(weekdayMode(s)) }}</span>
+            <span v-else
+              >{{
+                s.previousDay
+                  ? t("reportSchedule.dailyRangePrevious")
+                  : t("reportSchedule.dailyRangeToday")
+              }}
+              · {{ weekdayLabel(weekdayMode(s)) }}</span
+            >
             <span
               >{{ t("reportSchedule.authorLabel") }}:
               {{
@@ -464,7 +476,33 @@ watch(
             <!-- time -->
             <div class="flex flex-col gap-1.5">
               <label class="text-sm font-medium">{{ t("reportSchedule.timeLabel") }}</label>
-              <Input v-model="formTime" type="time" class="h-8 w-28" />
+              <TimeField v-model="formTime" class="w-24" />
+            </div>
+
+            <!-- 日报范围(daily):前一天(次日生成)或当天 -->
+            <div v-if="formReportType === 'daily'" class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">{{ t("reportSchedule.dailyRangeLabel") }}</label>
+              <div class="flex gap-1.5">
+                <Button
+                  size="sm"
+                  class="h-7 text-xs"
+                  :variant="formPreviousDay ? 'default' : 'outline'"
+                  @click="formPreviousDay = true"
+                >
+                  {{ t("reportSchedule.dailyRangePrevious") }}
+                </Button>
+                <Button
+                  size="sm"
+                  class="h-7 text-xs"
+                  :variant="!formPreviousDay ? 'default' : 'outline'"
+                  @click="formPreviousDay = false"
+                >
+                  {{ t("reportSchedule.dailyRangeToday") }}
+                </Button>
+              </div>
+              <p v-if="!formPreviousDay" class="text-[11px] text-muted-foreground">
+                {{ t("reportSchedule.dailyTodayHint") }}
+              </p>
             </div>
 
             <!-- weekday filter(daily) -->

@@ -56,14 +56,14 @@ src-tauri/src/
   tray.rs             系统托盘图标 + 迷你弹窗窗口(MAIN_WINDOW_LABEL / TRAY_POPUP_LABEL)
   workday.rs          chinese-days 节假日数据拉取与缓存
   error.rs            AppError / AppResult,错误序列化为中文字符串传前端
-src-tauri/migrations/ SQL 迁移,NNN_name.sql(当前 001~006)
+src-tauri/migrations/ SQL 迁移,NNN_name.sql(当前 001~007)
 ```
 
 关键规则:
 
 1. **新增 Rust 命令**:在 `commands/*.rs` 实现(返回 `AppResult<T>`)后,必须在 `lib.rs` 的 `invoke_handler!` 里注册,前端经 `cmd<T>("snake_case 名", { camelCase 参数 })` 调用(Tauri 自动做参数名映射)。当前命令域:`project / git / script / docker / files / open / tag / walk / scan / report / overview / pin / account / java / toolchain / editor_icon / hidden / prompt / window`。
 2. **Tauri 插件与特性**(`src-tauri/Cargo.toml` + `lib.rs`):`tauri` 启用 `protocol-asset` / `tray-icon` / `image-png` 三个 feature;插件依次注册 `single-instance`(必须最先注册,二次启动聚焦已有窗口并退出新进程)、`opener` / `dialog` / `shell` / `store` / `http` / `updater` / `process` / `autostart`(自启时附 `--autostart` 参数,用于静默驻留托盘)。新增插件后请同步在这里登记。
-3. **数据库与持久化迁移**:SQLite 文件在 `~/.repomeow/projects.db`(Windows: `C:\Users\<user>\.repomeow\`)。以版本是否已正式发布或对外分发作为迁移边界:当前版本尚未发布时,同一开发版本内的 SQL、设置、配置及其他持久化格式变更可直接更新该版本的定义,无需为开发快照之间新增迁移;这不保证已有本地开发数据自动升级,必要时可重建开发数据库或配置。版本发布后,不得修改该版本已经使用的迁移文件;数据库结构变更需新增 `migrations/00N_xxx.sql` 并在 `db/migrations.rs` 中按 `PRAGMA user_version` 顺序应用、保证幂等,配置键名/类型/语义等变更也必须提供迁移或兼容处理。每个 SQL 迁移文件顶部必须用 `-- App version: x.y.z` 标明对应应用版本,并用 `-- Status: in development` 标记正在开发的版本;正式发布后改为 `-- Status: released`。当前已应用 001_init / 002_favorite / 003_pinned_commands / 004_git_account_token_invalid / 005_auto_pull / 006_schedule_tag_ids。
+3. **数据库与持久化迁移**:SQLite 文件在 `~/.repomeow/projects.db`(Windows: `C:\Users\<user>\.repomeow\`)。以版本是否已正式发布或对外分发作为迁移边界:当前版本尚未发布时,同一开发版本内的 SQL、设置、配置及其他持久化格式变更可直接更新该版本的定义,无需为开发快照之间新增迁移;这不保证已有本地开发数据自动升级,必要时可重建开发数据库或配置。版本发布后,不得修改该版本已经使用的迁移文件;数据库结构变更需新增 `migrations/00N_xxx.sql` 并在 `db/migrations.rs` 中按 `PRAGMA user_version` 顺序应用、保证幂等,配置键名/类型/语义等变更也必须提供迁移或兼容处理。每个 SQL 迁移文件顶部必须用 `-- App version: x.y.z` 标明对应应用版本,并用 `-- Status: in development` 标记正在开发的版本;正式发布后改为 `-- Status: released`。当前已应用 001_init / 002_favorite / 003_pinned_commands / 004_git_account_token_invalid / 005_auto_pull / 006_schedule_tag_ids / 007_daily_previous_day。
 4. **应用数据目录名 `.repomeow`** 在 Rust(`lib.rs` 的 `APP_DATA_DIR_NAME`)和前端(`stores/settings.ts`)各有一份常量,改动需同步。设置持久化走 `tauri-plugin-store` → `~/.repomeow/settings.json`。AI 提示词不走 store/SQLite,存 `~/.repomeow/prompts/*.md`(`commands/prompt.rs` 读写,文件缺失/为空 = 前端 `lib/ai-prompts.ts` 的内置默认模板)。可再生运行期缓存则放在**安装目录** `<exe 所在目录>/data/` 下(`lib.rs` 的 `runtime_data_root()`,dev 模式落在 `target/debug/data/`):编辑器真实图标缓存为 `data/icons/<kind>.png`(`commands/editor_icon.rs` 从本机 exe / .app 提取,settings 表 `editor_icon_cache` 记录源文件 mtime,变化才重提),chinese-days 节假日缓存为 `data/chinese-days.json`(`workday.rs`,TTL 30 天,缺失/过期自动重拉 CDN)。安装目录不可写时两者按既有语义静默降级(图标回退 lucide 通用图标,节假日数据不缓存)。
 5. **窗口与生命周期**(`lib.rs` + `tray.rs`):主窗口默认 `visible: false`,启动时统一 `show()`;带 `--autostart` 参数时保持隐藏仅驻留托盘。托盘迷你弹窗(`TRAY_POPUP_LABEL`)永不真正关闭,失焦自动收起;主窗口(`MAIN_WINDOW_LABEL`)关闭时按设置项 `closeAction`(默认 `tray` = 最小化到托盘,`exit` = 真退出整个进程)。新增窗口/托盘行为请同步登记。
 6. **后台任务**(`lib.rs` 的 `setup`):`scheduler::run(handle)` 跑日报定时调度,`commands::git::status_refresher_loop(handle)` 跑批量 git 状态推送(替代前端轮询),`commands::git::auto_pull_loop(handle)` 跑「跟踪更新」自动拉取(auto_pull=1 的项目 fetch 后 `git merge --ff-only @{u}`,无法快进即静默取消);变更这几个域时请检查启动序列是否仍按 notify / handle 顺序装配。

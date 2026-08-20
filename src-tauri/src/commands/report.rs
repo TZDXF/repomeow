@@ -44,6 +44,9 @@ pub struct ReportSchedule {
     /// 日报:仅中国工作日
     #[serde(default)]
     pub chinese_workday_only: bool,
+    /// 日报:true = 前一天(次日生成,默认);false = 当天
+    #[serde(default = "default_previous_day")]
+    pub previous_day: bool,
     /// 周报:true = 工作周模式(自动识别连续工作周期,末日触发);
     /// false = 自定义周几~周几(结束周几触发)
     #[serde(default = "default_weekly_workweek")]
@@ -66,6 +69,9 @@ fn default_author_mode() -> String {
 }
 fn default_report_type() -> String {
     "daily".into()
+}
+fn default_previous_day() -> bool {
+    true
 }
 fn default_weekly_workweek() -> bool {
     true
@@ -815,7 +821,7 @@ pub fn list_report_dates(
 
 const SCHEDULE_COLS: &str = "id, name, enabled, report_type, project_ids, tag_ids, author_mode, \
      time_of_day, weekdays_only, chinese_workday_only, weekly_workweek, weekly_start_weekday, \
-     weekly_end_weekday, last_run_at";
+     weekly_end_weekday, last_run_at, previous_day";
 
 fn map_schedule_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ReportSchedule> {
     let ids_json: String = r.get(4)?;
@@ -835,6 +841,7 @@ fn map_schedule_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ReportSchedule> {
         weekly_start_weekday: r.get::<_, u32>(11)?,
         weekly_end_weekday: r.get::<_, u32>(12)?,
         last_run_at: r.get(13)?,
+        previous_day: r.get::<_, i64>(14)? != 0,
     })
 }
 
@@ -862,8 +869,8 @@ pub fn save_report_schedules(
             tx.execute(
                 "INSERT INTO report_schedules (id, name, enabled, report_type, project_ids, tag_ids, author_mode,
                      time_of_day, weekdays_only, chinese_workday_only, weekly_workweek,
-                     weekly_start_weekday, weekly_end_weekday, last_run_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                     weekly_start_weekday, weekly_end_weekday, last_run_at, previous_day)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                 params![
                     s.id,
                     s.name,
@@ -879,6 +886,7 @@ pub fn save_report_schedules(
                     s.weekly_start_weekday,
                     s.weekly_end_weekday,
                     s.last_run_at,
+                    s.previous_day as i64,
                 ],
             )?;
         }

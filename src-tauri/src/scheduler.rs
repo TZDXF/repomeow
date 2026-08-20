@@ -403,10 +403,14 @@ fn is_work_week_last_day(today: NaiveDate, cache_root: &PathBuf) -> bool {
     is_work_week_last_day_with(today, &|d| workday::is_workday(d, cache_root))
 }
 
-/// 日报的报告日 = 触发日的前一天(次日生成,覆盖前一日全天,
-/// 避免执行时间之后的加班提交被漏掉)
-fn daily_report_date(fire_date: NaiveDate) -> NaiveDate {
-    fire_date - chrono::Duration::days(1)
+/// 日报的报告日:前一天(次日生成,默认)覆盖前一日全天,
+/// 避免执行时间之后的加班提交被漏掉;当天则为触发日本身
+fn daily_report_date(fire_date: NaiveDate, previous_day: bool) -> NaiveDate {
+    if previous_day {
+        fire_date - chrono::Duration::days(1)
+    } else {
+        fire_date
+    }
 }
 
 /// 日报星期过滤判定,作用于报告日(触发日前一天)而非触发日当天:
@@ -472,8 +476,8 @@ fn due_schedules(
                 return today.weekday().number_from_monday() == s.weekly_end_weekday;
             }
 
-            // 日报:次日生成,报告日为前一天;星期过滤按报告日判定
-            let report_date = daily_report_date(today);
+            // 日报:报告日 = 触发日前一天(次日生成)或当天;星期过滤按报告日判定
+            let report_date = daily_report_date(today, s.previous_day);
             daily_filters_allow(
                 report_date,
                 s.weekdays_only,
@@ -648,8 +652,8 @@ pub(crate) async fn fire_schedule(
             (start.format("%Y-%m-%d").to_string(), today_str.clone())
         }
     } else {
-        // 日报次日生成:覆盖前一天全天,执行时间之后的加班提交也能纳入
-        let report_date = daily_report_date(today);
+        // 日报按任务配置取前一天(次日生成,覆盖全天)或当天
+        let report_date = daily_report_date(today, schedule.previous_day);
         let date = report_date.format("%Y-%m-%d").to_string();
         (date.clone(), date)
     };
@@ -898,16 +902,19 @@ mod tests {
 
     #[test]
     fn daily_report_date_is_previous_day() {
-        // 常规:8/20 触发 → 报告日 8/19
+        // 次日生成(默认):8/20 触发 → 报告日 8/19
         assert_eq!(
-            super::daily_report_date(chrono::NaiveDate::from_ymd_opt(2026, 8, 20).unwrap()),
+            super::daily_report_date(chrono::NaiveDate::from_ymd_opt(2026, 8, 20).unwrap(), true),
             chrono::NaiveDate::from_ymd_opt(2026, 8, 19).unwrap()
         );
         // 跨月:8/1 触发 → 报告日 7/31
         assert_eq!(
-            super::daily_report_date(chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap()),
+            super::daily_report_date(chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap(), true),
             chrono::NaiveDate::from_ymd_opt(2026, 7, 31).unwrap()
         );
+        // 当天生成:报告日 = 触发日
+        let fire = chrono::NaiveDate::from_ymd_opt(2026, 8, 20).unwrap();
+        assert_eq!(super::daily_report_date(fire, false), fire);
     }
 
     #[test]

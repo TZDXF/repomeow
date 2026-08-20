@@ -568,7 +568,7 @@ export interface ReportSchedule {
   id: string;
   name: string;
   enabled: boolean;
-  /** 报告类型:日报(前一天,次日生成) | 周报(工作周,最后一个工作日触发) */
+  /** 报告类型:日报(前一天或当天) | 周报(工作周,最后一个工作日触发) */
   reportType: ReportPeriodType;
   projectIds: number[];
   /** 按标签动态包含:执行时反查带有任一选中标签的未归档项目,与 projectIds 取并集 */
@@ -579,6 +579,8 @@ export interface ReportSchedule {
   weekdaysOnly: boolean;
   /** 日报:仅中国工作日 */
   chineseWorkdayOnly: boolean;
+  /** 日报:true = 前一天(次日生成,默认);false = 当天 */
+  previousDay: boolean;
   /** 周报:true = 工作周模式(自动识别连续工作周期,末日触发);false = 自定义周几~周几 */
   weeklyWorkweek: boolean;
   /** 周报自定义:范围起始周几(1=周一 .. 7=周日) */
