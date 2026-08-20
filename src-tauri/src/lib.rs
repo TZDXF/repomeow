@@ -192,6 +192,7 @@ pub fn run() {
             commands::script::delete_custom_command,
             commands::script::run_in_terminal,
             commands::files::read_readme,
+            commands::files::has_readme,
             commands::files::save_text_file,
             commands::files::list_project_files,
             commands::files::search_project_files,

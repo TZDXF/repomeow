@@ -49,6 +49,13 @@ fn find_file(dir: &Path, candidates: &[&str]) -> Option<String> {
         .map(|name| name.to_string())
 }
 
+/// 仅探测项目根目录是否存在 README(不读内容),供前端决定是否展示 README 入口按钮
+#[tauri::command]
+pub fn has_readme(path: String) -> AppResult<bool> {
+    ensure_dir(&path)?;
+    Ok(find_file(Path::new(&path), README_CANDIDATES).is_some())
+}
+
 /// 读取项目 README;不存在时返回 None
 #[tauri::command]
 pub fn read_readme(path: String) -> AppResult<Option<ReadmeContent>> {

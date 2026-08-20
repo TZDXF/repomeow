@@ -38,11 +38,8 @@ const mainWorktree = computed(() => worktrees.value.find((w) => w.is_main));
 /** 主工作区之外的 linked worktree */
 const linkedWorktrees = computed(() => worktrees.value.filter((w) => !w.is_main));
 
-/** 触发按钮显示名:主工作区显示其分支名,worktree 显示分支名/短 hash */
+/** 触发按钮显示名:仅选中 linked worktree 时展示其分支名/短 hash,主工作区只显示图标 */
 const currentLabel = computed(() => {
-  if (!path.value) {
-    return mainWorktree.value?.branch ?? props.project.git?.branch ?? t("git.worktree.main");
-  }
   const w = worktrees.value.find((x) => x.path === path.value);
   // 列表尚未加载到时先用通用文案兜底(加载完成会校验并可能回退主工作区)
   if (!w) return t("git.worktree.workspace");
@@ -93,14 +90,13 @@ defineExpose({ reload: load });
     @click="emit('manage')"
   >
     <FolderGit2 class="h-3.5 w-3.5" />
-    <span class="max-w-48 truncate">{{ currentLabel }}</span>
     <Settings2 class="h-3 w-3 opacity-60" />
   </Button>
   <DropdownMenu v-else v-model:open="open">
     <DropdownMenuTrigger as-child>
       <Button variant="outline" size="xs" :title="t('git.worktree.switchWorkspace')">
         <FolderGit2 class="h-3.5 w-3.5" />
-        <span class="max-w-48 truncate">{{ currentLabel }}</span>
+        <span v-if="path" class="max-w-48 truncate">{{ currentLabel }}</span>
         <ChevronDown class="h-3 w-3 opacity-60" />
       </Button>
     </DropdownMenuTrigger>

@@ -29,6 +29,7 @@ import DailyReportDialog from "@/components/report/DailyReportDialog.vue";
 import CustomCommands from "@/components/scripts/CustomCommands.vue";
 import PackageScripts from "@/components/scripts/PackageScripts.vue";
 import TagPicker from "@/components/tags/TagPicker.vue";
+import { cmd } from "@/lib/tauri";
 import { useProjectsStore } from "@/stores/projects";
 import type { Project } from "@/types";
 
@@ -70,6 +71,24 @@ watch(
 
 // --- README 侧边栏 ---
 const readmeOpen = ref(false);
+// 项目根目录无 README 时不展示入口按钮;探测以 path 为凭据,避免切换项目时旧请求回写
+const hasReadme = ref(false);
+watch(
+  () => (project.value?.path_exists ? project.value.path : null),
+  async (path) => {
+    if (!path) {
+      hasReadme.value = false;
+      return;
+    }
+    try {
+      const has = await cmd<boolean>("has_readme", { path });
+      if (project.value?.path === path) hasReadme.value = has;
+    } catch {
+      if (project.value?.path === path) hasReadme.value = false;
+    }
+  },
+  { immediate: true },
+);
 
 // --- AI 日报弹窗 ---
 const reportOpen = ref(false);
@@ -276,7 +295,12 @@ async function saveDesc() {
             <FileText class="h-4 w-4" />
             {{ t("ai.entry") }}
           </Button>
-          <Button v-if="project.path_exists" variant="outline" size="sm" @click="readmeOpen = true">
+          <Button
+            v-if="project.path_exists && hasReadme"
+            variant="outline"
+            size="sm"
+            @click="readmeOpen = true"
+          >
             <BookOpen class="h-4 w-4" />
             {{ t("readme.title") }}
           </Button>

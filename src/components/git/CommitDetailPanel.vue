@@ -231,11 +231,6 @@ function toggleFolder(fullPath: string) {
 // hunk 头:非截断 diff 整文件已铺开,逐行/并排视图都不渲染(见 displayLines);截断 diff(>10 万行,
 // libgit2 在 @@ 上报畸形头如 2-)仍展示——此时它是定位"被截断的变更段"的唯一线索。
 
-/** 整文件单边变更(新增/删除):所有行同为 + 或 -,行首标记是噪音,逐行视图去掉 */
-const wholeFileChange = computed(
-  () => selectedFile.value?.status === "A" || selectedFile.value?.status === "D",
-);
-
 /** 超过该行数的连续未更改区间才折叠 */
 const FOLD_MIN = 12;
 /** 折叠区间两端各保留的上下文行数 */
@@ -1419,11 +1414,8 @@ onBeforeUnmount(() => {
                   {{ line.newLine ?? "" }}
                 </span>
                 <span class="whitespace-pre">
-                  <template v-if="hlOf(line) && !wholeFileChange">{{
-                    line.text.charAt(0)
-                  }}</template>
                   <span v-if="hlOf(line)" class="diff-hl" v-html="hlOf(line)" />
-                  <template v-else>{{ wholeFileChange ? line.text.slice(1) : line.text }}</template>
+                  <template v-else>{{ line.text.slice(1) }}</template>
                 </span>
               </div>
             </template>
