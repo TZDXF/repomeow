@@ -613,8 +613,13 @@ watch(
                     </span>
                   </span>
                   <Badge
-                    :variant="r.periodType === 'weekly' ? 'default' : 'outline'"
+                    variant="outline"
                     class="text-[11px] shrink-0"
+                    :class="
+                      r.periodType === 'weekly'
+                        ? 'border-violet-500/40 bg-violet-500/10 text-violet-600 dark:text-violet-400'
+                        : ''
+                    "
                   >
                     {{
                       t(
