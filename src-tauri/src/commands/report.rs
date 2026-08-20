@@ -661,6 +661,38 @@ fn parse_date(s: &str) -> AppResult<NaiveDate> {
         .map_err(|_| AppError::coded(ErrorCode::ReportInvalidDate, s.to_string()))
 }
 
+/// 不晚于 `to` 的第一个工作日(含 `from` 本身);找不到时返回大于 `to` 的日期
+fn first_workday_from(mut d: NaiveDate, to: NaiveDate, is_workday: &dyn Fn(NaiveDate) -> bool) -> NaiveDate {
+    while d <= to && !is_workday(d) {
+        d += chrono::Duration::days(1);
+    }
+    d
+}
+
+/// 按工作周(连续工作周期)把 [from, to] 切段:工作日且为工作周末日时闭合一段,
+/// 末尾不足一周的收尾。每段起点对齐到段内第一个工作日,避免上一工作周的
+/// 周末(周六/周日)挂到下一段开头。
+fn plan_weekly_ranges(
+    from: NaiveDate,
+    to: NaiveDate,
+    is_workday: &dyn Fn(NaiveDate) -> bool,
+) -> Vec<(NaiveDate, NaiveDate)> {
+    let mut ranges = Vec::new();
+    let mut seg_start = first_workday_from(from, to, is_workday);
+    let mut d = from;
+    while d <= to {
+        if crate::scheduler::is_work_week_last_day_with(d, is_workday) {
+            ranges.push((seg_start, d));
+            seg_start = first_workday_from(d + chrono::Duration::days(1), to, is_workday);
+        }
+        d += chrono::Duration::days(1);
+    }
+    if seg_start <= to {
+        ranges.push((seg_start, to));
+    }
+    ranges
+}
+
 /// 规划批量生成的时段列表。
 /// * daily: 枚举范围内每一天,is_workday 标注是否工作日(过滤模式由前端决定)
 /// * weekly: 按工作周(连续工作周期)切段,复用 scheduler 的工作周算法
@@ -690,28 +722,14 @@ pub async fn plan_batch_report_ranges(
                     BATCH_WEEKLY_MAX_DAYS.to_string(),
                 ));
             }
-            // 逐日扫描,工作日且为工作周末日时闭合一段;末尾不足一周的收尾
-            let mut ranges = Vec::new();
-            let mut seg_start = from;
-            let mut d = from;
-            while d <= to {
-                if crate::scheduler::is_work_week_last_day_with(d, &is_workday) {
-                    ranges.push(BatchRange {
-                        date_from: fmt(seg_start),
-                        date_to: fmt(d),
-                        is_workday: true,
-                    });
-                    seg_start = d + chrono::Duration::days(1);
-                }
-                d += chrono::Duration::days(1);
-            }
-            if seg_start <= to {
-                ranges.push(BatchRange {
-                    date_from: fmt(seg_start),
-                    date_to: fmt(to),
+            let ranges = plan_weekly_ranges(from, to, &is_workday)
+                .into_iter()
+                .map(|(seg_from, seg_to)| BatchRange {
+                    date_from: fmt(seg_from),
+                    date_to: fmt(seg_to),
                     is_workday: true,
-                });
-            }
+                })
+                .collect();
             Ok(ranges)
         } else {
             if span > BATCH_DAILY_MAX_DAYS {
@@ -1497,5 +1515,106 @@ mod tests {
         let exact = list_report_history_impl(&conn, None, None, Some(1)).unwrap();
         assert_eq!(exact.len(), 1);
         assert_eq!(exact[0].project_ids, vec![1]);
+    }
+
+    // ── plan_weekly_ranges ──────────────────────────────────────────────
+
+    fn d(s: &str) -> NaiveDate {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    /// 普通周一~周五工作日
+    fn weekday_only(date: NaiveDate) -> bool {
+        date.weekday().num_days_from_monday() < 5
+    }
+
+    fn range_strs(ranges: &[(NaiveDate, NaiveDate)]) -> Vec<(String, String)> {
+        ranges
+            .iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn weekly_ranges_never_start_on_weekend() {
+        // 跨两个完整周:每段都应 周一 ~ 周五,周六日不挂到下一段开头
+        let ranges = plan_weekly_ranges(d("2026-08-03"), d("2026-08-16"), &weekday_only);
+        assert_eq!(
+            range_strs(&ranges),
+            vec![
+                ("2026-08-03".to_string(), "2026-08-07".to_string()),
+                ("2026-08-10".to_string(), "2026-08-14".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn weekly_ranges_skip_trailing_weekend() {
+        // 范围结束于周末:周五闭合后不产生 周六~周日 的残余段
+        let ranges = plan_weekly_ranges(d("2026-08-03"), d("2026-08-09"), &weekday_only);
+        assert_eq!(
+            range_strs(&ranges),
+            vec![("2026-08-03".to_string(), "2026-08-07".to_string())]
+        );
+    }
+
+    #[test]
+    fn weekly_ranges_trim_leading_weekend() {
+        // 起点落在周六:首段对齐到周一
+        let ranges = plan_weekly_ranges(d("2026-08-08"), d("2026-08-16"), &weekday_only);
+        assert_eq!(
+            range_strs(&ranges),
+            vec![("2026-08-10".to_string(), "2026-08-14".to_string())]
+        );
+    }
+
+    #[test]
+    fn weekly_ranges_no_workday_yields_empty() {
+        // 范围内无工作日(纯周末):不产生任何段
+        let ranges = plan_weekly_ranges(d("2026-08-08"), d("2026-08-09"), &weekday_only);
+        assert!(ranges.is_empty());
+    }
+
+    #[test]
+    fn weekly_ranges_adjusted_sunday_starts_next_segment() {
+        // 2026-08-09(周日)调休上班且下周有工作日 → 前挂为下一段起点
+        let adjusted = |date: NaiveDate| weekday_only(date) || date == d("2026-08-09");
+        let ranges = plan_weekly_ranges(d("2026-08-03"), d("2026-08-16"), &adjusted);
+        assert_eq!(
+            range_strs(&ranges),
+            vec![
+                ("2026-08-03".to_string(), "2026-08-07".to_string()),
+                ("2026-08-09".to_string(), "2026-08-14".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn weekly_ranges_midweek_holiday_does_not_split() {
+        // 周三(2026-08-12)法定节假日:工作周不中断;起点落在节假日时顺延到下一个工作日
+        let holiday = |date: NaiveDate| weekday_only(date) && date != d("2026-08-12");
+        let ranges = plan_weekly_ranges(d("2026-08-10"), d("2026-08-16"), &holiday);
+        assert_eq!(
+            range_strs(&ranges),
+            vec![("2026-08-10".to_string(), "2026-08-14".to_string())]
+        );
+        let ranges = plan_weekly_ranges(d("2026-08-12"), d("2026-08-16"), &holiday);
+        assert_eq!(
+            range_strs(&ranges),
+            vec![("2026-08-13".to_string(), "2026-08-14".to_string())]
+        );
+    }
+
+    #[test]
+    fn weekly_ranges_partial_tail_week() {
+        // 末尾不足一周:周五闭合后残余的周一~周三收尾
+        let ranges = plan_weekly_ranges(d("2026-08-03"), d("2026-08-12"), &weekday_only);
+        assert_eq!(
+            range_strs(&ranges),
+            vec![
+                ("2026-08-03".to_string(), "2026-08-07".to_string()),
+                ("2026-08-10".to_string(), "2026-08-12".to_string()),
+            ]
+        );
     }
 }
