@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
-import { GitBranch } from "@lucide/vue";
+import { GitBranch, Radar } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import FavoriteToggle from "@/components/project/FavoriteToggle.vue";
 import ProjectActionsMenu from "@/components/project/ProjectActionsMenu.vue";
@@ -37,7 +37,12 @@ function open(id: number) {
         @click="open(p.id)"
       >
         <td class="max-w-48 px-4 py-2">
-          <span class="block truncate font-medium" :title="p.name">{{ p.name }}</span>
+          <span class="flex items-center gap-1.5 font-medium">
+            <span class="min-w-0 truncate" :title="p.name">{{ p.name }}</span>
+            <span v-if="p.auto_pull" class="shrink-0" :title="t('git.tracking.hint')">
+              <Radar class="h-3 w-3 text-muted-foreground" />
+            </span>
+          </span>
           <span
             v-if="p.description"
             class="block truncate text-xs text-muted-foreground"

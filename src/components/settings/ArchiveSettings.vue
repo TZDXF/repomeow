@@ -72,7 +72,7 @@ async function confirmAction() {
 </script>
 
 <template>
-  <section>
+  <section class="flex h-full flex-col">
     <h2 class="text-base font-semibold">{{ t("settings.archive.title") }}</h2>
     <p class="mt-1 text-sm text-muted-foreground">
       {{ t("settings.archive.description") }}
@@ -89,7 +89,8 @@ async function confirmAction() {
       />
     </div>
 
-    <ScrollArea class="mt-3 max-h-96">
+    <!-- 列表区跟随窗口高度:占满剩余空间,内部滚动 -->
+    <ScrollArea class="mt-3 min-h-0 flex-1">
       <div class="flex flex-col gap-1">
         <div
           v-for="p in filteredProjects"

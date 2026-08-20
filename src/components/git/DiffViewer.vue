@@ -666,11 +666,7 @@ onBeforeUnmount(() => {
       <span class="min-w-0 flex-1 truncate font-mono text-xs" :title="filePath ?? undefined">
         {{ filePath ?? "" }}
       </span>
-      <Badge
-        v-if="landedDiff?.truncated"
-        variant="outline"
-        class="h-5 shrink-0 px-1.5 text-[10px]"
-      >
+      <Badge v-if="landedDiff?.truncated" variant="outline" class="h-5 shrink-0 px-1.5 text-[10px]">
         {{ t("git.graph.detail.diffTruncated") }}
       </Badge>
       <template v-if="landedDiff">

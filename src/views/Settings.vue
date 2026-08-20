@@ -120,7 +120,8 @@ const active = computed(() => categories.find((c) => c.id === activeId.value) ??
       </nav>
 
       <ScrollArea class="flex-1">
-        <div class="max-w-xl p-6">
+        <!-- h-full + flex-col:内容矮于窗口时撑满,供列表型设置页(跟踪/归档)的列表区 flex-1 跟随窗口高度 -->
+        <div class="flex h-full max-w-xl flex-col p-6">
           <component :is="active.component" />
         </div>
       </ScrollArea>

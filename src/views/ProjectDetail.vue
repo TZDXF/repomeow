@@ -10,6 +10,7 @@ import {
   FolderSync,
   FolderTree,
   Pencil,
+  Radar,
   Star,
   TriangleAlert,
   Waypoints,
@@ -261,6 +262,14 @@ async function saveDesc() {
             @click="startEditName"
           >
             <span class="truncate">{{ project.name }}</span>
+            <span
+              v-if="project.auto_pull"
+              class="shrink-0"
+              :title="t('git.tracking.hint')"
+              @click.stop
+            >
+              <Radar class="h-3.5 w-3.5 text-muted-foreground" />
+            </span>
             <Pencil
               class="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
             />

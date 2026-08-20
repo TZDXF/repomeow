@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
-import { GitBranch } from "@lucide/vue";
+import { GitBranch, Radar } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import FavoriteToggle from "@/components/project/FavoriteToggle.vue";
 import ProjectActionsMenu from "@/components/project/ProjectActionsMenu.vue";
@@ -25,6 +25,9 @@ function open() {
     <div class="flex items-center justify-between gap-2">
       <span class="flex min-w-0 items-center gap-1.5">
         <span class="truncate text-sm font-medium">{{ project.name }}</span>
+        <span v-if="project.auto_pull" class="shrink-0" :title="t('git.tracking.hint')">
+          <Radar class="h-3.5 w-3.5 text-muted-foreground" />
+        </span>
         <Badge
           v-if="!project.path_exists"
           variant="destructive"

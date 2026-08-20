@@ -683,10 +683,14 @@ export default {
     nameLabel: "Task name",
     namePlaceholder: "Optional, leave blank for default name",
     projectsLabel: "Select projects",
+    tagIncludeLabel: "Include by tags",
+    tagIncludeHint:
+      "Projects with any selected tag are included automatically (union with the projects checked below); newly tagged projects take effect without editing this task.",
     reportType: "Report type",
     typeDaily: "Daily",
     typeWeekly: "Weekly",
-    typeDailyHint: "Generates a daily report of the current day's commits at the set time",
+    typeDailyHint:
+      "Generates the previous day's commit report at the set time (covers the full previous day, so overtime commits made after the run time are not missed)",
     typeWeeklyHint:
       "By work week or a custom weekday range, fires at the set time on the period's end day, covering from the start day through that day.",
     timeLabel: "Run time",

@@ -117,7 +117,7 @@ function uninstall(tool: ToolchainStatus) {
   void run(tool.id, "uninstall");
 }
 
-  // ---- 版本管理(nvm/fnm/vp/uv) ───────────────────────────────────────────
+// ---- 版本管理(nvm/fnm/vp/uv) ───────────────────────────────────────────
 
 /** 各版本管理器行内的「安装指定版本」输入框 */
 const versionInputs = ref<Record<string, string>>({});
