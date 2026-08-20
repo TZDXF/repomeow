@@ -2491,6 +2491,28 @@ fn commit_files_blocking(path: &str, hash: &str) -> AppResult<Vec<GitCommitFile>
     Ok(files)
 }
 
+/// 单文件 diff 的展示选项(commit / worktree 单文件 diff 共用):
+/// 全量上下文(完整文件内容,前端并排/逐行视图自行折叠未更改区间)+ 忽略空白差异。
+/// context_lines 拉满:u32::MAX 会使 libgit2 的 hunk 边界计算溢出,
+/// 产生 @@ -4,2- +4 @@ 畸形头且丢上下文;100k 已足够——行数超 10 万的文件
+/// 体积必然超过 COMMIT_DIFF_MAX_CHARS 字符上限,会先被截断
+fn apply_display_opts(opts: &mut DiffOptions, ignore_ws: Option<&str>) {
+    opts.context_lines(100_000);
+    // 忽略空白差异:eol=仅行尾 / change=空白数量变化 / all=全部空白(对应 git 的 -b / -w 语义)
+    match ignore_ws {
+        Some("eol") => {
+            opts.ignore_whitespace_eol(true);
+        }
+        Some("change") => {
+            opts.ignore_whitespace_change(true);
+        }
+        Some("all") => {
+            opts.ignore_whitespace(true);
+        }
+        _ => {}
+    }
+}
+
 /// 读取某次提交中单个文件的 diff(提交详情面板用)。
 /// 重命名时新旧路径都作为 pathspec 传入。超长按字符截断(二进制 diff 天然很短)
 /// context_lines 拉满:前端并排/逐行视图均展示完整文件内容(未更改区间由前端折叠)
@@ -2521,25 +2543,9 @@ fn commit_file_diff_blocking(
     };
     let Some(diff) = commit_diff(&repo, hash, |opts| {
         opts.pathspec(file_path);
-        // 全量上下文(完整文件内容):u32::MAX 会使 libgit2 的 hunk 边界计算溢出,
-        // 产生 @@ -4,2- +4 @@ 畸形头且丢上下文;100k 已足够——行数超 10 万的文件
-        // 体积必然超过 COMMIT_DIFF_MAX_CHARS 字符上限,会先被截断
-        opts.context_lines(100_000);
+        apply_display_opts(opts, ignore_ws);
         if let Some(old) = old_path {
             opts.pathspec(old);
-        }
-        // 忽略空白差异:eol=仅行尾 / change=空白数量变化 / all=全部空白(对应 git 的 -b / -w 语义)
-        match ignore_ws {
-            Some("eol") => {
-                opts.ignore_whitespace_eol(true);
-            }
-            Some("change") => {
-                opts.ignore_whitespace_change(true);
-            }
-            Some("all") => {
-                opts.ignore_whitespace(true);
-            }
-            _ => {}
         }
     })?
     else {
@@ -2674,26 +2680,33 @@ fn worktree_files_blocking(path: &str) -> AppResult<Vec<GitWorktreeFile>> {
 }
 
 /// 读取工作区单个待提交文件的 diff(相对 HEAD;未跟踪文件为全新增补丁)。
-/// 重命名时新旧路径都作为 pathspec 传入。超长按字符截断
+/// 重命名时新旧路径都作为 pathspec 传入。超长按字符截断。
+/// context_lines 与 ignore_ws 语义同 git_commit_file_diff(前端 DiffViewer 共用展示语义)
 #[tauri::command]
 pub async fn git_worktree_file_diff(
     path: String,
     file_path: String,
     old_path: Option<String>,
+    ignore_ws: Option<String>,
 ) -> AppResult<GitCommitFileDiff> {
-    run_blocking(move || worktree_file_diff_blocking(&path, &file_path, old_path.as_deref())).await
+    run_blocking(move || {
+        worktree_file_diff_blocking(&path, &file_path, old_path.as_deref(), ignore_ws.as_deref())
+    })
+    .await
 }
 
 fn worktree_file_diff_blocking(
     path: &str,
     file_path: &str,
     old_path: Option<&str>,
+    ignore_ws: Option<&str>,
 ) -> AppResult<GitCommitFileDiff> {
     let Some(repo) = open_repo(path)? else {
         return Err(not_a_repo());
     };
     let diff = worktree_diff(&repo, |opts| {
         opts.pathspec(file_path);
+        apply_display_opts(opts, ignore_ws);
         if let Some(old) = old_path {
             opts.pathspec(old);
         }
@@ -3412,7 +3425,7 @@ mod tests {
         assert!(by_path["b.txt"].additions.unwrap_or(0) > 0);
 
         // 未跟踪文件的单文件 diff 是全新增补丁
-        let d = worktree_file_diff_blocking(dir.to_str().unwrap(), "b.txt", None).unwrap();
+        let d = worktree_file_diff_blocking(dir.to_str().unwrap(), "b.txt", None, None).unwrap();
         assert!(d.diff.contains("+b"), "未跟踪文件 diff: {}", d.diff);
 
         let _ = fs::remove_dir_all(&dir);
@@ -3444,7 +3457,7 @@ mod tests {
         assert!(by_path["sub/b.txt"].untracked);
 
         // 单文件 diff 同样可用
-        let d = worktree_file_diff_blocking(dir.to_str().unwrap(), "a.txt", None).unwrap();
+        let d = worktree_file_diff_blocking(dir.to_str().unwrap(), "a.txt", None, None).unwrap();
         assert!(d.diff.contains("+a"), "未出生 HEAD 单文件 diff: {}", d.diff);
 
         let _ = fs::remove_dir_all(&dir);

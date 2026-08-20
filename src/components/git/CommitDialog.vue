@@ -7,13 +7,12 @@ import {
   ChevronDown,
   ChevronRight,
   FileDiff,
-  Folder,
   FolderTree,
   List,
   Loader2,
   Sparkles,
 } from "@lucide/vue";
-import { Badge } from "@/components/ui/badge";
+import { Icon } from "@iconify/vue";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -23,9 +22,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import DiffViewer from "@/components/git/DiffViewer.vue";
 import { generateCommitMessage } from "@/lib/ai";
-import { parseDiff } from "@/lib/diff";
+import { fileIcon, folderIcon } from "@/lib/file-icons";
 import { buildFileTree, type FileTreeNode } from "@/lib/file-tree";
+import { openPathWith, sortOpenWithOptions } from "@/lib/open-with";
 import { baseName } from "@/lib/path";
 import { cmd } from "@/lib/tauri";
 import { useProjectsStore } from "@/stores/projects";
@@ -57,6 +58,12 @@ const selectedPath = ref<string | null>(null);
 const diff = ref<GitCommitFileDiff | null>(null);
 const diffLoading = ref(false);
 const diffError = ref("");
+
+/** 忽略空白差异模式(与提交详情面板同键同源):none 不忽略 / eol 行尾 / change 空白数量变化 / all 全部空白 */
+const ignoreWs = useLocalStorage<"none" | "eol" | "change" | "all">(
+  "repomeow:commit-diff-ignore-ws",
+  "none",
+);
 
 // --- 文件勾选:可提交子集;未跟踪文件仅在勾选"包含未跟踪文件"时可提交 ---
 const checkedPaths = ref(new Set<string>());
@@ -237,8 +244,12 @@ function toggleFolderChecked(node: FileTreeNode<GitWorktreeFile>) {
 
 /** 平铺模式只显示文件名(完整路径放 title);baseName 走 @/lib/path */
 
-const diffLines = computed(() => (diff.value ? parseDiff(diff.value.diff) : []));
 const selectedFile = computed(() => files.value.find((f) => f.path === selectedPath.value) ?? null);
+const canOpenInIde = computed(() => !!selectedFile.value && selectedFile.value.status !== "D");
+/** 并排是否适用:新增/删除文件一侧必然全空,强制逐行视图(与提交详情面板一致) */
+const splitApplicable = computed(
+  () => selectedFile.value?.status !== "A" && selectedFile.value?.status !== "D",
+);
 
 async function loadChanges() {
   filesLoading.value = true;
@@ -266,24 +277,48 @@ async function loadChanges() {
   }
 }
 
-async function selectFile(file: GitWorktreeFile) {
-  if (selectedPath.value === file.path && diff.value) {
+async function selectFile(file: GitWorktreeFile, force = false) {
+  if (!force && selectedPath.value === file.path && diff.value) {
     return;
   }
   selectedPath.value = file.path;
-  diffLoading.value = true;
+  // 切文件不清空旧 diff、不转圈:旧内容保留到新结果落地后由 DiffViewer 同帧替换(与提交详情面板一致);
+  // 仅首次加载(没有任何旧内容)时 diffLoading 才为 true,给空区域一个转圈
+  diffLoading.value = !diff.value;
   diffError.value = "";
-  diff.value = null;
   try {
-    diff.value = await cmd<GitCommitFileDiff>("git_worktree_file_diff", {
+    const result = await cmd<GitCommitFileDiff>("git_worktree_file_diff", {
       path: props.project.path,
       filePath: file.path,
       oldPath: file.old_path,
+      ignoreWs: ignoreWs.value === "none" ? null : ignoreWs.value,
     });
+    // 快速连点 A→B:旧响应可能晚于新选择返回,不做 stale 校验会把 A 的 diff 写到 B 的标题下
+    if (selectedPath.value !== file.path) return;
+    diff.value = result;
   } catch (e) {
+    if (selectedPath.value !== file.path) return;
     diffError.value = String(e);
   } finally {
-    diffLoading.value = false;
+    if (selectedPath.value === file.path) diffLoading.value = false;
+  }
+}
+
+// 忽略空白模式变化:按新模式重取当前文件 diff(行集会变)
+watch(ignoreWs, () => {
+  if (selectedFile.value) void selectFile(selectedFile.value, true);
+});
+
+/** 在 IDE 打开(默认编辑器;未跟踪文件工作区已存在,同样可打开) */
+async function openFile(file: GitWorktreeFile) {
+  const option = sortOpenWithOptions(settings.openWithOrder, settings.customOpenWith).find(
+    (candidate) => candidate.id === settings.defaultOpenWith,
+  );
+  if (!option) return;
+  try {
+    await openPathWith(option, `${props.project.path}/${file.path}`);
+  } catch (e) {
+    toast.error(String(e));
   }
 }
 
@@ -494,7 +529,11 @@ async function generate() {
                   >
                     {{ file.untracked ? "U" : file.status }}
                   </span>
-                  <span class="min-w-0 flex-1 truncate font-mono">{{ baseName(file.path) }}</span>
+                  <Icon :icon="fileIcon(baseName(file.path))" class="h-3.5 w-3.5 shrink-0" />
+                  <span class="min-w-0 flex-1 truncate font-mono">
+                    <template v-if="file.old_path">{{ baseName(file.old_path) }} → </template
+                    >{{ baseName(file.path) }}
+                  </span>
                   <span
                     v-if="file.additions != null"
                     class="shrink-0 text-green-600 dark:text-green-400"
@@ -554,7 +593,10 @@ async function generate() {
                       @click.stop
                       @change="toggleFolderChecked(row.node)"
                     />
-                    <Folder class="h-3 w-3 shrink-0 text-muted-foreground" />
+                    <Icon
+                      :icon="folderIcon(row.node.name, !collapsedFolders.has(row.node.fullPath))"
+                      class="h-3.5 w-3.5 shrink-0"
+                    />
                   </template>
                   <template v-else>
                     <input
@@ -572,6 +614,7 @@ async function generate() {
                     >
                       {{ row.node.file.untracked ? "U" : row.node.file.status }}
                     </span>
+                    <Icon :icon="fileIcon(row.node.name)" class="h-3.5 w-3.5 shrink-0" />
                   </template>
                   <span class="min-w-0 flex-1 truncate font-mono">{{ row.node.name }}</span>
                   <template v-if="row.node.file">
@@ -593,74 +636,17 @@ async function generate() {
             </div>
           </div>
 
-          <!-- diff 区 -->
-          <div class="flex min-w-0 flex-1 flex-col">
-            <div class="flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
-              <span class="min-w-0 flex-1 truncate font-mono text-xs" :title="selectedFile?.path">
-                {{ selectedFile?.path ?? "" }}
-              </span>
-              <Badge
-                v-if="diff?.truncated"
-                variant="outline"
-                class="h-5 shrink-0 px-1.5 text-[10px]"
-              >
-                {{ t("git.graph.detail.diffTruncated") }}
-              </Badge>
-            </div>
-            <div class="min-h-0 flex-1 overflow-auto">
-              <div v-if="diffLoading" class="flex h-full items-center justify-center">
-                <Loader2 class="h-4 w-4 animate-spin text-muted-foreground" />
-              </div>
-              <p v-else-if="diffError" class="px-3 py-2 text-xs text-destructive">
-                {{ t("git.graph.detail.diffLoadFailed") }}:{{ diffError }}
-              </p>
-              <p
-                v-else-if="!selectedPath"
-                class="flex h-full items-center justify-center text-xs text-muted-foreground"
-              >
-                {{ t("git.graph.detail.selectFile") }}
-              </p>
-              <div v-else class="min-w-max py-1 font-mono text-xs leading-5">
-                <template v-for="(line, i) in diffLines" :key="i">
-                  <div
-                    v-if="line.kind === 'hunk'"
-                    class="bg-muted/60 px-3 text-muted-foreground select-none"
-                  >
-                    {{ line.text }}
-                  </div>
-                  <div
-                    v-else-if="line.kind === 'meta'"
-                    class="px-3 text-muted-foreground select-none"
-                  >
-                    {{ line.text }}
-                  </div>
-                  <div
-                    v-else
-                    class="flex w-full"
-                    :class="
-                      line.kind === 'add'
-                        ? 'bg-green-500/10'
-                        : line.kind === 'del'
-                          ? 'bg-red-500/10'
-                          : ''
-                    "
-                  >
-                    <span
-                      class="w-10 shrink-0 pr-2 text-right text-muted-foreground/50 select-none"
-                    >
-                      {{ line.oldLine ?? "" }}
-                    </span>
-                    <span
-                      class="w-10 shrink-0 pr-2 text-right text-muted-foreground/50 select-none"
-                    >
-                      {{ line.newLine ?? "" }}
-                    </span>
-                    <span class="whitespace-pre">{{ line.text }}</span>
-                  </div>
-                </template>
-              </div>
-            </div>
-          </div>
+          <!-- diff 区:与提交详情面板共用的 DiffViewer(解析/着色/折叠/并排/导航全在其内) -->
+          <DiffViewer
+            v-model:ignore-ws="ignoreWs"
+            :diff="diff"
+            :file-path="selectedPath"
+            :loading="diffLoading"
+            :error="diffError"
+            :split-applicable="splitApplicable"
+            :can-open-ide="canOpenInIde"
+            @open-ide="selectedFile && openFile(selectedFile)"
+          />
         </div>
 
         <div class="flex flex-col gap-1.5">

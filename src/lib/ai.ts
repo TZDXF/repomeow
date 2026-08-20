@@ -196,6 +196,26 @@ ${sections}`,
   return stripThinking(text);
 }
 
+/**
+ * 拉取 OpenAI 兼容接口的模型列表(GET {baseURL}/models),供设置页模型下拉使用。
+ * 直接收表单值而非读 store,便于用户未保存时也能先拉取;走 Tauri HTTP 插件规避 CORS
+ */
+export async function fetchAiModels(baseURL: string, apiKey: string): Promise<string[]> {
+  const url = `${baseURL.trim().replace(/\/+$/, "")}/models`;
+  const res = await tauriFetch(url, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${apiKey.trim()}` },
+  });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  const json = (await res.json()) as { data?: Array<{ id?: unknown }> };
+  const ids = (json.data ?? [])
+    .map((m) => (typeof m?.id === "string" ? m.id.trim() : ""))
+    .filter(Boolean);
+  return [...new Set(ids)].sort((a, b) => a.localeCompare(b));
+}
+
 /** 测试连接:发一条极短请求验证 baseURL / apiKey / model 可用 */
 export async function testAiConnection(): Promise<void> {
   await generateText({
