@@ -17,7 +17,7 @@ import {
   CalendarNextButton,
   CalendarPrevButton,
 } from "@/components/ui/calendar";
-import type { CalendarMeta } from "@/types";
+import type { CalendarMeta, ReportViewMode } from "@/types";
 import { getHolidayDayClass, getHolidayDayTitle, isWeekendDate } from "@/lib/holidays";
 import "@/styles/holiday-calendar.css";
 import { useSettingsStore } from "@/stores/settings";
@@ -27,6 +27,8 @@ const props = defineProps<{
   calendarData: CalendarMeta | null;
   /** 周报时间范围高亮("YYYY-MM-DD" 起止,闭区间);null 表示不高亮 */
   highlightRange?: { start: string; end: string } | null;
+  /** 选中视角:日(点选单日) | 周(点选某日即选中其周一至周日整周) | 月(月格点选整月) */
+  selectionMode: ReportViewMode;
 }>();
 
 const emit = defineEmits<{
@@ -103,6 +105,29 @@ watch(placeholder, (val) => {
 type CalendarView = "days" | "months" | "years";
 const view = ref<CalendarView>("days");
 
+/**
+ * 选中视角驱动内部视图:月视角常驻月格视图(月格即选中态,不再下钻回日视图),
+ * 并把 placeholder 对齐到已选月份所在年,保证选中月落在展示年份内;
+ * 日/周视角回到日网格(周视角在日网格上整周铺选中带)。
+ */
+watch(
+  () => props.selectionMode,
+  (mode) => {
+    if (mode === "month") {
+      if (props.modelValue) {
+        try {
+          placeholder.value = parseDate(props.modelValue);
+        } catch {
+          // ignore invalid date
+        }
+      }
+      view.value = "months";
+    } else {
+      view.value = "days";
+    }
+  },
+);
+
 /** 月份短标签(1月..12月 / Jan..Dec),用 Intl 生成,无需新增 i18n 词条 */
 const monthLabels = computed(() => {
   const fmt = new Intl.DateTimeFormat(settings.language, { month: "short" });
@@ -130,6 +155,11 @@ function shiftView(dir: 1 | -1) {
 
 function pickMonth(month: number) {
   placeholder.value = placeholder.value.set({ month });
+  if (props.selectionMode === "month") {
+    // 月视角:月格即选中态,modelValue 落在该月 1 日,由父组件推导出整月范围
+    innerValue.value = placeholder.value.set({ day: 1 });
+    return;
+  }
   view.value = "days";
 }
 
@@ -144,10 +174,16 @@ function monthCellClass(month: number): string {
   const now = today(getLocalTimeZone());
   const y = placeholder.value.year;
   const classes: string[] = [];
-  if (sel && sel.year === y && sel.month === month) {
-    classes.push("bg-primary/10 font-medium");
+  const isSelected = !!sel && sel.year === y && sel.month === month;
+  if (isSelected) {
+    // 月视角下月格即选中态,用主色实心;日/周视角的月视图仅是下钻导航,保持淡底
+    classes.push(
+      props.selectionMode === "month"
+        ? "bg-primary text-primary-foreground font-medium"
+        : "bg-primary/10 font-medium",
+    );
   }
-  if (now.year === y && now.month === month) {
+  if (now.year === y && now.month === month && !(isSelected && props.selectionMode === "month")) {
     classes.push("text-primary");
   }
   return classes.join(" ");
@@ -206,6 +242,30 @@ function getHighlightClass(dv: DateValue): string {
   if (ds === r.start) return "bg-primary/10 rounded-r-none";
   if (ds === r.end) return "bg-primary/10 rounded-l-none";
   return "bg-primary/10 rounded-none";
+}
+
+/** 周视角的选中周范围:已选日期所在周一至周日(与 week-starts-on=1 一致) */
+const selectedWeekRange = computed(() => {
+  if (props.selectionMode !== "week") return null;
+  const sel = innerValue.value;
+  if (!sel) return null;
+  const dow = (sel.toDate(getLocalTimeZone()).getDay() + 6) % 7;
+  const start = sel.subtract({ days: dow });
+  return { start: start.toString(), end: start.add({ days: 6 }).toString() };
+});
+
+/**
+ * 选中周铺带 class:比报告范围高亮(bg-primary/10)更实一档以示选中,
+ * 同日两带重叠时以选中带为准(模板里 || 短路,避免 bg 类冲突结果不可预期)
+ */
+function getSelectionClass(dv: DateValue): string {
+  const r = selectedWeekRange.value;
+  if (!r) return "";
+  const ds = dv.toString();
+  if (ds < r.start || ds > r.end) return "";
+  if (ds === r.start) return "bg-primary/15 rounded-r-none";
+  if (ds === r.end) return "bg-primary/15 rounded-l-none";
+  return "bg-primary/15 rounded-none";
 }
 
 /** Type helper: narrow grid cell date to DateValue for CalendarCellTrigger */
@@ -334,7 +394,10 @@ function asDateValue(dv: any): DateValue {
             <CalendarCellTrigger
               :day="asDateValue(cellDate)"
               :month="month.value"
-              :class="[getDayClass(cellDate), getHighlightClass(cellDate)]"
+              :class="[
+                getDayClass(cellDate),
+                getSelectionClass(cellDate) || getHighlightClass(cellDate),
+              ]"
               :title="getDayTitle(cellDate)"
               class="relative flex size-8 items-center justify-center rounded-md p-0 font-normal text-sm"
             >

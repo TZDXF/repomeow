@@ -211,6 +211,8 @@ pub struct Project {
     pub archived_at: Option<i64>,
     /// 收藏时间(NULL = 未收藏;列表中收藏项目置顶,组内按收藏时间倒序)
     pub favorited_at: Option<i64>,
+    /// 跟踪更新:开启后后台循环在远端有更新时自动快进拉取(无法快进即取消,不提醒)
+    pub auto_pull: bool,
     pub created_at: i64,
     pub updated_at: i64,
 }

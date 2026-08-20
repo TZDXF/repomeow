@@ -32,6 +32,9 @@ pub struct ReportSchedule {
     #[serde(default = "default_report_type")]
     pub report_type: String,
     pub project_ids: Vec<i64>,
+    /// 按标签动态包含:执行时反查带有任一选中标签的未归档项目,与 project_ids 取并集
+    #[serde(default)]
+    pub tag_ids: Vec<i64>,
     #[serde(default = "default_author_mode")]
     pub author_mode: String,
     pub time_of_day: String,
@@ -501,20 +504,47 @@ pub fn get_reports_by_date(
     report_type: Option<String>,
 ) -> AppResult<Vec<ReportHistoryDetail>> {
     let conn = db.0.lock().unwrap();
-    get_reports_by_date_impl(&conn, &date, &project_ids, &tag_ids, &report_type)
+    get_reports_by_range_impl(&conn, &date, &date, &project_ids, &tag_ids, &report_type)
 }
 
-/// 按日期查询的实现:一次加载所有报告的 project_names/total_commits/commits。
-pub fn get_reports_by_date_impl(
+/// 查询 date_to 落在 [date_from, date_to] 闭区间内的所有报告详情(含提交记录和 Markdown 正文)。
+///
+/// 与日历标注一致按 date_to 归集:周报挂在范围末日,周/月视角下自然覆盖其整段范围。
+#[tauri::command]
+pub fn get_reports_by_range(
+    db: State<'_, Db>,
+    date_from: String,
+    date_to: String,
+    project_ids: Vec<i64>,
+    tag_ids: Vec<i64>,
+    report_type: Option<String>,
+) -> AppResult<Vec<ReportHistoryDetail>> {
+    let conn = db.0.lock().unwrap();
+    get_reports_by_range_impl(
+        &conn,
+        &date_from,
+        &date_to,
+        &project_ids,
+        &tag_ids,
+        &report_type,
+    )
+}
+
+/// 按日期范围查询的实现:一次加载所有报告的 project_names/total_commits/commits。
+pub fn get_reports_by_range_impl(
     conn: &Connection,
-    date: &str,
+    date_from: &str,
+    date_to: &str,
     project_ids: &[i64],
     tag_ids: &[i64],
     report_type: &Option<String>,
 ) -> AppResult<Vec<ReportHistoryDetail>> {
-    let mut conditions = vec!["h.date_to = ?1".to_string()];
-    let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(date.to_string())];
-    let mut param_idx = 2;
+    let mut conditions = vec!["h.date_to BETWEEN ?1 AND ?2".to_string()];
+    let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = vec![
+        Box::new(date_from.to_string()),
+        Box::new(date_to.to_string()),
+    ];
+    let mut param_idx = 3;
     append_history_filters(
         &mut conditions,
         &mut params_vec,
@@ -783,26 +813,28 @@ pub fn list_report_dates(
 
 // ── commands: schedules ────────────────────────────────────────────────
 
-const SCHEDULE_COLS: &str = "id, name, enabled, report_type, project_ids, author_mode, \
+const SCHEDULE_COLS: &str = "id, name, enabled, report_type, project_ids, tag_ids, author_mode, \
      time_of_day, weekdays_only, chinese_workday_only, weekly_workweek, weekly_start_weekday, \
      weekly_end_weekday, last_run_at";
 
 fn map_schedule_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ReportSchedule> {
     let ids_json: String = r.get(4)?;
+    let tag_ids_json: String = r.get(5)?;
     Ok(ReportSchedule {
         id: r.get(0)?,
         name: r.get(1)?,
         enabled: r.get::<_, i64>(2)? != 0,
         report_type: r.get(3)?,
         project_ids: serde_json::from_str(&ids_json).unwrap_or_default(),
-        author_mode: r.get(5)?,
-        time_of_day: r.get(6)?,
-        weekdays_only: r.get::<_, i64>(7)? != 0,
-        chinese_workday_only: r.get::<_, i64>(8)? != 0,
-        weekly_workweek: r.get::<_, i64>(9)? != 0,
-        weekly_start_weekday: r.get::<_, u32>(10)?,
-        weekly_end_weekday: r.get::<_, u32>(11)?,
-        last_run_at: r.get(12)?,
+        tag_ids: serde_json::from_str(&tag_ids_json).unwrap_or_default(),
+        author_mode: r.get(6)?,
+        time_of_day: r.get(7)?,
+        weekdays_only: r.get::<_, i64>(8)? != 0,
+        chinese_workday_only: r.get::<_, i64>(9)? != 0,
+        weekly_workweek: r.get::<_, i64>(10)? != 0,
+        weekly_start_weekday: r.get::<_, u32>(11)?,
+        weekly_end_weekday: r.get::<_, u32>(12)?,
+        last_run_at: r.get(13)?,
     })
 }
 
@@ -826,17 +858,19 @@ pub fn save_report_schedules(
         tx.execute("DELETE FROM report_schedules", [])?;
         for s in &schedules {
             let ids_json = serde_json::to_string(&s.project_ids).unwrap_or_default();
+            let tag_ids_json = serde_json::to_string(&s.tag_ids).unwrap_or_default();
             tx.execute(
-                "INSERT INTO report_schedules (id, name, enabled, report_type, project_ids, author_mode,
+                "INSERT INTO report_schedules (id, name, enabled, report_type, project_ids, tag_ids, author_mode,
                      time_of_day, weekdays_only, chinese_workday_only, weekly_workweek,
                      weekly_start_weekday, weekly_end_weekday, last_run_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                 params![
                     s.id,
                     s.name,
                     s.enabled as i64,
                     s.report_type,
                     ids_json,
+                    tag_ids_json,
                     s.author_mode,
                     s.time_of_day,
                     s.weekdays_only as i64,
@@ -905,7 +939,7 @@ fn map_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<(ReportHistoryItem, Vec<i6
     ))
 }
 
-/// 映射 get_reports_by_date 的查询行(末尾多一列 result)
+/// 映射 get_reports_by_range 的查询行(末尾多一列 result)
 fn map_detail_row(
     r: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<(ReportHistoryItem, Vec<i64>, String)> {
@@ -1111,6 +1145,28 @@ pub fn read_schedules(conn: &Connection) -> AppResult<Vec<ReportSchedule>> {
     Ok(rows)
 }
 
+/// 反查带有任一选中标签的未归档项目 id(去重、按 id 排序)。
+/// 定时任务的 tag_ids 为空时返回空 vec,由调用方与显式 project_ids 取并集。
+pub fn tag_project_ids(conn: &Connection, tag_ids: &[i64]) -> AppResult<Vec<i64>> {
+    if tag_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let marks = vec!["?"; tag_ids.len()].join(", ");
+    let sql = format!(
+        "SELECT DISTINCT pt.project_id FROM project_tags pt \
+         JOIN projects p ON p.id = pt.project_id \
+         WHERE pt.tag_id IN ({marks}) AND p.archived_at IS NULL \
+         ORDER BY pt.project_id"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(tag_ids.iter()), |r| {
+            r.get::<_, i64>(0)
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
 /// 更新定时任务的 last_run_at。
 #[allow(dead_code)]
 pub fn update_last_run_at(conn: &Connection, schedule_id: &str, timestamp: i64) -> AppResult<()> {
@@ -1143,6 +1199,73 @@ mod tests {
         )
         .unwrap();
         conn.last_insert_rowid()
+    }
+
+    fn insert_tag(conn: &Connection, name: &str) -> i64 {
+        conn.execute(
+            "INSERT INTO tags (name, color) VALUES (?1, '#000000')",
+            params![name],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
+    fn tag_project(conn: &Connection, project_id: i64, tag_id: i64) {
+        conn.execute(
+            "INSERT INTO project_tags (project_id, tag_id) VALUES (?1, ?2)",
+            params![project_id, tag_id],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn tag_project_ids_matches_any_selected_tag() {
+        let conn = test_conn();
+        let a = insert_project(&conn, "alpha");
+        let b = insert_project(&conn, "beta");
+        let c = insert_project(&conn, "gamma");
+        let t1 = insert_tag(&conn, "t1");
+        let t2 = insert_tag(&conn, "t2");
+        tag_project(&conn, a, t1);
+        tag_project(&conn, b, t2);
+        tag_project(&conn, c, t1);
+        tag_project(&conn, c, t2);
+
+        // 任一标签命中即纳入;c 同时含两个标签只出现一次(按 id 排序)
+        assert_eq!(tag_project_ids(&conn, &[t1, t2]).unwrap(), vec![a, b, c]);
+        assert_eq!(tag_project_ids(&conn, &[t1]).unwrap(), vec![a, c]);
+        // 空标签列表 → 空结果
+        assert_eq!(tag_project_ids(&conn, &[]).unwrap(), Vec::<i64>::new());
+    }
+
+    #[test]
+    fn tag_project_ids_excludes_archived_projects() {
+        let conn = test_conn();
+        let a = insert_project(&conn, "alpha");
+        let t1 = insert_tag(&conn, "t1");
+        tag_project(&conn, a, t1);
+        conn.execute(
+            "UPDATE projects SET archived_at = 1 WHERE id = ?1",
+            params![a],
+        )
+        .unwrap();
+        assert_eq!(tag_project_ids(&conn, &[t1]).unwrap(), Vec::<i64>::new());
+    }
+
+    #[test]
+    fn read_schedules_parses_tag_ids() {
+        let conn = test_conn();
+        conn.execute(
+            "INSERT INTO report_schedules (id, name, enabled, report_type, project_ids, tag_ids,
+                 author_mode, time_of_day, weekdays_only, chinese_workday_only,
+                 weekly_workweek, weekly_start_weekday, weekly_end_weekday, last_run_at)
+             VALUES ('s1', '', 1, 'daily', '[1,2]', '[3,4]', 'me', '09:00', 0, 0, 1, 1, 5, NULL)",
+            [],
+        )
+        .unwrap();
+        let schedules = read_schedules(&conn).unwrap();
+        assert_eq!(schedules[0].project_ids, vec![1, 2]);
+        assert_eq!(schedules[0].tag_ids, vec![3, 4]);
     }
 
     /// 插入报告 + 关联 commits;commits_per_record 表示每个 project 的 commit 数。
@@ -1437,7 +1560,8 @@ mod tests {
             2_000_000,
         );
 
-        let details = get_reports_by_date_impl(&conn, "2026-07-01", &[], &[], &None).unwrap();
+        let details =
+            get_reports_by_range_impl(&conn, "2026-07-01", "2026-07-01", &[], &[], &None).unwrap();
         assert_eq!(details.len(), 2);
 
         // 顺序按 created_at DESC: r2 在前
@@ -1467,7 +1591,8 @@ mod tests {
         let b = insert_project(&conn, "beta");
         insert_report(&conn, &[a], "2026-07-01", "2026-07-01", "daily", 1);
         insert_report(&conn, &[b], "2026-07-01", "2026-07-01", "daily", 1);
-        let only_a = get_reports_by_date_impl(&conn, "2026-07-01", &[a], &[], &None).unwrap();
+        let only_a =
+            get_reports_by_range_impl(&conn, "2026-07-01", "2026-07-01", &[a], &[], &None).unwrap();
         assert_eq!(only_a.len(), 1);
         assert_eq!(only_a[0].item.project_names, vec!["alpha".to_string()]);
     }

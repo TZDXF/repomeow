@@ -10,6 +10,7 @@ import {
   Info,
   KeyRound,
   MessageSquareText,
+  Radar,
   SlidersHorizontal,
   Sparkles,
   Tags,
@@ -19,6 +20,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import GeneralSettings from "@/components/settings/GeneralSettings.vue";
 import ToolchainPanel from "@/components/settings/ToolchainPanel.vue";
 import TagSettings from "@/components/settings/TagSettings.vue";
+import TrackingSettings from "@/components/settings/TrackingSettings.vue";
 import ArchiveSettings from "@/components/settings/ArchiveSettings.vue";
 import AiSettings from "@/components/settings/AiSettings.vue";
 import AccountSettings from "@/components/settings/AccountSettings.vue";
@@ -42,6 +44,12 @@ const categories: Category[] = [
     component: GeneralSettings,
   },
   { id: "tags", labelKey: "settings.categories.tags", icon: Tags, component: TagSettings },
+  {
+    id: "tracking",
+    labelKey: "settings.categories.tracking",
+    icon: Radar,
+    component: TrackingSettings,
+  },
   {
     id: "devEnv",
     labelKey: "settings.categories.devEnv",

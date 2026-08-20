@@ -16,12 +16,13 @@ struct ProjectRow {
     description: String,
     archived_at: Option<i64>,
     favorited_at: Option<i64>,
+    auto_pull: bool,
     created_at: i64,
     updated_at: i64,
 }
 
 const PROJECT_COLS: &str =
-    "id, path, name, description, archived_at, favorited_at, created_at, updated_at";
+    "id, path, name, description, archived_at, favorited_at, auto_pull, created_at, updated_at";
 
 fn map_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectRow> {
     Ok(ProjectRow {
@@ -31,8 +32,9 @@ fn map_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectRow> {
         description: r.get(3)?,
         archived_at: r.get(4)?,
         favorited_at: r.get(5)?,
-        created_at: r.get(6)?,
-        updated_at: r.get(7)?,
+        auto_pull: r.get(6)?,
+        created_at: r.get(7)?,
+        updated_at: r.get(8)?,
     })
 }
 
@@ -66,6 +68,7 @@ fn project_from_row(row: ProjectRow, tags: Vec<Tag>) -> Project {
         path_exists,
         archived_at: row.archived_at,
         favorited_at: row.favorited_at,
+        auto_pull: row.auto_pull,
         created_at: row.created_at,
         updated_at: row.updated_at,
     }
@@ -439,6 +442,19 @@ pub fn set_favorite(conn: &Connection, id: i64, favorite: bool) -> AppResult<()>
     Ok(())
 }
 
+/// 设置/取消「跟踪更新」:开启后后台循环在远端有更新时自动快进拉取
+/// (无法快进即取消,不提醒)。归档项目不参与后台循环,但开关状态保留
+pub fn set_auto_pull(conn: &Connection, id: i64, enabled: bool) -> AppResult<()> {
+    let changed = conn.execute(
+        "UPDATE projects SET auto_pull = ?1 WHERE id = ?2",
+        params![enabled, id],
+    )?;
+    if changed == 0 {
+        return Err(AppError::coded(ErrorCode::ProjectNotFound, id.to_string()));
+    }
+    Ok(())
+}
+
 /// 彻底删除项目(关联的标签指派、自定义命令随外键级联清理;不动磁盘文件)
 pub fn remove(conn: &Connection, id: i64) -> AppResult<()> {
     let changed = conn.execute("DELETE FROM projects WHERE id = ?1", params![id])?;
@@ -590,6 +606,12 @@ pub fn set_project_favorite(
 }
 
 #[tauri::command]
+pub fn set_project_auto_pull(db: State<'_, Db>, id: i64, enabled: bool) -> AppResult<()> {
+    let conn = db.0.lock().unwrap();
+    set_auto_pull(&conn, id, enabled)
+}
+
+#[tauri::command]
 pub fn delete_project(db: State<'_, Db>, id: i64) -> AppResult<()> {
     let conn = db.0.lock().unwrap();
     let project = get(&conn, id)?;
@@ -653,6 +675,24 @@ mod tests {
 
         assert!(
             matches!(set_favorite(&conn, 9999, true), Err(ref e) if e.is_code(crate::error::ErrorCode::ProjectNotFound))
+        );
+    }
+
+    #[test]
+    fn set_auto_pull_toggles_flag() {
+        let conn = test_conn();
+        let dir = std::env::temp_dir().to_string_lossy().to_string();
+        let p = add(&conn, &dir, "demo", "").unwrap();
+        assert!(!p.auto_pull);
+
+        set_auto_pull(&conn, p.id, true).unwrap();
+        assert!(get(&conn, p.id).unwrap().auto_pull);
+
+        set_auto_pull(&conn, p.id, false).unwrap();
+        assert!(!get(&conn, p.id).unwrap().auto_pull);
+
+        assert!(
+            matches!(set_auto_pull(&conn, 9999, true), Err(ref e) if e.is_code(crate::error::ErrorCode::ProjectNotFound))
         );
     }
 

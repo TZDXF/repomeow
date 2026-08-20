@@ -402,6 +402,13 @@ export default {
       rejected: "Push rejected: the remote has commits you don't have locally. Pull first.",
       pullAndPush: "Pull & push",
     },
+    tracking: {
+      action: "Track updates",
+      stop: "Stop tracking",
+      hint: "Automatically fast-forward pulls when the remote has updates; cancels silently when fast-forward is not possible (diverged or conflicting)",
+      enabled: "Update tracking enabled",
+      disabled: "Update tracking disabled",
+    },
     branch: {
       switch: "Switch branch",
       local: "Local",
@@ -653,6 +660,10 @@ export default {
     today: "Today",
     selectDateHint: "Click a date to view reports",
     noReportsOnDate: "No reports on this date",
+    noReportsInRange: "No reports in this range",
+    viewDay: "Day",
+    viewWeek: "Week",
+    viewMonth: "Month",
     expandAll: "Expand all",
     collapseAll: "Collapse all",
     reportCount: "{count} reports",
@@ -918,6 +929,7 @@ export default {
     categories: {
       general: "General",
       tags: "Tag manager",
+      tracking: "Update tracking",
       devEnv: "Dev environment",
       archive: "Archived projects",
       ai: "AI",
@@ -1193,6 +1205,16 @@ export default {
       deleteConfirm:
         'Permanently delete project "{name}"? This cannot be undone. All history including tag assignments and custom commands will be deleted. (Files on disk are not affected.)',
       loadFailed: "Failed to load archived projects: {error}",
+    },
+    tracking: {
+      title: "Update tracking",
+      description:
+        "Tracked projects are checked periodically and fast-forward pulled automatically when the remote has updates; when fast-forward is not possible (diverged or local changes may conflict), the pull is canceled silently.",
+      searchPlaceholder: "Search name, description, or path...",
+      trackedCount: "{count} project(s) tracked",
+      toggleHint: "Toggle update tracking for this project",
+      noMatch: "No matching projects",
+      empty: "No projects registered",
     },
   },
 };

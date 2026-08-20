@@ -388,6 +388,13 @@ export default {
       rejected: "推送被拒绝:远端有本地缺失的提交,请先拉取",
       pullAndPush: "拉取并推送",
     },
+    tracking: {
+      action: "跟踪更新",
+      stop: "取消跟踪",
+      hint: "远端有更新时自动快进拉取;无法快进(分叉或可能冲突)时自动取消,不做提醒",
+      enabled: "已开启跟踪更新",
+      disabled: "已取消跟踪更新",
+    },
     branch: {
       switch: "切换分支",
       local: "本地",
@@ -631,6 +638,10 @@ export default {
     today: "今天",
     selectDateHint: "点击日历日期查看日报",
     noReportsOnDate: "该日期无日报记录",
+    noReportsInRange: "该范围暂无报告记录",
+    viewDay: "日",
+    viewWeek: "周",
+    viewMonth: "月",
     expandAll: "全部展开",
     collapseAll: "全部折叠",
     reportCount: "{count} 条日报",
@@ -893,6 +904,7 @@ export default {
     categories: {
       general: "通用",
       tags: "标签管理",
+      tracking: "跟踪更新",
       devEnv: "开发环境",
       archive: "归档项目",
       ai: "AI 接入",
@@ -1152,6 +1164,16 @@ export default {
       deleteConfirm:
         "确定彻底删除项目「{name}」吗?此操作不可恢复,标签指派、自定义命令等历史数据将一并删除。(不会删除磁盘文件)",
       loadFailed: "加载归档项目失败:{error}",
+    },
+    tracking: {
+      title: "跟踪更新",
+      description:
+        "开启跟踪后,后台会定时检查远端更新并自动快进拉取;无法快进(分叉或本地改动可能冲突)时自动取消,不做提醒",
+      searchPlaceholder: "搜索名称、描述或路径...",
+      trackedCount: "已跟踪 {count} 个项目",
+      toggleHint: "开启/关闭该项目的跟踪更新",
+      noMatch: "没有匹配的项目",
+      empty: "没有已登记的项目",
     },
   },
 };

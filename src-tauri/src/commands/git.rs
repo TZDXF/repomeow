@@ -845,6 +845,113 @@ pub fn fetch_git_remote_async(window: Window, project_id: i64, path: String) {
     fetch_schedule(window.app_handle(), project_id, path);
 }
 
+// ── 跟踪更新(自动拉取) ──────────────────────────────────────────────
+
+/// 跟踪项目的检查周期(每轮对各项目先 fetch 再按需快进)
+const AUTO_PULL_INTERVAL: Duration = Duration::from_secs(60);
+
+/// 读取所有开启「跟踪更新」且未归档项目的 (id, path)
+fn list_tracked_project_paths(app: &AppHandle) -> Vec<(i64, String)> {
+    let Some(db) = app.try_state::<Db>() else {
+        return Vec::new();
+    };
+    let conn = db.0.lock().unwrap();
+    let mut stmt = match conn
+        .prepare("SELECT id, path FROM projects WHERE archived_at IS NULL AND auto_pull = 1")
+    {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+        .map(|rows| rows.filter_map(Result::ok).collect())
+        .unwrap_or_default()
+}
+
+/// 跟踪更新后台循环:启动延迟后每分钟检查一轮开启跟踪的项目
+pub async fn auto_pull_loop(app: AppHandle) {
+    tokio::time::sleep(STATUS_REFRESH_FIRST_DELAY).await;
+    loop {
+        for (id, path) in list_tracked_project_paths(&app) {
+            auto_pull_schedule(&app, id, path);
+        }
+        tokio::time::sleep(AUTO_PULL_INTERVAL).await;
+    }
+}
+
+/// 调度一次跟踪项目的自动拉取(进行中/退避期跳过,与 fetch_schedule 共用同一治理):
+/// 先 fetch,状态显示落后 upstream 时执行 `git merge --ff-only @{u}` 快进。
+/// 仅快进保证不产生合并提交;分叉、无 upstream、本地改动会被覆盖等可能冲突的
+/// 情形 git 直接拒绝且不留合并状态——即「有冲突则取消」,全程静默不提醒。
+/// 快进成功后回填状态缓存并广播,前端徽标即时更新
+fn auto_pull_schedule(app: &AppHandle, project_id: i64, path: String) {
+    if !fetch_due(&path) {
+        return;
+    }
+    let key = crate::path_util::clean_str(&path);
+    fetch_tracker().lock().unwrap().in_progress.insert(key);
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let semaphore = FETCH_PERMITS.get_or_init(|| Semaphore::new(3));
+        let _permit = semaphore.acquire().await;
+        let ok = fetch_with_timeout(&path).await;
+        if ok {
+            let st = tokio::task::spawn_blocking({
+                let path = path.clone();
+                move || status_cached(&path, true)
+            })
+            .await;
+            if let Ok(Ok(st)) = st {
+                if st.is_repo && st.behind > 0 {
+                    let pulled = tokio::task::spawn_blocking({
+                        let path = path.clone();
+                        move || ff_pull_blocking(&path)
+                    })
+                    .await;
+                    if let Ok(true) = pulled {
+                        let st = tokio::task::spawn_blocking({
+                            let path = path.clone();
+                            move || {
+                                let st = status(&path)?;
+                                cache_status(&path, &st);
+                                Ok::<_, AppError>(st)
+                            }
+                        })
+                        .await;
+                        if let Ok(Ok(st)) = st {
+                            let _ = app.emit(
+                                "git://status-updated",
+                                vec![GitStatusItem {
+                                    path: path.clone(),
+                                    status: st,
+                                }],
+                            );
+                            let _ = app.emit(
+                                "git://updated",
+                                GitUpdatedPayload {
+                                    project_id,
+                                    remote_ahead: 0,
+                                    last_fetch_at: chrono::Utc::now().timestamp(),
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        fetch_finished(&path, ok);
+    });
+}
+
+/// `git merge --ff-only @{u}`:仅快进合并,不可能产生合并提交。
+/// 返回是否快进成功;失败一律视为「取消」(不留状态、不提醒)
+fn ff_pull_blocking(path: &str) -> bool {
+    git_command(path)
+        .args(["merge", "--ff-only", "@{u}"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 /// 当前处于合并冲突状态的文件(相对仓库根的路径)
 fn unmerged_files(path: &str) -> Vec<String> {
     let Ok(out) = git_command(path)

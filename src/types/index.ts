@@ -245,6 +245,8 @@ export interface Project {
   archived_at: number | null;
   /** 收藏时间(null = 未收藏;列表中收藏项目置顶,组内按收藏时间倒序) */
   favorited_at: number | null;
+  /** 跟踪更新:开启后远端有更新时后台自动快进拉取(无法快进即取消,不提醒) */
+  auto_pull: boolean;
   created_at: number;
   updated_at: number;
 }
@@ -498,6 +500,9 @@ export interface GitUpdatedPayload {
 /** 报告类型:日报(单日) | 周报(日期范围) */
 export type ReportPeriodType = "daily" | "weekly";
 
+/** 报告历史日历的选中视角:按日 | 按周(周一至周日) | 按月 */
+export type ReportViewMode = "day" | "week" | "month";
+
 /** 工作周日期范围(get_work_week_ranges,起止均为 "YYYY-MM-DD") */
 export interface WorkWeekRange {
   from: string;
@@ -563,9 +568,11 @@ export interface ReportSchedule {
   id: string;
   name: string;
   enabled: boolean;
-  /** 报告类型:日报(当天) | 周报(工作周,最后一个工作日触发) */
+  /** 报告类型:日报(前一天,次日生成) | 周报(工作周,最后一个工作日触发) */
   reportType: ReportPeriodType;
   projectIds: number[];
+  /** 按标签动态包含:执行时反查带有任一选中标签的未归档项目,与 projectIds 取并集 */
+  tagIds: number[];
   authorMode: "me" | "all";
   timeOfDay: string;
   /** 日报:仅周一~周五 */

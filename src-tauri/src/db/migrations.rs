@@ -6,6 +6,8 @@ const MIGRATION_001: &str = include_str!("../../migrations/001_init.sql");
 const MIGRATION_002: &str = include_str!("../../migrations/002_favorite.sql");
 const MIGRATION_003: &str = include_str!("../../migrations/003_pinned_commands.sql");
 const MIGRATION_004: &str = include_str!("../../migrations/004_git_account_token_invalid.sql");
+const MIGRATION_005: &str = include_str!("../../migrations/005_auto_pull.sql");
+const MIGRATION_006: &str = include_str!("../../migrations/006_schedule_tag_ids.sql");
 
 /// 按 PRAGMA user_version 顺序应用迁移,保证幂等
 pub fn run(conn: &Connection) -> AppResult<()> {
@@ -25,6 +27,14 @@ pub fn run(conn: &Connection) -> AppResult<()> {
     if version < 4 {
         conn.execute_batch(MIGRATION_004)?;
         conn.pragma_update(None, "user_version", 4)?;
+    }
+    if version < 5 {
+        conn.execute_batch(MIGRATION_005)?;
+        conn.pragma_update(None, "user_version", 5)?;
+    }
+    if version < 6 {
+        conn.execute_batch(MIGRATION_006)?;
+        conn.pragma_update(None, "user_version", 6)?;
     }
     Ok(())
 }

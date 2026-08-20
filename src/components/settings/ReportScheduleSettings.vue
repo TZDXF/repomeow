@@ -126,6 +126,7 @@ const formWeeklyStart = ref(1);
 const formWeeklyEnd = ref(5);
 const formAuthorMode = ref<"me" | "all">("me");
 const formProjectIds = ref<number[]>([]);
+const formTagIds = ref<number[]>([]);
 
 // project filter (same pattern as DailyReportDialog)
 const keyword = ref("");
@@ -150,6 +151,17 @@ function toggleTagFilter(id: number) {
     : [...filterTagIds.value, id];
 }
 
+// 持久化的「按标签包含」选择(存入任务,执行时动态反查项目)
+const selectedIncludeTags = computed(() =>
+  tagsStore.tags.filter((tag) => formTagIds.value.includes(tag.id)),
+);
+
+function toggleTagInclude(id: number) {
+  formTagIds.value = formTagIds.value.includes(id)
+    ? formTagIds.value.filter((x) => x !== id)
+    : [...formTagIds.value, id];
+}
+
 function toggleProject(id: number) {
   formProjectIds.value = formProjectIds.value.includes(id)
     ? formProjectIds.value.filter((x) => x !== id)
@@ -159,7 +171,7 @@ function toggleProject(id: number) {
 function openCreate() {
   editing.value = null;
   formName.value = "";
-  formTime.value = "18:00";
+  formTime.value = "09:00";
   formReportType.value = "daily";
   formWeekdayMode.value = "everyday";
   formWeeklyWorkweek.value = true;
@@ -167,6 +179,7 @@ function openCreate() {
   formWeeklyEnd.value = 5;
   formAuthorMode.value = "me";
   formProjectIds.value = [];
+  formTagIds.value = [];
   keyword.value = "";
   filterTagIds.value = [];
   dialogOpen.value = true;
@@ -179,6 +192,7 @@ function openEdit(s: ReportSchedule) {
   formReportType.value = s.reportType;
   formAuthorMode.value = s.authorMode;
   formProjectIds.value = [...s.projectIds];
+  formTagIds.value = [...s.tagIds];
   if (s.chineseWorkdayOnly) formWeekdayMode.value = "chineseWorkday";
   else if (s.weekdaysOnly) formWeekdayMode.value = "weekdays";
   else formWeekdayMode.value = "everyday";
@@ -191,7 +205,7 @@ function openEdit(s: ReportSchedule) {
 }
 
 async function submit() {
-  if (!formProjectIds.value.length) {
+  if (!formProjectIds.value.length && !formTagIds.value.length) {
     toast.error(t("report.noProjects"));
     return;
   }
@@ -202,6 +216,7 @@ async function submit() {
     enabled: editing.value?.enabled ?? true,
     reportType: formReportType.value,
     projectIds: [...formProjectIds.value],
+    tagIds: [...formTagIds.value],
     authorMode: formAuthorMode.value,
     timeOfDay: formTime.value,
     weekdaysOnly: isDaily && formWeekdayMode.value === "weekdays",
@@ -247,6 +262,10 @@ function weeklyLabel(s: ReportSchedule) {
 
 function projectNames(ids: number[]) {
   return ids.map((id) => activeProjects.value.find((p) => p.id === id)?.name ?? "").filter(Boolean);
+}
+
+function tagNames(ids: number[]) {
+  return ids.map((id) => tagsStore.tags.find((t) => t.id === id)?.name ?? "").filter(Boolean);
 }
 
 function lastRun(ts: number | null) {

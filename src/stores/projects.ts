@@ -212,6 +212,15 @@ export const useProjectsStore = defineStore("projects", () => {
     }
   }
 
+  /** 设置/取消「跟踪更新」:开启后远端有更新时后台自动快进拉取(无法快进即取消,不提醒) */
+  async function setAutoPull(id: number, enabled: boolean) {
+    await cmd("set_project_auto_pull", { id, enabled });
+    const p = projects.value.find((x) => x.id === id);
+    if (p) {
+      p.auto_pull = enabled;
+    }
+  }
+
   /** 拉取已归档项目列表(设置页归档管理用) */
   async function fetchArchivedProjects() {
     archivedProjects.value = await cmd<Project[]>("list_archived_projects");
@@ -444,6 +453,7 @@ export const useProjectsStore = defineStore("projects", () => {
     moveProjectDir,
     archiveProject,
     setFavorite,
+    setAutoPull,
     fetchArchivedProjects,
     unarchiveProject,
     deleteProject,

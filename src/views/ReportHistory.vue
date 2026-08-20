@@ -39,6 +39,7 @@ import type {
   ReportGeneratedPayload,
   ReportHistoryDetail,
   ReportPeriodType,
+  ReportViewMode,
 } from "@/types";
 
 type TypeFilter = "all" | ReportPeriodType;
@@ -47,6 +48,13 @@ const TYPE_OPTIONS: { value: TypeFilter; labelKey: string }[] = [
   { value: "all", labelKey: "reportHistory.typeAll" },
   { value: "daily", labelKey: "reportHistory.typeDaily" },
   { value: "weekly", labelKey: "reportHistory.typeWeekly" },
+];
+
+/** 日历选中视角:日(单日) | 周(周一至周日) | 月(整月),决定右侧列表的日期范围 */
+const VIEW_OPTIONS: { value: ReportViewMode; labelKey: string }[] = [
+  { value: "day", labelKey: "reportHistory.viewDay" },
+  { value: "week", labelKey: "reportHistory.viewWeek" },
+  { value: "month", labelKey: "reportHistory.viewMonth" },
 ];
 
 const { t } = useI18n();
@@ -91,10 +99,40 @@ const todayStr = (() => {
 })();
 
 const selectedDate = ref<string | null>(todayStr);
+const viewMode = ref<ReportViewMode>("day");
 const filterProjectIds = ref<number[]>([]);
 const filterTagIds = ref<number[]>([]);
 const filterType = ref<TypeFilter>("all");
 const projectKeyword = ref("");
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+function toDateStr(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+/** 当前选中范围(闭区间 "YYYY-MM-DD"):日视角为单日,周视角为周一至周日,月视角为整月 */
+const selectedRange = computed<{ from: string; to: string } | null>(() => {
+  const ds = selectedDate.value;
+  if (!ds) return null;
+  if (viewMode.value === "day") return { from: ds, to: ds };
+  const d = new Date(ds + "T00:00:00");
+  if (isNaN(d.getTime())) return null;
+  if (viewMode.value === "week") {
+    // 与日历 week-starts-on=1 一致:所在周周一至周日
+    const dow = (d.getDay() + 6) % 7;
+    const start = new Date(d);
+    start.setDate(d.getDate() - dow);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    return { from: toDateStr(start), to: toDateStr(end) };
+  }
+  const from = new Date(d.getFullYear(), d.getMonth(), 1);
+  const to = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  return { from: toDateStr(from), to: toDateStr(to) };
+});
 
 /** 传给后端的类型过滤参数("all" 时不过滤) */
 const reportTypeParam = computed(() => (filterType.value === "all" ? null : filterType.value));
@@ -146,8 +184,9 @@ let unlistenReportGenerated: UnlistenFn | undefined;
 onMounted(async () => {
   unlistenReportGenerated = await onListen<ReportGeneratedPayload>("report://generated", () => {
     loadCalendarMeta(calendarYear.value, calendarMonth.value);
-    if (selectedDate.value) {
-      loadReports(selectedDate.value);
+    const r = selectedRange.value;
+    if (r) {
+      loadReports(r.from, r.to);
     }
   });
 });
@@ -172,25 +211,43 @@ const highlightRange = computed(() => {
 
 const activeProjects = computed(() => projectStore.projects.filter((p) => !p.archived_at));
 
-/** 选中日期的格式化描述（使用浏览器 Intl API，避免 i18n 数组不可靠） */
-const dateLabel = computed(() => {
-  if (!selectedDate.value) return "";
-  const date = new Date(selectedDate.value + "T00:00:00");
-  if (isNaN(date.getTime())) return "";
+/** 选中范围的格式化描述(日:单日;周:起止区间;月:年月),用浏览器 Intl API 避免 i18n 数组不可靠 */
+const rangeLabel = computed(() => {
+  const range = selectedRange.value;
+  if (!range) return "";
+  const from = new Date(range.from + "T00:00:00");
+  const to = new Date(range.to + "T00:00:00");
+  if (isNaN(from.getTime()) || isNaN(to.getTime())) return "";
   const lang = settings.language;
-  const y = date.getFullYear();
-  const m = date.getMonth() + 1;
-  const d = date.getDate();
-  const wd = date.toLocaleDateString(lang, { weekday: "short" });
-  // zh-CN: "2026年7月15日 周三", en-US: "July 15, 2026 Wed"
-  if (lang === "zh-CN") {
-    return `${y}年${m}月${d}日 ${wd}`;
+  if (viewMode.value === "day") {
+    const wd = from.toLocaleDateString(lang, { weekday: "short" });
+    // zh-CN: "2026年7月15日 周三", en-US: "July 15, 2026 Wed"
+    if (lang === "zh-CN") {
+      return `${from.getFullYear()}年${from.getMonth() + 1}月${from.getDate()}日 ${wd}`;
+    }
+    return `${from.toLocaleDateString(lang, { month: "long", day: "numeric" })}, ${from.getFullYear()} ${wd}`;
   }
-  return `${date.toLocaleDateString(lang, { month: "long", day: "numeric" })}, ${y} ${wd}`;
+  if (viewMode.value === "month") {
+    // zh-CN: "2026年8月", en-US: "August 2026"
+    if (lang === "zh-CN") {
+      return `${from.getFullYear()}年${from.getMonth() + 1}月`;
+    }
+    return from.toLocaleDateString(lang, { month: "long", year: "numeric" });
+  }
+  // week: zh-CN "2026年8月17日 – 8月23日"(跨年/跨月补全),en-US "Aug 17 – Aug 23, 2026"
+  if (lang === "zh-CN") {
+    const sameYear = from.getFullYear() === to.getFullYear();
+    const fromPart = `${from.getFullYear()}年${from.getMonth() + 1}月${from.getDate()}日`;
+    const toPart = `${sameYear ? "" : `${to.getFullYear()}年`}${to.getMonth() + 1}月${to.getDate()}日`;
+    return `${fromPart} – ${toPart}`;
+  }
+  const opt: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+  return `${from.toLocaleDateString(lang, opt)} – ${to.toLocaleDateString(lang, opt)}, ${to.getFullYear()}`;
 });
 
+/** 周末/节假日徽章仅日视角有意义(周/月范围混合多种日期类型) */
 const dateBadge = computed(() => {
-  if (!selectedDate.value) return null;
+  if (viewMode.value !== "day" || !selectedDate.value) return null;
   const ds = selectedDate.value;
   if (calendarData.value?.holidays.includes(ds))
     return { label: t("reportHistory.holiday"), variant: "secondary" as const };
@@ -249,14 +306,15 @@ async function loadCalendarMeta(year: number, month: number) {
   }
 }
 
-async function loadReports(date: string) {
+async function loadReports(from: string, to: string) {
   const token = ++reportsRequestToken;
   reportsLoading.value = true;
   expandedReportId.value = null;
   commitOpen.value = {};
   try {
-    const result = await cmd<ReportHistoryDetail[]>("get_reports_by_date", {
-      date,
+    const result = await cmd<ReportHistoryDetail[]>("get_reports_by_range", {
+      dateFrom: from,
+      dateTo: to,
       projectIds: filterProjectIds.value,
       tagIds: filterTagIds.value,
       reportType: reportTypeParam.value,
@@ -322,12 +380,19 @@ watch(
   { immediate: true },
 );
 
-/** 选中日期或任一筛选条件变化时刷新报告列表(合并原 4 个重复 watch) */
+/** 选中范围或任一筛选条件变化时刷新报告列表(日/周/月视角切换即范围变化) */
 watch(
-  () => [selectedDate.value, filterProjectIds.value, filterTagIds.value, filterType.value] as const,
-  ([date]) => {
-    if (date) {
-      loadReports(date);
+  () =>
+    [
+      selectedRange.value?.from ?? null,
+      selectedRange.value?.to ?? null,
+      filterProjectIds.value,
+      filterTagIds.value,
+      filterType.value,
+    ] as const,
+  ([from, to]) => {
+    if (from && to) {
+      loadReports(from, to);
     } else {
       reports.value = [];
     }
@@ -524,14 +589,30 @@ watch(
             v-else-if="calendarRefreshing"
             class="absolute right-10 top-2.5 z-10 h-3.5 w-3.5 animate-spin text-muted-foreground"
           />
-          <ScrollArea class="h-full">
-            <ReportCalendar
-              v-model="selectedDate"
-              :calendar-data="calendarData"
-              :highlight-range="highlightRange"
-              @month-change="onMonthChange"
-            />
-          </ScrollArea>
+          <div class="flex h-full flex-col">
+            <!-- 选中视角:日 / 周 / 月 -->
+            <div class="flex shrink-0 items-center gap-1 px-3 pt-2">
+              <Button
+                v-for="opt in VIEW_OPTIONS"
+                :key="opt.value"
+                size="sm"
+                :variant="viewMode === opt.value ? 'default' : 'outline'"
+                class="h-6 flex-1 px-2 text-[11px]"
+                @click="viewMode = opt.value"
+              >
+                {{ t(opt.labelKey) }}
+              </Button>
+            </div>
+            <ScrollArea class="min-h-0 flex-1">
+              <ReportCalendar
+                v-model="selectedDate"
+                :calendar-data="calendarData"
+                :highlight-range="highlightRange"
+                :selection-mode="viewMode"
+                @month-change="onMonthChange"
+              />
+            </ScrollArea>
+          </div>
         </div>
       </div>
 
@@ -556,11 +637,15 @@ watch(
         <template v-else>
           <!-- date header -->
           <div class="flex shrink-0 items-center gap-2 border-b px-4 py-2">
-            <span class="text-sm font-medium">{{ dateLabel }}</span>
+            <span class="text-sm font-medium">{{ rangeLabel }}</span>
             <Badge v-if="dateBadge" :variant="dateBadge.variant" class="text-[11px]">
               {{ dateBadge.label }}
             </Badge>
-            <Badge v-if="selectedDate === todayStr" variant="secondary" class="text-[11px]">
+            <Badge
+              v-if="viewMode === 'day' && selectedDate === todayStr"
+              variant="secondary"
+              class="text-[11px]"
+            >
               {{ t("reportHistory.today") }}
             </Badge>
           </div>
@@ -570,7 +655,11 @@ watch(
             v-if="!reports.length"
             class="flex flex-1 items-center justify-center text-sm text-muted-foreground"
           >
-            {{ t("reportHistory.noReportsOnDate") }}
+            {{
+              viewMode === "day"
+                ? t("reportHistory.noReportsOnDate")
+                : t("reportHistory.noReportsInRange")
+            }}
           </div>
 
           <!-- reports + commits -->

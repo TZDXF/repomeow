@@ -91,6 +91,12 @@ pub fn run() {
                 commands::git::status_refresher_loop(handle).await;
             });
 
+            // 跟踪更新循环:开启跟踪的项目远端有更新时自动快进拉取(无法快进即取消,不提醒)
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                commands::git::auto_pull_loop(handle).await;
+            });
+
             Ok(())
         })
         .on_window_event(|window, event| match event {
@@ -133,6 +139,7 @@ pub fn run() {
             commands::project::list_archived_projects,
             commands::project::unarchive_project,
             commands::project::set_project_favorite,
+            commands::project::set_project_auto_pull,
             commands::project::delete_project,
             commands::git::get_git_status,
             commands::git::refresh_all_git_status,
@@ -217,6 +224,7 @@ pub fn run() {
             commands::report::get_calendar_meta,
             commands::report::get_holiday_data,
             commands::report::get_reports_by_date,
+            commands::report::get_reports_by_range,
             commands::report::get_work_week_ranges,
             commands::report::plan_batch_report_ranges,
             commands::report::list_report_dates,

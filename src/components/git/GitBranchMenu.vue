@@ -5,10 +5,12 @@ import { toast } from "vue-sonner";
 import {
   ArrowDownToLine,
   ArrowUpToLine,
+  Check,
   GitBranchPlus,
   GitCommitHorizontal,
   GitMerge,
   Loader2,
+  Radar,
 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import {
@@ -297,6 +299,25 @@ async function pullThenPush() {
   if (await pull()) await push();
 }
 
+// --- 跟踪更新:开启后后台定时检查远端更新并自动快进拉取(无法快进即取消,不提醒) ---
+/** 主工作区下 props.project 即 store 中的对象,切换后就地更新、此处响应式跟随 */
+const tracked = computed(() => props.project.auto_pull);
+const trackingBusy = ref(false);
+
+async function toggleTracking() {
+  if (trackingBusy.value) return;
+  trackingBusy.value = true;
+  const next = !tracked.value;
+  try {
+    await store.setAutoPull(props.project.id, next);
+    toast.success(t(next ? "git.tracking.enabled" : "git.tracking.disabled"));
+  } catch (e) {
+    toast.error(String(e));
+  } finally {
+    trackingBusy.value = false;
+  }
+}
+
 // --- 指定分支:拉取 / 推送(非当前分支由后端快进更新或直接推送,不切换工作区) ---
 const branchOp = ref<{ branch: string; op: "pull" | "push" } | null>(null);
 
@@ -468,6 +489,18 @@ function onOpsChanged() {
             class="ml-auto text-[10px] font-medium leading-none text-emerald-600"
             >{{ ahead }}</span
           >
+        </DropdownMenuItem>
+        <!-- 跟踪更新:按项目维度生效(worktree 视图隐藏,避免误以为只跟踪当前工作区) -->
+        <DropdownMenuItem
+          v-if="!currentWorktree"
+          class="gap-2 text-xs"
+          :disabled="opsLocked || trackingBusy"
+          :title="t('git.tracking.hint')"
+          @click="toggleTracking"
+        >
+          <Radar class="h-3.5 w-3.5" />
+          {{ tracked ? t("git.tracking.stop") : t("git.tracking.action") }}
+          <Check v-if="tracked" class="ml-auto h-3.5 w-3.5 text-emerald-600" />
         </DropdownMenuItem>
         <DropdownMenuSeparator />
       </template>

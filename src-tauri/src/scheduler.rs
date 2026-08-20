@@ -403,6 +403,29 @@ fn is_work_week_last_day(today: NaiveDate, cache_root: &PathBuf) -> bool {
     is_work_week_last_day_with(today, &|d| workday::is_workday(d, cache_root))
 }
 
+/// 日报的报告日 = 触发日的前一天(次日生成,覆盖前一日全天,
+/// 避免执行时间之后的加班提交被漏掉)
+fn daily_report_date(fire_date: NaiveDate) -> NaiveDate {
+    fire_date - chrono::Duration::days(1)
+}
+
+/// 日报星期过滤判定,作用于报告日(触发日前一天)而非触发日当天:
+/// 「仅周一至周五 / 仅中国工作日」描述的是哪些天的工作需要出日报
+fn daily_filters_allow(
+    report_date: NaiveDate,
+    weekdays_only: bool,
+    chinese_workday_only: bool,
+    is_workday: &dyn Fn(NaiveDate) -> bool,
+) -> bool {
+    if weekdays_only && report_date.weekday().num_days_from_monday() >= 5 {
+        return false;
+    }
+    if chinese_workday_only && !is_workday(report_date) {
+        return false;
+    }
+    true
+}
+
 /// 筛选当前时刻应该触发的 schedule(±1 分钟容差)
 fn due_schedules(
     schedules: &[ReportSchedule],
@@ -449,20 +472,14 @@ fn due_schedules(
                 return today.weekday().number_from_monday() == s.weekly_end_weekday;
             }
 
-            // 日报:星期过滤
-            if s.weekdays_only {
-                let w = today.weekday().num_days_from_monday();
-                if w >= 5 {
-                    return false;
-                }
-            }
-
-            // 日报:中国工作日过滤
-            if s.chinese_workday_only && !workday::is_workday(today, cache_root) {
-                return false;
-            }
-
-            true
+            // 日报:次日生成,报告日为前一天;星期过滤按报告日判定
+            let report_date = daily_report_date(today);
+            daily_filters_allow(
+                report_date,
+                s.weekdays_only,
+                s.chinese_workday_only,
+                &|d| workday::is_workday(d, cache_root),
+            )
         })
         .cloned()
         .collect()
@@ -552,6 +569,26 @@ pub(crate) async fn fire_schedule(
         e
     })?;
 
+    // 1.5 按标签反查项目,与显式选择的 project_ids 取并集
+    // (任一选中标签命中即纳入;新项目打上标签后自动生效,无需修改任务)
+    let effective_project_ids: Vec<i64> = {
+        let db = app.state::<crate::db::Db>();
+        let conn = db.0.lock().unwrap();
+        let tag_pids = crate::commands::report::tag_project_ids(&conn, &schedule.tag_ids).map_err(
+            |e| {
+                eprintln!("[scheduler] 按标签反查项目失败: {e}");
+                e
+            },
+        )?;
+        let mut ids = schedule.project_ids.clone();
+        for pid in tag_pids {
+            if !ids.contains(&pid) {
+                ids.push(pid);
+            }
+        }
+        ids
+    };
+
     // 2. 读取 AI 配置(三项任意一项缺失即拒绝执行)
     let ai_config = load_ai_config(data_dir);
     if ai_config.ai_base_url.is_empty() {
@@ -611,7 +648,10 @@ pub(crate) async fn fire_schedule(
             (start.format("%Y-%m-%d").to_string(), today_str.clone())
         }
     } else {
-        (today_str.clone(), today_str.clone())
+        // 日报次日生成:覆盖前一天全天,执行时间之后的加班提交也能纳入
+        let report_date = daily_report_date(today);
+        let date = report_date.format("%Y-%m-%d").to_string();
+        (date.clone(), date)
     };
     let since = format!("{date_from} 00:00:00");
     let until = format!("{date_to} 23:59:59");
@@ -625,7 +665,7 @@ pub(crate) async fn fire_schedule(
 
     // 5. 对每个项目拉取 git_log
     let mut commits_by_project: Vec<(i64, String, String, Vec<GitCommitInfo>)> = Vec::new();
-    for &pid in &schedule.project_ids {
+    for &pid in &effective_project_ids {
         if let Some((path, name, desc)) = projects.get(&pid) {
             // 解析作者过滤
             let author: Option<String> = if schedule.author_mode == "me" {
@@ -854,6 +894,40 @@ mod tests {
     #[test]
     fn plain_text_unchanged() {
         assert_eq!(strip_thinking("  普通报告  "), "普通报告");
+    }
+
+    #[test]
+    fn daily_report_date_is_previous_day() {
+        // 常规:8/20 触发 → 报告日 8/19
+        assert_eq!(
+            super::daily_report_date(chrono::NaiveDate::from_ymd_opt(2026, 8, 20).unwrap()),
+            chrono::NaiveDate::from_ymd_opt(2026, 8, 19).unwrap()
+        );
+        // 跨月:8/1 触发 → 报告日 7/31
+        assert_eq!(
+            super::daily_report_date(chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap()),
+            chrono::NaiveDate::from_ymd_opt(2026, 7, 31).unwrap()
+        );
+    }
+
+    #[test]
+    fn daily_filters_apply_to_report_date_not_fire_date() {
+        use chrono::Datelike;
+        let all_days = &|_: chrono::NaiveDate| true;
+        // 报告日为周五(触发日周六):「仅周一至周五」仍生成 —— 周五晚加班提交不丢
+        let fri = chrono::NaiveDate::from_ymd_opt(2026, 8, 14).unwrap();
+        assert_eq!(fri.weekday(), chrono::Weekday::Fri);
+        assert!(super::daily_filters_allow(fri, true, false, all_days));
+        // 报告日为周六(触发日周日):「仅周一至周五」跳过
+        let sat = chrono::NaiveDate::from_ymd_opt(2026, 8, 15).unwrap();
+        assert_eq!(sat.weekday(), chrono::Weekday::Sat);
+        assert!(!super::daily_filters_allow(sat, true, false, all_days));
+        // 「仅中国工作日」:报告日为节假日跳过,为工作日(含调休补班)生成
+        let except_fri = &|d: chrono::NaiveDate| d != fri;
+        assert!(!super::daily_filters_allow(fri, false, true, except_fri));
+        assert!(super::daily_filters_allow(sat, false, true, all_days));
+        // 不过滤:任意报告日都生成
+        assert!(super::daily_filters_allow(sat, false, false, all_days));
     }
 
     use crate::commands::report::read_schedules;
