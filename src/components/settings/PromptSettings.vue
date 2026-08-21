@@ -9,6 +9,8 @@ import {
   DEFAULT_COMMIT_PROMPT,
   DEFAULT_REPORT_PROMPT,
   DEFAULT_WEEKLY_REPORT_PROMPT,
+  DEFAULT_WIKI_OUTLINE_PROMPT,
+  DEFAULT_WIKI_PAGE_PROMPT,
   loadAiPrompts,
   openPromptsDir,
   saveAiPrompts,
@@ -16,7 +18,7 @@ import {
 
 const { t } = useI18n();
 
-type PromptId = "commit" | "report" | "weeklyReport";
+type PromptId = "commit" | "report" | "weeklyReport" | "wikiOutline" | "wikiPage";
 
 const activePrompt = ref<PromptId>("commit");
 
@@ -24,6 +26,8 @@ const activePrompt = ref<PromptId>("commit");
 const commitPrompt = ref("");
 const reportPrompt = ref("");
 const weeklyReportPrompt = ref("");
+const wikiOutlinePrompt = ref("");
+const wikiPagePrompt = ref("");
 
 onMounted(async () => {
   try {
@@ -31,6 +35,8 @@ onMounted(async () => {
     commitPrompt.value = prompts.commit;
     reportPrompt.value = prompts.report;
     weeklyReportPrompt.value = prompts.reportWeekly;
+    wikiOutlinePrompt.value = prompts.wikiOutline;
+    wikiPagePrompt.value = prompts.wikiPage;
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     toast.error(t("settings.prompts.loadFailed", { error: message }));
@@ -43,6 +49,8 @@ async function save() {
       commit: commitPrompt.value,
       report: reportPrompt.value,
       reportWeekly: weeklyReportPrompt.value,
+      wikiOutline: wikiOutlinePrompt.value,
+      wikiPage: wikiPagePrompt.value,
     });
     toast.success(t("settings.prompts.saved"));
   } catch (e) {
@@ -95,6 +103,20 @@ async function openDir() {
         @click="activePrompt = 'weeklyReport'"
       >
         {{ t("settings.prompts.weeklyReport") }}
+      </Button>
+      <Button
+        size="sm"
+        :variant="activePrompt === 'wikiOutline' ? 'default' : 'outline'"
+        @click="activePrompt = 'wikiOutline'"
+      >
+        {{ t("settings.prompts.wikiOutline") }}
+      </Button>
+      <Button
+        size="sm"
+        :variant="activePrompt === 'wikiPage' ? 'default' : 'outline'"
+        @click="activePrompt = 'wikiPage'"
+      >
+        {{ t("settings.prompts.wikiPage") }}
       </Button>
     </div>
 
@@ -157,7 +179,7 @@ async function openDir() {
         />
       </template>
 
-      <template v-else>
+      <template v-else-if="activePrompt === 'weeklyReport'">
         <div class="flex items-center justify-between gap-2">
           <label class="text-sm font-medium" for="prompt-report-weekly">
             {{ t("settings.prompts.weeklyReport") }}
@@ -180,6 +202,64 @@ async function openDir() {
           id="prompt-report-weekly"
           v-model="weeklyReportPrompt"
           :placeholder="DEFAULT_WEEKLY_REPORT_PROMPT"
+          rows="18"
+          spellcheck="false"
+          class="mt-3 min-h-96 resize-y font-mono text-xs"
+        />
+      </template>
+
+      <template v-else-if="activePrompt === 'wikiOutline'">
+        <div class="flex items-center justify-between gap-2">
+          <label class="text-sm font-medium" for="prompt-wiki-outline">
+            {{ t("settings.prompts.wikiOutline") }}
+          </label>
+          <Button
+            size="sm"
+            variant="ghost"
+            class="h-7 shrink-0 gap-1 px-2 text-xs text-muted-foreground"
+            :disabled="!wikiOutlinePrompt"
+            @click="wikiOutlinePrompt = ''"
+          >
+            <RotateCcw class="h-3 w-3" />
+            {{ t("settings.prompts.reset") }}
+          </Button>
+        </div>
+        <p class="mt-1.5 text-xs text-muted-foreground">
+          {{ t("settings.prompts.wikiOutlineDescription") }}
+        </p>
+        <Textarea
+          id="prompt-wiki-outline"
+          v-model="wikiOutlinePrompt"
+          :placeholder="DEFAULT_WIKI_OUTLINE_PROMPT"
+          rows="18"
+          spellcheck="false"
+          class="mt-3 min-h-96 resize-y font-mono text-xs"
+        />
+      </template>
+
+      <template v-else>
+        <div class="flex items-center justify-between gap-2">
+          <label class="text-sm font-medium" for="prompt-wiki-page">
+            {{ t("settings.prompts.wikiPage") }}
+          </label>
+          <Button
+            size="sm"
+            variant="ghost"
+            class="h-7 shrink-0 gap-1 px-2 text-xs text-muted-foreground"
+            :disabled="!wikiPagePrompt"
+            @click="wikiPagePrompt = ''"
+          >
+            <RotateCcw class="h-3 w-3" />
+            {{ t("settings.prompts.reset") }}
+          </Button>
+        </div>
+        <p class="mt-1.5 text-xs text-muted-foreground">
+          {{ t("settings.prompts.wikiPageDescription") }}
+        </p>
+        <Textarea
+          id="prompt-wiki-page"
+          v-model="wikiPagePrompt"
+          :placeholder="DEFAULT_WIKI_PAGE_PROMPT"
           rows="18"
           spellcheck="false"
           class="mt-3 min-h-96 resize-y font-mono text-xs"

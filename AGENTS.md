@@ -30,7 +30,7 @@ Tauri 2 + Vue 3 + TypeScript 桌面应用(项目名称 `RepoMeow`,中文名“�
 ```
 src/                  Vue 3 前端(<script setup> SFC)
   views/              页面:ProjectsHome / ProjectDetail / ProjectFiles / GitGraph
-                      / ReportHistory / Settings / TrayPopup(系统托盘迷你弹窗)
+                      / ProjectWiki / ReportHistory / Settings / TrayPopup(系统托盘迷你弹窗)
   components/ui/      shadcn-vue(reka-ui)组件,勿手改生成文件风格
   components/{common,files,git,icons,java,markdown,open,project,report,scripts,settings,tags,update}/
                       业务组件;TitleBar 在 components/ 顶层
@@ -39,6 +39,7 @@ src/                  Vue 3 前端(<script setup> SFC)
                       / pins / project-assets / project-overview / update
   i18n/locales/       zh-CN.ts(默认)、en-US.ts(回退),两文件键必须对齐
   lib/                tauri.ts(前后端桥 cmd<T>)/ ai.ts / path.ts / diff.ts / diff-highlight.ts
+                      / wiki.ts / wiki-parse.ts / wiki-generator.ts / async-pool.ts 等
                       / git-graph.ts / branch-tree.ts / favorites.ts / open-with.ts 等
                       单元测试与源文件同目录(lib/*.test.ts,stores/*.test.ts)
   router/             Vue Router(index.ts)
@@ -48,7 +49,7 @@ src-tauri/src/
   main.rs             二进制入口(实际逻辑在 lib.rs 的 run())
   commands/*.rs       Tauri 命令,按域拆分:project / git / script / docker / files
                       / open / tag / walk / scan / report / overview / pin / account
-                      / java / toolchain / editor_icon / hidden / prompt / window / mod
+                      / java / toolchain / editor_icon / hidden / prompt / wiki / window / mod
   db/                 rusqlite 连接(全局 Mutex 单连接) + migrations.rs 迁移执行器
   models.rs           serde 数据结构(命令/项目/扫描/报告等)
   path_util.rs        clean_str / to_forward_slash 等路径归一化辅助
@@ -61,14 +62,24 @@ src-tauri/migrations/ SQL 迁移,NNN_name.sql(当前 001~007)
 
 关键规则:
 
-1. **新增 Rust 命令**:在 `commands/*.rs` 实现(返回 `AppResult<T>`)后,必须在 `lib.rs` 的 `invoke_handler!` 里注册,前端经 `cmd<T>("snake_case 名", { camelCase 参数 })` 调用(Tauri 自动做参数名映射)。当前命令域:`project / git / script / docker / files / open / tag / walk / scan / report / overview / pin / account / java / toolchain / editor_icon / hidden / prompt / window`。
+1. **新增 Rust 命令**:在 `commands/*.rs` 实现(返回 `AppResult<T>`)后,必须在 `lib.rs` 的 `invoke_handler!` 里注册,前端经 `cmd<T>("snake_case 名", { camelCase 参数 })` 调用(Tauri 自动做参数名映射)。当前命令域:`project / git / script / docker / files / open / tag / walk / scan / report / overview / pin / account / java / toolchain / editor_icon / hidden / prompt / wiki / window`。
 2. **Tauri 插件与特性**(`src-tauri/Cargo.toml` + `lib.rs`):`tauri` 启用 `protocol-asset` / `tray-icon` / `image-png` 三个 feature;插件依次注册 `single-instance`(必须最先注册,二次启动聚焦已有窗口并退出新进程)、`opener` / `dialog` / `shell` / `store` / `http` / `updater` / `process` / `autostart`(自启时附 `--autostart` 参数,用于静默驻留托盘)。新增插件后请同步在这里登记。
 3. **数据库与持久化迁移**:SQLite 文件在 `~/.repomeow/projects.db`(Windows: `C:\Users\<user>\.repomeow\`)。以版本是否已正式发布或对外分发作为迁移边界:当前版本尚未发布时,同一开发版本内的 SQL、设置、配置及其他持久化格式变更可直接更新该版本的定义,无需为开发快照之间新增迁移;这不保证已有本地开发数据自动升级,必要时可重建开发数据库或配置。版本发布后,不得修改该版本已经使用的迁移文件;数据库结构变更需新增 `migrations/00N_xxx.sql` 并在 `db/migrations.rs` 中按 `PRAGMA user_version` 顺序应用、保证幂等,配置键名/类型/语义等变更也必须提供迁移或兼容处理。每个 SQL 迁移文件顶部必须用 `-- App version: x.y.z` 标明对应应用版本,并用 `-- Status: in development` 标记正在开发的版本;正式发布后改为 `-- Status: released`。当前已应用 001_init / 002_favorite / 003_pinned_commands / 004_git_account_token_invalid / 005_auto_pull / 006_schedule_tag_ids / 007_daily_previous_day。
-4. **应用数据目录名 `.repomeow`** 在 Rust(`lib.rs` 的 `APP_DATA_DIR_NAME`)和前端(`stores/settings.ts`)各有一份常量,改动需同步。设置持久化走 `tauri-plugin-store` → `~/.repomeow/settings.json`。AI 提示词不走 store/SQLite,存 `~/.repomeow/prompts/*.md`(`commands/prompt.rs` 读写,文件缺失/为空 = 前端 `lib/ai-prompts.ts` 的内置默认模板)。可再生运行期缓存则放在**安装目录** `<exe 所在目录>/data/` 下(`lib.rs` 的 `runtime_data_root()`,dev 模式落在 `target/debug/data/`):编辑器真实图标缓存为 `data/icons/<kind>.png`(`commands/editor_icon.rs` 从本机 exe / .app 提取,settings 表 `editor_icon_cache` 记录源文件 mtime,变化才重提),chinese-days 节假日缓存为 `data/chinese-days.json`(`workday.rs`,TTL 30 天,缺失/过期自动重拉 CDN)。安装目录不可写时两者按既有语义静默降级(图标回退 lucide 通用图标,节假日数据不缓存)。
+4. **应用数据目录名 `.repomeow`** 在 Rust(`lib.rs` 的 `APP_DATA_DIR_NAME`)和前端(`stores/settings.ts`)各有一份常量,改动需同步。设置持久化走 `tauri-plugin-store` → `~/.repomeow/settings.json`。AI 提示词不走 store/SQLite,存 `~/.repomeow/prompts/*.md`(`commands/prompt.rs` 读写,文件缺失/为空 = 前端 `lib/ai-prompts.ts` 的内置默认模板)。项目 wiki 同样不进 SQLite:落盘 `~/.repomeow/wiki/<basename>-<8位fnv1a哈希>/` 下的 `meta.json`(大纲+headSha+generatedAt,最后写入,status=completed 才有效)与 `pages/NN-slug.md`(tmp+rename 原子写),目录名由 `commands/wiki.rs` 按 clean_str 路径派生,前端一律经命令拿路径,不自算。可再生运行期缓存则放在**安装目录** `<exe 所在目录>/data/` 下(`lib.rs` 的 `runtime_data_root()`,dev 模式落在 `target/debug/data/`):编辑器真实图标缓存为 `data/icons/<kind>.png`(`commands/editor_icon.rs` 从本机 exe / .app 提取,settings 表 `editor_icon_cache` 记录源文件 mtime,变化才重提),chinese-days 节假日缓存为 `data/chinese-days.json`(`workday.rs`,TTL 30 天,缺失/过期自动重拉 CDN)。安装目录不可写时两者按既有语义静默降级(图标回退 lucide 通用图标,节假日数据不缓存)。
 5. **窗口与生命周期**(`lib.rs` + `tray.rs`):主窗口默认 `visible: false`,启动时统一 `show()`;带 `--autostart` 参数时保持隐藏仅驻留托盘。托盘迷你弹窗(`TRAY_POPUP_LABEL`)永不真正关闭,失焦自动收起;主窗口(`MAIN_WINDOW_LABEL`)关闭时按设置项 `closeAction`(默认 `tray` = 最小化到托盘,`exit` = 真退出整个进程)。新增窗口/托盘行为请同步登记。
 6. **后台任务**(`lib.rs` 的 `setup`):`scheduler::run(handle)` 跑日报定时调度,`commands::git::status_refresher_loop(handle)` 跑批量 git 状态推送(替代前端轮询),`commands::git::auto_pull_loop(handle)` 跑「跟踪更新」自动拉取(auto_pull=1 的项目 fetch 后 `git merge --ff-only @{u}`,无法快进即静默取消);变更这几个域时请检查启动序列是否仍按 notify / handle 顺序装配。
 7. **路径别名** `@/` → `src/`(tsconfig + vite + vitest 三处均已配置)。
 8. **路径风格统一**:禁止各处 ad-hoc `replace('\\', "/")` / `split("/")`,一律走统一辅助——Rust 侧 `path_util.rs`(`clean_str` 落库/缓存 key 用平台分隔符、`to_forward_slash` IPC/git pathspec 用 `/`)、前端 `src/lib/path.ts`(`cleanPath` / `toForwardSlash` / `baseName` / `splitDirName` / `displayRelativeTo`)。项目路径入库前必须 `clean_str`;IPC 输出的仓库内路径恒为 `/` 分隔;各类 HashMap/缓存 key 必须经归一化后再做读写与 invalidate。
+
+## wiki 生成管线(commands/wiki.rs + lib/wiki-generator.ts)
+
+- 两阶段(参照 deepwiki-open,无 embedding/RAG):`collect_wiki_context` 收集过滤后的文件树(walk 缓存 + 产物/二进制/锁文件黑名单,超预算按目录折叠)+ README + 根目录清单文件 → LLM 产裸 XML 大纲(`wiki-parse.ts` 三层容错:fence 剥离/合成闭合标签/逐 `<page>` 切分,配单测)→ 逐页 `read_wiki_files` 取相关文件全文喂 LLM(单页重试 2 次,并发走 `aiConcurrency`)→ `save_wiki_page` 逐页落盘 → `save_wiki_meta` 收尾。取消时不写 meta,整本视为无效。
+- 生成状态托管在全局 `stores/wiki.ts`(单例):**离开 wiki 页不中止生成**,回来后按 `genFor` 路径匹配续看进度;同时只允许一个整本生成,期间其他项目可正常查看已有 wiki。生成中 UI 为左右布局(左侧进度+页面列表,右侧流式预览)。
+- AI 思考模式:`settings.aiThinkingEnabled` 默认 false;开启后 `getChatModel(thinkingEnabled)` 不再注入 provider 关闭思考参数,模型按默认行为输出 `<think>` 块;`stripThinking` 的兜底剥除对响应起始位置的闭合思考块仍生效。仅 wiki 大纲与页面生成受开关影响(commit/报告等其他 AI 功能保持原行为,避免思考带来的延迟副作用)。
+- 页面正文走**流式生成**(`ai.ts` 的 `streamWikiPage`,streamText + Tauri http 插件 pull 式读响应体),进度面板用 Markdown `mode="streaming"` 实时预览第一个进行中页面;大纲仍为非流式(generateText)。
+- stale 检测:meta.headSha 与当前 HEAD(git2 `open_repo`,wiki.rs 内复用)不一致即过时;stale 时可**增量更新**(`wiki_changed_files` 取 headSha..HEAD 变更文件清单,仅重生成 relevantFiles 命中的页面并推进 meta.headSha;无 headSha/历史改写时退化为整本重生成)。
+- 页面底部「来源文件」chips 来自大纲的 relevantFiles(非 LLM 正文解析),点击经 `SourceFileDialog.vue`(复用 CodeViewer + `read_file_preview`)查看文件;页面提示词**不再要求**正文末尾输出来源清单(该信息由 chips 承担,避免重复)。页面提示词要求产出 mermaid 图(flowchart 强制 TD),由 vue-stream-markdown 内置 mermaid 支持渲染。
+- git.rs 的 `open_repo` 是 pub(crate),git 读路径优先复用。
 
 ## 前端约定
 

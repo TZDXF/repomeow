@@ -357,7 +357,7 @@ async fn run_blocking<T: Send + 'static>(
 
 /// 打开仓库(向上查找父目录,与 `git -C <path>` 语义一致)。
 /// 非 git 仓库返回 Ok(None),其他错误(权限/损坏等)透传
-fn open_repo(path: &str) -> AppResult<Option<Repository>> {
+pub(crate) fn open_repo(path: &str) -> AppResult<Option<Repository>> {
     match Repository::discover(path) {
         Ok(repo) => Ok(Some(repo)),
         Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(None),
