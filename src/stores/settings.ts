@@ -68,6 +68,13 @@ export const useSettingsStore = defineStore("settings", () => {
   const aiModel = ref("");
   /** AI 调用并发上限(1-5),适用于批量生成报告等所有 AI 请求场景 */
   const aiConcurrency = ref(2);
+  /**
+   * 启用 AI 思考模式(wiki 生成会用上;默认 false)。
+   * 关闭时 ai.ts 会按 provider 注入关闭思考参数(已知推理服务有效,未知服务忽略);
+   * 开启时不注入任何参数,模型按默认行为决定是否输出 <think> 块。
+   * 不影响 stripThinking 的兜底剥除(响应起始位置的思考块无论开关都会被清理)。
+   */
+  const aiThinkingEnabled = ref(false);
   /** 项目列表视图模式(grid / table) */
   const projectsViewMode = ref<ProjectsViewMode>("grid");
   /** 项目列表排序方式 */
@@ -353,6 +360,7 @@ export const useSettingsStore = defineStore("settings", () => {
         aiApiKey: "",
         aiModel: "",
         aiConcurrency: "2",
+        aiThinkingEnabled: "false",
         projectsViewMode: "grid",
         projectsSortKey: "name",
         autoCheckUpdate: "true",
@@ -411,6 +419,11 @@ export const useSettingsStore = defineStore("settings", () => {
       if (Number.isFinite(n)) {
         aiConcurrency.value = Math.min(5, Math.max(1, n));
       }
+    }
+    // 思考模式开关:字符串 "true"/"false",非 "true" 一律回退默认 false
+    const savedThinking = await fileStore.get<string>("aiThinkingEnabled");
+    if (savedThinking === "true") {
+      aiThinkingEnabled.value = true;
     }
     // 视图模式:白名单校验,非法值回退 grid
     const savedViewMode = await fileStore.get<ProjectsViewMode>("projectsViewMode");
@@ -584,6 +597,11 @@ export const useSettingsStore = defineStore("settings", () => {
     await persist("aiConcurrency", String(n));
   }
 
+  async function setAiThinkingEnabled(value: boolean) {
+    aiThinkingEnabled.value = value;
+    await persist("aiThinkingEnabled", String(value));
+  }
+
   async function setProjectsViewMode(value: ProjectsViewMode) {
     if (value !== "grid" && value !== "table") return;
     projectsViewMode.value = value;
@@ -713,6 +731,7 @@ export const useSettingsStore = defineStore("settings", () => {
     aiApiKey,
     aiModel,
     aiConcurrency,
+    aiThinkingEnabled,
     projectsViewMode,
     projectsSortKey,
     autoCheckUpdate,
@@ -741,6 +760,7 @@ export const useSettingsStore = defineStore("settings", () => {
     setAiApiKey,
     setAiModel,
     setAiConcurrency,
+    setAiThinkingEnabled,
     setProjectsViewMode,
     setProjectsSortKey,
     setAutoCheckUpdate,

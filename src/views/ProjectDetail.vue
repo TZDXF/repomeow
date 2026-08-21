@@ -6,6 +6,7 @@ import { toast } from "vue-sonner";
 import {
   ArrowLeft,
   BookOpen,
+  BookOpenText,
   FileText,
   FolderSync,
   FolderTree,
@@ -322,6 +323,16 @@ async function saveDesc() {
           >
             <FolderTree class="h-4 w-4" />
             {{ t("files.entry") }}
+          </Button>
+          <Button
+            v-if="project.path_exists"
+            variant="outline"
+            size="sm"
+            :title="t('wiki.entry')"
+            @click="router.push(`/projects/${project.id}/wiki`)"
+          >
+            <BookOpenText class="h-4 w-4" />
+            {{ t("wiki.entry") }}
           </Button>
           <OpenWithMenu v-if="project.path_exists" :project="worktreeProject ?? project" />
         </div>

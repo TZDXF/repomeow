@@ -1,0 +1,742 @@
+//! 项目 Wiki:AI 生成的大纲与页面落盘为 `~/.repomeow/wiki/<basename>-<hash>/` 下的
+//! `meta.json` + `pages/NN-slug.md` 普通文件(不进 SQLite),用户可直接查看/编辑/导出。
+//!
+//! 生成流水线在前端编排(参照 batch-report):collect_wiki_context 收集文件树与清单
+//! → LLM 产 XML 大纲 → 逐页 read_wiki_files 取相关文件全文喂 LLM → save_wiki_page 逐页
+//! 落盘 → save_wiki_meta 最后写入(meta.json 存在且 status=completed 才算有效 wiki)。
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Manager};
+
+use crate::commands::{files, git, open, walk};
+use crate::error::{AppError, AppResult, ErrorCode};
+use crate::path_util::{clean_str, to_forward_slash};
+use crate::APP_DATA_DIR_NAME;
+
+const WIKI_DIR_NAME: &str = "wiki";
+const META_FILE: &str = "meta.json";
+const PAGES_DIR: &str = "pages";
+const META_VERSION: u32 = 1;
+
+/// 文件树字符预算(≈25k token),超出按目录折叠
+const FILE_TREE_MAX_CHARS: usize = 100_000;
+/// README 注入 prompt 的字符上限
+const README_MAX_CHARS: usize = 32_768;
+/// 单个清单文件读取上限
+const MANIFEST_MAX_BYTES: usize = 16 * 1024;
+/// 单页生成时单个相关文件的字符上限
+const PAGE_FILE_MAX_CHARS: usize = 65_536;
+/// 单页生成时全部相关文件的总量预算,耗尽即停止读取后续文件
+const PAGE_TOTAL_MAX_CHARS: usize = 240_000;
+
+/// 目录名黑名单:任一路径段命中即排除(node_modules / 隐藏目录已由 walk 层跳过,
+/// 这里主要兜住非 git 项目没有 .gitignore 时的构建产物目录)
+const EXCLUDED_DIRS: &[&str] = &[
+    "target",
+    "dist",
+    "build",
+    "out",
+    "coverage",
+    "vendor",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "bin",
+    "obj",
+    "pods",
+    "deriveddata",
+];
+
+/// 文件名黑名单(小写比较):锁文件与系统杂项对理解架构没有价值且体积极大
+const EXCLUDED_FILE_NAMES: &[&str] = &[
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "cargo.lock",
+    "composer.lock",
+    "gemfile.lock",
+    "poetry.lock",
+    "bun.lockb",
+    ".ds_store",
+    "thumbs.db",
+];
+
+/// 扩展名黑名单(小写比较):二进制、媒体、字体、压缩包、sourcemap 等
+const EXCLUDED_EXTS: &[&str] = &[
+    "exe", "dll", "so", "dylib", "bin", "o", "a", "lib", "jar", "war", "class", "pyc", "pyo",
+    "png", "jpg", "jpeg", "gif", "webp", "ico", "svg", "bmp", "avif", "mp3", "mp4", "wav", "ogg",
+    "mov", "avi", "webm", "zip", "tar", "gz", "tgz", "bz2", "xz", "7z", "rar", "zst", "pdf",
+    "woff", "woff2", "ttf", "otf", "eot", "db", "sqlite", "sqlite3", "map", "lock",
+];
+
+/// 根目录清单文件:帮助 LLM 理解技术栈与构建方式,存在才读取
+const MANIFEST_NAMES: &[&str] = &[
+    "package.json",
+    "pnpm-workspace.yaml",
+    "Cargo.toml",
+    "go.mod",
+    "pyproject.toml",
+    "requirements.txt",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "composer.json",
+    "Gemfile",
+    "Dockerfile",
+    "docker-compose.yml",
+    "docker-compose.yaml",
+    "tsconfig.json",
+];
+
+// ── 数据结构(IPC 边界恒为 camelCase) ─────────────────────────────────────
+
+/// 大纲中的单个页面条目(meta.json 的 outline 元素)
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WikiOutlinePage {
+    pub id: String,
+    /// 页面文件名(pages/ 下,如 `01-overview.md`)
+    pub file: String,
+    pub title: String,
+    /// 该页覆盖内容的简述(大纲阶段产出,单页生成时注入 prompt)
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub section: Option<String>,
+    #[serde(default)]
+    pub importance: String,
+    #[serde(default)]
+    pub relevant_files: Vec<String>,
+    #[serde(default)]
+    pub related_pages: Vec<String>,
+}
+
+/// wiki 元信息;`generated_at` 与 `version` 由 save_wiki_meta 覆写,前端无需填
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WikiMeta {
+    #[serde(default)]
+    pub version: u32,
+    #[serde(default)]
+    pub project_path: String,
+    #[serde(default)]
+    pub generated_at: String,
+    #[serde(default)]
+    pub head_sha: Option<String>,
+    #[serde(default)]
+    pub model: String,
+    #[serde(default)]
+    pub language: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub outline: Vec<WikiOutlinePage>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WikiPageData {
+    pub id: String,
+    pub file: String,
+    pub title: String,
+    pub section: Option<String>,
+    pub importance: String,
+    pub relevant_files: Vec<String>,
+    pub related_pages: Vec<String>,
+    /// 页面 Markdown 正文;文件缺失时为空串(前端显示占位)
+    pub content: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WikiData {
+    pub meta: WikiMeta,
+    pub pages: Vec<WikiPageData>,
+    /// 生成时的 HEAD 与当前 HEAD 不一致(代码已更新,wiki 可能过时)
+    pub stale: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WikiManifest {
+    pub path: String,
+    pub content: String,
+}
+
+/// 结构阶段的输入:过滤后的文件树 + README + 根目录清单文件 + 当前 HEAD
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WikiContext {
+    pub file_tree: String,
+    /// 过滤后的完整文件清单(/ 分隔相对路径,不折叠),前端用于校验大纲标注的相关文件
+    pub paths: Vec<String>,
+    pub file_count: usize,
+    pub tree_truncated: bool,
+    pub readme: Option<String>,
+    pub manifests: Vec<WikiManifest>,
+    pub head_sha: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WikiFileContent {
+    pub path: String,
+    pub content: String,
+    pub truncated: bool,
+}
+
+// ── 目录派生 ─────────────────────────────────────────────────────────────
+
+/// FNV-1a 64 位:自实现保证跨版本稳定(std 的 DefaultHasher 不承诺哈希值稳定)
+fn fnv1a64(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in s.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+/// wiki 文件夹名:`<basename>-<clean 路径哈希低32位 hex>`。
+/// basename 取归一化路径最后一段(非法文件名字符替换为 `_`),哈希防同名碰撞
+fn folder_name(project_path: &str) -> String {
+    let clean = clean_str(project_path);
+    let base = clean.rsplit(['\\', '/']).next().unwrap_or_default();
+    let base: String = base
+        .chars()
+        .map(|c| if "<>:\"/\\|?*".contains(c) { '_' } else { c })
+        .collect();
+    let base = if base.is_empty() { "root" } else { &base };
+    format!("{base}-{:08x}", fnv1a64(&clean) as u32)
+}
+
+fn wiki_dir_in(root: &Path, project_path: &str) -> PathBuf {
+    root.join(folder_name(project_path))
+}
+
+fn wiki_dir(app: &AppHandle, project_path: &str) -> AppResult<PathBuf> {
+    let home = app
+        .path()
+        .home_dir()
+        .map_err(|e| AppError::coded(ErrorCode::IoError, e.to_string()))?;
+    Ok(wiki_dir_in(
+        &home.join(APP_DATA_DIR_NAME).join(WIKI_DIR_NAME),
+        project_path,
+    ))
+}
+
+/// 读取仓库当前 HEAD 的完整 sha;非 git 仓库 / 空仓库 / 读取失败均为 None
+fn head_sha(project_path: &str) -> Option<String> {
+    let repo = git::open_repo(project_path).ok()??;
+    let sha = repo.head().ok()?.target().map(|oid| oid.to_string());
+    sha
+}
+
+// ── 结构阶段:上下文收集 ──────────────────────────────────────────────────
+
+/// 文件是否对理解项目有价值(walk 已按 gitignore 过滤,此处再排除产物/二进制/锁文件)
+fn is_wiki_relevant(rel: &str) -> bool {
+    let path = Path::new(rel);
+    for comp in path.components() {
+        let s = comp.as_os_str().to_string_lossy().to_lowercase();
+        if EXCLUDED_DIRS.contains(&s.as_str()) {
+            return false;
+        }
+    }
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let lower = name.to_lowercase();
+    if EXCLUDED_FILE_NAMES.contains(&lower.as_str()) {
+        return false;
+    }
+    if lower.ends_with(".min.js") || lower.ends_with(".min.css") {
+        return false;
+    }
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        if EXCLUDED_EXTS.contains(&ext.to_lowercase().as_str()) {
+            return false;
+        }
+    }
+    true
+}
+
+/// 渲染文件树(每行一个 `/` 分隔相对路径)。超预算时反复把「最深的、含 ≥2 个文件的
+/// 父目录」折叠为 `dir/ (N files)` 摘要行(路径有序,同级兄弟必然相邻);
+/// 无可折叠行仍超预算时做行级截断,保证结构信息尽量完整
+fn render_file_tree(paths: &[String]) -> (String, bool) {
+    if paths.join("\n").len() <= FILE_TREE_MAX_CHARS {
+        return (paths.join("\n"), false);
+    }
+    let mut lines: Vec<String> = paths.to_vec();
+    loop {
+        if lines.join("\n").len() <= FILE_TREE_MAX_CHARS {
+            return (lines.join("\n"), true);
+        }
+        // 按父目录给相邻文件行分组,取最深一组折叠
+        let mut best: Option<(usize, usize, usize)> = None; // (深度, 起始下标, 组长度)
+        let mut i = 0;
+        while i < lines.len() {
+            let Some(pos) = lines[i].rfind('/') else {
+                i += 1;
+                continue;
+            };
+            let parent = &lines[i][..pos];
+            let start = i;
+            while i < lines.len() && lines[i].rfind('/').is_some_and(|p| &lines[i][..p] == parent)
+            {
+                i += 1;
+            }
+            let len = i - start;
+            if len >= 2 {
+                let depth = parent.matches('/').count();
+                if best.is_none_or(|(d, _, _)| depth > d) {
+                    best = Some((depth, start, len));
+                }
+            }
+        }
+        let Some((_, start, len)) = best else {
+            // 没有可折叠的兄弟组:保留预算内的前缀行,追加截断标记
+            let mut kept = Vec::new();
+            let mut used = 0;
+            for line in &lines {
+                if used + line.len() + 1 > FILE_TREE_MAX_CHARS {
+                    break;
+                }
+                used += line.len() + 1;
+                kept.push(line.clone());
+            }
+            kept.push(format!("... ({} more files)", lines.len() - kept.len()));
+            return (kept.join("\n"), true);
+        };
+        let parent = lines[start][..lines[start].rfind('/').unwrap()].to_string();
+        lines.splice(
+            start..start + len,
+            [format!("{parent}/ ({len} files)")],
+        );
+    }
+}
+
+/// 按 UTF-8 边界截断到 max 字节(跳过 continuation byte)
+fn truncate_utf8(bytes: &[u8], max: usize) -> String {
+    let mut end = bytes.len().min(max);
+    while end > 0 && end < bytes.len() && (bytes[end] & 0xC0) == 0x80 {
+        end -= 1;
+    }
+    String::from_utf8_lossy(&bytes[..end]).into_owned()
+}
+
+/// 读取根目录清单文件(存在才读,单文件上限 MANIFEST_MAX_BYTES)
+fn read_manifests(root: &Path) -> Vec<WikiManifest> {
+    MANIFEST_NAMES
+        .iter()
+        .filter_map(|name| {
+            let file = root.join(name);
+            if !file.is_file() {
+                return None;
+            }
+            let bytes = fs::read(&file).ok()?;
+            Some(WikiManifest {
+                path: (*name).to_string(),
+                content: truncate_utf8(&bytes, MANIFEST_MAX_BYTES),
+            })
+        })
+        .collect()
+}
+
+/// 收集结构阶段上下文:过滤后的文件树 + README(截断)+ 根目录清单文件 + 当前 HEAD
+#[tauri::command]
+pub fn collect_wiki_context(project_path: String) -> AppResult<WikiContext> {
+    files::ensure_dir(&project_path)?;
+    let root = Path::new(&project_path);
+    let paths: Vec<String> = walk::project_files_cached(root)
+        .iter()
+        .map(|p| walk::to_slash(p))
+        .filter(|p| is_wiki_relevant(p))
+        .collect();
+    let file_count = paths.len();
+    let (file_tree, tree_truncated) = render_file_tree(&paths);
+
+    let readme = files::read_readme(project_path.clone())?.map(|r| {
+        if r.content.len() > README_MAX_CHARS {
+            format!(
+                "{}\n\n...(truncated)",
+                truncate_utf8(r.content.as_bytes(), README_MAX_CHARS)
+            )
+        } else {
+            r.content
+        }
+    });
+
+    let manifests = read_manifests(root);
+
+    Ok(WikiContext {
+        file_tree,
+        paths,
+        file_count,
+        tree_truncated,
+        readme,
+        manifests,
+        head_sha: head_sha(&project_path),
+    })
+}
+
+/// 读取单页生成所需的相关文件全文。LLM 大纲标注的路径可能不存在或幻觉,
+/// 逐个 canonicalize 校验(拒绝越界与符号链接逃逸),读不到的静默跳过;
+/// 二进制文件跳过;单文件超 PAGE_FILE_MAX_CHARS 截断;总预算耗尽即停止
+#[tauri::command]
+pub fn read_wiki_files(
+    project_path: String,
+    rel_paths: Vec<String>,
+) -> AppResult<Vec<WikiFileContent>> {
+    files::ensure_dir(&project_path)?;
+    let root_canon = fs::canonicalize(&project_path)?;
+    let mut out = Vec::new();
+    let mut budget = PAGE_TOTAL_MAX_CHARS;
+    for rel in rel_paths {
+        let Ok(file) = fs::canonicalize(root_canon.join(&rel)) else {
+            continue;
+        };
+        if !file.starts_with(&root_canon) || !file.is_file() {
+            continue;
+        }
+        let Ok(bytes) = fs::read(&file) else {
+            continue;
+        };
+        // 二进制嗅探:前缀内出现 NUL 即跳过(与 read_file_preview 口径一致)
+        if bytes[..bytes.len().min(8_000)].contains(&0) {
+            continue;
+        }
+        let cap = PAGE_FILE_MAX_CHARS.min(budget);
+        let content = truncate_utf8(&bytes, cap);
+        let truncated = bytes.len() > content.len();
+        budget = budget.saturating_sub(content.len());
+        out.push(WikiFileContent {
+            path: to_forward_slash(Path::new(&rel)),
+            content,
+            truncated,
+        });
+        if budget == 0 {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+// ── 落盘与读取 ───────────────────────────────────────────────────────────
+
+/// 页面文件名校验:防路径穿越,只允许 `NN-slug.md` 形态
+fn valid_page_file(name: &str) -> bool {
+    !name.is_empty()
+        && name.ends_with(".md")
+        && !name.contains("..")
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+}
+
+fn save_page_in(dir: &Path, file_name: &str, content: &str) -> AppResult<()> {
+    if !valid_page_file(file_name) {
+        return Err(AppError::coded(ErrorCode::InvalidPath, file_name));
+    }
+    let pages = dir.join(PAGES_DIR);
+    fs::create_dir_all(&pages)?;
+    let target = pages.join(file_name);
+    // 先写 tmp 再 rename:生成中途取消不会留下半截页面文件
+    let tmp = pages.join(format!("{file_name}.tmp"));
+    fs::write(&tmp, content)?;
+    fs::rename(&tmp, &target)?;
+    Ok(())
+}
+
+fn save_meta_in(dir: &Path, mut meta: WikiMeta) -> AppResult<()> {
+    meta.version = META_VERSION;
+    meta.generated_at = chrono::Utc::now().to_rfc3339();
+    fs::create_dir_all(dir)?;
+    let target = dir.join(META_FILE);
+    let tmp = dir.join(format!("{META_FILE}.tmp"));
+    let json = serde_json::to_string_pretty(&meta)
+        .map_err(|e| AppError::coded(ErrorCode::IoError, e.to_string()))?;
+    fs::write(&tmp, json)?;
+    fs::rename(&tmp, &target)?;
+    Ok(())
+}
+
+fn load_wiki_in(dir: &Path) -> Option<(WikiMeta, Vec<WikiPageData>)> {
+    let raw = fs::read_to_string(dir.join(META_FILE)).ok()?;
+    let meta: WikiMeta = serde_json::from_str(&raw).ok()?;
+    // meta.json 最后写入;status 未完结说明上次生成被中断,整本视为无效
+    if meta.status != "completed" {
+        return None;
+    }
+    let pages = meta
+        .outline
+        .iter()
+        .map(|p| WikiPageData {
+            id: p.id.clone(),
+            file: p.file.clone(),
+            title: p.title.clone(),
+            section: p.section.clone(),
+            importance: p.importance.clone(),
+            relevant_files: p.relevant_files.clone(),
+            related_pages: p.related_pages.clone(),
+            content: fs::read_to_string(dir.join(PAGES_DIR).join(&p.file)).unwrap_or_default(),
+        })
+        .collect();
+    Some((meta, pages))
+}
+
+/// 项目的 wiki 目录路径(不创建),供前端展示
+#[tauri::command]
+pub fn get_wiki_dir(app: AppHandle, project_path: String) -> AppResult<String> {
+    Ok(wiki_dir(&app, &project_path)?
+        .to_string_lossy()
+        .into_owned())
+}
+
+/// 开始一次全新生成:清空 pages/ 与 meta.json(旧 wiki 随即失效,避免中断后读到新旧混杂)
+#[tauri::command]
+pub fn begin_wiki(app: AppHandle, project_path: String) -> AppResult<()> {
+    let dir = wiki_dir(&app, &project_path)?;
+    if dir.exists() {
+        fs::remove_dir_all(&dir)?;
+    }
+    fs::create_dir_all(dir.join(PAGES_DIR))?;
+    Ok(())
+}
+
+/// 写入单个页面(tmp + rename);file_name 必须匹配 `NN-slug.md`
+#[tauri::command]
+pub fn save_wiki_page(
+    app: AppHandle,
+    project_path: String,
+    file_name: String,
+    content: String,
+) -> AppResult<()> {
+    save_page_in(&wiki_dir(&app, &project_path)?, &file_name, &content)
+}
+
+/// 写入 meta.json(最后调用;version 与 generated_at 由后端覆写)
+#[tauri::command]
+pub fn save_wiki_meta(app: AppHandle, project_path: String, meta: WikiMeta) -> AppResult<()> {
+    let mut meta = meta;
+    if meta.project_path.is_empty() {
+        meta.project_path = clean_str(&project_path);
+    }
+    save_meta_in(&wiki_dir(&app, &project_path)?, meta)
+}
+
+/// 读取整个 wiki;meta 缺失/损坏/未完结返回 None;附带与当前 HEAD 比对的 stale 标记
+#[tauri::command]
+pub fn load_wiki(app: AppHandle, project_path: String) -> AppResult<Option<WikiData>> {
+    let dir = wiki_dir(&app, &project_path)?;
+    let Some((meta, pages)) = load_wiki_in(&dir) else {
+        return Ok(None);
+    };
+    let stale = match (&meta.head_sha, &head_sha(&project_path)) {
+        (Some(a), Some(b)) => a != b,
+        _ => false,
+    };
+    Ok(Some(WikiData { meta, pages, stale }))
+}
+
+/// 删除项目的整个 wiki 目录(幂等)
+#[tauri::command]
+pub fn delete_wiki(app: AppHandle, project_path: String) -> AppResult<()> {
+    let dir = wiki_dir(&app, &project_path)?;
+    match fs::remove_dir_all(&dir) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// 在系统文件管理器中打开项目的 wiki 目录
+#[tauri::command]
+pub fn open_wiki_dir(app: AppHandle, project_path: String) -> AppResult<()> {
+    let dir = wiki_dir(&app, &project_path)?;
+    fs::create_dir_all(&dir)?;
+    open::open_explorer(&dir.to_string_lossy())
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WikiChangedFiles {
+    pub files: Vec<String>,
+    /// 当前 HEAD(增量更新成功后回写 meta)
+    pub head_sha: Option<String>,
+}
+
+/// 增量更新用:列出 from_sha..HEAD 之间变更的文件(/ 分隔相对路径)。
+/// 非 git 仓库返回空表(调用方退化为整本重生成);from_sha 无法解析时报错
+/// (仓库历史被改写,调用方同样退化为整本重生成)
+#[tauri::command]
+pub fn wiki_changed_files(
+    project_path: String,
+    from_sha: String,
+) -> AppResult<WikiChangedFiles> {
+    let Some(repo) = git::open_repo(&project_path)? else {
+        return Ok(WikiChangedFiles {
+            files: Vec::new(),
+            head_sha: None,
+        });
+    };
+    let oid = git2::Oid::from_str(&from_sha)
+        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+    let from = repo
+        .find_commit(oid)
+        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+    let Ok(head) = repo.head().and_then(|h| h.peel_to_commit()) else {
+        return Ok(WikiChangedFiles {
+            files: Vec::new(),
+            head_sha: None,
+        });
+    };
+    let from_tree = from
+        .tree()
+        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+    let head_tree = head
+        .tree()
+        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+    let diff = repo
+        .diff_tree_to_tree(Some(&from_tree), Some(&head_tree), None)
+        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+    let mut files: Vec<String> = diff
+        .deltas()
+        // 删除的文件用 old_file,其余用 new_file(重命名取新路径)
+        .filter_map(|d| {
+            let p = if d.status() == git2::Delta::Deleted {
+                d.old_file().path()
+            } else {
+                d.new_file().path()
+            };
+            p.map(to_forward_slash)
+        })
+        .collect();
+    files.sort();
+    files.dedup();
+    Ok(WikiChangedFiles {
+        files,
+        head_sha: Some(head.id().to_string()),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "repomeow-wiki-{tag}-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn folder_name_distinguishes_same_basename() {
+        let a = folder_name("D:/code/web");
+        let b = folder_name("E:/other/web");
+        assert!(a.starts_with("web-") && b.starts_with("web-"));
+        assert_ne!(a, b, "同名不同路径的项目必须落到不同 wiki 目录");
+        // 尾随分隔符归一后为同一目录
+        assert_eq!(folder_name("D:/code/web/"), folder_name("D:/code/web"));
+    }
+
+    #[test]
+    fn save_and_load_roundtrip() {
+        let dir = temp_dir("roundtrip");
+        save_page_in(&dir, "01-overview.md", "# 概览").unwrap();
+        let meta = WikiMeta {
+            status: "completed".into(),
+            outline: vec![WikiOutlinePage {
+                id: "overview".into(),
+                file: "01-overview.md".into(),
+                title: "概览".into(),
+                importance: "high".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        save_meta_in(&dir, meta).unwrap();
+
+        let (meta, pages) = load_wiki_in(&dir).unwrap();
+        assert_eq!(meta.version, META_VERSION);
+        assert!(!meta.generated_at.is_empty(), "generated_at 由后端覆写");
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].content, "# 概览");
+        // tmp 文件不残留
+        assert!(!dir.join(PAGES_DIR).join("01-overview.md.tmp").exists());
+        assert!(!dir.join("meta.json.tmp").exists());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn load_returns_none_when_incomplete_or_missing() {
+        let dir = temp_dir("incomplete");
+        assert!(load_wiki_in(&dir).is_none(), "无 meta.json 返回 None");
+        save_meta_in(
+            &dir,
+            WikiMeta {
+                status: "generating".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(load_wiki_in(&dir).is_none(), "未完结的 meta 视为无效");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn rejects_traversal_page_name() {
+        let dir = temp_dir("traversal");
+        assert!(save_page_in(&dir, "../evil.md", "x").is_err());
+        assert!(save_page_in(&dir, "a/b.md", "x").is_err());
+        assert!(save_page_in(&dir, "01-ok.md", "x").is_ok());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn file_tree_folds_when_over_budget() {
+        // 构造超预算的文件树:多个深层目录,每目录多个文件
+        let mut paths = Vec::new();
+        for d in 0..50 {
+            for f in 0..50 {
+                paths.push(format!("src/module-{d:03}/sub/file-{f:03}-with-a-long-name.rs"));
+            }
+        }
+        let (tree, truncated) = render_file_tree(&paths);
+        assert!(truncated);
+        assert!(tree.len() <= FILE_TREE_MAX_CHARS + 64);
+        assert!(tree.contains("files)"), "应以目录折叠摘要为主: {tree}");
+    }
+
+    #[test]
+    fn wiki_relevance_filters() {
+        assert!(is_wiki_relevant("src/main.rs"));
+        assert!(is_wiki_relevant("docs/guide.md"));
+        assert!(!is_wiki_relevant("target/debug/app.exe"));
+        assert!(!is_wiki_relevant("dist/bundle.js"));
+        assert!(!is_wiki_relevant("pnpm-lock.yaml"));
+        assert!(!is_wiki_relevant("assets/logo.png"));
+        assert!(!is_wiki_relevant("src/app.min.js"));
+        assert!(!is_wiki_relevant("data/app.sqlite"));
+    }
+
+    #[test]
+    fn manifests_only_include_existing() {
+        let dir = temp_dir("manifest");
+        fs::write(dir.join("package.json"), "{}").unwrap();
+        let manifests = read_manifests(&dir);
+        assert_eq!(manifests.len(), 1);
+        assert_eq!(manifests[0].path, "package.json");
+        assert_eq!(manifests[0].content, "{}");
+        fs::remove_dir_all(&dir).ok();
+    }
+}

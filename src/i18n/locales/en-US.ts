@@ -800,6 +800,44 @@ export default {
     statusUnknown: "Status unknown (docker unavailable or not started)",
     openPort: "Open in browser",
   },
+  wiki: {
+    entry: "Wiki",
+    title: "Wiki",
+    back: "Back to Project",
+    stale: "Code updated",
+    staleHint:
+      "New commits landed after this wiki was generated; content may be outdated. Consider regenerating.",
+    generate: "Generate Wiki",
+    regenerate: "Regenerate",
+    regeneratePage: "Regenerate this page",
+    pageRegenerated: "Page regenerated",
+    openDir: "Open Folder",
+    delete: "Delete Wiki",
+    deleted: "Wiki deleted",
+    deleteFailed: "Delete failed: {error}",
+    emptyTitle: "No wiki yet",
+    emptyDescription:
+      "Generate a structured wiki from project files with AI: it analyzes the file tree into an outline, then writes each page. Results are stored under ~/.repomeow/wiki/.",
+    emptyContent:
+      "This page has no content. The previous generation was probably interrupted or failed.",
+    morePages: "...and {count} more pages to go",
+    cancel: "Cancel",
+    failed: "Generation failed: {error}",
+    update: "Update Wiki",
+    updateHint:
+      "Incremental update: only regenerates pages affected by code changes. New files do not create new pages — regenerate the whole wiki after structural changes.",
+    updatedPages: "Updated {count} page(s)",
+    updateNoop: "No pages are affected by these code changes",
+    writing: "Writing",
+    sources: "Source files",
+    waitingFirstChunk: "Waiting for the first chunk from the model...",
+    busyOther: "Another project is generating its wiki. Please wait for it to finish.",
+    phase: {
+      collecting: "Collecting project files...",
+      outlining: "Generating outline...",
+      generating: "Writing pages...",
+    },
+  },
   readme: {
     title: "README",
     closeEsc: "Close (Esc)",
@@ -1089,6 +1127,9 @@ export default {
       saved: "AI settings saved",
       concurrency: "Concurrency limit",
       concurrencyHint: "Maximum concurrent AI requests (1-5). Lower this if the API rate-limits.",
+      thinkingTitle: "Enable AI thinking",
+      thinkingHint:
+        "When off, this app injects disable-thinking parameters for known reasoning providers (effective on Qwen / GLM / Doubao / Step). When on, no parameters are injected and the model follows its default behavior. Leading <think> blocks are still stripped automatically.",
     },
     accounts: {
       title: "Accounts",
@@ -1139,6 +1180,12 @@ export default {
       weeklyReport: "Weekly report prompt",
       weeklyReportDescription:
         "System prompt used to generate weekly reports. Leave blank to use the built-in default template.",
+      wikiOutline: "Wiki outline",
+      wikiOutlineDescription:
+        "Prompt used to generate the wiki structure (page list and relevant files). The output must remain bare XML — do not change the output format constraints.",
+      wikiPage: "Wiki page",
+      wikiPageDescription:
+        "Prompt used to write each wiki page; the input is the full text of the page's source files.",
       note: "Leave empty to use the built-in default template (shown as the placeholder). The output language is appended automatically based on the language setting, no need to include it.",
       reset: "Reset to default",
       saved: "Prompts saved",

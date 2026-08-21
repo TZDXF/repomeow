@@ -16,4 +16,5 @@ pub mod script;
 pub mod tag;
 pub mod toolchain;
 pub mod walk;
+pub mod wiki;
 pub mod window;
