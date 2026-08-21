@@ -19,7 +19,11 @@
               window.matchMedia("(prefers-color-scheme: dark)").matches);
           var root = document.documentElement;
           root.classList.toggle("dark", dark);
-          if (cache.themeSkin === "island" || cache.themeSkin === "glass") {
+          if (
+            cache.themeSkin === "island" ||
+            cache.themeSkin === "glass" ||
+            cache.themeSkin === "mono"
+          ) {
             root.setAttribute("data-theme", cache.themeSkin);
           }
           if (cache.mdTheme && cache.mdTheme !== "default") {

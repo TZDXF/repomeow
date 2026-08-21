@@ -81,56 +81,18 @@ pub fn read_readme(path: String) -> AppResult<Option<ReadmeContent>> {
     Ok(Some(ReadmeContent { file_name, content }))
 }
 
-/// 列出项目内某目录的直接子项(文件树逐层懒加载;dir 为 None/空串时列根层)。
-/// 含隐藏文件与 node_modules,仅跳过 .git;文件与目录都返回(空目录可见),
-/// ignored 标记是否被 .gitignore / .ignore 排除(前端灰显用);结果按路径排序
+/// 全量文件树(@pierre/trees 一次性喂数,前端不再逐层懒加载):递归返回文件与目录
+/// (空目录可见),含隐藏文件、仅跳过 .git;ignored 标记供前端灰显。
+/// 被 ignore 排除的目录与 node_modules 只列自身、不下降(见 walk::tree_entries)
 #[tauri::command]
-pub fn list_project_files(path: String, dir: Option<String>) -> AppResult<Vec<ProjectFileEntry>> {
+pub fn list_project_tree(path: String) -> AppResult<Vec<ProjectFileEntry>> {
     ensure_dir(&path)?;
-    let root = Path::new(&path);
-    let rel = dir.unwrap_or_default();
-    // dir 必须解析到 root 内的目录:canonicalize 后比较前缀,拒绝 .. 越界与符号链接逃逸
-    let root_canon = std::fs::canonicalize(root)?;
-    let target = if rel.is_empty() {
-        root_canon.clone()
-    } else {
-        std::fs::canonicalize(root.join(&rel))
-            .map_err(|_| AppError::coded(ErrorCode::InvalidPath, rel.clone()))?
-    };
-    if !target.starts_with(&root_canon) || !target.is_dir() {
-        return Err(AppError::coded(ErrorCode::InvalidPath, rel));
-    }
-    Ok(walk::dir_entries(root, Path::new(&rel))
+    Ok(walk::tree_entries(Path::new(&path))
         .into_iter()
         .map(|e| ProjectFileEntry {
             path: walk::to_slash(&e.path),
             ignored: e.ignored,
             is_dir: e.is_dir,
-        })
-        .collect())
-}
-
-/// 文件名搜索(文件树头部搜索框):在未被 .gitignore / .ignore 排除的文件中
-/// 按相对路径做大小写不敏感子串匹配(与原前端「被排除文件不参与」口径一致),
-/// 遍历命中 limit 条即提前退出;结果按路径排序。空查询返回空
-#[tauri::command]
-pub fn search_project_files(
-    path: String,
-    query: String,
-    limit: Option<u32>,
-) -> AppResult<Vec<ProjectFileEntry>> {
-    ensure_dir(&path)?;
-    let needle = query.trim().to_lowercase();
-    if needle.is_empty() {
-        return Ok(Vec::new());
-    }
-    let limit = limit.unwrap_or(50).max(1) as usize;
-    Ok(walk::search_file_paths(Path::new(&path), &needle, limit)
-        .into_iter()
-        .map(|p| ProjectFileEntry {
-            path: walk::to_slash(&p),
-            ignored: false,
-            is_dir: false,
         })
         .collect())
 }
@@ -708,76 +670,32 @@ mod tests {
     }
 
     #[test]
-    fn list_project_files_lists_single_level_and_marks_ignored() {
-        let dir = temp_project_dir("list");
+    fn list_project_tree_recurses_and_marks_ignored() {
+        let dir = temp_project_dir("tree");
         let p = Path::new(&dir);
-        fs::write(p.join(".gitignore"), "logs/\n").unwrap();
+        fs::write(p.join(".gitignore"), "logs/
+").unwrap();
         fs::create_dir_all(p.join("node_modules/dep")).unwrap();
         fs::write(p.join("node_modules/dep/package.json"), "{}").unwrap();
         fs::create_dir_all(p.join("logs")).unwrap();
         fs::write(p.join("logs/app.log"), "x").unwrap();
         fs::create_dir_all(p.join("empty")).unwrap();
         fs::write(p.join(".env"), "A=1").unwrap();
-        fs::write(p.join("src.rs"), "fn main() {}").unwrap();
+        fs::create_dir_all(p.join("src")).unwrap();
+        fs::write(p.join("src/main.rs"), "fn main() {}").unwrap();
 
-        // 根层:只有直接子项,文件与目录(含空目录)都返回
-        let entries = list_project_files(dir.clone(), None).unwrap();
+        let entries = list_project_tree(dir.clone()).unwrap();
         let by_path: std::collections::HashMap<&str, &ProjectFileEntry> =
             entries.iter().map(|e| (e.path.as_str(), e)).collect();
-        for expected in ["node_modules", "logs", "empty", ".env", ".gitignore", "src.rs"] {
+        // 递归展开:嵌套文件、空目录、隐藏文件都在;ignored 标记正确
+        for expected in ["src", "src/main.rs", "empty", ".env", "logs", "node_modules"] {
             assert!(by_path.contains_key(expected), "缺少 {expected}");
         }
-        assert!(!by_path.keys().any(|k| k.contains('/')), "根层不应出现嵌套路径");
-        assert!(by_path["node_modules"].is_dir && by_path["empty"].is_dir);
-        assert!(!by_path["src.rs"].is_dir);
-        // 被 .gitignore 排除的目录整体标 ignored;未排除的 node_modules 不标
         assert!(by_path["logs"].ignored);
-        assert!(!by_path["node_modules"].ignored);
-        assert!(!by_path[".env"].ignored && !by_path["src.rs"].ignored);
-
-        // 子目录层
-        let entries = list_project_files(dir.clone(), Some("logs".into())).unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].path, "logs/app.log");
-        assert!(!entries[0].is_dir);
-        assert!(entries[0].ignored, "父目录被排除时其内文件同样 ignored");
-
-        // dir 越界 / 指向文件被拒绝
-        assert!(list_project_files(dir.clone(), Some("../".into())).is_err());
-        assert!(list_project_files(dir.clone(), Some("src.rs".into())).is_err());
-
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn search_project_files_filters_and_limits() {
-        let dir = temp_project_dir("filesearch");
-        let p = Path::new(&dir);
-        fs::write(p.join("App.vue"), "<template />").unwrap();
-        fs::create_dir_all(p.join("src")).unwrap();
-        fs::write(p.join("src/app.ts"), "x").unwrap();
-        fs::write(p.join("other.txt"), "x").unwrap();
-        fs::create_dir_all(p.join("logs")).unwrap();
-        fs::write(p.join("logs/app.log"), "x").unwrap();
-        fs::write(p.join(".gitignore"), "logs/\n").unwrap();
-
-        // 大小写不敏感;gitignore 排除的不参与;ignored/is_dir 恒为 false
-        let r = search_project_files(dir.clone(), "app".into(), Some(50)).unwrap();
-        let paths: Vec<&str> = r.iter().map(|e| e.path.as_str()).collect();
-        assert_eq!(paths, vec!["App.vue", "src/app.ts"]);
-        assert!(r.iter().all(|e| !e.ignored && !e.is_dir));
-
-        // 空查询返回空
-        assert!(search_project_files(dir.clone(), "  ".into(), None)
-            .unwrap()
-            .is_empty());
-        // limit 生效
-        assert_eq!(
-            search_project_files(dir.clone(), "app".into(), Some(1))
-                .unwrap()
-                .len(),
-            1
-        );
+        assert!(!by_path["src"].ignored && !by_path["node_modules"].ignored);
+        // 被排除目录与 node_modules 只列自身、不下降
+        assert!(!by_path.contains_key("logs/app.log"));
+        assert!(!by_path.keys().any(|k| k.starts_with("node_modules/")));
 
         let _ = fs::remove_dir_all(&dir);
     }

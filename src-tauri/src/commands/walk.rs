@@ -199,25 +199,36 @@ fn shallow_entries(dir: &Path, respect_ignore: bool) -> Vec<(PathBuf, bool)> {
         .collect()
 }
 
-/// 文件名搜索(search_project_files):在未被 .gitignore/.ignore 排除的文件里
-/// 按相对路径(小写化后,needle 需已小写)做子串匹配,命中 limit 条即停止遍历——
-/// 单线程顺序走,大项目避免为搜索框全量扫描;遍历口径:尊重 .gitignore/.ignore
-/// (require_git(false) 非 git 项目同样生效)、含隐藏文件、node_modules 是否出现
-/// 由项目 ignore 规则决定、跳过 .git
-pub fn search_file_paths(root: &Path, needle_lower: &str, limit: usize) -> Vec<PathBuf> {
-    let mut matches: Vec<PathBuf> = WalkBuilder::new(root)
-        .require_git(false)
-        .hidden(false)
-        .filter_entry(|e| e.file_name() != ".git")
-        .build()
-        .filter_map(|entry| entry.ok())
-        .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
-        .filter_map(|e| e.path().strip_prefix(root).ok().map(PathBuf::from))
-        .filter(|rel| to_slash(rel).to_lowercase().contains(needle_lower))
-        .take(limit)
-        .collect();
-    matches.sort();
-    matches
+/// 全量文件树遍历(list_project_tree):BFS 逐层复用 dir_entries(继承其 ignore 判定、
+/// 符号链接归类与排序),返回所有文件与目录条目(空目录可见、含隐藏条目、跳过 .git)。
+/// 两类目录只列自身、不下降(前端灰显且不可展开):
+/// - 被 .gitignore/.ignore 排除的目录(子项本就全部继承 ignored,内容无浏览价值);
+/// - node_modules(未被 ignore 时体量巨大,对代码浏览没有价值)。
+/// 符号链接目录按 canonicalize 去重,防止链接成环(如 pnpm 循环链)导致 BFS 不收敛
+pub fn tree_entries(root: &Path) -> Vec<DirEntry> {
+    let mut out = Vec::new();
+    let mut visited: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    if let Ok(canon) = std::fs::canonicalize(root) {
+        visited.insert(canon);
+    }
+    let mut queue: std::collections::VecDeque<PathBuf> = std::collections::VecDeque::new();
+    queue.push_back(PathBuf::new());
+    while let Some(dir) = queue.pop_front() {
+        for entry in dir_entries(root, &dir) {
+            if entry.is_dir
+                && !entry.ignored
+                && entry.path.file_name().is_some_and(|n| n != "node_modules")
+            {
+                if let Ok(canon) = std::fs::canonicalize(root.join(&entry.path)) {
+                    if visited.insert(canon) {
+                        queue.push_back(entry.path.clone());
+                    }
+                }
+            }
+            out.push(entry);
+        }
+    }
+    out
 }
 
 // ── walk 结果缓存(notify 变更即时失效 + TTL 兜底) ─────────────────────────
@@ -528,26 +539,35 @@ mod tests {
     }
 
     #[test]
-    fn search_file_paths_matches_case_insensitive_and_respects_gitignore() {
-        let dir = temp_dir("searchpaths");
-        fs::write(dir.join("ReadMe.md"), "# x").unwrap();
-        fs::create_dir_all(dir.join("src")).unwrap();
-        fs::write(dir.join("src/README.md"), "# y").unwrap();
-        fs::write(dir.join("other.txt"), "x").unwrap();
-        fs::create_dir_all(dir.join("logs")).unwrap();
-        fs::write(dir.join("logs/readme.log"), "x").unwrap();
+    fn tree_entries_recurses_and_marks_ignored_without_descending() {
+        let dir = temp_dir("tree");
         fs::write(dir.join(".gitignore"), "logs/\n").unwrap();
-        fs::create_dir_all(dir.join(".git")).unwrap();
-        fs::write(dir.join(".git/readme"), "x").unwrap();
+        fs::create_dir_all(dir.join("src/nested")).unwrap();
+        fs::write(dir.join("src/main.rs"), "fn main() {}").unwrap();
+        fs::write(dir.join("src/nested/deep.txt"), "x").unwrap();
+        fs::create_dir_all(dir.join("empty")).unwrap();
+        fs::create_dir_all(dir.join("logs")).unwrap();
+        fs::write(dir.join("logs/app.log"), "x").unwrap();
+        fs::create_dir_all(dir.join("node_modules/dep")).unwrap();
+        fs::write(dir.join("node_modules/dep/index.js"), "x").unwrap();
 
-        // 大小写不敏感子串匹配;被 gitignore 排除的与 .git 内部不参与
-        let matches = search_file_paths(&dir, "readme", 50);
-        let names: Vec<String> = matches.iter().map(|p| to_slash(p)).collect();
-        assert_eq!(names, vec!["ReadMe.md", "src/README.md"]);
-
-        // limit 提前截断
-        let matches = search_file_paths(&dir, "readme", 1);
-        assert_eq!(matches.len(), 1);
+        let entries = tree_entries(&dir);
+        let by_path: std::collections::HashMap<String, &DirEntry> = entries
+            .iter()
+            .map(|e| (to_slash(&e.path), e))
+            .collect();
+        // 递归展开未排除目录,含空目录与嵌套文件
+        for expected in ["src", "src/main.rs", "src/nested", "src/nested/deep.txt", "empty"] {
+            assert!(by_path.contains_key(expected), "缺少 {expected}");
+        }
+        // 被排除目录与 node_modules 只列自身、不下降
+        assert!(by_path["logs"].ignored);
+        assert!(!by_path.contains_key("logs/app.log"), "ignored 目录不下降");
+        assert!(by_path.contains_key("node_modules"));
+        assert!(
+            !by_path.keys().any(|p| p.starts_with("node_modules/")),
+            "node_modules 不下降"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }
