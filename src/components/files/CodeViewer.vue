@@ -167,7 +167,14 @@ watch(
   () => props.text,
   (text) => {
     if (!view) return;
-    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+    // 整体替换文档 = 切文件:旧匹配位置对新文档无意义,连同高亮/游标一并复位,
+    // 由宿主在文档就位后重跑查找重铺高亮
+    findRanges = [];
+    findCursor = -1;
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: text },
+      effects: setFindRanges.of({ ranges: [], current: -1 }),
+    });
   },
 );
 

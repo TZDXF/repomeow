@@ -493,9 +493,16 @@ function refreshFind(scrollToCurrent: boolean) {
 watch([findText, findCase, findWord, findRegex], () => {
   if (findOpen.value) refreshFind(true);
 });
-watch([codeVisible, previewText], () => {
-  if (findOpen.value && codeVisible.value) refreshFind(false);
-});
+// 文档就位或切换(切文件)后若查找条仍开着则在就位的新文档上重查;
+// 必须 post-flush:pre 会在 CodeViewer 内部 watch(props.text) 换文档之前执行,
+// 跑在旧文档上得到上一个文件的结果;post 也保证 MD 渲染切源码时跑在新挂载实例上
+watch(
+  [codeVisible, previewText],
+  () => {
+    if (findOpen.value && codeVisible.value) refreshFind(false);
+  },
+  { flush: "post" },
+);
 
 function findStep(delta: number) {
   if (!findTotal.value) return;
