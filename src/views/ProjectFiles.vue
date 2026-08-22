@@ -4,18 +4,7 @@ import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
-import {
-  ArrowLeft,
-  ChevronDown,
-  ChevronRight,
-  Code,
-  Eye,
-  FileQuestion,
-  FolderTree,
-  LoaderCircle,
-  Search,
-  WrapText,
-} from "@lucide/vue";
+import { ArrowLeft, Code, Eye, FileQuestion, FolderTree, Search, WrapText } from "@lucide/vue";
 import { onClickOutside, useLocalStorage } from "@vueuse/core";
 import { Markdown, type ControlsConfig, type NodeRenderers } from "vue-stream-markdown";
 import { Button } from "@/components/ui/button";
@@ -24,6 +13,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import CodeViewer from "@/components/files/CodeViewer.vue";
 import FindBar from "@/components/files/FindBar.vue";
 import TextSearchPanel from "@/components/files/TextSearchPanel.vue";
+import FileTreeList from "@/components/common/FileTreeList.vue";
 import MdImage from "@/components/markdown/MdImage.vue";
 import MdLink from "@/components/markdown/MdLink.vue";
 import { MD_BASE_PATH_KEY } from "@/components/markdown/keys";
@@ -33,13 +23,8 @@ import { debounce } from "@/lib/utils";
 import { extOf, IMAGE_EXTS } from "@/lib/file-kind";
 import { hasScheme, resolvePath } from "@/lib/markdown";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
-import {
-  buildVisibleRows,
-  prefetchTargets,
-  sortDirEntries,
-  type LazyFileRow,
-} from "@/lib/lazy-file-tree";
-import { fileIcon, folderIcon } from "@/lib/file-icons";
+import { buildVisibleRows, prefetchTargets, sortDirEntries } from "@/lib/lazy-file-tree";
+import { fileIcon } from "@/lib/file-icons";
 import { buildFindRegExp, type FindQuery } from "@/lib/text-search";
 import { Icon } from "@iconify/vue";
 import { useSettingsStore } from "@/stores/settings";
@@ -177,21 +162,7 @@ function toggleFolder(fullPath: string) {
   expandedFolders.value = next;
 }
 
-interface FileRow extends LazyFileRow {
-  /** iconify 图标名(vscode-icons 集);加载占位行为空串 */
-  icon: string;
-}
-
-const visibleRows = computed<FileRow[]>(() =>
-  buildVisibleRows(childrenMap.value, expandedFolders.value).map((row) => ({
-    ...row,
-    icon: row.loading
-      ? ""
-      : row.isDir
-        ? folderIcon(row.name, expandedFolders.value.has(row.fullPath))
-        : fileIcon(row.name),
-  })),
-);
+const visibleRows = computed(() => buildVisibleRows(childrenMap.value, expandedFolders.value));
 
 const rootEmpty = computed(
   () => childrenMap.value.has("") && childrenMap.value.get("")!.length === 0,
@@ -376,14 +347,6 @@ const imageSrc = computed(() =>
     ? convertFileSrc(resolvePath(rootPath.value, selected.value))
     : "",
 );
-
-function onRowClick(row: FileRow) {
-  if (row.loading) {
-    return;
-  }
-  if (row.isDir) toggleFolder(row.fullPath);
-  else selected.value = row.fullPath;
-}
 
 // 切换文件不显示 loading:本地读取很快,loading 只会闪烁;
 // 保留旧内容直到新内容就位(序号防串台),仅错误/二进制等状态标记随切换即清
@@ -775,41 +738,13 @@ function startTreeResize(e: PointerEvent) {
             <p v-else-if="rootEmpty" class="p-4 text-sm text-muted-foreground">
               {{ t("files.empty") }}
             </p>
-            <div v-else class="py-1">
-              <button
-                v-for="row in visibleRows"
-                :key="row.key"
-                class="flex w-full items-center gap-1 py-1 pr-2 text-left text-sm hover:bg-accent"
-                :class="[
-                  selected === row.fullPath && !row.loading
-                    ? 'file-row-selected bg-accent text-accent-foreground'
-                    : '',
-                  row.dimmed ? 'opacity-50' : '',
-                ]"
-                :style="{ paddingLeft: `${row.depth * 14 + 8}px` }"
-                :title="row.loading ? undefined : row.fullPath"
-                @click="onRowClick(row)"
-              >
-                <template v-if="row.loading">
-                  <LoaderCircle class="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-                  <span class="min-w-0 truncate text-muted-foreground">
-                    {{ t("common.loading") }}
-                  </span>
-                </template>
-                <template v-else>
-                  <template v-if="row.isDir && !row.emptyDir">
-                    <ChevronDown
-                      v-if="expandedFolders.has(row.fullPath)"
-                      class="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-                    />
-                    <ChevronRight v-else class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  </template>
-                  <span v-else class="w-3.5 shrink-0" />
-                  <Icon :icon="row.icon" class="h-4 w-4 shrink-0" />
-                  <span class="min-w-0 truncate">{{ row.name }}</span>
-                </template>
-              </button>
-            </div>
+            <FileTreeList
+              v-else
+              :rows="visibleRows"
+              :selected="selected"
+              @select="(row) => (selected = row.fullPath)"
+              @toggle="(row) => toggleFolder(row.fullPath)"
+            />
           </ScrollArea>
         </template>
         <TextSearchPanel v-else ref="searchPanelRef" :root="rootPath" @open="onSearchOpen" />

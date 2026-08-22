@@ -3,16 +3,7 @@ import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { useLocalStorage } from "@vueuse/core";
-import {
-  ChevronDown,
-  ChevronRight,
-  FileDiff,
-  FolderTree,
-  List,
-  Loader2,
-  Sparkles,
-} from "@lucide/vue";
-import { Icon } from "@iconify/vue";
+import { ChevronDown, FileDiff, FolderTree, List, Loader2, Sparkles } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -22,10 +13,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import FileTreeList from "@/components/common/FileTreeList.vue";
 import DiffViewer from "@/components/git/DiffViewer.vue";
 import { generateCommitMessage } from "@/lib/ai";
-import { fileIcon, folderIcon } from "@/lib/file-icons";
-import { buildFileTree, type FileTreeNode } from "@/lib/file-tree";
+import { statusClass } from "@/lib/git-status";
+import {
+  buildFileTree,
+  flatFileRows,
+  flattenVisibleTree,
+  type FileTreeNode,
+} from "@/lib/file-tree";
 import { openPathWith, sortOpenWithOptions } from "@/lib/open-with";
 import { baseName } from "@/lib/path";
 import { cmd } from "@/lib/tauri";
@@ -162,30 +159,26 @@ watch(includeUntracked, (v) => {
   checkedPaths.value = next;
 });
 
-// --- 树形展示:按目录层级聚合,折叠状态记忆;平铺 / 树形切换与提交详情面板共用持久化键 ---
+// --- 树形展示:按目录层级聚合,折叠状态记忆;行化(树形/平铺)走 file-tree 统一辅助 ---
+// 平铺 / 树形切换与提交详情面板共用持久化键
 const treeMode = useLocalStorage("repomeow:commit-files-tree", false);
 const collapsedFolders = ref(new Set<string>());
 const fileTree = computed(() => buildFileTree(files.value));
 
-interface FileRow {
-  node: FileTreeNode<GitWorktreeFile>;
-  depth: number;
-}
+const treeRows = computed(() =>
+  flattenVisibleTree(fileTree.value, collapsedFolders.value, {
+    dim: fileDimmed,
+    title: fileTitle,
+  }),
+);
 
-/** 拍平可见树行(跳过折叠目录的子级) */
-const treeRows = computed(() => {
-  const out: FileRow[] = [];
-  const walk = (nodes: FileTreeNode<GitWorktreeFile>[], depth: number) => {
-    for (const node of nodes) {
-      out.push({ node, depth });
-      if (node.children.length && !collapsedFolders.value.has(node.fullPath)) {
-        walk(node.children, depth + 1);
-      }
-    }
-  };
-  walk(fileTree.value, 0);
-  return out;
-});
+const flatRows = computed(() =>
+  flatFileRows(files.value, {
+    name: flatName,
+    dim: fileDimmed,
+    title: fileTitle,
+  }),
+);
 
 function toggleFolder(fullPath: string) {
   const next = new Set(collapsedFolders.value);
@@ -197,25 +190,35 @@ function toggleFolder(fullPath: string) {
   collapsedFolders.value = next;
 }
 
-/** 目录节点勾选状态(仅统计可提交文件;total = 0 时勾选框禁用) */
-const folderStates = computed(() => {
-  const map = new Map<string, { all: boolean; some: boolean; total: number }>();
-  const walk = (node: FileTreeNode<GitWorktreeFile>): { checked: number; total: number } => {
+/** 目录节点勾选信息(仅统计可提交文件;total = 0 时勾选框禁用),paths 供整目录勾选 */
+const folderInfo = computed(() => {
+  const map = new Map<string, { all: boolean; some: boolean; total: number; paths: string[] }>();
+  const walk = (
+    node: FileTreeNode<GitWorktreeFile>,
+  ): { checked: number; total: number; paths: string[] } => {
     let total = 0;
     let checked = 0;
+    const paths: string[] = [];
     if (node.file && fileCommittable(node.file)) {
       total = 1;
       checked = checkedPaths.value.has(node.file.path) ? 1 : 0;
+      paths.push(node.file.path);
     }
     for (const c of node.children) {
       const r = walk(c);
       total += r.total;
       checked += r.checked;
+      paths.push(...r.paths);
     }
     if (!node.file && node.children.length) {
-      map.set(node.fullPath, { all: total > 0 && checked === total, some: checked > 0, total });
+      map.set(node.fullPath, {
+        all: total > 0 && checked === total,
+        some: checked > 0,
+        total,
+        paths,
+      });
     }
-    return { checked, total };
+    return { checked, total, paths };
   };
   for (const n of fileTree.value) {
     walk(n);
@@ -224,25 +227,30 @@ const folderStates = computed(() => {
 });
 
 /** 目录勾选:全选则整目录取消,否则整目录选中(只影响可提交文件) */
-function toggleFolderChecked(node: FileTreeNode<GitWorktreeFile>) {
-  const state = folderStates.value.get(node.fullPath);
-  if (!state || state.total === 0) {
+function toggleFolderChecked(fullPath: string) {
+  const info = folderInfo.value.get(fullPath);
+  if (!info || info.total === 0) {
     return;
   }
-  const paths: string[] = [];
-  const walk = (n: FileTreeNode<GitWorktreeFile>) => {
-    if (n.file && fileCommittable(n.file)) {
-      paths.push(n.file.path);
-    }
-    for (const c of n.children) {
-      walk(c);
-    }
-  };
-  walk(node);
-  setChecked(paths, !state.all);
+  setChecked(info.paths, !info.all);
 }
 
-/** 平铺模式只显示文件名(完整路径放 title);baseName 走 @/lib/path */
+/** 未勾选"包含未跟踪文件"时未跟踪文件不纳入本次提交,列表中降透明度提示 */
+function fileDimmed(file: GitWorktreeFile) {
+  return file.untracked && !includeUntracked.value;
+}
+
+/** 行 title:重命名文件展示「旧路径 → 新路径」 */
+function fileTitle(file: GitWorktreeFile) {
+  return file.old_path ? `${file.old_path} → ${file.path}` : file.path;
+}
+
+/** 平铺模式只显示文件名(重命名带箭头);baseName 走 @/lib/path */
+function flatName(file: GitWorktreeFile) {
+  return file.old_path
+    ? `${baseName(file.old_path)} → ${baseName(file.path)}`
+    : baseName(file.path);
+}
 
 const selectedFile = computed(() => files.value.find((f) => f.path === selectedPath.value) ?? null);
 const canOpenInIde = computed(() => !!selectedFile.value && selectedFile.value.status !== "D");
@@ -327,29 +335,6 @@ function toggleChanges() {
   showChanges.value = !showChanges.value;
   if (showChanges.value) {
     void loadChanges();
-  }
-}
-
-/** 未勾选"包含未跟踪文件"时,未跟踪文件不纳入本次提交,列表中降透明度提示 */
-function fileDimmed(file: GitWorktreeFile) {
-  return file.untracked && !includeUntracked.value;
-}
-
-// --- 状态徽标配色(与提交详情面板一致;U = 未跟踪) ---
-function statusClass(status: string) {
-  switch (status) {
-    case "A":
-      return "text-green-600 dark:text-green-400";
-    case "D":
-      return "text-red-600 dark:text-red-400";
-    case "R":
-      return "text-blue-600 dark:text-blue-400";
-    case "T":
-      return "text-purple-600 dark:text-purple-400";
-    case "U":
-      return "text-sky-600 dark:text-sky-400";
-    default:
-      return "text-amber-600 dark:text-amber-400";
   }
 }
 
@@ -502,137 +487,106 @@ async function generate() {
               </p>
 
               <!-- 平铺:只显示文件名,完整路径放 title -->
-              <template v-else-if="!treeMode">
-                <div
-                  v-for="file in files"
-                  :key="file.path"
-                  class="flex w-full cursor-pointer items-center gap-1.5 px-3 py-1 text-xs transition-colors hover:bg-accent/60"
-                  :class="[
-                    selectedPath === file.path ? 'bg-accent' : '',
-                    fileDimmed(file) ? 'opacity-40' : '',
-                  ]"
-                  :title="file.old_path ? `${file.old_path} → ${file.path}` : file.path"
-                  @click="selectFile(file)"
-                >
+              <FileTreeList
+                v-else-if="!treeMode"
+                size="sm"
+                flat
+                :rows="flatRows"
+                :selected="selectedPath"
+                @select="(row) => selectFile(row.data!)"
+              >
+                <template #leading="{ row }">
                   <input
                     type="checkbox"
                     class="h-3 w-3 shrink-0 accent-primary"
-                    :checked="checkedPaths.has(file.path)"
-                    :disabled="!fileCommittable(file)"
+                    :checked="checkedPaths.has(row.data!.path)"
+                    :disabled="!fileCommittable(row.data!)"
                     :title="t('git.commit.includeFile')"
                     @click.stop
-                    @change="toggleFileChecked(file)"
+                    @change="toggleFileChecked(row.data!)"
                   />
                   <span
                     class="w-3 shrink-0 font-mono font-semibold"
-                    :class="statusClass(file.untracked ? 'U' : file.status)"
+                    :class="statusClass(row.data!.untracked ? 'U' : row.data!.status)"
                   >
-                    {{ file.untracked ? "U" : file.status }}
+                    {{ row.data!.untracked ? "U" : row.data!.status }}
                   </span>
-                  <Icon :icon="fileIcon(baseName(file.path))" class="h-3.5 w-3.5 shrink-0" />
-                  <span class="min-w-0 flex-1 truncate font-mono">
-                    <template v-if="file.old_path">{{ baseName(file.old_path) }} → </template
-                    >{{ baseName(file.path) }}
-                  </span>
+                </template>
+                <template #trailing="{ row }">
                   <span
-                    v-if="file.additions != null"
+                    v-if="row.data!.additions != null"
                     class="shrink-0 text-green-600 dark:text-green-400"
                   >
-                    +{{ file.additions }}
+                    +{{ row.data!.additions }}
                   </span>
                   <span
-                    v-if="file.deletions != null"
+                    v-if="row.data!.deletions != null"
                     class="shrink-0 text-red-600 dark:text-red-400"
                   >
-                    -{{ file.deletions }}
+                    -{{ row.data!.deletions }}
                   </span>
-                </div>
-              </template>
+                </template>
+              </FileTreeList>
 
               <!-- 树形:按目录层级聚合 -->
-              <template v-else>
-                <div
-                  v-for="row in treeRows"
-                  :key="row.node.fullPath"
-                  class="flex w-full items-center gap-1.5 py-1 pr-3 text-xs transition-colors"
-                  :class="[
-                    row.node.file ? 'cursor-pointer hover:bg-accent/60' : '',
-                    row.node.file && selectedPath === row.node.file.path ? 'bg-accent' : '',
-                    row.node.file && fileDimmed(row.node.file) ? 'opacity-40' : '',
-                  ]"
-                  :style="{ paddingLeft: `${8 + row.depth * 14}px` }"
-                  :title="
-                    row.node.file
-                      ? row.node.file.old_path
-                        ? `${row.node.file.old_path} → ${row.node.file.path}`
-                        : row.node.file.path
-                      : undefined
-                  "
-                  @click="
-                    row.node.file ? selectFile(row.node.file) : toggleFolder(row.node.fullPath)
-                  "
-                >
-                  <span class="w-3 shrink-0 text-muted-foreground">
-                    <ChevronRight
-                      v-if="row.node.children.length"
-                      class="h-3 w-3 transition-transform"
-                      :class="collapsedFolders.has(row.node.fullPath) ? '' : 'rotate-90'"
-                    />
-                  </span>
-                  <template v-if="!row.node.file">
-                    <input
-                      type="checkbox"
-                      class="h-3 w-3 shrink-0 accent-primary"
-                      :checked="folderStates.get(row.node.fullPath)?.all ?? false"
-                      :indeterminate.prop="
-                        (folderStates.get(row.node.fullPath)?.some ?? false) &&
-                        !(folderStates.get(row.node.fullPath)?.all ?? false)
-                      "
-                      :disabled="!folderStates.get(row.node.fullPath)?.total"
-                      :title="t('git.commit.selectAll')"
-                      @click.stop
-                      @change="toggleFolderChecked(row.node)"
-                    />
-                    <Icon
-                      :icon="folderIcon(row.node.name, !collapsedFolders.has(row.node.fullPath))"
-                      class="h-3.5 w-3.5 shrink-0"
-                    />
-                  </template>
+              <FileTreeList
+                v-else
+                size="sm"
+                :rows="treeRows"
+                :selected="selectedPath"
+                @select="(row) => selectFile(row.data!)"
+                @toggle="(row) => toggleFolder(row.fullPath)"
+              >
+                <template #leading="{ row }">
+                  <input
+                    v-if="row.isDir"
+                    type="checkbox"
+                    class="h-3 w-3 shrink-0 accent-primary"
+                    :checked="folderInfo.get(row.fullPath)?.all ?? false"
+                    :indeterminate.prop="
+                      (folderInfo.get(row.fullPath)?.some ?? false) &&
+                      !(folderInfo.get(row.fullPath)?.all ?? false)
+                    "
+                    :disabled="!folderInfo.get(row.fullPath)?.total"
+                    :title="t('git.commit.selectAll')"
+                    @click.stop
+                    @change="toggleFolderChecked(row.fullPath)"
+                  />
                   <template v-else>
                     <input
                       type="checkbox"
                       class="h-3 w-3 shrink-0 accent-primary"
-                      :checked="checkedPaths.has(row.node.file.path)"
-                      :disabled="!fileCommittable(row.node.file)"
+                      :checked="checkedPaths.has(row.data!.path)"
+                      :disabled="!fileCommittable(row.data!)"
                       :title="t('git.commit.includeFile')"
                       @click.stop
-                      @change="toggleFileChecked(row.node.file!)"
+                      @change="toggleFileChecked(row.data!)"
                     />
                     <span
                       class="w-3 shrink-0 font-mono font-semibold"
-                      :class="statusClass(row.node.file.untracked ? 'U' : row.node.file.status)"
+                      :class="statusClass(row.data!.untracked ? 'U' : row.data!.status)"
                     >
-                      {{ row.node.file.untracked ? "U" : row.node.file.status }}
+                      {{ row.data!.untracked ? "U" : row.data!.status }}
                     </span>
-                    <Icon :icon="fileIcon(row.node.name)" class="h-3.5 w-3.5 shrink-0" />
                   </template>
-                  <span class="min-w-0 flex-1 truncate font-mono">{{ row.node.name }}</span>
-                  <template v-if="row.node.file">
+                </template>
+                <template #trailing="{ row }">
+                  <template v-if="row.data">
                     <span
-                      v-if="row.node.file.additions != null"
+                      v-if="row.data.additions != null"
                       class="shrink-0 text-green-600 dark:text-green-400"
                     >
-                      +{{ row.node.file.additions }}
+                      +{{ row.data.additions }}
                     </span>
                     <span
-                      v-if="row.node.file.deletions != null"
+                      v-if="row.data.deletions != null"
                       class="shrink-0 text-red-600 dark:text-red-400"
                     >
-                      -{{ row.node.file.deletions }}
+                      -{{ row.data.deletions }}
                     </span>
                   </template>
-                </div>
-              </template>
+                </template>
+              </FileTreeList>
             </div>
           </div>
 

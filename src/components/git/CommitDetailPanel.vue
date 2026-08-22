@@ -4,7 +4,6 @@ import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { useElementSize, useLocalStorage } from "@vueuse/core";
 import {
-  ChevronRight,
   Columns2,
   Copy,
   FolderTree,
@@ -15,13 +14,13 @@ import {
   Rows2,
   Tag as TagIcon,
 } from "@lucide/vue";
-import { Icon } from "@iconify/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import FileTreeList from "@/components/common/FileTreeList.vue";
 import DiffViewer from "@/components/git/DiffViewer.vue";
 import ImageDiffPreview from "@/components/git/ImageDiffPreview.vue";
-import { fileIcon, folderIcon } from "@/lib/file-icons";
-import { buildFileTree, type FileTreeNode } from "@/lib/file-tree";
+import { statusClass } from "@/lib/git-status";
+import { buildFileTree, flatFileRows, flattenVisibleTree } from "@/lib/file-tree";
 import { extOf, imageMimeOf, isImagePath } from "@/lib/file-kind";
 import { openPathWith, sortOpenWithOptions } from "@/lib/open-with";
 import { baseName } from "@/lib/path";
@@ -212,28 +211,18 @@ watch(ignoreWs, () => {
   if (file && !isImagePath(file.path)) void selectFile(file, true);
 });
 
-// --- 树形展示:按目录层级聚合,折叠状态记忆 ---
+// --- 树形展示:按目录层级聚合,折叠状态记忆;行化(树形/平铺)走 file-tree 统一辅助 ---
 const fileTree = computed(() => buildFileTree(files.value));
 
-interface FileRow {
-  node: FileTreeNode;
-  depth: number;
-}
+const treeRows = computed(() => flattenVisibleTree(fileTree.value, collapsedFolders.value));
 
-/** 拍平可见树行(跳过折叠目录的子级) */
-const treeRows = computed(() => {
-  const out: FileRow[] = [];
-  const walk = (nodes: FileTreeNode[], depth: number) => {
-    for (const node of nodes) {
-      out.push({ node, depth });
-      if (node.children.length && !collapsedFolders.value.has(node.fullPath)) {
-        walk(node.children, depth + 1);
-      }
-    }
-  };
-  walk(fileTree.value, 0);
-  return out;
-});
+/** 平铺行:只显示文件名,完整路径放 title;baseName 走 @/lib/path */
+const flatRows = computed(() =>
+  flatFileRows(files.value, {
+    name: (f) => (f.old_path ? `${baseName(f.old_path)} → ${baseName(f.path)}` : baseName(f.path)),
+    title: (f) => (f.old_path ? `${f.old_path} → ${f.path}` : f.path),
+  }),
+);
 
 function toggleFolder(fullPath: string) {
   const next = new Set(collapsedFolders.value);
@@ -279,22 +268,6 @@ function tagName(refName: string) {
 }
 async function copyHash(hash: string) {
   await copyToClipboard(hash);
-}
-
-// --- 状态徽标配色 ---
-function statusClass(status: string) {
-  switch (status) {
-    case "A":
-      return "text-green-600 dark:text-green-400";
-    case "D":
-      return "text-red-600 dark:text-red-400";
-    case "R":
-      return "text-blue-600 dark:text-blue-400";
-    case "T":
-      return "text-purple-600 dark:text-purple-400";
-    default:
-      return "text-amber-600 dark:text-amber-400";
-  }
 }
 
 // --- 布局:vertical = 列表在上 diff 在下;horizontal = 列表与 diff 左右分列(diff 单独一列) ---
@@ -462,88 +435,62 @@ onBeforeUnmount(() => {
             {{ t(isMerge ? "git.graph.detail.mergeCommit" : "git.graph.detail.emptyFiles") }}
           </p>
 
-          <!-- 平铺 -->
-          <template v-else-if="!treeMode">
-            <div
-              v-for="file in files"
-              :key="file.path"
-              class="flex w-full cursor-pointer items-center gap-1.5 px-3 py-1 text-xs transition-colors hover:bg-accent/60"
-              :class="selectedPath === file.path ? 'bg-accent' : ''"
-              @click="selectFile(file)"
-            >
-              <span class="w-3 shrink-0 font-mono font-semibold" :class="statusClass(file.status)">
-                {{ file.status }}
-              </span>
-              <Icon :icon="fileIcon(baseName(file.path))" class="h-3.5 w-3.5 shrink-0" />
+          <!-- 平铺:只显示文件名,完整路径放 title -->
+          <FileTreeList
+            v-else-if="!treeMode"
+            size="sm"
+            flat
+            :rows="flatRows"
+            :selected="selectedPath"
+            @select="(row) => selectFile(row.data!)"
+          >
+            <template #leading="{ row }">
               <span
-                class="min-w-0 flex-1 truncate font-mono"
-                :title="file.old_path ? `${file.old_path} → ${file.path}` : file.path"
+                class="w-3 shrink-0 font-mono font-semibold"
+                :class="statusClass(row.data!.status)"
               >
-                <template v-if="file.old_path">{{ baseName(file.old_path) }} → </template
-                >{{ baseName(file.path) }}
+                {{ row.data!.status }}
               </span>
-              <span v-if="file.additions" class="shrink-0 text-green-600 dark:text-green-400">
-                +{{ file.additions }}
+            </template>
+            <template #trailing="{ row }">
+              <span v-if="row.data!.additions" class="shrink-0 text-green-600 dark:text-green-400">
+                +{{ row.data!.additions }}
               </span>
-              <span v-if="file.deletions" class="shrink-0 text-red-600 dark:text-red-400">
-                -{{ file.deletions }}
+              <span v-if="row.data!.deletions" class="shrink-0 text-red-600 dark:text-red-400">
+                -{{ row.data!.deletions }}
               </span>
-            </div>
-          </template>
+            </template>
+          </FileTreeList>
 
-          <!-- 树形 -->
-          <template v-else>
-            <div
-              v-for="row in treeRows"
-              :key="row.node.fullPath"
-              class="flex w-full items-center gap-1.5 py-1 pr-3 text-xs transition-colors"
-              :class="[
-                row.node.file ? 'cursor-pointer hover:bg-accent/60' : '',
-                row.node.file && selectedPath === row.node.file.path ? 'bg-accent' : '',
-              ]"
-              :style="{ paddingLeft: `${8 + row.depth * 14}px` }"
-              @click="row.node.file ? selectFile(row.node.file) : toggleFolder(row.node.fullPath)"
-            >
-              <span class="w-3 shrink-0 text-muted-foreground">
-                <ChevronRight
-                  v-if="row.node.children.length"
-                  class="h-3 w-3 transition-transform"
-                  :class="collapsedFolders.has(row.node.fullPath) ? '' : 'rotate-90'"
-                />
+          <!-- 树形:按目录层级聚合 -->
+          <FileTreeList
+            v-else
+            size="sm"
+            :rows="treeRows"
+            :selected="selectedPath"
+            @select="(row) => selectFile(row.data!)"
+            @toggle="(row) => toggleFolder(row.fullPath)"
+          >
+            <template #leading="{ row }">
+              <span
+                v-if="row.data"
+                class="w-3 shrink-0 font-mono font-semibold"
+                :class="statusClass(row.data.status)"
+              >
+                {{ row.data.status }}
               </span>
-              <Icon
-                v-if="!row.node.file"
-                :icon="folderIcon(row.node.name, !collapsedFolders.has(row.node.fullPath))"
-                class="h-3.5 w-3.5 shrink-0"
-              />
-              <template v-else>
-                <span
-                  class="w-3 shrink-0 font-mono font-semibold"
-                  :class="statusClass(row.node.file.status)"
-                >
-                  {{ row.node.file.status }}
+            </template>
+            <template #trailing="{ row }">
+              <template v-if="row.data">
+                <span v-if="row.data.additions" class="shrink-0 text-green-600 dark:text-green-400">
+                  +{{ row.data.additions }}
                 </span>
-                <Icon :icon="fileIcon(row.node.name)" class="h-3.5 w-3.5 shrink-0" />
-              </template>
-              <span class="min-w-0 flex-1 truncate font-mono" :title="row.node.fullPath">
-                {{ row.node.name }}
-              </span>
-              <template v-if="row.node.file">
-                <span
-                  v-if="row.node.file.additions"
-                  class="shrink-0 text-green-600 dark:text-green-400"
-                >
-                  +{{ row.node.file.additions }}
-                </span>
-                <span
-                  v-if="row.node.file.deletions"
-                  class="shrink-0 text-red-600 dark:text-red-400"
-                >
-                  -{{ row.node.file.deletions }}
+                <span v-if="row.data.deletions" class="shrink-0 text-red-600 dark:text-red-400">
+                  -{{ row.data.deletions }}
                 </span>
               </template>
-            </div>
-          </template>
+            </template>
+          </FileTreeList>
         </div>
       </div>
 

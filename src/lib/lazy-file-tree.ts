@@ -1,9 +1,10 @@
+import type { FileTreeRow } from "@/lib/file-tree";
 import type { ProjectFileEntry } from "@/types";
 
 /**
  * 懒加载文件树的纯逻辑:后端按层返回目录子项(ProjectFiles 缓存于 childrenMap,
  * key 为目录相对路径、根为 ""),此处负责层内排序、可见行展开与预取目标挑选,
- * 与 Vue 状态解耦便于单测
+ * 与 Vue 状态解耦便于单测;行形状与静态树的 flattenVisibleTree 同构(FileTreeRow)
  */
 
 /** 单层预取的目录数上限:防止超宽目录(如未排除的依赖目录)一次排入过多后台请求 */
@@ -40,21 +41,6 @@ export function prefetchTargets(children: readonly ProjectFileEntry[]): string[]
   return out;
 }
 
-export interface LazyFileRow {
-  /** v-for key;加载占位行为 `${dir}::__loading` */
-  key: string;
-  name: string;
-  fullPath: string;
-  isDir: boolean;
-  depth: number;
-  /** 被 git 排除(.gitignore/.ignore),降低灰度显示 */
-  dimmed: boolean;
-  /** 目录已知为空(子层已加载且无子项):不渲染展开箭头、点击不动作 */
-  emptyDir: boolean;
-  /** 「加载中」占位行:目录已展开但子层未就位 */
-  loading: boolean;
-}
-
 /**
  * 由 childrenMap + 展开集合生成可见行:DFS 根层,仅下钻「已展开且子层已加载」的目录;
  * 已展开但子层未就位的目录追加一行加载占位
@@ -62,8 +48,8 @@ export interface LazyFileRow {
 export function buildVisibleRows(
   childrenMap: ReadonlyMap<string, readonly ProjectFileEntry[]>,
   expanded: ReadonlySet<string>,
-): LazyFileRow[] {
-  const out: LazyFileRow[] = [];
+): FileTreeRow<ProjectFileEntry>[] {
+  const out: FileTreeRow<ProjectFileEntry>[] = [];
   const walk = (dir: string, depth: number) => {
     const children = childrenMap.get(dir);
     if (!children) {
@@ -71,17 +57,20 @@ export function buildVisibleRows(
     }
     for (const entry of children) {
       const knownEmpty = entry.isDir && childrenMap.get(entry.path)?.length === 0;
+      const isExpanded = expanded.has(entry.path);
       out.push({
         key: entry.path,
         name: entryName(entry.path),
         fullPath: entry.path,
         isDir: entry.isDir,
         depth,
+        expanded: isExpanded,
+        expandable: entry.isDir && !knownEmpty,
         dimmed: entry.ignored,
-        emptyDir: knownEmpty,
         loading: false,
+        data: entry,
       });
-      if (!entry.isDir || !expanded.has(entry.path)) {
+      if (!entry.isDir || !isExpanded) {
         continue;
       }
       if (childrenMap.has(entry.path)) {
@@ -93,9 +82,11 @@ export function buildVisibleRows(
           fullPath: entry.path,
           isDir: false,
           depth: depth + 1,
+          expanded: false,
+          expandable: false,
           dimmed: false,
-          emptyDir: false,
           loading: true,
+          data: null,
         });
       }
     }

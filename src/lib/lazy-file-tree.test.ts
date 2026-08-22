@@ -10,7 +10,8 @@ import {
 
 // ── 任务描述 ─────────────────────────────────────────────────────────────────
 // 覆盖懒加载文件树纯逻辑:层内排序(目录在前/名称序)、预取目标(跳过排除目录与
-// 上限截断)、可见行生成(折叠/展开下钻/加载占位/已知空目录标记/灰显透传)。
+// 上限截断)、可见行生成(折叠/展开下钻/加载占位/已知空目录不展开/灰显透传/
+// 展开态与条目数据透传)。
 
 function entry(path: string, isDir = false, ignored = false): ProjectFileEntry {
   return { path, isDir, ignored };
@@ -72,6 +73,7 @@ describe("buildVisibleRows", () => {
     const rows = buildVisibleRows(childrenMap, new Set());
     expect(rows.map((r) => r.fullPath)).toEqual(["src", "docs", "empty", "README.md"]);
     expect(rows.every((r) => r.depth === 0)).toBe(true);
+    expect(rows.every((r) => !r.expanded)).toBe(true);
   });
 
   it("展开已加载目录下钻,未加载目录追加加载占位行", () => {
@@ -86,13 +88,26 @@ describe("buildVisibleRows", () => {
       ["README.md", 0, false],
     ]);
     expect(rows.find((r) => r.loading)?.key).toBe("docs::__loading");
+    expect(rows.find((r) => r.fullPath === "src")?.expanded).toBe(true);
   });
 
-  it("已知空目录标 emptyDir,展开也不产生子行", () => {
+  it("已知空目录不 expandable,展开也不产生子行", () => {
     const rows = buildVisibleRows(childrenMap, new Set(["empty"]));
     const empty = rows.find((r) => r.fullPath === "empty")!;
-    expect(empty.emptyDir).toBe(true);
+    expect(empty.expandable).toBe(false);
     expect(rows.filter((r) => r.depth > 0)).toHaveLength(0);
+  });
+
+  it("目录行 expandable,文件行不可展开", () => {
+    const rows = buildVisibleRows(childrenMap, new Set());
+    expect(rows.find((r) => r.fullPath === "src")?.expandable).toBe(true);
+    expect(rows.find((r) => r.fullPath === "README.md")?.expandable).toBe(false);
+  });
+
+  it("行携带原始条目 data(目录行也有)", () => {
+    const rows = buildVisibleRows(childrenMap, new Set());
+    expect(rows.find((r) => r.fullPath === "src")?.data).toEqual(entry("src", true));
+    expect(rows.find((r) => r.fullPath === "README.md")?.data).toEqual(entry("README.md"));
   });
 
   it("ignored 标记透传为 dimmed", () => {
