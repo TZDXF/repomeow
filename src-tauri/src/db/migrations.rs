@@ -9,6 +9,7 @@ const MIGRATION_004: &str = include_str!("../../migrations/004_git_account_token
 const MIGRATION_005: &str = include_str!("../../migrations/005_auto_pull.sql");
 const MIGRATION_006: &str = include_str!("../../migrations/006_schedule_tag_ids.sql");
 const MIGRATION_007: &str = include_str!("../../migrations/007_daily_previous_day.sql");
+const MIGRATION_008: &str = include_str!("../../migrations/008_wiki_auto_update.sql");
 
 /// 按 PRAGMA user_version 顺序应用迁移,保证幂等
 pub fn run(conn: &Connection) -> AppResult<()> {
@@ -40,6 +41,10 @@ pub fn run(conn: &Connection) -> AppResult<()> {
     if version < 7 {
         conn.execute_batch(MIGRATION_007)?;
         conn.pragma_update(None, "user_version", 7)?;
+    }
+    if version < 8 {
+        conn.execute_batch(MIGRATION_008)?;
+        conn.pragma_update(None, "user_version", 8)?;
     }
     Ok(())
 }

@@ -75,8 +75,9 @@ export const useSettingsStore = defineStore("settings", () => {
   /** 启动时自动检查更新 */
   const autoCheckUpdate = ref(true);
   /**
-   * Wiki 自动增量更新(与「跟踪更新」联动,默认关闭):跟踪项目快进拉取后,
-   * 未同步进 wiki 的提交数达到阈值时自动执行增量更新(stores/wiki.ts 的 autoUpdate)
+   * Wiki 自动增量更新全局开关(与「跟踪更新」联动,默认关闭):打开 = 所有跟踪项目
+   * 都参与自动增量更新(项目勾选被忽略并在 UI 禁用);关闭 = 仅项目勾选了的参与
+   * (projects 表 wiki_auto_update)。阈值见 wikiAutoUpdateThreshold
    */
   const wikiAutoUpdate = ref(false);
   /** Wiki 自动增量更新的触发阈值(未同步提交数,1-10000) */

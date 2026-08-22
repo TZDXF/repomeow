@@ -221,6 +221,15 @@ export const useProjectsStore = defineStore("projects", () => {
     }
   }
 
+  /** 设置/取消项目级「Wiki 自动增量更新」:实际触发还需全局开关与「跟踪更新」开启 */
+  async function setWikiAutoUpdate(id: number, enabled: boolean) {
+    await cmd("set_project_wiki_auto_update", { id, enabled });
+    const p = projects.value.find((x) => x.id === id);
+    if (p) {
+      p.wiki_auto_update = enabled;
+    }
+  }
+
   /** 拉取已归档项目列表(设置页归档管理用) */
   async function fetchArchivedProjects() {
     archivedProjects.value = await cmd<Project[]>("list_archived_projects");
@@ -454,6 +463,7 @@ export const useProjectsStore = defineStore("projects", () => {
     archiveProject,
     setFavorite,
     setAutoPull,
+    setWikiAutoUpdate,
     fetchArchivedProjects,
     unarchiveProject,
     deleteProject,

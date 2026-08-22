@@ -14,12 +14,12 @@ struct ProjectRow {
     archived_at: Option<i64>,
     favorited_at: Option<i64>,
     auto_pull: bool,
+    wiki_auto_update: bool,
     created_at: i64,
     updated_at: i64,
 }
 
-const PROJECT_COLS: &str =
-    "id, path, name, description, archived_at, favorited_at, auto_pull, created_at, updated_at";
+const PROJECT_COLS: &str = "id, path, name, description, archived_at, favorited_at, auto_pull, wiki_auto_update, created_at, updated_at";
 
 fn map_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectRow> {
     Ok(ProjectRow {
@@ -30,8 +30,9 @@ fn map_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectRow> {
         archived_at: r.get(4)?,
         favorited_at: r.get(5)?,
         auto_pull: r.get(6)?,
-        created_at: r.get(7)?,
-        updated_at: r.get(8)?,
+        wiki_auto_update: r.get(7)?,
+        created_at: r.get(8)?,
+        updated_at: r.get(9)?,
     })
 }
 
@@ -66,6 +67,7 @@ fn project_from_row(row: ProjectRow, tags: Vec<Tag>) -> Project {
         archived_at: row.archived_at,
         favorited_at: row.favorited_at,
         auto_pull: row.auto_pull,
+        wiki_auto_update: row.wiki_auto_update,
         created_at: row.created_at,
         updated_at: row.updated_at,
     }
@@ -452,6 +454,19 @@ pub fn set_auto_pull(conn: &Connection, id: i64, enabled: bool) -> AppResult<()>
     Ok(())
 }
 
+/// 设置/取消项目级「Wiki 自动增量更新」:实际触发还需前端全局开关打开,
+/// 且「跟踪更新」(auto_pull)开启——开关状态独立保留,便于提前配置
+pub fn set_wiki_auto_update(conn: &Connection, id: i64, enabled: bool) -> AppResult<()> {
+    let changed = conn.execute(
+        "UPDATE projects SET wiki_auto_update = ?1 WHERE id = ?2",
+        params![enabled, id],
+    )?;
+    if changed == 0 {
+        return Err(AppError::coded(ErrorCode::ProjectNotFound, id.to_string()));
+    }
+    Ok(())
+}
+
 /// 彻底删除项目(关联的标签指派、自定义命令随外键级联清理;不动磁盘文件)
 pub fn remove(conn: &Connection, id: i64) -> AppResult<()> {
     let changed = conn.execute("DELETE FROM projects WHERE id = ?1", params![id])?;
@@ -609,6 +624,12 @@ pub fn set_project_auto_pull(db: State<'_, Db>, id: i64, enabled: bool) -> AppRe
 }
 
 #[tauri::command]
+pub fn set_project_wiki_auto_update(db: State<'_, Db>, id: i64, enabled: bool) -> AppResult<()> {
+    let conn = db.0.lock().unwrap();
+    set_wiki_auto_update(&conn, id, enabled)
+}
+
+#[tauri::command]
 pub fn delete_project(db: State<'_, Db>, id: i64) -> AppResult<()> {
     let conn = db.0.lock().unwrap();
     let project = get(&conn, id)?;
@@ -690,6 +711,26 @@ mod tests {
 
         assert!(
             matches!(set_auto_pull(&conn, 9999, true), Err(ref e) if e.is_code(crate::error::ErrorCode::ProjectNotFound))
+        );
+    }
+
+    #[test]
+    fn set_wiki_auto_update_toggles_flag() {
+        let conn = test_conn();
+        let dir = std::env::temp_dir().to_string_lossy().to_string();
+        let p = add(&conn, &dir, "demo", "").unwrap();
+        // 默认关闭,且与 auto_pull 互相独立
+        assert!(!p.wiki_auto_update);
+
+        set_wiki_auto_update(&conn, p.id, true).unwrap();
+        assert!(get(&conn, p.id).unwrap().wiki_auto_update);
+        assert!(!get(&conn, p.id).unwrap().auto_pull);
+
+        set_wiki_auto_update(&conn, p.id, false).unwrap();
+        assert!(!get(&conn, p.id).unwrap().wiki_auto_update);
+
+        assert!(
+            matches!(set_wiki_auto_update(&conn, 9999, true), Err(ref e) if e.is_code(crate::error::ErrorCode::ProjectNotFound))
         );
     }
 

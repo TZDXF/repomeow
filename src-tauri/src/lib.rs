@@ -141,6 +141,7 @@ pub fn run() {
             commands::project::unarchive_project,
             commands::project::set_project_favorite,
             commands::project::set_project_auto_pull,
+            commands::project::set_project_wiki_auto_update,
             commands::project::delete_project,
             commands::git::get_git_status,
             commands::git::refresh_all_git_status,

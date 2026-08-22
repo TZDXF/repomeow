@@ -319,6 +319,8 @@ export interface Project {
   favorited_at: number | null;
   /** 跟踪更新:开启后远端有更新时后台自动快进拉取(无法快进即取消,不提醒) */
   auto_pull: boolean;
+  /** Wiki 自动增量更新(项目级):跟踪拉取后未同步提交数达全局阈值时自动增量更新 */
+  wiki_auto_update: boolean;
   created_at: number;
   updated_at: number;
 }

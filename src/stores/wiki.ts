@@ -193,8 +193,9 @@ export const useWikiStore = defineStore("wiki", () => {
 
   /**
    * 后台自动增量更新(「跟踪更新」联动):auto-pull 快进成功事件触发。
-   * 开关关闭/正在生成或更新/无 wiki/无 headSha/提交数未达阈值时静默跳过(返回 0);
-   * headSha 已不在当前历史(改写)同样跳过,整本重生成只留给用户手动触发。
+   * 是否参与由调用方按两级开关决定(全局开 = 所有的跟踪项目,全局关 = 仅项目勾选的),
+   * 这里只看运行条件:正在生成或更新/无 wiki/无 headSha/提交数未达阈值时静默跳过
+   * (返回 0);headSha 已不在当前历史(改写)同样跳过,整本重生成只留给用户手动触发。
    * 内部串行排队(多个项目的触发依次执行);正忙时本次跳过,后续拉取事件会再次触发。
    * 执行失败向外抛,由调用方提示
    */
@@ -213,10 +214,10 @@ export const useWikiStore = defineStore("wiki", () => {
     project: { path: string; name: string },
     language: SupportedLocale,
   ): Promise<number> {
-    const settings = useSettingsStore();
-    if (!settings.wikiAutoUpdate || updating.value || generating.value || regeneratingPage.value) {
+    if (updating.value || generating.value || regeneratingPage.value) {
       return 0;
     }
+    const settings = useSettingsStore();
     // 不依赖当前查看状态,后台直接读盘;用户若正看该项目,结束时 load 会刷新展示
     const d = await loadWiki(project.path).catch(() => null);
     const fromSha = d?.meta.headSha;

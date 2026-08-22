@@ -96,12 +96,13 @@ onMounted(async () => {
   onListen<GitUpdatedPayload>("git://updated", (payload) => {
     store.updateGitRemote(payload.project_id, payload);
   });
-  // 跟踪更新快进拉取成功:按设置的提交数阈值联动 wiki 自动增量更新
-  // (开关关闭/未达阈值/正忙时 store 内部静默跳过,不会产生 AI 调用)
+  // 跟踪更新快进拉取成功:全局开关打开 = 所有跟踪项目都参与 wiki 自动增量更新;
+  // 关闭 = 仅项目勾选了 Wiki 开关的参与(无 wiki 的项目在 store 内部跳过)。
+  // 未达阈值/正忙时同样静默跳过,不会产生 AI 调用
   onListen<GitAutoPulledPayload>("git://auto-pulled", (payload) => {
-    if (!settingsStore.wikiAutoUpdate) return;
     const p = store.projects.find((x) => x.id === payload.project_id);
     if (!p) return;
+    if (!settingsStore.wikiAutoUpdate && !p.wiki_auto_update) return;
     wikiStore
       .autoUpdate({ path: p.path, name: p.name }, settingsStore.language)
       .then((count) => {

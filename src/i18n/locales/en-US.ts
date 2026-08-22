@@ -1258,9 +1258,13 @@ export default {
         "Tracked projects are checked periodically and fast-forward pulled automatically when the remote has updates; when fast-forward is not possible (diverged or local changes may conflict), the pull is canceled silently.",
       wikiAutoUpdateLabel: "Auto-update wiki",
       wikiAutoUpdateHint:
-        "After a tracked project is fast-forward pulled, an incremental wiki update runs automatically once the number of commits not yet reflected in its wiki reaches the threshold. Skipped when there is no wiki or an incremental update is impossible; never triggers a full regeneration on its own.",
+        "When on, every tracked project with a wiki gets an incremental update after fast-forward pulls once unwritten commits reach the threshold (per-project checkboxes are ignored and disabled). When off, only projects with their wiki switch checked are updated. Skipped when there is no wiki or an incremental update is impossible; never triggers a full regeneration on its own.",
       wikiThresholdTitle: "Trigger threshold (commits not yet reflected in the wiki)",
       wikiThresholdSuffix: "commits",
+      wikiToggleHint: "Toggle automatic wiki updates for this project",
+      wikiToggleNeedsTracking: "Enable update tracking for this project first",
+      wikiToggleGloballyOn:
+        "Global switch is on: every tracked project with a wiki is auto-updated, no per-project checkbox needed",
       searchPlaceholder: "Search name, description, or path...",
       trackedCount: "{count} project(s) tracked",
       toggleHint: "Toggle update tracking for this project",

@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
-import { Search } from "@lucide/vue";
+import { BookOpenText, Search } from "@lucide/vue";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
@@ -54,6 +54,28 @@ async function toggle(project: Project, enabled: boolean) {
   } finally {
     pendingIds.value.delete(project.id);
   }
+}
+
+/** Wiki 自动更新开关的切换中状态(与跟踪开关分开置灰,互不阻塞) */
+const wikiPendingIds = ref<Set<number>>(new Set());
+
+async function toggleWiki(project: Project, enabled: boolean) {
+  if (wikiPendingIds.value.has(project.id)) return;
+  wikiPendingIds.value.add(project.id);
+  try {
+    await store.setWikiAutoUpdate(project.id, enabled);
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    wikiPendingIds.value.delete(project.id);
+  }
+}
+
+/** Wiki 开关的三态提示:未跟踪 / 全局已开启(勾选被忽略并禁用) / 正常 */
+function wikiToggleTitle(p: Project): string {
+  if (!p.auto_pull) return t("settings.tracking.wikiToggleNeedsTracking");
+  if (settings.wikiAutoUpdate) return t("settings.tracking.wikiToggleGloballyOn");
+  return t("settings.tracking.wikiToggleHint");
 }
 
 // ── Wiki 自动增量更新(跟踪联动) ──────────────────────────────────────────
@@ -156,12 +178,25 @@ function commitThreshold() {
             <p class="truncate text-sm font-medium">{{ p.name }}</p>
             <p class="truncate text-xs text-muted-foreground" :title="p.path">{{ p.path }}</p>
           </div>
-          <Switch
-            :model-value="p.auto_pull"
-            :disabled="pendingIds.has(p.id)"
-            :title="t('settings.tracking.toggleHint')"
-            @update:model-value="toggle(p, $event)"
-          />
+          <div class="flex shrink-0 items-center gap-4">
+            <!-- Wiki 自动增量更新(项目级):依赖该项目的跟踪更新;
+                 全局开关打开时所有跟踪项目都参与,勾选被忽略并禁用 -->
+            <div class="flex items-center gap-1.5">
+              <BookOpenText class="h-3.5 w-3.5 text-muted-foreground" />
+              <Switch
+                :model-value="p.wiki_auto_update"
+                :disabled="!p.auto_pull || settings.wikiAutoUpdate || wikiPendingIds.has(p.id)"
+                :title="wikiToggleTitle(p)"
+                @update:model-value="toggleWiki(p, $event)"
+              />
+            </div>
+            <Switch
+              :model-value="p.auto_pull"
+              :disabled="pendingIds.has(p.id)"
+              :title="t('settings.tracking.toggleHint')"
+              @update:model-value="toggle(p, $event)"
+            />
+          </div>
         </div>
         <p v-if="!sortedProjects.length" class="py-6 text-center text-xs text-muted-foreground">
           {{
