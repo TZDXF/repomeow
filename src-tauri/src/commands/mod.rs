@@ -1,4 +1,5 @@
 pub mod account;
+pub mod agent;
 pub mod docker;
 pub mod editor_icon;
 pub mod files;
@@ -15,6 +16,7 @@ pub mod scan;
 pub mod script;
 pub mod tag;
 pub mod toolchain;
+pub mod usage;
 pub mod walk;
 pub mod wiki;
 pub mod window;

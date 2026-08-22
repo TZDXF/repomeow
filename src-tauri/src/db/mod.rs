@@ -70,6 +70,7 @@ mod tests {
             "custom_commands",
             "settings",
             "hidden_items",
+            "ai_usage_log",
         ] {
             let count: i64 = conn
                 .query_row(

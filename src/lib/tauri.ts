@@ -44,6 +44,12 @@ const GENERIC_DETAIL_CODES = new Set([
   // 工具链操作:message 里的工具/操作名或非法版本值是定位问题的关键
   "toolchain_op_unsupported",
   "toolchain_version_invalid",
+  // Agent 后端:i18n 文案只有一句"X 失败",message 里的程序路径 / OS 错误 /
+  // stderr 尾部(agent 未登录、适配器报错)是排障关键
+  "agent_not_detected",
+  "agent_spawn_failed",
+  "agent_handshake_failed",
+  "agent_prompt_failed",
 ]);
 
 /**

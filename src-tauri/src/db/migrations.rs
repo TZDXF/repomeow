@@ -10,6 +10,8 @@ const MIGRATION_005: &str = include_str!("../../migrations/005_auto_pull.sql");
 const MIGRATION_006: &str = include_str!("../../migrations/006_schedule_tag_ids.sql");
 const MIGRATION_007: &str = include_str!("../../migrations/007_daily_previous_day.sql");
 const MIGRATION_008: &str = include_str!("../../migrations/008_wiki_auto_update.sql");
+const MIGRATION_009: &str = include_str!("../../migrations/009_ai_usage_log.sql");
+const MIGRATION_010: &str = include_str!("../../migrations/010_ai_usage_cached_tokens.sql");
 
 /// 按 PRAGMA user_version 顺序应用迁移,保证幂等
 pub fn run(conn: &Connection) -> AppResult<()> {
@@ -45,6 +47,14 @@ pub fn run(conn: &Connection) -> AppResult<()> {
     if version < 8 {
         conn.execute_batch(MIGRATION_008)?;
         conn.pragma_update(None, "user_version", 8)?;
+    }
+    if version < 9 {
+        conn.execute_batch(MIGRATION_009)?;
+        conn.pragma_update(None, "user_version", 9)?;
+    }
+    if version < 10 {
+        conn.execute_batch(MIGRATION_010)?;
+        conn.pragma_update(None, "user_version", 10)?;
     }
     Ok(())
 }

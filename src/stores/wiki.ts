@@ -2,8 +2,13 @@ import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 import type { SupportedLocale } from "@/i18n";
 import {
+  backendIdOf,
+  createWikiKernel,
   generateWiki,
   regenerateWikiPage,
+  type WikiGenBackend,
+  type WikiGenKernel,
+  type WikiGenOptions,
   type WikiGenPhase,
   type WikiPageStatus,
 } from "@/lib/wiki-generator";
@@ -16,6 +21,33 @@ export interface WikiGenPageItem {
   page: WikiOutlinePage;
   status: WikiPageStatus;
   error?: string;
+}
+
+/** 按设置组装生成选项:内置 API 或本地 agent(ACP 会话)后端 */
+function buildGenOptions(language: SupportedLocale): WikiGenOptions {
+  const settings = useSettingsStore();
+  const backend: WikiGenBackend =
+    settings.wikiGenBackend === "builtin"
+      ? { kind: "builtin" }
+      : settings.wikiGenBackend === "custom"
+        ? {
+            kind: "agent",
+            customCommand: settings.wikiAgentCustomCommand,
+            model: settings.wikiAgentModel || undefined,
+            thinking: settings.wikiAgentThinking || undefined,
+          }
+        : {
+            kind: "agent",
+            agentId: settings.wikiGenBackend,
+            model: settings.wikiAgentModel || undefined,
+            thinking: settings.wikiAgentThinking || undefined,
+          };
+  return {
+    language,
+    concurrency: settings.aiConcurrency,
+    model: settings.aiModel,
+    backend,
+  };
 }
 
 /**
@@ -70,43 +102,33 @@ export const useWikiStore = defineStore("wiki", () => {
 
   async function runGenerate(project: { path: string; name: string }, language: SupportedLocale) {
     if (generating.value) return;
-    const settings = useSettingsStore();
     controller = new AbortController();
     genFor.value = project.path;
     pages.value = [];
     genError.value = "";
     streamContents.value = {};
     try {
-      await generateWiki(
-        project,
-        {
-          language,
-          concurrency: settings.aiConcurrency,
-          model: settings.aiModel,
+      await generateWiki(project, buildGenOptions(language), controller.signal, {
+        onPhase: (p) => {
+          phase.value = p;
         },
-        controller.signal,
-        {
-          onPhase: (p) => {
-            phase.value = p;
-          },
-          onPage: (page, status, error) => {
-            const item = pages.value.find((i) => i.page.id === page.id);
-            if (item) {
-              item.status = status;
-              item.error = error;
-            } else {
-              pages.value.push({ page: { ...page }, status, error });
-            }
-            // 页面进入终态后清掉流式预览内容
-            if (status !== "running" && status !== "pending") {
-              delete streamContents.value[page.id];
-            }
-          },
-          onPageProgress: (page, partial) => {
-            streamContents.value[page.id] = partial;
-          },
+        onPage: (page, status, error) => {
+          const item = pages.value.find((i) => i.page.id === page.id);
+          if (item) {
+            item.status = status;
+            item.error = error;
+          } else {
+            pages.value.push({ page: { ...page }, status, error });
+          }
+          // 页面进入终态后清掉流式预览内容
+          if (status !== "running" && status !== "pending") {
+            delete streamContents.value[page.id];
+          }
         },
-      );
+        onPageProgress: (page, partial) => {
+          streamContents.value[page.id] = partial;
+        },
+      });
     } catch (e) {
       genError.value = e instanceof Error ? e.message : String(e);
     } finally {
@@ -128,19 +150,23 @@ export const useWikiStore = defineStore("wiki", () => {
   /** 单页重生成:就地更新该页内容,保持其余页面与 meta 不变 */
   const regeneratingPage = ref<string | null>(null);
   async function regeneratePage(
-    projectPath: string,
+    project: { path: string; name: string },
     page: WikiOutlinePage,
     language: SupportedLocale,
   ) {
     if (generating.value || regeneratingPage.value) return;
     regeneratingPage.value = page.id;
+    // agent 后端为本次重生成单独起会话(原生成会话早已结束),完成后即收尾
+    let kernel: WikiGenKernel | null = null;
     try {
-      await regenerateWikiPage(projectPath, page, language, new AbortController().signal);
+      kernel = await createWikiKernel(project, buildGenOptions(language));
+      await regenerateWikiPage(kernel, project.path, page, language, new AbortController().signal);
       // git 快照提交(辅助管理,失败不影响页面内容,下次操作会补提交)
-      await commitWiki(projectPath, "page", page.title).catch(() => {});
-      if (dataFor.value === projectPath) await load(projectPath);
+      await commitWiki(project.path, "page", page.title).catch(() => {});
+      if (dataFor.value === project.path) await load(project.path);
     } finally {
       regeneratingPage.value = null;
+      await kernel?.dispose().catch(() => {});
     }
   }
 
@@ -158,10 +184,15 @@ export const useWikiStore = defineStore("wiki", () => {
     if (!d || updating.value || generating.value) return 0;
     const fromSha = d.meta.headSha;
     if (!fromSha) throw new Error("no head sha");
+    const options = buildGenOptions(language);
+    // 跨后端(如内置 API ↔ agent)的旧 wiki 不做增量:抛错由调用方退化为整本重生成
+    if ((d.meta.generator ?? "builtin") !== backendIdOf(options.backend)) {
+      throw new Error("generator mismatch");
+    }
     updating.value = true;
     try {
       const changed = await wikiChangedFiles(project.path, fromSha);
-      return await applyUpdate(project, d, language, changed);
+      return await applyUpdate(project, d, language, changed, options);
     } finally {
       updating.value = false;
       regeneratingPage.value = null;
@@ -174,18 +205,36 @@ export const useWikiStore = defineStore("wiki", () => {
     d: WikiData,
     language: SupportedLocale,
     changed: WikiChangedFiles,
+    options: WikiGenOptions,
   ): Promise<number> {
     const changedSet = new Set(changed.files);
     const affected = d.pages.filter((p) => p.relevantFiles.some((f) => changedSet.has(f)));
-    for (const page of affected) {
-      regeneratingPage.value = page.id;
-      // 页数少(通常个位数),串行足够;保持与 regeneratePage 同一互斥标记
-      // eslint-disable-next-line no-await-in-loop
-      await regenerateWikiPage(project.path, page, language, new AbortController().signal);
-    }
-    regeneratingPage.value = null;
-    if (changed.headSha) {
-      await saveWikiMeta(project.path, { ...d.meta, headSha: changed.headSha }, "update");
+    let kernel: WikiGenKernel | null = null;
+    try {
+      kernel = await createWikiKernel(project, options);
+      for (const page of affected) {
+        regeneratingPage.value = page.id;
+        // 页数少(通常个位数),串行足够;保持与 regeneratePage 同一互斥标记
+        // eslint-disable-next-line no-await-in-loop
+        await regenerateWikiPage(
+          kernel,
+          project.path,
+          page,
+          language,
+          new AbortController().signal,
+          { changedFiles: changed.files },
+        );
+      }
+      regeneratingPage.value = null;
+      if (changed.headSha) {
+        await saveWikiMeta(
+          project.path,
+          { ...d.meta, headSha: changed.headSha, model: kernel.model, generator: kernel.backendId },
+          "update",
+        );
+      }
+    } finally {
+      await kernel?.dispose().catch(() => {});
     }
     if (dataFor.value === project.path) await load(project.path);
     return affected.length;
@@ -217,16 +266,22 @@ export const useWikiStore = defineStore("wiki", () => {
     if (updating.value || generating.value || regeneratingPage.value) {
       return 0;
     }
-    const settings = useSettingsStore();
-    // 不依赖当前查看状态,后台直接读盘;用户若正看该项目,结束时 load 会刷新展示
+    const options = buildGenOptions(language);
+    // agent 后端不参与自动增量更新:后台无人值守跑 agent 会静默消耗订阅额度,
+    // 增量更新只留给用户在 wiki 页手动触发
+    if (options.backend.kind !== "builtin") return 0;
     const d = await loadWiki(project.path).catch(() => null);
     const fromSha = d?.meta.headSha;
     if (!d || !fromSha) return 0;
+    // 跨后端的旧 wiki 不自动增量(手动更新会退化为整本重生成),静默跳过
+    if ((d.meta.generator ?? "builtin") !== backendIdOf(options.backend)) return 0;
     const changed = await wikiChangedFiles(project.path, fromSha).catch(() => null);
-    if (!changed || changed.commitCount < settings.wikiAutoUpdateThreshold) return 0;
+    if (!changed) return 0;
+    const settings = useSettingsStore();
+    if (changed.commitCount < settings.wikiAutoUpdateThreshold) return 0;
     updating.value = true;
     try {
-      return await applyUpdate(project, d, language, changed);
+      return await applyUpdate(project, d, language, changed, options);
     } finally {
       updating.value = false;
       regeneratingPage.value = null;

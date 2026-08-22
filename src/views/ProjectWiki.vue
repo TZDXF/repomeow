@@ -13,6 +13,7 @@ import {
   GitPullRequestArrow,
   LoaderCircle,
   RefreshCw,
+  SlidersHorizontal,
   Trash2,
   X,
 } from "@lucide/vue";
@@ -21,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import SourceFileDialog from "@/components/wiki/SourceFileDialog.vue";
+import WikiGenerateDialog from "@/components/wiki/WikiGenerateDialog.vue";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
 import { openWikiDir } from "@/lib/wiki";
 import type { WikiGenPhase, WikiPageStatus } from "@/lib/wiki-generator";
@@ -210,6 +212,29 @@ watch(
 
 // ── 生成 / 操作 ───────────────────────────────────────────────────────────
 
+/** 生成配置对话框:生成/重新生成前选择,或右上角入口直接查看/修改已记录配置 */
+const genDialogOpen = ref(false);
+const genDialogMode = ref<"generate" | "edit">("generate");
+
+function requestGenerate() {
+  genDialogMode.value = "generate";
+  genDialogOpen.value = true;
+}
+
+function requestConfigEdit() {
+  genDialogMode.value = "edit";
+  genDialogOpen.value = true;
+}
+
+/** 对话框确认(配置已写回设置):generate 模式随之启动整本生成 */
+function onGenConfirm() {
+  genDialogOpen.value = false;
+  if (genDialogMode.value === "generate") {
+    generate();
+  }
+}
+
+/** 实际执行整本生成(对话框确认后,或增量更新退化时用已记录配置直接跑) */
 function generate() {
   const p = project.value;
   if (!p) return;
@@ -238,7 +263,7 @@ async function regeneratePage(page: WikiPageData) {
   const p = project.value;
   if (!p) return;
   try {
-    await wiki.regeneratePage(p.path, page, settings.language);
+    await wiki.regeneratePage({ path: p.path, name: p.name }, page, settings.language);
     toast.success(t("wiki.pageRegenerated"));
   } catch (e) {
     toast.error(t("wiki.failed", { error: String(e) }));
@@ -255,7 +280,8 @@ function openDir() {
 
 /**
  * 增量更新:只重生成受 headSha..HEAD 变更影响的页面。
- * 无 headSha(非 git 项目)或历史改写导致 diff 失败时退化为整本重生成
+ * 无 headSha(非 git 项目)、历史改写导致 diff 失败、或生成后端切换(generator 不一致)
+ * 时退化为整本重生成
  */
 async function updateWiki() {
   const p = project.value;
@@ -348,7 +374,15 @@ const beforeDownload = createBeforeDownload(t);
           <GitPullRequestArrow v-else class="h-4 w-4" />
           {{ t("wiki.update") }}
         </Button>
-        <Button variant="outline" size="sm" :disabled="wiki.generating" @click="generate">
+        <Button
+          variant="outline"
+          size="sm"
+          :title="t('wiki.genConfigTitle')"
+          @click="requestConfigEdit"
+        >
+          <SlidersHorizontal class="h-4 w-4" />
+        </Button>
+        <Button variant="outline" size="sm" :disabled="wiki.generating" @click="requestGenerate">
           <RefreshCw class="h-4 w-4" />
           {{ t("wiki.regenerate") }}
         </Button>
@@ -525,7 +559,7 @@ const beforeDownload = createBeforeDownload(t);
         class="mt-2"
         :disabled="wiki.generating"
         :title="wiki.generating ? t('wiki.busyOther') : undefined"
-        @click="generate"
+        @click="requestGenerate"
       >
         <BookOpenText class="h-4 w-4" />
         {{ t("wiki.generate") }}
@@ -538,6 +572,12 @@ const beforeDownload = createBeforeDownload(t);
       :start-line="sourceTarget?.start ?? null"
       :end-line="sourceTarget?.end ?? null"
       @close="sourceTarget = null"
+    />
+    <WikiGenerateDialog
+      :open="genDialogOpen"
+      :mode="genDialogMode"
+      @close="genDialogOpen = false"
+      @confirm="onGenConfirm"
     />
   </div>
 </template>

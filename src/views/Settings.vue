@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   CalendarClock,
   Coffee,
+  Gauge,
   Info,
   KeyRound,
   MessageSquareText,
@@ -23,6 +24,7 @@ import TagSettings from "@/components/settings/TagSettings.vue";
 import TrackingSettings from "@/components/settings/TrackingSettings.vue";
 import ArchiveSettings from "@/components/settings/ArchiveSettings.vue";
 import AiSettings from "@/components/settings/AiSettings.vue";
+import AiUsageSettings from "@/components/settings/AiUsageSettings.vue";
 import AccountSettings from "@/components/settings/AccountSettings.vue";
 import PromptSettings from "@/components/settings/PromptSettings.vue";
 import ReportScheduleSettings from "@/components/settings/ReportScheduleSettings.vue";
@@ -63,6 +65,12 @@ const categories: Category[] = [
     component: ArchiveSettings,
   },
   { id: "ai", labelKey: "settings.categories.ai", icon: Sparkles, component: AiSettings },
+  {
+    id: "aiUsage",
+    labelKey: "settings.categories.aiUsage",
+    icon: Gauge,
+    component: AiUsageSettings,
+  },
   {
     id: "accounts",
     labelKey: "settings.categories.accounts",

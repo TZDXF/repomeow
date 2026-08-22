@@ -61,6 +61,8 @@ pub fn run() {
             let db = Db::open(&dir.join("projects.db"))?;
             // 清洗入库归一化前的存量登记路径(统一分隔符风格,消除同目录重复登记)
             commands::project::normalize_stored_paths(&db.0.lock().unwrap());
+            // AI 用量日志保留期清理(90 天前)
+            commands::usage::prune_old_entries(&db.0.lock().unwrap());
             app.manage(db);
 
             // 调度通知:用于定时任务变更时唤醒后台 scheduler
@@ -244,14 +246,24 @@ pub fn run() {
             commands::wiki::delete_wiki,
             commands::wiki::open_wiki_dir,
             commands::wiki::wiki_changed_files,
+            commands::agent::agent_list,
+            commands::agent::acp_start,
+            commands::agent::acp_prompt,
+            commands::agent::acp_cancel,
+            commands::agent::acp_test,
+            commands::usage::record_ai_usage,
+            commands::usage::get_ai_usage_summary,
+            commands::usage::list_ai_usage_log,
+            commands::usage::clear_ai_usage_log,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app_handle, event| {
             // 事件循环退出前(正常关闭 / 退出到托盘 / 系统关机销毁窗口):
-            // 杀掉所有仍在运行的 git 子进程,避免 fetch/clone 子进程成为孤儿
+            // 杀掉所有仍在运行的 git/agent 子进程,避免其成为孤儿
             if let tauri::RunEvent::Exit = event {
                 commands::git::cleanup_on_exit();
+                commands::agent::cleanup_on_exit();
             }
         });
 }

@@ -113,6 +113,28 @@ fn default_prompt(report_type: &str) -> &'static str {
 #[derive(Deserialize)]
 struct ChatResponse {
     choices: Vec<ChatChoice>,
+    #[serde(default)]
+    usage: Option<ChatUsage>,
+}
+
+/// OpenAI 兼容响应的 token 用量(部分网关不返回,保持 Option 容错)
+#[derive(Debug, Deserialize)]
+struct ChatUsage {
+    #[serde(default)]
+    prompt_tokens: Option<i64>,
+    #[serde(default)]
+    completion_tokens: Option<i64>,
+    #[serde(default)]
+    total_tokens: Option<i64>,
+    /// prompt_tokens_details.cached_tokens(缓存命中的输入 tokens)
+    #[serde(default)]
+    prompt_tokens_details: Option<ChatPromptDetails>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatPromptDetails {
+    #[serde(default)]
+    cached_tokens: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -191,7 +213,7 @@ async fn call_ai(
     config: &AiConfig,
     system_prompt: &str,
     user_prompt: &str,
-) -> AppResult<String> {
+) -> AppResult<(String, Option<ChatUsage>)> {
     let url = format!(
         "{}/chat/completions",
         config.ai_base_url.trim_end_matches('/')
@@ -237,7 +259,7 @@ async fn call_ai(
         .first()
         .map(|c| c.message.content.clone())
         .ok_or_else(|| AppError::coded(ErrorCode::AiEmptyResponse, ""))?;
-    Ok(strip_thinking(&content))
+    Ok((strip_thinking(&content), data.usage))
 }
 
 // ── prompt builder ─────────────────────────────────────────────────────
@@ -722,7 +744,8 @@ pub(crate) async fn fire_schedule(
     let user_prompt = build_report_prompt(&prompt_data, &range_label, &language);
 
     // 7. 调用 AI(失败不写历史、不更新 last_run_at)
-    let result = call_ai(client, &ai_config, &system_prompt, &user_prompt)
+    let ai_started = std::time::Instant::now();
+    let (result, ai_usage) = call_ai(client, &ai_config, &system_prompt, &user_prompt)
         .await
         .map_err(|e| {
             eprintln!("[scheduler] {schedule_name}: AI 调用失败: {e}");
@@ -753,6 +776,23 @@ pub(crate) async fn fire_schedule(
                  VALUES (?1, ?2, ?3, ?4, ?5)",
                 rusqlite::params![report_id, pid, name, desc, commits_json],
             )?;
+        }
+
+        // 用量日志与报告同事务落库;记录失败仅记日志,不影响报告保存
+        let usage_record = crate::models::AiUsageRecord {
+            task_type: "report".to_string(),
+            model: ai_config.ai_model.clone(),
+            input_tokens: ai_usage.as_ref().and_then(|u| u.prompt_tokens),
+            output_tokens: ai_usage.as_ref().and_then(|u| u.completion_tokens),
+            total_tokens: ai_usage.as_ref().and_then(|u| u.total_tokens),
+            duration_ms: Some(ai_started.elapsed().as_millis() as i64),
+            cached_tokens: ai_usage
+                .as_ref()
+                .and_then(|u| u.prompt_tokens_details.as_ref())
+                .and_then(|d| d.cached_tokens),
+        };
+        if let Err(e) = crate::commands::usage::insert_usage_row(&tx, &usage_record, now) {
+            eprintln!("[scheduler] {schedule_name}: 用量日志写入失败: {e}");
         }
 
         tx.commit()?;
@@ -864,7 +904,7 @@ pub async fn run(app: AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_schedule_name, strip_thinking};
+    use super::{default_schedule_name, strip_thinking, ChatResponse};
 
     #[test]
     fn default_schedule_name_follows_ui_language() {
@@ -887,6 +927,40 @@ mod tests {
             strip_thinking("<think>a</think><think>b</think>正文"),
             "正文"
         );
+    }
+
+    #[test]
+    fn chat_response_parses_usage() {
+        // 标准 OpenAI 兼容响应:usage 三字段 + 缓存明细齐全
+        let data: ChatResponse = serde_json::from_str(
+            r#"{"choices":[{"message":{"content":"hi"}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15,"prompt_tokens_details":{"cached_tokens":6}}}"#,
+        )
+        .unwrap();
+        let u = data.usage.unwrap();
+        assert_eq!(u.prompt_tokens, Some(10));
+        assert_eq!(u.completion_tokens, Some(5));
+        assert_eq!(u.total_tokens, Some(15));
+        assert_eq!(
+            u.prompt_tokens_details.and_then(|d| d.cached_tokens),
+            Some(6)
+        );
+
+        // 部分网关不返回 usage:缺字段不报错
+        let data: ChatResponse = serde_json::from_str(
+            r#"{"choices":[{"message":{"content":"hi"}}]}"#,
+        )
+        .unwrap();
+        assert!(data.usage.is_none());
+
+        // usage 内个别字段缺失时按 None 容错(含缓存明细整体缺失)
+        let data: ChatResponse = serde_json::from_str(
+            r#"{"choices":[{"message":{"content":"hi"}}],"usage":{"total_tokens":7}}"#,
+        )
+        .unwrap();
+        let u = data.usage.unwrap();
+        assert_eq!(u.total_tokens, Some(7));
+        assert_eq!(u.prompt_tokens, None);
+        assert!(u.prompt_tokens_details.is_none());
     }
 
     #[test]

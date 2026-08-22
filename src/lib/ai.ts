@@ -2,6 +2,7 @@ import { generateText, streamText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { i18n, type SupportedLocale } from "@/i18n";
+import { recordAiUsage, type AiTokenUsage } from "@/lib/ai-usage";
 import {
   DEFAULT_COMMIT_PROMPT,
   DEFAULT_REPORT_PROMPT,
@@ -125,10 +126,32 @@ function getChatModel(thinkingEnabled = false) {
     apiKey,
     fetch: fetchFn,
   });
-  return openai.chat(model);
+  return { chat: openai.chat(model), modelName: model };
 }
 
-function languageName(language: SupportedLocale) {
+/** SDK 解析的 usage → 统计入参(undefined/null 字段落库为 NULL,不计入汇总) */
+function toUsage(
+  u:
+    | {
+        inputTokens?: number | null;
+        outputTokens?: number | null;
+        totalTokens?: number | null;
+        inputTokenDetails?: { cacheReadTokens?: number | null } | null;
+      }
+    | undefined
+    | null,
+): AiTokenUsage | undefined {
+  if (!u) return undefined;
+  return {
+    inputTokens: u.inputTokens ?? undefined,
+    outputTokens: u.outputTokens ?? undefined,
+    totalTokens: u.totalTokens ?? undefined,
+    cachedTokens: u.inputTokenDetails?.cacheReadTokens ?? undefined,
+  };
+}
+
+/** 输出语言名(wiki-generator 的 agent 提示词同样需要语言指令) */
+export function languageName(language: SupportedLocale) {
   return language === "zh-CN" ? "中文" : "English";
 }
 
@@ -169,8 +192,10 @@ export async function generateCommitMessage(
         .map((f) => `=== ${f.path}${f.truncated ? " (truncated)" : ""} ===\n${f.content}`)
         .join("\n\n")}`
     : "";
-  const { text } = await generateText({
-    model: getChatModel(),
+  const { chat, modelName } = getChatModel();
+  const startedAt = Date.now();
+  const { text, usage } = await generateText({
+    model: chat,
     system: buildSystemPrompt(prompts.commit, DEFAULT_COMMIT_PROMPT, language),
     prompt: `${projectSection}${recentSection}
 
@@ -179,6 +204,12 @@ ${ctx.stat || "(none)"}
 
 Diff:${truncatedNote}
 ${ctx.diff || "(empty)"}${untrackedNamesSection}${untrackedContentsSection}`,
+  });
+  recordAiUsage({
+    taskType: "commit",
+    model: modelName,
+    usage: toUsage(usage),
+    durationMs: Date.now() - startedAt,
   });
   return stripThinking(text);
 }
@@ -205,14 +236,22 @@ export async function generateReport(
     .join("\n\n");
   const custom = periodType === "weekly" ? prompts.reportWeekly : prompts.report;
   const fallback = periodType === "weekly" ? DEFAULT_WEEKLY_REPORT_PROMPT : DEFAULT_REPORT_PROMPT;
-  const { text } = await generateText({
-    model: getChatModel(),
+  const { chat, modelName } = getChatModel();
+  const startedAt = Date.now();
+  const { text, usage } = await generateText({
+    model: chat,
     system: buildSystemPrompt(custom, fallback, language),
     prompt: `Time range: ${rangeLabel}.
 
 Commit records:
 ${sections}`,
     abortSignal: signal,
+  });
+  recordAiUsage({
+    taskType: "report",
+    model: modelName,
+    usage: toUsage(usage),
+    durationMs: Date.now() - startedAt,
   });
   return stripThinking(text);
 }
@@ -236,14 +275,22 @@ export async function generateWikiOutline(
   const truncatedNote = context.treeTruncated
     ? "\n(Note: the file tree was truncated; directory entries like `dir/ (N files)` summarize folded subtrees.)"
     : "";
-  const { text } = await generateText({
-    model: getChatModel(true),
+  const { chat, modelName } = getChatModel(true);
+  const startedAt = Date.now();
+  const { text, usage } = await generateText({
+    model: chat,
     system: fixedSystemPrompt(DEFAULT_WIKI_OUTLINE_PROMPT, language),
     prompt: `Project: ${projectName}
 
 File tree (${context.fileCount} files):${truncatedNote}
 ${context.fileTree}${readmeSection}${manifestSection}`,
     abortSignal: signal,
+  });
+  recordAiUsage({
+    taskType: "wiki",
+    model: modelName,
+    usage: toUsage(usage),
+    durationMs: Date.now() - startedAt,
   });
   return stripThinking(text);
 }
@@ -277,11 +324,19 @@ export async function generateWikiPage(
   language: SupportedLocale,
   signal?: AbortSignal,
 ): Promise<string> {
-  const { text } = await generateText({
-    model: getChatModel(true),
+  const { chat, modelName } = getChatModel(true);
+  const startedAt = Date.now();
+  const { text, usage } = await generateText({
+    model: chat,
     system: fixedSystemPrompt(DEFAULT_WIKI_PAGE_PROMPT, language),
     prompt: buildWikiPageUserPrompt(page, files),
     abortSignal: signal,
+  });
+  recordAiUsage({
+    taskType: "wiki",
+    model: modelName,
+    usage: toUsage(usage),
+    durationMs: Date.now() - startedAt,
   });
   return stripThinking(text);
 }
@@ -298,8 +353,10 @@ export async function streamWikiPage(
   signal: AbortSignal | undefined,
   onChunk: (partial: string) => void,
 ): Promise<string> {
+  const { chat, modelName } = getChatModel(true);
+  const startedAt = Date.now();
   const result = streamText({
-    model: getChatModel(true),
+    model: chat,
     system: fixedSystemPrompt(DEFAULT_WIKI_PAGE_PROMPT, language),
     prompt: buildWikiPageUserPrompt(page, files),
     abortSignal: signal,
@@ -309,6 +366,17 @@ export async function streamWikiPage(
     acc += chunk;
     onChunk(stripThinking(acc));
   }
+  // SDK 已自动携带 stream_options.include_usage,末分片解析出 usage
+  // (result.usage 是 PromiseLike,无 .catch,先包成原生 Promise)
+  const usage = await Promise.resolve(result.usage)
+    .then(toUsage)
+    .catch(() => undefined);
+  recordAiUsage({
+    taskType: "wiki",
+    model: modelName,
+    usage,
+    durationMs: Date.now() - startedAt,
+  });
   return stripThinking(acc);
 }
 
@@ -332,10 +400,11 @@ export async function fetchAiModels(baseURL: string, apiKey: string): Promise<st
   return [...new Set(ids)].sort((a, b) => a.localeCompare(b));
 }
 
-/** 测试连接:发一条极短请求验证 baseURL / apiKey / model 可用 */
+/** 测试连接:发一条极短请求验证 baseURL / apiKey / model 可用(不计量入用量统计) */
 export async function testAiConnection(): Promise<void> {
+  const { chat } = getChatModel();
   await generateText({
-    model: getChatModel(),
+    model: chat,
     prompt: "Reply with the single word: ok",
     maxOutputTokens: 8,
   });

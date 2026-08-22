@@ -512,3 +512,73 @@ pub enum EditorKind {
     Rustrover,
     Terminal,
 }
+
+// ── AI 用量统计 ───────────────────────────────────────────────────────
+
+/// ai_usage_log 的一行(明细日志)
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiUsageEntry {
+    pub id: i64,
+    pub created_at: i64,
+    pub task_type: String,
+    pub model: String,
+    /// provider 未返回 usage 时为 None(不计入汇总求和,调用次数仍统计)
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub total_tokens: Option<i64>,
+    pub duration_ms: Option<i64>,
+    /// 缓存命中的输入 tokens(input_tokens 的子集);未返回时为 None
+    pub cached_tokens: Option<i64>,
+}
+
+/// 一次用量记录的入参(id/created_at 由落库时补)
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiUsageRecord {
+    pub task_type: String,
+    #[serde(default)]
+    pub model: String,
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub total_tokens: Option<i64>,
+    pub duration_ms: Option<i64>,
+    pub cached_tokens: Option<i64>,
+}
+
+/// 汇总统计(get_ai_usage_summary 返回)
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiUsageSummary {
+    pub total_calls: i64,
+    pub total_input_tokens: i64,
+    pub total_output_tokens: i64,
+    pub total_tokens: i64,
+    pub total_cached_tokens: i64,
+    pub by_task: Vec<AiUsageTaskStat>,
+    /// 按日本机时区分组,最近 30 天倒序
+    pub by_day: Vec<AiUsageDayStat>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiUsageTaskStat {
+    pub task_type: String,
+    pub calls: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub total_tokens: i64,
+    pub cached_tokens: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiUsageDayStat {
+    /// YYYY-MM-DD
+    pub day: String,
+    pub calls: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub total_tokens: i64,
+    pub cached_tokens: i64,
+}

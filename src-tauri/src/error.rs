@@ -180,6 +180,13 @@ pub enum ErrorCode {
     AiResponseParseFailed,
     AiEmptyResponse,
 
+    // ── Agent(wiki agent 后端)─────────────────────────────────────────
+    AgentNotDetected,
+    AgentSpawnFailed,
+    AgentHandshakeFailed,
+    AgentPromptFailed,
+    AgentCanceled,
+
     // ── 工作日 ────────────────────────────────────────────────────────
     WorkdayHttpClientFailed,
     WorkdayFetchFailed,
@@ -322,6 +329,12 @@ impl ErrorCode {
             Self::AiResponseError => "ai_response_error",
             Self::AiResponseParseFailed => "ai_response_parse_failed",
             Self::AiEmptyResponse => "ai_empty_response",
+            // Agent(wiki agent 后端)
+            Self::AgentNotDetected => "agent_not_detected",
+            Self::AgentSpawnFailed => "agent_spawn_failed",
+            Self::AgentHandshakeFailed => "agent_handshake_failed",
+            Self::AgentPromptFailed => "agent_prompt_failed",
+            Self::AgentCanceled => "agent_canceled",
             // 工作日
             Self::WorkdayHttpClientFailed => "workday_http_client_failed",
             Self::WorkdayFetchFailed => "workday_fetch_failed",
