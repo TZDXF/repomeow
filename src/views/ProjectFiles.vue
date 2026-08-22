@@ -29,6 +29,7 @@ import MdLink from "@/components/markdown/MdLink.vue";
 import { MD_BASE_PATH_KEY } from "@/components/markdown/keys";
 import ImageViewer from "@/components/files/ImageViewer.vue";
 import { cmd } from "@/lib/tauri";
+import { debounce } from "@/lib/utils";
 import { extOf, IMAGE_EXTS } from "@/lib/file-kind";
 import { hasScheme, resolvePath } from "@/lib/markdown";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
@@ -230,20 +231,19 @@ const fileSearchLimited = ref(false);
 const fileSearchBox = ref<HTMLElement | null>(null);
 const fileSearchBtn = ref<InstanceType<typeof Button> | null>(null);
 let fileSearchSeq = 0;
-let fileSearchTimer: ReturnType<typeof setTimeout> | null = null;
+/** 文件搜索防抖:输入停 200ms 后查询 */
+const debouncedRunFileSearch = debounce((q: string) => void runFileSearch(q), 200);
 
 watch(fileSearchText, () => {
   fileSearchIndex.value = 0;
-  if (fileSearchTimer) {
-    clearTimeout(fileSearchTimer);
-  }
   const q = fileSearchText.value.trim();
   if (!q) {
+    debouncedRunFileSearch.cancel();
     fileSearchResults.value = [];
     fileSearchLimited.value = false;
     return;
   }
-  fileSearchTimer = setTimeout(() => void runFileSearch(q), 200);
+  debouncedRunFileSearch(q);
 });
 
 async function runFileSearch(q: string) {
@@ -286,9 +286,7 @@ function closeFileSearch() {
   fileSearchOpen.value = false;
   fileSearchText.value = "";
   fileSearchIndex.value = 0;
-  if (fileSearchTimer) {
-    clearTimeout(fileSearchTimer);
-  }
+  debouncedRunFileSearch.cancel();
   fileSearchSeq++;
   fileSearchResults.value = [];
   fileSearchLimited.value = false;
@@ -328,9 +326,7 @@ async function onFileSearchKeydown(e: KeyboardEvent) {
   } else if (e.key === "Enter") {
     e.preventDefault();
     // 结果经防抖异步到达:Enter 立即补一次查询,避免按到防抖窗口内的旧结果
-    if (fileSearchTimer) {
-      clearTimeout(fileSearchTimer);
-    }
+    debouncedRunFileSearch.cancel();
     const q = fileSearchText.value.trim();
     if (q) {
       await runFileSearch(q);

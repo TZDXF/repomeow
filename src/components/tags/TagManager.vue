@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { Plus, Trash2 } from "@lucide/vue";
+import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -52,10 +53,24 @@ async function create() {
   }
 }
 
-async function remove(id: number, name: string) {
-  if (!window.confirm(t("tags.manager.deleteConfirm", { name }))) return;
+/** 待确认删除的标签,ConfirmDialog 确认后执行 */
+const pendingRemove = ref<{ id: number; name: string } | null>(null);
+const removeConfirmOpen = computed({
+  get: () => pendingRemove.value !== null,
+  set: (v) => {
+    if (!v) pendingRemove.value = null;
+  },
+});
+
+function remove(id: number, name: string) {
+  pendingRemove.value = { id, name };
+}
+
+async function confirmRemove() {
+  const tag = pendingRemove.value;
+  if (!tag) return;
   try {
-    await store.deleteTag(id);
+    await store.deleteTag(tag.id);
     emit("refreshProjects");
     toast.success(t("tags.manager.deleted"));
   } catch (e) {
@@ -124,4 +139,12 @@ async function remove(id: number, name: string) {
       </ScrollArea>
     </DialogContent>
   </Dialog>
+  <ConfirmDialog
+    v-model:open="removeConfirmOpen"
+    :title="t('common.delete')"
+    :description="t('tags.manager.deleteConfirm', { name: pendingRemove?.name })"
+    :confirm-text="t('common.delete')"
+    destructive
+    @confirm="confirmRemove"
+  />
 </template>

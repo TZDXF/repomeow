@@ -17,6 +17,7 @@ import {
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { Markdown, type ControlsConfig } from "vue-stream-markdown";
 import { Badge } from "@/components/ui/badge";
+import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
@@ -29,7 +30,7 @@ import DailyReportDialog from "@/components/report/DailyReportDialog.vue";
 import ReportCalendar from "@/components/report/ReportCalendar.vue";
 import TagCheckList from "@/components/tags/TagCheckList.vue";
 import { cmd, onListen } from "@/lib/tauri";
-import { formatCommitTime } from "@/lib/format";
+import { formatCommitTime, formatDate, formatLocalDateTime, parseDateStr } from "@/lib/format";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
 import { useSettingsStore } from "@/stores/settings";
 import { useProjectsStore } from "@/stores/projects";
@@ -90,35 +91,19 @@ watch(calendarLoading, (v) => {
 
 // ── selection ───────────────────────────────────────────────────────────
 
-const todayStr = (() => {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-})();
-
-const selectedDate = ref<string | null>(todayStr);
+const selectedDate = ref<string | null>(formatDate(new Date()));
 const viewMode = ref<ReportViewMode>("day");
 const filterProjectIds = ref<number[]>([]);
 const filterTagIds = ref<number[]>([]);
 const filterType = ref<TypeFilter>("all");
 const projectKeyword = ref("");
 
-function pad2(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
-function toDateStr(d: Date): string {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
-
 /** 当前选中范围(闭区间 "YYYY-MM-DD"):日视角为单日,周视角为周一至周日,月视角为整月 */
 const selectedRange = computed<{ from: string; to: string } | null>(() => {
   const ds = selectedDate.value;
   if (!ds) return null;
   if (viewMode.value === "day") return { from: ds, to: ds };
-  const d = new Date(ds + "T00:00:00");
+  const d = parseDateStr(ds);
   if (isNaN(d.getTime())) return null;
   if (viewMode.value === "week") {
     // 与日历 week-starts-on=1 一致:所在周周一至周日
@@ -127,11 +112,11 @@ const selectedRange = computed<{ from: string; to: string } | null>(() => {
     start.setDate(d.getDate() - dow);
     const end = new Date(start);
     end.setDate(start.getDate() + 6);
-    return { from: toDateStr(start), to: toDateStr(end) };
+    return { from: formatDate(start), to: formatDate(end) };
   }
   const from = new Date(d.getFullYear(), d.getMonth(), 1);
   const to = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-  return { from: toDateStr(from), to: toDateStr(to) };
+  return { from: formatDate(from), to: formatDate(to) };
 });
 
 /** 传给后端的类型过滤参数("all" 时不过滤) */
@@ -215,8 +200,8 @@ const activeProjects = computed(() => projectStore.projects.filter((p) => !p.arc
 const rangeLabel = computed(() => {
   const range = selectedRange.value;
   if (!range) return "";
-  const from = new Date(range.from + "T00:00:00");
-  const to = new Date(range.to + "T00:00:00");
+  const from = parseDateStr(range.from);
+  const to = parseDateStr(range.to);
   if (isNaN(from.getTime()) || isNaN(to.getTime())) return "";
   const lang = settings.language;
   if (viewMode.value === "day") {
@@ -253,7 +238,7 @@ const dateBadge = computed(() => {
     return { label: t("reportHistory.holiday"), variant: "secondary" as const };
   if (calendarData.value?.workdays.includes(ds))
     return { label: t("reportHistory.makeupWorkday"), variant: "secondary" as const };
-  const d = new Date(ds + "T00:00:00");
+  const d = parseDateStr(ds);
   if (d.getDay() === 0 || d.getDay() === 6)
     return { label: t("reportHistory.weekend"), variant: "outline" as const };
   return null;
@@ -336,8 +321,22 @@ async function loadReports(from: string, to: string) {
   }
 }
 
-async function deleteReport(id: number) {
-  if (!confirm(t("reportHistory.deleteConfirm"))) return;
+/** 待确认删除的报告,ConfirmDialog 确认后执行 */
+const pendingDelete = ref<number | null>(null);
+const deleteConfirmOpen = computed({
+  get: () => pendingDelete.value !== null,
+  set: (v) => {
+    if (!v) pendingDelete.value = null;
+  },
+});
+
+function deleteReport(id: number) {
+  pendingDelete.value = id;
+}
+
+async function confirmDeleteReport() {
+  const id = pendingDelete.value;
+  if (id == null) return;
   try {
     await cmd("delete_report_history", { id });
     reports.value = reports.value.filter((r) => r.id !== id);
@@ -347,17 +346,6 @@ async function deleteReport(id: number) {
   } catch (e) {
     toast.error(e instanceof Error ? e.message : String(e));
   }
-}
-
-/** 生成时间(秒级时间戳)格式化为本地日期时间,用于卡片头部悬停提示 */
-function formatGeneratedAt(tsSeconds: number): string {
-  return new Date(tsSeconds * 1000).toLocaleString(settings.language, {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 // ── watchers ────────────────────────────────────────────────────────────
@@ -642,7 +630,7 @@ watch(
               {{ dateBadge.label }}
             </Badge>
             <Badge
-              v-if="viewMode === 'day' && selectedDate === todayStr"
+              v-if="viewMode === 'day' && selectedDate === formatDate(new Date())"
               variant="secondary"
               class="text-[11px]"
             >
@@ -698,7 +686,7 @@ watch(
                     <span
                       class="ml-2 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
                     >
-                      {{ formatGeneratedAt(r.createdAt) }}
+                      {{ formatLocalDateTime(r.createdAt) }}
                     </span>
                   </span>
                   <Badge
@@ -798,5 +786,13 @@ watch(
     </div>
 
     <DailyReportDialog v-model:open="reportOpen" />
+    <ConfirmDialog
+      v-model:open="deleteConfirmOpen"
+      :title="t('common.delete')"
+      :description="t('reportHistory.deleteConfirm')"
+      :confirm-text="t('common.delete')"
+      destructive
+      @confirm="confirmDeleteReport"
+    />
   </div>
 </template>

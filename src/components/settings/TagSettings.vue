@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { Pencil, Plus, Trash2 } from "@lucide/vue";
+import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -79,10 +80,23 @@ async function saveEdit() {
 }
 
 // 删除
-async function remove(id: number, name: string) {
-  if (!window.confirm(t("settings.tags.deleteConfirm", { name }))) return;
+const pendingRemove = ref<Tag | null>(null);
+const removeConfirmOpen = computed({
+  get: () => pendingRemove.value !== null,
+  set: (v) => {
+    if (!v) pendingRemove.value = null;
+  },
+});
+
+function remove(tag: Tag) {
+  pendingRemove.value = tag;
+}
+
+async function confirmRemove() {
+  const tag = pendingRemove.value;
+  if (!tag) return;
   try {
-    await store.deleteTag(id);
+    await store.deleteTag(tag.id);
     toast.success(t("settings.tags.deleted"));
   } catch (e) {
     toast.error(String(e));
@@ -145,7 +159,7 @@ async function remove(id: number, name: string) {
               size="icon"
               class="h-7 w-7"
               :title="t('settings.tags.delete')"
-              @click="remove(tag.id, tag.name)"
+              @click="remove(tag)"
             >
               <Trash2 class="h-3.5 w-3.5" />
             </Button>
@@ -185,5 +199,14 @@ async function remove(id: number, name: string) {
         </form>
       </DialogContent>
     </Dialog>
+
+    <ConfirmDialog
+      v-model:open="removeConfirmOpen"
+      :title="t('common.delete')"
+      :description="t('settings.tags.deleteConfirm', { name: pendingRemove?.name })"
+      :confirm-text="t('common.delete')"
+      destructive
+      @confirm="confirmRemove"
+    />
   </section>
 </template>

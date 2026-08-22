@@ -8,6 +8,7 @@ export default {
   common: {
     cancel: "Cancel",
     confirm: "OK",
+    copied: "Copied to clipboard",
     save: "Save",
     saving: "Saving...",
     delete: "Delete",
@@ -446,7 +447,6 @@ export default {
       loadFailed: "Failed to load commit graph",
       truncatedHint: "Showing only the latest {count} commits; older history was not loaded",
       copyHash: "Copy full hash",
-      copied: "Copied to clipboard",
       detail: {
         hash: "Commit",
         author: "Author",
@@ -603,7 +603,6 @@ export default {
     generate: "Generate report",
     generating: "Generating...",
     copy: "Copy Markdown",
-    copied: "Copied to clipboard",
     noProjects: "Select at least one project",
     noCommits: "No commits found in the selected projects for this time range",
     loadFailed: "Failed to load commits: {error}",
@@ -924,7 +923,6 @@ export default {
     item: {
       runTitle: "Run in terminal: {command}",
       copy: "Copy command",
-      copied: "Copied to clipboard",
       edit: "Edit",
       delete: "Delete",
     },

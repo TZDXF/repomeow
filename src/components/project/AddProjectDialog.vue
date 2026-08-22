@@ -34,6 +34,7 @@ import {
   type GitAccount,
   type RemoteRepo,
 } from "@/lib/accounts";
+import { formatIsoDate } from "@/lib/format";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
 import { baseName, cleanPath } from "@/lib/path";
@@ -206,12 +207,6 @@ function pickRepo(repo: RemoteRepo) {
   cloneNameTouched.value = false;
   url.value = repo.httpCloneUrl;
   mode.value = "clone";
-}
-
-function formatRepoTime(iso: string): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString();
 }
 
 /** 从仓库 URL 推导目录名:取末段并去掉 .git 后缀 */
@@ -577,7 +572,7 @@ function switchMode(m: "local" | "clone" | "account") {
                   {{ t("projects.add.repoAdded") }}
                 </Badge>
                 <span class="ml-auto shrink-0 text-xs text-muted-foreground">
-                  {{ formatRepoTime(repo.updatedAt) }}
+                  {{ formatIsoDate(repo.updatedAt) }}
                 </span>
               </div>
               <p v-if="repo.description" class="truncate text-xs text-muted-foreground">

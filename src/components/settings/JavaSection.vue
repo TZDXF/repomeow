@@ -5,6 +5,7 @@ import { toast } from "vue-sonner";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type { AcceptableValue } from "reka-ui";
 import { Check, Coffee, Download, FolderOpen, Plus, ScanSearch, Trash2 } from "@lucide/vue";
+import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -134,8 +135,22 @@ async function submit() {
   }
 }
 
-async function remove(jdk: JdkConfig) {
-  if (!window.confirm(t("settings.devEnv.deleteConfirm", { name: jdk.name }))) return;
+/** 待确认删除的 JDK,ConfirmDialog 确认后执行 */
+const pendingRemove = ref<JdkConfig | null>(null);
+const removeConfirmOpen = computed({
+  get: () => pendingRemove.value !== null,
+  set: (v) => {
+    if (!v) pendingRemove.value = null;
+  },
+});
+
+function remove(jdk: JdkConfig) {
+  pendingRemove.value = jdk;
+}
+
+async function confirmRemove() {
+  const jdk = pendingRemove.value;
+  if (!jdk) return;
   await store.removeJdk(jdk.id);
 }
 
@@ -418,4 +433,12 @@ function startInstall() {
       </div>
     </DialogContent>
   </Dialog>
+  <ConfirmDialog
+    v-model:open="removeConfirmOpen"
+    :title="t('common.delete')"
+    :description="t('settings.devEnv.deleteConfirm', { name: pendingRemove?.name })"
+    :confirm-text="t('common.delete')"
+    destructive
+    @confirm="confirmRemove"
+  />
 </template>

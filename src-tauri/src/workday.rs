@@ -287,7 +287,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!(
             "repomeow-workday-test-fresh-{}-{}",
             std::process::id(),
-            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+            crate::time_util::now_ts_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(CACHE_FILE);
@@ -311,7 +311,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!(
             "repomeow-workday-test-legacy-{}-{}",
             std::process::id(),
-            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+            crate::time_util::now_ts_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(CACHE_FILE);
@@ -330,11 +330,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!(
             "repomeow-workday-test-expired-{}-{}",
             std::process::id(),
-            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+            crate::time_util::now_ts_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(CACHE_FILE);
-        let stale_ts = chrono::Utc::now().timestamp() - (CACHE_TTL_SECS + 60);
+        let stale_ts = crate::time_util::now_ts() - (CACHE_TTL_SECS + 60);
         let inner = sample_inner_json();
         let envelope = serde_json::json!({ "downloaded_at": stale_ts, "data": inner }).to_string();
         std::fs::write(&path, envelope).unwrap();
@@ -367,7 +367,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!(
             "repomeow-workday-test-{}-{}",
             std::process::id(),
-            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+            crate::time_util::now_ts_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(CACHE_FILE);

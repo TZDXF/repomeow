@@ -361,13 +361,18 @@ pub(crate) fn open_repo(path: &str) -> AppResult<Option<Repository>> {
     match Repository::discover(path) {
         Ok(repo) => Ok(Some(repo)),
         Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(None),
-        Err(e) => Err(AppError::coded(ErrorCode::GitCommandFailed, e.to_string())),
+        Err(e) => Err(git_err(e)),
     }
 }
 
 /// 非仓库场景的统一错误(与原 CLI `fatal: not a git repository` 映射一致)
 fn not_a_repo() -> AppError {
     AppError::coded(ErrorCode::NotGitRepository, "")
+}
+
+/// git2/IO 错误统一映射 GitCommandFailed(全文件 19 处 map_err 共用)
+fn git_err(e: impl std::fmt::Display) -> AppError {
+    AppError::coded(ErrorCode::GitCommandFailed, e.to_string())
 }
 
 /// 提交的短 hash(等价 %h,长度随仓库规模自动消歧)
@@ -477,7 +482,7 @@ pub fn status(path: &str) -> AppResult<GitStatus> {
     let workdir = repo.workdir().map(|p| p.to_string_lossy().to_string());
     let statuses = repo
         .statuses(Some(&mut opts))
-        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+        .map_err(git_err)?;
     for entry in statuses.iter() {
         let s = entry.status();
         if s.contains(Git2Status::CONFLICTED) {
@@ -726,7 +731,7 @@ fn list_remotes_blocking(path: &str) -> AppResult<Vec<GitRemote>> {
     };
     let names = repo
         .remotes()
-        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+        .map_err(git_err)?;
     let mut out: Vec<GitRemote> = Vec::new();
     for name in names.iter().flatten() {
         // 无 URL 的 remote(纯 pushurl 等)跳过,与 `git remote -v` 一致取 fetch 地址
@@ -829,7 +834,7 @@ fn fetch_schedule(app: &AppHandle, project_id: i64, path: String) {
                     let payload = GitUpdatedPayload {
                         project_id,
                         remote_ahead: st.behind,
-                        last_fetch_at: chrono::Utc::now().timestamp(),
+                        last_fetch_at: crate::time_util::now_ts(),
                     };
                     let _ = app.emit("git://updated", payload);
                 }
@@ -930,7 +935,7 @@ fn auto_pull_schedule(app: &AppHandle, project_id: i64, path: String) {
                                 GitUpdatedPayload {
                                     project_id,
                                     remote_ahead: 0,
-                                    last_fetch_at: chrono::Utc::now().timestamp(),
+                                    last_fetch_at: crate::time_util::now_ts(),
                                 },
                             );
                         }
@@ -983,11 +988,11 @@ fn local_branch_names(path: &str) -> AppResult<Vec<String>> {
 fn local_branch_names_of(repo: &Repository) -> AppResult<Vec<String>> {
     let iter = repo
         .branches(Some(BranchType::Local))
-        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+        .map_err(git_err)?;
     let mut names = Vec::new();
     for item in iter {
         let (branch, _) =
-            item.map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+            item.map_err(git_err)?;
         if let Some(name) = branch.name().ok().flatten() {
             names.push(name.to_string());
         }
@@ -1011,10 +1016,10 @@ fn list_branches_blocking(path: &str) -> AppResult<GitBranches> {
     let mut remote = Vec::new();
     let remote_iter = repo
         .branches(Some(BranchType::Remote))
-        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+        .map_err(git_err)?;
     for item in remote_iter {
         let (branch, _) =
-            item.map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+            item.map_err(git_err)?;
         if branch.get().kind() == Some(git2::ReferenceType::Symbolic) {
             continue;
         }
@@ -1583,7 +1588,7 @@ fn list_worktrees_blocking(path: &str) -> AppResult<Vec<GitWorktree>> {
     }
     let names = repo
         .worktrees()
-        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+        .map_err(git_err)?;
     for name in names.iter().flatten() {
         let Ok(wt) = repo.find_worktree(name) else {
             continue;
@@ -2107,7 +2112,6 @@ fn commit_context_blocking(path: &str) -> AppResult<GitCommitContext> {
     let Some(repo) = open_repo(path)? else {
         return Err(not_a_repo());
     };
-    let git_err = |e: git2::Error| AppError::coded(ErrorCode::GitCommandFailed, e.to_string());
 
     // diff:相对 HEAD(等价 git diff HEAD,覆盖已暂存+已跟踪未暂存修改,与 git_commit 语义一致);
     // 仓库尚无提交(无 HEAD)时回退到暂存区 diff(相对空树,等价 git diff --cached)
@@ -2526,19 +2530,19 @@ fn commit_diff<'r>(
     let commit = repo
         .revparse_single(hash)
         .and_then(|o| o.peel_to_commit())
-        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+        .map_err(git_err)?;
     if commit.parent_count() > 1 {
         return Ok(None);
     }
     let new_tree = commit
         .tree()
-        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+        .map_err(git_err)?;
     let old_tree = if commit.parent_count() == 1 {
         Some(
             commit
                 .parent(0)
                 .and_then(|p| p.tree())
-                .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?,
+                .map_err(git_err)?,
         )
     } else {
         None
@@ -2548,9 +2552,9 @@ fn commit_diff<'r>(
     configure(&mut opts);
     let mut diff = repo
         .diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut opts))
-        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+        .map_err(git_err)?;
     diff.find_similar(Some(&mut DiffFindOptions::new().renames(true)))
-        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+        .map_err(git_err)?;
     Ok(Some(diff))
 }
 
@@ -2735,7 +2739,7 @@ fn commit_file_blob_blocking(
     let commit = repo
         .revparse_single(hash)
         .and_then(|o| o.peel_to_commit())
-        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+        .map_err(git_err)?;
     let commit = if parent {
         // 根提交无父提交:文件在旧版本必然不存在,视作 None(与新增文件同语义)
         match commit.parent(0) {
@@ -2747,7 +2751,7 @@ fn commit_file_blob_blocking(
     };
     let tree = commit
         .tree()
-        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+        .map_err(git_err)?;
     let Ok(entry) = tree.get_path(Path::new(file_path)) else {
         return Ok(None);
     };
@@ -2756,7 +2760,7 @@ fn commit_file_blob_blocking(
     }
     let blob = repo
         .find_blob(entry.id())
-        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+        .map_err(git_err)?;
     if blob.size() > COMMIT_BLOB_MAX_BYTES {
         return Err(AppError::coded(
             ErrorCode::GitCommandFailed,
@@ -2776,7 +2780,6 @@ fn worktree_diff<'r>(
     repo: &'r Repository,
     configure: impl FnOnce(&mut DiffOptions),
 ) -> AppResult<git2::Diff<'r>> {
-    let git_err = |e: git2::Error| AppError::coded(ErrorCode::GitCommandFailed, e.to_string());
     let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
     let mut opts = DiffOptions::new();
     // 未跟踪文件以 Untracked delta 出现(不是 Added);
@@ -2809,7 +2812,6 @@ fn worktree_files_blocking(path: &str) -> AppResult<Vec<GitWorktreeFile>> {
     let Some(repo) = open_repo(path)? else {
         return Err(not_a_repo());
     };
-    let git_err = |e: git2::Error| AppError::coded(ErrorCode::GitCommandFailed, e.to_string());
     let diff = worktree_diff(&repo, |_| {})?;
     let index = repo.index().map_err(git_err)?;
     let workdir = repo
@@ -3165,7 +3167,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!(
             "repomeow-git-test-{tag}-{}-{}",
             std::process::id(),
-            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+            crate::time_util::now_ts_nanos()
         ));
         fs::create_dir_all(&dir).unwrap();
         dir

@@ -41,7 +41,7 @@ pub struct RemoteRepo {
 }
 
 fn now() -> i64 {
-    chrono::Utc::now().timestamp()
+    crate::time_util::now_ts()
 }
 
 fn normalize_provider(provider: &str) -> AppResult<String> {

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { Ban, Plus, TerminalSquare } from "@lucide/vue";
+import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -91,8 +92,22 @@ async function submit() {
   }
 }
 
-async function remove(c: CustomCommand) {
-  if (!window.confirm(t("scripts.custom.deleteConfirm", { name: c.name }))) return;
+/** 待确认删除的自定义命令,ConfirmDialog 确认后执行 */
+const pendingRemove = ref<CustomCommand | null>(null);
+const removeConfirmOpen = computed({
+  get: () => pendingRemove.value !== null,
+  set: (v) => {
+    if (!v) pendingRemove.value = null;
+  },
+});
+
+function remove(c: CustomCommand) {
+  pendingRemove.value = c;
+}
+
+async function confirmRemove() {
+  const c = pendingRemove.value;
+  if (!c) return;
   try {
     await cmd("delete_custom_command", { id: c.id });
     await load();
@@ -233,4 +248,12 @@ async function togglePin(c: CustomCommand) {
       </form>
     </DialogContent>
   </Dialog>
+  <ConfirmDialog
+    v-model:open="removeConfirmOpen"
+    :title="t('common.delete')"
+    :description="t('scripts.custom.deleteConfirm', { name: pendingRemove?.name })"
+    :confirm-text="t('common.delete')"
+    destructive
+    @confirm="confirmRemove"
+  />
 </template>

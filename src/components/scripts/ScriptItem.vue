@@ -2,9 +2,9 @@
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { Eye, EyeOff, Copy, Pencil, Play, Star, Trash2 } from "@lucide/vue";
-import { toast } from "vue-sonner";
 import { Button } from "@/components/ui/button";
 import { commandIcon } from "@/lib/command-icons";
+import { copyToClipboard } from "@/lib/utils";
 
 const { t } = useI18n();
 const props = defineProps<{
@@ -34,12 +34,7 @@ const emit = defineEmits<{
 }>();
 
 async function copyCommand() {
-  try {
-    await navigator.clipboard.writeText(props.command);
-    toast.success(t("scripts.item.copied"));
-  } catch (e) {
-    toast.error(String(e));
-  }
+  await copyToClipboard(props.command);
 }
 </script>
 

@@ -4,6 +4,7 @@ mod error;
 mod models;
 mod path_util;
 mod scheduler;
+mod time_util;
 mod tray;
 mod workday;
 

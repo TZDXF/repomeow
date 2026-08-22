@@ -41,6 +41,10 @@ src/                  Vue 3 前端(<script setup> SFC)
   lib/                tauri.ts(前后端桥 cmd<T>)/ ai.ts / path.ts / diff.ts / diff-highlight.ts
                       / wiki.ts / wiki-parse.ts / wiki-generator.ts / async-pool.ts 等
                       / git-graph.ts / branch-tree.ts / favorites.ts / open-with.ts 等
+                      / format.ts(formatDate/parseDateStr/formatLocalDateTime 等日期工具
+                      与 formatRelativeTime,日期格式化勿散写 toLocaleString)
+                      / utils.ts(cn / copyToClipboard / debounce,debounce 带 cancel
+                      ——@vueuse/core 的 useDebounceFn 无 cancel,需取消语义时用这个)
                       单元测试与源文件同目录(lib/*.test.ts,stores/*.test.ts)
   router/             Vue Router(index.ts)
   styles/markdown/    base.css + index.css + themes/{default,github,notion,serif}.css
@@ -53,7 +57,8 @@ src-tauri/src/
   db/                 rusqlite 连接(全局 Mutex 单连接) + migrations.rs 迁移执行器
   models.rs           serde 数据结构(命令/项目/扫描/报告等)
   path_util.rs        clean_str / to_forward_slash 等路径归一化辅助
-  scheduler.rs        后台 tokio 任务(日报定时调度等)
+  time_util.rs        now_ts / now_ts_nanos 时间戳统一入口(勿散写 chrono::Utc::now())
+  scheduler.rs        后台 tokio 任务(日报定时调度等;report_http_client 为报告/AI 共用异步客户端,仅连接超时)
   tray.rs             系统托盘图标 + 迷你弹窗窗口(MAIN_WINDOW_LABEL / TRAY_POPUP_LABEL)
   workday.rs          chinese-days 节假日数据拉取与缓存
   error.rs            AppError / AppResult,错误序列化为中文字符串传前端

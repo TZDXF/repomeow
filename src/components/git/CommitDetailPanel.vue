@@ -25,6 +25,7 @@ import { buildFileTree, type FileTreeNode } from "@/lib/file-tree";
 import { extOf, imageMimeOf, isImagePath } from "@/lib/file-kind";
 import { openPathWith, sortOpenWithOptions } from "@/lib/open-with";
 import { baseName } from "@/lib/path";
+import { copyToClipboard } from "@/lib/utils";
 import { cmd } from "@/lib/tauri";
 import { useSettingsStore } from "@/stores/settings";
 import type { GitCommitFile, GitCommitFileDiff, GitGraphCommit } from "@/types";
@@ -277,8 +278,7 @@ function tagName(refName: string) {
   return refName.slice(5);
 }
 async function copyHash(hash: string) {
-  await navigator.clipboard.writeText(hash);
-  toast.success(t("git.graph.copied"));
+  await copyToClipboard(hash);
 }
 
 // --- 状态徽标配色 ---

@@ -803,7 +803,7 @@ fn install_jdk_blocking(app: &AppHandle, vendor: JdkVendor, major: u32) -> AppRe
     let extract_dir = std::env::temp_dir().join(format!(
         "repomeow-jdk-extract-{}-{}",
         std::process::id(),
-        chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),
+        crate::time_util::now_ts_nanos(),
     ));
     let extracted = (|| -> AppResult<PathBuf> {
         std::fs::create_dir_all(&extract_dir)?;
@@ -898,7 +898,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!(
             "repomeow-java-{tag}-{}-{}",
             std::process::id(),
-            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+            crate::time_util::now_ts_nanos()
         ));
         fs::create_dir_all(&dir).unwrap();
         dir

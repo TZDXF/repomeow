@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { Ban, Check, GripVertical, Pencil, Plus, Trash2 } from "@lucide/vue";
 import { VueDraggable } from "vue-draggable-plus";
+import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import OpenWithIcon from "@/components/open/OpenWithIcon.vue";
 import { Button } from "@/components/ui/button";
 import {
@@ -102,8 +103,22 @@ async function submit() {
   }
 }
 
-async function remove(option: CustomOpenWith) {
-  if (!window.confirm(t("openWith.custom.deleteConfirm", { name: option.name }))) return;
+/** 待确认删除的自定义打开方式,ConfirmDialog 确认后执行 */
+const pendingRemove = ref<CustomOpenWith | null>(null);
+const removeConfirmOpen = computed({
+  get: () => pendingRemove.value !== null,
+  set: (v) => {
+    if (!v) pendingRemove.value = null;
+  },
+});
+
+function remove(option: CustomOpenWith) {
+  pendingRemove.value = option;
+}
+
+async function confirmRemove() {
+  const option = pendingRemove.value;
+  if (!option) return;
   try {
     await store.removeCustomOpenWith(option.id);
     toast.success(t("openWith.custom.deleted"));
@@ -246,4 +261,12 @@ const customById = computed(
       </form>
     </DialogContent>
   </Dialog>
+  <ConfirmDialog
+    v-model:open="removeConfirmOpen"
+    :title="t('common.delete')"
+    :description="t('openWith.custom.deleteConfirm', { name: pendingRemove?.name })"
+    :confirm-text="t('common.delete')"
+    destructive
+    @confirm="confirmRemove"
+  />
 </template>

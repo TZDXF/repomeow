@@ -701,7 +701,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!(
             "repomeow-files-{tag}-{}-{}",
             std::process::id(),
-            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+            crate::time_util::now_ts_nanos()
         ));
         fs::create_dir_all(&dir).unwrap();
         dir.to_string_lossy().to_string()

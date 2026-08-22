@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { debounce } from "@/lib/utils";
 import { useI18n } from "vue-i18n";
 import { ChevronDown, ChevronRight, Loader2, Search } from "@lucide/vue";
 import { Icon } from "@iconify/vue";
@@ -57,12 +58,12 @@ const highlightRe = computed(() => {
   return buildFindRegExp(findQuery.value);
 });
 
-let timer: ReturnType<typeof setTimeout> | undefined;
 let seq = 0;
+/** 输入/搜索选项变化后 300ms 防抖触发搜索 */
+const debouncedRunSearch = debounce(() => void runSearch(), 300);
 
 watch([query, include, exclude, caseSensitive, wholeWord, useRegex], () => {
-  clearTimeout(timer);
-  timer = setTimeout(runSearch, 300);
+  debouncedRunSearch();
 });
 
 // 项目切换(root 变化)清空旧结果
@@ -77,10 +78,10 @@ watch(
   },
 );
 
-onBeforeUnmount(() => clearTimeout(timer));
+onBeforeUnmount(() => debouncedRunSearch.cancel());
 
 async function runSearch() {
-  clearTimeout(timer);
+  debouncedRunSearch.cancel();
   const q = findQuery.value;
   if (!q.text.trim() || invalidRegex.value) {
     // 自增 seq 让仍在飞行的旧请求在 await 解析后被 stale-check 挡掉,

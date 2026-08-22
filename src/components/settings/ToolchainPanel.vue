@@ -17,6 +17,7 @@ import {
 } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import {
   Dialog,
   DialogContent,
@@ -106,6 +107,15 @@ function install(tool: ToolchainStatus) {
   void run(tool.id, "install");
 }
 
+/** 待确认的工具链操作(卸载/卸载指定版本),ConfirmDialog 确认后执行 */
+const pendingOp = ref<{ description: string; action: () => void } | null>(null);
+const opConfirmOpen = computed({
+  get: () => pendingOp.value !== null,
+  set: (v) => {
+    if (!v) pendingOp.value = null;
+  },
+});
+
 function uninstall(tool: ToolchainStatus) {
   let message = t("settings.devEnv.tools.uninstallConfirm", { name: displayName(tool) });
   if (tool.id === "git" || tool.id === "gh") {
@@ -113,8 +123,7 @@ function uninstall(tool: ToolchainStatus) {
   } else if (tool.id === "vp") {
     message += `\n${t("settings.devEnv.tools.uninstallVpWarn")}`;
   }
-  if (!window.confirm(message)) return;
-  void run(tool.id, "uninstall");
+  pendingOp.value = { description: message, action: () => void run(tool.id, "uninstall") };
 }
 
 // ---- 版本管理(nvm/fnm/vp/uv) ───────────────────────────────────────────
@@ -128,13 +137,15 @@ function useVersion(tool: ToolchainStatus, name: string) {
 }
 
 function removeVersion(tool: ToolchainStatus, name: string) {
-  if (
-    !tool.caps.can_switch ||
-    !window.confirm(t("settings.devEnv.tools.uninstallVersionConfirm", { name }))
-  ) {
-    return;
-  }
-  void run(tool.id, "uninstall_version", name);
+  if (!tool.caps.can_switch) return;
+  pendingOp.value = {
+    description: t("settings.devEnv.tools.uninstallVersionConfirm", { name }),
+    action: () => void run(tool.id, "uninstall_version", name),
+  };
+}
+
+function confirmOp() {
+  pendingOp.value?.action();
 }
 
 function addVersion(tool: ToolchainStatus) {
@@ -455,5 +466,13 @@ onMounted(() => {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <ConfirmDialog
+      v-model:open="opConfirmOpen"
+      :title="t('settings.devEnv.tools.uninstall')"
+      :description="pendingOp?.description ?? ''"
+      :confirm-text="t('settings.devEnv.tools.uninstall')"
+      destructive
+      @confirm="confirmOp"
+    />
   </section>
 </template>

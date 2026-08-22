@@ -550,6 +550,15 @@ fn delete_report_history_row(conn: &rusqlite::Connection, history_id: i64) -> Ap
 
 // ── schedule execution ─────────────────────────────────────────────────
 
+/// 报告调度/AI 生成共用的异步客户端:仅设连接超时、不设总超时
+/// (LLM 生成耗时不可预估,总超时会切断长响应;此处与 java/account 各自的客户端语义不同)
+pub(crate) fn report_http_client() -> Client {
+    Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .build()
+        .unwrap_or_else(|_| Client::new())
+}
+
 /// 执行一次定时任务:拉取提交 → 调 AI → 写报告历史 → 更新运行时间 → emit 事件。
 /// 成功返回报告历史 id;任何失败以 Err 返回。
 ///
@@ -726,7 +735,7 @@ pub(crate) async fn fire_schedule(
     let mut conn = db.0.lock().unwrap();
     let history_id = {
         let tx = conn.transaction()?;
-        let now = chrono::Utc::now().timestamp();
+        let now = crate::time_util::now_ts();
         let project_ids: Vec<i64> = commits_by_project.iter().map(|(id, _, _, _)| *id).collect();
         let ids_json = serde_json::to_string(&project_ids).unwrap_or_default();
 
@@ -800,7 +809,7 @@ pub async fn run(app: AppHandle) {
         .state::<crate::commands::report::ScheduleNotify>()
         .0
         .clone();
-    let client = Client::new();
+    let client = report_http_client();
 
     loop {
         // 重新加载定时任务(从 SQLite 读取;锁在此行结束后立即释放,不跨 await)
@@ -1018,7 +1027,7 @@ mod tests {
     use crate::commands::report::delete_report_history_impl;
 
     fn insert_history_row(conn: &rusqlite::Connection) -> i64 {
-        let now = chrono::Utc::now().timestamp();
+        let now = crate::time_util::now_ts();
         conn.execute(
             "INSERT INTO report_history (project_ids, date_from, date_to, range_label,
                  author_mode, language, period_type, result, created_at)

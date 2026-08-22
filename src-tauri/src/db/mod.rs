@@ -56,7 +56,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!(
             "repomeow-test-{}-{}",
             std::process::id(),
-            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+            crate::time_util::now_ts_nanos()
         ));
         let db_path = dir.join("projects.db");
         let db = Db::open(&db_path).expect("open db");

@@ -36,6 +36,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { TimeField } from "@/components/ui/time-field";
 import TagCheckList from "@/components/tags/TagCheckList.vue";
+import { formatLocalDateTime } from "@/lib/format";
 import { cmd } from "@/lib/tauri";
 import { useProjectsStore } from "@/stores/projects";
 import { useTagsStore } from "@/stores/tags";
@@ -275,8 +276,7 @@ function tagNames(ids: number[]) {
 
 function lastRun(ts: number | null) {
   if (!ts) return t("reportSchedule.never");
-  const d = new Date(ts * 1000);
-  return d.toLocaleString();
+  return formatLocalDateTime(ts);
 }
 
 // ── init ───────────────────────────────────────────────────────────────

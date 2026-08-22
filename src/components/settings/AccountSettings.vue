@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { GitBranch, Loader2, Pencil, Plus, Trash2 } from "@lucide/vue";
+import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -116,9 +117,27 @@ async function save() {
   }
 }
 
-async function remove(account: GitAccount) {
-  const name = account.label || account.username || providerLabel(account.provider);
-  if (!window.confirm(t("settings.accounts.deleteConfirm", { name }))) return;
+/** 待确认删除的账号,ConfirmDialog 确认后执行 */
+const pendingRemove = ref<GitAccount | null>(null);
+const removeConfirmOpen = computed({
+  get: () => pendingRemove.value !== null,
+  set: (v) => {
+    if (!v) pendingRemove.value = null;
+  },
+});
+
+const pendingRemoveName = computed(() => {
+  const a = pendingRemove.value;
+  return a ? a.label || a.username || providerLabel(a.provider) : "";
+});
+
+function remove(account: GitAccount) {
+  pendingRemove.value = account;
+}
+
+async function confirmRemove() {
+  const account = pendingRemove.value;
+  if (!account) return;
   try {
     await removeGitAccount(account.id);
     toast.success(t("settings.accounts.deleted"));
@@ -291,5 +310,13 @@ async function remove(account: GitAccount) {
         </form>
       </DialogContent>
     </Dialog>
+    <ConfirmDialog
+      v-model:open="removeConfirmOpen"
+      :title="t('common.delete')"
+      :description="t('settings.accounts.deleteConfirm', { name: pendingRemoveName })"
+      :confirm-text="t('common.delete')"
+      destructive
+      @confirm="confirmRemove"
+    />
   </section>
 </template>

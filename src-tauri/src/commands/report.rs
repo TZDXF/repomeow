@@ -156,7 +156,7 @@ pub fn save_report_history(
     commit_data: Vec<SaveReportCommit>,
 ) -> AppResult<i64> {
     let conn = db.0.lock().unwrap();
-    let now = chrono::Utc::now().timestamp();
+    let now = crate::time_util::now_ts();
     let ids_json = serde_json::to_string(&project_ids).unwrap_or_default();
 
     conn.execute(
@@ -915,7 +915,7 @@ pub async fn run_report_schedule_now(
             .map_err(|_| AppError::coded(ErrorCode::ScheduleNotFound, id.to_string()))?
     };
     let data_dir = workday::data_dir(&app);
-    let client = reqwest::Client::new();
+    let client = crate::scheduler::report_http_client();
     crate::scheduler::fire_schedule(&app, &client, &data_dir, &schedule).await
 }
 
@@ -1199,7 +1199,7 @@ mod tests {
 
     /// 直接向 projects 表插入一行(绕过 `add` 的目录存在检查)
     fn insert_project(conn: &Connection, name: &str) -> i64 {
-        let now = chrono::Utc::now().timestamp();
+        let now = crate::time_util::now_ts();
         conn.execute(
             "INSERT INTO projects (path, name, description, created_at, updated_at)
              VALUES (?1, ?2, '', ?3, ?3)",
@@ -1293,7 +1293,7 @@ mod tests {
             date_to,
             period_type,
             commits_per_record,
-            chrono::Utc::now().timestamp(),
+            crate::time_util::now_ts(),
         )
     }
 
@@ -1628,7 +1628,7 @@ mod tests {
     #[test]
     fn exact_project_id_filter_avoids_substring_matches() {
         let conn = test_conn();
-        let now = chrono::Utc::now().timestamp();
+        let now = crate::time_util::now_ts();
         for (pid, label) in [(1i64, "p1"), (12, "p12"), (123, "p123")] {
             conn.execute(
                 "INSERT INTO projects (id, path, name, description, created_at, updated_at)

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
+import { watchDebounced } from "@vueuse/core";
 import {
   ArrowDownUp,
   FileText,
@@ -43,11 +44,7 @@ const router = useRouter();
 
 // 搜索(防抖,逻辑同原 Sidebar)
 const searchInput = ref(store.query);
-let debounceTimer: number | undefined;
-watch(searchInput, (value) => {
-  window.clearTimeout(debounceTimer);
-  debounceTimer = window.setTimeout(() => store.setQuery(value), 250);
-});
+watchDebounced(searchInput, (value) => store.setQuery(value), { debounce: 250 });
 
 // 视图模式与排序方式持久化到 settings store
 const viewMode = computed<ProjectsViewMode>({

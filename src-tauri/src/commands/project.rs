@@ -4,10 +4,7 @@ use tauri::{AppHandle, Emitter, State};
 use crate::db::Db;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::{Project, Tag};
-
-fn now() -> i64 {
-    chrono::Utc::now().timestamp()
-}
+use crate::time_util::now_ts;
 
 struct ProjectRow {
     id: i64,
@@ -140,7 +137,7 @@ pub fn add(conn: &Connection, path: &str, name: &str, description: &str) -> AppR
     if name.is_empty() {
         return Err(AppError::coded(ErrorCode::ProjectNameRequired, ""));
     }
-    let ts = now();
+    let ts = now_ts();
     conn.execute(
         "INSERT INTO projects (path, name, description, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -213,7 +210,7 @@ pub fn update(conn: &Connection, id: i64, name: &str, description: &str) -> AppR
     }
     let changed = conn.execute(
         "UPDATE projects SET name = ?1, description = ?2, updated_at = ?3 WHERE id = ?4",
-        params![name, description, now(), id],
+        params![name, description, now_ts(), id],
     )?;
     if changed == 0 {
         return Err(AppError::coded(ErrorCode::ProjectNotFound, id.to_string()));
@@ -230,7 +227,7 @@ pub fn update_path(conn: &Connection, id: i64, path: &str) -> AppResult<Project>
     let changed = conn
         .execute(
             "UPDATE projects SET path = ?1, updated_at = ?2 WHERE id = ?3",
-            params![path, now(), id],
+            params![path, now_ts(), id],
         )
         .map_err(|e| match e {
             rusqlite::Error::SqliteFailure(err, _)
@@ -375,7 +372,7 @@ fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::
 fn apply_move(conn: &Connection, id: i64, plan: &MovePlan) -> AppResult<()> {
     if let Err(e) = conn.execute(
         "UPDATE projects SET path = ?1, updated_at = ?2 WHERE id = ?3",
-        params![plan.target_str, now(), id],
+        params![plan.target_str, now_ts(), id],
     ) {
         let _ = std::fs::rename(&plan.target, &plan.src);
         return Err(AppError::Db(e));
@@ -398,7 +395,7 @@ pub fn move_dir(conn: &Connection, id: i64, target_parent: &str, dir_name: &str)
 pub fn archive(conn: &Connection, id: i64) -> AppResult<()> {
     let changed = conn.execute(
         "UPDATE projects SET archived_at = ?1 WHERE id = ?2",
-        params![now(), id],
+        params![now_ts(), id],
     )?;
     if changed == 0 {
         return Err(AppError::coded(ErrorCode::ProjectNotFound, id.to_string()));
@@ -431,7 +428,7 @@ pub fn unarchive(conn: &Connection, id: i64) -> AppResult<()> {
 
 /// 设置/取消收藏:收藏项目在各列表中置顶(组内按收藏时间倒序)
 pub fn set_favorite(conn: &Connection, id: i64, favorite: bool) -> AppResult<()> {
-    let favorited_at = if favorite { Some(now()) } else { None };
+    let favorited_at = if favorite { Some(now_ts()) } else { None };
     let changed = conn.execute(
         "UPDATE projects SET favorited_at = ?1 WHERE id = ?2",
         params![favorited_at, id],

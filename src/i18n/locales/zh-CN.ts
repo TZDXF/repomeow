@@ -9,6 +9,7 @@ export default {
   common: {
     cancel: "取消",
     confirm: "确认",
+    copied: "已复制到剪贴板",
     save: "保存",
     saving: "保存中...",
     delete: "删除",
@@ -431,7 +432,6 @@ export default {
       loadFailed: "加载提交图谱失败",
       truncatedHint: "仅展示最近 {count} 条提交,更早的历史未加载",
       copyHash: "复制完整 hash",
-      copied: "已复制到剪贴板",
       detail: {
         hash: "提交",
         author: "作者",
@@ -582,7 +582,6 @@ export default {
     generate: "生成日报",
     generating: "生成中...",
     copy: "复制 Markdown",
-    copied: "已复制到剪贴板",
     noProjects: "请至少选择一个项目",
     noCommits: "所选项目在该时间范围内没有提交记录",
     loadFailed: "读取提交记录失败:{error}",
@@ -896,7 +895,6 @@ export default {
     item: {
       runTitle: "在终端运行: {command}",
       copy: "复制命令",
-      copied: "已复制到剪贴板",
       edit: "编辑",
       delete: "删除",
     },

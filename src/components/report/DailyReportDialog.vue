@@ -41,7 +41,8 @@ import HolidayRangeCalendar from "@/components/report/HolidayRangeCalendar.vue";
 import TagCheckList from "@/components/tags/TagCheckList.vue";
 import { generateReport, type ProjectCommits } from "@/lib/ai";
 import { planBatchItems, type BatchItem } from "@/lib/batch-report";
-import { formatCommitTime } from "@/lib/format";
+import { formatCommitTime, formatDate, parseDateStr } from "@/lib/format";
+import { copyToClipboard } from "@/lib/utils";
 import { cmd } from "@/lib/tauri";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
 import { useBatchReportStore } from "@/stores/batch-report";
@@ -181,9 +182,9 @@ const batchPlanning = ref(false);
 
 const batchRangeLabel = computed(() => {
   const { start, end } = batchRange.value;
-  if (start && end) return `${fmt(toLocalDate(start))} - ${fmt(toLocalDate(end))}`;
+  if (start && end) return `${formatDate(toLocalDate(start))} - ${formatDate(toLocalDate(end))}`;
   const single = start ?? end;
-  return single ? fmt(toLocalDate(single)) : t("report.pickRange");
+  return single ? formatDate(toLocalDate(single)) : t("report.pickRange");
 });
 /** 本次拉取到的提交记录(驱动提交条数与可展开列表;生成前展示,AI 失败也保留) */
 const commitData = ref<ProjectCommits[]>([]);
@@ -241,13 +242,6 @@ const beforeDownload = createBeforeDownload(t);
 const detachedThemeEl = document.createElement("div");
 const themeElement = () => detachedThemeEl;
 
-function fmt(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 /** DateValue → 本地当天 00:00 的 Date */
 function toLocalDate(d: RangeDateValue) {
   return d.toDate(getLocalTimeZone());
@@ -256,24 +250,18 @@ function toLocalDate(d: RangeDateValue) {
 /** 周报自定义范围触发按钮的展示文案 */
 const customRangeLabel = computed(() => {
   const { start, end } = customRange.value;
-  if (start && end) return `${fmt(toLocalDate(start))} - ${fmt(toLocalDate(end))}`;
+  if (start && end) return `${formatDate(toLocalDate(start))} - ${formatDate(toLocalDate(end))}`;
   const single = start ?? end;
-  return single ? fmt(toLocalDate(single)) : t("report.pickRange");
+  return single ? formatDate(toLocalDate(single)) : t("report.pickRange");
 });
 
 /** 日报自定义单日触发按钮的展示文案 */
 const customDateLabel = computed(() =>
-  customDate.value ? fmt(toLocalDate(customDate.value)) : t("report.pickDate"),
+  customDate.value ? formatDate(toLocalDate(customDate.value)) : t("report.pickDate"),
 );
 
 /** 后端计算的工作周范围(连续工作周期,含法定节假日/调休识别;打开弹窗时拉取) */
 const workWeekRanges = ref<WorkWeekRanges | null>(null);
-
-/** "YYYY-MM-DD" → 本地当天 00:00 的 Date(避免 new Date(str) 的 UTC 解析时区偏移) */
-function parseDateStr(s: string) {
-  const [y, m, d] = s.split("-").map(Number);
-  return new Date(y, m - 1, d);
-}
 
 /** 周报"本周/上周"的具体日期范围。优先用后端工作周算法;
  *  未返回/失败时回退本地算法(周一为一周起点,上周为周一至周日) */
@@ -311,7 +299,7 @@ const selectedWeekRange = computed(() =>
 );
 
 function fmtWeekRange(r: { from: Date; to: Date }) {
-  return `${fmt(r.from)} ~ ${fmt(r.to)}`;
+  return `${formatDate(r.from)} ~ ${formatDate(r.to)}`;
 }
 
 /** 当前选择的日期范围(本地时区,起止均为当天 00:00)。
@@ -408,8 +396,8 @@ async function loadCommits() {
   loadingCommits.value = true;
   const stale = () => token !== commitsToken;
   try {
-    const since = `${fmt(range.value.from)} 00:00:00`;
-    const until = `${fmt(range.value.to)} 23:59:59`;
+    const since = `${formatDate(range.value.from)} 00:00:00`;
+    const until = `${formatDate(range.value.to)} 23:59:59`;
     const data = await Promise.all(
       projects.map(async (p) => {
         // "仅自己":取该仓库 git 用户身份作为 --author 过滤;未配置则不过滤
@@ -450,8 +438,8 @@ watch(
     [
       [...effectiveProjectIds.value].sort((a, b) => a - b).join(","),
       mode.value,
-      fmt(range.value.from),
-      fmt(range.value.to),
+      formatDate(range.value.from),
+      formatDate(range.value.to),
       authorMode.value,
       execMode.value,
     ].join("|"),
@@ -475,8 +463,8 @@ async function generate() {
   generating.value = true;
   savedHistoryId.value = null;
   try {
-    const dateFrom = fmt(range.value.from);
-    const dateTo = fmt(range.value.to);
+    const dateFrom = formatDate(range.value.from);
+    const dateTo = formatDate(range.value.to);
     const rangeLabel =
       dateFrom === dateTo ? dateFrom : t("report.rangeLabel", { from: dateFrom, to: dateTo });
     result.value = await generateReport(data, rangeLabel, settings.language, mode.value);
@@ -532,12 +520,7 @@ async function generate() {
 }
 
 async function copyResult() {
-  try {
-    await navigator.clipboard.writeText(result.value);
-    toast.success(t("report.copied"));
-  } catch (e) {
-    toast.error(String(e));
-  }
+  await copyToClipboard(result.value);
 }
 
 /** 批量生成:规划时段后交给全局 store 执行,进度在右下角浮窗展示;启动即关闭弹窗 */
@@ -557,8 +540,8 @@ async function startBatch() {
     toast.error(t("ai.notConfigured"));
     return;
   }
-  const dateFrom = fmt(toLocalDate(start));
-  const dateTo = fmt(toLocalDate(end));
+  const dateFrom = formatDate(toLocalDate(start));
+  const dateTo = formatDate(toLocalDate(end));
 
   batchPlanning.value = true;
   let items: BatchItem[];
