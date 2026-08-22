@@ -32,15 +32,13 @@ src/                  Vue 3 前端(<script setup> SFC)
   views/              页面:ProjectsHome / ProjectDetail / ProjectFiles / GitGraph
                       / ReportHistory / Settings / TrayPopup(系统托盘迷你弹窗)
   components/ui/      shadcn-vue(reka-ui)组件,勿手改生成文件风格
-  components/pierre/  @pierre/diffs + @pierre/trees 的 Vue 薄包装(PierreDiff /
-                      PierreFileView / PierreFileTree)+ 主题桥接 use-pierre-theme.ts
   components/{common,files,git,icons,java,markdown,open,project,report,scripts,settings,tags,update}/
                       业务组件;TitleBar 在 components/ 顶层
   composables/        useCollapsibleOpen 等小组件式组合式函数
   stores/             Pinia:projects / settings / tags / batch-report / jdk-install
                       / pins / project-assets / project-overview / update
   i18n/locales/       zh-CN.ts(默认)、en-US.ts(回退),两文件键必须对齐
-  lib/                tauri.ts(前后端桥 cmd<T>)/ ai.ts / path.ts / file-tree.ts(提交对话框勾选树)
+  lib/                tauri.ts(前后端桥 cmd<T>)/ ai.ts / path.ts / diff.ts / diff-highlight.ts
                       / git-graph.ts / branch-tree.ts / favorites.ts / open-with.ts 等
                       单元测试与源文件同目录(lib/*.test.ts,stores/*.test.ts)
   router/             Vue Router(index.ts)
@@ -76,15 +74,14 @@ src-tauri/migrations/ SQL 迁移,NNN_name.sql(当前 001~007)
 
 - **UI 体系**:shadcn-vue + Tailwind CSS v4 + lucide 图标;样式合并用 `@/lib/utils` 的 `cn()`。主题用 CSS 变量,亮/暗经根节点 `.dark` 类切换,皮肤经 `data-theme="island"`。
 - **Markdown 渲染**:用 `vue-stream-markdown`(Shiki 高亮);MD 主题经根节点 `data-md-theme` 属性切换(default/github/notion/serif);自定义图片/链接渲染器要保留本地 `asset:` 协议与系统打开行为(`src-tauri/Cargo.toml` 已启用 `protocol-asset` feature)。
-- **代码查看 / diff / 文件树(@pierre/diffs + @pierre/trees)**:diff 渲染(PierreDiff,unified patch 输入,split/unified、词级高亮、未变更区折叠均为库内行为)与文件代码查看(PierreFileView,Shiki 高亮)走 `@pierre/diffs`;项目文件树与提交详情变更文件树走 `@pierre/trees`(PierreFileTree)。两库都无 Vue 封装,包装组件在 `components/pierre/`,实例生命周期与主题桥接(github-light/dark 双主题 + setThemeType)由包装层持有。文件树数据由 `list_project_tree` 一次性全量供给(被 ignore 目录与 node_modules 只列自身不下降)。例外:提交对话框(CommitDialog)的勾选文件树是「提交范围选择器」(三态勾选级联),无法用 trees 的选择模型表达,保留自研(`lib/file-tree.ts` + `lib/file-icons.ts`);命令行图标语义在 `command-icons.ts`;`git-graph.ts` 与 `branch-tree.ts` 驱动 GitGraph 视图。
+- **代码编辑器 / diff / 文件树**:CodeMirror 6(各 `lang-*` + `legacy-modes`)在视图层做只读 / 可编辑渲染;diff 高亮、行内差异与并排同步在 `src/lib/diff.ts` + `diff-highlight.ts`;文件树懒加载在 `src/lib/lazy-file-tree.ts`;命令行图标语义在 `command-icons.ts`;`git-graph.ts` 与 `branch-tree.ts` 驱动 GitGraph 视图。
 - **i18n**:所有用户可见文案走 `vue-i18n`,键定义在 `src/i18n/locales/zh-CN.ts` 与 `en-US.ts`,新增键两语言必须同时补。仓库有专用翻译子代理(`.zcode/skills/i18n-translator/`,用法见 `docs/i18n-translator.md`),批量翻译/审计时优先调用它。Rust 侧错误文案(error.rs)目前是硬编码中文,属已知现状。
 - **TS 严格模式**:`noUnusedLocals` / `noUnusedParameters` 开启,未用变量会导致 build 失败。
 - **代码规范**:oxlint 配置在 `.oxlintrc.json`(plugins: typescript/vue/import;correctness/suspicious/perf = error、style = warn;`rules` 中关闭了若干与本项目约定冲突的高噪规则,如 `sort-imports`/`sort-keys`/`id-length`/`func-style`/`no-shadow`/`import/no-unassigned-import`,新增告警前先看现有 `rules` 注释)。oxfmt 配置在 `.oxfmtrc.json`(双引号、分号、2 空格、`trailingComma: all`、`printWidth: 100`、`endOfLine: lf`),**只格式化 `src/`**,根目录配置文件与 `src-tauri/` 不在范围。VS Code 用 Oxc 扩展(`oxc.oxc-vscode`,lint + format 一体),保存自动格式化见 `.vscode/settings.json`。`src/components/ui/`(shadcn-vue 生成文件)会被 oxfmt 一并格式化属正常,**但不要手改其结构**。
-- **单元测试**:`vitest` 仅覆盖 `src/**/*.test.ts`(node 环境、无 setup 文件,见 `vitest.config.ts`),用例与源文件同目录(如 `src/lib/text-search.test.ts`、`src/stores/settings.test.ts`)。`pnpm test:unit` 跑一次,**不改业务代码时请保持零新增失败用例**。
+- **单元测试**:`vitest` 仅覆盖 `src/**/*.test.ts`(node 环境、无 setup 文件,见 `vitest.config.ts`),用例与源文件同目录(如 `src/lib/diff.test.ts`、`src/stores/settings.test.ts`)。`pnpm test:unit` 跑一次,**不改业务代码时请保持零新增失败用例**。
 
 ## 注意事项(Gotchas)
 
-- **pierre 两库(@pierre/diffs / @pierre/trees)**:渲染在 open shadow DOM 内,样式只能经 CSS 变量(`--diffs-*` / `--trees-*`,可穿透 shadow)与 `unsafeCSS` 桥接;亮暗默认走 `color-scheme` + `light-dark()`(跟随 OS),树的 `:host-context(html.dark)` 桥接在 PierreFileTree 的 unsafeCSS 里,新增 pierre 表面时复用同一写法。`setOptions()` **不会重渲染**,改布局/开关后必须显式 `rerender()`;亮暗切换用 `setThemeType()`(有缓存通道)。库无公开行定位 API,行跳转/差异导航经 shadow root 内 `[data-line]` 元素实现(见 PierreDiff/PierreFileView)。trees 处于 beta,API 以 `.zcode/skills/trees/` 参考为准。
 - **git 双层实现**:只读查询(status/分支/worktree 列表/log/graph/commit 文件与 diff/remote 列表/当前用户)走 git2(libgit2,`Cargo.toml` 里 default-features = false);写操作(checkout/commit/merge/rebase/worktree 增删/init)与网络操作(fetch/pull/push/clone)仍走系统 git CLI(`git_command`/`run_git`),以继承用户凭证环境(GCM 等)。新增 git 读路径优先复用 git2 层的 `open_repo`/`format_git_time`/`commit_diff` 等辅助;libgit2 revwalk 的纯时间排序在完全相同时间戳下不稳定,需排序时加 `Sort::TOPOLOGICAL` 保底。
 - git 相关命令已禁用终端凭据交互询问;涉及凭证的改动注意保持非交互。
 - `run_in_terminal` 在系统终端新窗口执行命令,Windows 优先 Windows Terminal。

@@ -4,22 +4,27 @@ import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { useElementSize, useLocalStorage } from "@vueuse/core";
 import {
+  ChevronRight,
   Columns2,
   Copy,
+  FolderTree,
   GitBranch,
+  List,
   Loader2,
   PanelRightClose,
   Rows2,
   Tag as TagIcon,
 } from "@lucide/vue";
+import { Icon } from "@iconify/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import DiffViewer from "@/components/git/DiffViewer.vue";
-import PierreFileTree from "@/components/pierre/PierreFileTree.vue";
+import { fileIcon, folderIcon } from "@/lib/file-icons";
+import { buildFileTree, type FileTreeNode } from "@/lib/file-tree";
 import { openPathWith, sortOpenWithOptions } from "@/lib/open-with";
+import { baseName } from "@/lib/path";
 import { cmd } from "@/lib/tauri";
 import { useSettingsStore } from "@/stores/settings";
-import type { GitStatusEntry, FileTreeRowDecoration } from "@pierre/trees";
 import type { GitCommitFile, GitCommitFileDiff, GitGraphCommit } from "@/types";
 
 const props = defineProps<{
@@ -40,6 +45,9 @@ const settings = useSettingsStore();
 const files = ref<GitCommitFile[]>([]);
 const filesLoading = ref(false);
 const filesError = ref("");
+/** 平铺 / 树形切换(持久化) */
+const treeMode = useLocalStorage("repomeow:commit-files-tree", false);
+const collapsedFolders = ref(new Set<string>());
 
 // --- 单文件 diff:本组件只负责取数,解析/着色/折叠/并排渲染全部在 DiffViewer ---
 const selectedPath = ref<string | null>(null);
@@ -100,69 +108,52 @@ async function selectFile(file: GitCommitFile, force = false) {
       ignoreWs: ignoreWs.value === "none" ? null : ignoreWs.value,
     });
     // 快速连点 A→B:旧响应可能晚于新选择返回,不做 stale 校验会把 A 的 diff 写到 B 的标题下
-    if (selectedPath.value !== file.path) {
-      return;
-    }
+    if (selectedPath.value !== file.path) return;
     diff.value = result;
   } catch (e) {
-    if (selectedPath.value !== file.path) {
-      return;
-    }
+    if (selectedPath.value !== file.path) return;
     diffError.value = String(e);
   } finally {
-    if (selectedPath.value === file.path) {
-      diffLoading.value = false;
-    }
+    if (selectedPath.value === file.path) diffLoading.value = false;
   }
 }
 
 // 忽略空白模式变化:按新模式重取当前文件 diff
 watch(ignoreWs, () => {
-  if (selectedFile.value) {
-    void selectFile(selectedFile.value, true);
-  }
+  if (selectedFile.value) void selectFile(selectedFile.value, true);
 });
 
-// --- 文件树(@pierre/trees):git 状态着色 + 行尾 +/- 计数装饰 ---
-const treeEntries = computed(() => files.value.map((f) => ({ path: f.path, isDir: false })));
+// --- 树形展示:按目录层级聚合,折叠状态记忆 ---
+const fileTree = computed(() => buildFileTree(files.value));
 
-/** GitCommitFile.status(A/M/D/R/T) → 库的 GitStatus;路径取新路径(重命名的旧路径在 diff 取数时用) */
-const GIT_STATUS_MAP: Record<string, GitStatusEntry["status"]> = {
-  A: "added",
-  D: "deleted",
-  R: "renamed",
-};
-
-const treeGitStatus = computed<GitStatusEntry[]>(() =>
-  files.value.map((f) => ({
-    path: f.path,
-    status: GIT_STATUS_MAP[f.status] ?? "modified",
-  })),
-);
-
-const filesByPath = computed(() => new Map(files.value.map((f) => [f.path, f])));
-
-/** 行尾装饰:+增/-删计数(颜色经 .pierre-tree 上的自定义属性,随亮暗主题切换) */
-function fileDecoration(path: string): FileTreeRowDecoration | null {
-  const f = filesByPath.value.get(path);
-  if (!f || (!f.additions && !f.deletions)) {
-    return null;
-  }
-  const parts = [];
-  if (f.additions) {
-    parts.push({ text: `+${f.additions}`, color: "var(--tree-add)" });
-  }
-  if (f.deletions) {
-    parts.push({ text: `-${f.deletions}`, color: "var(--tree-del)" });
-  }
-  return { text: parts.map((p) => p.text).join(" "), parts };
+interface FileRow {
+  node: FileTreeNode;
+  depth: number;
 }
 
-function onActivate(path: string) {
-  const file = filesByPath.value.get(path);
-  if (file) {
-    void selectFile(file);
+/** 拍平可见树行(跳过折叠目录的子级) */
+const treeRows = computed(() => {
+  const out: FileRow[] = [];
+  const walk = (nodes: FileTreeNode[], depth: number) => {
+    for (const node of nodes) {
+      out.push({ node, depth });
+      if (node.children.length && !collapsedFolders.value.has(node.fullPath)) {
+        walk(node.children, depth + 1);
+      }
+    }
+  };
+  walk(fileTree.value, 0);
+  return out;
+});
+
+function toggleFolder(fullPath: string) {
+  const next = new Set(collapsedFolders.value);
+  if (next.has(fullPath)) {
+    next.delete(fullPath);
+  } else {
+    next.add(fullPath);
   }
+  collapsedFolders.value = next;
 }
 
 /** 当前选中文件(已删除的文件不提供 IDE 打开:工作区已不存在) */
@@ -179,9 +170,7 @@ async function openFile(file: GitCommitFile) {
   const option = sortOpenWithOptions(settings.openWithOrder, settings.customOpenWith).find(
     (candidate) => candidate.id === settings.defaultOpenWith,
   );
-  if (!option) {
-    return;
-  }
+  if (!option) return;
   try {
     await openPathWith(option, `${props.projectPath}/${file.path}`);
   } catch (e) {
@@ -202,6 +191,22 @@ function tagName(refName: string) {
 async function copyHash(hash: string) {
   await navigator.clipboard.writeText(hash);
   toast.success(t("git.graph.copied"));
+}
+
+// --- 状态徽标配色 ---
+function statusClass(status: string) {
+  switch (status) {
+    case "A":
+      return "text-green-600 dark:text-green-400";
+    case "D":
+      return "text-red-600 dark:text-red-400";
+    case "R":
+      return "text-blue-600 dark:text-blue-400";
+    case "T":
+      return "text-purple-600 dark:text-purple-400";
+    default:
+      return "text-amber-600 dark:text-amber-400";
+  }
 }
 
 // --- 布局:vertical = 列表在上 diff 在下;horizontal = 列表与 diff 左右分列(diff 单独一列) ---
@@ -225,9 +230,7 @@ const { width: panelWidth } = useElementSize(rootEl);
 
 /** 列表宽度实际上限:面板宽减去 diff 列最小宽度,随面板宽度动态伸缩(不设固定上限) */
 function listWidthCap() {
-  if (layout.value !== "horizontal" || !panelWidth.value) {
-    return LIST_MIN_W;
-  }
+  if (layout.value !== "horizontal" || !panelWidth.value) return LIST_MIN_W;
   return Math.max(LIST_MIN_W, Math.floor(panelWidth.value) - DIFF_MIN_W);
 }
 
@@ -263,9 +266,7 @@ function startListResize(e: PointerEvent) {
 
 onBeforeUnmount(() => {
   // 拖拽中组件被卸载:残留 pointermove/pointerup 监听器仍会引用已卸载组件的状态,显式移除避免泄漏
-  for (const fn of listResizeCleanups) {
-    fn();
-  }
+  for (const fn of listResizeCleanups) fn();
   listResizeCleanups = [];
 });
 </script>
@@ -323,7 +324,7 @@ onBeforeUnmount(() => {
 
     <!-- 主体:上下布局(列表在上 diff 在下)/ 左右布局(diff 单独一列) -->
     <div class="flex min-h-0 flex-1" :class="layout === 'horizontal' ? 'flex-row' : 'flex-col'">
-      <!-- 文件列表:@pierre/trees 树形(git 状态着色 + 行尾 +/- 计数) -->
+      <!-- 文件列表:平铺 / 树形切换 -->
       <div
         class="flex min-h-0 min-w-0 shrink-0 flex-col"
         :style="
@@ -336,40 +337,126 @@ onBeforeUnmount(() => {
           <span class="text-xs font-medium text-muted-foreground">
             {{ t("git.graph.detail.filesCount", { count: files.length }) }}
           </span>
-          <button
-            class="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            :title="
-              t(
-                layout === 'horizontal'
-                  ? 'git.graph.detail.layoutStack'
-                  : 'git.graph.detail.layoutSplit',
-              )
-            "
-            @click="layout = layout === 'horizontal' ? 'vertical' : 'horizontal'"
-          >
-            <Rows2 v-if="layout === 'horizontal'" class="h-3.5 w-3.5" />
-            <Columns2 v-else class="h-3.5 w-3.5" />
-          </button>
+          <div class="flex items-center">
+            <button
+              class="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              :title="
+                t(
+                  layout === 'horizontal'
+                    ? 'git.graph.detail.layoutStack'
+                    : 'git.graph.detail.layoutSplit',
+                )
+              "
+              @click="layout = layout === 'horizontal' ? 'vertical' : 'horizontal'"
+            >
+              <Rows2 v-if="layout === 'horizontal'" class="h-3.5 w-3.5" />
+              <Columns2 v-else class="h-3.5 w-3.5" />
+            </button>
+            <button
+              class="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              :title="t(treeMode ? 'git.graph.detail.showFlat' : 'git.graph.detail.showTree')"
+              @click="treeMode = !treeMode"
+            >
+              <List v-if="treeMode" class="h-3.5 w-3.5" />
+              <FolderTree v-else class="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
 
-        <div v-if="filesLoading" class="flex min-h-0 flex-1 items-center justify-center">
-          <Loader2 class="h-4 w-4 animate-spin text-muted-foreground" />
+        <div class="min-h-0 flex-1 overflow-auto py-1">
+          <div v-if="filesLoading" class="flex h-full items-center justify-center">
+            <Loader2 class="h-4 w-4 animate-spin text-muted-foreground" />
+          </div>
+          <p v-else-if="filesError" class="px-3 py-2 text-xs text-destructive">
+            {{ t("git.graph.detail.filesLoadFailed") }}:{{ filesError }}
+          </p>
+          <p v-else-if="!files.length" class="px-3 py-2 text-xs text-muted-foreground">
+            {{ t(isMerge ? "git.graph.detail.mergeCommit" : "git.graph.detail.emptyFiles") }}
+          </p>
+
+          <!-- 平铺 -->
+          <template v-else-if="!treeMode">
+            <div
+              v-for="file in files"
+              :key="file.path"
+              class="flex w-full cursor-pointer items-center gap-1.5 px-3 py-1 text-xs transition-colors hover:bg-accent/60"
+              :class="selectedPath === file.path ? 'bg-accent' : ''"
+              @click="selectFile(file)"
+            >
+              <span class="w-3 shrink-0 font-mono font-semibold" :class="statusClass(file.status)">
+                {{ file.status }}
+              </span>
+              <Icon :icon="fileIcon(baseName(file.path))" class="h-3.5 w-3.5 shrink-0" />
+              <span
+                class="min-w-0 flex-1 truncate font-mono"
+                :title="file.old_path ? `${file.old_path} → ${file.path}` : file.path"
+              >
+                <template v-if="file.old_path">{{ baseName(file.old_path) }} → </template
+                >{{ baseName(file.path) }}
+              </span>
+              <span v-if="file.additions" class="shrink-0 text-green-600 dark:text-green-400">
+                +{{ file.additions }}
+              </span>
+              <span v-if="file.deletions" class="shrink-0 text-red-600 dark:text-red-400">
+                -{{ file.deletions }}
+              </span>
+            </div>
+          </template>
+
+          <!-- 树形 -->
+          <template v-else>
+            <div
+              v-for="row in treeRows"
+              :key="row.node.fullPath"
+              class="flex w-full items-center gap-1.5 py-1 pr-3 text-xs transition-colors"
+              :class="[
+                row.node.file ? 'cursor-pointer hover:bg-accent/60' : '',
+                row.node.file && selectedPath === row.node.file.path ? 'bg-accent' : '',
+              ]"
+              :style="{ paddingLeft: `${8 + row.depth * 14}px` }"
+              @click="row.node.file ? selectFile(row.node.file) : toggleFolder(row.node.fullPath)"
+            >
+              <span class="w-3 shrink-0 text-muted-foreground">
+                <ChevronRight
+                  v-if="row.node.children.length"
+                  class="h-3 w-3 transition-transform"
+                  :class="collapsedFolders.has(row.node.fullPath) ? '' : 'rotate-90'"
+                />
+              </span>
+              <Icon
+                v-if="!row.node.file"
+                :icon="folderIcon(row.node.name, !collapsedFolders.has(row.node.fullPath))"
+                class="h-3.5 w-3.5 shrink-0"
+              />
+              <template v-else>
+                <span
+                  class="w-3 shrink-0 font-mono font-semibold"
+                  :class="statusClass(row.node.file.status)"
+                >
+                  {{ row.node.file.status }}
+                </span>
+                <Icon :icon="fileIcon(row.node.name)" class="h-3.5 w-3.5 shrink-0" />
+              </template>
+              <span class="min-w-0 flex-1 truncate font-mono" :title="row.node.fullPath">
+                {{ row.node.name }}
+              </span>
+              <template v-if="row.node.file">
+                <span
+                  v-if="row.node.file.additions"
+                  class="shrink-0 text-green-600 dark:text-green-400"
+                >
+                  +{{ row.node.file.additions }}
+                </span>
+                <span
+                  v-if="row.node.file.deletions"
+                  class="shrink-0 text-red-600 dark:text-red-400"
+                >
+                  -{{ row.node.file.deletions }}
+                </span>
+              </template>
+            </div>
+          </template>
         </div>
-        <p v-else-if="filesError" class="px-3 py-2 text-xs text-destructive">
-          {{ t("git.graph.detail.filesLoadFailed") }}:{{ filesError }}
-        </p>
-        <p v-else-if="!files.length" class="px-3 py-2 text-xs text-muted-foreground">
-          {{ t(isMerge ? "git.graph.detail.mergeCommit" : "git.graph.detail.emptyFiles") }}
-        </p>
-        <PierreFileTree
-          v-else
-          :entries="treeEntries"
-          :git-status="treeGitStatus"
-          :decoration="fileDecoration"
-          :selected="selectedPath"
-          initial-expansion="open"
-          @activate="onActivate"
-        />
       </div>
 
       <!-- 列表 / diff 分隔拖拽条:上下布局横条调高,左右布局竖条调宽 -->

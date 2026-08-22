@@ -173,13 +173,13 @@ export interface FilePreview {
   truncated: boolean;
 }
 
-/** 项目文件树条目(list_project_tree 全量返回) */
+/** 项目文件清单条目(list_project_files / search_project_files) */
 export interface ProjectFileEntry {
   /** 项目相对路径('/' 分隔) */
   path: string;
-  /** 是否被 .gitignore / .ignore 排除(灰显用;被排除目录只列自身、不含子项) */
+  /** 是否被 .gitignore / .ignore 排除(灰显用) */
   ignored: boolean;
-  /** 是否目录(空目录可见) */
+  /** 是否目录(list_project_files 逐层返回会包含目录,空目录可见) */
   isDir: boolean;
 }
 
