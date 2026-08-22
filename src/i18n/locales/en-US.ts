@@ -1261,6 +1261,10 @@ export default {
       restoreConfirm: 'Restore project "{name}"? It will be shown in the project list again.',
       deleteConfirm:
         'Permanently delete project "{name}"? This cannot be undone. All history including tag assignments and custom commands will be deleted. (Files on disk are not affected.)',
+      cleanWikiLabel: "Also delete the wiki folder",
+      cleanWikiHint:
+        "Removes the generated wiki data. Project files are not affected; the wiki can be regenerated after re-adding the project.",
+      wikiCleanFailed: "Failed to clean up the wiki data: {error}",
       loadFailed: "Failed to load archived projects: {error}",
     },
     tracking: {

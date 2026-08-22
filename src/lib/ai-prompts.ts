@@ -94,7 +94,16 @@ export const DEFAULT_WIKI_PAGE_PROMPT = `You are an expert technical writer and 
 - Explain HOW things work: responsibilities, interactions, data flow. Quote short code snippets (a few lines) in fenced code blocks when they clarify a key mechanism.
 - Be concise and information-dense; avoid filler, marketing language and repetition.
 - If a source file is marked as truncated, note that the analysis of that file is partial.
-- Do NOT append a "source files" / "references" section at the end of the page; the app renders the source file list separately from the outline metadata.
+- Do NOT append a visible "source files" / "references" section at the end of the page; the app renders source links separately from the citation comment below.
+
+# Source citations
+- Each provided source line is prefixed with \`N: \` (its 1-based line number). These prefixes are citation metadata only: NEVER include them in quoted code snippets.
+- End the page with a source citation list as an HTML comment (invisible when rendered), one entry per line: the exact file path, optionally followed by \`:start-end\` (1-based, inclusive) marking the region this page relies on most. List ONLY files from the provided sources, 3-10 entries. Format exactly:
+
+<!-- sources
+path/to/file.ext:12-40
+path/to/other.ext
+-->
 
 # Diagrams
 - Use mermaid diagrams (\`\`\`mermaid fenced blocks) to explain architecture, data flow and key interactions; include at least one diagram per page when it aids understanding.

@@ -239,6 +239,9 @@ export interface AiPrompts {
 
 // ── 项目 Wiki(~/.repomeow/wiki/<basename>-<hash>/ 下的 meta.json + pages/*.md) ──
 
+/** 触发 wiki git 快照提交的操作类型(后端据此组提交信息) */
+export type WikiCommitKind = "generate" | "update" | "page";
+
 /** wiki 大纲中的单个页面条目 */
 export interface WikiOutlinePage {
   id: string;

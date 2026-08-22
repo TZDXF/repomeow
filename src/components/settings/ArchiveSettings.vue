@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { ArchiveRestore, Search, Trash2 } from "@lucide/vue";
@@ -7,12 +7,16 @@ import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Switch } from "@/components/ui/switch";
 import { formatRelativeTime } from "@/lib/format";
+import { hasWiki } from "@/lib/wiki";
 import { useProjectsStore } from "@/stores/projects";
+import { useWikiStore } from "@/stores/wiki";
 import type { Project } from "@/types";
 
 const { t } = useI18n();
 const store = useProjectsStore();
+const wikiStore = useWikiStore();
 
 onMounted(async () => {
   try {
@@ -54,6 +58,25 @@ const confirmDescription = computed(() => {
   return t(key, { name: pending.value.project.name });
 });
 
+/** 删除确认打开时异步检测:该项目是否有 wiki 数据,有则展示联动清理开关 */
+const wikiExists = ref(false);
+const cleanWiki = ref(true);
+
+watch(pending, async (p) => {
+  wikiExists.value = false;
+  cleanWiki.value = true;
+  if (p?.action !== "delete") return;
+  try {
+    const exists = await hasWiki(p.project.path);
+    // 异步期间对话框可能已关闭或切到其他项目,仅回写仍匹配的结果
+    if (pending.value?.action === "delete" && pending.value.project.id === p.project.id) {
+      wikiExists.value = exists;
+    }
+  } catch {
+    // 检测失败按无 wiki 处理,不阻断删除
+  }
+});
+
 async function confirmAction() {
   if (!pending.value) return;
   const { action, project } = pending.value;
@@ -61,6 +84,18 @@ async function confirmAction() {
     if (action === "delete") {
       await store.deleteProject(project.id);
       toast.success(t("settings.archive.deleted", { name: project.name }));
+      // 联动清理放在项目删除成功之后;清理失败单独提示,不影响删除结果
+      if (wikiExists.value && cleanWiki.value) {
+        try {
+          await wikiStore.remove(project.path);
+        } catch (e) {
+          toast.error(
+            t("settings.archive.wikiCleanFailed", {
+              error: e instanceof Error ? e.message : String(e),
+            }),
+          );
+        }
+      }
     } else {
       await store.unarchiveProject(project.id);
       toast.success(t("settings.archive.restored", { name: project.name }));
@@ -148,6 +183,19 @@ async function confirmAction() {
       :destructive="pending?.action === 'delete'"
       @update:open="pending = null"
       @confirm="confirmAction"
-    />
+    >
+      <div
+        v-if="pending?.action === 'delete' && wikiExists"
+        class="flex items-center justify-between gap-3 rounded-md border p-3"
+      >
+        <div class="min-w-0">
+          <p class="text-sm font-medium">{{ t("settings.archive.cleanWikiLabel") }}</p>
+          <p class="mt-0.5 text-xs text-muted-foreground">
+            {{ t("settings.archive.cleanWikiHint") }}
+          </p>
+        </div>
+        <Switch v-model="cleanWiki" />
+      </div>
+    </ConfirmDialog>
   </section>
 </template>

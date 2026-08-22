@@ -186,7 +186,7 @@ pub(crate) fn git_command(path: &str) -> Command {
 }
 
 /// 执行 git 命令,非零退出时取 stderr(兜底 stdout)转为友好错误
-fn run_git(path: &str, args: &[&str]) -> AppResult<Output> {
+pub(crate) fn run_git(path: &str, args: &[&str]) -> AppResult<Output> {
     let output = git_command(path).args(args).output()?;
     if output.status.success() {
         return Ok(output);

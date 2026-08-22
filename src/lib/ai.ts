@@ -252,7 +252,14 @@ ${context.fileTree}${readmeSection}${manifestSection}`,
 /** wiki 单页生成的 user prompt(流式/非流式共用) */
 function buildWikiPageUserPrompt(page: WikiOutlinePage, files: WikiFileContent[]): string {
   const filesSection = files
-    .map((f) => `=== ${f.path}${f.truncated ? " (truncated)" : ""} ===\n${f.content}`)
+    .map((f) => {
+      // 行号前缀供末尾 sources 注释块标注 path:start-end 引用(提示词要求引用时剥除前缀)
+      const numbered = f.content
+        .split("\n")
+        .map((line, i) => `${i + 1}: ${line}`)
+        .join("\n");
+      return `=== ${f.path}${f.truncated ? " (truncated)" : ""} ===\n${numbered}`;
+    })
     .join("\n\n");
   return `Wiki page: ${page.title}
 Coverage: ${page.description}

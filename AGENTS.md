@@ -74,12 +74,13 @@ src-tauri/migrations/ SQL 迁移,NNN_name.sql(当前 001~007)
 ## wiki 生成管线(commands/wiki.rs + lib/wiki-generator.ts)
 
 - 两阶段(参照 deepwiki-open,无 embedding/RAG):`collect_wiki_context` 收集过滤后的文件树(walk 缓存 + 产物/二进制/锁文件黑名单,超预算按目录折叠)+ README + 根目录清单文件 → LLM 产裸 XML 大纲(`wiki-parse.ts` 三层容错:fence 剥离/合成闭合标签/逐 `<page>` 切分,配单测)→ 逐页 `read_wiki_files` 取相关文件全文喂 LLM(单页重试 2 次,并发走 `aiConcurrency`)→ `save_wiki_page` 逐页落盘 → `save_wiki_meta` 收尾。取消时不写 meta,整本视为无效。
-- 生成状态托管在全局 `stores/wiki.ts`(单例):**离开 wiki 页不中止生成**,回来后按 `genFor` 路径匹配续看进度;同时只允许一个整本生成,期间其他项目可正常查看已有 wiki。生成中 UI 为左右布局(左侧进度+页面列表,右侧流式预览)。
+- 生成状态托管在全局 `stores/wiki.ts`(单例):**离开 wiki 页不中止生成**,回来后按 `genFor` 路径匹配续看进度;同时只允许一个整本生成,期间其他项目可正常查看已有 wiki。生成中与最终查看**复用同一左右布局**(左侧页面列表在生成中把 importance 色点换成单页状态图标,顶部多一段阶段/进度、底部多一个取消按钮;右侧正文换成流式预览),流式预览自动跟随滚动到底部,用户上翻阅读即暂停跟随、滚回底部自动恢复(见 `ProjectWiki.vue` 的 pinned/suppress 逻辑)。
 - AI 思考模式:`settings.aiThinkingEnabled` 默认 false;开启后 `getChatModel(thinkingEnabled)` 不再注入 provider 关闭思考参数,模型按默认行为输出 `<think>` 块;`stripThinking` 的兜底剥除对响应起始位置的闭合思考块仍生效。仅 wiki 大纲与页面生成受开关影响(commit/报告等其他 AI 功能保持原行为,避免思考带来的延迟副作用)。
 - 页面正文走**流式生成**(`ai.ts` 的 `streamWikiPage`,streamText + Tauri http 插件 pull 式读响应体),进度面板用 Markdown `mode="streaming"` 实时预览第一个进行中页面;大纲仍为非流式(generateText)。
 - stale 检测:meta.headSha 与当前 HEAD(git2 `open_repo`,wiki.rs 内复用)不一致即过时;stale 时可**增量更新**(`wiki_changed_files` 取 headSha..HEAD 变更文件清单,仅重生成 relevantFiles 命中的页面并推进 meta.headSha;无 headSha/历史改写时退化为整本重生成)。
 - 页面底部「来源文件」chips 来自大纲的 relevantFiles(非 LLM 正文解析),点击经 `SourceFileDialog.vue`(复用 CodeViewer + `read_file_preview`)查看文件;页面提示词**不再要求**正文末尾输出来源清单(该信息由 chips 承担,避免重复)。页面提示词要求产出 mermaid 图(flowchart 强制 TD),由 vue-stream-markdown 内置 mermaid 支持渲染。
-- git.rs 的 `open_repo` 是 pub(crate),git 读路径优先复用。
+- **wiki 目录用 git 管理**:每个项目的 wiki 目录本身是本地 git 仓库(首次提交时 `git init`,init 后本地固化 `user.name=RepoMeow` / `user.email=repomeow@localhost` / `commit.gpgsign=false` / `core.autocrlf=false`,提交再加 `-c commit.gpgsign=false --no-verify` 兜底,不依赖用户全局 git 配置)。整本生成与增量更新在 `save_wiki_meta` 落盘后自动快照提交(`commitKind` 参数决定中文提交信息措辞:generate=生成/update=增量更新;提交信息统一附「当前代码 HEAD 前 7 位」,即 `commit_message` 的 head 参数,非 git 项目省略),提交失败仅 eprintln 不阻断落盘;单页重新生成不经 meta,由前端调 `commit_wiki` 命令补提交(kind=page + 页面标题);`begin_wiki` 只清 pages/ 与 meta.json 而**保留 .git**,整本重新生成在同一历史上演进;`delete_wiki` 不走 git,整目录直接删除(`remove_wiki_dir` 会先清 Windows 只读位——git 对象文件只读,裸 `remove_dir_all` 会「拒绝访问」)。快照提交幂等:`git status --porcelain` 为空即跳过。
+- git.rs 的 `open_repo` 是 pub(crate),git 读路径优先复用;wiki 快照提交复用 git.rs 的 `run_git`/`git_command`(亦 pub(crate))。
 
 ## 前端约定
 
