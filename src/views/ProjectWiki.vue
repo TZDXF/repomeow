@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { toast } from "vue-sonner";
+import { useNow } from "@vueuse/core";
 import {
   ArrowLeft,
   BookOpenText,
@@ -99,6 +100,52 @@ const phaseText = computed(() => {
   };
   const phase = generation.value?.phase ?? "idle";
   return phase === "idle" ? "" : map[phase];
+});
+
+const phaseSteps = computed(() => [
+  t("wiki.progress.collecting"),
+  t("wiki.progress.outlining"),
+  t("wiki.progress.generating"),
+]);
+
+const activePhaseIndex = computed(() => {
+  switch (generation.value?.phase) {
+    case "outlining":
+      return 1;
+    case "generating":
+      return 2;
+    default:
+      return 0;
+  }
+});
+
+const totalPageCount = computed(() => generation.value?.pages.length ?? 0);
+const processedPageCount = computed(
+  () =>
+    generation.value?.pages.filter((item) => ["done", "failed", "cancelled"].includes(item.status))
+      .length ?? 0,
+);
+const failedPageCount = computed(
+  () => generation.value?.pages.filter((item) => item.status === "failed").length ?? 0,
+);
+const pageProgressPercent = computed(() =>
+  totalPageCount.value > 0
+    ? Math.round((processedPageCount.value / totalPageCount.value) * 100)
+    : 0,
+);
+const pageProgressStyle = computed(() => ({ width: `${pageProgressPercent.value}%` }));
+
+/** 每秒刷新展示用时;生成开始时间由全局 store 持有,路由返回后不会重新计时 */
+const now = useNow({ interval: 1000 });
+const elapsedText = computed(() => {
+  const startedAt = generation.value?.startedAt;
+  if (!startedAt) return "00:00";
+  const totalSeconds = Math.max(0, Math.floor((now.value.getTime() - startedAt) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const pair = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  return hours > 0 ? `${String(hours).padStart(2, "0")}:${pair}` : pair;
 });
 
 /** 手动选中的预览页;未选或选中页不可预览时自动跟随第一个正在生成的页 */
@@ -365,6 +412,15 @@ const beforeDownload = createBeforeDownload(t);
       <span class="min-w-0 flex-1 truncate text-sm font-medium">
         {{ project.name }} · {{ t("wiki.title") }}
       </span>
+      <div
+        v-if="generatingHere"
+        class="flex shrink-0 items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-xs text-primary"
+      >
+        <LoaderCircle class="h-3.5 w-3.5 animate-spin" />
+        <span>{{ t("wiki.progress.inProgress") }}</span>
+        <span class="text-muted-foreground">·</span>
+        <span class="tabular-nums text-muted-foreground">{{ elapsedText }}</span>
+      </div>
       <Badge v-if="wiki.data?.stale" variant="secondary" :title="t('wiki.staleHint')">
         {{ t("wiki.stale") }}
       </Badge>
@@ -407,6 +463,85 @@ const beforeDownload = createBeforeDownload(t);
     <!-- 主体:左侧页面列表 + 右侧内容;生成中复用同一布局(列表带单页状态,右侧流式预览) -->
     <div v-if="generatingHere || wiki.data" class="flex min-h-0 flex-1">
       <aside class="flex w-64 shrink-0 flex-col border-r">
+        <section v-if="generatingHere" class="shrink-0 border-b bg-muted/20 p-3" aria-live="polite">
+          <div class="flex items-center gap-2">
+            <LoaderCircle class="h-4 w-4 shrink-0 animate-spin text-primary" />
+            <p class="min-w-0 flex-1 truncate text-xs font-medium">{{ phaseText }}</p>
+            <span
+              v-if="totalPageCount"
+              class="shrink-0 text-xs font-semibold tabular-nums text-primary"
+            >
+              {{ pageProgressPercent }}%
+            </span>
+          </div>
+
+          <div class="mt-3 grid grid-cols-3 gap-1" aria-hidden="true">
+            <div v-for="(step, index) in phaseSteps" :key="step" class="text-center">
+              <div class="mb-1 flex items-center">
+                <span
+                  class="h-px flex-1"
+                  :class="index <= activePhaseIndex ? 'bg-primary/50' : 'bg-border'"
+                />
+                <span
+                  class="relative h-2.5 w-2.5 shrink-0 rounded-full border"
+                  :class="
+                    index < activePhaseIndex
+                      ? 'border-primary bg-primary'
+                      : index === activePhaseIndex
+                        ? 'border-primary bg-background shadow-[0_0_0_3px] shadow-primary/15'
+                        : 'border-border bg-background'
+                  "
+                >
+                  <span
+                    v-if="index === activePhaseIndex"
+                    class="absolute inset-0 animate-ping rounded-full bg-primary/50"
+                  />
+                </span>
+                <span
+                  class="h-px flex-1"
+                  :class="index < activePhaseIndex ? 'bg-primary/50' : 'bg-border'"
+                />
+              </div>
+              <span
+                class="text-[10px]"
+                :class="index <= activePhaseIndex ? 'text-foreground' : 'text-muted-foreground/60'"
+              >
+                {{ step }}
+              </span>
+            </div>
+          </div>
+
+          <div
+            class="mt-3 h-1.5 overflow-hidden rounded-full bg-muted"
+            role="progressbar"
+            :aria-label="phaseText"
+            :aria-valuemin="totalPageCount ? 0 : undefined"
+            :aria-valuemax="totalPageCount ? 100 : undefined"
+            :aria-valuenow="totalPageCount ? pageProgressPercent : undefined"
+          >
+            <div
+              v-if="totalPageCount"
+              class="h-full rounded-full bg-primary transition-[width] duration-500 ease-out"
+              :style="pageProgressStyle"
+            />
+            <div v-else class="wiki-progress-indeterminate h-full rounded-full bg-primary" />
+          </div>
+
+          <div class="mt-2 text-[11px] text-muted-foreground">
+            <span v-if="totalPageCount" class="tabular-nums">
+              {{
+                t("wiki.progress.pages", {
+                  processed: processedPageCount,
+                  total: totalPageCount,
+                })
+              }}
+            </span>
+            <span v-else>{{ t("wiki.progress.preparing") }}</span>
+          </div>
+          <p v-if="failedPageCount" class="mt-1 text-[11px] text-destructive">
+            {{ t("wiki.progress.failedPages", { count: failedPageCount }) }}
+          </p>
+        </section>
         <ScrollArea class="min-h-0 flex-1">
           <nav class="space-y-3 p-3">
             <div v-for="g in navGroups" :key="g.section ?? '__flat'">
@@ -424,7 +559,9 @@ const beforeDownload = createBeforeDownload(t);
                 :class="
                   p.id === activeId
                     ? 'bg-accent font-medium text-accent-foreground'
-                    : 'text-foreground/80'
+                    : p.status === 'running'
+                      ? 'bg-primary/5 text-foreground'
+                      : 'text-foreground/80'
                 "
                 :title="p.error ?? p.title"
                 @click="selectPage(p.id)"
@@ -465,10 +602,16 @@ const beforeDownload = createBeforeDownload(t);
         <div ref="previewHost" class="mx-auto max-w-3xl px-6 py-5 text-sm">
           <!-- 生成中:流式预览 -->
           <template v-if="generatingHere">
-            <div v-if="previewItem" class="mb-3 flex items-center gap-2">
+            <div v-if="previewItem" class="mb-3 flex items-center gap-2 border-b pb-3">
               <LoaderCircle class="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
               <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
                 {{ t("wiki.writing") }} · {{ previewItem.page.title }}
+              </span>
+              <span
+                v-if="totalPageCount"
+                class="shrink-0 text-xs tabular-nums text-muted-foreground"
+              >
+                {{ processedPageCount }} / {{ totalPageCount }}
               </span>
             </div>
             <Markdown
@@ -480,9 +623,28 @@ const beforeDownload = createBeforeDownload(t);
               :locale="settings.language"
               :before-download="beforeDownload"
             />
-            <p v-else class="py-12 text-center text-muted-foreground">
-              {{ previewItem ? t("wiki.waitingFirstChunk") : phaseText }}
-            </p>
+            <div v-else class="flex min-h-[22rem] flex-col items-center justify-center text-center">
+              <div class="relative mb-5 flex h-16 w-16 items-center justify-center">
+                <span class="absolute inset-0 animate-ping rounded-full bg-primary/10" />
+                <span class="absolute inset-2 animate-pulse rounded-full bg-primary/10" />
+                <BookOpenText class="relative h-7 w-7 text-primary" />
+              </div>
+              <p class="text-sm font-medium">
+                {{ previewItem ? t("wiki.waitingFirstChunk") : phaseText }}
+              </p>
+              <div class="mt-3 flex gap-1.5" aria-hidden="true">
+                <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/70" />
+                <span
+                  class="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/70 [animation-delay:150ms]"
+                />
+                <span
+                  class="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/70 [animation-delay:300ms]"
+                />
+              </div>
+              <p class="mt-4 max-w-sm text-xs leading-5 text-muted-foreground">
+                {{ t("wiki.progress.leaveHint") }}
+              </p>
+            </div>
           </template>
 
           <!-- 静态正文 -->
@@ -583,3 +745,27 @@ const beforeDownload = createBeforeDownload(t);
     />
   </div>
 </template>
+
+<style scoped>
+@keyframes wiki-progress-slide {
+  from {
+    transform: translateX(-120%);
+  }
+  to {
+    transform: translateX(350%);
+  }
+}
+
+.wiki-progress-indeterminate {
+  width: 30%;
+  animation: wiki-progress-slide 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wiki-progress-indeterminate {
+    width: 100%;
+    animation: none;
+    opacity: 0.55;
+  }
+}
+</style>

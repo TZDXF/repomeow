@@ -855,6 +855,17 @@ export default {
     writing: "Writing",
     sources: "Source files",
     waitingFirstChunk: "Waiting for the first chunk from the model...",
+    progress: {
+      inProgress: "Generating Wiki",
+      collecting: "Collect files",
+      outlining: "Build outline",
+      generating: "Write pages",
+      preparing: "Preparing the page list",
+      pages: "Processed {processed} / {total} pages",
+      failedPages: "{count} page(s) failed; the remaining pages will continue",
+      leaveHint:
+        "Generation may take a few minutes. You can work on another project—leaving this page will not interrupt it.",
+    },
     phase: {
       collecting: "Collecting project files...",
       outlining: "Generating outline...",

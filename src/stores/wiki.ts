@@ -30,6 +30,8 @@ export interface WikiGenerationState {
   pages: WikiGenPageItem[];
   error: string;
   streamContents: Record<string, string>;
+  /** 本轮整本生成开始时间,供离开页面后返回时继续展示真实耗时 */
+  startedAt: number;
 }
 
 function isActiveGeneration(state: WikiGenerationState | undefined): boolean {
@@ -138,6 +140,7 @@ export const useWikiStore = defineStore("wiki", () => {
       pages: [],
       error: "",
       streamContents: {},
+      startedAt: Date.now(),
     });
     generations[key] = state;
     generationControllers.set(key, controller);

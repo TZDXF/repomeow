@@ -824,6 +824,16 @@ export default {
     writing: "正在生成",
     sources: "来源文件",
     waitingFirstChunk: "等待模型输出第一段内容…",
+    progress: {
+      inProgress: "Wiki 生成中",
+      collecting: "收集文件",
+      outlining: "生成大纲",
+      generating: "生成页面",
+      preparing: "正在准备页面清单",
+      pages: "已处理 {processed} / {total} 页",
+      failedPages: "{count} 个页面生成失败，其余页面将继续",
+      leaveHint: "生成可能需要几分钟。你可以先去处理其他项目，离开此页面不会中断任务。",
+    },
     phase: {
       collecting: "正在收集项目文件…",
       outlining: "正在生成大纲…",
