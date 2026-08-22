@@ -245,7 +245,7 @@ async function confirm() {
 
         <!-- 模型 / 思考强度 -->
         <template v-if="backend !== 'builtin'">
-          <div class="grid gap-3 sm:grid-cols-2">
+          <div class="grid gap-3">
             <div class="flex min-w-0 flex-col gap-1.5">
               <label class="text-sm font-medium">{{ t("wiki.agentModel") }}</label>
               <Select
@@ -253,8 +253,8 @@ async function confirm() {
                 :disabled="probeLoading"
                 @update:model-value="onModelChange"
               >
-                <SelectTrigger>
-                  <SelectValue />
+                <SelectTrigger class="min-w-0 w-full">
+                  <SelectValue class="min-w-0 flex-1 truncate text-left" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem :value="DEFAULT_VALUE">
@@ -273,8 +273,8 @@ async function confirm() {
                 :disabled="probeLoading || thinkingChoices.length === 0"
                 @update:model-value="onThinkingChange"
               >
-                <SelectTrigger>
-                  <SelectValue />
+                <SelectTrigger class="min-w-0 w-full">
+                  <SelectValue class="min-w-0 flex-1 truncate text-left" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem :value="DEFAULT_VALUE">
@@ -295,7 +295,6 @@ async function confirm() {
             <Loader2 v-if="probeLoading" class="h-3 w-3 animate-spin" />
             {{ probeHint }}
           </p>
-          <p class="text-xs text-muted-foreground">{{ t("wiki.agentBackendNote") }}</p>
         </template>
       </div>
 

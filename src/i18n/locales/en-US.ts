@@ -829,8 +829,6 @@ export default {
     agentFetchModelsFailed: 'Failed to fetch the model list; click "Test" to see the error',
     agentNoModelOptions:
       "This agent did not report model / thinking-effort options; its defaults will be used",
-    agentBackendNote:
-      "The agent backend generates pages sequentially in a single session (exploring the repository page by page); duration and quota usage depend on the chosen agent. Automatic incremental wiki updates only run with the built-in API backend — with an agent backend, trigger updates manually",
     regeneratePage: "Regenerate this page",
     pageRegenerated: "Page regenerated",
     openDir: "Open Folder",

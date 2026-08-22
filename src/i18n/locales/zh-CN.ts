@@ -800,8 +800,6 @@ export default {
     agentFetchingModels: "正在从 agent 获取模型清单…",
     agentFetchModelsFailed: "获取模型清单失败,可点「测试」查看报错",
     agentNoModelOptions: "该 agent 未上报模型/思考强度选项,将使用其默认配置",
-    agentBackendNote:
-      "agent 后端为单会话顺序生成(逐页探索仓库),耗时与额度消耗取决于所选 agent;wiki 自动增量更新仅在「内置 API」后端时参与,agent 后端需手动触发",
     regeneratePage: "重新生成此页",
     pageRegenerated: "页面已重新生成",
     openDir: "打开目录",
