@@ -49,10 +49,15 @@ onMounted(async () => {
   if (project.value) await wiki.load(project.value.path);
 });
 
-/** 当前项目是否正在生成(生成可能属于另一个项目,那时本页正常查看自己的 wiki) */
-const generatingHere = computed(
-  () => wiki.generating && wiki.genFor != null && wiki.genFor === project.value?.path,
-);
+/** 当前项目的生成状态;不同项目的任务在全局 store 中按路径隔离 */
+const generation = computed(() => {
+  const p = project.value;
+  return p ? wiki.generationFor(p.path) : undefined;
+});
+const generatingHere = computed(() => {
+  const p = project.value;
+  return p ? wiki.isGenerating(p.path) : false;
+});
 
 // ── 页面选择 ──────────────────────────────────────────────────────────────
 
@@ -92,21 +97,22 @@ const phaseText = computed(() => {
     failed: "",
     cancelled: "",
   };
-  return wiki.phase === "idle" ? "" : map[wiki.phase as WikiGenPhase];
+  const phase = generation.value?.phase ?? "idle";
+  return phase === "idle" ? "" : map[phase];
 });
 
 /** 手动选中的预览页;未选或选中页不可预览时自动跟随第一个正在生成的页 */
 const previewId = ref<string | null>(null);
 const previewItem = computed(() => {
-  const list = wiki.pages;
+  const list = generation.value?.pages ?? [];
   const manual = list.find((i) => i.page.id === previewId.value);
-  if (manual && (wiki.streamContents[manual.page.id] || manual.status === "running")) {
+  if (manual && (generation.value?.streamContents[manual.page.id] || manual.status === "running")) {
     return manual;
   }
   return list.find((i) => i.status === "running") ?? null;
 });
 const previewContent = computed(() =>
-  previewItem.value ? (wiki.streamContents[previewItem.value.page.id] ?? "") : "",
+  previewItem.value ? (generation.value?.streamContents[previewItem.value.page.id] ?? "") : "",
 );
 
 // ── 左侧导航列表(生成中与最终查看复用同一列表样式) ───────────────────────
@@ -123,7 +129,7 @@ interface WikiNavItem {
 
 const navItems = computed<WikiNavItem[]>(() => {
   if (generatingHere.value) {
-    return wiki.pages.map((i) => ({
+    return (generation.value?.pages ?? []).map((i) => ({
       id: i.page.id,
       title: i.page.title,
       section: i.page.section ?? null,
@@ -241,8 +247,9 @@ function generate() {
   wiki
     .generate({ path: p.path, name: p.name }, settings.language)
     .then(() => {
-      if (wiki.phase === "failed") {
-        toast.error(t("wiki.failed", { error: wiki.genError || "-" }));
+      const result = wiki.generationFor(p.path);
+      if (result?.phase === "failed") {
+        toast.error(t("wiki.failed", { error: result.error || "-" }));
       }
     })
     .catch(() => {});
@@ -382,7 +389,7 @@ const beforeDownload = createBeforeDownload(t);
         >
           <SlidersHorizontal class="h-4 w-4" />
         </Button>
-        <Button variant="outline" size="sm" :disabled="wiki.generating" @click="requestGenerate">
+        <Button variant="outline" size="sm" @click="requestGenerate">
           <RefreshCw class="h-4 w-4" />
           {{ t("wiki.regenerate") }}
         </Button>
@@ -448,7 +455,7 @@ const beforeDownload = createBeforeDownload(t);
           </nav>
         </ScrollArea>
         <div v-if="generatingHere" class="shrink-0 border-t p-2">
-          <Button variant="outline" size="sm" class="w-full" @click="wiki.cancel()">
+          <Button variant="outline" size="sm" class="w-full" @click="wiki.cancel(project.path)">
             {{ t("wiki.cancel") }}
           </Button>
         </div>
@@ -552,15 +559,10 @@ const beforeDownload = createBeforeDownload(t);
       <p class="max-w-md text-center text-sm text-muted-foreground">
         {{ t("wiki.emptyDescription") }}
       </p>
-      <p v-if="wiki.genError" class="max-w-md text-center text-sm text-destructive">
-        {{ wiki.genError }}
+      <p v-if="generation?.error" class="max-w-md text-center text-sm text-destructive">
+        {{ generation.error }}
       </p>
-      <Button
-        class="mt-2"
-        :disabled="wiki.generating"
-        :title="wiki.generating ? t('wiki.busyOther') : undefined"
-        @click="requestGenerate"
-      >
+      <Button class="mt-2" @click="requestGenerate">
         <BookOpenText class="h-4 w-4" />
         {{ t("wiki.generate") }}
       </Button>

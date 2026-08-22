@@ -855,7 +855,6 @@ export default {
     writing: "Writing",
     sources: "Source files",
     waitingFirstChunk: "Waiting for the first chunk from the model...",
-    busyOther: "Another project is generating its wiki. Please wait for it to finish.",
     phase: {
       collecting: "Collecting project files...",
       outlining: "Generating outline...",

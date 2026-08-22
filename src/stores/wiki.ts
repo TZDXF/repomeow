@@ -1,4 +1,4 @@
-import { computed, ref } from "vue";
+import { computed, reactive, ref } from "vue";
 import { defineStore } from "pinia";
 import type { SupportedLocale } from "@/i18n";
 import {
@@ -13,6 +13,7 @@ import {
   type WikiPageStatus,
 } from "@/lib/wiki-generator";
 import { commitWiki, deleteWiki, loadWiki, saveWikiMeta, wikiChangedFiles } from "@/lib/wiki";
+import { cleanPath } from "@/lib/path";
 import { useSettingsStore } from "@/stores/settings";
 import type { WikiChangedFiles, WikiData, WikiOutlinePage } from "@/types";
 
@@ -21,6 +22,23 @@ export interface WikiGenPageItem {
   page: WikiOutlinePage;
   status: WikiPageStatus;
   error?: string;
+}
+
+/** 单个项目的整本生成状态;不同项目各自持有一份,可同时生成 */
+export interface WikiGenerationState {
+  phase: WikiGenPhase | "idle";
+  pages: WikiGenPageItem[];
+  error: string;
+  streamContents: Record<string, string>;
+}
+
+function isActiveGeneration(state: WikiGenerationState | undefined): boolean {
+  return !!state && ["collecting", "outlining", "generating"].includes(state.phase);
+}
+
+/** 生成任务与项目路径一一对应;统一清理尾随分隔符后作为缓存 key */
+function generationKey(projectPath: string): string {
+  return cleanPath(projectPath);
 }
 
 /** 按设置组装生成选项:内置 API 或本地 agent(ACP 会话)后端 */
@@ -52,9 +70,8 @@ function buildGenOptions(language: SupportedLocale): WikiGenOptions {
 
 /**
  * 项目 wiki 的查看与生成状态。wiki 文件落盘在 ~/.repomeow/wiki/<目录>。
- * store 是全局单例:**离开 wiki 页面不中止生成**——生成状态(genFor)与加载的
- * wiki 数据(dataFor)各自记录所属项目路径,视图只展示与当前项目匹配的部分;
- * 同时进行中的整本生成只允许一个(AI 管线串行),期间其他项目可正常查看已有 wiki。
+ * store 是全局单例:**离开 wiki 页面不中止生成**——生成状态按项目路径隔离,
+ * 不同项目可以同时生成;加载的 wiki 数据(dataFor)仍只对应当前查看的项目。
  */
 export const useWikiStore = defineStore("wiki", () => {
   const data = ref<WikiData | null>(null);
@@ -63,23 +80,22 @@ export const useWikiStore = defineStore("wiki", () => {
   const loading = ref(false);
 
   // ── 生成进度 ──
-  const phase = ref<WikiGenPhase | "idle">("idle");
-  /** 正在生成的项目路径;视图据此判断进度面板是否属于当前项目 */
-  const genFor = ref<string | null>(null);
-  const pages = ref<WikiGenPageItem[]>([]);
-  const genError = ref("");
-  /** 逐页流式生成中的正文(pageId → 已产出内容),供进度面板实时预览 */
-  const streamContents = ref<Record<string, string>>({});
-  let controller: AbortController | null = null;
-  /** 进行中的整本生成 promise;remove 时等待其收敛,避免删除后页面又被落盘重建 */
-  let genRun: Promise<void> | null = null;
+  const generations = reactive<Record<string, WikiGenerationState>>({});
+  const generationControllers = new Map<string, AbortController>();
+  /** 进行中的整本生成 promise;remove 时等待对应项目收敛,避免删除后又被落盘重建 */
+  const generationRuns = new Map<string, Promise<void>>();
 
-  const generating = computed(() =>
-    ["collecting", "outlining", "generating"].includes(phase.value),
-  );
-  const doneCount = computed(
-    () => pages.value.filter((p) => p.status === "done" || p.status === "failed").length,
-  );
+  /** 获取指定项目的生成状态;返回值由 Vue reactive 托管,可直接用于 computed */
+  function generationFor(projectPath: string): WikiGenerationState | undefined {
+    return generations[generationKey(projectPath)];
+  }
+
+  function isGenerating(projectPath: string): boolean {
+    return isActiveGeneration(generationFor(projectPath));
+  }
+
+  /** 是否存在任意整本生成任务,供需要全局概览的调用方使用 */
+  const generating = computed(() => Object.values(generations).some(isActiveGeneration));
 
   async function load(projectPath: string) {
     // 切换到另一个项目时先清空,避免旧项目内容闪现
@@ -93,47 +109,56 @@ export const useWikiStore = defineStore("wiki", () => {
     }
   }
 
-  /** 整本生成(已有生成任务进行中时忽略);结束后若用户仍在看该项目则刷新展示 */
+  /** 整本生成;同一项目避免重复启动,不同项目可并行;结束后按当前查看项目刷新展示 */
   function generate(project: { path: string; name: string }, language: SupportedLocale) {
-    if (generating.value) return Promise.resolve();
-    genRun = runGenerate(project, language);
-    return genRun;
+    const key = generationKey(project.path);
+    if (isGenerating(project.path)) return generationRuns.get(key) ?? Promise.resolve();
+    const run = runGenerate(project, language, key);
+    generationRuns.set(key, run);
+    return run;
   }
 
-  async function runGenerate(project: { path: string; name: string }, language: SupportedLocale) {
-    if (generating.value) return;
-    controller = new AbortController();
-    genFor.value = project.path;
-    pages.value = [];
-    genError.value = "";
-    streamContents.value = {};
+  async function runGenerate(
+    project: { path: string; name: string },
+    language: SupportedLocale,
+    key: string,
+  ) {
+    const controller = new AbortController();
+    const state = reactive<WikiGenerationState>({
+      phase: "idle",
+      pages: [],
+      error: "",
+      streamContents: {},
+    });
+    generations[key] = state;
+    generationControllers.set(key, controller);
     try {
       await generateWiki(project, buildGenOptions(language), controller.signal, {
         onPhase: (p) => {
-          phase.value = p;
+          state.phase = p;
         },
         onPage: (page, status, error) => {
-          const item = pages.value.find((i) => i.page.id === page.id);
+          const item = state.pages.find((i) => i.page.id === page.id);
           if (item) {
             item.status = status;
             item.error = error;
           } else {
-            pages.value.push({ page: { ...page }, status, error });
+            state.pages.push({ page: { ...page }, status, error });
           }
           // 页面进入终态后清掉流式预览内容
           if (status !== "running" && status !== "pending") {
-            delete streamContents.value[page.id];
+            delete state.streamContents[page.id];
           }
         },
         onPageProgress: (page, partial) => {
-          streamContents.value[page.id] = partial;
+          state.streamContents[page.id] = partial;
         },
       });
     } catch (e) {
-      genError.value = e instanceof Error ? e.message : String(e);
+      state.error = e instanceof Error ? e.message : String(e);
     } finally {
-      controller = null;
-      genRun = null;
+      generationControllers.delete(key);
+      generationRuns.delete(key);
       // 取消/失败时已生成的页面文件仍在磁盘(无 meta 则整本无效),统一以落盘状态为准;
       // 用户已切到别的项目时不回写 data,避免覆盖其正在查看的 wiki
       if (dataFor.value === project.path) {
@@ -143,8 +168,8 @@ export const useWikiStore = defineStore("wiki", () => {
   }
 
   /** 用户主动取消(中止 AI 请求与后续页面派发) */
-  function cancel() {
-    controller?.abort();
+  function cancel(projectPath: string) {
+    generationControllers.get(generationKey(projectPath))?.abort();
   }
 
   /** 单页重生成:就地更新该页内容,保持其余页面与 meta 不变 */
@@ -154,7 +179,7 @@ export const useWikiStore = defineStore("wiki", () => {
     page: WikiOutlinePage,
     language: SupportedLocale,
   ) {
-    if (generating.value || regeneratingPage.value) return;
+    if (isGenerating(project.path) || regeneratingPage.value) return;
     regeneratingPage.value = page.id;
     // agent 后端为本次重生成单独起会话(原生成会话早已结束),完成后即收尾
     let kernel: WikiGenKernel | null = null;
@@ -181,7 +206,7 @@ export const useWikiStore = defineStore("wiki", () => {
     language: SupportedLocale,
   ): Promise<number> {
     const d = data.value;
-    if (!d || updating.value || generating.value) return 0;
+    if (!d || updating.value || isGenerating(project.path)) return 0;
     const fromSha = d.meta.headSha;
     if (!fromSha) throw new Error("no head sha");
     const options = buildGenOptions(language);
@@ -263,7 +288,7 @@ export const useWikiStore = defineStore("wiki", () => {
     project: { path: string; name: string },
     language: SupportedLocale,
   ): Promise<number> {
-    if (updating.value || generating.value || regeneratingPage.value) {
+    if (updating.value || isGenerating(project.path) || regeneratingPage.value) {
       return 0;
     }
     const options = buildGenOptions(language);
@@ -290,11 +315,14 @@ export const useWikiStore = defineStore("wiki", () => {
 
   async function remove(projectPath: string) {
     // 该项目正在生成时先中止并等流水线收敛,避免删除后又被落盘的页面把目录建回来
-    if (genRun && genFor.value === projectPath) {
-      controller?.abort();
-      await genRun.catch(() => {});
+    const key = generationKey(projectPath);
+    const run = generationRuns.get(key);
+    if (run) {
+      generationControllers.get(key)?.abort();
+      await run.catch(() => {});
     }
     await deleteWiki(projectPath);
+    delete generations[key];
     if (dataFor.value === projectPath) data.value = null;
   }
 
@@ -302,13 +330,9 @@ export const useWikiStore = defineStore("wiki", () => {
     data,
     dataFor,
     loading,
-    phase,
-    genFor,
-    pages,
-    genError,
-    streamContents,
+    generationFor,
+    isGenerating,
     generating,
-    doneCount,
     regeneratingPage,
     updating,
     load,

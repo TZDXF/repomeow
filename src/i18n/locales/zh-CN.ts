@@ -825,7 +825,6 @@ export default {
     writing: "正在生成",
     sources: "来源文件",
     waitingFirstChunk: "等待模型输出第一段内容…",
-    busyOther: "另一个项目正在生成 Wiki,请等待其完成",
     phase: {
       collecting: "正在收集项目文件…",
       outlining: "正在生成大纲…",
