@@ -1,6 +1,11 @@
 //! 项目 Wiki:AI 生成的大纲与页面落盘为 `~/.repomeow/wiki/<basename>-<hash>/` 下的
 //! `meta.json` + `pages/NN-slug.md` 普通文件(不进 SQLite),用户可直接查看/编辑/导出。
 //!
+//! wiki 目录本身是一个本地 git 仓库(首次提交时 `git init`):整本生成/增量更新在
+//! save_wiki_meta 落盘后自动快照提交,单页重新生成走 commit_wiki;begin_wiki 只清
+//! pages/ 与 meta.json 而保留 .git,重新生成在同一历史上演进;删除(delete_wiki)
+//! 不走 git,整目录直接移除(含 .git)。
+//!
 //! 生成流水线在前端编排(参照 batch-report):collect_wiki_context 收集文件树与清单
 //! → LLM 产 XML 大纲 → 逐页 read_wiki_files 取相关文件全文喂 LLM → save_wiki_page 逐页
 //! 落盘 → save_wiki_meta 最后写入(meta.json 存在且 status=completed 才算有效 wiki)。
@@ -20,6 +25,9 @@ const WIKI_DIR_NAME: &str = "wiki";
 const META_FILE: &str = "meta.json";
 const PAGES_DIR: &str = "pages";
 const META_VERSION: u32 = 1;
+/// wiki git 提交身份:git 管理是应用自身行为,不用用户全局配置(避免无身份时提交失败)
+const WIKI_GIT_NAME: &str = "RepoMeow";
+const WIKI_GIT_EMAIL: &str = "repomeow@localhost";
 
 /// 文件树字符预算(≈25k token),超出按目录折叠
 const FILE_TREE_MAX_CHARS: usize = 100_000;
@@ -92,6 +100,15 @@ const MANIFEST_NAMES: &[&str] = &[
 ];
 
 // ── 数据结构(IPC 边界恒为 camelCase) ─────────────────────────────────────
+
+/// 触发 wiki git 提交的操作类型(决定提交信息措辞;序列化为 "generate"/"update"/"page")
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WikiCommitKind {
+    Generate,
+    Update,
+    Page,
+}
 
 /// 大纲中的单个页面条目(meta.json 的 outline 元素)
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -489,6 +506,15 @@ fn load_wiki_in(dir: &Path) -> Option<(WikiMeta, Vec<WikiPageData>)> {
     Some((meta, pages))
 }
 
+/// 项目是否已有 wiki 数据目录(目录存在且非空;未完结/损坏的 meta 也算,
+/// 供删除项目时询问是否一并清理)
+fn has_wiki_in(dir: &Path) -> bool {
+    dir.is_dir()
+        && fs::read_dir(dir)
+            .map(|mut entries| entries.next().is_some())
+            .unwrap_or(false)
+}
+
 /// 项目的 wiki 目录路径(不创建),供前端展示
 #[tauri::command]
 pub fn get_wiki_dir(app: AppHandle, project_path: String) -> AppResult<String> {
@@ -497,15 +523,145 @@ pub fn get_wiki_dir(app: AppHandle, project_path: String) -> AppResult<String> {
         .into_owned())
 }
 
-/// 开始一次全新生成:清空 pages/ 与 meta.json(旧 wiki 随即失效,避免中断后读到新旧混杂)
+/// 项目是否已有 wiki 数据(供删除项目时联动询问清理)
+#[tauri::command]
+pub fn has_wiki(app: AppHandle, project_path: String) -> AppResult<bool> {
+    Ok(has_wiki_in(&wiki_dir(&app, &project_path)?))
+}
+
+/// 开始一次全新生成:清空 pages/ 与 meta.json(旧 wiki 随即失效,避免中断后读到
+/// 新旧混杂)。保留 .git——整本重新生成也在同一 git 历史上演进,而非从零开始
+fn begin_wiki_in(dir: &Path) -> AppResult<()> {
+    let pages = dir.join(PAGES_DIR);
+    if pages.exists() {
+        fs::remove_dir_all(&pages)?;
+    }
+    // meta 与残留 tmp 一并清掉(pages/ 下的 tmp 已随目录删除)
+    for leftover in [META_FILE, "meta.json.tmp"] {
+        match fs::remove_file(dir.join(leftover)) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    fs::create_dir_all(&pages)?;
+    Ok(())
+}
+
+// ── git 快照管理 ──────────────────────────────────────────────────────────
+
+/// 组提交信息:固定中文,与仓库提交信息约定一致,不随应用语言切换;
+/// 统一附「当前代码 HEAD 前 7 位」便于对照 wiki 版本对应的代码版本(非 git 项目省略)
+fn commit_message(kind: WikiCommitKind, meta: &WikiMeta, title: Option<&str>, head: Option<&str>) -> String {
+    let short = head.filter(|s| s.len() >= 7).map(|s| &s[..7]);
+    match kind {
+        WikiCommitKind::Generate => match short {
+            Some(s) => format!("生成 wiki(共 {} 页,代码 {s})", meta.outline.len()),
+            None => format!("生成 wiki(共 {} 页)", meta.outline.len()),
+        },
+        WikiCommitKind::Update => match short {
+            Some(s) => format!("增量更新 wiki(代码 {s})"),
+            None => "增量更新 wiki".into(),
+        },
+        WikiCommitKind::Page => match (title, short) {
+            (Some(t), Some(s)) => format!("重新生成页面:{t}(代码 {s})"),
+            (Some(t), None) => format!("重新生成页面:{t}"),
+            (None, Some(s)) => format!("重新生成页面(代码 {s})"),
+            (None, None) => "重新生成页面".into(),
+        },
+    }
+}
+
+/// 在 wiki 目录做一次快照提交:无 .git 时先 `git init`,工作区无变更则跳过(幂等)。
+/// 提交固定 RepoMeow 身份并关闭 GPG 签名、跳过钩子,避免用户全局 git 配置
+/// (无身份/gpg 私钥)导致提交挂起或失败
+fn commit_wiki_in(dir: &Path, message: &str) -> AppResult<()> {
+    let dir_str = dir.to_string_lossy().into_owned();
+    if !dir.join(".git").exists() {
+        git::run_git(&dir_str, &["init"])?;
+        // 本地固化身份与签名开关:用户在该目录手动操作 git 时行为一致
+        for (key, value) in [
+            ("user.name", WIKI_GIT_NAME),
+            ("user.email", WIKI_GIT_EMAIL),
+            ("commit.gpgsign", "false"),
+            ("core.autocrlf", "false"),
+        ] {
+            git::run_git(&dir_str, &["config", key, value])?;
+        }
+    }
+    // status --porcelain 空输出 = 无变更,直接跳过
+    let status = git::git_command(&dir_str)
+        .args(["status", "--porcelain"])
+        .output()
+        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+    if !status.status.success() {
+        return Err(AppError::coded(
+            ErrorCode::GitCommandFailed,
+            format!("git status: {}", String::from_utf8_lossy(&status.stderr).trim()),
+        ));
+    }
+    if status.stdout.iter().all(|b| b.is_ascii_whitespace()) {
+        return Ok(());
+    }
+    git::run_git(&dir_str, &["add", "-A"])?;
+    let args = [
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "--no-verify",
+        "-m",
+        message,
+    ];
+    git::run_git(&dir_str, &args)?;
+    Ok(())
+}
+
+/// 清除目录树下所有文件的只读位(Windows:git 对象文件只读,直接删会「拒绝访问」)
+#[cfg(windows)]
+fn clear_readonly_recursive(root: &Path) {
+    fn visit(path: &Path) {
+        let Ok(meta) = fs::metadata(path) else {
+            return;
+        };
+        if meta.is_dir() {
+            if let Ok(entries) = fs::read_dir(path) {
+                for entry in entries.flatten() {
+                    visit(&entry.path());
+                }
+            }
+        }
+        let mut perms = meta.permissions();
+        if perms.readonly() {
+            perms.set_readonly(false);
+            let _ = fs::set_permissions(path, perms);
+        }
+    }
+    visit(root);
+}
+
+#[cfg(not(windows))]
+fn clear_readonly_recursive(_root: &Path) {}
+
+/// 删除 wiki 目录(含 .git):不走 git,直接移除;只读位导致失败时清权限重试
+fn remove_wiki_dir(dir: &Path) -> AppResult<()> {
+    match fs::remove_dir_all(dir) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => {
+            clear_readonly_recursive(dir);
+            match fs::remove_dir_all(dir) {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(e.into()),
+            }
+        }
+    }
+}
+
+/// 开始一次全新生成:清空旧 pages/ 与 meta.json,保留 .git 历史
 #[tauri::command]
 pub fn begin_wiki(app: AppHandle, project_path: String) -> AppResult<()> {
-    let dir = wiki_dir(&app, &project_path)?;
-    if dir.exists() {
-        fs::remove_dir_all(&dir)?;
-    }
-    fs::create_dir_all(dir.join(PAGES_DIR))?;
-    Ok(())
+    begin_wiki_in(&wiki_dir(&app, &project_path)?)
 }
 
 /// 写入单个页面(tmp + rename);file_name 必须匹配 `NN-slug.md`
@@ -519,14 +675,45 @@ pub fn save_wiki_page(
     save_page_in(&wiki_dir(&app, &project_path)?, &file_name, &content)
 }
 
-/// 写入 meta.json(最后调用;version 与 generated_at 由后端覆写)
+/// 写入 meta.json(最后调用;version 与 generated_at 由后端覆写),随后自动做一次
+/// git 快照提交。meta 落盘成功即整本有效,提交失败仅记日志不阻断(下次操作会补提交)
 #[tauri::command]
-pub fn save_wiki_meta(app: AppHandle, project_path: String, meta: WikiMeta) -> AppResult<()> {
+pub fn save_wiki_meta(
+    app: AppHandle,
+    project_path: String,
+    meta: WikiMeta,
+    commit_kind: Option<WikiCommitKind>,
+) -> AppResult<()> {
     let mut meta = meta;
     if meta.project_path.is_empty() {
         meta.project_path = clean_str(&project_path);
     }
-    save_meta_in(&wiki_dir(&app, &project_path)?, meta)
+    let dir = wiki_dir(&app, &project_path)?;
+    let kind = commit_kind.unwrap_or(WikiCommitKind::Generate);
+    let message = commit_message(kind, &meta, None, head_sha(&project_path).as_deref());
+    save_meta_in(&dir, meta)?;
+    if let Err(e) = commit_wiki_in(&dir, &message) {
+        eprintln!("[wiki] git 快照提交失败({:?}): {e}", dir);
+    }
+    Ok(())
+}
+
+/// 手动触发一次 git 快照提交:单页重新生成等不经 save_wiki_meta 的场景。
+/// kind=Page 需要 title;generate/update 读盘上现有 meta 组提交信息
+#[tauri::command]
+pub fn commit_wiki(
+    app: AppHandle,
+    project_path: String,
+    kind: WikiCommitKind,
+    title: Option<String>,
+) -> AppResult<()> {
+    let dir = wiki_dir(&app, &project_path)?;
+    let meta = fs::read_to_string(dir.join(META_FILE))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<WikiMeta>(&raw).ok())
+        .unwrap_or_default();
+    let message = commit_message(kind, &meta, title.as_deref(), head_sha(&project_path).as_deref());
+    commit_wiki_in(&dir, &message)
 }
 
 /// 读取整个 wiki;meta 缺失/损坏/未完结返回 None;附带与当前 HEAD 比对的 stale 标记
@@ -543,15 +730,10 @@ pub fn load_wiki(app: AppHandle, project_path: String) -> AppResult<Option<WikiD
     Ok(Some(WikiData { meta, pages, stale }))
 }
 
-/// 删除项目的整个 wiki 目录(幂等)
+/// 删除项目的整个 wiki 目录(幂等;含 .git,不走 git 操作)
 #[tauri::command]
 pub fn delete_wiki(app: AppHandle, project_path: String) -> AppResult<()> {
-    let dir = wiki_dir(&app, &project_path)?;
-    match fs::remove_dir_all(&dir) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e.into()),
-    }
+    remove_wiki_dir(&wiki_dir(&app, &project_path)?)
 }
 
 /// 在系统文件管理器中打开项目的 wiki 目录
@@ -737,6 +919,133 @@ mod tests {
         assert_eq!(manifests.len(), 1);
         assert_eq!(manifests[0].path, "package.json");
         assert_eq!(manifests[0].content, "{}");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn begin_wiki_keeps_git_dir() {
+        let dir = temp_dir("begin-keep-git");
+        fs::create_dir_all(dir.join(PAGES_DIR)).unwrap();
+        fs::write(dir.join(PAGES_DIR).join("01-old.md"), "old").unwrap();
+        fs::write(dir.join(META_FILE), "{}").unwrap();
+        fs::create_dir_all(dir.join(".git")).unwrap();
+
+        begin_wiki_in(&dir).unwrap();
+        assert!(dir.join(".git").is_dir(), "重新生成必须保留 .git 历史");
+        assert!(!dir.join(META_FILE).exists());
+        assert!(!dir.join(PAGES_DIR).join("01-old.md").exists());
+        assert!(dir.join(PAGES_DIR).is_dir(), "pages/ 应重建为空目录");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 环境没有 git CLI 时跳过(commit_wiki_in 依赖系统 git)
+    fn git_available() -> bool {
+        git::git_command(".")
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success())
+    }
+
+    fn completed_meta(file: &str) -> WikiMeta {
+        WikiMeta {
+            status: "completed".into(),
+            head_sha: Some("0123456789abcdef".into()),
+            outline: vec![WikiOutlinePage {
+                id: "overview".into(),
+                file: file.into(),
+                title: "概览".into(),
+                importance: "high".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn commit_wiki_snapshots_and_skips_when_clean() {
+        if !git_available() {
+            return;
+        }
+        let dir = temp_dir("git-commit");
+        save_page_in(&dir, "01-overview.md", "# v1").unwrap();
+        save_meta_in(&dir, completed_meta("01-overview.md")).unwrap();
+
+        commit_wiki_in(&dir, "生成 wiki(共 1 页)").unwrap();
+        // 无变更时幂等跳过,不产生新提交
+        commit_wiki_in(&dir, "重复提交").unwrap();
+        let repo = git2::Repository::open(&dir).unwrap();
+        let count = || {
+            let mut walk = repo.revwalk().unwrap();
+            walk.push_head().unwrap();
+            walk.count()
+        };
+        assert_eq!(count(), 1, "无变更不应产生新提交");
+
+        // 页面变化后提交进入历史,身份固定为 RepoMeow
+        save_page_in(&dir, "01-overview.md", "# v2").unwrap();
+        commit_wiki_in(&dir, "重新生成页面:概览").unwrap();
+        assert_eq!(count(), 2);
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head.author().name(), Some(WIKI_GIT_NAME));
+        assert_eq!(head.message().unwrap().trim_end(), "重新生成页面:概览");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn commit_messages_by_kind() {
+        let meta = completed_meta("01-overview.md");
+        let sha = "0123456789abcdef";
+        // 三类操作都附当前代码 HEAD 短 sha
+        assert_eq!(
+            commit_message(WikiCommitKind::Generate, &meta, None, Some(sha)),
+            "生成 wiki(共 1 页,代码 0123456)"
+        );
+        assert_eq!(
+            commit_message(WikiCommitKind::Update, &meta, None, Some(sha)),
+            "增量更新 wiki(代码 0123456)"
+        );
+        assert_eq!(
+            commit_message(WikiCommitKind::Page, &meta, Some("概览"), Some(sha)),
+            "重新生成页面:概览(代码 0123456)"
+        );
+        // 非 git 项目(无 HEAD)省略代码版本段
+        assert_eq!(
+            commit_message(WikiCommitKind::Generate, &meta, None, None),
+            "生成 wiki(共 1 页)"
+        );
+        assert_eq!(
+            commit_message(WikiCommitKind::Update, &meta, None, None),
+            "增量更新 wiki"
+        );
+        assert_eq!(
+            commit_message(WikiCommitKind::Page, &meta, Some("概览"), None),
+            "重新生成页面:概览"
+        );
+    }
+
+    #[test]
+    fn remove_wiki_dir_tolerates_readonly_files() {
+        let dir = temp_dir("remove-readonly");
+        let git_objects = dir.join(".git").join("objects");
+        fs::create_dir_all(&git_objects).unwrap();
+        let object = git_objects.join("abc123");
+        fs::write(&object, b"pack").unwrap();
+        let mut perms = fs::metadata(&object).unwrap().permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&object, perms).unwrap();
+
+        remove_wiki_dir(&dir).unwrap();
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn has_wiki_requires_nonempty_dir() {
+        let dir = temp_dir("has-wiki");
+        assert!(!has_wiki_in(&dir), "目录不存在不算有 wiki");
+        fs::create_dir_all(&dir).unwrap();
+        assert!(!has_wiki_in(&dir), "空目录不算有 wiki");
+        fs::write(dir.join(META_FILE), "{}").unwrap();
+        assert!(has_wiki_in(&dir));
         fs::remove_dir_all(&dir).ok();
     }
 }

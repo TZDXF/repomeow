@@ -1214,6 +1214,9 @@ export default {
       restoreConfirm: "确定恢复项目「{name}」吗?将重新显示在项目列表中。",
       deleteConfirm:
         "确定彻底删除项目「{name}」吗?此操作不可恢复,标签指派、自定义命令等历史数据将一并删除。(不会删除磁盘文件)",
+      cleanWikiLabel: "同时清理 Wiki 文件夹",
+      cleanWikiHint: "删除已生成的 Wiki 数据,不影响项目文件,重新登记后可再次生成",
+      wikiCleanFailed: "Wiki 数据清理失败:{error}",
       loadFailed: "加载归档项目失败:{error}",
     },
     tracking: {

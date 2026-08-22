@@ -7,7 +7,7 @@ import {
   type WikiGenPhase,
   type WikiPageStatus,
 } from "@/lib/wiki-generator";
-import { deleteWiki, loadWiki, saveWikiMeta, wikiChangedFiles } from "@/lib/wiki";
+import { commitWiki, deleteWiki, loadWiki, saveWikiMeta, wikiChangedFiles } from "@/lib/wiki";
 import { useSettingsStore } from "@/stores/settings";
 import type { WikiData, WikiOutlinePage } from "@/types";
 
@@ -39,6 +39,8 @@ export const useWikiStore = defineStore("wiki", () => {
   /** 逐页流式生成中的正文(pageId → 已产出内容),供进度面板实时预览 */
   const streamContents = ref<Record<string, string>>({});
   let controller: AbortController | null = null;
+  /** 进行中的整本生成 promise;remove 时等待其收敛,避免删除后页面又被落盘重建 */
+  let genRun: Promise<void> | null = null;
 
   const generating = computed(() =>
     ["collecting", "outlining", "generating"].includes(phase.value),
@@ -60,7 +62,13 @@ export const useWikiStore = defineStore("wiki", () => {
   }
 
   /** 整本生成(已有生成任务进行中时忽略);结束后若用户仍在看该项目则刷新展示 */
-  async function generate(project: { path: string; name: string }, language: SupportedLocale) {
+  function generate(project: { path: string; name: string }, language: SupportedLocale) {
+    if (generating.value) return Promise.resolve();
+    genRun = runGenerate(project, language);
+    return genRun;
+  }
+
+  async function runGenerate(project: { path: string; name: string }, language: SupportedLocale) {
     if (generating.value) return;
     const settings = useSettingsStore();
     controller = new AbortController();
@@ -103,6 +111,7 @@ export const useWikiStore = defineStore("wiki", () => {
       genError.value = e instanceof Error ? e.message : String(e);
     } finally {
       controller = null;
+      genRun = null;
       // 取消/失败时已生成的页面文件仍在磁盘(无 meta 则整本无效),统一以落盘状态为准;
       // 用户已切到别的项目时不回写 data,避免覆盖其正在查看的 wiki
       if (dataFor.value === project.path) {
@@ -127,6 +136,8 @@ export const useWikiStore = defineStore("wiki", () => {
     regeneratingPage.value = page.id;
     try {
       await regenerateWikiPage(projectPath, page, language, new AbortController().signal);
+      // git 快照提交(辅助管理,失败不影响页面内容,下次操作会补提交)
+      await commitWiki(projectPath, "page", page.title).catch(() => {});
       if (dataFor.value === projectPath) await load(projectPath);
     } finally {
       regeneratingPage.value = null;
@@ -160,7 +171,7 @@ export const useWikiStore = defineStore("wiki", () => {
       }
       regeneratingPage.value = null;
       if (headSha) {
-        await saveWikiMeta(project.path, { ...d.meta, headSha });
+        await saveWikiMeta(project.path, { ...d.meta, headSha }, "update");
       }
       if (dataFor.value === project.path) await load(project.path);
       return affected.length;
@@ -171,6 +182,11 @@ export const useWikiStore = defineStore("wiki", () => {
   }
 
   async function remove(projectPath: string) {
+    // 该项目正在生成时先中止并等流水线收敛,避免删除后又被落盘的页面把目录建回来
+    if (genRun && genFor.value === projectPath) {
+      controller?.abort();
+      await genRun.catch(() => {});
+    }
     await deleteWiki(projectPath);
     if (dataFor.value === projectPath) data.value = null;
   }

@@ -138,6 +138,40 @@ function revealLine(line: number) {
   });
 }
 
+// ── 行区间高亮(wiki 来源文件 path:start-end 跳转) ─────────────────────────
+const setCiteLines = StateEffect.define<{ from: number; to: number } | null>();
+
+const citeLineMarks = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(value, tr) {
+    const next = value.map(tr.changes);
+    for (const e of tr.effects) {
+      if (!e.is(setCiteLines)) continue;
+      if (!e.value) return Decoration.none;
+      const decos = [];
+      for (let n = e.value.from; n <= e.value.to && n <= tr.state.doc.lines; n++) {
+        decos.push(Decoration.line({ class: "cm-line-cite" }).range(tr.state.doc.line(n).from));
+      }
+      return Decoration.set(decos, true);
+    }
+    return next;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
+/** 定位并高亮 1-based 行区间(闭区间,越界自动收敛;wiki 来源 chips 跳转用) */
+function revealLines(start: number, end?: number) {
+  if (!view) return;
+  const total = view.state.doc.lines;
+  const from = Math.min(Math.max(1, Math.floor(start)), total);
+  const to = Math.min(Math.max(from, Math.floor(end ?? start)), total);
+  const pos = view.state.doc.line(from).from;
+  view.dispatch({
+    selection: { anchor: pos },
+    effects: [EditorView.scrollIntoView(pos, { y: "center" }), setCiteLines.of({ from, to })],
+  });
+}
+
 onMounted(() => {
   view = new EditorView({
     parent: host.value ?? undefined,
@@ -157,6 +191,7 @@ onMounted(() => {
         languageConf.of([]),
         wrapConf.of(props.wrap ? EditorView.lineWrapping : []),
         findMarks,
+        citeLineMarks,
       ],
     }),
   });
@@ -195,7 +230,7 @@ function getView() {
   return view;
 }
 
-defineExpose({ getView, runFind, clearFind, gotoMatch, getFindCursor, revealLine });
+defineExpose({ getView, runFind, clearFind, gotoMatch, getFindCursor, revealLine, revealLines });
 </script>
 
 <template>

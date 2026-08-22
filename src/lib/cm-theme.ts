@@ -76,6 +76,11 @@ export const cmViewerTheme = EditorView.theme({
     backgroundColor: "rgba(249, 115, 22, 0.5)",
     outline: "1px solid rgba(249, 115, 22, 0.9)",
   },
+  // wiki 来源引用行高亮(path:start-end 跳转):主色淡底 + 左侧竖条
+  ".cm-line-cite": {
+    backgroundColor: "color-mix(in oklab, var(--color-primary) 12%, transparent)",
+    boxShadow: "inset 2px 0 0 var(--color-primary)",
+  },
 });
 
 export const cmViewerHighlight = HighlightStyle.define([

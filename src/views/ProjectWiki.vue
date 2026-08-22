@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { toast } from "vue-sonner";
@@ -23,7 +23,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import SourceFileDialog from "@/components/wiki/SourceFileDialog.vue";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
 import { openWikiDir } from "@/lib/wiki";
-import type { WikiGenPhase } from "@/lib/wiki-generator";
+import type { WikiGenPhase, WikiPageStatus } from "@/lib/wiki-generator";
+import { parseWikiSources } from "@/lib/wiki-parse";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
 import { useWikiStore } from "@/stores/wiki";
@@ -66,18 +67,6 @@ watch(
 );
 const current = computed(() => pages.value.find((p) => p.id === selectedId.value) ?? null);
 
-/** 按 section 保序分组;无 section 的页面归入 null 组(扁平展示) */
-const grouped = computed(() => {
-  const groups: { section: string | null; items: WikiPageData[] }[] = [];
-  for (const p of pages.value) {
-    const section = p.section ?? null;
-    const g = groups.find((g) => g.section === section);
-    if (g) g.items.push(p);
-    else groups.push({ section, items: [p] });
-  }
-  return groups;
-});
-
 /** importance 色点(参照 deepwiki-open:high 紫 / medium 琥珀 / low 珊瑚) */
 function importanceClass(importance: string): string {
   switch (importance) {
@@ -90,7 +79,7 @@ function importanceClass(importance: string): string {
   }
 }
 
-// ── 生成进度(左右布局:左侧阶段/进度/页面列表,右侧流式预览) ─────────────────
+// ── 生成进度 ───────────────────────────────────────────────────────────────
 
 const phaseText = computed(() => {
   const map: Record<WikiGenPhase, string> = {
@@ -116,6 +105,107 @@ const previewItem = computed(() => {
 });
 const previewContent = computed(() =>
   previewItem.value ? (wiki.streamContents[previewItem.value.page.id] ?? "") : "",
+);
+
+// ── 左侧导航列表(生成中与最终查看复用同一列表样式) ───────────────────────
+
+/** status 仅生成中的条目携带:存在时以状态图标替代 importance 色点 */
+interface WikiNavItem {
+  id: string;
+  title: string;
+  section: string | null;
+  importance: string;
+  status?: WikiPageStatus;
+  error?: string;
+}
+
+const navItems = computed<WikiNavItem[]>(() => {
+  if (generatingHere.value) {
+    return wiki.pages.map((i) => ({
+      id: i.page.id,
+      title: i.page.title,
+      section: i.page.section ?? null,
+      importance: i.page.importance,
+      status: i.status,
+      error: i.error,
+    }));
+  }
+  return pages.value.map((p) => ({
+    id: p.id,
+    title: p.title,
+    section: p.section ?? null,
+    importance: p.importance,
+  }));
+});
+
+/** 按 section 保序分组;无 section 的页面归入 null 组(扁平展示) */
+const navGroups = computed(() => {
+  const groups: { section: string | null; items: WikiNavItem[] }[] = [];
+  for (const p of navItems.value) {
+    const section = p.section ?? null;
+    const last = groups[groups.length - 1];
+    if (last && last.section === section) last.items.push(p);
+    else groups.push({ section, items: [p] });
+  }
+  return groups;
+});
+
+const activeId = computed(() =>
+  generatingHere.value ? (previewItem.value?.page.id ?? null) : selectedId.value,
+);
+
+function selectPage(id: string) {
+  if (generatingHere.value) previewId.value = id;
+  else selectedId.value = id;
+}
+
+// ── 流式预览自动跟随滚动(用户上翻阅读时暂停,回到底部自动恢复) ─────────────
+
+const previewHost = ref<HTMLElement | null>(null);
+let pinnedToBottom = true;
+let suppressScrollEvents = false;
+
+/** reka-ui ScrollArea 的实际滚动元素是内部 viewport(本仓库包装层标注的 data-slot) */
+function scrollViewport(): HTMLElement | null {
+  return previewHost.value?.closest('[data-slot="scroll-area-viewport"]') ?? null;
+}
+
+function onPreviewScroll(e: Event) {
+  if (suppressScrollEvents) return;
+  const el = e.target as HTMLElement;
+  pinnedToBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+}
+
+/** 程序化滚动需屏蔽自身触发的 scroll 事件,避免覆盖 pinned 状态 */
+function setViewportScroll(vp: HTMLElement, position: "top" | "bottom") {
+  suppressScrollEvents = true;
+  vp.scrollTop = position === "top" ? 0 : vp.scrollHeight;
+  requestAnimationFrame(() => {
+    suppressScrollEvents = false;
+  });
+}
+
+watch(previewHost, (el) => {
+  if (el) scrollViewport()?.addEventListener("scroll", onPreviewScroll, { passive: true });
+});
+
+watch(previewContent, async () => {
+  if (!generatingHere.value || !pinnedToBottom) return;
+  await nextTick();
+  const vp = scrollViewport();
+  if (vp) setViewportScroll(vp, "bottom");
+});
+
+// 切换预览页 / 进入与结束生成时回到顶部并重新开始跟随;
+// 生成属于其他项目时 previewId 分量为 null,不会扰动本页静态视图的滚动
+watch(
+  () => [generatingHere.value, generatingHere.value ? previewItem.value?.page.id : null] as const,
+  async () => {
+    pinnedToBottom = true;
+    await nextTick();
+    const vp = scrollViewport();
+    if (vp) setViewportScroll(vp, "top");
+  },
 );
 
 // ── 生成 / 操作 ───────────────────────────────────────────────────────────
@@ -178,8 +268,34 @@ async function updateWiki() {
   }
 }
 
-/** 来源文件查看对话框:选中的仓库内相对路径(null 关闭) */
-const sourceFile = ref<string | null>(null);
+/** 来源文件查看对话框目标:仓库内相对路径 + 可选行区间(null 关闭) */
+interface SourceTarget {
+  path: string;
+  start: number | null;
+  end: number | null;
+}
+const sourceTarget = ref<SourceTarget | null>(null);
+
+/**
+ * 当前页正文解析:剥离末尾 <!-- sources --> 注释块(页面 LLM 标注的来源行区间,
+ * 渲染不可见),区间合并进来源 chips;无块时 ranges 为空,chips 退化为文件级
+ */
+const currentSources = computed(() => parseWikiSources(current.value?.content ?? ""));
+
+function openSource(path: string) {
+  const r = currentSources.value.ranges.get(path);
+  sourceTarget.value = { path, start: r?.start ?? null, end: r?.end ?? null };
+}
+
+/** chip 上的行区间徽标文本(`:12-40` / `:7`);无标注返回空串 */
+function sourceRangeLabel(path: string): string {
+  const r = currentSources.value.ranges.get(path);
+  if (!r) return "";
+  return r.end > r.start ? `:${r.start}-${r.end}` : `:${r.start}`;
+}
+
+/** 流式预览同样剥离 sources 注释块(生成中途的未闭合尾巴也一并隐藏) */
+const previewDisplay = computed(() => parseWikiSources(previewContent.value).body);
 
 // ── Markdown 渲染配置(与 ReportHistory 一致) ─────────────────────────────
 
@@ -244,90 +360,177 @@ const beforeDownload = createBeforeDownload(t);
       </template>
     </header>
 
-    <!-- 生成中(当前项目):左侧阶段/进度/页面列表,右侧流式预览 -->
-    <div v-if="generatingHere" class="flex min-h-0 flex-1">
-      <aside class="flex w-72 shrink-0 flex-col border-r">
-        <div class="shrink-0 space-y-3 border-b p-4">
-          <div class="flex items-center gap-2 text-sm">
-            <LoaderCircle class="h-4 w-4 animate-spin text-muted-foreground" />
-            {{ phaseText }}
+    <!-- 主体:左侧页面列表 + 右侧内容;生成中复用同一布局(列表带单页状态,右侧流式预览) -->
+    <div v-if="generatingHere || wiki.data" class="flex min-h-0 flex-1">
+      <aside class="flex w-64 shrink-0 flex-col border-r">
+        <div v-if="generatingHere" class="shrink-0 space-y-2 border-b p-3">
+          <div class="flex items-center gap-2 text-xs text-muted-foreground">
+            <LoaderCircle class="h-3.5 w-3.5 shrink-0 animate-spin" />
+            <span class="min-w-0 flex-1 truncate">{{ phaseText }}</span>
+            <span
+              v-if="wiki.phase === 'generating' && wiki.pages.length"
+              class="shrink-0 tabular-nums"
+            >
+              {{ wiki.doneCount }}/{{ wiki.pages.length }}
+            </span>
           </div>
-          <template v-if="wiki.phase === 'generating' && wiki.pages.length">
-            <div class="h-1.5 overflow-hidden rounded-full bg-muted">
-              <div
-                class="h-full rounded-full bg-primary transition-all"
-                :style="{ width: `${(wiki.doneCount / wiki.pages.length) * 100}%` }"
-              />
-            </div>
-            <p class="text-xs text-muted-foreground">
-              {{ wiki.doneCount }} / {{ wiki.pages.length }}
-            </p>
-          </template>
+          <div
+            v-if="wiki.phase === 'generating' && wiki.pages.length"
+            class="h-1 overflow-hidden rounded-full bg-muted"
+          >
+            <div
+              class="h-full rounded-full bg-primary transition-all"
+              :style="{ width: `${(wiki.doneCount / wiki.pages.length) * 100}%` }"
+            />
+          </div>
         </div>
         <ScrollArea class="min-h-0 flex-1">
-          <ul class="space-y-0.5 p-2 text-sm">
-            <li v-for="item in wiki.pages" :key="item.page.id">
-              <button
-                type="button"
-                class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent/60"
-                :class="item.page.id === previewItem?.page.id ? 'bg-accent' : ''"
-                @click="previewId = item.page.id"
+          <nav class="space-y-3 p-3">
+            <div v-for="g in navGroups" :key="g.section ?? '__flat'">
+              <p
+                v-if="g.section"
+                class="mb-1 px-2 text-xs font-medium uppercase tracking-wide text-muted-foreground"
               >
-                <LoaderCircle
-                  v-if="item.status === 'running'"
-                  class="h-3.5 w-3.5 shrink-0 animate-spin text-primary"
+                {{ g.section }}
+              </p>
+              <button
+                v-for="p in g.items"
+                :key="p.id"
+                type="button"
+                class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/60"
+                :class="
+                  p.id === activeId
+                    ? 'bg-accent font-medium text-accent-foreground'
+                    : 'text-foreground/80'
+                "
+                :title="p.error ?? p.title"
+                @click="selectPage(p.id)"
+              >
+                <template v-if="p.status">
+                  <LoaderCircle
+                    v-if="p.status === 'running'"
+                    class="h-3.5 w-3.5 shrink-0 animate-spin text-primary"
+                  />
+                  <Check
+                    v-else-if="p.status === 'done'"
+                    class="h-3.5 w-3.5 shrink-0 text-green-500"
+                  />
+                  <X
+                    v-else-if="p.status === 'failed'"
+                    class="h-3.5 w-3.5 shrink-0 text-destructive"
+                  />
+                  <Circle v-else class="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+                </template>
+                <span
+                  v-else
+                  class="h-1.5 w-1.5 shrink-0 rounded-full"
+                  :class="importanceClass(p.importance)"
                 />
-                <Check
-                  v-else-if="item.status === 'done'"
-                  class="h-3.5 w-3.5 shrink-0 text-green-500"
-                />
-                <X
-                  v-else-if="item.status === 'failed'"
-                  class="h-3.5 w-3.5 shrink-0 text-destructive"
-                />
-                <Circle v-else class="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
-                <span class="min-w-0 flex-1 truncate" :title="item.error">
-                  {{ item.page.title }}
-                </span>
+                <span class="min-w-0 flex-1 truncate">{{ p.title }}</span>
               </button>
-            </li>
-          </ul>
+            </div>
+          </nav>
         </ScrollArea>
-        <div class="shrink-0 border-t p-3">
+        <div v-if="generatingHere" class="shrink-0 border-t p-2">
           <Button variant="outline" size="sm" class="w-full" @click="wiki.cancel()">
             {{ t("wiki.cancel") }}
           </Button>
         </div>
       </aside>
 
-      <div class="flex min-w-0 flex-1 flex-col">
-        <div class="shrink-0 border-b px-4 py-2 text-xs text-muted-foreground">
-          <template v-if="previewItem">
-            {{ t("wiki.writing") }} · {{ previewItem.page.title }}
-          </template>
-          <template v-else>{{ phaseText }}</template>
-        </div>
-        <ScrollArea class="min-h-0 flex-1">
-          <div class="mx-auto max-w-3xl px-6 py-5 text-sm">
+      <ScrollArea class="min-w-0 flex-1">
+        <div ref="previewHost" class="mx-auto max-w-3xl px-6 py-5 text-sm">
+          <!-- 生成中:流式预览 -->
+          <template v-if="generatingHere">
+            <div v-if="previewItem" class="mb-3 flex items-center gap-2">
+              <LoaderCircle class="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+              <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                {{ t("wiki.writing") }} · {{ previewItem.page.title }}
+              </span>
+            </div>
             <Markdown
-              v-if="previewContent"
+              v-if="previewDisplay"
               mode="streaming"
-              :content="previewContent"
+              :content="previewDisplay"
               :controls="controls"
               :theme-element="themeElement"
               :locale="settings.language"
               :before-download="beforeDownload"
             />
             <p v-else class="py-12 text-center text-muted-foreground">
-              {{ t("wiki.waitingFirstChunk") }}
+              {{ previewItem ? t("wiki.waitingFirstChunk") : phaseText }}
             </p>
-          </div>
-        </ScrollArea>
-      </div>
+          </template>
+
+          <!-- 静态正文 -->
+          <template v-else-if="current">
+            <div class="mb-3 flex items-center gap-2">
+              <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                {{ current.file }}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                :disabled="wiki.regeneratingPage === current.id"
+                :title="t('wiki.regeneratePage')"
+                @click="regeneratePage(current)"
+              >
+                <LoaderCircle
+                  v-if="wiki.regeneratingPage === current.id"
+                  class="h-3.5 w-3.5 animate-spin"
+                />
+                <RefreshCw v-else class="h-3.5 w-3.5" />
+              </Button>
+            </div>
+            <div v-if="current.content">
+              <Markdown
+                mode="static"
+                :content="currentSources.body"
+                :controls="controls"
+                :theme-element="themeElement"
+                :locale="settings.language"
+                :before-download="beforeDownload"
+              />
+              <!-- 来源文件(chips 来自大纲标注;行区间来自页面末尾 sources 注释块) -->
+              <div v-if="current.relevantFiles.length" class="mt-6 border-t pt-3">
+                <p class="mb-2 text-xs font-medium text-muted-foreground">
+                  {{ t("wiki.sources") }}
+                </p>
+                <div class="flex flex-wrap gap-1.5">
+                  <button
+                    v-for="f in current.relevantFiles"
+                    :key="f"
+                    type="button"
+                    class="flex max-w-full items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                    :title="f"
+                    @click="openSource(f)"
+                  >
+                    <FileCode class="h-3 w-3 shrink-0" />
+                    <span class="min-w-0 truncate [direction:rtl] [text-align:left]">{{ f }}</span>
+                    <span v-if="sourceRangeLabel(f)" class="shrink-0 text-primary">{{
+                      sourceRangeLabel(f)
+                    }}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div
+              v-else
+              class="flex flex-col items-center gap-2 rounded-md border border-dashed py-12 text-sm text-muted-foreground"
+            >
+              <p>{{ t("wiki.emptyContent") }}</p>
+              <Button variant="outline" size="sm" @click="regeneratePage(current)">
+                <RefreshCw class="h-4 w-4" />
+                {{ t("wiki.regeneratePage") }}
+              </Button>
+            </div>
+          </template>
+        </div>
+      </ScrollArea>
     </div>
 
     <!-- 空态 -->
-    <div v-else-if="!wiki.data" class="flex flex-1 flex-col items-center justify-center gap-3 p-8">
+    <div v-else class="flex flex-1 flex-col items-center justify-center gap-3 p-8">
       <BookOpenText class="h-10 w-10 text-muted-foreground/50" />
       <p class="text-sm font-medium">{{ t("wiki.emptyTitle") }}</p>
       <p class="max-w-md text-center text-sm text-muted-foreground">
@@ -347,102 +550,12 @@ const beforeDownload = createBeforeDownload(t);
       </Button>
     </div>
 
-    <!-- wiki 内容:左侧页面树 + 右侧正文 -->
-    <div v-else class="flex min-h-0 flex-1">
-      <aside class="w-64 shrink-0 border-r">
-        <ScrollArea class="h-full">
-          <nav class="space-y-3 p-3">
-            <div v-for="g in grouped" :key="g.section ?? '__flat'">
-              <p
-                v-if="g.section"
-                class="mb-1 px-2 text-xs font-medium uppercase tracking-wide text-muted-foreground"
-              >
-                {{ g.section }}
-              </p>
-              <button
-                v-for="p in g.items"
-                :key="p.id"
-                type="button"
-                class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/60"
-                :class="
-                  p.id === selectedId
-                    ? 'bg-accent font-medium text-accent-foreground'
-                    : 'text-foreground/80'
-                "
-                @click="selectedId = p.id"
-              >
-                <span
-                  class="h-1.5 w-1.5 shrink-0 rounded-full"
-                  :class="importanceClass(p.importance)"
-                />
-                <span class="min-w-0 flex-1 truncate" :title="p.title">{{ p.title }}</span>
-              </button>
-            </div>
-          </nav>
-        </ScrollArea>
-      </aside>
-
-      <ScrollArea class="min-w-0 flex-1">
-        <div v-if="current" class="mx-auto max-w-3xl px-6 py-5">
-          <div class="mb-3 flex items-center gap-2">
-            <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-              {{ current.file }}
-            </span>
-            <Button
-              variant="ghost"
-              size="sm"
-              :disabled="wiki.regeneratingPage === current.id"
-              :title="t('wiki.regeneratePage')"
-              @click="regeneratePage(current)"
-            >
-              <LoaderCircle
-                v-if="wiki.regeneratingPage === current.id"
-                class="h-3.5 w-3.5 animate-spin"
-              />
-              <RefreshCw v-else class="h-3.5 w-3.5" />
-            </Button>
-          </div>
-          <div v-if="current.content" class="text-sm">
-            <Markdown
-              mode="static"
-              :content="current.content"
-              :controls="controls"
-              :theme-element="themeElement"
-              :locale="settings.language"
-              :before-download="beforeDownload"
-            />
-            <!-- 来源文件(大纲阶段标注):点击查看文件内容 -->
-            <div v-if="current.relevantFiles.length" class="mt-6 border-t pt-3">
-              <p class="mb-2 text-xs font-medium text-muted-foreground">{{ t("wiki.sources") }}</p>
-              <div class="flex flex-wrap gap-1.5">
-                <button
-                  v-for="f in current.relevantFiles"
-                  :key="f"
-                  type="button"
-                  class="flex max-w-full items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-                  :title="f"
-                  @click="sourceFile = f"
-                >
-                  <FileCode class="h-3 w-3 shrink-0" />
-                  <span class="min-w-0 truncate [direction:rtl] [text-align:left]">{{ f }}</span>
-                </button>
-              </div>
-            </div>
-          </div>
-          <div
-            v-else
-            class="flex flex-col items-center gap-2 rounded-md border border-dashed py-12 text-sm text-muted-foreground"
-          >
-            <p>{{ t("wiki.emptyContent") }}</p>
-            <Button variant="outline" size="sm" @click="regeneratePage(current)">
-              <RefreshCw class="h-4 w-4" />
-              {{ t("wiki.regeneratePage") }}
-            </Button>
-          </div>
-        </div>
-      </ScrollArea>
-    </div>
-
-    <SourceFileDialog :root="project.path" :rel-path="sourceFile" @close="sourceFile = null" />
+    <SourceFileDialog
+      :root="project.path"
+      :rel-path="sourceTarget?.path ?? null"
+      :start-line="sourceTarget?.start ?? null"
+      :end-line="sourceTarget?.end ?? null"
+      @close="sourceTarget = null"
+    />
   </div>
 </template>
