@@ -149,4 +149,14 @@ describe("parseWikiSources", () => {
     expect(body).toContain("引用说明 <!-- sources -->");
     expect(ranges.get("src/a.ts")).toEqual({ start: 3, end: 5 });
   });
+
+  it("knownFiles 提供时 bare filename 按 basename 补全为全路径", () => {
+    const content = "正文\n<!-- sources\nai.ts:12-40\nsrc/wiki.ts:1-2\nunknown.ts:5\n-->";
+    const known = ["src/lib/ai.ts", "src/wiki.ts"];
+    const { ranges } = parseWikiSources(content, known);
+    expect(ranges.get("src/lib/ai.ts")).toEqual({ start: 12, end: 40 });
+    // 已是全路径的原样保留;查不到的全路径/bare name 保持原样(由调用方白名单过滤)
+    expect(ranges.get("src/wiki.ts")).toEqual({ start: 1, end: 2 });
+    expect(ranges.get("unknown.ts")).toEqual({ start: 5, end: 5 });
+  });
 });

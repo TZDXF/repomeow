@@ -278,9 +278,12 @@ const sourceTarget = ref<SourceTarget | null>(null);
 
 /**
  * 当前页正文解析:剥离末尾 <!-- sources --> 注释块(页面 LLM 标注的来源行区间,
- * 渲染不可见),区间合并进来源 chips;无块时 ranges 为空,chips 退化为文件级
+ * 渲染不可见),区间合并进来源 chips(relevantFiles 同时充当 basename 补全白名单);
+ * 无块时 ranges 为空,chips 退化为文件级
  */
-const currentSources = computed(() => parseWikiSources(current.value?.content ?? ""));
+const currentSources = computed(() =>
+  parseWikiSources(current.value?.content ?? "", current.value?.relevantFiles),
+);
 
 function openSource(path: string) {
   const r = currentSources.value.ranges.get(path);
@@ -363,27 +366,6 @@ const beforeDownload = createBeforeDownload(t);
     <!-- 主体:左侧页面列表 + 右侧内容;生成中复用同一布局(列表带单页状态,右侧流式预览) -->
     <div v-if="generatingHere || wiki.data" class="flex min-h-0 flex-1">
       <aside class="flex w-64 shrink-0 flex-col border-r">
-        <div v-if="generatingHere" class="shrink-0 space-y-2 border-b p-3">
-          <div class="flex items-center gap-2 text-xs text-muted-foreground">
-            <LoaderCircle class="h-3.5 w-3.5 shrink-0 animate-spin" />
-            <span class="min-w-0 flex-1 truncate">{{ phaseText }}</span>
-            <span
-              v-if="wiki.phase === 'generating' && wiki.pages.length"
-              class="shrink-0 tabular-nums"
-            >
-              {{ wiki.doneCount }}/{{ wiki.pages.length }}
-            </span>
-          </div>
-          <div
-            v-if="wiki.phase === 'generating' && wiki.pages.length"
-            class="h-1 overflow-hidden rounded-full bg-muted"
-          >
-            <div
-              class="h-full rounded-full bg-primary transition-all"
-              :style="{ width: `${(wiki.doneCount / wiki.pages.length) * 100}%` }"
-            />
-          </div>
-        </div>
         <ScrollArea class="min-h-0 flex-1">
           <nav class="space-y-3 p-3">
             <div v-for="g in navGroups" :key="g.section ?? '__flat'">

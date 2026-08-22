@@ -98,7 +98,8 @@ export const DEFAULT_WIKI_PAGE_PROMPT = `You are an expert technical writer and 
 
 # Source citations
 - Each provided source line is prefixed with \`N: \` (its 1-based line number). These prefixes are citation metadata only: NEVER include them in quoted code snippets.
-- End the page with a source citation list as an HTML comment (invisible when rendered), one entry per line: the exact file path, optionally followed by \`:start-end\` (1-based, inclusive) marking the region this page relies on most. List ONLY files from the provided sources, 3-10 entries. Format exactly:
+- End the page with a source citation list as an HTML comment (invisible when rendered), one entry per line: the exact file path, optionally followed by \`:start-end\` (1-based, inclusive) marking the region this page relies on most. List ONLY files from the provided sources, 3-10 entries.
+- Only add \`:start-end\` when the page draws on a specific region; if it relies on essentially the whole file, write the bare path with NO line range. Format exactly:
 
 <!-- sources
 path/to/file.ext:12-40
