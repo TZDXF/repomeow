@@ -3,6 +3,7 @@ import type { DropdownMenuContentEmits, DropdownMenuContentProps } from "reka-ui
 import type { HTMLAttributes } from "vue";
 import { reactiveOmit } from "@vueuse/core";
 import { DropdownMenuContent, DropdownMenuPortal, useForwardPropsEmits } from "reka-ui";
+import { POPPER_COLLISION_PADDING } from "@/lib/popper";
 import { cn } from "@/lib/utils";
 
 defineOptions({
@@ -14,6 +15,7 @@ const props = withDefaults(
   {
     align: "start",
     sideOffset: 4,
+    collisionPadding: () => POPPER_COLLISION_PADDING,
   },
 );
 const emits = defineEmits<DropdownMenuContentEmits>();

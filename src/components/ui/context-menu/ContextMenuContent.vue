@@ -3,13 +3,19 @@ import type { ContextMenuContentEmits, ContextMenuContentProps } from "reka-ui";
 import type { HTMLAttributes } from "vue";
 import { reactiveOmit } from "@vueuse/core";
 import { ContextMenuContent, ContextMenuPortal, useForwardPropsEmits } from "reka-ui";
+import { POPPER_COLLISION_PADDING } from "@/lib/popper";
 import { cn } from "@/lib/utils";
 
 defineOptions({
   inheritAttrs: false,
 });
 
-const props = defineProps<ContextMenuContentProps & { class?: HTMLAttributes["class"] }>();
+const props = withDefaults(
+  defineProps<ContextMenuContentProps & { class?: HTMLAttributes["class"] }>(),
+  {
+    collisionPadding: () => POPPER_COLLISION_PADDING,
+  },
+);
 const emits = defineEmits<ContextMenuContentEmits>();
 
 const delegatedProps = reactiveOmit(props, "class");

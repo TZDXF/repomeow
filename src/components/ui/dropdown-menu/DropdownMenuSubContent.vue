@@ -3,9 +3,15 @@ import type { DropdownMenuSubContentEmits, DropdownMenuSubContentProps } from "r
 import type { HTMLAttributes } from "vue";
 import { reactiveOmit } from "@vueuse/core";
 import { DropdownMenuPortal, DropdownMenuSubContent, useForwardPropsEmits } from "reka-ui";
+import { POPPER_COLLISION_PADDING } from "@/lib/popper";
 import { cn } from "@/lib/utils";
 
-const props = defineProps<DropdownMenuSubContentProps & { class?: HTMLAttributes["class"] }>();
+const props = withDefaults(
+  defineProps<DropdownMenuSubContentProps & { class?: HTMLAttributes["class"] }>(),
+  {
+    collisionPadding: () => POPPER_COLLISION_PADDING,
+  },
+);
 const emits = defineEmits<DropdownMenuSubContentEmits>();
 
 const delegatedProps = reactiveOmit(props, "class");

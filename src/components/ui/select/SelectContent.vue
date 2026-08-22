@@ -3,6 +3,7 @@ import type { SelectContentEmits, SelectContentProps } from "reka-ui";
 import type { HTMLAttributes } from "vue";
 import { reactiveOmit } from "@vueuse/core";
 import { SelectContent, SelectPortal, SelectViewport, useForwardPropsEmits } from "reka-ui";
+import { POPPER_COLLISION_PADDING } from "@/lib/popper";
 import { cn } from "@/lib/utils";
 import { SelectScrollDownButton, SelectScrollUpButton } from ".";
 
@@ -13,8 +14,11 @@ defineOptions({
 const props = withDefaults(
   defineProps<SelectContentProps & { class?: HTMLAttributes["class"] }>(),
   {
-    position: "item-aligned",
+    // popper:item-aligned 模式按视口边缘定位且不读 collisionPadding,
+    // 长列表会钻进自绘标题栏下方;popper 模式经 POPPER_COLLISION_PADDING 让出标题栏高度
+    position: "popper",
     align: "center",
+    collisionPadding: () => POPPER_COLLISION_PADDING,
   },
 );
 const emits = defineEmits<SelectContentEmits>();
