@@ -112,9 +112,11 @@ const SOURCE_LINE_RE = /^(.+?)(?::(\d+)(?:\s*-\s*(\d+))?)?$/;
 
 /**
  * 解析页面正文末尾的来源注释块:返回剥离后的正文与各文件的行区间。
- * 无块/块内无合法条目时 ranges 为空,body 为原文(仅去未闭合尾巴)
+ * 无块/块内无合法条目时 ranges 为空,body 为原文(仅去未闭合尾巴);
+ * knownFiles(通常为大纲 relevantFiles)提供时,bare filename 按 basename 补全为全路径
+ * (参照 deepwiki-open 的容错:LLM 常省略目录前缀)
  */
-export function parseWikiSources(content: string): ParsedWikiSources {
+export function parseWikiSources(content: string, knownFiles?: string[]): ParsedWikiSources {
   const ranges = new Map<string, WikiSourceRange>();
   let body = content.replace(SOURCES_TAIL_RE, "");
 
@@ -122,11 +124,18 @@ export function parseWikiSources(content: string): ParsedWikiSources {
   // tsconfig lib 为 ES2020,无 Array.prototype.at
   const last = matches[matches.length - 1];
   if (last) {
+    // bare filename → 全路径的 basename 查表(同名取先出现者)
+    const byBasename = new Map<string, string>();
+    for (const f of knownFiles ?? []) {
+      const base = f.slice(f.lastIndexOf("/") + 1);
+      if (!byBasename.has(base)) byBasename.set(base, f);
+    }
     for (const rawLine of last[1].split("\n")) {
       const m = rawLine.trim().match(SOURCE_LINE_RE);
       if (!m) continue;
-      const path = normalizeFilePath(m[1].trim());
+      let path = normalizeFilePath(m[1].trim());
       if (!path) continue;
+      if (!path.includes("/")) path = byBasename.get(path) ?? path;
       const start = m[2] ? Number.parseInt(m[2], 10) : null;
       const end = m[3] ? Number.parseInt(m[3], 10) : start;
       if (start == null || end == null || start < 1) continue;

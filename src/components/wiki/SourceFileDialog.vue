@@ -94,7 +94,9 @@ const rangeLabel = computed(() => {
       <DialogHeader class="shrink-0">
         <DialogTitle class="flex items-center gap-2 pr-8 text-sm">
           <FileCode class="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span class="truncate font-mono text-xs">{{ relPath }}<span class="text-primary">{{ rangeLabel }}</span></span>
+          <span class="truncate font-mono text-xs"
+            >{{ relPath }}<span class="text-primary">{{ rangeLabel }}</span></span
+          >
         </DialogTitle>
       </DialogHeader>
       <div v-if="loading" class="flex flex-1 items-center justify-center py-12">
