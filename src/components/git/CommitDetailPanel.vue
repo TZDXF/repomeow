@@ -19,8 +19,10 @@ import { Icon } from "@iconify/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import DiffViewer from "@/components/git/DiffViewer.vue";
+import ImageDiffPreview from "@/components/git/ImageDiffPreview.vue";
 import { fileIcon, folderIcon } from "@/lib/file-icons";
 import { buildFileTree, type FileTreeNode } from "@/lib/file-tree";
+import { extOf, imageMimeOf, isImagePath } from "@/lib/file-kind";
 import { openPathWith, sortOpenWithOptions } from "@/lib/open-with";
 import { baseName } from "@/lib/path";
 import { cmd } from "@/lib/tauri";
@@ -55,6 +57,23 @@ const diff = ref<GitCommitFileDiff | null>(null);
 const diffLoading = ref(false);
 const diffError = ref("");
 
+// --- 图片 diff:二进制图片无文本 diff 可渲染,新旧版本 blob 转 data URL 由
+//     ImageDiffPreview 直接预览(与 ProjectFiles 的图片查看同款交互) ---
+interface DiffImagePane {
+  key: string;
+  label: string;
+  path: string;
+  src: string;
+  svg: boolean;
+}
+const imagePanes = ref<DiffImagePane[]>([]);
+const imageLoading = ref(false);
+const imageError = ref("");
+
+const selectedIsImage = computed(() =>
+  selectedPath.value ? isImagePath(selectedPath.value) : false,
+);
+
 /** 忽略空白差异模式(持久化):none 不忽略 / eol 行尾 / change 空白数量变化 / all 全部空白;
  *  与 DiffViewer 的 v-model 同源,模式变化时按新模式重取当前文件 diff(行集会变) */
 const ignoreWs = useLocalStorage<"none" | "eol" | "change" | "all">(
@@ -72,6 +91,8 @@ async function loadFiles() {
   selectedPath.value = null;
   diff.value = null;
   diffError.value = "";
+  imagePanes.value = [];
+  imageError.value = "";
   try {
     files.value = await cmd<GitCommitFile[]>("git_commit_files", {
       path: props.projectPath,
@@ -91,10 +112,19 @@ async function loadFiles() {
 watch(() => props.commit.hash, loadFiles, { immediate: true });
 
 async function selectFile(file: GitCommitFile, force = false) {
-  if (!force && selectedPath.value === file.path && diff.value) {
+  if (!force && selectedPath.value === file.path && (diff.value || imagePanes.value.length)) {
     return;
   }
   selectedPath.value = file.path;
+  // 图片:不走文本 diff,取新旧版本 blob 预览(忽略空白模式对二进制无意义,不参与其重取)
+  if (isImagePath(file.path)) {
+    diff.value = null;
+    diffError.value = "";
+    diffLoading.value = false;
+    void loadImageDiff(file);
+    return;
+  }
+  imagePanes.value = [];
   // 切文件不清空旧 diff、不转圈:旧内容保留到新结果落地后由 DiffViewer 同帧替换;
   // 仅首次加载(没有任何旧内容)时 diffLoading 才为 true,给空区域一个转圈
   diffLoading.value = !diff.value;
@@ -118,9 +148,67 @@ async function selectFile(file: GitCommitFile, force = false) {
   }
 }
 
-// 忽略空白模式变化:按新模式重取当前文件 diff
+// 图片 diff 取数:新增文件无旧版本、删除文件无新版本,其余(含重命名/类型变更)两侧都取;
+// blob 在某一版本不存在时该侧直接不渲染。旧版本从父提交的树读,重命名走 old_path
+async function loadImageDiff(file: GitCommitFile) {
+  const wantOld = file.status !== "A";
+  const wantNew = file.status !== "D";
+  imageLoading.value = true;
+  imageError.value = "";
+  try {
+    const [oldB64, newB64] = await Promise.all([
+      wantOld
+        ? cmd<string | null>("git_commit_file_blob", {
+            path: props.projectPath,
+            hash: props.commit.hash,
+            filePath: file.old_path ?? file.path,
+            parent: true,
+          })
+        : Promise.resolve(null),
+      wantNew
+        ? cmd<string | null>("git_commit_file_blob", {
+            path: props.projectPath,
+            hash: props.commit.hash,
+            filePath: file.path,
+            parent: false,
+          })
+        : Promise.resolve(null),
+    ]);
+    if (selectedPath.value !== file.path) return;
+    const panes: DiffImagePane[] = [];
+    if (oldB64 !== null) {
+      const p = file.old_path ?? file.path;
+      panes.push({
+        key: "old",
+        label: t("git.graph.detail.imageOld"),
+        path: p,
+        src: `data:${imageMimeOf(p)};base64,${oldB64}`,
+        svg: extOf(p) === "svg",
+      });
+    }
+    if (newB64 !== null) {
+      panes.push({
+        key: "new",
+        label: t("git.graph.detail.imageNew"),
+        path: file.path,
+        src: `data:${imageMimeOf(file.path)};base64,${newB64}`,
+        svg: extOf(file.path) === "svg",
+      });
+    }
+    imagePanes.value = panes;
+  } catch (e) {
+    if (selectedPath.value !== file.path) return;
+    imagePanes.value = [];
+    imageError.value = String(e);
+  } finally {
+    if (selectedPath.value === file.path) imageLoading.value = false;
+  }
+}
+
+// 忽略空白模式变化:按新模式重取当前文件 diff(图片是二进制,不受空白模式影响,跳过)
 watch(ignoreWs, () => {
-  if (selectedFile.value) void selectFile(selectedFile.value, true);
+  const file = selectedFile.value;
+  if (file && !isImagePath(file.path)) void selectFile(file, true);
 });
 
 // --- 树形展示:按目录层级聚合,折叠状态记忆 ---
@@ -466,8 +554,17 @@ onBeforeUnmount(() => {
         @pointerdown="startListResize"
       />
 
-      <!-- diff 区:与提交对话框变更预览共用的 DiffViewer(解析/着色/折叠/并排/导航全在其内) -->
+      <!-- diff 区:图片文件走 blob 图像预览(新增只看新/删除只看旧/修改左右对照),
+           其余与提交对话框变更预览共用 DiffViewer(解析/着色/折叠/并排/导航全在其内) -->
+      <ImageDiffPreview
+        v-if="selectedIsImage"
+        :file-path="selectedPath"
+        :loading="imageLoading"
+        :error="imageError"
+        :panes="imagePanes"
+      />
       <DiffViewer
+        v-else
         v-model:ignore-ws="ignoreWs"
         :diff="diff"
         :file-path="selectedPath"

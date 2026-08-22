@@ -476,6 +476,8 @@ export default {
         emptyFiles: "No changed files",
         filesLoadFailed: "Failed to load file list",
         diffLoadFailed: "Failed to load diff",
+        imageOld: "Old version",
+        imageNew: "New version",
       },
       filterAll: "All branches",
       filterCurrent: "Current branch",

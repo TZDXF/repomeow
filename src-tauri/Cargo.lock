@@ -3490,6 +3490,7 @@ name = "repomeow"
 version = "0.1.13"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "git2",
  "globset",

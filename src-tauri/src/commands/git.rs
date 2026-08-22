@@ -2674,6 +2674,72 @@ fn commit_file_diff_blocking(
     Ok(GitCommitFileDiff { diff, truncated })
 }
 
+/// 单文件 blob 的预览上限(超出报错,避免异常大的二进制经 IPC 传输撑爆前端)
+const COMMIT_BLOB_MAX_BYTES: usize = 32 * 1024 * 1024;
+
+/// 读取某次提交(或其第一个父提交)中一个文件的 blob 内容,base64 编码返回
+/// (提交详情面板拼 data: URL 预览图片)。文件在该版本不存在(如新增文件的旧版本、
+/// 根提交请求父版本)返回 None;子模块等非 blob 条目同样返回 None。
+/// parent = true 时读父提交版本(旧版),否则读该提交本身(新版);重命名的旧路径由前端传入
+#[tauri::command]
+pub async fn git_commit_file_blob(
+    path: String,
+    hash: String,
+    file_path: String,
+    parent: Option<bool>,
+) -> AppResult<Option<String>> {
+    run_blocking(move || {
+        commit_file_blob_blocking(&path, &hash, &file_path, parent.unwrap_or(false))
+    })
+    .await
+}
+
+fn commit_file_blob_blocking(
+    path: &str,
+    hash: &str,
+    file_path: &str,
+    parent: bool,
+) -> AppResult<Option<String>> {
+    let Some(repo) = open_repo(path)? else {
+        return Err(not_a_repo());
+    };
+    let commit = repo
+        .revparse_single(hash)
+        .and_then(|o| o.peel_to_commit())
+        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+    let commit = if parent {
+        // 根提交无父提交:文件在旧版本必然不存在,视作 None(与新增文件同语义)
+        match commit.parent(0) {
+            Ok(p) => p,
+            Err(_) => return Ok(None),
+        }
+    } else {
+        commit
+    };
+    let tree = commit
+        .tree()
+        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+    let Ok(entry) = tree.get_path(Path::new(file_path)) else {
+        return Ok(None);
+    };
+    if entry.kind() != Some(git2::ObjectType::Blob) {
+        return Ok(None);
+    }
+    let blob = repo
+        .find_blob(entry.id())
+        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
+    if blob.size() > COMMIT_BLOB_MAX_BYTES {
+        return Err(AppError::coded(
+            ErrorCode::GitCommandFailed,
+            format!("blob too large: {} bytes", blob.size()),
+        ));
+    }
+    use base64::Engine as _;
+    Ok(Some(
+        base64::engine::general_purpose::STANDARD.encode(blob.content()),
+    ))
+}
+
 /// 构建工作区相对 HEAD 的 diff(覆盖已暂存 + 已跟踪未暂存修改 + 未跟踪文件,与 git_commit 语义一致);
 /// 仓库尚无提交(无 HEAD)时回退到暂存区 diff(相对空树);
 /// include_untracked 使未跟踪文件以 Added delta 出现,补丁内容直接读工作区

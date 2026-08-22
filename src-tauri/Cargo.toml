@@ -56,6 +56,8 @@ globset = "0.4"
 regex = "1"
 # JDK 在线安装(install_jdk)解压发行包 zip;仅 deflate 即可覆盖 Adoptium/Zulu 的归档
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# 提交内图片预览(git_commit_file_blob):git blob 内容 base64 编码后经 IPC 传前端拼 data: URL
+base64 = "0.22"
 
 [dev-dependencies]
 urlpattern = "0.3"

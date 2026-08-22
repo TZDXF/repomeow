@@ -461,6 +461,8 @@ export default {
         emptyFiles: "无变动文件",
         filesLoadFailed: "文件列表加载失败",
         diffLoadFailed: "变动内容加载失败",
+        imageOld: "旧版本",
+        imageNew: "新版本",
       },
       filterAll: "所有分支",
       filterCurrent: "当前分支",

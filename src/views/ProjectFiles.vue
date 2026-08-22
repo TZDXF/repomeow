@@ -29,6 +29,7 @@ import MdLink from "@/components/markdown/MdLink.vue";
 import { MD_BASE_PATH_KEY } from "@/components/markdown/keys";
 import ImageViewer from "@/components/files/ImageViewer.vue";
 import { cmd } from "@/lib/tauri";
+import { extOf, IMAGE_EXTS } from "@/lib/file-kind";
 import { hasScheme, resolvePath } from "@/lib/markdown";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
 import {
@@ -363,14 +364,7 @@ watch(rootPath, () => {
   previewSeq++;
 });
 
-const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "ico", "bmp", "avif"]);
 const MD_EXTS = new Set(["md", "markdown"]);
-
-function extOf(path: string): string {
-  const name = path.slice(path.lastIndexOf("/") + 1);
-  const dot = name.lastIndexOf(".");
-  return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
-}
 
 const selectedExt = computed(() => (selected.value ? extOf(selected.value) : ""));
 const isImage = computed(() => IMAGE_EXTS.has(selectedExt.value));
