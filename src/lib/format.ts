@@ -1,5 +1,34 @@
 import { i18n } from "@/i18n";
 
+const COMPACT_NUMBER_UNITS = [
+  { divisor: 1_000, suffix: "K" },
+  { divisor: 1_000_000, suffix: "M" },
+  { divisor: 1_000_000_000, suffix: "B" },
+] as const;
+
+/** 数量紧凑显示:1.2K / 3.4M / 5.6B;小于 1000 时保留完整数字 */
+export function formatCompactNumber(value: number): string {
+  const absolute = Math.abs(value);
+  if (!Number.isFinite(value) || absolute < 1_000) {
+    return value.toLocaleString(i18n.global.locale.value);
+  }
+
+  let unitIndex = Math.min(
+    Math.floor(Math.log10(absolute) / 3) - 1,
+    COMPACT_NUMBER_UNITS.length - 1,
+  );
+  let unit = COMPACT_NUMBER_UNITS[unitIndex];
+  let rounded = Math.round((value / unit.divisor) * 10) / 10;
+
+  // 999.95K 等边界值应提升为 1M,避免显示 1000K
+  if (Math.abs(rounded) >= 1_000 && unitIndex < COMPACT_NUMBER_UNITS.length - 1) {
+    unit = COMPACT_NUMBER_UNITS[++unitIndex];
+    rounded = Math.round((value / unit.divisor) * 10) / 10;
+  }
+
+  return `${rounded.toLocaleString(i18n.global.locale.value, { maximumFractionDigits: 1 })}${unit.suffix}`;
+}
+
 /** Unix 秒时间戳 → 当前语言的相对时间 */
 export function formatRelativeTime(tsSeconds: number | null): string {
   if (!tsSeconds) return i18n.global.t("common.never");

@@ -3,7 +3,7 @@
 
 -- AI 模型用量日志:每条记录一次 LLM 调用(任务类型 + token 消耗)。
 -- 覆盖三条链路:前端内置 API(ai.ts)、Rust 定时报告(scheduler.rs)、
--- 本地 coding agent 后端(ACP,usage 为会话累计值经差分得到单次消耗)。
+-- 本地 coding agent 后端(ACP,记录每次 PromptResponse.usage)。
 -- token 列可空:provider 未返回 usage 时行仍在(调用次数可统计),但不计入汇总求和
 CREATE TABLE ai_usage_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

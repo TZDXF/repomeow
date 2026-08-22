@@ -1,5 +1,5 @@
 import { generateWikiOutline, languageName, streamWikiPage } from "@/lib/ai";
-import { recordAiUsage, usageDelta, type AiUsageSnapshot } from "@/lib/ai-usage";
+import { mapAcpPromptUsage, recordAiUsage } from "@/lib/ai-usage";
 import { AGENT_WIKI_OUTLINE_PROMPT, AGENT_WIKI_PAGE_PROMPT } from "@/lib/ai-prompts";
 import { acpCancel, acpPrompt, acpStart } from "@/lib/agent";
 import { runPool } from "@/lib/async-pool";
@@ -213,9 +213,6 @@ async function createAgentKernel(
   });
   // 用量统计与 meta.model 同款「agent 名称 · 所选模型」措辞
   const usageModel = backend.model ? `${agentName} · ${backend.model}` : agentName;
-  // ACP Usage 为会话累计口径:保留上次快照,差分出单次消耗
-  let lastUsageSnapshot: AiUsageSnapshot | undefined;
-
   /** 单次 prompt:invoke 本身不可中止,取消靠 abort 事件触发后端 session/cancel(+超时杀进程) */
   async function promptOnce(
     prompt: string,
@@ -231,23 +228,14 @@ async function createAgentKernel(
       const result = await acpPrompt(runId, prompt, (event) => {
         if (event.kind === "chunk") onChunk?.(event.text);
       });
-      // 差分记录本次消耗;agent 未上报 usage 时跳过(不伪造数值)
+      // PromptResponse.usage 即本次 prompt 消耗;agent 未上报时跳过
       if (result.usage) {
-        const snapshot: AiUsageSnapshot = {
-          totalTokens: result.usage.totalTokens,
-          inputTokens: result.usage.inputTokens,
-          outputTokens: result.usage.outputTokens,
-          ...(result.usage.cachedReadTokens !== undefined
-            ? { cachedTokens: result.usage.cachedReadTokens }
-            : {}),
-        };
         recordAiUsage({
           taskType: "wiki",
           model: usageModel,
-          usage: usageDelta(snapshot, lastUsageSnapshot),
+          usage: mapAcpPromptUsage(result.usage),
           durationMs: Date.now() - startedAt,
         });
-        lastUsageSnapshot = snapshot;
       }
       return result.text;
     } finally {

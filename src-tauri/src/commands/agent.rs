@@ -242,7 +242,7 @@ pub struct AcpPromptResult {
     usage: Option<AcpTokenUsage>,
 }
 
-/// 一次 prompt 的 token 用量快照(ACP Usage,会话累计口径)
+/// 一次 prompt 的 token 用量(ACP PromptResponse.usage,unstable 字段)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AcpTokenUsage {
@@ -715,7 +715,7 @@ async fn run_session(
                                                     StopReason::EndTurn => Ok(AcpPromptResult {
                                                         stop_reason: "end_turn".into(),
                                                         text,
-                                                        // 会话累计口径,前端差分出单次消耗
+                                                        // PromptResponse.usage 即本次 prompt 消耗
                                                         usage: r.usage.map(Into::into),
                                                     }),
                                                     StopReason::Cancelled => Err(AppError::coded(

@@ -64,12 +64,12 @@ export interface AcpTestResult {
 export interface AcpPromptResult {
   stopReason: string;
   text: string;
-  /** 会话累计口径的 token 用量快照(ACP unstable 字段;agent 未上报为 null) */
-  usage?: AcpUsageSnapshot | null;
+  /** 本次 prompt 的 token 用量(ACP unstable 字段;agent 未上报为 null) */
+  usage?: AcpPromptUsage | null;
 }
 
-/** ACP Usage 快照(会话累计口径,单次消耗需由调用方差分) */
-export interface AcpUsageSnapshot {
+/** ACP 单次 prompt 的 token 用量 */
+export interface AcpPromptUsage {
   totalTokens: number;
   inputTokens: number;
   outputTokens: number;

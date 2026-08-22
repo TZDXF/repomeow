@@ -16,7 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { AI_TASK_TYPES } from "@/lib/ai-usage";
-import { formatLocalDateTime } from "@/lib/format";
+import { formatCompactNumber, formatLocalDateTime } from "@/lib/format";
 import { cmd } from "@/lib/tauri";
 import type { AiUsageEntry, AiUsageSummary } from "@/types";
 
@@ -103,20 +103,11 @@ async function confirmClear() {
 // ── 展示辅助 ───────────────────────────────────────────────────────────────
 
 const cells = computed(() => [
-  { label: t("settings.usage.calls"), value: fmtNum(summary.value?.totalCalls ?? null) },
-  {
-    label: t("settings.usage.inputTokens"),
-    value: fmtNum(summary.value?.totalInputTokens ?? null),
-  },
-  {
-    label: t("settings.usage.outputTokens"),
-    value: fmtNum(summary.value?.totalOutputTokens ?? null),
-  },
-  { label: t("settings.usage.totalTokens"), value: fmtNum(summary.value?.totalTokens ?? null) },
-  {
-    label: t("settings.usage.cachedTokens"),
-    value: fmtNum(summary.value?.totalCachedTokens ?? null),
-  },
+  exactCell(t("settings.usage.calls"), summary.value?.totalCalls ?? null),
+  tokenCell(t("settings.usage.inputTokens"), summary.value?.totalInputTokens ?? null),
+  tokenCell(t("settings.usage.outputTokens"), summary.value?.totalOutputTokens ?? null),
+  tokenCell(t("settings.usage.totalTokens"), summary.value?.totalTokens ?? null),
+  tokenCell(t("settings.usage.cachedTokens"), summary.value?.totalCachedTokens ?? null),
 ]);
 
 /** 按日趋势正序排列,高度按当日 tokens 归一化 */
@@ -133,8 +124,21 @@ const maxTaskTokens = computed(() =>
   Math.max(...(summary.value?.byTask ?? []).map((s) => s.totalTokens), 1),
 );
 
-function fmtNum(n: number | null | undefined): string {
+function fmtExact(n: number | null | undefined): string {
   return n == null ? "—" : n.toLocaleString();
+}
+
+function fmtTokens(n: number | null | undefined): string {
+  return n == null ? "—" : formatCompactNumber(n);
+}
+
+function exactCell(label: string, value: number | null) {
+  const text = fmtExact(value);
+  return { label, value: text, title: text };
+}
+
+function tokenCell(label: string, value: number | null) {
+  return { label, value: fmtTokens(value), title: fmtExact(value) };
 }
 
 function taskLabel(taskType: string): string {
@@ -143,21 +147,27 @@ function taskLabel(taskType: string): string {
 }
 
 function dayTitle(day: string, calls: number, totalTokens: number): string {
-  return t("settings.usage.dayTooltip", { date: day, count: calls, tokens: totalTokens });
+  return t("settings.usage.dayTooltip", {
+    date: day,
+    count: fmtExact(calls),
+    tokens: fmtExact(totalTokens),
+  });
 }
 
 /** 输入 → 输出;缓存命中大于 0 时以括号附在输入后(缓存是输入的子集) */
 function ioText(entry: AiUsageEntry): string {
   const cached =
-    entry.cachedTokens != null && entry.cachedTokens > 0 ? ` (${fmtNum(entry.cachedTokens)})` : "";
-  return `${fmtNum(entry.inputTokens)}${cached} → ${fmtNum(entry.outputTokens)}`;
+    entry.cachedTokens != null && entry.cachedTokens > 0
+      ? ` (${fmtTokens(entry.cachedTokens)})`
+      : "";
+  return `${fmtTokens(entry.inputTokens)}${cached} → ${fmtTokens(entry.outputTokens)}`;
 }
 
 function ioTitle(entry: AiUsageEntry): string {
   return t("settings.usage.ioTooltip", {
-    input: fmtNum(entry.inputTokens),
-    cached: fmtNum(entry.cachedTokens),
-    output: fmtNum(entry.outputTokens),
+    input: fmtExact(entry.inputTokens),
+    cached: fmtExact(entry.cachedTokens),
+    output: fmtExact(entry.outputTokens),
   });
 }
 </script>
@@ -184,7 +194,7 @@ function ioTitle(entry: AiUsageEntry): string {
       <div class="mt-4 grid grid-cols-5 gap-2">
         <div v-for="cell in cells" :key="cell.label" class="rounded-lg border px-2 py-2">
           <p class="truncate text-xs text-muted-foreground">{{ cell.label }}</p>
-          <p class="mt-0.5 truncate text-base font-semibold tabular-nums" :title="cell.value">
+          <p class="mt-0.5 truncate text-base font-semibold tabular-nums" :title="cell.title">
             {{ cell.value }}
           </p>
         </div>
@@ -212,7 +222,7 @@ function ioTitle(entry: AiUsageEntry): string {
               />
             </div>
             <span class="shrink-0 text-xs tabular-nums text-muted-foreground">
-              {{ stat.calls }} · {{ stat.totalTokens.toLocaleString() }}
+              {{ stat.calls }} · {{ fmtTokens(stat.totalTokens) }}
             </span>
           </div>
         </div>
@@ -292,8 +302,11 @@ function ioTitle(entry: AiUsageEntry): string {
             <span class="shrink-0 tabular-nums text-muted-foreground" :title="ioTitle(entry)">
               {{ ioText(entry) }}
             </span>
-            <span class="w-14 shrink-0 text-right font-medium tabular-nums">
-              {{ fmtNum(entry.totalTokens) }}
+            <span
+              class="w-14 shrink-0 text-right font-medium tabular-nums"
+              :title="fmtExact(entry.totalTokens)"
+            >
+              {{ fmtTokens(entry.totalTokens) }}
             </span>
           </div>
           <p v-if="!entries.length && !loading" class="py-6 text-center text-muted-foreground">
