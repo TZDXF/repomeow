@@ -1543,10 +1543,39 @@ fn base_branch_of(repo: &Repository, branch: Option<&str>) -> Option<String> {
     }
 }
 
+/// 归一到主工作区句柄。path 可能是链接工作区本身(worktree 副本会登记为独立项目),
+/// 该视角下 workdir() 是副本自身、worktrees() 只列链接工作区,主工作区会整体缺失
+/// 且 is_main 标错对象。统一换成主工作区视角再列举;推导或打开失败
+/// (separate-git-dir、子模块等非标准布局)时原样返回,退回传入路径视角
+fn main_worktree_repo(repo: Repository) -> Repository {
+    if repo.path() == repo.commondir() {
+        return repo;
+    }
+    let Some(main_root) = main_worktree_root(&repo) else {
+        return repo;
+    };
+    let root_str = main_root.to_string_lossy();
+    match open_repo(&root_str) {
+        Ok(Some(main)) => main,
+        _ => repo,
+    }
+}
+
+/// 主工作区根目录:commondir(标准布局为 `<主工作区>/.git`)的上一级,与
+/// `git worktree list` 的推导一致;末段不是 .git 时无法推导,返回 None
+fn main_worktree_root(repo: &Repository) -> Option<PathBuf> {
+    let commondir = repo.commondir();
+    if !commondir.file_name()?.eq_ignore_ascii_case(".git") {
+        return None;
+    }
+    commondir.parent().map(PathBuf::from)
+}
+
 fn list_worktrees_blocking(path: &str) -> AppResult<Vec<GitWorktree>> {
     let Some(repo) = open_repo(path)? else {
         return Err(not_a_repo());
     };
+    let repo = main_worktree_repo(repo);
     let mut list = Vec::new();
     // 主工作区始终第一条
     if let Some(workdir) = repo.workdir() {
@@ -4605,6 +4634,32 @@ mod tests {
             .unwrap()
             .iter()
             .any(|b| b == "feature/x"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn list_worktrees_from_linked_worktree_includes_main() {
+        let dir = temp_dir("worktree-from-linked");
+        init_repo(&dir);
+        fs::write(dir.join("a.txt"), "hello").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-m", "init"]);
+        let path = dir.to_str().unwrap();
+
+        worktree_add_blocking(path, ".worktrees/feature", "feature", true, None, None).unwrap();
+        let wt = dir.join(".worktrees").join("feature");
+
+        // 以链接工作区作为项目路径列 worktree:主工作区仍排第一、分支正确,
+        // 链接工作区不重复不遗漏(修复前:副本自身被标为主工作区,真正的主工作区缺失)
+        let list = list_worktrees_blocking(wt.to_str().unwrap()).unwrap();
+        assert_eq!(list.len(), 2);
+        assert!(list[0].is_main);
+        assert_eq!(list[0].branch.as_deref(), Some("main"));
+        assert_ne!(list[0].path, list[1].path);
+        assert!(!list[1].is_main);
+        assert_eq!(list[1].branch.as_deref(), Some("feature"));
+        assert!(Path::new(&list[1].path).join("a.txt").exists());
 
         let _ = fs::remove_dir_all(&dir);
     }
