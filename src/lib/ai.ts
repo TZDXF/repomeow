@@ -92,20 +92,18 @@ function stripThinking(text: string): string {
  * 显式使用 .chat()(而非默认的 Responses API),兼容 DeepSeek/Moonshot/各类中转服务;
  * fetch 走 Tauri HTTP 插件(Rust 侧发请求),规避 webview 的 CORS 限制
  *
- * thinkingEnabled:
- * - false(默认) → 命中已知推理模型提供方时向请求体注入关闭思考的参数;
- * - true → 不注入任何参数,模型按默认行为决定是否输出 <think> 块;
+ * 是否思考由应用按场景决定,无用户设置:
+ * - false(默认;commit 信息/报告/测试连接) → 命中已知推理模型提供方时向请求体注入关闭思考的参数,
+ *   避免思考带来的延迟副作用;
+ * - true(仅 wiki 大纲与页面生成) → 不注入任何参数,模型按默认行为决定是否输出 <think> 块;
  *   stripThinking 兜底剥除仍然生效(只在响应起始位置的思考块会被清理,
  *   完整闭合后中途再出现的保留原文)。
  */
-function getChatModel(thinkingEnabled?: boolean) {
+function getChatModel(thinkingEnabled = false) {
   const { baseURL, apiKey, model } = requireConfig();
   const baseFetch = tauriFetch as unknown as typeof globalThis.fetch;
-  const useSettings = useSettingsStore();
-  const enabled =
-    typeof thinkingEnabled === "boolean" ? thinkingEnabled : useSettings.aiThinkingEnabled;
-  // 开启思考模式时直接跳过参数注入,模型按默认行为输出
-  const noThink = enabled ? {} : thinkingOffParams(baseURL, model);
+  // 启用思考时直接跳过参数注入,模型按默认行为输出
+  const noThink = thinkingEnabled ? {} : thinkingOffParams(baseURL, model);
   // 命中已知推理模型提供方时,包装 fetch 向请求体注入关闭思考的参数
   const fetchFn =
     Object.keys(noThink).length === 0
@@ -134,10 +132,14 @@ function languageName(language: SupportedLocale) {
   return language === "zh-CN" ? "中文" : "English";
 }
 
+/** 组装固定 system prompt(内置模板);输出语言指令统一追加 */
+function fixedSystemPrompt(fallback: string, language: SupportedLocale) {
+  return `${fallback}\n\nRespond in ${languageName(language)}.`;
+}
+
 /** 组装 system prompt:用户自定义(~/.repomeow/prompts/*.md)优先,空则回退内置默认;输出语言指令统一追加 */
 function buildSystemPrompt(custom: string, fallback: string, language: SupportedLocale) {
-  const base = custom.trim() || fallback;
-  return `${base}\n\nRespond in ${languageName(language)}.`;
+  return fixedSystemPrompt(custom.trim() || fallback, language);
 }
 
 /** 根据当前变更上下文生成 git 提交信息;user 提示词携带项目名称与描述帮助模型理解业务语境 */
@@ -217,17 +219,14 @@ ${sections}`,
 
 /**
  * 生成 wiki 大纲:输入过滤后的文件树 + README + 清单文件,输出裸 XML 结构文本
- * (由 wiki-parse.ts 容错解析);signal 用于取消生成;
- * thinkingEnabled: 显式覆盖 settings.aiThinkingEnabled(未传则按设置)
+ * (由 wiki-parse.ts 容错解析);signal 用于取消生成;思考模式固定启用
  */
 export async function generateWikiOutline(
   context: WikiContext,
   projectName: string,
   language: SupportedLocale,
   signal: AbortSignal | undefined,
-  thinkingEnabled?: boolean,
 ): Promise<string> {
-  const prompts = await loadAiPrompts();
   const manifestSection = context.manifests.length
     ? `\n\nManifest files:\n${context.manifests
         .map((m) => `=== ${m.path} ===\n${m.content}`)
@@ -238,8 +237,8 @@ export async function generateWikiOutline(
     ? "\n(Note: the file tree was truncated; directory entries like `dir/ (N files)` summarize folded subtrees.)"
     : "";
   const { text } = await generateText({
-    model: getChatModel(thinkingEnabled),
-    system: buildSystemPrompt(prompts.wikiOutline, DEFAULT_WIKI_OUTLINE_PROMPT, language),
+    model: getChatModel(true),
+    system: fixedSystemPrompt(DEFAULT_WIKI_OUTLINE_PROMPT, language),
     prompt: `Project: ${projectName}
 
 File tree (${context.fileCount} files):${truncatedNote}
@@ -270,7 +269,7 @@ ${filesSection || "(no source files available)"}`;
 
 /**
  * 生成 wiki 单个页面:输入大纲条目与其相关文件全文,输出 Markdown 正文;
- * signal 用于取消生成与重试中止
+ * signal 用于取消生成与重试中止;思考模式固定启用
  */
 export async function generateWikiPage(
   page: WikiOutlinePage,
@@ -278,10 +277,9 @@ export async function generateWikiPage(
   language: SupportedLocale,
   signal?: AbortSignal,
 ): Promise<string> {
-  const prompts = await loadAiPrompts();
   const { text } = await generateText({
-    model: getChatModel(),
-    system: buildSystemPrompt(prompts.wikiPage, DEFAULT_WIKI_PAGE_PROMPT, language),
+    model: getChatModel(true),
+    system: fixedSystemPrompt(DEFAULT_WIKI_PAGE_PROMPT, language),
     prompt: buildWikiPageUserPrompt(page, files),
     abortSignal: signal,
   });
@@ -291,7 +289,7 @@ export async function generateWikiPage(
 /**
  * 流式生成 wiki 页面:onChunk 收到逐步累积的正文(已剥离开头思考块;
  * 思考块未闭合期间回调为空串)。Tauri http 插件按 pull 逐块读响应体,支持流式;
- * thinkingEnabled: 显式覆盖 settings.aiThinkingEnabled(未传则按设置)
+ * 思考模式固定启用
  */
 export async function streamWikiPage(
   page: WikiOutlinePage,
@@ -299,12 +297,10 @@ export async function streamWikiPage(
   language: SupportedLocale,
   signal: AbortSignal | undefined,
   onChunk: (partial: string) => void,
-  thinkingEnabled?: boolean,
 ): Promise<string> {
-  const prompts = await loadAiPrompts();
   const result = streamText({
-    model: getChatModel(thinkingEnabled),
-    system: buildSystemPrompt(prompts.wikiPage, DEFAULT_WIKI_PAGE_PROMPT, language),
+    model: getChatModel(true),
+    system: fixedSystemPrompt(DEFAULT_WIKI_PAGE_PROMPT, language),
     prompt: buildWikiPageUserPrompt(page, files),
     abortSignal: signal,
   });

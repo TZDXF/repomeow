@@ -6,7 +6,6 @@ import { Check, Loader2, Plug, RefreshCw } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
-import { Switch } from "@/components/ui/switch";
 import { fetchAiModels, testAiConnection } from "@/lib/ai";
 import { useSettingsStore } from "@/stores/settings";
 
@@ -202,18 +201,6 @@ async function testConnection() {
         <p class="text-xs text-muted-foreground">
           {{ t("settings.ai.concurrencyHint") }}
         </p>
-      </div>
-      <div class="flex items-center justify-between gap-3 rounded-md border p-3">
-        <div class="min-w-0 flex-1">
-          <p class="text-sm font-medium">{{ t("settings.ai.thinkingTitle") }}</p>
-          <p class="mt-0.5 text-xs text-muted-foreground">
-            {{ t("settings.ai.thinkingHint") }}
-          </p>
-        </div>
-        <Switch
-          :model-value="store.aiThinkingEnabled"
-          @update:model-value="store.setAiThinkingEnabled(!!$event)"
-        />
       </div>
     </div>
   </section>

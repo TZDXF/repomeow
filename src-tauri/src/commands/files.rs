@@ -5,9 +5,19 @@ use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use crate::commands::walk;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::{
-    ComposeFile, ComposePort, ComposeService, FilePreview, ProjectFileEntry, ReadmeContent,
-    TextSearchHit, TextSearchLine, TextSearchOutcome,
+    ComposeFile, ComposePort, ComposeService, FilePreview, ProjectFileEntry, TextSearchHit,
+    TextSearchLine, TextSearchOutcome,
 };
+
+/// compose 文件大小上限 256KB,超过的直接跳过(正常 compose 文件远小于此)
+const COMPOSE_MAX_BYTES: u64 = 256 * 1024;
+
+pub(crate) fn ensure_dir(path: &str) -> AppResult<()> {
+    if !Path::new(path).is_dir() {
+        return Err(AppError::coded(ErrorCode::InvalidPath, path));
+    }
+    Ok(())
+}
 
 /// README 候选文件名,按优先级排列(大小写常见变体)
 const README_CANDIDATES: &[&str] = &[
@@ -20,18 +30,8 @@ const README_CANDIDATES: &[&str] = &[
     "README",
 ];
 
-/// README 读取上限 512KB,避免超大文件拖垮前端渲染
+/// README 读取上限 512KB
 const README_MAX_BYTES: u64 = 512 * 1024;
-
-/// compose 文件大小上限 256KB,超过的直接跳过(正常 compose 文件远小于此)
-const COMPOSE_MAX_BYTES: u64 = 256 * 1024;
-
-pub(crate) fn ensure_dir(path: &str) -> AppResult<()> {
-    if !Path::new(path).is_dir() {
-        return Err(AppError::coded(ErrorCode::InvalidPath, path));
-    }
-    Ok(())
-}
 
 /// 在目录中按候选名查找文件,返回第一个存在的文件名。
 /// 用 read_dir 做大小写精确匹配,避免 Windows/macOS 大小写不敏感文件系统
@@ -49,18 +49,11 @@ fn find_file(dir: &Path, candidates: &[&str]) -> Option<String> {
         .map(|name| name.to_string())
 }
 
-/// 仅探测项目根目录是否存在 README(不读内容),供前端决定是否展示 README 入口按钮
-#[tauri::command]
-pub fn has_readme(path: String) -> AppResult<bool> {
-    ensure_dir(&path)?;
-    Ok(find_file(Path::new(&path), README_CANDIDATES).is_some())
-}
-
-/// 读取项目 README;不存在时返回 None
-#[tauri::command]
-pub fn read_readme(path: String) -> AppResult<Option<ReadmeContent>> {
-    ensure_dir(&path)?;
-    let dir = Path::new(&path);
+/// 读取项目根目录 README 全文;不存在时返回 None。
+/// 仅供后端内部使用(wiki 上下文收集);前端查看 README 走文件预览页
+pub(crate) fn read_readme(path: &str) -> AppResult<Option<String>> {
+    ensure_dir(path)?;
+    let dir = Path::new(path);
     let Some(file_name) = find_file(dir, README_CANDIDATES) else {
         return Ok(None);
     };
@@ -78,7 +71,7 @@ pub fn read_readme(path: String) -> AppResult<Option<ReadmeContent>> {
     } else {
         std::fs::read_to_string(&file)?
     };
-    Ok(Some(ReadmeContent { file_name, content }))
+    Ok(Some(content))
 }
 
 /// 列出项目内某目录的直接子项(文件树逐层懒加载;dir 为 None/空串时列根层)。
@@ -839,28 +832,24 @@ mod tests {
         let dir = temp_project_dir("readme");
         let p = Path::new(&dir);
 
-        assert!(read_readme(dir.clone()).unwrap().is_none());
+        assert!(read_readme(&dir).unwrap().is_none());
 
         fs::write(p.join("readme.md"), "# Hello").unwrap();
-        let r = read_readme(dir.clone()).unwrap().unwrap();
-        assert_eq!(r.file_name, "readme.md");
-        assert_eq!(r.content, "# Hello");
+        assert_eq!(read_readme(&dir).unwrap().as_deref(), Some("# Hello"));
 
         // 优先级:README.md 高于 readme.md。
         // 注意先删 readme.md:Windows/macOS 大小写不敏感文件系统上,
         // 直接写 README.md 会覆盖同名文件但保留原有目录项大小写。
         fs::remove_file(p.join("readme.md")).unwrap();
         fs::write(p.join("README.md"), "# Priority").unwrap();
-        let r = read_readme(dir.clone()).unwrap().unwrap();
-        assert_eq!(r.file_name, "README.md");
-        assert_eq!(r.content, "# Priority");
+        assert_eq!(read_readme(&dir).unwrap().as_deref(), Some("# Priority"));
 
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn readme_rejects_missing_dir() {
-        assert!(matches!(read_readme("D:/no/such/dir-xyz".into()),
+        assert!(matches!(read_readme("D:/no/such/dir-xyz"),
                 Err(ref e) if e.is_code(crate::error::ErrorCode::InvalidPath)));
     }
 

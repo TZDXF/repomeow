@@ -12,8 +12,9 @@ const PROMPTS_DIR_NAME: &str = "prompts";
 const COMMIT_PROMPT_FILE: &str = "commit.md";
 const REPORT_PROMPT_FILE: &str = "report.md";
 const REPORT_WEEKLY_PROMPT_FILE: &str = "report-weekly.md";
-const WIKI_OUTLINE_PROMPT_FILE: &str = "wiki-outline.md";
-const WIKI_PAGE_PROMPT_FILE: &str = "wiki-page.md";
+// 旧版本曾支持自定义的 wiki 提示词文件,现已固定为前端内置模板;保存时顺带清理避免遗留文件被误认为仍生效
+const LEGACY_WIKI_OUTLINE_PROMPT_FILE: &str = "wiki-outline.md";
+const LEGACY_WIKI_PAGE_PROMPT_FILE: &str = "wiki-page.md";
 
 /// 用户自定义 AI 提示词(存为 ~/.repomeow/prompts/*.md);空字符串表示使用内置默认模板
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -22,10 +23,6 @@ pub struct AiPrompts {
     pub commit: String,
     pub report: String,
     pub report_weekly: String,
-    /// wiki 大纲(结构)生成提示词
-    pub wiki_outline: String,
-    /// wiki 单页内容生成提示词
-    pub wiki_page: String,
 }
 
 fn prompts_dir(app: &AppHandle) -> AppResult<PathBuf> {
@@ -63,8 +60,6 @@ pub fn get_ai_prompts(app: AppHandle) -> AppResult<AiPrompts> {
         commit: read_prompt(&dir, COMMIT_PROMPT_FILE),
         report: read_prompt(&dir, REPORT_PROMPT_FILE),
         report_weekly: read_prompt(&dir, REPORT_WEEKLY_PROMPT_FILE),
-        wiki_outline: read_prompt(&dir, WIKI_OUTLINE_PROMPT_FILE),
-        wiki_page: read_prompt(&dir, WIKI_PAGE_PROMPT_FILE),
     })
 }
 
@@ -75,8 +70,8 @@ pub fn set_ai_prompts(app: AppHandle, prompts: AiPrompts) -> AppResult<()> {
     write_prompt(&dir, COMMIT_PROMPT_FILE, &prompts.commit)?;
     write_prompt(&dir, REPORT_PROMPT_FILE, &prompts.report)?;
     write_prompt(&dir, REPORT_WEEKLY_PROMPT_FILE, &prompts.report_weekly)?;
-    write_prompt(&dir, WIKI_OUTLINE_PROMPT_FILE, &prompts.wiki_outline)?;
-    write_prompt(&dir, WIKI_PAGE_PROMPT_FILE, &prompts.wiki_page)?;
+    write_prompt(&dir, LEGACY_WIKI_OUTLINE_PROMPT_FILE, "")?;
+    write_prompt(&dir, LEGACY_WIKI_PAGE_PROMPT_FILE, "")?;
     Ok(())
 }
 

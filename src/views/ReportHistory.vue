@@ -258,7 +258,7 @@ const controls: ControlsConfig = {
 const detachedThemeEl = document.createElement("div");
 const themeElement = () => detachedThemeEl;
 
-// 与 ReadmeDrawer / DailyReportDialog 一致:覆盖库默认下载,走 Tauri save dialog。
+// 与 DailyReportDialog 一致:覆盖库默认下载,走 Tauri save dialog。
 const beforeDownload = createBeforeDownload(t);
 
 // ── data loading ────────────────────────────────────────────────────────

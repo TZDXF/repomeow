@@ -244,12 +244,6 @@ pub struct CustomCommand {
     pub sort_order: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct ReadmeContent {
-    pub file_name: String,
-    pub content: String,
-}
-
 /// 文件预览内容(read_file_preview):text 为 None 表示二进制文件不可预览
 #[derive(Debug, Clone, Serialize)]
 pub struct FilePreview {

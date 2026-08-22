@@ -7,7 +7,7 @@ import { MD_BASE_PATH_KEY } from "@/components/markdown/keys";
 
 const props = defineProps<ImageNodeRendererProps>();
 
-// README 所在项目目录,由使用方(如 ReadmeDrawer)provide
+// 相对路径解析基准目录(MD 文件所在目录),由使用方 provide
 const getBasePath = inject(MD_BASE_PATH_KEY, () => "");
 
 /** 相对路径图片换成本地 asset 协议地址,其余(http/asset/data 等)原样输出 */

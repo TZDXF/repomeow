@@ -68,19 +68,19 @@ export const useSettingsStore = defineStore("settings", () => {
   const aiModel = ref("");
   /** AI 调用并发上限(1-5),适用于批量生成报告等所有 AI 请求场景 */
   const aiConcurrency = ref(2);
-  /**
-   * 启用 AI 思考模式(wiki 生成会用上;默认 false)。
-   * 关闭时 ai.ts 会按 provider 注入关闭思考参数(已知推理服务有效,未知服务忽略);
-   * 开启时不注入任何参数,模型按默认行为决定是否输出 <think> 块。
-   * 不影响 stripThinking 的兜底剥除(响应起始位置的思考块无论开关都会被清理)。
-   */
-  const aiThinkingEnabled = ref(false);
   /** 项目列表视图模式(grid / table) */
   const projectsViewMode = ref<ProjectsViewMode>("grid");
   /** 项目列表排序方式 */
   const projectsSortKey = ref<ProjectsSortKey>("name");
   /** 启动时自动检查更新 */
   const autoCheckUpdate = ref(true);
+  /**
+   * Wiki 自动增量更新(与「跟踪更新」联动,默认关闭):跟踪项目快进拉取后,
+   * 未同步进 wiki 的提交数达到阈值时自动执行增量更新(stores/wiki.ts 的 autoUpdate)
+   */
+  const wikiAutoUpdate = ref(false);
+  /** Wiki 自动增量更新的触发阈值(未同步提交数,1-10000) */
+  const wikiAutoUpdateThreshold = ref(10);
   /** 关闭主窗口行为(默认最小化到托盘) */
   const closeAction = ref<CloseAction>("tray");
   /** 启用 GitHub CLI(gh)作为「账号仓库」的虚拟账号来源(默认关闭,opt-in) */
@@ -360,10 +360,11 @@ export const useSettingsStore = defineStore("settings", () => {
         aiApiKey: "",
         aiModel: "",
         aiConcurrency: "2",
-        aiThinkingEnabled: "false",
         projectsViewMode: "grid",
         projectsSortKey: "name",
         autoCheckUpdate: "true",
+        wikiAutoUpdate: "false",
+        wikiAutoUpdateThreshold: "10",
         closeAction: "tray",
         enableGhCli: "false",
         worktreeDirTemplate: ".worktrees/{branch}",
@@ -420,11 +421,6 @@ export const useSettingsStore = defineStore("settings", () => {
         aiConcurrency.value = Math.min(5, Math.max(1, n));
       }
     }
-    // 思考模式开关:字符串 "true"/"false",非 "true" 一律回退默认 false
-    const savedThinking = await fileStore.get<string>("aiThinkingEnabled");
-    if (savedThinking === "true") {
-      aiThinkingEnabled.value = true;
-    }
     // 视图模式:白名单校验,非法值回退 grid
     const savedViewMode = await fileStore.get<ProjectsViewMode>("projectsViewMode");
     if (savedViewMode === "grid" || savedViewMode === "table") {
@@ -439,6 +435,19 @@ export const useSettingsStore = defineStore("settings", () => {
     const savedAutoCheckUpdate = await fileStore.get<string>("autoCheckUpdate");
     if (savedAutoCheckUpdate === "true" || savedAutoCheckUpdate === "false") {
       autoCheckUpdate.value = savedAutoCheckUpdate === "true";
+    }
+    // Wiki 自动增量更新开关:存为字符串 "true"/"false",非法值回退 false
+    const savedWikiAutoUpdate = await fileStore.get<string>("wikiAutoUpdate");
+    if (savedWikiAutoUpdate === "true" || savedWikiAutoUpdate === "false") {
+      wikiAutoUpdate.value = savedWikiAutoUpdate === "true";
+    }
+    // 触发阈值:正整数,限制在 1-10000,非法值回退默认 10
+    const savedWikiThreshold = await fileStore.get<string>("wikiAutoUpdateThreshold");
+    if (typeof savedWikiThreshold === "string") {
+      const n = Number.parseInt(savedWikiThreshold, 10);
+      if (Number.isFinite(n)) {
+        wikiAutoUpdateThreshold.value = Math.min(10000, Math.max(1, n));
+      }
     }
     // 关闭行为:白名单校验,非法值回退 tray(该键同时被 Rust 侧 on_window_event 读取)
     const savedCloseAction = await fileStore.get<CloseAction>("closeAction");
@@ -597,11 +606,6 @@ export const useSettingsStore = defineStore("settings", () => {
     await persist("aiConcurrency", String(n));
   }
 
-  async function setAiThinkingEnabled(value: boolean) {
-    aiThinkingEnabled.value = value;
-    await persist("aiThinkingEnabled", String(value));
-  }
-
   async function setProjectsViewMode(value: ProjectsViewMode) {
     if (value !== "grid" && value !== "table") return;
     projectsViewMode.value = value;
@@ -617,6 +621,18 @@ export const useSettingsStore = defineStore("settings", () => {
   async function setAutoCheckUpdate(value: boolean) {
     autoCheckUpdate.value = value;
     await persist("autoCheckUpdate", String(value));
+  }
+
+  async function setWikiAutoUpdate(value: boolean) {
+    wikiAutoUpdate.value = value;
+    await persist("wikiAutoUpdate", String(value));
+  }
+
+  async function setWikiAutoUpdateThreshold(value: number) {
+    if (!Number.isFinite(value)) return;
+    const n = Math.min(10000, Math.max(1, Math.round(value)));
+    wikiAutoUpdateThreshold.value = n;
+    await persist("wikiAutoUpdateThreshold", String(n));
   }
 
   async function setCloseAction(value: CloseAction) {
@@ -731,10 +747,11 @@ export const useSettingsStore = defineStore("settings", () => {
     aiApiKey,
     aiModel,
     aiConcurrency,
-    aiThinkingEnabled,
     projectsViewMode,
     projectsSortKey,
     autoCheckUpdate,
+    wikiAutoUpdate,
+    wikiAutoUpdateThreshold,
     closeAction,
     enableGhCli,
     worktreeDirTemplate,
@@ -760,10 +777,11 @@ export const useSettingsStore = defineStore("settings", () => {
     setAiApiKey,
     setAiModel,
     setAiConcurrency,
-    setAiThinkingEnabled,
     setProjectsViewMode,
     setProjectsSortKey,
     setAutoCheckUpdate,
+    setWikiAutoUpdate,
+    setWikiAutoUpdateThreshold,
     setCloseAction,
     setEnableGhCli,
     setWorktreeDirTemplate,

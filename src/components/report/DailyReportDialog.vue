@@ -223,7 +223,7 @@ watch(
   () => void resolveSelfNames(effectiveProjectIds.value),
 );
 
-// 表格/代码复制导出控件,与 ReadmeDrawer 保持一致
+// 表格/代码复制导出控件,与文件预览的 Markdown 渲染保持一致
 const controls: ControlsConfig = {
   table: {
     copy: true,
@@ -238,7 +238,7 @@ const controls: ControlsConfig = {
 // 走 Tauri save dialog + save_text_file;见 src/lib/markdown-download.ts
 const beforeDownload = createBeforeDownload(t);
 
-// 同 ReadmeDrawer:阻止库内联宿主变量,MD 主题交给 CSS 层
+// 阻止库内联宿主变量,MD 主题交给 CSS 层
 const detachedThemeEl = document.createElement("div");
 const themeElement = () => detachedThemeEl;
 

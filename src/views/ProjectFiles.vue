@@ -20,10 +20,10 @@ import { MD_BASE_PATH_KEY } from "@/components/markdown/keys";
 import ImageViewer from "@/components/files/ImageViewer.vue";
 import { cmd } from "@/lib/tauri";
 import { debounce } from "@/lib/utils";
-import { extOf, IMAGE_EXTS } from "@/lib/file-kind";
+import { extOf, IMAGE_EXTS, isReadmeName } from "@/lib/file-kind";
 import { hasScheme, resolvePath } from "@/lib/markdown";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
-import { buildVisibleRows, prefetchTargets, sortDirEntries } from "@/lib/lazy-file-tree";
+import { buildVisibleRows, entryName, prefetchTargets, sortDirEntries } from "@/lib/lazy-file-tree";
 import { fileIcon } from "@/lib/file-icons";
 import { buildFindRegExp, type FindQuery } from "@/lib/text-search";
 import { Icon } from "@iconify/vue";
@@ -182,6 +182,13 @@ async function loadFiles() {
   listError.value = false;
   try {
     await ensureChildren("");
+    // 进入页面默认打开根目录 README(无 README 保持空态);加载间隙用户已点选时不覆盖
+    const readme = childrenMap.value
+      .get("")
+      ?.find((e) => !e.isDir && isReadmeName(entryName(e.path)));
+    if (readme && selected.value === null) {
+      selected.value = readme.path;
+    }
   } finally {
     listLoading.value = false;
   }
@@ -571,7 +578,7 @@ const controls: ControlsConfig = {
 
 const beforeDownload = createBeforeDownload(t);
 
-// 见 ReadmeDrawer:阻止库把 shadcn 变量内联成非法色值,MD 主题交给 CSS 层
+// 阻止库把 shadcn 变量内联成非法色值,MD 主题交给 CSS 层
 const detachedThemeEl = document.createElement("div");
 const themeElement = () => detachedThemeEl;
 

@@ -23,6 +23,11 @@ export function isImagePath(path: string): boolean {
   return IMAGE_EXTS.has(extOf(path));
 }
 
+/** README 文件名识别(.md/.markdown/.txt/无扩展名,大小写不敏感,覆盖常见大小写变体) */
+export function isReadmeName(name: string): boolean {
+  return /^readme(?:\.(?:md|markdown|txt))?$/i.test(name);
+}
+
 /** 扩展名 → data URL 的 mime 类型;未知扩展回退八进制流 */
 export function imageMimeOf(path: string): string {
   switch (extOf(path)) {

@@ -799,6 +799,8 @@ export default {
       "增量更新:只重新生成受代码变更影响的页面;新增文件不会触发新页面,结构变化建议整本重新生成",
     updatedPages: "已更新 {count} 个页面",
     updateNoop: "没有页面受本次代码变更影响",
+    autoUpdated: "「{name}」的 Wiki 已自动增量更新({count} 个页面)",
+    autoUpdateFailed: "「{name}」的 Wiki 自动更新失败:{error}",
     writing: "正在生成",
     sources: "来源文件",
     waitingFirstChunk: "等待模型输出第一段内容…",
@@ -808,12 +810,6 @@ export default {
       outlining: "正在生成大纲…",
       generating: "正在生成页面…",
     },
-  },
-  readme: {
-    title: "README",
-    closeEsc: "关闭 (Esc)",
-    loading: "加载中...",
-    notFound: "项目中未找到 README 文件",
   },
   files: {
     entry: "文件预览",
@@ -1089,9 +1085,6 @@ export default {
       saved: "AI 配置已保存",
       concurrency: "并发数限制",
       concurrencyHint: "同时进行的 AI 请求数上限(1-5),接口限流时可调低",
-      thinkingTitle: "启用 AI 思考模式",
-      thinkingHint:
-        "关闭时按 provider 注入关闭思考参数(已知推理模型有效);开启时不注入任何参数,模型按默认行为决定是否输出 <think> 块。响应起始位置的思考块仍会被自动剥离。",
     },
     accounts: {
       title: "账号绑定",
@@ -1136,11 +1129,6 @@ export default {
       reportDescription: "汇总提交记录生成日报时使用的提示词",
       weeklyReport: "周报",
       weeklyReportDescription: "用于生成周报的 system 提示词;留空使用内置默认模板",
-      wikiOutline: "Wiki 大纲",
-      wikiOutlineDescription:
-        "生成 wiki 结构(页面清单与相关文件)时使用的提示词;输出必须是裸 XML,勿改输出格式约束",
-      wikiPage: "Wiki 页面",
-      wikiPageDescription: "逐页生成 wiki 正文时使用的提示词;输入为该页相关源文件全文",
       note: "留空使用内置默认模板(即占位区域所示内容);输出语言由应用按语言设置自动追加,无需写入提示词",
       reset: "恢复默认",
       saved: "提示词已保存",
@@ -1223,6 +1211,11 @@ export default {
       title: "跟踪更新",
       description:
         "开启跟踪后,后台会定时检查远端更新并自动快进拉取;无法快进(分叉或本地改动可能冲突)时自动取消,不做提醒",
+      wikiAutoUpdateLabel: "自动更新 Wiki",
+      wikiAutoUpdateHint:
+        "跟踪的项目自动快进拉取后,累计未同步进 Wiki 的提交数达到阈值时自动增量更新该项目的 Wiki;无 Wiki 或无法增量时跳过,不会自动整本重新生成",
+      wikiThresholdTitle: "触发阈值(未同步进 Wiki 的提交数)",
+      wikiThresholdSuffix: "次提交",
       searchPlaceholder: "搜索名称、描述或路径...",
       trackedCount: "已跟踪 {count} 个项目",
       toggleHint: "开启/关闭该项目的跟踪更新",

@@ -166,6 +166,14 @@ pub struct GitUpdatedPayload {
     pub last_fetch_at: i64,
 }
 
+/// "git://auto-pulled" 事件载荷:跟踪更新快进拉取成功时发出,
+/// pulled = 本轮快进合并的提交数(拉取前 behind 计数),供前端联动 wiki 自动增量更新
+#[derive(Debug, Clone, Serialize)]
+pub struct GitAutoPulledPayload {
+    pub project_id: i64,
+    pub pulled: i32,
+}
+
 /// 构造 git 命令:禁用终端凭据交互(GUI 应用无人应答会挂起,凭据管理器
 /// helper 弹窗不受影响),Windows 下隐藏控制台黑窗
 fn git_command_raw() -> Command {
@@ -887,7 +895,8 @@ pub async fn auto_pull_loop(app: AppHandle) {
 /// 先 fetch,状态显示落后 upstream 时执行 `git merge --ff-only @{u}` 快进。
 /// 仅快进保证不产生合并提交;分叉、无 upstream、本地改动会被覆盖等可能冲突的
 /// 情形 git 直接拒绝且不留合并状态——即「有冲突则取消」,全程静默不提醒。
-/// 快进成功后回填状态缓存并广播,前端徽标即时更新
+/// 快进成功后回填状态缓存并广播,前端徽标即时更新;
+/// 另 emit "git://auto-pulled"(project_id + 本轮拉取提交数),供前端联动 wiki 自动增量更新
 fn auto_pull_schedule(app: &AppHandle, project_id: i64, path: String) {
     if !fetch_due(&path) {
         return;
@@ -907,6 +916,8 @@ fn auto_pull_schedule(app: &AppHandle, project_id: i64, path: String) {
             .await;
             if let Ok(Ok(st)) = st {
                 if st.is_repo && st.behind > 0 {
+                    // 快进前的 behind 即本轮拉取的提交数,事件里带上
+                    let pulled_count = st.behind;
                     let pulled = tokio::task::spawn_blocking({
                         let path = path.clone();
                         move || ff_pull_blocking(&path)
@@ -936,6 +947,13 @@ fn auto_pull_schedule(app: &AppHandle, project_id: i64, path: String) {
                                     project_id,
                                     remote_ahead: 0,
                                     last_fetch_at: crate::time_util::now_ts(),
+                                },
+                            );
+                            let _ = app.emit(
+                                "git://auto-pulled",
+                                GitAutoPulledPayload {
+                                    project_id,
+                                    pulled: pulled_count,
                                 },
                             );
                         }

@@ -231,10 +231,6 @@ export interface AiPrompts {
   report: string;
   /** 周报生成提示词 */
   reportWeekly: string;
-  /** wiki 大纲(结构)生成提示词 */
-  wikiOutline: string;
-  /** wiki 单页内容生成提示词 */
-  wikiPage: string;
 }
 
 // ── 项目 Wiki(~/.repomeow/wiki/<basename>-<hash>/ 下的 meta.json + pages/*.md) ──
@@ -294,9 +290,11 @@ export interface WikiContext {
   headSha: string | null;
 }
 
-/** wiki_changed_files 的返回:区间变更文件 + 当前 HEAD */
+/** wiki_changed_files 的返回:区间变更文件 + 提交数 + 当前 HEAD */
 export interface WikiChangedFiles {
   files: string[];
+  /** fromSha..HEAD 的提交数(自动增量更新按「未同步提交数达阈值」触发) */
+  commitCount: number;
   headSha: string | null;
 }
 
@@ -347,11 +345,6 @@ export interface CustomCommand {
   description: string;
   icon: string;
   sort_order: number;
-}
-
-export interface ReadmeContent {
-  file_name: string;
-  content: string;
 }
 
 /** 一条可浏览器访问的端口映射:宿主机发布端口 -> 容器端口 */
@@ -569,6 +562,12 @@ export interface GitUpdatedPayload {
   project_id: number;
   remote_ahead: number;
   last_fetch_at: number;
+}
+
+/** git://auto-pulled 事件载荷:跟踪更新快进拉取成功(pulled = 本轮拉取的提交数) */
+export interface GitAutoPulledPayload {
+  project_id: number;
+  pulled: number;
 }
 
 /** 报告类型:日报(单日) | 周报(日期范围) */

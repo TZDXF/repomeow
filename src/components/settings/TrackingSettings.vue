@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { Search } from "@lucide/vue";
@@ -7,10 +7,12 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { useProjectsStore } from "@/stores/projects";
+import { useSettingsStore } from "@/stores/settings";
 import type { Project } from "@/types";
 
 const { t } = useI18n();
 const store = useProjectsStore();
+const settings = useSettingsStore();
 
 // 设置页可能直达(未经项目列表页),项目列表为空时补拉一次(不带 git 状态)
 onMounted(() => {
@@ -53,6 +55,36 @@ async function toggle(project: Project, enabled: boolean) {
     pendingIds.value.delete(project.id);
   }
 }
+
+// ── Wiki 自动增量更新(跟踪联动) ──────────────────────────────────────────
+
+/** 阈值输入的本地镜像:敲入非法值不打断,失焦/回车时收敛回 store 的合法值 */
+const thresholdInput = ref(String(settings.wikiAutoUpdateThreshold));
+watch(
+  () => settings.wikiAutoUpdateThreshold,
+  (v) => {
+    thresholdInput.value = String(v);
+  },
+);
+
+async function toggleWikiAutoUpdate(enabled: boolean) {
+  try {
+    await settings.setWikiAutoUpdate(enabled);
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : String(e));
+  }
+}
+
+function commitThreshold() {
+  const n = Number.parseInt(thresholdInput.value, 10);
+  if (Number.isFinite(n)) {
+    settings.setWikiAutoUpdateThreshold(n).catch((e) => {
+      toast.error(e instanceof Error ? e.message : String(e));
+    });
+  } else {
+    thresholdInput.value = String(settings.wikiAutoUpdateThreshold);
+  }
+}
 </script>
 
 <template>
@@ -61,6 +93,41 @@ async function toggle(project: Project, enabled: boolean) {
     <p class="mt-1 text-sm text-muted-foreground">
       {{ t("settings.tracking.description") }}
     </p>
+
+    <!-- Wiki 自动增量更新(跟踪联动) -->
+    <div class="mt-4 flex items-center justify-between gap-3 rounded-md border px-3 py-2.5">
+      <div class="min-w-0 flex-1">
+        <p class="text-sm font-medium">{{ t("settings.tracking.wikiAutoUpdateLabel") }}</p>
+        <p class="mt-0.5 text-xs text-muted-foreground">
+          {{ t("settings.tracking.wikiAutoUpdateHint") }}
+        </p>
+      </div>
+      <div class="flex shrink-0 items-center gap-2">
+        <div
+          v-if="settings.wikiAutoUpdate"
+          class="flex items-center gap-1.5"
+          :title="t('settings.tracking.wikiThresholdTitle')"
+        >
+          <Input
+            v-model="thresholdInput"
+            type="number"
+            min="1"
+            max="10000"
+            class="h-8 w-20 text-sm"
+            @blur="commitThreshold"
+            @keydown.enter.prevent="commitThreshold"
+          />
+          <span class="whitespace-nowrap text-xs text-muted-foreground">
+            {{ t("settings.tracking.wikiThresholdSuffix") }}
+          </span>
+        </div>
+        <Switch
+          :model-value="settings.wikiAutoUpdate"
+          :title="t('settings.tracking.wikiAutoUpdateLabel')"
+          @update:model-value="toggleWikiAutoUpdate"
+        />
+      </div>
+    </div>
 
     <div class="relative mt-4 w-64 max-w-full">
       <Search

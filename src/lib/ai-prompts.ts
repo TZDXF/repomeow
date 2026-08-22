@@ -46,7 +46,8 @@ Report requirements:
 - Do not invent work that is not reflected in the commits.
 - Output ONLY the report text. Use plain headings and bullet points for structure. Do NOT wrap the output in a code block or fenced code of any kind.`;
 
-/** 内置默认提示词(wiki 大纲生成),同上;输出为裸 XML 结构,由前端容错解析 */
+/** wiki 大纲生成的固定内置提示词;输出为裸 XML 结构,由前端容错解析。
+ *  输出格式与解析管线强耦合,不开放用户自定义(提示词管理仅覆盖 commit/日报/周报) */
 export const DEFAULT_WIKI_OUTLINE_PROMPT = `You are an expert software architect. Given a project's file tree, README and manifest files, design the structure of a wiki that helps a new developer understand the project.
 
 # Requirements
@@ -85,7 +86,8 @@ Output ONLY bare XML in exactly this shape. No markdown code fences, no preamble
 
 Every page must appear in <pages>; sections are optional and only group pages. Page ids must be unique, lowercase, hyphen-separated.`;
 
-/** 内置默认提示词(wiki 单页内容生成),同上;页面正文为 Markdown */
+/** wiki 单页内容生成的固定内置提示词;页面正文为 Markdown,末尾 sources 注释块由前端解析。
+ *  与大纲提示词同理,不开放用户自定义 */
 export const DEFAULT_WIKI_PAGE_PROMPT = `You are an expert technical writer and software architect. Write ONE page of a project wiki from the source files provided.
 
 # Requirements

@@ -827,6 +827,8 @@ export default {
       "Incremental update: only regenerates pages affected by code changes. New files do not create new pages — regenerate the whole wiki after structural changes.",
     updatedPages: "Updated {count} page(s)",
     updateNoop: "No pages are affected by these code changes",
+    autoUpdated: 'Wiki for "{name}" was updated automatically ({count} page(s))',
+    autoUpdateFailed: 'Automatic wiki update failed for "{name}": {error}',
     writing: "Writing",
     sources: "Source files",
     waitingFirstChunk: "Waiting for the first chunk from the model...",
@@ -836,12 +838,6 @@ export default {
       outlining: "Generating outline...",
       generating: "Writing pages...",
     },
-  },
-  readme: {
-    title: "README",
-    closeEsc: "Close (Esc)",
-    loading: "Loading...",
-    notFound: "No README file found in this project",
   },
   files: {
     entry: "Files",
@@ -1125,9 +1121,6 @@ export default {
       saved: "AI settings saved",
       concurrency: "Concurrency limit",
       concurrencyHint: "Maximum concurrent AI requests (1-5). Lower this if the API rate-limits.",
-      thinkingTitle: "Enable AI thinking",
-      thinkingHint:
-        "When off, this app injects disable-thinking parameters for known reasoning providers (effective on Qwen / GLM / Doubao / Step). When on, no parameters are injected and the model follows its default behavior. Leading <think> blocks are still stripped automatically.",
     },
     accounts: {
       title: "Accounts",
@@ -1178,12 +1171,6 @@ export default {
       weeklyReport: "Weekly report prompt",
       weeklyReportDescription:
         "System prompt used to generate weekly reports. Leave blank to use the built-in default template.",
-      wikiOutline: "Wiki outline",
-      wikiOutlineDescription:
-        "Prompt used to generate the wiki structure (page list and relevant files). The output must remain bare XML — do not change the output format constraints.",
-      wikiPage: "Wiki page",
-      wikiPageDescription:
-        "Prompt used to write each wiki page; the input is the full text of the page's source files.",
       note: "Leave empty to use the built-in default template (shown as the placeholder). The output language is appended automatically based on the language setting, no need to include it.",
       reset: "Reset to default",
       saved: "Prompts saved",
@@ -1269,6 +1256,11 @@ export default {
       title: "Update tracking",
       description:
         "Tracked projects are checked periodically and fast-forward pulled automatically when the remote has updates; when fast-forward is not possible (diverged or local changes may conflict), the pull is canceled silently.",
+      wikiAutoUpdateLabel: "Auto-update wiki",
+      wikiAutoUpdateHint:
+        "After a tracked project is fast-forward pulled, an incremental wiki update runs automatically once the number of commits not yet reflected in its wiki reaches the threshold. Skipped when there is no wiki or an incremental update is impossible; never triggers a full regeneration on its own.",
+      wikiThresholdTitle: "Trigger threshold (commits not yet reflected in the wiki)",
+      wikiThresholdSuffix: "commits",
       searchPlaceholder: "Search name, description, or path...",
       trackedCount: "{count} project(s) tracked",
       toggleHint: "Toggle update tracking for this project",

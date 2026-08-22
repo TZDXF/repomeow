@@ -9,7 +9,7 @@ import {
 } from "@/lib/wiki-generator";
 import { commitWiki, deleteWiki, loadWiki, saveWikiMeta, wikiChangedFiles } from "@/lib/wiki";
 import { useSettingsStore } from "@/stores/settings";
-import type { WikiData, WikiOutlinePage } from "@/types";
+import type { WikiChangedFiles, WikiData, WikiOutlinePage } from "@/types";
 
 /** 生成进度中的单页状态(进度 UI 直接渲染) */
 export interface WikiGenPageItem {
@@ -160,21 +160,72 @@ export const useWikiStore = defineStore("wiki", () => {
     if (!fromSha) throw new Error("no head sha");
     updating.value = true;
     try {
-      const { files: changed, headSha } = await wikiChangedFiles(project.path, fromSha);
-      const changedSet = new Set(changed);
-      const affected = d.pages.filter((p) => p.relevantFiles.some((f) => changedSet.has(f)));
-      for (const page of affected) {
-        regeneratingPage.value = page.id;
-        // 页数少(通常个位数),串行足够;保持与 regeneratePage 同一互斥标记
-        // eslint-disable-next-line no-await-in-loop
-        await regenerateWikiPage(project.path, page, language, new AbortController().signal);
-      }
+      const changed = await wikiChangedFiles(project.path, fromSha);
+      return await applyUpdate(project, d, language, changed);
+    } finally {
+      updating.value = false;
       regeneratingPage.value = null;
-      if (headSha) {
-        await saveWikiMeta(project.path, { ...d.meta, headSha }, "update");
-      }
-      if (dataFor.value === project.path) await load(project.path);
-      return affected.length;
+    }
+  }
+
+  /** 增量更新核心:重生成 changed 命中的页面并推进 meta.headSha(调用方持有 updating 标记) */
+  async function applyUpdate(
+    project: { path: string; name: string },
+    d: WikiData,
+    language: SupportedLocale,
+    changed: WikiChangedFiles,
+  ): Promise<number> {
+    const changedSet = new Set(changed.files);
+    const affected = d.pages.filter((p) => p.relevantFiles.some((f) => changedSet.has(f)));
+    for (const page of affected) {
+      regeneratingPage.value = page.id;
+      // 页数少(通常个位数),串行足够;保持与 regeneratePage 同一互斥标记
+      // eslint-disable-next-line no-await-in-loop
+      await regenerateWikiPage(project.path, page, language, new AbortController().signal);
+    }
+    regeneratingPage.value = null;
+    if (changed.headSha) {
+      await saveWikiMeta(project.path, { ...d.meta, headSha: changed.headSha }, "update");
+    }
+    if (dataFor.value === project.path) await load(project.path);
+    return affected.length;
+  }
+
+  /**
+   * 后台自动增量更新(「跟踪更新」联动):auto-pull 快进成功事件触发。
+   * 开关关闭/正在生成或更新/无 wiki/无 headSha/提交数未达阈值时静默跳过(返回 0);
+   * headSha 已不在当前历史(改写)同样跳过,整本重生成只留给用户手动触发。
+   * 内部串行排队(多个项目的触发依次执行);正忙时本次跳过,后续拉取事件会再次触发。
+   * 执行失败向外抛,由调用方提示
+   */
+  let autoQueue: Promise<unknown> = Promise.resolve();
+  function autoUpdate(project: { path: string; name: string }, language: SupportedLocale) {
+    const run = autoQueue.then(() => runAutoUpdate(project, language));
+    // 队列自身吞掉异常继续前进;错误经返回的 promise 交给触发方
+    autoQueue = run.then(
+      () => {},
+      () => {},
+    );
+    return run;
+  }
+
+  async function runAutoUpdate(
+    project: { path: string; name: string },
+    language: SupportedLocale,
+  ): Promise<number> {
+    const settings = useSettingsStore();
+    if (!settings.wikiAutoUpdate || updating.value || generating.value || regeneratingPage.value) {
+      return 0;
+    }
+    // 不依赖当前查看状态,后台直接读盘;用户若正看该项目,结束时 load 会刷新展示
+    const d = await loadWiki(project.path).catch(() => null);
+    const fromSha = d?.meta.headSha;
+    if (!d || !fromSha) return 0;
+    const changed = await wikiChangedFiles(project.path, fromSha).catch(() => null);
+    if (!changed || changed.commitCount < settings.wikiAutoUpdateThreshold) return 0;
+    updating.value = true;
+    try {
+      return await applyUpdate(project, d, language, changed);
     } finally {
       updating.value = false;
       regeneratingPage.value = null;
@@ -209,6 +260,7 @@ export const useWikiStore = defineStore("wiki", () => {
     cancel,
     regeneratePage,
     update,
+    autoUpdate,
     remove,
   };
 });

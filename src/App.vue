@@ -14,7 +14,13 @@ import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
 import { useTagsStore } from "@/stores/tags";
 import { useUpdateStore } from "@/stores/update";
-import type { GitStatusItem, GitUpdatedPayload, ReportGeneratedPayload } from "@/types";
+import { useWikiStore } from "@/stores/wiki";
+import type {
+  GitAutoPulledPayload,
+  GitStatusItem,
+  GitUpdatedPayload,
+  ReportGeneratedPayload,
+} from "@/types";
 
 const router = useRouter();
 const { t } = useI18n();
@@ -23,6 +29,7 @@ const pinsStore = usePinsStore();
 const tagsStore = useTagsStore();
 const settingsStore = useSettingsStore();
 const updateStore = useUpdateStore();
+const wikiStore = useWikiStore();
 
 // 托盘迷你弹窗窗口:仅加载主题/语言与项目列表,跳过标题栏、更新检查等主窗口专属逻辑
 const isTrayPopup = getCurrentWindow().label === "tray-popup";
@@ -88,6 +95,23 @@ onMounted(async () => {
   tagsStore.fetchTags();
   onListen<GitUpdatedPayload>("git://updated", (payload) => {
     store.updateGitRemote(payload.project_id, payload);
+  });
+  // 跟踪更新快进拉取成功:按设置的提交数阈值联动 wiki 自动增量更新
+  // (开关关闭/未达阈值/正忙时 store 内部静默跳过,不会产生 AI 调用)
+  onListen<GitAutoPulledPayload>("git://auto-pulled", (payload) => {
+    if (!settingsStore.wikiAutoUpdate) return;
+    const p = store.projects.find((x) => x.id === payload.project_id);
+    if (!p) return;
+    wikiStore
+      .autoUpdate({ path: p.path, name: p.name }, settingsStore.language)
+      .then((count) => {
+        if (count > 0) {
+          toast.success(t("wiki.autoUpdated", { name: p.name, count }));
+        }
+      })
+      .catch((e) => {
+        toast.error(t("wiki.autoUpdateFailed", { name: p.name, error: String(e) }));
+      });
   });
   onListen<ReportGeneratedPayload>("report://generated", (payload) => {
     toast.success(
