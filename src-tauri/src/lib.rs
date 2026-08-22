@@ -232,6 +232,18 @@ pub fn run() {
             commands::report::list_report_schedules,
             commands::report::save_report_schedules,
             commands::report::run_report_schedule_now,
+            commands::wiki::collect_wiki_context,
+            commands::wiki::read_wiki_files,
+            commands::wiki::get_wiki_dir,
+            commands::wiki::begin_wiki,
+            commands::wiki::save_wiki_page,
+            commands::wiki::save_wiki_meta,
+            commands::wiki::commit_wiki,
+            commands::wiki::load_wiki,
+            commands::wiki::has_wiki,
+            commands::wiki::delete_wiki,
+            commands::wiki::open_wiki_dir,
+            commands::wiki::wiki_changed_files,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

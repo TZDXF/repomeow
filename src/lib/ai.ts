@@ -1,4 +1,4 @@
-import { generateText } from "ai";
+import { generateText, streamText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { i18n, type SupportedLocale } from "@/i18n";
@@ -6,10 +6,19 @@ import {
   DEFAULT_COMMIT_PROMPT,
   DEFAULT_REPORT_PROMPT,
   DEFAULT_WEEKLY_REPORT_PROMPT,
+  DEFAULT_WIKI_OUTLINE_PROMPT,
+  DEFAULT_WIKI_PAGE_PROMPT,
   loadAiPrompts,
 } from "@/lib/ai-prompts";
 import { useSettingsStore } from "@/stores/settings";
-import type { GitCommitContext, GitCommitInfo, ReportPeriodType } from "@/types";
+import type {
+  GitCommitContext,
+  GitCommitInfo,
+  ReportPeriodType,
+  WikiContext,
+  WikiFileContent,
+  WikiOutlinePage,
+} from "@/types";
 
 /** 一个项目在给定时间范围内的提交记录(日报输入) */
 export interface ProjectCommits {
@@ -82,11 +91,21 @@ function stripThinking(text: string): string {
  * 构造 OpenAI Chat Completions 兼容模型。
  * 显式使用 .chat()(而非默认的 Responses API),兼容 DeepSeek/Moonshot/各类中转服务;
  * fetch 走 Tauri HTTP 插件(Rust 侧发请求),规避 webview 的 CORS 限制
+ *
+ * thinkingEnabled:
+ * - false(默认) → 命中已知推理模型提供方时向请求体注入关闭思考的参数;
+ * - true → 不注入任何参数,模型按默认行为决定是否输出 <think> 块;
+ *   stripThinking 兜底剥除仍然生效(只在响应起始位置的思考块会被清理,
+ *   完整闭合后中途再出现的保留原文)。
  */
-function getChatModel() {
+function getChatModel(thinkingEnabled?: boolean) {
   const { baseURL, apiKey, model } = requireConfig();
   const baseFetch = tauriFetch as unknown as typeof globalThis.fetch;
-  const noThink = thinkingOffParams(baseURL, model);
+  const useSettings = useSettingsStore();
+  const enabled =
+    typeof thinkingEnabled === "boolean" ? thinkingEnabled : useSettings.aiThinkingEnabled;
+  // 开启思考模式时直接跳过参数注入,模型按默认行为输出
+  const noThink = enabled ? {} : thinkingOffParams(baseURL, model);
   // 命中已知推理模型提供方时,包装 fetch 向请求体注入关闭思考的参数
   const fetchFn =
     Object.keys(noThink).length === 0
@@ -194,6 +213,107 @@ ${sections}`,
     abortSignal: signal,
   });
   return stripThinking(text);
+}
+
+/**
+ * 生成 wiki 大纲:输入过滤后的文件树 + README + 清单文件,输出裸 XML 结构文本
+ * (由 wiki-parse.ts 容错解析);signal 用于取消生成;
+ * thinkingEnabled: 显式覆盖 settings.aiThinkingEnabled(未传则按设置)
+ */
+export async function generateWikiOutline(
+  context: WikiContext,
+  projectName: string,
+  language: SupportedLocale,
+  signal: AbortSignal | undefined,
+  thinkingEnabled?: boolean,
+): Promise<string> {
+  const prompts = await loadAiPrompts();
+  const manifestSection = context.manifests.length
+    ? `\n\nManifest files:\n${context.manifests
+        .map((m) => `=== ${m.path} ===\n${m.content}`)
+        .join("\n\n")}`
+    : "";
+  const readmeSection = context.readme ? `\n\nREADME:\n${context.readme}` : "";
+  const truncatedNote = context.treeTruncated
+    ? "\n(Note: the file tree was truncated; directory entries like `dir/ (N files)` summarize folded subtrees.)"
+    : "";
+  const { text } = await generateText({
+    model: getChatModel(thinkingEnabled),
+    system: buildSystemPrompt(prompts.wikiOutline, DEFAULT_WIKI_OUTLINE_PROMPT, language),
+    prompt: `Project: ${projectName}
+
+File tree (${context.fileCount} files):${truncatedNote}
+${context.fileTree}${readmeSection}${manifestSection}`,
+    abortSignal: signal,
+  });
+  return stripThinking(text);
+}
+
+/** wiki 单页生成的 user prompt(流式/非流式共用) */
+function buildWikiPageUserPrompt(page: WikiOutlinePage, files: WikiFileContent[]): string {
+  const filesSection = files
+    .map((f) => {
+      // 行号前缀供末尾 sources 注释块标注 path:start-end 引用(提示词要求引用时剥除前缀)
+      const numbered = f.content
+        .split("\n")
+        .map((line, i) => `${i + 1}: ${line}`)
+        .join("\n");
+      return `=== ${f.path}${f.truncated ? " (truncated)" : ""} ===\n${numbered}`;
+    })
+    .join("\n\n");
+  return `Wiki page: ${page.title}
+Coverage: ${page.description}
+
+Source files:
+${filesSection || "(no source files available)"}`;
+}
+
+/**
+ * 生成 wiki 单个页面:输入大纲条目与其相关文件全文,输出 Markdown 正文;
+ * signal 用于取消生成与重试中止
+ */
+export async function generateWikiPage(
+  page: WikiOutlinePage,
+  files: WikiFileContent[],
+  language: SupportedLocale,
+  signal?: AbortSignal,
+): Promise<string> {
+  const prompts = await loadAiPrompts();
+  const { text } = await generateText({
+    model: getChatModel(),
+    system: buildSystemPrompt(prompts.wikiPage, DEFAULT_WIKI_PAGE_PROMPT, language),
+    prompt: buildWikiPageUserPrompt(page, files),
+    abortSignal: signal,
+  });
+  return stripThinking(text);
+}
+
+/**
+ * 流式生成 wiki 页面:onChunk 收到逐步累积的正文(已剥离开头思考块;
+ * 思考块未闭合期间回调为空串)。Tauri http 插件按 pull 逐块读响应体,支持流式;
+ * thinkingEnabled: 显式覆盖 settings.aiThinkingEnabled(未传则按设置)
+ */
+export async function streamWikiPage(
+  page: WikiOutlinePage,
+  files: WikiFileContent[],
+  language: SupportedLocale,
+  signal: AbortSignal | undefined,
+  onChunk: (partial: string) => void,
+  thinkingEnabled?: boolean,
+): Promise<string> {
+  const prompts = await loadAiPrompts();
+  const result = streamText({
+    model: getChatModel(thinkingEnabled),
+    system: buildSystemPrompt(prompts.wikiPage, DEFAULT_WIKI_PAGE_PROMPT, language),
+    prompt: buildWikiPageUserPrompt(page, files),
+    abortSignal: signal,
+  });
+  let acc = "";
+  for await (const chunk of result.textStream) {
+    acc += chunk;
+    onChunk(stripThinking(acc));
+  }
+  return stripThinking(acc);
 }
 
 /**

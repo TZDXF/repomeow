@@ -39,6 +39,7 @@ function onConfirm() {
         <DialogTitle>{{ title }}</DialogTitle>
         <DialogDescription class="whitespace-pre-line">{{ description }}</DialogDescription>
       </DialogHeader>
+      <slot></slot>
       <DialogFooter>
         <Button variant="outline" @click="open = false">{{ t("common.cancel") }}</Button>
         <Button :variant="destructive ? 'destructive' : 'default'" @click="onConfirm">

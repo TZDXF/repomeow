@@ -231,6 +231,80 @@ export interface AiPrompts {
   report: string;
   /** 周报生成提示词 */
   reportWeekly: string;
+  /** wiki 大纲(结构)生成提示词 */
+  wikiOutline: string;
+  /** wiki 单页内容生成提示词 */
+  wikiPage: string;
+}
+
+// ── 项目 Wiki(~/.repomeow/wiki/<basename>-<hash>/ 下的 meta.json + pages/*.md) ──
+
+/** 触发 wiki git 快照提交的操作类型(后端据此组提交信息) */
+export type WikiCommitKind = "generate" | "update" | "page";
+
+/** wiki 大纲中的单个页面条目 */
+export interface WikiOutlinePage {
+  id: string;
+  /** 页面文件名(pages/ 下,如 `01-overview.md`) */
+  file: string;
+  title: string;
+  /** 该页覆盖内容的简述(大纲阶段产出,单页生成时注入 prompt) */
+  description: string;
+  section: string | null;
+  importance: string;
+  relevantFiles: string[];
+  relatedPages: string[];
+}
+
+/** wiki 元信息(meta.json);generatedAt 与 version 由后端覆写 */
+export interface WikiMeta {
+  version: number;
+  projectPath: string;
+  generatedAt: string;
+  headSha: string | null;
+  model: string;
+  language: string;
+  status: string;
+  outline: WikiOutlinePage[];
+}
+
+/** 一个已生成的 wiki 页面(含正文) */
+export interface WikiPageData extends WikiOutlinePage {
+  /** 页面 Markdown 正文;文件缺失时为空串 */
+  content: string;
+}
+
+export interface WikiData {
+  meta: WikiMeta;
+  pages: WikiPageData[];
+  /** 生成时的 HEAD 与当前 HEAD 不一致(代码已更新,wiki 可能过时) */
+  stale: boolean;
+}
+
+/** 结构阶段输入:collect_wiki_context 的返回 */
+export interface WikiContext {
+  /** 过滤后的文件树(每行一个 / 分隔相对路径,超预算时目录折叠为摘要行) */
+  fileTree: string;
+  /** 过滤后的完整文件清单(/ 分隔,不折叠),用于校验大纲标注的相关文件 */
+  paths: string[];
+  fileCount: number;
+  treeTruncated: boolean;
+  readme: string | null;
+  manifests: { path: string; content: string }[];
+  headSha: string | null;
+}
+
+/** wiki_changed_files 的返回:区间变更文件 + 当前 HEAD */
+export interface WikiChangedFiles {
+  files: string[];
+  headSha: string | null;
+}
+
+/** 单页生成的相关文件内容(read_wiki_files 返回;读不到/二进制文件被静默跳过) */
+export interface WikiFileContent {
+  path: string;
+  content: string;
+  truncated: boolean;
 }
 
 export interface Project {
