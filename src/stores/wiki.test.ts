@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
+import { i18n } from "@/i18n";
 import { useWikiStore } from "@/stores/wiki";
 
 const generationHarness = vi.hoisted(() => {
   const finishes = new Map<string, () => void>();
-  return { finishes };
+  const errors = new Map<string, Error>();
+  return { errors, finishes };
 });
 
 vi.mock("@/lib/wiki-generator", () => ({
@@ -24,6 +26,11 @@ vi.mock("@/lib/wiki-generator", () => ({
       await new Promise<void>((resolve) => {
         generationHarness.finishes.set(project.path, resolve);
       });
+      const error = generationHarness.errors.get(project.path);
+      if (error) {
+        callbacks.onPhase("failed");
+        throw error;
+      }
       callbacks.onPhase("done");
     },
   ),
@@ -52,6 +59,8 @@ vi.mock("@/stores/settings", () => ({
 describe("wiki store generation concurrency", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+    i18n.global.locale.value = "zh-CN";
+    generationHarness.errors.clear();
     generationHarness.finishes.clear();
   });
 
@@ -75,5 +84,19 @@ describe("wiki store generation concurrency", () => {
 
     expect(store.generationFor("D:\\repos\\second")?.phase).toBe("done");
     expect(store.generating).toBe(false);
+  });
+
+  it("将大纲解析错误转换为友好的用户提示", async () => {
+    const store = useWikiStore();
+    const path = "D:\\repos\\invalid-outline";
+    generationHarness.errors.set(path, new Error("wiki outline: no <wiki_structure> found"));
+
+    const run = store.generate({ path, name: "invalid-outline" }, "zh-CN");
+    generationHarness.finishes.get(path)?.();
+    await run;
+
+    expect(store.generationFor(path)?.error).toBe(
+      "AI 返回的大纲格式不完整。请重试生成；如果多次失败，请更换模型或生成后端。",
+    );
   });
 });

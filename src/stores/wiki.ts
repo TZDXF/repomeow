@@ -1,6 +1,6 @@
 import { computed, reactive, ref } from "vue";
 import { defineStore } from "pinia";
-import type { SupportedLocale } from "@/i18n";
+import { i18n, type SupportedLocale } from "@/i18n";
 import {
   backendIdOf,
   createWikiKernel,
@@ -39,6 +39,15 @@ function isActiveGeneration(state: WikiGenerationState | undefined): boolean {
 /** 生成任务与项目路径一一对应;统一清理尾随分隔符后作为缓存 key */
 function generationKey(projectPath: string): string {
   return cleanPath(projectPath);
+}
+
+/** 将面向开发者的 Wiki 生成错误转换为适合直接展示给用户的提示。 */
+export function toFriendlyWikiGenerationError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  if (raw.startsWith("wiki outline:")) {
+    return i18n.global.t("wiki.invalidOutline");
+  }
+  return raw;
 }
 
 /** 按设置组装生成选项:内置 API 或本地 agent(ACP 会话)后端 */
@@ -155,7 +164,7 @@ export const useWikiStore = defineStore("wiki", () => {
         },
       });
     } catch (e) {
-      state.error = e instanceof Error ? e.message : String(e);
+      state.error = toFriendlyWikiGenerationError(e);
     } finally {
       generationControllers.delete(key);
       generationRuns.delete(key);

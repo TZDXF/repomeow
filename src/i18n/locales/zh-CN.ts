@@ -814,7 +814,8 @@ export default {
     emptyContent: "该页面内容缺失,可能是上次生成被中断或生成失败",
     morePages: "…还有 {count} 页待生成",
     cancel: "取消生成",
-    failed: "生成失败:{error}",
+    failed: "生成失败：{error}",
+    invalidOutline: "AI 返回的大纲格式不完整。请重试生成；如果多次失败，请更换模型或生成后端。",
     update: "更新 Wiki",
     updateHint:
       "增量更新:只重新生成受代码变更影响的页面;新增文件不会触发新页面,结构变化建议整本重新生成",

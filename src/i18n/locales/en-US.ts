@@ -845,6 +845,8 @@ export default {
     morePages: "...and {count} more pages to go",
     cancel: "Cancel",
     failed: "Generation failed: {error}",
+    invalidOutline:
+      "The AI returned an incomplete wiki outline. Try again; if it keeps failing, switch the model or generation backend.",
     update: "Update Wiki",
     updateHint:
       "Incremental update: only regenerates pages affected by code changes. New files do not create new pages — regenerate the whole wiki after structural changes.",
