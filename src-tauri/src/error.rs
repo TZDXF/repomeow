@@ -176,6 +176,8 @@ pub enum ErrorCode {
     // ── AI ────────────────────────────────────────────────────────────
     AiNotConfigured,
     AiRequestFailed,
+    AiRateLimited,
+    AiServiceUnavailable,
     AiResponseError,
     AiMaxOutputTokensExceeded,
     AiResponseParseFailed,
@@ -327,6 +329,8 @@ impl ErrorCode {
             // AI
             Self::AiNotConfigured => "ai_not_configured",
             Self::AiRequestFailed => "ai_request_failed",
+            Self::AiRateLimited => "ai_rate_limited",
+            Self::AiServiceUnavailable => "ai_service_unavailable",
             Self::AiResponseError => "ai_response_error",
             Self::AiMaxOutputTokensExceeded => "ai_max_output_tokens_exceeded",
             Self::AiResponseParseFailed => "ai_response_parse_failed",
@@ -404,6 +408,19 @@ impl AppError {
     #[cfg(test)]
     pub fn is_code(&self, expected: ErrorCode) -> bool {
         self.code_enum() == expected
+    }
+
+    /// Wiki 生成可安全重试的临时 AI 错误。参数、鉴权与响应格式错误不应重试。
+    pub fn is_retryable_ai_error(&self) -> bool {
+        matches!(
+            self,
+            Self::Coded {
+                code: ErrorCode::AiRequestFailed
+                    | ErrorCode::AiRateLimited
+                    | ErrorCode::AiServiceUnavailable,
+                ..
+            }
+        )
     }
 }
 

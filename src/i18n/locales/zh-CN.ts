@@ -167,6 +167,8 @@ export default {
     // AI
     ai_not_configured: "请先在设置页配置 AI 的 API Key",
     ai_request_failed: "AI 请求失败",
+    ai_rate_limited: "AI 请求过于频繁，已触发服务商限流",
+    ai_service_unavailable: "AI 服务暂时不可用，请稍后重试",
     ai_response_error: "AI 返回错误",
     ai_max_output_tokens_exceeded:
       "AI 请求设置的最大输出 Token 数超过当前模型上限，请调整 Agent 配置或更换模型后重试",
@@ -872,6 +874,10 @@ export default {
       treeTruncated: "；文件树过大，已折叠",
       pages: "已处理 {processed} / {total} 页",
       failedPages: "{count} 个页面生成失败，其余页面将继续",
+      retrying: {
+        rateLimited: "请求频率受限，{seconds} 秒后自动重试（{attempt}/{max}）",
+        temporary: "AI 服务暂时异常，{seconds} 秒后自动重试（{attempt}/{max}）",
+      },
       leaveHint: "生成可能需要几分钟。你可以先去处理其他项目，离开此页面不会中断任务。",
     },
     phase: {

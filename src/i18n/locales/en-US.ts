@@ -175,6 +175,8 @@ export default {
     // AI
     ai_not_configured: "Configure the AI API key in Settings first",
     ai_request_failed: "AI request failed",
+    ai_rate_limited: "Too many AI requests; the provider rate limit was reached",
+    ai_service_unavailable: "The AI service is temporarily unavailable; try again later",
     ai_response_error: "AI returned an error",
     ai_max_output_tokens_exceeded:
       "The AI request's maximum output token setting exceeds this model's limit. Adjust the agent configuration or switch models and try again",
@@ -903,6 +905,11 @@ export default {
       treeTruncated: "; large file tree folded",
       pages: "Processed {processed} / {total} pages",
       failedPages: "{count} page(s) failed; the remaining pages will continue",
+      retrying: {
+        rateLimited: "Rate limit reached; retrying automatically in {seconds}s ({attempt}/{max})",
+        temporary:
+          "The AI service is temporarily unavailable; retrying in {seconds}s ({attempt}/{max})",
+      },
       leaveHint:
         "Generation may take a few minutes. You can work on another project—leaving this page will not interrupt it.",
     },

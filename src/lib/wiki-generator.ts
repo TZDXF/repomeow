@@ -25,6 +25,7 @@ export interface WikiGenCallbacks {
   onPageProgress?: (page: WikiOutlinePage, partial: string) => void;
   onContext?: (context: WikiContextSummary) => void;
   onActivities?: (activities: WikiGenerationActivity[]) => void;
+  onRetry?: (retry: WikiRetryStatus) => void;
 }
 
 export interface WikiContextSummary {
@@ -39,6 +40,14 @@ export type WikiGenerationActivityType = "scan" | "read" | "tool";
 export interface WikiGenerationActivity {
   type: WikiGenerationActivityType;
   text: string;
+}
+
+export interface WikiRetryStatus {
+  pageId?: string;
+  attempt: number;
+  maxAttempts: number;
+  delaySeconds: number;
+  reason: "rateLimited" | "temporary";
 }
 
 /** 生成后端选择:内置 API 或本地 agent(经 ACP 会话) */
@@ -74,6 +83,7 @@ type WikiGenerationEvent =
   | { kind: "phase"; phase: WikiGenPhase }
   | { kind: "page"; page: WikiOutlinePage; status: WikiPageStatus; error?: string }
   | { kind: "progress"; pageId: string; content: string }
+  | ({ kind: "retry" } & WikiRetryStatus)
   | ({ kind: "context" } & WikiContextSummary)
   | { kind: "activityBatch"; activityType: WikiGenerationActivityType; items: string[] };
 
@@ -84,7 +94,7 @@ export async function generateWiki(
   signal: AbortSignal,
   callbacks: WikiGenCallbacks,
 ): Promise<void> {
-  const { onPhase, onPage, onPageProgress, onContext, onActivities } = callbacks;
+  const { onPhase, onPage, onPageProgress, onContext, onActivities, onRetry } = callbacks;
   const id = `wiki-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const pages = new Map<string, WikiOutlinePage>();
   const channel = new Channel<WikiGenerationEvent>();
@@ -99,6 +109,8 @@ export async function generateWiki(
       if (page) {
         onPageProgress?.(page, event.content);
       }
+    } else if (event.kind === "retry") {
+      onRetry?.(event);
     } else if (event.kind === "context") {
       onContext?.(event);
     } else {

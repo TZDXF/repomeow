@@ -102,7 +102,19 @@ fn client(config: &AiConfig, require_model: bool) -> AppResult<OpenAiClient> {
 
 fn map_sdk_error(error: OpenAIError) -> AppError {
     match error {
-        OpenAIError::ApiError(api) => map_api_error_message(api.api_error.message),
+        OpenAIError::ApiError(api) => {
+            let code = if api.status_code.as_u16() == 429 {
+                ErrorCode::AiRateLimited
+            } else if api.status_code.as_u16() == 408
+                || api.status_code.as_u16() == 409
+                || api.status_code.is_server_error()
+            {
+                ErrorCode::AiServiceUnavailable
+            } else {
+                ErrorCode::AiResponseError
+            };
+            map_api_error(code, api.api_error.message)
+        }
         OpenAIError::JSONDeserialize(error, _) => {
             AppError::coded(ErrorCode::AiResponseParseFailed, error.to_string())
         }
@@ -110,8 +122,8 @@ fn map_sdk_error(error: OpenAIError) -> AppError {
     }
 }
 
-fn map_api_error_message(message: String) -> AppError {
-    AppError::ai_provider_error(ErrorCode::AiResponseError, message)
+fn map_api_error(code: ErrorCode, message: String) -> AppError {
+    AppError::ai_provider_error(code, message)
 }
 
 fn usage_of(usage: CompletionUsage) -> TokenUsage {
@@ -338,13 +350,41 @@ mod tests {
 
     #[test]
     fn max_output_token_api_errors_have_a_specific_code() {
-        let error = map_api_error_message(
+        let error = map_api_error(
+            ErrorCode::AiResponseError,
             "invalid params, model[MiniMax-M3] does not support max tokens > 524288 (2013)".into(),
         );
         assert!(error.is_code(ErrorCode::AiMaxOutputTokensExceeded));
 
-        let error = map_api_error_message("provider temporarily unavailable".into());
+        let error = map_api_error(
+            ErrorCode::AiResponseError,
+            "provider temporarily unavailable".into(),
+        );
         assert!(error.is_code(ErrorCode::AiResponseError));
+    }
+
+    #[test]
+    fn rate_limit_and_server_errors_are_retryable() {
+        let provider_error = |status_code| {
+            map_sdk_error(OpenAIError::ApiError(
+                async_openai::error::ApiErrorResponse {
+                    status_code,
+                    api_error: async_openai::error::ApiError {
+                        message: "temporary provider error".into(),
+                        r#type: None,
+                        param: None,
+                        code: None,
+                    },
+                },
+            ))
+        };
+        let rate_limited = provider_error(reqwest::StatusCode::TOO_MANY_REQUESTS);
+        assert!(rate_limited.is_code(ErrorCode::AiRateLimited));
+        assert!(rate_limited.is_retryable_ai_error());
+
+        let unavailable = provider_error(reqwest::StatusCode::SERVICE_UNAVAILABLE);
+        assert!(unavailable.is_code(ErrorCode::AiServiceUnavailable));
+        assert!(unavailable.is_retryable_ai_error());
     }
 
     #[test]

@@ -228,6 +228,20 @@ const previewItem = computed(() => {
 const previewContent = computed(() =>
   previewItem.value ? (generation.value?.streamContents[previewItem.value.page.id] ?? "") : "",
 );
+const retryStatus = computed(() => {
+  const retries = generation.value?.retries;
+  if (!retries) return undefined;
+  return previewItem.value ? retries[previewItem.value.page.id] : retries.outline;
+});
+const retryText = computed(() => {
+  const retry = retryStatus.value;
+  if (!retry) return "";
+  return t(`wiki.progress.retrying.${retry.reason}`, {
+    seconds: retry.delaySeconds,
+    attempt: retry.attempt,
+    max: retry.maxAttempts,
+  });
+});
 
 // ── 左侧导航列表(生成中与最终查看复用同一列表样式) ───────────────────────
 
@@ -710,6 +724,15 @@ const beforeDownload = createBeforeDownload(t);
                 {{ processedPageCount }} / {{ totalPageCount }}
               </span>
             </div>
+            <div
+              v-if="retryStatus"
+              class="mb-3 flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+              role="status"
+              aria-live="polite"
+            >
+              <RefreshCw class="h-3.5 w-3.5 shrink-0 animate-spin" />
+              <span>{{ retryText }}</span>
+            </div>
             <Markdown
               v-if="previewDisplay"
               mode="streaming"
@@ -758,7 +781,7 @@ const beforeDownload = createBeforeDownload(t);
                   <span class="shrink-0 text-primary/80">{{
                     activityTypeLabel(activity.type)
                   }}</span>
-                  <span class="min-w-0 break-all text-muted-foreground">{{
+                  <span class="min-w-0 whitespace-pre-wrap break-all text-muted-foreground">{{
                     activityText(activity.type, activity.text)
                   }}</span>
                 </div>

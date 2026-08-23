@@ -660,7 +660,7 @@ async fn run_session(
                         async move |req: ReadTextFileRequest, responder, _cx| {
                             push_activity(
                                 &sink,
-                                format!("工具: read · {}", req.path.display()),
+                                read_tool_activity_text(&req.path, req.line, req.limit),
                             );
                             match read_file_within(&fs_root, &req.path, req.line, req.limit) {
                                 Ok(content) => {
@@ -1204,91 +1204,43 @@ fn known_tool_title(sink: &SharedSink, call_id: &str) -> Option<String> {
         .cloned()
 }
 
-/// 工具活动只展示协议明确提供的文件位置，或 rawInput 中常见的路径字段；
-/// 不回显完整参数，避免命令、提示词或其他敏感内容进入界面。
+/// 工具参数由各家 agent 自定义，不在客户端猜测字段语义，直接展示其上报的 rawInput；
+/// 未上报 rawInput 时才回退展示 ACP 标准 locations。
 fn tool_activity_text(
     title: &str,
     locations: &[ToolCallLocation],
     raw_input: Option<&serde_json::Value>,
 ) -> String {
-    let mut paths = Vec::new();
-    for location in locations {
-        push_tool_path(&mut paths, location.path.display().to_string());
-    }
     if let Some(input) = raw_input {
-        collect_tool_paths(input, &mut paths);
+        return format!("工具: {title}\n{}", format_tool_input(input));
     }
-    paths.retain(|path| !title.contains(path.as_str()));
-    if paths.is_empty() {
+    if locations.is_empty() {
         return format!("工具: {title}");
     }
-    let hidden = paths.len().saturating_sub(4);
-    paths.truncate(4);
-    let suffix = if hidden > 0 {
-        format!("，另 {hidden} 个")
-    } else {
-        String::new()
-    };
-    format!("工具: {title} · {}{suffix}", paths.join("，"))
+    let locations = serde_json::to_value(locations).unwrap_or(serde_json::Value::Null);
+    format!("工具: {title}\n{}", format_tool_input(&locations))
 }
 
-fn collect_tool_paths(value: &serde_json::Value, paths: &mut Vec<String>) {
-    match value {
-        serde_json::Value::Object(object) => {
-            for (key, value) in object {
-                let normalized = key
-                    .chars()
-                    .filter(|character| character.is_ascii_alphanumeric())
-                    .flat_map(char::to_lowercase)
-                    .collect::<String>();
-                if matches!(
-                    normalized.as_str(),
-                    "path"
-                        | "filepath"
-                        | "filename"
-                        | "relativepath"
-                        | "absolutepath"
-                        | "targetfile"
-                ) {
-                    collect_path_value(value, paths);
-                } else if value.is_object() || value.is_array() {
-                    collect_tool_paths(value, paths);
-                }
-            }
-        }
-        serde_json::Value::Array(values) => {
-            for value in values {
-                collect_tool_paths(value, paths);
-            }
-        }
-        _ => {}
-    }
+fn format_tool_input(input: &serde_json::Value) -> String {
+    serde_json::to_string_pretty(input).unwrap_or_else(|_| input.to_string())
 }
 
-fn collect_path_value(value: &serde_json::Value, paths: &mut Vec<String>) {
-    match value {
-        serde_json::Value::String(path) => push_tool_path(paths, path.clone()),
-        serde_json::Value::Array(values) => {
-            for value in values {
-                if let serde_json::Value::String(path) = value {
-                    push_tool_path(paths, path.clone());
-                }
-            }
-        }
-        _ => {}
+fn read_tool_activity_text(path: &Path, line: Option<u32>, limit: Option<u32>) -> String {
+    let mut input = serde_json::Map::new();
+    input.insert(
+        "path".into(),
+        serde_json::Value::String(path.display().to_string()),
+    );
+    if let Some(line) = line {
+        input.insert("line".into(), serde_json::Value::from(line));
     }
-}
-
-fn push_tool_path(paths: &mut Vec<String>, path: String) {
-    let path = path.trim();
-    if path.is_empty()
-        || path.len() > 500
-        || path.contains(['\r', '\n'])
-        || paths.iter().any(|existing| existing == path)
-    {
-        return;
+    if let Some(limit) = limit {
+        input.insert("limit".into(), serde_json::Value::from(limit));
     }
-    paths.push(path.to_string());
+    format!(
+        "工具: read\n{}",
+        format_tool_input(&serde_json::Value::Object(input))
+    )
 }
 
 fn push_chunk(sink: &SharedSink, delta: &str) {
@@ -1422,18 +1374,33 @@ mod tests {
     }
 
     #[test]
-    fn tool_activity_extracts_locations_and_nested_path_inputs() {
+    fn tool_activity_preserves_raw_input_without_field_adaptation() {
         let locations = vec![ToolCallLocation::new(r"D:\repo\src\main.rs")];
         let input = serde_json::json!({
             "arguments": {
                 "file_path": "src/lib.rs",
+                "limit": 40,
                 "query": "must not be displayed"
             }
         });
         let text = tool_activity_text("read", &locations, Some(&input));
-        assert!(text.contains(r"D:\repo\src\main.rs"));
-        assert!(text.contains("src/lib.rs"));
-        assert!(!text.contains("must not be displayed"));
+        assert_eq!(text, format!("工具: read\n{}", format_tool_input(&input)));
+        assert!(text.contains("file_path"));
+        assert!(text.contains("limit"));
+        assert!(text.contains("must not be displayed"));
+        assert!(!text.contains(r"D:\repo\src\main.rs"));
+
+        let fallback = tool_activity_text("read", &locations, None);
+        let locations_json = serde_json::to_value(&locations).unwrap();
+        assert_eq!(
+            fallback,
+            format!("工具: read\n{}", format_tool_input(&locations_json))
+        );
+
+        let callback = read_tool_activity_text(Path::new("src/lib.rs"), Some(20), Some(40));
+        assert!(callback.contains("src/lib.rs"));
+        assert!(callback.contains("\"line\": 20"));
+        assert!(callback.contains("\"limit\": 40"));
     }
 
     #[test]

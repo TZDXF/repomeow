@@ -112,6 +112,15 @@ describe("wiki store generation concurrency", () => {
       ),
     ).toBe("AI 请求设置的最大输出 Token 数超过当前模型上限，请调整 Agent 配置或更换模型后重试");
   });
+
+  it("将限流和服务临时异常转换为友好提示", () => {
+    expect(toFriendlyWikiGenerationError("code=AiRateLimited message=HTTP 429")).toBe(
+      "AI 请求过于频繁，已触发服务商限流",
+    );
+    expect(toFriendlyWikiGenerationError("code=AiServiceUnavailable message=HTTP 503")).toBe(
+      "AI 服务暂时不可用，请稍后重试",
+    );
+  });
 });
 
 describe("wiki store automatic update", () => {

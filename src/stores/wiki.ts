@@ -10,6 +10,7 @@ import {
   type WikiGenerationActivity,
   type WikiContextSummary,
   type WikiPageStatus,
+  type WikiRetryStatus,
 } from "@/lib/wiki-generator";
 import { deleteWiki, loadWiki } from "@/lib/wiki";
 import { cleanPath } from "@/lib/path";
@@ -33,6 +34,7 @@ export interface WikiGenerationState {
   streamContents: Record<string, string>;
   context: WikiContextSummary | null;
   activities: WikiGenerationActivity[];
+  retries: Record<string, WikiRetryStatus>;
   /** 本轮整本生成开始时间,供离开页面后返回时继续展示真实耗时 */
   startedAt: number;
 }
@@ -72,6 +74,15 @@ function generationKey(projectPath: string): string {
 export function toFriendlyWikiGenerationError(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
   const normalized = raw.toLowerCase();
+  if (normalized.includes("airatelimited") || normalized.includes("ai_rate_limited")) {
+    return i18n.global.t("errors.ai_rate_limited");
+  }
+  if (
+    normalized.includes("aiserviceunavailable") ||
+    normalized.includes("ai_service_unavailable")
+  ) {
+    return i18n.global.t("errors.ai_service_unavailable");
+  }
   if (
     normalized.includes("aimaxoutputtokensexceeded") ||
     normalized.includes("ai_max_output_tokens_exceeded") ||
@@ -196,6 +207,7 @@ export const useWikiStore = defineStore("wiki", () => {
       streamContents: {},
       context: null,
       activities: [],
+      retries: {},
       startedAt: Date.now(),
     });
     generations[key] = state;
@@ -204,6 +216,7 @@ export const useWikiStore = defineStore("wiki", () => {
       await generateWiki(project, buildGenOptions(language), controller.signal, {
         onPhase: (p) => {
           state.phase = p;
+          if (p !== "outlining") delete state.retries.outline;
         },
         onPage: (page, status, error) => {
           const item = state.pages.find((i) => i.page.id === page.id);
@@ -220,10 +233,12 @@ export const useWikiStore = defineStore("wiki", () => {
           // 页面进入终态后清掉流式预览内容
           if (status !== "running" && status !== "pending") {
             delete state.streamContents[page.id];
+            delete state.retries[page.id];
           }
         },
         onPageProgress: (page, partial) => {
           state.streamContents[page.id] = partial;
+          if (partial) delete state.retries[page.id];
         },
         onContext: (context) => {
           state.context = { ...context };
@@ -233,6 +248,9 @@ export const useWikiStore = defineStore("wiki", () => {
           if (state.activities.length > 2_000) {
             state.activities.splice(0, state.activities.length - 2_000);
           }
+        },
+        onRetry: (retry) => {
+          state.retries[retry.pageId ?? "outline"] = { ...retry };
         },
       });
     } catch (e) {

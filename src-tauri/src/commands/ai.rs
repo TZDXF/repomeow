@@ -206,6 +206,14 @@ pub enum WikiGenerationEvent {
         page_id: String,
         content: String,
     },
+    Retry {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        page_id: Option<String>,
+        attempt: usize,
+        max_attempts: usize,
+        delay_seconds: u64,
+        reason: String,
+    },
     Context {
         file_count: usize,
         tree_truncated: bool,
@@ -216,6 +224,75 @@ pub enum WikiGenerationEvent {
         activity_type: String,
         items: Vec<String>,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct WikiRetryNotice {
+    attempt: usize,
+    max_attempts: usize,
+    delay_seconds: u64,
+    reason: String,
+}
+
+fn retry_notice(error: &AppError, attempt: usize, max_attempts: usize) -> WikiRetryNotice {
+    WikiRetryNotice {
+        attempt,
+        max_attempts,
+        delay_seconds: 1_u64 << attempt.min(4),
+        reason: if error.code() == "ai_rate_limited" {
+            "rateLimited".into()
+        } else {
+            "temporary".into()
+        },
+    }
+}
+
+async fn wait_for_wiki_retry(
+    cancel: &CancellationToken,
+    notice: &WikiRetryNotice,
+) -> AppResult<()> {
+    tokio::select! {
+        _ = tokio::time::sleep(std::time::Duration::from_secs(notice.delay_seconds)) => Ok(()),
+        _ = cancel.cancelled() => Err(AppError::coded(ErrorCode::AiRequestFailed, "canceled")),
+    }
+}
+
+/// 某些 ACP agent 会把自身的 429 重试提示作为正文 chunk 上报。将该传输状态
+/// 从最终 Markdown 中剥离，同时保留结构化信息供进度 UI 展示。
+fn sanitize_agent_retry_notices(text: &str) -> (String, Option<WikiRetryNotice>) {
+    static COMPLETE: OnceLock<regex::Regex> = OnceLock::new();
+    static START: OnceLock<regex::Regex> = OnceLock::new();
+    static INCOMPLETE: OnceLock<regex::Regex> = OnceLock::new();
+    let complete = COMPLETE.get_or_init(|| {
+        regex::Regex::new(
+            r"(?is)Retrying\s*\(\s*attempt\s+(\d+)\s*/\s*(\d+)\s*,\s*waiting\s+(\d+)\s*s\s*\)\s*\.\.\.\s*Retry finished,\s*resuming\.\s*",
+        )
+        .expect("valid ACP retry regex")
+    });
+    let start = START.get_or_init(|| {
+        regex::Regex::new(
+            r"(?is)Retrying\s*\(\s*attempt\s+(\d+)\s*/\s*(\d+)\s*,\s*waiting\s+(\d+)\s*s\s*\)\s*\.\.\.",
+        )
+        .expect("valid ACP retry start regex")
+    });
+    let incomplete = INCOMPLETE.get_or_init(|| {
+        regex::Regex::new(r"(?is)Retrying\s*\(\s*attempt[^\r\n]*$")
+            .expect("valid ACP partial retry regex")
+    });
+    let mut latest = None;
+    for captures in start.captures_iter(text) {
+        latest = Some(WikiRetryNotice {
+            attempt: captures[1].parse().unwrap_or(1),
+            max_attempts: captures[2].parse().unwrap_or(3),
+            delay_seconds: captures[3].parse().unwrap_or(0),
+            reason: "rateLimited".into(),
+        });
+    }
+    let mut cleaned = complete.replace_all(text, "").into_owned();
+    if let Some(found) = incomplete.find(&cleaned) {
+        cleaned.truncate(found.start());
+    }
+    (cleaned, latest)
 }
 
 fn record_usage(db: &Db, task_type: &str, model: &str, output: &ChatOutput, duration_ms: i64) {
@@ -895,6 +972,7 @@ async fn generate_builtin_outline_pages(
     project_name: &str,
     language: &str,
     cancel: &CancellationToken,
+    on_retry: impl Fn(WikiRetryNotice),
 ) -> AppResult<Vec<super::wiki::WikiOutlinePage>> {
     let config = sdk::load_config(app);
     let system = fixed_system_prompt(DEFAULT_WIKI_OUTLINE_PROMPT, language);
@@ -903,9 +981,22 @@ async fn generate_builtin_outline_pages(
     let valid_files: HashSet<String> = context.paths.iter().cloned().collect();
     let mut last_error = "wiki outline JSON was not generated".to_string();
     const MAX_ATTEMPTS: usize = 3;
-    for _ in 1..=MAX_ATTEMPTS {
+    for attempt in 1..=MAX_ATTEMPTS {
         let started = Instant::now();
-        let output = sdk::stream_chat(&config, &system, &prompt, true, cancel, |_| {}).await?;
+        let output = match sdk::stream_chat(&config, &system, &prompt, true, cancel, |_| {}).await {
+            Ok(output) => output,
+            Err(error)
+                if !cancel.is_cancelled()
+                    && attempt < MAX_ATTEMPTS
+                    && error.is_retryable_ai_error() =>
+            {
+                let notice = retry_notice(&error, attempt, MAX_ATTEMPTS);
+                on_retry(notice.clone());
+                wait_for_wiki_retry(cancel, &notice).await?;
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
         record_usage(
             db,
             "wiki",
@@ -935,13 +1026,15 @@ async fn generate_builtin_page_to_disk(
     language: &str,
     cancel: &CancellationToken,
     on_progress: impl Fn(&str),
+    on_retry: impl Fn(WikiRetryNotice),
 ) -> AppResult<()> {
     let config = sdk::load_config(app);
     let system = fixed_system_prompt(DEFAULT_WIKI_PAGE_PROMPT, language);
     let files = super::wiki::read_wiki_files_in(project_path, &page.relevant_files)?;
     let prompt = wiki_page_user_prompt(page, &files);
     let mut last_error = None;
-    for _ in 0..=2 {
+    const MAX_ATTEMPTS: usize = 3;
+    for attempt in 1..=MAX_ATTEMPTS {
         on_progress("");
         let started = Instant::now();
         match sdk::stream_chat(&config, &system, &prompt, true, cancel, |text| {
@@ -961,7 +1054,14 @@ async fn generate_builtin_page_to_disk(
                 return Ok(());
             }
             Err(error) if cancel.is_cancelled() => return Err(error),
-            Err(error) => last_error = Some(error),
+            Err(error) => {
+                if attempt < MAX_ATTEMPTS && error.is_retryable_ai_error() {
+                    let notice = retry_notice(&error, attempt, MAX_ATTEMPTS);
+                    on_retry(notice.clone());
+                    wait_for_wiki_retry(cancel, &notice).await?;
+                }
+                last_error = Some(error);
+            }
         }
     }
     Err(last_error.unwrap_or_else(|| {
@@ -977,6 +1077,7 @@ async fn generate_agent_outline_pages(
     project_name: &str,
     language: &str,
     on_activity: Arc<dyn Fn(String) + Send + Sync>,
+    on_retry: Arc<dyn Fn(WikiRetryNotice) + Send + Sync>,
 ) -> AppResult<Vec<super::wiki::WikiOutlinePage>> {
     let original_prompt = agent_wiki_outline_prompt(context, project_name, language);
     let mut prompt = original_prompt.clone();
@@ -1001,7 +1102,11 @@ async fn generate_agent_outline_pages(
             &result,
             started.elapsed().as_millis() as i64,
         );
-        let outline = sdk::strip_thinking(&result.text);
+        let (cleaned, retry) = sanitize_agent_retry_notices(&result.text);
+        if let Some(notice) = retry {
+            on_retry(notice);
+        }
+        let outline = sdk::strip_thinking(&cleaned);
         match crate::ai::wiki_outline::parse_outline(&outline, &valid_files) {
             Ok(pages) => return Ok(pages),
             Err(error) => {
@@ -1027,6 +1132,7 @@ async fn generate_agent_page_to_disk(
     changed_files: &[String],
     on_progress: Arc<dyn Fn(String) + Send + Sync>,
     on_activity: Arc<dyn Fn(String) + Send + Sync>,
+    on_retry: Arc<dyn Fn(WikiRetryNotice) + Send + Sync>,
 ) -> AppResult<()> {
     let prompt = agent_wiki_page_prompt(page, changed_files, language);
     let mut last_error = None;
@@ -1034,9 +1140,20 @@ async fn generate_agent_page_to_disk(
         on_progress(String::new());
         let progress = on_progress.clone();
         let activity = on_activity.clone();
+        let retry = on_retry.clone();
+        let seen_retry = Arc::new(Mutex::new(None::<(usize, usize)>));
         let sender = super::agent::AcpEventSender::new(move |event| match event {
             super::agent::AcpEvent::Chunk { text } => {
-                progress(sdk::strip_thinking(&text));
+                let (cleaned, notice) = sanitize_agent_retry_notices(&text);
+                progress(sdk::strip_thinking(&cleaned));
+                if let Some(notice) = notice {
+                    let marker = (notice.attempt, notice.max_attempts);
+                    let mut seen = seen_retry.lock().unwrap();
+                    if seen.as_ref() != Some(&marker) {
+                        *seen = Some(marker);
+                        retry(notice);
+                    }
+                }
             }
             super::agent::AcpEvent::Activity { text } => activity(text),
         });
@@ -1049,7 +1166,8 @@ async fn generate_agent_page_to_disk(
                     &result,
                     started.elapsed().as_millis() as i64,
                 );
-                let page_content = sdk::strip_thinking(&result.text);
+                let (cleaned, _) = sanitize_agent_retry_notices(&result.text);
+                let page_content = sdk::strip_thinking(&cleaned);
                 if page_content.is_empty() {
                     last_error = Some(AppError::coded(
                         ErrorCode::AgentPromptFailed,
@@ -1145,6 +1263,21 @@ pub async fn ai_generate_wiki(
                 &request.project_name,
                 &request.language,
                 &run.token,
+                {
+                    let channel = on_event.clone();
+                    move |notice| {
+                        send_wiki_event(
+                            &channel,
+                            WikiGenerationEvent::Retry {
+                                page_id: None,
+                                attempt: notice.attempt,
+                                max_attempts: notice.max_attempts,
+                                delay_seconds: notice.delay_seconds,
+                                reason: notice.reason,
+                            },
+                        );
+                    }
+                },
             )
             .await
         }
@@ -1199,6 +1332,21 @@ pub async fn ai_generate_wiki(
                             WikiGenerationEvent::ActivityBatch {
                                 activity_type: "tool".into(),
                                 items: vec![text],
+                            },
+                        );
+                    })
+                },
+                {
+                    let channel = on_event.clone();
+                    Arc::new(move |notice: WikiRetryNotice| {
+                        send_wiki_event(
+                            &channel,
+                            WikiGenerationEvent::Retry {
+                                page_id: None,
+                                attempt: notice.attempt,
+                                max_attempts: notice.max_attempts,
+                                delay_seconds: notice.delay_seconds,
+                                reason: notice.reason,
                             },
                         );
                     })
@@ -1273,6 +1421,7 @@ pub async fn ai_generate_wiki(
         },
     );
 
+    let page_errors = Arc::new(Mutex::new(Vec::<AppError>::new()));
     match &backend {
         WikiGenerationBackend::Builtin => {
             stream::iter(pages.clone())
@@ -1283,6 +1432,7 @@ pub async fn ai_generate_wiki(
                     let language = request.language.clone();
                     let token = run.token.clone();
                     let channel = on_event.clone();
+                    let page_errors = page_errors.clone();
                     async move {
                         send_wiki_event(
                             &channel,
@@ -1293,7 +1443,9 @@ pub async fn ai_generate_wiki(
                             },
                         );
                         let progress_channel = channel.clone();
-                        let page_id = page.id.clone();
+                        let retry_channel = channel.clone();
+                        let progress_page_id = page.id.clone();
+                        let retry_page_id = page.id.clone();
                         send_wiki_event(
                             &channel,
                             WikiGenerationEvent::ActivityBatch {
@@ -1312,8 +1464,20 @@ pub async fn ai_generate_wiki(
                                 send_wiki_event(
                                     &progress_channel,
                                     WikiGenerationEvent::Progress {
-                                        page_id: page_id.clone(),
+                                        page_id: progress_page_id.clone(),
                                         content: content.to_string(),
+                                    },
+                                );
+                            },
+                            move |notice| {
+                                send_wiki_event(
+                                    &retry_channel,
+                                    WikiGenerationEvent::Retry {
+                                        page_id: Some(retry_page_id.clone()),
+                                        attempt: notice.attempt,
+                                        max_attempts: notice.max_attempts,
+                                        delay_seconds: notice.delay_seconds,
+                                        reason: notice.reason,
                                     },
                                 );
                             },
@@ -1324,7 +1488,11 @@ pub async fn ai_generate_wiki(
                         } else {
                             match result {
                                 Ok(()) => ("done", None),
-                                Err(error) => ("failed", Some(error.to_string())),
+                                Err(error) => {
+                                    let message = error.to_string();
+                                    page_errors.lock().unwrap().push(error);
+                                    ("failed", Some(message))
+                                }
                             }
                         };
                         send_wiki_event(
@@ -1363,7 +1531,9 @@ pub async fn ai_generate_wiki(
                 );
                 let progress_channel = on_event.clone();
                 let activity_channel = on_event.clone();
-                let page_id = page.id.clone();
+                let retry_channel = on_event.clone();
+                let progress_page_id = page.id.clone();
+                let retry_page_id = page.id.clone();
                 let result = generate_agent_page_to_disk(
                     &app,
                     &db,
@@ -1377,7 +1547,7 @@ pub async fn ai_generate_wiki(
                         send_wiki_event(
                             &progress_channel,
                             WikiGenerationEvent::Progress {
-                                page_id: page_id.clone(),
+                                page_id: progress_page_id.clone(),
                                 content,
                             },
                         );
@@ -1391,6 +1561,18 @@ pub async fn ai_generate_wiki(
                             },
                         );
                     }),
+                    Arc::new(move |notice: WikiRetryNotice| {
+                        send_wiki_event(
+                            &retry_channel,
+                            WikiGenerationEvent::Retry {
+                                page_id: Some(retry_page_id.clone()),
+                                attempt: notice.attempt,
+                                max_attempts: notice.max_attempts,
+                                delay_seconds: notice.delay_seconds,
+                                reason: notice.reason,
+                            },
+                        );
+                    }),
                 )
                 .await;
                 let (status, error) = if run.token.is_cancelled() {
@@ -1398,7 +1580,11 @@ pub async fn ai_generate_wiki(
                 } else {
                     match result {
                         Ok(()) => ("done", None),
-                        Err(error) => ("failed", Some(error.to_string())),
+                        Err(error) => {
+                            let message = error.to_string();
+                            page_errors.lock().unwrap().push(error);
+                            ("failed", Some(message))
+                        }
                     }
                 };
                 send_wiki_event(
@@ -1427,6 +1613,17 @@ pub async fn ai_generate_wiki(
             },
         );
         return Ok(());
+    }
+    let page_error = {
+        let mut errors = page_errors.lock().unwrap();
+        if errors.is_empty() {
+            None
+        } else {
+            Some(errors.remove(0))
+        }
+    };
+    if let Some(error) = page_error {
+        return fail_wiki_generation(&on_event, &run.token, error);
     }
     let save_result = super::wiki::save_wiki_meta(
         app,
@@ -1479,6 +1676,7 @@ pub async fn ai_regenerate_wiki_page(
                 |content| {
                     let _ = on_progress.send(content.to_string());
                 },
+                |_| {},
             )
             .await?;
             RegeneratedWikiPage {
@@ -1523,6 +1721,7 @@ pub async fn ai_regenerate_wiki_page(
                 &request.language,
                 &request.changed_files,
                 progress,
+                Arc::new(|_| {}),
                 Arc::new(|_| {}),
             )
             .await;
@@ -1617,6 +1816,7 @@ pub async fn ai_update_wiki(
                         &request.language,
                         &run.token,
                         |_| {},
+                        |_| {},
                     )
                     .await?;
                     let _ = on_event.send(WikiUpdateEvent {
@@ -1662,6 +1862,7 @@ pub async fn ai_update_wiki(
                             &changed.files,
                             Arc::new(|_| {}),
                             Arc::new(|_| {}),
+                            Arc::new(|_| {}),
                         )
                         .await?;
                         let _ = on_event.send(WikiUpdateEvent {
@@ -1699,7 +1900,7 @@ pub async fn ai_update_wiki(
 mod tests {
     use serde_json::json;
 
-    use super::WikiGenerationEvent;
+    use super::{sanitize_agent_retry_notices, WikiGenerationEvent};
 
     #[test]
     fn wiki_progress_event_uses_frontend_field_names() {
@@ -1731,5 +1932,39 @@ mod tests {
                 "items": ["README.md"],
             })
         );
+
+        let retry = serde_json::to_value(WikiGenerationEvent::Retry {
+            page_id: Some("overview".into()),
+            attempt: 1,
+            max_attempts: 3,
+            delay_seconds: 2,
+            reason: "rateLimited".into(),
+        })
+        .unwrap();
+        assert_eq!(
+            retry,
+            json!({
+                "kind": "retry",
+                "pageId": "overview",
+                "attempt": 1,
+                "maxAttempts": 3,
+                "delaySeconds": 2,
+                "reason": "rateLimited",
+            })
+        );
+    }
+
+    #[test]
+    fn acp_retry_notices_do_not_enter_wiki_markdown() {
+        let (content, retry) = sanitize_agent_retry_notices(
+            "Retrying (attempt 1/3, waiting 2s)...Retry finished, resuming.# 请求数据流",
+        );
+        assert_eq!(content, "# 请求数据流");
+        assert_eq!(retry.unwrap().attempt, 1);
+
+        let (partial, retry) =
+            sanitize_agent_retry_notices("# 已生成\nRetrying (attempt 2/3, waiting 4s)...");
+        assert_eq!(partial, "# 已生成\n");
+        assert_eq!(retry.unwrap().delay_seconds, 4);
     }
 }
