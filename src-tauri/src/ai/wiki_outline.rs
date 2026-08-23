@@ -1,98 +1,45 @@
 use std::collections::{HashMap, HashSet};
 
-use regex::Regex;
+use serde::Deserialize;
 
 use crate::commands::wiki::WikiOutlinePage;
 
-fn unescape_xml(value: &str) -> String {
-    value
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .replace("&amp;", "&")
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct OutlineDocument {
+    title: String,
+    description: String,
+    sections: Vec<OutlineSection>,
+    pages: Vec<OutlinePage>,
 }
 
-fn tag_text(block: &str, tag: &str) -> String {
-    Regex::new(&format!(r"(?s)<{tag}>(.*?)</{tag}>"))
-        .ok()
-        .and_then(|pattern| pattern.captures(block))
-        .and_then(|captures| captures.get(1))
-        .map(|value| unescape_xml(value.as_str().trim()))
-        .unwrap_or_default()
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OutlineSection {
+    id: String,
+    title: String,
+    pages: Vec<String>,
 }
 
-fn tag_texts(block: &str, tag: &str) -> Vec<String> {
-    let Ok(pattern) = Regex::new(&format!(r"(?s)<{tag}>(.*?)</{tag}>")) else {
-        return Vec::new();
-    };
-    pattern
-        .captures_iter(block)
-        .filter_map(|captures| captures.get(1))
-        .map(|value| unescape_xml(value.as_str().trim()))
-        .filter(|value| !value.is_empty())
-        .collect()
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct OutlinePage {
+    id: String,
+    title: String,
+    description: String,
+    importance: String,
+    relevant_files: Vec<String>,
+    related_pages: Vec<String>,
 }
 
-fn structure_region(raw: &str) -> Option<String> {
-    let fence = Regex::new(r"(?i)```(?:xml)?").ok()?;
-    let without_fence = fence.replace_all(raw, "");
-    let start = without_fence.find("<wiki_structure")?;
-    let mut region = without_fence[start..].to_string();
-    if !region.contains("</wiki_structure>") {
-        region.push_str("</page></pages></wiki_structure>");
-    }
-    Some(region)
-}
-
-fn parse_sections(region: &str) -> HashMap<String, String> {
-    let mut sections = HashMap::new();
-    let Ok(pattern) = Regex::new(r"(?s)<section\b[^>]*>(.*?)</section>") else {
-        return sections;
-    };
-    for captures in pattern.captures_iter(region) {
-        let block = captures
-            .get(1)
-            .map(|value| value.as_str())
-            .unwrap_or_default();
-        let title = tag_text(block, "title");
-        if title.is_empty() {
-            continue;
-        }
-        for id in tag_text(block, "pages")
-            .split(|character: char| character.is_whitespace() || character == ',')
-        {
-            if !id.is_empty() {
-                sections.insert(id.to_string(), title.clone());
-            }
-        }
-    }
-    sections
-}
-
-fn slugify(value: &str, fallback: &str) -> String {
-    let mut slug = String::new();
-    let mut dash = false;
-    for character in value.to_ascii_lowercase().chars() {
-        if character.is_ascii_alphanumeric() {
-            if dash && !slug.is_empty() {
-                slug.push('-');
-            }
-            dash = false;
-            slug.push(character);
-            if slug.len() >= 48 {
-                break;
-            }
-        } else {
-            dash = true;
-        }
-    }
-    let slug = slug.trim_matches('-').to_string();
-    if slug.is_empty() {
-        fallback.to_string()
-    } else {
-        slug
-    }
+fn valid_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.split('-').all(|part| {
+            !part.is_empty()
+                && part
+                    .chars()
+                    .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
+        })
 }
 
 fn normalize_path(value: &str) -> String {
@@ -103,138 +50,284 @@ fn normalize_path(value: &str) -> String {
         .to_string()
 }
 
+fn validation_error(errors: Vec<String>) -> Result<Vec<WikiOutlinePage>, String> {
+    Err(format!(
+        "wiki outline JSON validation failed:\n- {}",
+        errors.join("\n- ")
+    ))
+}
+
 pub fn parse_outline(
     raw: &str,
     valid_files: &HashSet<String>,
 ) -> Result<Vec<WikiOutlinePage>, String> {
-    let region = structure_region(raw)
-        .ok_or_else(|| "wiki outline: no <wiki_structure> found".to_string())?;
-    let sections = parse_sections(&region);
-    let page_split = Regex::new(r"<page\b").map_err(|error| error.to_string())?;
-    let id_pattern =
-        Regex::new(r#"^[^>]*?\bid\s*=\s*"([^"]+)""#).map_err(|error| error.to_string())?;
-    let close_pattern = Regex::new(r"(?s)</page>.*$").map_err(|error| error.to_string())?;
-    let mut pages = Vec::new();
-    let mut used_ids = HashSet::new();
+    let text = raw.trim();
+    if !text.starts_with('{') || !text.ends_with('}') {
+        return Err(
+            "wiki outline response must contain only one complete JSON object starting with `{` and ending with `}`; remove commentary, fences, control tokens, and truncated content"
+                .to_string(),
+        );
+    }
+    let document: OutlineDocument = serde_json::from_str(text).map_err(|error| {
+        format!(
+            "wiki outline JSON parse failed at line {}, column {}: {error}",
+            error.line(),
+            error.column(),
+        )
+    })?;
 
-    for fragment in page_split.split(&region).skip(1) {
-        let Some(raw_id) = id_pattern
-            .captures(fragment)
-            .and_then(|captures| captures.get(1))
-            .map(|value| value.as_str().trim())
-        else {
-            continue;
-        };
-        let block = close_pattern.replace(fragment, "");
-        let page_number = pages.len() + 1;
-        let fallback = format!("page-{page_number}");
-        let base_id = slugify(raw_id, &fallback);
-        let mut id = base_id.clone();
-        let mut suffix = 2;
-        while used_ids.contains(&id) {
-            id = format!("{base_id}-{suffix}");
-            suffix += 1;
+    let mut errors = Vec::new();
+    if document.title.trim().is_empty() {
+        errors.push("root `title` must not be empty".to_string());
+    }
+    if document.description.trim().is_empty() {
+        errors.push("root `description` must not be empty".to_string());
+    }
+    if !(6..=10).contains(&document.pages.len()) {
+        errors.push(format!(
+            "`pages` must contain 6-10 items, got {}",
+            document.pages.len()
+        ));
+    }
+
+    let mut page_ids = HashSet::new();
+    for page in &document.pages {
+        if !valid_id(&page.id) {
+            errors.push(format!(
+                "page id `{}` must be lowercase, numeric, and hyphen-separated",
+                page.id
+            ));
         }
-        used_ids.insert(id.clone());
-        let title = tag_text(&block, "title");
-        let importance = match tag_text(&block, "importance").to_ascii_lowercase().as_str() {
-            "high" => "high",
-            "low" => "low",
-            _ => "medium",
+        if !page_ids.insert(page.id.clone()) {
+            errors.push(format!("duplicate page id `{}`", page.id));
         }
-        .to_string();
+    }
+
+    let mut section_ids = HashSet::new();
+    let mut membership = HashMap::<String, String>::new();
+    for section in &document.sections {
+        if !valid_id(&section.id) {
+            errors.push(format!(
+                "section id `{}` must be lowercase, numeric, and hyphen-separated",
+                section.id
+            ));
+        }
+        if !section_ids.insert(section.id.clone()) {
+            errors.push(format!("duplicate section id `{}`", section.id));
+        }
+        if section.title.trim().is_empty() {
+            errors.push(format!("section `{}` has an empty title", section.id));
+        }
+        if section.pages.is_empty() {
+            errors.push(format!(
+                "section `{}` must reference at least one page",
+                section.id
+            ));
+        }
+        let mut section_pages = HashSet::new();
+        for page_id in &section.pages {
+            if !section_pages.insert(page_id) {
+                errors.push(format!(
+                    "section `{}` references page `{page_id}` more than once",
+                    section.id
+                ));
+            }
+            if !page_ids.contains(page_id) {
+                errors.push(format!(
+                    "section `{}` references unknown page `{page_id}`",
+                    section.id
+                ));
+            }
+            if let Some(previous) = membership.insert(page_id.clone(), section.title.clone()) {
+                errors.push(format!(
+                    "page `{page_id}` belongs to multiple sections (`{previous}` and `{}`)",
+                    section.title
+                ));
+            }
+        }
+    }
+    if !document.sections.is_empty() {
+        for page_id in &page_ids {
+            if !membership.contains_key(page_id) {
+                errors.push(format!("page `{page_id}` is not assigned to any section"));
+            }
+        }
+    }
+
+    let mut normalized_files = HashMap::<String, Vec<String>>::new();
+    for page in &document.pages {
+        if page.title.trim().is_empty() {
+            errors.push(format!("page `{}` has an empty title", page.id));
+        }
+        if page.description.trim().is_empty() {
+            errors.push(format!("page `{}` has an empty description", page.id));
+        }
+        if !matches!(page.importance.as_str(), "high" | "medium" | "low") {
+            errors.push(format!(
+                "page `{}` has invalid importance `{}`; expected high, medium, or low",
+                page.id, page.importance
+            ));
+        }
+        if !(3..=10).contains(&page.relevant_files.len()) {
+            errors.push(format!(
+                "page `{}` must list 3-10 relevantFiles, got {}",
+                page.id,
+                page.relevant_files.len()
+            ));
+        }
         let mut seen_files = HashSet::new();
-        let relevant_files = tag_texts(&block, "file_path")
-            .into_iter()
-            .map(|path| normalize_path(&path))
-            .filter(|path| valid_files.contains(path) && seen_files.insert(path.clone()))
-            .collect();
-        pages.push(WikiOutlinePage {
-            id: id.clone(),
-            file: format!("{page_number:02}-{id}.md"),
-            title: if title.is_empty() {
-                raw_id.to_string()
+        let mut files = Vec::new();
+        for raw_path in &page.relevant_files {
+            let path = normalize_path(raw_path);
+            if path.is_empty() {
+                errors.push(format!("page `{}` contains an empty file path", page.id));
+            } else if !valid_files.contains(&path) {
+                errors.push(format!(
+                    "page `{}` references nonexistent file `{path}`",
+                    page.id
+                ));
+            } else if !seen_files.insert(path.clone()) {
+                errors.push(format!(
+                    "page `{}` lists file `{path}` more than once",
+                    page.id
+                ));
             } else {
-                title
-            },
-            description: tag_text(&block, "description"),
-            section: sections.get(raw_id).or_else(|| sections.get(&id)).cloned(),
-            importance,
-            relevant_files,
-            related_pages: tag_texts(&block, "related"),
-        });
+                files.push(path);
+            }
+        }
+        normalized_files.insert(page.id.clone(), files);
+
+        let mut seen_related = HashSet::new();
+        for related_id in &page.related_pages {
+            if related_id == &page.id {
+                errors.push(format!("page `{}` must not relate to itself", page.id));
+            } else if !page_ids.contains(related_id) {
+                errors.push(format!(
+                    "page `{}` references unknown related page `{related_id}`",
+                    page.id
+                ));
+            } else if !seen_related.insert(related_id) {
+                errors.push(format!(
+                    "page `{}` lists related page `{related_id}` more than once",
+                    page.id
+                ));
+            }
+        }
     }
 
-    if pages.is_empty() {
-        Err("wiki outline: no <page> parsed".to_string())
-    } else {
-        Ok(pages)
+    if !errors.is_empty() {
+        return validation_error(errors);
     }
+
+    Ok(document
+        .pages
+        .into_iter()
+        .enumerate()
+        .map(|(index, page)| WikiOutlinePage {
+            file: format!("{:02}-{}.md", index + 1, page.id),
+            section: membership.get(&page.id).cloned(),
+            relevant_files: normalized_files.remove(&page.id).unwrap_or_default(),
+            id: page.id,
+            title: page.title,
+            description: page.description,
+            importance: page.importance,
+            related_pages: page.related_pages,
+        })
+        .collect())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use serde_json::{json, Value};
 
-    const VALID_XML: &str = r#"<wiki_structure>
-<sections><section><title>Overview</title><pages>overview architecture</pages></section></sections>
-<pages>
-<page id="overview"><title>项目概览</title><description>What this project is</description><importance>high</importance><file_path>README.md</file_path><file_path>./package.json</file_path><related>architecture</related></page>
-<page id="architecture"><title>Architecture &amp; Layers</title><importance>medium</importance><file_path>src\lib\ai.ts</file_path><file_path>not/exist.ts</file_path></page>
-</pages></wiki_structure>"#;
+    use super::*;
 
     fn valid_files() -> HashSet<String> {
         HashSet::from([
             "README.md".to_string(),
             "package.json".to_string(),
-            "src/lib/ai.ts".to_string(),
+            "src/main.ts".to_string(),
         ])
     }
 
-    #[test]
-    fn parses_fields_sections_entities_and_normalized_paths() {
-        let pages = parse_outline(VALID_XML, &valid_files()).unwrap();
-        assert_eq!(pages.len(), 2);
-        assert_eq!(pages[0].id, "overview");
-        assert_eq!(pages[0].file, "01-overview.md");
-        assert_eq!(pages[0].title, "项目概览");
-        assert_eq!(pages[0].section.as_deref(), Some("Overview"));
-        assert_eq!(pages[0].importance, "high");
-        assert_eq!(pages[0].related_pages, vec!["architecture"]);
-        assert_eq!(pages[0].relevant_files, vec!["README.md", "package.json"]);
-        assert_eq!(pages[1].title, "Architecture & Layers");
-        assert_eq!(pages[1].relevant_files, vec!["src/lib/ai.ts"]);
+    fn valid_document() -> Value {
+        let pages = (1..=6)
+            .map(|index| {
+                json!({
+                    "id": format!("page-{index}"),
+                    "title": format!("页面 {index}"),
+                    "description": format!("页面 {index} 的说明"),
+                    "importance": if index == 1 { "high" } else { "medium" },
+                    "relevantFiles": ["README.md", "./package.json", "src\\main.ts"],
+                    "relatedPages": if index == 1 { vec!["page-2"] } else { Vec::<&str>::new() },
+                })
+            })
+            .collect::<Vec<_>>();
+        json!({
+            "title": "项目 Wiki",
+            "description": "项目说明",
+            "sections": [{
+                "id": "section-overview",
+                "title": "概览",
+                "pages": ["page-1", "page-2", "page-3", "page-4", "page-5", "page-6"]
+            }],
+            "pages": pages,
+        })
     }
 
     #[test]
-    fn parses_truncated_outline_and_filters_files() {
-        let raw = r#"```xml
-noise<wiki_structure><sections><section><title>Overview</title><pages>core</pages></section></sections><pages>
-<page id="core"><title>核心 &amp; 架构</title><importance>high</importance><file_path>./src/main.rs</file_path></page>
-<page id="core"><title>重复</title><importance>bad</importance>"#;
-        let pages = parse_outline(raw, &HashSet::from(["src/main.rs".to_string()])).unwrap();
-        assert_eq!(pages.len(), 2);
-        assert_eq!(pages[0].id, "core");
-        assert_eq!(pages[0].title, "核心 & 架构");
-        assert_eq!(pages[0].section.as_deref(), Some("Overview"));
-        assert_eq!(pages[0].relevant_files, vec!["src/main.rs"]);
-        assert_eq!(pages[1].id, "core-2");
-        assert_eq!(pages[1].importance, "medium");
+    fn parses_and_validates_complete_json_outline() {
+        let pages = parse_outline(&valid_document().to_string(), &valid_files()).unwrap();
+        assert_eq!(pages.len(), 6);
+        assert_eq!(pages[0].id, "page-1");
+        assert_eq!(pages[0].file, "01-page-1.md");
+        assert_eq!(pages[0].section.as_deref(), Some("概览"));
+        assert_eq!(pages[0].related_pages, vec!["page-2"]);
+        assert_eq!(
+            pages[0].relevant_files,
+            vec!["README.md", "package.json", "src/main.ts"]
+        );
     }
 
     #[test]
-    fn accepts_fences_and_leading_noise() {
-        let raw = format!("好的，以下是结构：\n```xml\n{VALID_XML}\n```");
-        assert_eq!(parse_outline(&raw, &valid_files()).unwrap().len(), 2);
+    fn rejects_commentary_fences_truncation_and_control_tokens() {
+        let raw = valid_document().to_string();
+        for invalid in [
+            format!("正在生成。\n{raw}"),
+            format!("```json\n{raw}\n```"),
+            raw[..raw.len() - 1].to_string(),
+            format!("{raw}<]minimax[>"),
+        ] {
+            assert!(parse_outline(&invalid, &valid_files()).is_err());
+        }
     }
 
     #[test]
-    fn rejects_missing_structure_or_pages() {
-        assert!(parse_outline("抱歉，无法完成", &HashSet::new()).is_err());
-        assert!(parse_outline(
-            "<wiki_structure><title>x</title></wiki_structure>",
-            &HashSet::new(),
-        )
-        .is_err());
+    fn reports_schema_and_cross_reference_errors() {
+        let mut document = valid_document();
+        document["pages"][0]["relevantFiles"] = json!(["README.md", "missing.rs"]);
+        document["pages"][0]["relatedPages"] = json!(["missing-page"]);
+        let error = parse_outline(&document.to_string(), &valid_files()).unwrap_err();
+        assert!(error.contains("must list 3-10 relevantFiles, got 2"));
+        assert!(error.contains("nonexistent file `missing.rs`"));
+        assert!(error.contains("unknown related page `missing-page`"));
+    }
+
+    #[test]
+    fn rejects_wrong_page_count_and_unknown_fields() {
+        let mut document = valid_document();
+        document["pages"] = json!([]);
+        let error = parse_outline(&document.to_string(), &valid_files()).unwrap_err();
+        assert!(error.contains("must contain 6-10 items"));
+
+        let mut document = valid_document();
+        document["unexpected"] = json!(true);
+        let error = parse_outline(&document.to_string(), &valid_files()).unwrap_err();
+        assert!(error.contains("unknown field"));
+
+        let mut document = valid_document();
+        document.as_object_mut().unwrap().remove("sections");
+        let error = parse_outline(&document.to_string(), &valid_files()).unwrap_err();
+        assert!(error.contains("missing field `sections`"));
     }
 }

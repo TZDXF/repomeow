@@ -176,6 +176,8 @@ export default {
     ai_not_configured: "Configure the AI API key in Settings first",
     ai_request_failed: "AI request failed",
     ai_response_error: "AI returned an error",
+    ai_max_output_tokens_exceeded:
+      "The AI request's maximum output token setting exceeds this model's limit. Adjust the agent configuration or switch models and try again",
     ai_response_parse_failed: "Failed to parse AI response",
     ai_empty_response: "AI returned an empty response",
     // Agent (wiki generation backend)
@@ -839,7 +841,8 @@ export default {
     regenerate: "Regenerate",
     genConfigTitle: "Generation settings",
     genConfigDesc:
-      "Choose the backend and model for this run; your choice is remembered for next time and can be changed anytime",
+      "Choose the backend and model for this project; the config is stored independently in its Wiki folder",
+    genConfigError: "Failed to read or save the Wiki generation config: {error}",
     genBackend: "Backend",
     genBuiltin: "Built-in API (model configured in Settings)",
     genConfirm: "Start generating",
@@ -889,6 +892,15 @@ export default {
       outlining: "Build outline",
       generating: "Write pages",
       preparing: "Preparing the page list",
+      contextSummary:
+        "Outline context: selected {files} source/document files; README: {readme}; root manifests: {manifests}{truncated}",
+      activityTitle: "Generation activity",
+      activityScan: "scan",
+      activityRead: "read",
+      activityTool: "tool",
+      found: "loaded",
+      notFound: "not found",
+      treeTruncated: "; large file tree folded",
       pages: "Processed {processed} / {total} pages",
       failedPages: "{count} page(s) failed; the remaining pages will continue",
       leaveHint:

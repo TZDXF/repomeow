@@ -120,13 +120,14 @@ impl Drop for RegisteredRun {
     }
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
 pub enum WikiGenerationBackend {
+    #[default]
     Builtin,
     Agent {
         #[serde(default)]
@@ -148,7 +149,6 @@ pub struct GenerateWikiRequest {
     project_name: String,
     language: String,
     concurrency: usize,
-    backend: WikiGenerationBackend,
 }
 
 #[derive(Deserialize)]
@@ -157,7 +157,6 @@ pub struct RegenerateWikiPageRequest {
     run_id: String,
     project_path: String,
     language: String,
-    backend: WikiGenerationBackend,
     page: super::wiki::WikiOutlinePage,
     #[serde(default)]
     changed_files: Vec<String>,
@@ -169,7 +168,6 @@ pub struct UpdateWikiRequest {
     run_id: String,
     project_path: String,
     language: String,
-    backend: WikiGenerationBackend,
     #[serde(default)]
     automatic: bool,
 }
@@ -189,7 +187,11 @@ pub struct WikiUpdateEvent {
 }
 
 #[derive(Clone, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum WikiGenerationEvent {
     Phase {
         phase: String,
@@ -203,6 +205,16 @@ pub enum WikiGenerationEvent {
     Progress {
         page_id: String,
         content: String,
+    },
+    Context {
+        file_count: usize,
+        tree_truncated: bool,
+        has_readme: bool,
+        manifest_count: usize,
+    },
+    ActivityBatch {
+        activity_type: String,
+        items: Vec<String>,
     },
 }
 
@@ -768,6 +780,12 @@ fn agent_wiki_outline_prompt(
     )
 }
 
+fn outline_retry_prompt(original: &str, validation_error: &str) -> String {
+    format!(
+        "{original}\n\n# Correction required\nThe previous response was rejected by the application's strict JSON validator.\n\nExact validation error:\n<validation_error>\n{validation_error}\n</validation_error>\n\nProduce a completely new, full JSON outline that fixes every reported error. Re-run the acceptance check, then return only the corrected JSON object. Do not discuss the error or the correction."
+    )
+}
+
 fn agent_wiki_page_prompt(
     page: &super::wiki::WikiOutlinePage,
     changed_files: &[String],
@@ -880,12 +898,14 @@ async fn generate_builtin_outline_pages(
 ) -> AppResult<Vec<super::wiki::WikiOutlinePage>> {
     let config = sdk::load_config(app);
     let system = fixed_system_prompt(DEFAULT_WIKI_OUTLINE_PROMPT, language);
-    let prompt = wiki_outline_user_prompt(context, project_name);
+    let original_prompt = wiki_outline_user_prompt(context, project_name);
+    let mut prompt = original_prompt.clone();
     let valid_files: HashSet<String> = context.paths.iter().cloned().collect();
-    let mut last_error = "wiki outline: no <page> parsed".to_string();
-    for _ in 0..=1 {
+    let mut last_error = "wiki outline JSON was not generated".to_string();
+    const MAX_ATTEMPTS: usize = 3;
+    for _ in 1..=MAX_ATTEMPTS {
         let started = Instant::now();
-        let output = sdk::chat(&config, Some(&system), &prompt, true, None, Some(cancel)).await?;
+        let output = sdk::stream_chat(&config, &system, &prompt, true, cancel, |_| {}).await?;
         record_usage(
             db,
             "wiki",
@@ -895,7 +915,10 @@ async fn generate_builtin_outline_pages(
         );
         match crate::ai::wiki_outline::parse_outline(&output.text, &valid_files) {
             Ok(pages) => return Ok(pages),
-            Err(error) => last_error = error,
+            Err(error) => {
+                last_error = error;
+                prompt = outline_retry_prompt(&original_prompt, &last_error);
+            }
         }
     }
     Err(AppError::coded(
@@ -953,16 +976,23 @@ async fn generate_agent_outline_pages(
     context: &super::wiki::WikiContext,
     project_name: &str,
     language: &str,
+    on_activity: Arc<dyn Fn(String) + Send + Sync>,
 ) -> AppResult<Vec<super::wiki::WikiOutlinePage>> {
-    let prompt = agent_wiki_outline_prompt(context, project_name, language);
+    let original_prompt = agent_wiki_outline_prompt(context, project_name, language);
+    let mut prompt = original_prompt.clone();
     let valid_files: HashSet<String> = context.paths.iter().cloned().collect();
-    let mut last_error = "wiki outline: no <page> parsed".to_string();
-    for _ in 0..=1 {
+    let mut last_error = "wiki outline JSON was not generated".to_string();
+    const MAX_ATTEMPTS: usize = 3;
+    for _ in 1..=MAX_ATTEMPTS {
         let started = Instant::now();
+        let activity = on_activity.clone();
         let result = super::agent::acp_prompt_with(
             run_id.to_string(),
             prompt.clone(),
-            super::agent::AcpEventSender::new(|_| {}),
+            super::agent::AcpEventSender::new(move |event| match event {
+                super::agent::AcpEvent::Chunk { .. } => {}
+                super::agent::AcpEvent::Activity { text } => activity(text),
+            }),
         )
         .await?;
         record_acp_usage(
@@ -971,9 +1001,13 @@ async fn generate_agent_outline_pages(
             &result,
             started.elapsed().as_millis() as i64,
         );
-        match crate::ai::wiki_outline::parse_outline(&result.text, &valid_files) {
+        let outline = sdk::strip_thinking(&result.text);
+        match crate::ai::wiki_outline::parse_outline(&outline, &valid_files) {
             Ok(pages) => return Ok(pages),
-            Err(error) => last_error = error,
+            Err(error) => {
+                last_error = error;
+                prompt = outline_retry_prompt(&original_prompt, &last_error);
+            }
         }
     }
     Err(AppError::coded(
@@ -992,16 +1026,19 @@ async fn generate_agent_page_to_disk(
     language: &str,
     changed_files: &[String],
     on_progress: Arc<dyn Fn(String) + Send + Sync>,
+    on_activity: Arc<dyn Fn(String) + Send + Sync>,
 ) -> AppResult<()> {
     let prompt = agent_wiki_page_prompt(page, changed_files, language);
     let mut last_error = None;
     for _ in 0..=2 {
         on_progress(String::new());
         let progress = on_progress.clone();
-        let sender = super::agent::AcpEventSender::new(move |event| {
-            if let super::agent::AcpEvent::Chunk { text } = event {
-                progress(text);
+        let activity = on_activity.clone();
+        let sender = super::agent::AcpEventSender::new(move |event| match event {
+            super::agent::AcpEvent::Chunk { text } => {
+                progress(sdk::strip_thinking(&text));
             }
+            super::agent::AcpEvent::Activity { text } => activity(text),
         });
         let started = Instant::now();
         match super::agent::acp_prompt_with(run_id.to_string(), prompt.clone(), sender).await {
@@ -1012,7 +1049,15 @@ async fn generate_agent_page_to_disk(
                     &result,
                     started.elapsed().as_millis() as i64,
                 );
-                super::wiki::save_wiki_page_internal(app, project_path, &page.file, &result.text)?;
+                let page_content = sdk::strip_thinking(&result.text);
+                if page_content.is_empty() {
+                    last_error = Some(AppError::coded(
+                        ErrorCode::AgentPromptFailed,
+                        "wiki page response is empty after removing thinking content",
+                    ));
+                    continue;
+                }
+                super::wiki::save_wiki_page_internal(app, project_path, &page.file, &page_content)?;
                 return Ok(());
             }
             Err(error) => last_error = Some(error),
@@ -1032,6 +1077,7 @@ pub async fn ai_generate_wiki(
     on_event: Channel<WikiGenerationEvent>,
 ) -> AppResult<()> {
     let run = RegisteredRun::new(request.run_id);
+    let backend = super::wiki::load_wiki_config_internal(&app, &request.project_path)?.backend;
     send_wiki_event(
         &on_event,
         WikiGenerationEvent::Phase {
@@ -1042,12 +1088,47 @@ pub async fn ai_generate_wiki(
         Ok(context) => context,
         Err(error) => return fail_wiki_generation(&on_event, &run.token, error),
     };
+    for paths in context.paths.chunks(24) {
+        send_wiki_event(
+            &on_event,
+            WikiGenerationEvent::ActivityBatch {
+                activity_type: "scan".into(),
+                items: paths.to_vec(),
+            },
+        );
+    }
+    let mut read_files = context
+        .manifests
+        .iter()
+        .map(|manifest| manifest.path.clone())
+        .collect::<Vec<_>>();
+    if context.readme.is_some() {
+        read_files.insert(0, "README".into());
+    }
+    if !read_files.is_empty() {
+        send_wiki_event(
+            &on_event,
+            WikiGenerationEvent::ActivityBatch {
+                activity_type: "read".into(),
+                items: read_files,
+            },
+        );
+    }
+    send_wiki_event(
+        &on_event,
+        WikiGenerationEvent::Context {
+            file_count: context.file_count,
+            tree_truncated: context.tree_truncated,
+            has_readme: context.readme.is_some(),
+            manifest_count: context.manifests.len(),
+        },
+    );
     let backend_id;
     let meta_model;
     let mut agent_run_id = None;
     let mut agent_cancel_watch = None;
 
-    let pages_result = match &request.backend {
+    let pages_result = match &backend {
         WikiGenerationBackend::Builtin => {
             backend_id = "builtin".to_string();
             meta_model = sdk::load_config(&app).ai_model;
@@ -1110,6 +1191,18 @@ pub async fn ai_generate_wiki(
                 &context,
                 &request.project_name,
                 &request.language,
+                {
+                    let channel = on_event.clone();
+                    Arc::new(move |text| {
+                        send_wiki_event(
+                            &channel,
+                            WikiGenerationEvent::ActivityBatch {
+                                activity_type: "tool".into(),
+                                items: vec![text],
+                            },
+                        );
+                    })
+                },
             )
             .await
         }
@@ -1180,7 +1273,7 @@ pub async fn ai_generate_wiki(
         },
     );
 
-    match &request.backend {
+    match &backend {
         WikiGenerationBackend::Builtin => {
             stream::iter(pages.clone())
                 .for_each_concurrent(request.concurrency.clamp(1, 8), |page| {
@@ -1201,6 +1294,13 @@ pub async fn ai_generate_wiki(
                         );
                         let progress_channel = channel.clone();
                         let page_id = page.id.clone();
+                        send_wiki_event(
+                            &channel,
+                            WikiGenerationEvent::ActivityBatch {
+                                activity_type: "read".into(),
+                                items: page.relevant_files.clone(),
+                            },
+                        );
                         let result = generate_builtin_page_to_disk(
                             &app,
                             db,
@@ -1262,6 +1362,7 @@ pub async fn ai_generate_wiki(
                     },
                 );
                 let progress_channel = on_event.clone();
+                let activity_channel = on_event.clone();
                 let page_id = page.id.clone();
                 let result = generate_agent_page_to_disk(
                     &app,
@@ -1278,6 +1379,15 @@ pub async fn ai_generate_wiki(
                             WikiGenerationEvent::Progress {
                                 page_id: page_id.clone(),
                                 content,
+                            },
+                        );
+                    }),
+                    Arc::new(move |text| {
+                        send_wiki_event(
+                            &activity_channel,
+                            WikiGenerationEvent::ActivityBatch {
+                                activity_type: "tool".into(),
+                                items: vec![text],
                             },
                         );
                     }),
@@ -1354,9 +1464,10 @@ pub async fn ai_regenerate_wiki_page(
     on_progress: Channel<String>,
 ) -> AppResult<RegeneratedWikiPage> {
     let run = RegisteredRun::new(request.run_id);
+    let backend = super::wiki::load_wiki_config_internal(&app, &request.project_path)?.backend;
     let page_title = request.page.title.clone();
     let project_path = request.project_path.clone();
-    let generated = match request.backend {
+    let generated = match backend {
         WikiGenerationBackend::Builtin => {
             generate_builtin_page_to_disk(
                 &app,
@@ -1412,6 +1523,7 @@ pub async fn ai_regenerate_wiki_page(
                 &request.language,
                 &request.changed_files,
                 progress,
+                Arc::new(|_| {}),
             )
             .await;
             let _ = super::agent::acp_cancel(started.run_id);
@@ -1435,8 +1547,9 @@ pub async fn ai_regenerate_wiki_page(
 }
 
 /// 增量更新的变更检测、受影响页面筛选、页面生成与 meta 推进全部在后端完成。
-/// 自动更新遇到 agent 后端、旧 wiki、历史改写或后端切换时静默跳过；手动更新
-/// 对不可增量的情况返回错误，由界面沿既有语义退化为整本重生成。
+/// 生成后端始终从项目 Wiki 目录的 config.json 读取。自动更新遇到旧 wiki、历史
+/// 改写或后端切换时静默跳过；手动更新对不可增量的情况返回错误，由界面沿既有
+/// 语义退化为整本重生成。
 #[tauri::command]
 pub async fn ai_update_wiki(
     app: AppHandle,
@@ -1445,19 +1558,17 @@ pub async fn ai_update_wiki(
     on_event: Channel<WikiUpdateEvent>,
 ) -> AppResult<usize> {
     let run = RegisteredRun::new(request.run_id);
-    if request.automatic && !matches!(&request.backend, WikiGenerationBackend::Builtin) {
-        return Ok(0);
-    }
     let Some(data) = super::wiki::load_wiki(app.clone(), request.project_path.clone())? else {
         return Ok(0);
     };
+    let backend = super::wiki::load_wiki_config_internal(&app, &request.project_path)?.backend;
     let Some(from_sha) = data.meta.head_sha.clone() else {
         if request.automatic {
             return Ok(0);
         }
         return Err(AppError::coded(ErrorCode::GitCommandFailed, "no head sha"));
     };
-    let backend_id = wiki_backend_id(&request.backend);
+    let backend_id = wiki_backend_id(&backend);
     if data.meta.generator.as_deref().unwrap_or("builtin") != backend_id {
         if request.automatic {
             return Ok(0);
@@ -1494,7 +1605,7 @@ pub async fn ai_update_wiki(
     let mut generated_generator = data.meta.generator.clone();
     if !affected.is_empty() {
         generated_generator = Some(backend_id.clone());
-        match &request.backend {
+        match &backend {
             WikiGenerationBackend::Builtin => {
                 generated_model = sdk::load_config(&app).ai_model;
                 for (index, page) in affected.iter().enumerate() {
@@ -1550,6 +1661,7 @@ pub async fn ai_update_wiki(
                             &request.language,
                             &changed.files,
                             Arc::new(|_| {}),
+                            Arc::new(|_| {}),
                         )
                         .await?;
                         let _ = on_event.send(WikiUpdateEvent {
@@ -1581,4 +1693,43 @@ pub async fn ai_update_wiki(
         )?;
     }
     Ok(total)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::WikiGenerationEvent;
+
+    #[test]
+    fn wiki_progress_event_uses_frontend_field_names() {
+        let value = serde_json::to_value(WikiGenerationEvent::Progress {
+            page_id: "overview".into(),
+            content: "# Overview".into(),
+        })
+        .unwrap();
+
+        assert_eq!(
+            value,
+            json!({
+                "kind": "progress",
+                "pageId": "overview",
+                "content": "# Overview",
+            })
+        );
+
+        let activity = serde_json::to_value(WikiGenerationEvent::ActivityBatch {
+            activity_type: "read".into(),
+            items: vec!["README.md".into()],
+        })
+        .unwrap();
+        assert_eq!(
+            activity,
+            json!({
+                "kind": "activityBatch",
+                "activityType": "read",
+                "items": ["README.md"],
+            })
+        );
+    }
 }

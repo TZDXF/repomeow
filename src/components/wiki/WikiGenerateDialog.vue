@@ -13,25 +13,27 @@ import {
 } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { acpTestCached, agentList, type AcpTestResult } from "@/lib/agent";
-import { useSettingsStore } from "@/stores/settings";
+import { loadWikiConfig, saveWikiConfig } from "@/lib/wiki";
+import type { WikiGenBackend, WikiGenerationConfig } from "@/lib/wiki-generator";
 
 /**
  * Wiki 生成配置对话框:点「生成/重新生成」(generate 模式)或 wiki 页右上角
  * 配置入口(edit 模式)时打开,选择后端(内置 API / 已安装的精选 agent)与
- * agent 的模型、思考强度。打开时预填上次使用的配置(持久化在全局设置),
- * 确认才写回;取消则丢弃改动。agent 选中后自动探测其上报的模型/思考强度清单
+ * agent 的模型、思考强度。打开时读取当前项目 Wiki 目录的 config.json,
+ * 确认才写回该项目;取消则丢弃改动。agent 选中后自动探测其上报的模型/思考强度清单
  * (acpTestCached 应用会话级缓存,不重复 spawn)。是否随之触发生成由调用方决定。
  */
 const props = defineProps<{
   /** false 表示关闭 */
   open: boolean;
+  /** 当前项目路径，用于读写其独立 Wiki 生成配置。 */
+  projectPath: string;
   /** generate = 确认按钮为「开始生成」;edit = 仅保存配置,按钮为「保存」 */
   mode?: "generate" | "edit";
 }>();
 const emit = defineEmits<{ close: []; confirm: [] }>();
 
 const { t } = useI18n();
-const store = useSettingsStore();
 
 const open = computed({
   get: () => props.open,
@@ -44,42 +46,76 @@ const open = computed({
 
 /** 已安装的精选 agent(未安装的不进下拉;挂载时探测一次,失败不阻塞) */
 const installedAgents = ref<Awaited<ReturnType<typeof agentList>>>([]);
+const agentsLoaded = ref(false);
 onMounted(() => {
   agentList()
     .then((list) => {
       installedAgents.value = list.filter((a) => a.installed);
-      // 清单晚于打开到达时,补一次归一(存储值可能指向已卸载的 agent)
+      agentsLoaded.value = true;
+      // 清单晚于配置到达时,补一次归一(配置可能指向已卸载的 agent)
       backend.value = normalizeBackend(backend.value);
     })
-    .catch(() => {});
+    .catch(() => {
+      agentsLoaded.value = true;
+      backend.value = normalizeBackend(backend.value);
+    });
 });
 
-// ── 本地副本:打开时从设置同步,确认才写回 ─────────────────────────────────
+// ── 本地副本:打开时从项目 config.json 同步,确认才写回 ────────────────────
 
 const backend = ref("builtin");
 const model = ref("");
 const thinking = ref("");
+const configLoading = ref(false);
+const configSaving = ref(false);
+const configError = ref("");
+let loadSequence = 0;
 
 /** 归一后端选择:仅内置与已安装的精选 agent 合法,其余(含历史遗留的自定义)回退内置 */
 function normalizeBackend(value: string): string {
-  return value !== "builtin" && installedAgents.value.some((a) => a.id === value)
-    ? value
-    : "builtin";
+  if (value === "builtin") return value;
+  if (value === "custom") return "builtin";
+  if (!agentsLoaded.value) return value;
+  return installedAgents.value.some((a) => a.id === value) ? value : "builtin";
 }
 
 watch(
-  () => props.open,
-  (isOpen) => {
+  () => [props.open, props.projectPath] as const,
+  ([isOpen]) => {
     if (!isOpen) {
       return;
     }
-    backend.value = normalizeBackend(store.wikiGenBackend);
-    model.value = store.wikiAgentModel;
-    thinking.value = store.wikiAgentThinking;
-    // 已选中 agent 后端时立即自动获取模型清单(命中缓存则零开销)
-    void probeAgent();
+    void loadProjectConfig();
   },
 );
+
+async function loadProjectConfig() {
+  const sequence = ++loadSequence;
+  configLoading.value = true;
+  configError.value = "";
+  backend.value = "builtin";
+  model.value = "";
+  thinking.value = "";
+  try {
+    const config = await loadWikiConfig(props.projectPath);
+    if (sequence !== loadSequence || !props.open) return;
+    if (config.backend.kind === "builtin") {
+      backend.value = "builtin";
+    } else {
+      backend.value = normalizeBackend(config.backend.agentId ?? "custom");
+      model.value = config.backend.model ?? "";
+      thinking.value = config.backend.thinking ?? "";
+    }
+    // 已选中 agent 后端时立即自动获取模型清单(命中缓存则零开销)
+    void probeAgent();
+  } catch (error) {
+    if (sequence === loadSequence) {
+      configError.value = error instanceof Error ? error.message : String(error);
+    }
+  } finally {
+    if (sequence === loadSequence) configLoading.value = false;
+  }
+}
 
 function onBackendChange(value: unknown) {
   if (typeof value === "string" && value !== backend.value) {
@@ -216,10 +252,27 @@ const confirmLabel = computed(() =>
 );
 
 async function confirm() {
-  await store.setWikiGenBackend(backend.value);
-  await store.setWikiAgentModel(model.value);
-  await store.setWikiAgentThinking(thinking.value);
-  emit("confirm");
+  const projectPath = props.projectPath;
+  const selectedBackend: WikiGenBackend =
+    backend.value === "builtin"
+      ? { kind: "builtin" }
+      : {
+          kind: "agent",
+          agentId: backend.value,
+          model: model.value || undefined,
+          thinking: thinking.value || undefined,
+        };
+  const config: WikiGenerationConfig = { version: 1, backend: selectedBackend };
+  configSaving.value = true;
+  configError.value = "";
+  try {
+    await saveWikiConfig(projectPath, config);
+    if (props.open && props.projectPath === projectPath) emit("confirm");
+  } catch (error) {
+    configError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    configSaving.value = false;
+  }
 }
 </script>
 
@@ -235,7 +288,11 @@ async function confirm() {
         <!-- 后端:内置 API + 已安装的精选 agent(未安装/自定义不展示) -->
         <div class="flex flex-col gap-1.5">
           <label class="text-sm font-medium">{{ t("wiki.genBackend") }}</label>
-          <Select :model-value="backend" @update:model-value="onBackendChange">
+          <Select
+            :model-value="backend"
+            :disabled="configLoading || configSaving"
+            @update:model-value="onBackendChange"
+          >
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
@@ -257,7 +314,7 @@ async function confirm() {
               <label class="text-sm font-medium">{{ t("wiki.agentModel") }}</label>
               <Select
                 :model-value="model || DEFAULT_VALUE"
-                :disabled="probeLoading"
+                :disabled="configLoading || configSaving || probeLoading"
                 @update:model-value="onModelChange"
               >
                 <SelectTrigger class="min-w-0 w-full">
@@ -277,7 +334,9 @@ async function confirm() {
               <label class="text-sm font-medium">{{ t("wiki.agentThinking") }}</label>
               <Select
                 :model-value="thinking || DEFAULT_VALUE"
-                :disabled="probeLoading || thinkingChoices.length === 0"
+                :disabled="
+                  configLoading || configSaving || probeLoading || thinkingChoices.length === 0
+                "
                 @update:model-value="onThinkingChange"
               >
                 <SelectTrigger class="min-w-0 w-full">
@@ -305,11 +364,16 @@ async function confirm() {
         </template>
       </div>
 
+      <p v-if="configError" class="text-xs text-destructive">
+        {{ t("wiki.genConfigError", { error: configError }) }}
+      </p>
+
       <div class="flex shrink-0 justify-end gap-2 pt-2">
-        <Button variant="outline" size="sm" @click="emit('close')">
+        <Button variant="outline" size="sm" :disabled="configSaving" @click="emit('close')">
           {{ t("common.cancel") }}
         </Button>
-        <Button size="sm" @click="confirm">
+        <Button size="sm" :disabled="configLoading || configSaving" @click="confirm">
+          <Loader2 v-if="configLoading || configSaving" class="h-4 w-4 animate-spin" />
           {{ confirmLabel }}
         </Button>
       </div>

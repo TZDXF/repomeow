@@ -1,3 +1,4 @@
+import { Channel } from "@tauri-apps/api/core";
 import { cmd } from "@/lib/tauri";
 import type { SupportedLocale } from "@/i18n";
 import type { WikiOutlinePage } from "@/types";
@@ -18,10 +19,26 @@ export type WikiGenPhase =
 export type WikiPageStatus = "pending" | "running" | "done" | "failed" | "cancelled";
 
 export interface WikiGenCallbacks {
-  onPhase(phase: WikiGenPhase): void;
-  onPage(page: WikiOutlinePage, status: WikiPageStatus, error?: string): void;
+  onPhase: (phase: WikiGenPhase) => void;
+  onPage: (page: WikiOutlinePage, status: WikiPageStatus, error?: string) => void;
   /** 页面流式生成的增量内容(partial 为当前已生成的全部正文,非增量片段) */
-  onPageProgress?(page: WikiOutlinePage, partial: string): void;
+  onPageProgress?: (page: WikiOutlinePage, partial: string) => void;
+  onContext?: (context: WikiContextSummary) => void;
+  onActivities?: (activities: WikiGenerationActivity[]) => void;
+}
+
+export interface WikiContextSummary {
+  fileCount: number;
+  treeTruncated: boolean;
+  hasReadme: boolean;
+  manifestCount: number;
+}
+
+export type WikiGenerationActivityType = "scan" | "read" | "tool";
+
+export interface WikiGenerationActivity {
+  type: WikiGenerationActivityType;
+  text: string;
 }
 
 /** 生成后端选择:内置 API 或本地 agent(经 ACP 会话) */
@@ -36,11 +53,16 @@ export type WikiGenBackend =
       thinking?: string;
     };
 
+/** 单个项目独立保存于 Wiki 目录 config.json 的生成配置。 */
+export interface WikiGenerationConfig {
+  version: number;
+  backend: WikiGenBackend;
+}
+
 export interface WikiGenOptions {
   language: SupportedLocale;
   /** 并发生成的页数(复用设置的 aiConcurrency;agent 内核固定为单会话顺序,忽略此值) */
   concurrency: number;
-  backend: WikiGenBackend;
 }
 
 /** 页面生成的附加上下文(增量更新时传入变更文件清单,帮助内核聚焦) */
@@ -51,7 +73,9 @@ export interface WikiPageHints {
 type WikiGenerationEvent =
   | { kind: "phase"; phase: WikiGenPhase }
   | { kind: "page"; page: WikiOutlinePage; status: WikiPageStatus; error?: string }
-  | { kind: "progress"; pageId: string; content: string };
+  | { kind: "progress"; pageId: string; content: string }
+  | ({ kind: "context" } & WikiContextSummary)
+  | { kind: "activityBatch"; activityType: WikiGenerationActivityType; items: string[] };
 
 /** 整本生成的前端桥：仅把 Rust Channel 事件映射为既有 UI 回调。 */
 export async function generateWiki(
@@ -60,7 +84,7 @@ export async function generateWiki(
   signal: AbortSignal,
   callbacks: WikiGenCallbacks,
 ): Promise<void> {
-  const { onPhase, onPage, onPageProgress } = callbacks;
+  const { onPhase, onPage, onPageProgress, onContext, onActivities } = callbacks;
   const id = `wiki-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const pages = new Map<string, WikiOutlinePage>();
   const channel = new Channel<WikiGenerationEvent>();
@@ -70,9 +94,15 @@ export async function generateWiki(
     } else if (event.kind === "page") {
       pages.set(event.page.id, event.page);
       onPage(event.page, event.status, event.error);
-    } else {
+    } else if (event.kind === "progress") {
       const page = pages.get(event.pageId);
-      if (page) onPageProgress?.(page, event.content);
+      if (page) {
+        onPageProgress?.(page, event.content);
+      }
+    } else if (event.kind === "context") {
+      onContext?.(event);
+    } else {
+      onActivities?.(event.items.map((text) => ({ type: event.activityType, text })));
     }
   };
   const cancel = () => void cmd<void>("ai_cancel_run", { runId: id }).catch(() => {});
@@ -86,7 +116,6 @@ export async function generateWiki(
         projectName: project.name,
         language: options.language,
         concurrency: options.concurrency,
-        backend: options.backend,
       },
       onEvent: channel,
     });
@@ -108,7 +137,6 @@ export interface WikiUpdateProgress {
 /** 单页/增量生成桥；ACP 会话、重试与落盘均在后端。 */
 export async function regenerateWikiPage(
   project: { path: string; name: string },
-  options: WikiGenOptions,
   page: WikiOutlinePage,
   language: SupportedLocale,
   signal: AbortSignal,
@@ -126,7 +154,6 @@ export async function regenerateWikiPage(
         runId: id,
         projectPath: project.path,
         language,
-        backend: options.backend,
         page,
         changedFiles: hints?.changedFiles ?? [],
       },
@@ -152,10 +179,8 @@ export async function updateWiki(
       runId: id,
       projectPath: project.path,
       language: options.language,
-      backend: options.backend,
       automatic,
     },
     onEvent: channel,
   });
 }
-import { Channel } from "@tauri-apps/api/core";

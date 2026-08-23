@@ -5,9 +5,10 @@ import {
   generateWiki,
   regenerateWikiPage,
   updateWiki,
-  type WikiGenBackend,
   type WikiGenOptions,
   type WikiGenPhase,
+  type WikiGenerationActivity,
+  type WikiContextSummary,
   type WikiPageStatus,
 } from "@/lib/wiki-generator";
 import { deleteWiki, loadWiki } from "@/lib/wiki";
@@ -30,6 +31,8 @@ export interface WikiGenerationState {
   pages: WikiGenPageItem[];
   error: string;
   streamContents: Record<string, string>;
+  context: WikiContextSummary | null;
+  activities: WikiGenerationActivity[];
   /** 本轮整本生成开始时间,供离开页面后返回时继续展示真实耗时 */
   startedAt: number;
 }
@@ -68,35 +71,31 @@ function generationKey(projectPath: string): string {
 /** 将面向开发者的 Wiki 生成错误转换为适合直接展示给用户的提示。 */
 export function toFriendlyWikiGenerationError(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
-  if (raw.startsWith("wiki outline:")) {
+  const normalized = raw.toLowerCase();
+  if (
+    normalized.includes("aimaxoutputtokensexceeded") ||
+    normalized.includes("ai_max_output_tokens_exceeded") ||
+    normalized.includes("does not support max tokens >")
+  ) {
+    return i18n.global.t("errors.ai_max_output_tokens_exceeded");
+  }
+  if (
+    raw.startsWith("wiki outline:") ||
+    raw.startsWith("wiki outline JSON parse failed") ||
+    raw.startsWith("wiki outline JSON validation failed") ||
+    raw.startsWith("wiki outline response must contain")
+  ) {
     return i18n.global.t("wiki.invalidOutline");
   }
   return raw;
 }
 
-/** 按设置组装生成选项:内置 API 或本地 agent(ACP 会话)后端 */
+/** 通用生成参数；项目独立的后端配置由 Rust 从 Wiki 目录 config.json 读取。 */
 function buildGenOptions(language: SupportedLocale): WikiGenOptions {
   const settings = useSettingsStore();
-  const backend: WikiGenBackend =
-    settings.wikiGenBackend === "builtin"
-      ? { kind: "builtin" }
-      : settings.wikiGenBackend === "custom"
-        ? {
-            kind: "agent",
-            customCommand: settings.wikiAgentCustomCommand,
-            model: settings.wikiAgentModel || undefined,
-            thinking: settings.wikiAgentThinking || undefined,
-          }
-        : {
-            kind: "agent",
-            agentId: settings.wikiGenBackend,
-            model: settings.wikiAgentModel || undefined,
-            thinking: settings.wikiAgentThinking || undefined,
-          };
   return {
     language,
     concurrency: settings.aiConcurrency,
-    backend,
   };
 }
 
@@ -195,6 +194,8 @@ export const useWikiStore = defineStore("wiki", () => {
       pages: [],
       error: "",
       streamContents: {},
+      context: null,
+      activities: [],
       startedAt: Date.now(),
     });
     generations[key] = state;
@@ -208,9 +209,13 @@ export const useWikiStore = defineStore("wiki", () => {
           const item = state.pages.find((i) => i.page.id === page.id);
           if (item) {
             item.status = status;
-            item.error = error;
+            item.error = error ? toFriendlyWikiGenerationError(error) : undefined;
           } else {
-            state.pages.push({ page: { ...page }, status, error });
+            state.pages.push({
+              page: { ...page },
+              status,
+              error: error ? toFriendlyWikiGenerationError(error) : undefined,
+            });
           }
           // 页面进入终态后清掉流式预览内容
           if (status !== "running" && status !== "pending") {
@@ -219,6 +224,15 @@ export const useWikiStore = defineStore("wiki", () => {
         },
         onPageProgress: (page, partial) => {
           state.streamContents[page.id] = partial;
+        },
+        onContext: (context) => {
+          state.context = { ...context };
+        },
+        onActivities: (activities) => {
+          state.activities.push(...activities);
+          if (state.activities.length > 2_000) {
+            state.activities.splice(0, state.activities.length - 2_000);
+          }
         },
       });
     } catch (e) {
@@ -260,13 +274,7 @@ export const useWikiStore = defineStore("wiki", () => {
       pageTitle: page.title,
     };
     try {
-      await regenerateWikiPage(
-        project,
-        buildGenOptions(language),
-        page,
-        language,
-        new AbortController().signal,
-      );
+      await regenerateWikiPage(project, page, language, new AbortController().signal);
       if (dataFor.value === project.path) await load(project.path);
     } finally {
       regeneratingPage.value = null;

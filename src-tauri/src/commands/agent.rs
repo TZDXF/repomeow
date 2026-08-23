@@ -30,7 +30,7 @@ use agent_client_protocol::schema::v1::{
     RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption,
     SessionConfigOptionCategory, SessionConfigOptionValue, SessionConfigSelectOptions, SessionId,
     SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest,
-    StopReason, TextContent, Usage,
+    StopReason, TextContent, ToolCallLocation, Usage,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{Agent, ByteStreams, Client, ConnectionTo};
@@ -381,6 +381,7 @@ fn agent_pids() -> &'static Mutex<HashSet<u32>> {
 struct PromptSink {
     sender: AcpEventSender,
     text: String,
+    tool_titles: HashMap<String, String>,
 }
 
 #[derive(Clone)]
@@ -655,7 +656,12 @@ async fn run_session(
                 .on_receive_request(
                     {
                         let fs_root = fs_root.clone();
+                        let sink = sink.clone();
                         async move |req: ReadTextFileRequest, responder, _cx| {
+                            push_activity(
+                                &sink,
+                                format!("工具: read · {}", req.path.display()),
+                            );
                             match read_file_within(&fs_root, &req.path, req.line, req.limit) {
                                 Ok(content) => {
                                     let _ = responder.respond(ReadTextFileResponse::new(content));
@@ -750,8 +756,11 @@ async fn run_session(
                                     };
                                     match msg {
                                         JobMsg::Prompt { prompt, sender, done } => {
-                                            *sink.lock().unwrap() =
-                                                Some(PromptSink { sender, text: String::new() });
+                                            *sink.lock().unwrap() = Some(PromptSink {
+                                                sender,
+                                                text: String::new(),
+                                                tool_titles: HashMap::new(),
+                                            });
                                             let mut fut = std::pin::pin!(
                                                 conn.send_request(PromptRequest::new(
                                                     session_id.clone(),
@@ -794,7 +803,7 @@ async fn run_session(
                                                         format!("stop_reason={}", stop_reason_str(other)),
                                                     )),
                                                 },
-                                                Err(e) => Err(AppError::coded(
+                                                Err(e) => Err(AppError::ai_provider_error(
                                                     ErrorCode::AgentPromptFailed,
                                                     format!("{e}{}", tail_text(&stderr_tail)),
                                                 )),
@@ -1137,12 +1146,149 @@ fn route_session_update(sink: &SharedSink, update: SessionUpdate) {
             let title = if call.title.is_empty() {
                 format!("{:?}", call.kind)
             } else {
-                call.title
+                call.title.clone()
             };
-            push_activity(sink, format!("工具: {title}"));
+            remember_tool_title(sink, call.tool_call_id.0.as_ref(), &title);
+            push_activity(
+                sink,
+                tool_activity_text(&title, &call.locations, call.raw_input.as_ref()),
+            );
+        }
+        SessionUpdate::ToolCallUpdate(call) => {
+            let has_path_detail = call
+                .fields
+                .locations
+                .as_ref()
+                .is_some_and(|locations| !locations.is_empty())
+                || call.fields.raw_input.is_some();
+            if !has_path_detail && call.fields.title.is_none() {
+                return;
+            }
+            let call_id = call.tool_call_id.0.as_ref();
+            let title = call
+                .fields
+                .title
+                .as_deref()
+                .map(str::to_string)
+                .or_else(|| known_tool_title(sink, call_id))
+                .or_else(|| call.fields.kind.as_ref().map(|kind| format!("{kind:?}")))
+                .unwrap_or_else(|| "更新".into());
+            remember_tool_title(sink, call_id, &title);
+            push_activity(
+                sink,
+                tool_activity_text(
+                    &title,
+                    call.fields.locations.as_deref().unwrap_or_default(),
+                    call.fields.raw_input.as_ref(),
+                ),
+            );
         }
         _ => {}
     }
+}
+
+fn remember_tool_title(sink: &SharedSink, call_id: &str, title: &str) {
+    if let Some(prompt) = sink.lock().unwrap().as_mut() {
+        prompt
+            .tool_titles
+            .insert(call_id.to_string(), title.to_string());
+    }
+}
+
+fn known_tool_title(sink: &SharedSink, call_id: &str) -> Option<String> {
+    sink.lock()
+        .unwrap()
+        .as_ref()?
+        .tool_titles
+        .get(call_id)
+        .cloned()
+}
+
+/// 工具活动只展示协议明确提供的文件位置，或 rawInput 中常见的路径字段；
+/// 不回显完整参数，避免命令、提示词或其他敏感内容进入界面。
+fn tool_activity_text(
+    title: &str,
+    locations: &[ToolCallLocation],
+    raw_input: Option<&serde_json::Value>,
+) -> String {
+    let mut paths = Vec::new();
+    for location in locations {
+        push_tool_path(&mut paths, location.path.display().to_string());
+    }
+    if let Some(input) = raw_input {
+        collect_tool_paths(input, &mut paths);
+    }
+    paths.retain(|path| !title.contains(path.as_str()));
+    if paths.is_empty() {
+        return format!("工具: {title}");
+    }
+    let hidden = paths.len().saturating_sub(4);
+    paths.truncate(4);
+    let suffix = if hidden > 0 {
+        format!("，另 {hidden} 个")
+    } else {
+        String::new()
+    };
+    format!("工具: {title} · {}{suffix}", paths.join("，"))
+}
+
+fn collect_tool_paths(value: &serde_json::Value, paths: &mut Vec<String>) {
+    match value {
+        serde_json::Value::Object(object) => {
+            for (key, value) in object {
+                let normalized = key
+                    .chars()
+                    .filter(|character| character.is_ascii_alphanumeric())
+                    .flat_map(char::to_lowercase)
+                    .collect::<String>();
+                if matches!(
+                    normalized.as_str(),
+                    "path"
+                        | "filepath"
+                        | "filename"
+                        | "relativepath"
+                        | "absolutepath"
+                        | "targetfile"
+                ) {
+                    collect_path_value(value, paths);
+                } else if value.is_object() || value.is_array() {
+                    collect_tool_paths(value, paths);
+                }
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                collect_tool_paths(value, paths);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_path_value(value: &serde_json::Value, paths: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(path) => push_tool_path(paths, path.clone()),
+        serde_json::Value::Array(values) => {
+            for value in values {
+                if let serde_json::Value::String(path) = value {
+                    push_tool_path(paths, path.clone());
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn push_tool_path(paths: &mut Vec<String>, path: String) {
+    let path = path.trim();
+    if path.is_empty()
+        || path.len() > 500
+        || path.contains(['\r', '\n'])
+        || paths.iter().any(|existing| existing == path)
+    {
+        return;
+    }
+    paths.push(path.to_string());
 }
 
 fn push_chunk(sink: &SharedSink, delta: &str) {
@@ -1273,6 +1419,21 @@ mod tests {
             ["C:\\Program Files\\agent.exe", "--acp", "a b"]
         );
         assert!(parse_command_line("   ").is_empty());
+    }
+
+    #[test]
+    fn tool_activity_extracts_locations_and_nested_path_inputs() {
+        let locations = vec![ToolCallLocation::new(r"D:\repo\src\main.rs")];
+        let input = serde_json::json!({
+            "arguments": {
+                "file_path": "src/lib.rs",
+                "query": "must not be displayed"
+            }
+        });
+        let text = tool_activity_text("read", &locations, Some(&input));
+        assert!(text.contains(r"D:\repo\src\main.rs"));
+        assert!(text.contains("src/lib.rs"));
+        assert!(!text.contains("must not be displayed"));
     }
 
     #[test]

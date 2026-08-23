@@ -1,9 +1,20 @@
 import { cmd } from "@/lib/tauri";
+import type { WikiGenerationConfig } from "@/lib/wiki-generator";
 import type { WikiData } from "@/types";
 
 /** 项目的 wiki 目录路径(~/.repomeow/wiki/<basename>-<hash>/),仅展示用 */
 export function getWikiDir(projectPath: string): Promise<string> {
   return cmd<string>("get_wiki_dir", { projectPath });
+}
+
+/** 读取项目 Wiki 目录中的独立生成配置；未配置时后端返回内置 API 默认值。 */
+export function loadWikiConfig(projectPath: string): Promise<WikiGenerationConfig> {
+  return cmd<WikiGenerationConfig>("load_wiki_config", { projectPath });
+}
+
+/** 将项目独立的生成配置保存为 Wiki 目录下的 config.json。 */
+export function saveWikiConfig(projectPath: string, config: WikiGenerationConfig): Promise<void> {
+  return cmd<void>("save_wiki_config", { projectPath, config });
 }
 
 /** 读取整个 wiki;meta 缺失/损坏/未完结返回 null;附带 HEAD 比对的 stale 标记 */

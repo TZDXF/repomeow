@@ -78,4 +78,22 @@ mod tests {
             assert!(!prompt.trim().is_empty());
         }
     }
+
+    #[test]
+    fn agent_wiki_prompts_require_silent_self_validation() {
+        for prompt in [AGENT_WIKI_OUTLINE_PROMPT, AGENT_WIKI_PAGE_PROMPT] {
+            assert!(prompt.contains("Explore the repository and use tools silently."));
+            assert!(prompt.contains("If any criterion fails, revise the draft"));
+            assert!(prompt.contains("the application owns persistence"));
+        }
+
+        for prompt in [DEFAULT_WIKI_OUTLINE_PROMPT, AGENT_WIKI_OUTLINE_PROMPT] {
+            assert!(prompt.contains("Output ONLY one complete JSON object"));
+            assert!(prompt.contains("\"relevantFiles\""));
+            assert!(!prompt.contains("<wiki_structure>"));
+        }
+        assert!(AGENT_WIKI_OUTLINE_PROMPT.contains("The first non-whitespace character is"));
+        assert!(AGENT_WIKI_PAGE_PROMPT.contains("The first non-whitespace characters are"));
+        assert!(AGENT_WIKI_PAGE_PROMPT.contains("Nothing — including an acknowledgement"));
+    }
 }

@@ -1,9 +1,10 @@
 //! 项目 Wiki:AI 生成的大纲与页面落盘为 `~/.repomeow/wiki/<basename>-<hash>/` 下的
-//! `meta.json` + `pages/NN-slug.md` 普通文件(不进 SQLite),用户可直接查看/编辑/导出。
+//! `config.json` + `meta.json` + `pages/NN-slug.md` 普通文件(不进 SQLite),用户可直接
+//! 查看/编辑/导出。config.json 保存该项目独立的生成后端配置。
 //!
 //! wiki 目录本身是一个本地 git 仓库(首次提交时 `git init`):整本生成/增量更新在
 //! save_wiki_meta 落盘后自动快照提交,单页重新生成走 commit_wiki;begin_wiki 只清
-//! pages/ 与 meta.json 而保留 .git,重新生成在同一历史上演进;删除(delete_wiki)
+//! pages/ 与 meta.json 而保留 config.json 和 .git,重新生成在同一配置与历史上演进;删除(delete_wiki)
 //! 不走 git,整目录直接移除(含 .git)。
 //!
 //! 生成流水线由 `commands::ai` 在后端编排：收集文件树与清单 → SDK/ACP 生成大纲
@@ -21,8 +22,10 @@ use crate::path_util::{clean_str, to_forward_slash};
 use crate::APP_DATA_DIR_NAME;
 
 const WIKI_DIR_NAME: &str = "wiki";
+const CONFIG_FILE: &str = "config.json";
 const META_FILE: &str = "meta.json";
 const PAGES_DIR: &str = "pages";
+const CONFIG_VERSION: u32 = 1;
 const META_VERSION: u32 = 1;
 /// wiki git 提交身份:git 管理是应用自身行为,不用用户全局配置(避免无身份时提交失败)
 const WIKI_GIT_NAME: &str = "RepoMeow";
@@ -154,6 +157,29 @@ pub struct WikiMeta {
     /// 前端增量更新遇后端切换时退化为整本重生成
     #[serde(default)]
     pub generator: Option<String>,
+}
+
+/// 单个项目的 Wiki 生成配置，独立保存在该项目 Wiki 目录的 config.json。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WikiGenerationConfig {
+    #[serde(default = "default_config_version")]
+    pub version: u32,
+    #[serde(default)]
+    pub backend: super::ai::WikiGenerationBackend,
+}
+
+const fn default_config_version() -> u32 {
+    CONFIG_VERSION
+}
+
+impl Default for WikiGenerationConfig {
+    fn default() -> Self {
+        Self {
+            version: CONFIG_VERSION,
+            backend: super::ai::WikiGenerationBackend::Builtin,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -483,6 +509,63 @@ fn save_meta_in(dir: &Path, mut meta: WikiMeta) -> AppResult<()> {
     Ok(())
 }
 
+fn save_config_in(dir: &Path, mut config: WikiGenerationConfig) -> AppResult<()> {
+    config.version = CONFIG_VERSION;
+    fs::create_dir_all(dir)?;
+    let target = dir.join(CONFIG_FILE);
+    let tmp = dir.join(format!("{CONFIG_FILE}.tmp"));
+    let json = serde_json::to_string_pretty(&config)
+        .map_err(|e| AppError::coded(ErrorCode::IoError, e.to_string()))?;
+    fs::write(&tmp, json)?;
+    fs::rename(&tmp, &target)?;
+    Ok(())
+}
+
+fn load_config_in(dir: &Path) -> AppResult<WikiGenerationConfig> {
+    let path = dir.join(CONFIG_FILE);
+    let raw = match fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(WikiGenerationConfig::default());
+        }
+        Err(error) => return Err(error.into()),
+    };
+    serde_json::from_str(&raw).map_err(|error| {
+        AppError::coded(
+            ErrorCode::IoError,
+            format!("{}: {error}", path.to_string_lossy()),
+        )
+    })
+}
+
+/// 从旧版全局 settings 组装一次迁移用配置。仅在项目 config.json 尚不存在时使用，
+/// 写入项目目录后该项目便不再受全局值影响。
+fn legacy_wiki_config(app: &AppHandle) -> WikiGenerationConfig {
+    let model = crate::tray::read_setting_string(app, "wikiAgentModel").filter(|v| !v.is_empty());
+    let thinking =
+        crate::tray::read_setting_string(app, "wikiAgentThinking").filter(|v| !v.is_empty());
+    let backend = match crate::tray::read_setting_string(app, "wikiGenBackend").as_deref() {
+        None | Some("") | Some("builtin") => super::ai::WikiGenerationBackend::Builtin,
+        Some("custom") => super::ai::WikiGenerationBackend::Agent {
+            agent_id: None,
+            custom_command: crate::tray::read_setting_string(app, "wikiAgentCustomCommand")
+                .filter(|v| !v.is_empty()),
+            model,
+            thinking,
+        },
+        Some(agent_id) => super::ai::WikiGenerationBackend::Agent {
+            agent_id: Some(agent_id.to_string()),
+            custom_command: None,
+            model,
+            thinking,
+        },
+    };
+    WikiGenerationConfig {
+        version: CONFIG_VERSION,
+        backend,
+    }
+}
+
 fn load_wiki_in(dir: &Path) -> Option<(WikiMeta, Vec<WikiPageData>)> {
     let raw = fs::read_to_string(dir.join(META_FILE)).ok()?;
     let meta: WikiMeta = serde_json::from_str(&raw).ok()?;
@@ -524,6 +607,22 @@ pub fn get_wiki_dir(app: AppHandle, project_path: String) -> AppResult<String> {
         .into_owned())
 }
 
+/// 读取项目独立的 Wiki 生成配置；尚未配置时返回内置 API 默认值。
+#[tauri::command]
+pub fn load_wiki_config(app: AppHandle, project_path: String) -> AppResult<WikiGenerationConfig> {
+    load_wiki_config_internal(&app, &project_path)
+}
+
+/// 保存项目独立的 Wiki 生成配置到其 Wiki 目录。
+#[tauri::command]
+pub fn save_wiki_config(
+    app: AppHandle,
+    project_path: String,
+    config: WikiGenerationConfig,
+) -> AppResult<()> {
+    save_config_in(&wiki_dir(&app, &project_path)?, config)
+}
+
 /// 项目是否已有 wiki 数据(供删除项目时联动询问清理)
 #[tauri::command]
 pub fn has_wiki(app: AppHandle, project_path: String) -> AppResult<bool> {
@@ -531,7 +630,7 @@ pub fn has_wiki(app: AppHandle, project_path: String) -> AppResult<bool> {
 }
 
 /// 开始一次全新生成:清空 pages/ 与 meta.json(旧 wiki 随即失效,避免中断后读到
-/// 新旧混杂)。保留 .git——整本重新生成也在同一 git 历史上演进,而非从零开始
+/// 新旧混杂)。保留 config.json 与 .git——项目生成配置及历史不受重新生成影响
 fn begin_wiki_in(dir: &Path) -> AppResult<()> {
     let pages = dir.join(PAGES_DIR);
     if pages.exists() {
@@ -670,6 +769,20 @@ fn remove_wiki_dir(dir: &Path) -> AppResult<()> {
 /// 开始一次全新生成:清空旧 pages/ 与 meta.json,保留 .git 历史
 pub(crate) fn begin_wiki(app: AppHandle, project_path: String) -> AppResult<()> {
     begin_wiki_in(&wiki_dir(&app, &project_path)?)
+}
+
+/// 后端生成/更新任务读取项目独立配置的统一入口。
+pub(crate) fn load_wiki_config_internal(
+    app: &AppHandle,
+    project_path: &str,
+) -> AppResult<WikiGenerationConfig> {
+    let dir = wiki_dir(app, project_path)?;
+    if dir.join(CONFIG_FILE).is_file() {
+        return load_config_in(&dir);
+    }
+    let config = legacy_wiki_config(app);
+    save_config_in(&dir, config.clone())?;
+    Ok(config)
 }
 
 /// 写入单个页面(tmp + rename);file_name 必须匹配 `NN-slug.md`
@@ -869,6 +982,46 @@ mod tests {
     }
 
     #[test]
+    fn generation_config_roundtrip_and_default() {
+        let dir = temp_dir("config-roundtrip");
+        assert!(matches!(
+            load_config_in(&dir).unwrap().backend,
+            crate::commands::ai::WikiGenerationBackend::Builtin
+        ));
+
+        save_config_in(
+            &dir,
+            WikiGenerationConfig {
+                version: 99,
+                backend: crate::commands::ai::WikiGenerationBackend::Agent {
+                    agent_id: Some("codex".into()),
+                    custom_command: None,
+                    model: Some("gpt-5".into()),
+                    thinking: Some("high".into()),
+                },
+            },
+        )
+        .unwrap();
+        let loaded = load_config_in(&dir).unwrap();
+        assert_eq!(loaded.version, CONFIG_VERSION, "保存时应覆写配置版本");
+        match loaded.backend {
+            crate::commands::ai::WikiGenerationBackend::Agent {
+                agent_id,
+                model,
+                thinking,
+                ..
+            } => {
+                assert_eq!(agent_id.as_deref(), Some("codex"));
+                assert_eq!(model.as_deref(), Some("gpt-5"));
+                assert_eq!(thinking.as_deref(), Some("high"));
+            }
+            crate::commands::ai::WikiGenerationBackend::Builtin => panic!("应读回 agent 配置"),
+        }
+        assert!(!dir.join("config.json.tmp").exists());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn load_returns_none_when_incomplete_or_missing() {
         let dir = temp_dir("incomplete");
         assert!(load_wiki_in(&dir).is_none(), "无 meta.json 返回 None");
@@ -939,6 +1092,11 @@ mod tests {
         fs::create_dir_all(dir.join(PAGES_DIR)).unwrap();
         fs::write(dir.join(PAGES_DIR).join("01-old.md"), "old").unwrap();
         fs::write(dir.join(META_FILE), "{}").unwrap();
+        fs::write(
+            dir.join(CONFIG_FILE),
+            "{\"version\":1,\"backend\":{\"kind\":\"builtin\"}}",
+        )
+        .unwrap();
         fs::create_dir_all(dir.join(".git")).unwrap();
 
         begin_wiki_in(&dir).unwrap();
@@ -946,6 +1104,7 @@ mod tests {
         assert!(!dir.join(META_FILE).exists());
         assert!(!dir.join(PAGES_DIR).join("01-old.md").exists());
         assert!(dir.join(PAGES_DIR).is_dir(), "pages/ 应重建为空目录");
+        assert!(dir.join(CONFIG_FILE).is_file(), "重新生成必须保留项目配置");
         fs::remove_dir_all(&dir).ok();
     }
 

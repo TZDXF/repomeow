@@ -27,7 +27,11 @@ import SourceFileDialog from "@/components/wiki/SourceFileDialog.vue";
 import WikiGenerateDialog from "@/components/wiki/WikiGenerateDialog.vue";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
 import { openWikiDir } from "@/lib/wiki";
-import type { WikiGenPhase, WikiPageStatus } from "@/lib/wiki-generator";
+import type {
+  WikiGenerationActivityType,
+  WikiGenPhase,
+  WikiPageStatus,
+} from "@/lib/wiki-generator";
 import { parseWikiSources } from "@/lib/wiki-parse";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
@@ -158,15 +162,45 @@ const processedPageCount = computed(
     generation.value?.pages.filter((item) => ["done", "failed", "cancelled"].includes(item.status))
       .length ?? 0,
 );
-const failedPageCount = computed(
-  () => generation.value?.pages.filter((item) => item.status === "failed").length ?? 0,
-);
 const pageProgressPercent = computed(() =>
   totalPageCount.value > 0
     ? Math.round((processedPageCount.value / totalPageCount.value) * 100)
     : 0,
 );
 const pageProgressStyle = computed(() => ({ width: `${pageProgressPercent.value}%` }));
+
+const contextSummaryText = computed(() => {
+  if (!generation.value || !["collecting", "outlining"].includes(generation.value.phase)) {
+    return "";
+  }
+  const context = generation.value?.context;
+  if (!context) {
+    return "";
+  }
+  return t("wiki.progress.contextSummary", {
+    files: context.fileCount,
+    readme: t(context.hasReadme ? "wiki.progress.found" : "wiki.progress.notFound"),
+    manifests: context.manifestCount,
+    truncated: context.treeTruncated ? t("wiki.progress.treeTruncated") : "",
+  });
+});
+
+const visibleActivities = computed(() => generation.value?.activities.slice(-160) ?? []);
+
+function activityTypeLabel(type: WikiGenerationActivityType): string {
+  switch (type) {
+    case "read":
+      return t("wiki.progress.activityRead");
+    case "tool":
+      return t("wiki.progress.activityTool");
+    default:
+      return t("wiki.progress.activityScan");
+  }
+}
+
+function activityText(type: WikiGenerationActivityType, text: string): string {
+  return type === "tool" ? text.replace(/^工具:\s*/, "") : text;
+}
 
 /** 每秒刷新展示用时;生成开始时间由全局 store 持有,路由返回后不会重新计时 */
 const now = useNow({ interval: 1000 });
@@ -261,6 +295,7 @@ function selectRelatedPage(id: string) {
 // ── 流式预览自动跟随滚动(用户上翻阅读时暂停,回到底部自动恢复) ─────────────
 
 const previewHost = ref<HTMLElement | null>(null);
+const activityLogHost = ref<HTMLElement | null>(null);
 let pinnedToBottom = true;
 let suppressScrollEvents = false;
 
@@ -295,6 +330,25 @@ watch(previewContent, async () => {
   if (vp) setViewportScroll(vp, "bottom");
 });
 
+watch(
+  () => generation.value?.activities.length ?? 0,
+  async () => {
+    await nextTick();
+    const el = activityLogHost.value;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  },
+);
+
+watch(activityLogHost, async (el) => {
+  if (!el) {
+    return;
+  }
+  await nextTick();
+  el.scrollTop = el.scrollHeight;
+});
+
 // 切换预览页 / 进入与结束生成时回到顶部并重新开始跟随;
 // 生成属于其他项目时 previewId 分量为 null,不会扰动本页静态视图的滚动
 watch(
@@ -309,7 +363,7 @@ watch(
 
 // ── 生成 / 操作 ───────────────────────────────────────────────────────────
 
-/** 生成配置对话框:生成/重新生成前选择,或右上角入口直接查看/修改已记录配置 */
+/** 生成配置对话框:生成/重新生成前选择,或右上角入口修改当前项目的独立配置 */
 const genDialogOpen = ref(false);
 const genDialogMode = ref<"generate" | "edit">("generate");
 
@@ -331,7 +385,7 @@ function onGenConfirm() {
   }
 }
 
-/** 实际执行整本生成(对话框确认后,或增量更新退化时用已记录配置直接跑) */
+/** 实际执行整本生成(对话框确认后,或增量更新退化时读取当前项目配置直接跑) */
 function generate() {
   const p = project.value;
   if (!p) return;
@@ -570,21 +624,6 @@ const beforeDownload = createBeforeDownload(t);
             />
             <div v-else class="wiki-progress-indeterminate h-full rounded-full bg-primary" />
           </div>
-
-          <div class="mt-2 text-[11px] text-muted-foreground">
-            <span v-if="totalPageCount" class="tabular-nums">
-              {{
-                t("wiki.progress.pages", {
-                  processed: processedPageCount,
-                  total: totalPageCount,
-                })
-              }}
-            </span>
-            <span v-else>{{ t("wiki.progress.preparing") }}</span>
-          </div>
-          <p v-if="failedPageCount" class="mt-1 text-[11px] text-destructive">
-            {{ t("wiki.progress.failedPages", { count: failedPageCount }) }}
-          </p>
         </section>
         <ScrollArea class="min-h-0 flex-1">
           <TooltipProvider>
@@ -698,7 +737,33 @@ const beforeDownload = createBeforeDownload(t);
                   class="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/70 [animation-delay:300ms]"
                 />
               </div>
-              <p class="mt-4 max-w-sm text-xs leading-5 text-muted-foreground">
+              <p
+                v-if="contextSummaryText"
+                class="mt-4 max-w-md text-xs leading-5 text-muted-foreground"
+              >
+                {{ contextSummaryText }}
+              </p>
+              <div
+                v-if="visibleActivities.length"
+                ref="activityLogHost"
+                class="mt-4 h-52 w-full max-w-2xl overflow-y-auto rounded-lg border bg-muted/20 p-2 text-left font-mono text-[11px] leading-5"
+                aria-live="polite"
+                :aria-label="t('wiki.progress.activityTitle')"
+              >
+                <div
+                  v-for="(activity, index) in visibleActivities"
+                  :key="`${index}-${activity.type}-${activity.text}`"
+                  class="flex min-w-0 gap-2"
+                >
+                  <span class="shrink-0 text-primary/80">{{
+                    activityTypeLabel(activity.type)
+                  }}</span>
+                  <span class="min-w-0 break-all text-muted-foreground">{{
+                    activityText(activity.type, activity.text)
+                  }}</span>
+                </div>
+              </div>
+              <p v-else class="mt-4 max-w-sm text-xs leading-5 text-muted-foreground">
                 {{ t("wiki.progress.leaveHint") }}
               </p>
             </div>
@@ -815,6 +880,7 @@ const beforeDownload = createBeforeDownload(t);
     />
     <WikiGenerateDialog
       :open="genDialogOpen"
+      :project-path="project.path"
       :mode="genDialogMode"
       @close="genDialogOpen = false"
       @confirm="onGenConfirm"

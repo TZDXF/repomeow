@@ -102,14 +102,16 @@ fn client(config: &AiConfig, require_model: bool) -> AppResult<OpenAiClient> {
 
 fn map_sdk_error(error: OpenAIError) -> AppError {
     match error {
-        OpenAIError::ApiError(api) => {
-            AppError::coded(ErrorCode::AiResponseError, api.api_error.message)
-        }
+        OpenAIError::ApiError(api) => map_api_error_message(api.api_error.message),
         OpenAIError::JSONDeserialize(error, _) => {
             AppError::coded(ErrorCode::AiResponseParseFailed, error.to_string())
         }
         other => AppError::coded(ErrorCode::AiRequestFailed, other.to_string()),
     }
+}
+
+fn map_api_error_message(message: String) -> AppError {
+    AppError::ai_provider_error(ErrorCode::AiResponseError, message)
 }
 
 fn usage_of(usage: CompletionUsage) -> TokenUsage {
@@ -332,6 +334,17 @@ mod tests {
 
         let glm = thinking_off_params("https://open.bigmodel.cn/v1", "glm-4");
         assert_eq!(glm.get("thinking"), Some(&json!({ "type": "disabled" })));
+    }
+
+    #[test]
+    fn max_output_token_api_errors_have_a_specific_code() {
+        let error = map_api_error_message(
+            "invalid params, model[MiniMax-M3] does not support max tokens > 524288 (2013)".into(),
+        );
+        assert!(error.is_code(ErrorCode::AiMaxOutputTokensExceeded));
+
+        let error = map_api_error_message("provider temporarily unavailable".into());
+        assert!(error.is_code(ErrorCode::AiResponseError));
     }
 
     #[test]

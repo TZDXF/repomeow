@@ -177,6 +177,7 @@ pub enum ErrorCode {
     AiNotConfigured,
     AiRequestFailed,
     AiResponseError,
+    AiMaxOutputTokensExceeded,
     AiResponseParseFailed,
     AiEmptyResponse,
 
@@ -327,6 +328,7 @@ impl ErrorCode {
             Self::AiNotConfigured => "ai_not_configured",
             Self::AiRequestFailed => "ai_request_failed",
             Self::AiResponseError => "ai_response_error",
+            Self::AiMaxOutputTokensExceeded => "ai_max_output_tokens_exceeded",
             Self::AiResponseParseFailed => "ai_response_parse_failed",
             Self::AiEmptyResponse => "ai_empty_response",
             // Agent(wiki agent 后端)
@@ -365,6 +367,18 @@ impl AppError {
             code,
             message: message.into(),
         }
+    }
+
+    /// 将模型服务返回的参数错误细分为可操作的错误码；不改写服务端原始消息。
+    pub fn ai_provider_error(fallback: ErrorCode, message: impl Into<String>) -> Self {
+        let message = message.into();
+        let normalized = message.to_ascii_lowercase();
+        let code = if normalized.contains("does not support max tokens >") {
+            ErrorCode::AiMaxOutputTokensExceeded
+        } else {
+            fallback
+        };
+        Self::coded(code, message)
     }
 
     /// 取出错误码(总是有值,因为 Db/Io 也映射到对应码)

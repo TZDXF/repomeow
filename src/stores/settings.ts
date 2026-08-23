@@ -20,15 +20,6 @@ export type ProjectsViewMode = "grid" | "table";
 export type ProjectsSortKey = "name" | "updated" | "created";
 /** 关闭主窗口行为:tray = 最小化到系统托盘,exit = 直接退出 */
 export type CloseAction = "tray" | "exit";
-/**
- * wiki 生成后端 id:"builtin" 内置 OpenAI 兼容 API / "custom" 自定义 ACP agent 命令行 /
- * 其余字符串为精选 agent 的 id(claude/codex/gemini 等,见 commands/agent.rs 清单)
- */
-export type WikiGenBackendId = "builtin" | "custom" | (string & {});
-
-/** 精选 agent id 的合法形态(小写字母开头,含数字与连字符;与 registry 条目一致) */
-const agentIdPattern = /^[a-z][a-z0-9-]*$/;
-
 // 应用数据统一存放于用户主目录下的 .repomeow 目录(与 Rust 端 APP_DATA_DIR_NAME 保持一致)
 const APP_DATA_DIR_NAME = ".repomeow";
 const STORE_FILE = "settings.json";
@@ -88,14 +79,6 @@ export const useSettingsStore = defineStore("settings", () => {
    * (projects 表 wiki_auto_update)
    */
   const wikiAutoUpdate = ref(false);
-  /** wiki 生成后端(默认内置 API;agent 后端经 ACP 调本地 coding agent CLI) */
-  const wikiGenBackend = ref<WikiGenBackendId>("builtin");
-  /** 自定义 ACP agent 命令行(wikiGenBackend = "custom" 时使用) */
-  const wikiAgentCustomCommand = ref("");
-  /** agent 后端生成 wiki 使用的模型 id(空 = agent 默认;取值来自 agent 上报的模型选项) */
-  const wikiAgentModel = ref("");
-  /** agent 后端的思考强度 id(空 = agent 默认;取值来自 agent 上报的 thought_level 选项) */
-  const wikiAgentThinking = ref("");
   /** 关闭主窗口行为(默认最小化到托盘) */
   const closeAction = ref<CloseAction>("tray");
   /** 启用 GitHub CLI(gh)作为「账号仓库」的虚拟账号来源(默认关闭,opt-in) */
@@ -379,10 +362,6 @@ export const useSettingsStore = defineStore("settings", () => {
         projectsSortKey: "name",
         autoCheckUpdate: "true",
         wikiAutoUpdate: "false",
-        wikiGenBackend: "builtin",
-        wikiAgentCustomCommand: "",
-        wikiAgentModel: "",
-        wikiAgentThinking: "",
         closeAction: "tray",
         enableGhCli: "false",
         worktreeDirTemplate: ".worktrees/{branch}",
@@ -458,30 +437,6 @@ export const useSettingsStore = defineStore("settings", () => {
     const savedWikiAutoUpdate = await fileStore.get<string>("wikiAutoUpdate");
     if (savedWikiAutoUpdate === "true" || savedWikiAutoUpdate === "false") {
       wikiAutoUpdate.value = savedWikiAutoUpdate === "true";
-    }
-    // wiki 生成后端:白名单("builtin"/"custom")或合法 agent id,非法值回退 builtin
-    const savedWikiGenBackend = await fileStore.get<string>("wikiGenBackend");
-    if (
-      savedWikiGenBackend === "builtin" ||
-      savedWikiGenBackend === "custom" ||
-      (typeof savedWikiGenBackend === "string" && agentIdPattern.test(savedWikiGenBackend))
-    ) {
-      wikiGenBackend.value = savedWikiGenBackend;
-    }
-    // 自定义 agent 命令行:自由文本,原样采用(空 = 未配置)
-    const savedCustomCommand = await fileStore.get<string>("wikiAgentCustomCommand");
-    if (typeof savedCustomCommand === "string") {
-      wikiAgentCustomCommand.value = savedCustomCommand;
-    }
-    // agent 模型/思考强度:自由文本 id(取值来自各 agent 上报的选项列表,跨 agent
-    // 不通用,不做白名单校验;空 = agent 默认)
-    const savedAgentModel = await fileStore.get<string>("wikiAgentModel");
-    if (typeof savedAgentModel === "string") {
-      wikiAgentModel.value = savedAgentModel;
-    }
-    const savedAgentThinking = await fileStore.get<string>("wikiAgentThinking");
-    if (typeof savedAgentThinking === "string") {
-      wikiAgentThinking.value = savedAgentThinking;
     }
     // 关闭行为:白名单校验,非法值回退 tray(该键同时被 Rust 侧 on_window_event 读取)
     const savedCloseAction = await fileStore.get<CloseAction>("closeAction");
@@ -662,28 +617,6 @@ export const useSettingsStore = defineStore("settings", () => {
     await persist("wikiAutoUpdate", String(value));
   }
 
-  /** wiki 生成后端:内置 API(builtin)/ 精选 agent(agent id)/ 自定义命令(custom) */
-  async function setWikiGenBackend(value: WikiGenBackendId) {
-    if (value !== "builtin" && value !== "custom" && !agentIdPattern.test(value)) return;
-    wikiGenBackend.value = value;
-    await persist("wikiGenBackend", value);
-  }
-
-  async function setWikiAgentCustomCommand(value: string) {
-    wikiAgentCustomCommand.value = value;
-    await persist("wikiAgentCustomCommand", value);
-  }
-
-  async function setWikiAgentModel(value: string) {
-    wikiAgentModel.value = value;
-    await persist("wikiAgentModel", value);
-  }
-
-  async function setWikiAgentThinking(value: string) {
-    wikiAgentThinking.value = value;
-    await persist("wikiAgentThinking", value);
-  }
-
   async function setCloseAction(value: CloseAction) {
     if (value !== "tray" && value !== "exit") return;
     closeAction.value = value;
@@ -800,10 +733,6 @@ export const useSettingsStore = defineStore("settings", () => {
     projectsSortKey,
     autoCheckUpdate,
     wikiAutoUpdate,
-    wikiGenBackend,
-    wikiAgentCustomCommand,
-    wikiAgentModel,
-    wikiAgentThinking,
     closeAction,
     enableGhCli,
     worktreeDirTemplate,
@@ -833,10 +762,6 @@ export const useSettingsStore = defineStore("settings", () => {
     setProjectsSortKey,
     setAutoCheckUpdate,
     setWikiAutoUpdate,
-    setWikiGenBackend,
-    setWikiAgentCustomCommand,
-    setWikiAgentModel,
-    setWikiAgentThinking,
     setCloseAction,
     setEnableGhCli,
     setWorktreeDirTemplate,

@@ -3,7 +3,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { i18n } from "@/i18n";
 import { regenerateWikiPage, updateWiki } from "@/lib/wiki-generator";
 import { loadWiki } from "@/lib/wiki";
-import { useWikiStore } from "@/stores/wiki";
+import { toFriendlyWikiGenerationError, useWikiStore } from "@/stores/wiki";
 
 const generationHarness = vi.hoisted(() => {
   const finishes = new Map<string, () => void>();
@@ -46,10 +46,6 @@ vi.mock("@/stores/settings", () => ({
   useSettingsStore: () => ({
     aiConcurrency: 2,
     aiModel: "test-model",
-    wikiAgentCustomCommand: "",
-    wikiAgentModel: "",
-    wikiAgentThinking: "",
-    wikiGenBackend: "builtin",
   }),
 }));
 
@@ -98,7 +94,7 @@ describe("wiki store generation concurrency", () => {
   it("将大纲解析错误转换为友好的用户提示", async () => {
     const store = useWikiStore();
     const path = "D:\\repos\\invalid-outline";
-    generationHarness.errors.set(path, new Error("wiki outline: no <wiki_structure> found"));
+    generationHarness.errors.set(path, new Error("wiki outline JSON validation failed"));
 
     const run = store.generate({ path, name: "invalid-outline" }, "zh-CN");
     generationHarness.finishes.get(path)?.();
@@ -107,6 +103,14 @@ describe("wiki store generation concurrency", () => {
     expect(store.generationFor(path)?.error).toBe(
       "AI 返回的大纲格式不完整。请重试生成；如果多次失败，请更换模型或生成后端。",
     );
+  });
+
+  it("将模型 token 上限错误转换为可操作的提示", () => {
+    expect(
+      toFriendlyWikiGenerationError(
+        "code=AiMaxOutputTokensExceeded message=invalid params, model[MiniMax-M3] does not support max tokens > 524288 (2013) &#x20;",
+      ),
+    ).toBe("AI 请求设置的最大输出 Token 数超过当前模型上限，请调整 Agent 配置或更换模型后重试");
   });
 });
 
@@ -120,7 +124,7 @@ describe("wiki store automatic update", () => {
     });
   });
 
-  it("HEAD 变化后把自动增量任务整体交给后端", async () => {
+  it("HEAD 变化后把自动增量任务整体交给后端读取项目配置", async () => {
     vi.mocked(updateWiki).mockResolvedValue(1);
     const project = { path: "D:\\repos\\wiki-auto-update", name: "wiki-auto-update" };
 
@@ -129,7 +133,7 @@ describe("wiki store automatic update", () => {
     expect(count).toBe(1);
     expect(updateWiki).toHaveBeenCalledWith(
       project,
-      expect.objectContaining({ backend: { kind: "builtin" } }),
+      expect.not.objectContaining({ backend: expect.anything() }),
       true,
       expect.any(Function),
     );

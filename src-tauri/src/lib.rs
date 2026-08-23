@@ -241,6 +241,8 @@ pub fn run() {
             commands::git::list_system_schedules,
             commands::git::save_system_schedule,
             commands::wiki::get_wiki_dir,
+            commands::wiki::load_wiki_config,
+            commands::wiki::save_wiki_config,
             commands::wiki::load_wiki,
             commands::wiki::has_wiki,
             commands::wiki::delete_wiki,
