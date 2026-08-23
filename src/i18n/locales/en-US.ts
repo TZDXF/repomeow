@@ -855,6 +855,11 @@ export default {
     writing: "Writing",
     sources: "Source files",
     waitingFirstChunk: "Waiting for the first chunk from the model...",
+    importance: {
+      high: "Page importance: high",
+      medium: "Page importance: medium",
+      low: "Page importance: low",
+    },
     progress: {
       inProgress: "Generating Wiki",
       collecting: "Collect files",

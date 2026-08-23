@@ -824,6 +824,11 @@ export default {
     writing: "正在生成",
     sources: "来源文件",
     waitingFirstChunk: "等待模型输出第一段内容…",
+    importance: {
+      high: "页面重要性：高",
+      medium: "页面重要性：中",
+      low: "页面重要性：低",
+    },
     progress: {
       inProgress: "Wiki 生成中",
       collecting: "收集文件",

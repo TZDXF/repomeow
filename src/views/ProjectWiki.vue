@@ -22,6 +22,7 @@ import { Markdown, type ControlsConfig } from "vue-stream-markdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import SourceFileDialog from "@/components/wiki/SourceFileDialog.vue";
 import WikiGenerateDialog from "@/components/wiki/WikiGenerateDialog.vue";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
@@ -84,6 +85,17 @@ function importanceClass(importance: string): string {
       return "bg-rose-400";
     default:
       return "bg-amber-400";
+  }
+}
+
+function importanceLabel(importance: string): string {
+  switch (importance) {
+    case "high":
+      return t("wiki.importance.high");
+    case "low":
+      return t("wiki.importance.low");
+    default:
+      return t("wiki.importance.medium");
   }
 }
 
@@ -543,53 +555,66 @@ const beforeDownload = createBeforeDownload(t);
           </p>
         </section>
         <ScrollArea class="min-h-0 flex-1">
-          <nav class="space-y-3 p-3">
-            <div v-for="g in navGroups" :key="g.section ?? '__flat'">
-              <p
-                v-if="g.section"
-                class="mb-1 px-2 text-xs font-medium uppercase tracking-wide text-muted-foreground"
-              >
-                {{ g.section }}
-              </p>
-              <button
-                v-for="p in g.items"
-                :key="p.id"
-                type="button"
-                class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/60"
-                :class="
-                  p.id === activeId
-                    ? 'bg-accent font-medium text-accent-foreground'
-                    : p.status === 'running'
-                      ? 'bg-primary/5 text-foreground'
-                      : 'text-foreground/80'
-                "
-                :title="p.error ?? p.title"
-                @click="selectPage(p.id)"
-              >
-                <template v-if="p.status">
-                  <LoaderCircle
-                    v-if="p.status === 'running'"
-                    class="h-3.5 w-3.5 shrink-0 animate-spin text-primary"
-                  />
-                  <Check
-                    v-else-if="p.status === 'done'"
-                    class="h-3.5 w-3.5 shrink-0 text-green-500"
-                  />
-                  <X
-                    v-else-if="p.status === 'failed'"
-                    class="h-3.5 w-3.5 shrink-0 text-destructive"
-                  />
-                  <Circle v-else class="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
-                </template>
-                <span
-                  v-else
-                  class="h-1.5 w-1.5 shrink-0 rounded-full"
-                  :class="importanceClass(p.importance)"
-                />
-                <span class="min-w-0 flex-1 truncate">{{ p.title }}</span>
-              </button>
-            </div>
-          </nav>
+          <TooltipProvider>
+            <nav class="space-y-3 p-3">
+              <div v-for="g in navGroups" :key="g.section ?? '__flat'">
+                <p
+                  v-if="g.section"
+                  class="mb-1 px-2 text-xs font-medium uppercase tracking-wide text-muted-foreground"
+                >
+                  {{ g.section }}
+                </p>
+                <button
+                  v-for="p in g.items"
+                  :key="p.id"
+                  type="button"
+                  class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/60"
+                  :class="
+                    p.id === activeId
+                      ? 'bg-accent font-medium text-accent-foreground'
+                      : p.status === 'running'
+                        ? 'bg-primary/5 text-foreground'
+                        : 'text-foreground/80'
+                  "
+                  :title="p.error ?? (p.status ? p.title : undefined)"
+                  @click="selectPage(p.id)"
+                >
+                  <template v-if="p.status">
+                    <LoaderCircle
+                      v-if="p.status === 'running'"
+                      class="h-3.5 w-3.5 shrink-0 animate-spin text-primary"
+                    />
+                    <Check
+                      v-else-if="p.status === 'done'"
+                      class="h-3.5 w-3.5 shrink-0 text-green-500"
+                    />
+                    <X
+                      v-else-if="p.status === 'failed'"
+                      class="h-3.5 w-3.5 shrink-0 text-destructive"
+                    />
+                    <Circle v-else class="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+                  </template>
+                  <Tooltip v-else>
+                    <TooltipTrigger as-child>
+                      <span
+                        class="flex h-3.5 w-3.5 shrink-0 items-center justify-center"
+                        :aria-label="importanceLabel(p.importance)"
+                      >
+                        <span
+                          class="h-1.5 w-1.5 rounded-full"
+                          :class="importanceClass(p.importance)"
+                        />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">
+                      {{ importanceLabel(p.importance) }}
+                    </TooltipContent>
+                  </Tooltip>
+                  <span class="min-w-0 flex-1 truncate" :title="p.title">{{ p.title }}</span>
+                </button>
+              </div>
+            </nav>
+          </TooltipProvider>
         </ScrollArea>
         <div v-if="generatingHere" class="shrink-0 border-t p-2">
           <Button variant="outline" size="sm" class="w-full" @click="wiki.cancel(project.path)">
