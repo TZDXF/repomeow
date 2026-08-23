@@ -213,7 +213,7 @@ pub struct Project {
     pub favorited_at: Option<i64>,
     /// 跟踪更新:开启后后台循环在远端有更新时自动快进拉取(无法快进即取消,不提醒)
     pub auto_pull: bool,
-    /// Wiki 自动增量更新(项目级):跟踪拉取后未同步提交数达全局阈值时自动增量更新;
+    /// Wiki 自动增量更新(项目级):本地 HEAD 变化且 relevantFiles 命中时自动增量更新;
     /// 本地 HEAD 变化后按前端全局/项目级策略触发,与 auto_pull 相互独立
     pub wiki_auto_update: bool,
     pub created_at: i64,

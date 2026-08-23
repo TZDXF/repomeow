@@ -1276,9 +1276,7 @@ export default {
         "开启跟踪后,后台会定时检查远端更新并自动快进拉取;无法快进(分叉或本地改动可能冲突)时自动取消,不做提醒",
       wikiAutoUpdateLabel: "自动更新 Wiki",
       wikiAutoUpdateHint:
-        "开启后,所有已有 Wiki 的项目在本地代码更新且未同步提交数达到阈值时自动增量更新(项目勾选被忽略并禁用);关闭时仅更新勾选了 Wiki 开关的项目;无 Wiki 或无法增量时跳过,不会自动整本重新生成",
-      wikiThresholdTitle: "触发阈值(未同步进 Wiki 的提交数)",
-      wikiThresholdSuffix: "次提交",
+        "本地代码变化后检查 Wiki 来源文件,仅在相关文件受影响时自动增量更新;开启后作用于所有项目,关闭后仅作用于下方已勾选的项目",
       wikiToggleHint: "开启/关闭该项目的 Wiki 自动增量更新",
       wikiToggleGloballyOn: "全局开关已开启:所有有 Wiki 的项目均自动更新,无需单独勾选",
       searchPlaceholder: "搜索名称、简介、路径或标签...",

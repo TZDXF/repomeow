@@ -246,6 +246,15 @@ export const useWikiStore = defineStore("wiki", () => {
   ): Promise<number> {
     const changedSet = new Set(changed.files);
     const affected = d.pages.filter((p) => p.relevantFiles.some((f) => changedSet.has(f)));
+    // 没有页面受影响时不创建生成内核,仅推进已检查 HEAD，避免后续重复扫描同一批
+    // 无关变更，也避免 Wiki 因无关源码变化一直显示为过时。
+    if (!affected.length) {
+      if (changed.headSha) {
+        await saveWikiMeta(project.path, { ...d.meta, headSha: changed.headSha }, "update");
+      }
+      if (dataFor.value === project.path) await load(project.path);
+      return 0;
+    }
     let kernel: WikiGenKernel | null = null;
     try {
       kernel = await createWikiKernel(project, options);
@@ -280,7 +289,7 @@ export const useWikiStore = defineStore("wiki", () => {
   /**
    * 后台自动增量更新:统一 Git 事件检测到本地 HEAD 变化后触发。
    * 是否参与由调用方按两级开关决定(全局开 = 所有项目,全局关 = 仅项目勾选的),
-   * 这里只看运行条件:正在生成或更新/无 wiki/无 headSha/提交数未达阈值时静默跳过
+   * 这里只看运行条件:正在生成或更新/无 wiki/无 headSha/没有 relevantFiles 命中时静默跳过
    * (返回 0);headSha 已不在当前历史(改写)同样跳过,整本重生成只留给用户手动触发。
    * 内部串行排队(多个项目的触发依次执行);正忙时本次跳过,后续拉取事件会再次触发。
    * 执行失败向外抛,由调用方提示
@@ -314,8 +323,6 @@ export const useWikiStore = defineStore("wiki", () => {
     if ((d.meta.generator ?? "builtin") !== backendIdOf(options.backend)) return 0;
     const changed = await wikiChangedFiles(project.path, fromSha).catch(() => null);
     if (!changed) return 0;
-    const settings = useSettingsStore();
-    if (changed.commitCount < settings.wikiAutoUpdateThreshold) return 0;
     updating.value = true;
     try {
       return await applyUpdate(project, d, language, changed, options);

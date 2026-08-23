@@ -754,11 +754,9 @@ pub struct WikiChangedFiles {
     pub files: Vec<String>,
     /// 当前 HEAD(增量更新成功后回写 meta)
     pub head_sha: Option<String>,
-    /// from_sha..HEAD 的提交数(wiki 自动增量更新按「未同步提交数达阈值」触发)
-    pub commit_count: i64,
 }
 
-/// 增量更新用:列出 from_sha..HEAD 之间变更的文件(/ 分隔相对路径)与提交数。
+/// 增量更新用:列出 from_sha..HEAD 之间变更的文件(/ 分隔相对路径)。
 /// 非 git 仓库返回空表(调用方退化为整本重生成);from_sha 无法解析时报错
 /// (仓库历史被改写,调用方同样退化为整本重生成)
 #[tauri::command]
@@ -770,7 +768,6 @@ pub fn wiki_changed_files(
         return Ok(WikiChangedFiles {
             files: Vec::new(),
             head_sha: None,
-            commit_count: 0,
         });
     };
     let oid = git2::Oid::from_str(&from_sha)
@@ -782,7 +779,6 @@ pub fn wiki_changed_files(
         return Ok(WikiChangedFiles {
             files: Vec::new(),
             head_sha: None,
-            commit_count: 0,
         });
     };
     let from_tree = from
@@ -808,18 +804,9 @@ pub fn wiki_changed_files(
         .collect();
     files.sort();
     files.dedup();
-    // from..HEAD 提交数:遍历 HEAD 可达而 from 不可达的提交计数(from == HEAD 时为 0)
-    let mut walk = repo
-        .revwalk()
-        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
-    walk.push(head.id())
-        .and_then(|()| walk.hide(from.id()))
-        .map_err(|e| AppError::coded(ErrorCode::GitCommandFailed, e.to_string()))?;
-    let commit_count = walk.count() as i64;
     Ok(WikiChangedFiles {
         files,
         head_sha: Some(head.id().to_string()),
-        commit_count,
     })
 }
 
@@ -956,8 +943,8 @@ mod tests {
     }
 
     #[test]
-    fn changed_files_counts_commits_since() {
-        let dir = temp_dir("changed-count");
+    fn changed_files_since() {
+        let dir = temp_dir("changed-files");
         let repo = git2::Repository::init(&dir).unwrap();
         let sig = git2::Signature::now("t", "t@localhost").unwrap();
         let mut oids = Vec::new();
@@ -980,11 +967,10 @@ mod tests {
         let path = dir.to_string_lossy().to_string();
 
         let r = wiki_changed_files(path.clone(), oids[0].to_string()).unwrap();
-        assert_eq!(r.commit_count, 2, "首个提交..HEAD 应计 2 个提交");
         assert_eq!(r.files, vec!["f.txt".to_string()]);
 
         let r = wiki_changed_files(path.clone(), oids[2].to_string()).unwrap();
-        assert_eq!(r.commit_count, 0, "from == HEAD 时提交数为 0");
+        assert!(r.files.is_empty(), "from == HEAD 时不应有变更文件");
         assert_eq!(r.head_sha.as_deref(), Some(oids[2].to_string().as_str()));
 
         fs::remove_dir_all(&dir).ok();

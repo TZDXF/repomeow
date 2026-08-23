@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { Search } from "@lucide/vue";
@@ -70,31 +70,11 @@ function wikiToggleTitle(): string {
 
 // ── Wiki 自动增量更新(跟踪联动) ──────────────────────────────────────────
 
-/** 阈值输入的本地镜像:敲入非法值不打断,失焦/回车时收敛回 store 的合法值 */
-const thresholdInput = ref(String(settings.wikiAutoUpdateThreshold));
-watch(
-  () => settings.wikiAutoUpdateThreshold,
-  (v) => {
-    thresholdInput.value = String(v);
-  },
-);
-
 async function toggleWikiAutoUpdate(enabled: boolean) {
   try {
     await settings.setWikiAutoUpdate(enabled);
   } catch (e) {
     toast.error(e instanceof Error ? e.message : String(e));
-  }
-}
-
-function commitThreshold() {
-  const n = Number.parseInt(thresholdInput.value, 10);
-  if (Number.isFinite(n)) {
-    settings.setWikiAutoUpdateThreshold(n).catch((e) => {
-      toast.error(e instanceof Error ? e.message : String(e));
-    });
-  } else {
-    thresholdInput.value = String(settings.wikiAutoUpdateThreshold);
   }
 }
 </script>
@@ -114,31 +94,12 @@ function commitThreshold() {
           {{ t("settings.tracking.wikiAutoUpdateHint") }}
         </p>
       </div>
-      <div class="flex shrink-0 items-center gap-2">
-        <div
-          v-if="settings.wikiAutoUpdate"
-          class="flex items-center gap-1.5"
-          :title="t('settings.tracking.wikiThresholdTitle')"
-        >
-          <Input
-            v-model="thresholdInput"
-            type="number"
-            min="1"
-            max="10000"
-            class="h-8 w-20 text-sm"
-            @blur="commitThreshold"
-            @keydown.enter.prevent="commitThreshold"
-          />
-          <span class="whitespace-nowrap text-xs text-muted-foreground">
-            {{ t("settings.tracking.wikiThresholdSuffix") }}
-          </span>
-        </div>
-        <Switch
-          :model-value="settings.wikiAutoUpdate"
-          :title="t('settings.tracking.wikiAutoUpdateLabel')"
-          @update:model-value="toggleWikiAutoUpdate"
-        />
-      </div>
+      <Switch
+        class="shrink-0"
+        :model-value="settings.wikiAutoUpdate"
+        :title="t('settings.tracking.wikiAutoUpdateLabel')"
+        @update:model-value="toggleWikiAutoUpdate"
+      />
     </div>
 
     <div class="relative mt-4 w-80 max-w-full">

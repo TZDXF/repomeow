@@ -312,11 +312,9 @@ export interface WikiContext {
   headSha: string | null;
 }
 
-/** wiki_changed_files 的返回:区间变更文件 + 提交数 + 当前 HEAD */
+/** wiki_changed_files 的返回:区间变更文件 + 当前 HEAD */
 export interface WikiChangedFiles {
   files: string[];
-  /** fromSha..HEAD 的提交数(自动增量更新按「未同步提交数达阈值」触发) */
-  commitCount: number;
   headSha: string | null;
 }
 
@@ -341,7 +339,7 @@ export interface Project {
   favorited_at: number | null;
   /** 跟踪更新:开启后远端有更新时后台自动快进拉取(无法快进即取消,不提醒) */
   auto_pull: boolean;
-  /** Wiki 自动增量更新(项目级):跟踪拉取后未同步提交数达全局阈值时自动增量更新 */
+  /** Wiki 自动增量更新(项目级):本地 HEAD 变化且 relevantFiles 命中时自动增量更新 */
   wiki_auto_update: boolean;
   created_at: number;
   updated_at: number;

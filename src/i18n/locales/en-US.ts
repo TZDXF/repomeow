@@ -1326,9 +1326,7 @@ export default {
         "Tracked projects are checked periodically and fast-forward pulled automatically when the remote has updates; when fast-forward is not possible (diverged or local changes may conflict), the pull is canceled silently.",
       wikiAutoUpdateLabel: "Auto-update wiki",
       wikiAutoUpdateHint:
-        "When on, every project with a wiki gets an incremental update after its local code changes once unwritten commits reach the threshold (per-project checkboxes are ignored and disabled). When off, only projects with their wiki switch checked are updated. Skipped when there is no wiki or an incremental update is impossible; never triggers a full regeneration on its own.",
-      wikiThresholdTitle: "Trigger threshold (commits not yet reflected in the wiki)",
-      wikiThresholdSuffix: "commits",
+        "Checks wiki source files after local code changes and incrementally updates only affected pages. When on, it applies to all projects; when off, only to projects selected below.",
       wikiToggleHint: "Toggle automatic wiki updates for this project",
       wikiToggleGloballyOn:
         "Global switch is on: every project with a wiki is auto-updated, no per-project checkbox needed",

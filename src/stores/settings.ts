@@ -85,11 +85,9 @@ export const useSettingsStore = defineStore("settings", () => {
   /**
    * Wiki 自动增量更新全局开关(默认关闭):打开 = 所有项目都参与自动增量更新
    * (项目勾选被忽略并在 UI 禁用);关闭 = 仅项目勾选了的参与
-   * (projects 表 wiki_auto_update)。阈值见 wikiAutoUpdateThreshold
+   * (projects 表 wiki_auto_update)
    */
   const wikiAutoUpdate = ref(false);
-  /** Wiki 自动增量更新的触发阈值(未同步提交数,1-10000) */
-  const wikiAutoUpdateThreshold = ref(10);
   /** wiki 生成后端(默认内置 API;agent 后端经 ACP 调本地 coding agent CLI) */
   const wikiGenBackend = ref<WikiGenBackendId>("builtin");
   /** 自定义 ACP agent 命令行(wikiGenBackend = "custom" 时使用) */
@@ -381,7 +379,6 @@ export const useSettingsStore = defineStore("settings", () => {
         projectsSortKey: "name",
         autoCheckUpdate: "true",
         wikiAutoUpdate: "false",
-        wikiAutoUpdateThreshold: "10",
         wikiGenBackend: "builtin",
         wikiAgentCustomCommand: "",
         wikiAgentModel: "",
@@ -461,14 +458,6 @@ export const useSettingsStore = defineStore("settings", () => {
     const savedWikiAutoUpdate = await fileStore.get<string>("wikiAutoUpdate");
     if (savedWikiAutoUpdate === "true" || savedWikiAutoUpdate === "false") {
       wikiAutoUpdate.value = savedWikiAutoUpdate === "true";
-    }
-    // 触发阈值:正整数,限制在 1-10000,非法值回退默认 10
-    const savedWikiThreshold = await fileStore.get<string>("wikiAutoUpdateThreshold");
-    if (typeof savedWikiThreshold === "string") {
-      const n = Number.parseInt(savedWikiThreshold, 10);
-      if (Number.isFinite(n)) {
-        wikiAutoUpdateThreshold.value = Math.min(10000, Math.max(1, n));
-      }
     }
     // wiki 生成后端:白名单("builtin"/"custom")或合法 agent id,非法值回退 builtin
     const savedWikiGenBackend = await fileStore.get<string>("wikiGenBackend");
@@ -673,13 +662,6 @@ export const useSettingsStore = defineStore("settings", () => {
     await persist("wikiAutoUpdate", String(value));
   }
 
-  async function setWikiAutoUpdateThreshold(value: number) {
-    if (!Number.isFinite(value)) return;
-    const n = Math.min(10000, Math.max(1, Math.round(value)));
-    wikiAutoUpdateThreshold.value = n;
-    await persist("wikiAutoUpdateThreshold", String(n));
-  }
-
   /** wiki 生成后端:内置 API(builtin)/ 精选 agent(agent id)/ 自定义命令(custom) */
   async function setWikiGenBackend(value: WikiGenBackendId) {
     if (value !== "builtin" && value !== "custom" && !agentIdPattern.test(value)) return;
@@ -818,7 +800,6 @@ export const useSettingsStore = defineStore("settings", () => {
     projectsSortKey,
     autoCheckUpdate,
     wikiAutoUpdate,
-    wikiAutoUpdateThreshold,
     wikiGenBackend,
     wikiAgentCustomCommand,
     wikiAgentModel,
@@ -852,7 +833,6 @@ export const useSettingsStore = defineStore("settings", () => {
     setProjectsSortKey,
     setAutoCheckUpdate,
     setWikiAutoUpdate,
-    setWikiAutoUpdateThreshold,
     setWikiGenBackend,
     setWikiAgentCustomCommand,
     setWikiAgentModel,
