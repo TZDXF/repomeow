@@ -106,8 +106,8 @@ const cells = computed(() => [
   exactCell(t("settings.usage.calls"), summary.value?.totalCalls ?? null),
   tokenCell(t("settings.usage.inputTokens"), summary.value?.totalInputTokens ?? null),
   tokenCell(t("settings.usage.outputTokens"), summary.value?.totalOutputTokens ?? null),
-  tokenCell(t("settings.usage.totalTokens"), summary.value?.totalTokens ?? null),
   tokenCell(t("settings.usage.cachedTokens"), summary.value?.totalCachedTokens ?? null),
+  tokenCell(t("settings.usage.totalTokens"), summary.value?.totalTokens ?? null),
 ]);
 
 /** 按日趋势正序排列,高度按当日 tokens 归一化 */
@@ -222,7 +222,7 @@ function ioTitle(entry: AiUsageEntry): string {
               />
             </div>
             <span class="shrink-0 text-xs tabular-nums text-muted-foreground">
-              {{ stat.calls }} · {{ fmtTokens(stat.totalTokens) }}
+              {{ stat.totalTokens > 0 ? fmtTokens(stat.totalTokens) : "" }}
             </span>
           </div>
         </div>
@@ -238,7 +238,7 @@ function ioTitle(entry: AiUsageEntry): string {
           <div
             v-for="d in dayBars"
             :key="d.day"
-            class="min-w-0 flex-1 rounded-t-sm bg-primary/70 transition-[height]"
+            class="min-w-0 w-1 flex-1 rounded-t-sm bg-primary/70 transition-[height]"
             :style="{ height: `${d.heightPct}%` }"
             :title="dayTitle(d.day, d.calls, d.totalTokens)"
           />
