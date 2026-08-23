@@ -6,10 +6,8 @@ import { FolderOpen, RotateCcw } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  DEFAULT_COMMIT_PROMPT,
-  DEFAULT_REPORT_PROMPT,
-  DEFAULT_WEEKLY_REPORT_PROMPT,
   loadAiPrompts,
+  loadDefaultAiPrompts,
   openPromptsDir,
   saveAiPrompts,
 } from "@/lib/ai-prompts";
@@ -24,13 +22,19 @@ const activePrompt = ref<PromptId>("commit");
 const commitPrompt = ref("");
 const reportPrompt = ref("");
 const weeklyReportPrompt = ref("");
+const defaultCommitPrompt = ref("");
+const defaultReportPrompt = ref("");
+const defaultWeeklyReportPrompt = ref("");
 
 onMounted(async () => {
   try {
-    const prompts = await loadAiPrompts();
+    const [prompts, defaults] = await Promise.all([loadAiPrompts(), loadDefaultAiPrompts()]);
     commitPrompt.value = prompts.commit;
     reportPrompt.value = prompts.report;
     weeklyReportPrompt.value = prompts.reportWeekly;
+    defaultCommitPrompt.value = defaults.commit;
+    defaultReportPrompt.value = defaults.report;
+    defaultWeeklyReportPrompt.value = defaults.reportWeekly;
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     toast.error(t("settings.prompts.loadFailed", { error: message }));
@@ -121,7 +125,7 @@ async function openDir() {
         <Textarea
           id="prompt-commit"
           v-model="commitPrompt"
-          :placeholder="DEFAULT_COMMIT_PROMPT"
+          :placeholder="defaultCommitPrompt"
           rows="18"
           spellcheck="false"
           class="mt-3 min-h-96 resize-y font-mono text-xs"
@@ -150,7 +154,7 @@ async function openDir() {
         <Textarea
           id="prompt-report"
           v-model="reportPrompt"
-          :placeholder="DEFAULT_REPORT_PROMPT"
+          :placeholder="defaultReportPrompt"
           rows="18"
           spellcheck="false"
           class="mt-3 min-h-96 resize-y font-mono text-xs"
@@ -179,7 +183,7 @@ async function openDir() {
         <Textarea
           id="prompt-report-weekly"
           v-model="weeklyReportPrompt"
-          :placeholder="DEFAULT_WEEKLY_REPORT_PROMPT"
+          :placeholder="defaultWeeklyReportPrompt"
           rows="18"
           spellcheck="false"
           class="mt-3 min-h-96 resize-y font-mono text-xs"

@@ -128,7 +128,10 @@ pub fn create_command(
         |r| r.get(0),
     )?;
     if !exists {
-        return Err(AppError::coded(ErrorCode::ProjectNotFound, project_id.to_string()));
+        return Err(AppError::coded(
+            ErrorCode::ProjectNotFound,
+            project_id.to_string(),
+        ));
     }
     let next_order: i64 = conn.query_row(
         "SELECT COALESCE(MAX(sort_order) + 1, 0) FROM custom_commands WHERE project_id = ?1",
@@ -253,7 +256,11 @@ pub fn run_in_terminal(
     if !std::path::Path::new(&work_dir).is_dir() {
         return Err(AppError::coded(ErrorCode::ScriptDirNotFound, work_dir));
     }
-    let command = match java_home.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    let command = match java_home
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         Some(home) => {
             let home = home.replace('"', "");
             if cfg!(windows) {

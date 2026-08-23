@@ -1,5 +1,6 @@
 pub mod account;
 pub mod agent;
+pub mod ai;
 pub mod docker;
 pub mod editor_icon;
 pub mod files;

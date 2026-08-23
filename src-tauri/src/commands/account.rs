@@ -48,7 +48,10 @@ fn normalize_provider(provider: &str) -> AppResult<String> {
     let p = provider.trim().to_lowercase();
     match p.as_str() {
         "github" | "gitee" | "gitlab" => Ok(p),
-        _ => Err(AppError::coded(ErrorCode::AccountUnsupportedProvider, provider.to_string())),
+        _ => Err(AppError::coded(
+            ErrorCode::AccountUnsupportedProvider,
+            provider.to_string(),
+        )),
     }
 }
 
@@ -70,7 +73,10 @@ fn resolve_base_url(provider: &str, input: Option<&str>) -> AppResult<String> {
             }
             Ok(raw.to_string())
         }
-        _ => Err(AppError::coded(ErrorCode::AccountUnsupportedProvider, provider.to_string())),
+        _ => Err(AppError::coded(
+            ErrorCode::AccountUnsupportedProvider,
+            provider.to_string(),
+        )),
     }
 }
 

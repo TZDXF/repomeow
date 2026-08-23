@@ -18,7 +18,10 @@ fn validate_color(color: &str) -> AppResult<String> {
     if valid {
         Ok(color.to_string())
     } else {
-        Err(AppError::coded(ErrorCode::TagColorInvalid, color.to_string()))
+        Err(AppError::coded(
+            ErrorCode::TagColorInvalid,
+            color.to_string(),
+        ))
     }
 }
 
@@ -103,7 +106,10 @@ pub fn apply_project_tags(conn: &Connection, project_id: i64, tag_ids: &[i64]) -
         |r| r.get(0),
     )?;
     if !exists {
-        return Err(AppError::coded(ErrorCode::ProjectNotFound, project_id.to_string()));
+        return Err(AppError::coded(
+            ErrorCode::ProjectNotFound,
+            project_id.to_string(),
+        ));
     }
     let tx = conn.unchecked_transaction()?;
     tx.execute(
@@ -228,7 +234,9 @@ mod tests {
     #[test]
     fn rejects_bad_input() {
         let conn = test_conn();
-        assert!(matches!(create(&conn, " ", ""), Err(ref e) if e.is_code(ErrorCode::TagNameRequired)));
+        assert!(
+            matches!(create(&conn, " ", ""), Err(ref e) if e.is_code(ErrorCode::TagNameRequired))
+        );
         assert!(matches!(
             create(&conn, "x", "not-a-color"),
             Err(ref e) if e.is_code(ErrorCode::TagColorInvalid)

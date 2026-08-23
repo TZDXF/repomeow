@@ -102,6 +102,16 @@ export interface GitProjectChangedPayload {
   wiki_auto_update: boolean;
 }
 
+/** Rust 后台任务统一进度事件（定时报告等）。 */
+export interface BackgroundTaskProgressPayload {
+  task_id: string;
+  kind: "report" | "wiki" | string;
+  label: string;
+  completed: number;
+  total: number;
+  status: "running" | "finished";
+}
+
 /** 一个 git remote 及其地址 */
 export interface GitRemote {
   name: string;
@@ -255,8 +265,6 @@ export interface AiPrompts {
 // ── 项目 Wiki(~/.repomeow/wiki/<basename>-<hash>/ 下的 meta.json + pages/*.md) ──
 
 /** 触发 wiki git 快照提交的操作类型(后端据此组提交信息) */
-export type WikiCommitKind = "generate" | "update" | "page";
-
 /** wiki 大纲中的单个页面条目 */
 export interface WikiOutlinePage {
   id: string;
@@ -297,32 +305,6 @@ export interface WikiData {
   pages: WikiPageData[];
   /** 生成时的 HEAD 与当前 HEAD 不一致(代码已更新,wiki 可能过时) */
   stale: boolean;
-}
-
-/** 结构阶段输入:collect_wiki_context 的返回 */
-export interface WikiContext {
-  /** 过滤后的文件树(每行一个 / 分隔相对路径,超预算时目录折叠为摘要行) */
-  fileTree: string;
-  /** 过滤后的完整文件清单(/ 分隔,不折叠),用于校验大纲标注的相关文件 */
-  paths: string[];
-  fileCount: number;
-  treeTruncated: boolean;
-  readme: string | null;
-  manifests: { path: string; content: string }[];
-  headSha: string | null;
-}
-
-/** wiki_changed_files 的返回:区间变更文件 + 当前 HEAD */
-export interface WikiChangedFiles {
-  files: string[];
-  headSha: string | null;
-}
-
-/** 单页生成的相关文件内容(read_wiki_files 返回;读不到/二进制文件被静默跳过) */
-export interface WikiFileContent {
-  path: string;
-  content: string;
-  truncated: boolean;
 }
 
 export interface Project {
@@ -670,6 +652,14 @@ export interface ReportSchedule {
   weeklyStartWeekday: number;
   /** 周报自定义:范围结束/触发周几(1=周一 .. 7=周日) */
   weeklyEndWeekday: number;
+  lastRunAt: number | null;
+}
+
+/** 应用内置定时任务；可启停和修改间隔，不允许删除。 */
+export interface SystemSchedule {
+  id: "git_update" | string;
+  enabled: boolean;
+  intervalMinutes: number;
   lastRunAt: number | null;
 }
 

@@ -1,7 +1,6 @@
 //! AI 模型用量统计与日志(ai_usage_log 表)。
 //!
-//! * 前端内置 API 与 ACP agent 后端经 `record_ai_usage` 上报
-//! * Rust 定时报告(scheduler.rs)直接复用 `insert_usage_row` 并入报告落库事务
+//! * 内置 API、ACP agent 与定时报告均在 Rust 侧复用 `insert_usage_row`
 //! * token 列可空:provider 未返回 usage 时行仍在,但不计入 SUM 汇总
 
 use rusqlite::{params, Connection, Row};
@@ -9,9 +8,7 @@ use tauri::State;
 
 use crate::db::Db;
 use crate::error::AppResult;
-use crate::models::{
-    AiUsageDayStat, AiUsageEntry, AiUsageRecord, AiUsageSummary, AiUsageTaskStat,
-};
+use crate::models::{AiUsageDayStat, AiUsageEntry, AiUsageRecord, AiUsageSummary, AiUsageTaskStat};
 use crate::time_util::now_ts;
 
 /// 日志保留期:启动 prune 时清理更早的记录
@@ -58,12 +55,6 @@ fn row_to_entry(r: &Row) -> rusqlite::Result<AiUsageEntry> {
 }
 
 const ENTRY_COLS: &str = "id, created_at, task_type, model, input_tokens, output_tokens, total_tokens, duration_ms, cached_tokens";
-
-#[tauri::command]
-pub fn record_ai_usage(db: State<Db>, record: AiUsageRecord) -> AppResult<()> {
-    let conn = db.0.lock().unwrap();
-    insert_usage_row(&conn, &record, now_ts())
-}
 
 /// 汇总统计:总计 + 按任务类型 + 最近 30 天按日(SUM 忽略 NULL)
 #[tauri::command]
@@ -169,7 +160,9 @@ fn list_usage_rows(
             "SELECT {ENTRY_COLS} FROM ai_usage_log WHERE task_type = ?1
              ORDER BY id DESC LIMIT ?2 OFFSET ?3"
         ),
-        None => format!("SELECT {ENTRY_COLS} FROM ai_usage_log ORDER BY id DESC LIMIT ?1 OFFSET ?2"),
+        None => {
+            format!("SELECT {ENTRY_COLS} FROM ai_usage_log ORDER BY id DESC LIMIT ?1 OFFSET ?2")
+        }
     };
     let mut stmt = conn.prepare(&sql)?;
     let mapped = match task_type {

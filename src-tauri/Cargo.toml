@@ -23,7 +23,6 @@ tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-store = "2"
-tauri-plugin-http = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 tauri-plugin-single-instance = "2"
@@ -36,8 +35,11 @@ ignore = "0.4"
 notify = "8"
 rusqlite = { version = "0.31", features = ["bundled"] }
 tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 chrono = { version = "0.4", features = ["serde"] }
-reqwest = { version = "0.12", features = ["json", "blocking"] }
+reqwest = { version = "0.13", features = ["json", "blocking"] }
+# OpenAI 兼容请求统一经 SDK；byot 用于向兼容服务商附加思考模式等扩展字段。
+async-openai = { version = "0.41", default-features = false, features = ["rustls", "chat-completion", "model", "byot"] }
 thiserror = "1"
 anyhow = "1"
 # 编辑器图标提取(image 负责缩放与 PNG 编码;pelite/ico 解析 Windows exe 资源;

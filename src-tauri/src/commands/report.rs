@@ -121,11 +121,11 @@ pub struct ReportCommitItem {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveReportCommit {
-    pub project_id: Option<i64>,
-    pub project_name: String,
+    pub(crate) project_id: Option<i64>,
+    pub(crate) project_name: String,
     #[serde(default)]
-    pub project_description: String,
-    pub commits: Vec<GitCommitInfo>,
+    pub(crate) project_description: String,
+    pub(crate) commits: Vec<GitCommitInfo>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -139,23 +139,21 @@ pub struct ReportGeneratedPayload {
 
 // ── commands: report history ───────────────────────────────────────────
 
-/// 保存报告(日报/周报)及其提交记录到历史,返回新记录 id。
-/// 前端在生成报告后自动调用此命令(无需手动操作)。
-#[tauri::command]
-pub fn save_report_history(
-    app: AppHandle,
-    db: State<'_, Db>,
-    project_ids: Vec<i64>,
-    date_from: String,
-    date_to: String,
-    range_label: String,
-    author_mode: String,
-    language: String,
-    period_type: String,
-    result: String,
-    commit_data: Vec<SaveReportCommit>,
+/// 写入报告历史的内部入口。手动、批量与 AI 后端生成共用这一实现，确保报告正文、
+/// 提交快照和刷新事件始终由后端一次性完成。
+pub(crate) fn save_report_history_impl(
+    app: &AppHandle,
+    conn: &Connection,
+    project_ids: &[i64],
+    date_from: &str,
+    date_to: &str,
+    range_label: &str,
+    author_mode: &str,
+    language: &str,
+    period_type: &str,
+    result: &str,
+    commit_data: &[SaveReportCommit],
 ) -> AppResult<i64> {
-    let conn = db.0.lock().unwrap();
     let now = crate::time_util::now_ts();
     let ids_json = serde_json::to_string(&project_ids).unwrap_or_default();
 
@@ -166,7 +164,7 @@ pub fn save_report_history(
     )?;
     let report_id = conn.last_insert_rowid();
 
-    for item in &commit_data {
+    for item in commit_data {
         let commits_json = serde_json::to_string(&item.commits).unwrap_or_default();
         conn.execute(
             "INSERT INTO report_commits (report_id, project_id, project_name, project_description, commit_data)
@@ -186,8 +184,8 @@ pub fn save_report_history(
     let payload = ReportGeneratedPayload {
         schedule_name: String::new(),
         history_id: report_id,
-        date_from,
-        date_to,
+        date_from: date_from.to_string(),
+        date_to: date_to.to_string(),
     };
     if let Err(e) = app.emit("report://generated", payload) {
         eprintln!("[report] 发送前端通知失败: {e}");
@@ -440,11 +438,15 @@ pub fn get_calendar_meta_impl(
     tag_ids: &[i64],
     report_type: &Option<String>,
 ) -> AppResult<HashMap<String, i64>> {
-    let month_start = NaiveDate::from_ymd_opt(year, month, 1)
-        .ok_or_else(|| AppError::coded(ErrorCode::ReportInvalidYearMonth, format!("year={year} month={month}")))?;
+    let month_start = NaiveDate::from_ymd_opt(year, month, 1).ok_or_else(|| {
+        AppError::coded(
+            ErrorCode::ReportInvalidYearMonth,
+            format!("year={year} month={month}"),
+        )
+    })?;
     // 网格首格 = 当月 1 日向前对齐到所在周的周一(num_days_from_monday() ∈ 0..6)
-    let grid_start = month_start
-        - chrono::Duration::days(month_start.weekday().num_days_from_monday() as i64);
+    let grid_start =
+        month_start - chrono::Duration::days(month_start.weekday().num_days_from_monday() as i64);
     // 网格末格 = 首格 + 41 天(周一 + 41 天 = 周日,覆盖 6 行)
     let grid_end = grid_start + chrono::Duration::days(41);
     let date_from = grid_start.format("%Y-%m-%d").to_string();
@@ -698,7 +700,11 @@ fn parse_date(s: &str) -> AppResult<NaiveDate> {
 }
 
 /// 不晚于 `to` 的第一个工作日(含 `from` 本身);找不到时返回大于 `to` 的日期
-fn first_workday_from(mut d: NaiveDate, to: NaiveDate, is_workday: &dyn Fn(NaiveDate) -> bool) -> NaiveDate {
+fn first_workday_from(
+    mut d: NaiveDate,
+    to: NaiveDate,
+    is_workday: &dyn Fn(NaiveDate) -> bool,
+) -> NaiveDate {
     while d <= to && !is_workday(d) {
         d += chrono::Duration::days(1);
     }
@@ -915,8 +921,7 @@ pub async fn run_report_schedule_now(
             .map_err(|_| AppError::coded(ErrorCode::ScheduleNotFound, id.to_string()))?
     };
     let data_dir = workday::data_dir(&app);
-    let client = crate::scheduler::report_http_client();
-    crate::scheduler::fire_schedule(&app, &client, &data_dir, &schedule).await
+    crate::scheduler::fire_schedule(&app, &data_dir, &schedule).await
 }
 
 // ── Notify wrapper for Tauri state ─────────────────────────────────────

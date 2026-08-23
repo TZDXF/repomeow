@@ -717,10 +717,20 @@ mod tests {
         let entries = list_project_files(dir.clone(), None).unwrap();
         let by_path: std::collections::HashMap<&str, &ProjectFileEntry> =
             entries.iter().map(|e| (e.path.as_str(), e)).collect();
-        for expected in ["node_modules", "logs", "empty", ".env", ".gitignore", "src.rs"] {
+        for expected in [
+            "node_modules",
+            "logs",
+            "empty",
+            ".env",
+            ".gitignore",
+            "src.rs",
+        ] {
             assert!(by_path.contains_key(expected), "缺少 {expected}");
         }
-        assert!(!by_path.keys().any(|k| k.contains('/')), "根层不应出现嵌套路径");
+        assert!(
+            !by_path.keys().any(|k| k.contains('/')),
+            "根层不应出现嵌套路径"
+        );
         assert!(by_path["node_modules"].is_dir && by_path["empty"].is_dir);
         assert!(!by_path["src.rs"].is_dir);
         // 被 .gitignore 排除的目录整体标 ignored;未排除的 node_modules 不标
@@ -931,9 +941,15 @@ mod tests {
         // 顶层 services 键:标准写法、键后空格、CRLF 行尾都认
         assert!(maybe_compose_file("app.yml", "services:\n  web: {}\n"));
         assert!(maybe_compose_file("app.yml", "services :\n  web: {}\n"));
-        assert!(maybe_compose_file("app.yml", "---\nservices:\r\n  web: {}\n"));
+        assert!(maybe_compose_file(
+            "app.yml",
+            "---\nservices:\r\n  web: {}\n"
+        ));
         // 缩进的嵌套 services(如 CI 配置)不算顶层键
-        assert!(!maybe_compose_file("ci.yaml", "jobs:\n  build:\n    services:\n      db: {}\n"));
+        assert!(!maybe_compose_file(
+            "ci.yaml",
+            "jobs:\n  build:\n    services:\n      db: {}\n"
+        ));
         // 注释与普通键不误判
         assert!(!maybe_compose_file("a.yml", "# services:\nx: 1\n"));
         assert!(!maybe_compose_file("a.yml", "serviceName: web\n"));
@@ -1032,35 +1048,89 @@ services:
         // 默认大小写不敏感:第 1、2 行命中
         fs::write(p.join("a.txt"), "Hello world\nhello WORLD\nbye\n").unwrap();
 
-        let r = search_project_text(dir.clone(), "hello".into(), false, false, false, "".into(), "".into()).unwrap();
+        let r = search_project_text(
+            dir.clone(),
+            "hello".into(),
+            false,
+            false,
+            false,
+            "".into(),
+            "".into(),
+        )
+        .unwrap();
         assert_eq!(hit_lines(&r, "a.txt"), vec![1, 2]);
         assert_eq!(r.hits[0].count, 2);
         assert!(!r.truncated);
 
         // 大小写敏感:仅第 2 行(hello WORLD)
-        let r = search_project_text(dir.clone(), "hello".into(), true, false, false, "".into(), "".into()).unwrap();
+        let r = search_project_text(
+            dir.clone(),
+            "hello".into(),
+            true,
+            false,
+            false,
+            "".into(),
+            "".into(),
+        )
+        .unwrap();
         assert_eq!(hit_lines(&r, "a.txt"), vec![2]);
 
         // 全字匹配:"world" 不命中 "worldwide"
         fs::write(p.join("b.txt"), "world\nworldwide\n").unwrap();
-        let r = search_project_text(dir.clone(), "world".into(), false, true, false, "".into(), "".into()).unwrap();
+        let r = search_project_text(
+            dir.clone(),
+            "world".into(),
+            false,
+            true,
+            false,
+            "".into(),
+            "".into(),
+        )
+        .unwrap();
         assert_eq!(hit_lines(&r, "b.txt"), vec![1]);
 
         // 正则模式 + 全字组合:\b(?:c.t)\b
         fs::write(p.join("c.txt"), "cat cut\nconcat\n").unwrap();
-        let r = search_project_text(dir.clone(), "c.t".into(), false, true, true, "".into(), "".into()).unwrap();
+        let r = search_project_text(
+            dir.clone(),
+            "c.t".into(),
+            false,
+            true,
+            true,
+            "".into(),
+            "".into(),
+        )
+        .unwrap();
         assert_eq!(hit_lines(&r, "c.txt"), vec![1]);
 
         // 同行多次匹配计入 count,行只出现一次
         fs::write(p.join("d.txt"), "ab ab ab\n").unwrap();
-        let r = search_project_text(dir.clone(), "ab".into(), false, false, false, "".into(), "".into()).unwrap();
+        let r = search_project_text(
+            dir.clone(),
+            "ab".into(),
+            false,
+            false,
+            false,
+            "".into(),
+            "".into(),
+        )
+        .unwrap();
         assert_eq!(hit_lines(&r, "d.txt"), vec![1]);
         let d = r.hits.iter().find(|h| h.path == "d.txt").unwrap();
         assert_eq!(d.count, 3);
         assert_eq!(d.lines.len(), 1);
 
         // 空查询返回空结果
-        let r = search_project_text(dir.clone(), "  ".into(), false, false, false, "".into(), "".into()).unwrap();
+        let r = search_project_text(
+            dir.clone(),
+            "  ".into(),
+            false,
+            false,
+            false,
+            "".into(),
+            "".into(),
+        )
+        .unwrap();
         assert!(r.hits.is_empty());
 
         let _ = fs::remove_dir_all(&dir);
@@ -1080,7 +1150,16 @@ services:
         fs::create_dir_all(p.join(".git")).unwrap();
         fs::write(p.join(".git/token"), "token\n").unwrap();
 
-        let r = search_project_text(dir.clone(), "token".into(), false, false, false, "".into(), "".into()).unwrap();
+        let r = search_project_text(
+            dir.clone(),
+            "token".into(),
+            false,
+            false,
+            false,
+            "".into(),
+            "".into(),
+        )
+        .unwrap();
         let paths: Vec<&str> = r.hits.iter().map(|h| h.path.as_str()).collect();
         // 隐藏文件可搜;二进制、node_modules、git 忽略目录、.git 内部跳过
         assert_eq!(paths, vec![".env"]);
@@ -1098,7 +1177,16 @@ services:
         line.push_str(&"y".repeat(100));
         fs::write(p.join("min.js"), &line).unwrap();
 
-        let r = search_project_text(dir.clone(), "NEEDLE".into(), false, false, false, "".into(), "".into()).unwrap();
+        let r = search_project_text(
+            dir.clone(),
+            "NEEDLE".into(),
+            false,
+            false,
+            false,
+            "".into(),
+            "".into(),
+        )
+        .unwrap();
         let text = &r.hits[0].lines[0].text;
         assert!(text.starts_with('…'), "超长行窗口应带前省略号:{text}");
         assert!(text.ends_with('…'), "超长行窗口应带后省略号:{text}");
@@ -1107,7 +1195,16 @@ services:
 
         // 短行原样返回
         fs::write(p.join("short.txt"), "NEEDLE here\n").unwrap();
-        let r = search_project_text(dir.clone(), "NEEDLE".into(), false, false, false, "".into(), "".into()).unwrap();
+        let r = search_project_text(
+            dir.clone(),
+            "NEEDLE".into(),
+            false,
+            false,
+            false,
+            "".into(),
+            "".into(),
+        )
+        .unwrap();
         let short = r.hits.iter().find(|h| h.path == "short.txt").unwrap();
         assert_eq!(short.lines[0].text, "NEEDLE here");
 
@@ -1119,10 +1216,22 @@ services:
         let dir = temp_project_dir("search-caps");
         let p = Path::new(&dir);
         // 单文件 1100 个匹配:达到 1000 上限后停止累计并置 truncated
-        let content = (0..1100).map(|i| format!("hit {i}")).collect::<Vec<_>>().join("\n");
+        let content = (0..1100)
+            .map(|i| format!("hit {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         fs::write(p.join("many.txt"), &content).unwrap();
 
-        let r = search_project_text(dir.clone(), "hit".into(), false, false, false, "".into(), "".into()).unwrap();
+        let r = search_project_text(
+            dir.clone(),
+            "hit".into(),
+            false,
+            false,
+            false,
+            "".into(),
+            "".into(),
+        )
+        .unwrap();
         assert!(r.truncated);
         let hit = &r.hits[0];
         assert_eq!(hit.count, SEARCH_MAX_MATCHES);
@@ -1170,7 +1279,15 @@ services:
         )
         .unwrap();
         let paths: Vec<&str> = r.hits.iter().map(|h| h.path.as_str()).collect();
-        assert_eq!(paths, vec!["dist/bundle.ts", "src/main.ts", "src/nested/worker.ts", "tests/main.ts"]);
+        assert_eq!(
+            paths,
+            vec![
+                "dist/bundle.ts",
+                "src/main.ts",
+                "src/nested/worker.ts",
+                "tests/main.ts"
+            ]
+        );
 
         let r = search_project_text(
             dir.clone(),
@@ -1182,7 +1299,10 @@ services:
             "".into(),
         )
         .unwrap();
-        assert_eq!(r.hits.iter().map(|h| h.path.as_str()).collect::<Vec<_>>(), vec!["README.md"]);
+        assert_eq!(
+            r.hits.iter().map(|h| h.path.as_str()).collect::<Vec<_>>(),
+            vec!["README.md"]
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }

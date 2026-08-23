@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { ArrowUpCircle, Copy, Minus, Square, X } from "@lucide/vue";
+import BackgroundTasksMenu from "@/components/common/BackgroundTasksMenu.vue";
 import UpdateDialog from "@/components/update/UpdateDialog.vue";
 import { useUpdateStore } from "@/stores/update";
 
@@ -56,9 +57,10 @@ function onDragRegionDblClick(event: MouseEvent) {
   >
     <div
       data-tauri-drag-region
-      class="flex flex-1 items-center gap-2 text-xs font-medium text-muted-foreground"
+      class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-xs font-medium text-muted-foreground"
     >
-      <span class="pointer-events-none">{{ t("app.title") }} · {{ t("app.name") }}</span>
+      <span class="pointer-events-none shrink-0">{{ t("app.title") }} · {{ t("app.name") }}</span>
+      <BackgroundTasksMenu />
     </div>
     <div class="flex h-full items-stretch">
       <button

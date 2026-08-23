@@ -3,15 +3,15 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+#[cfg(target_os = "macos")]
+use tauri::window::{Effect, EffectState, EffectsBuilder};
+#[cfg(target_os = "windows")]
+use tauri::window::{Effect, EffectsBuilder};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     App, AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder,
 };
-#[cfg(target_os = "windows")]
-use tauri::window::{Effect, EffectsBuilder};
-#[cfg(target_os = "macos")]
-use tauri::window::{Effect, EffectState, EffectsBuilder};
 use tauri_plugin_store::StoreExt;
 
 use crate::APP_DATA_DIR_NAME;
@@ -85,11 +85,15 @@ fn load_tray_texts(app: &App) -> (String, String) {
     } else {
         &fallback_zh
     };
-    let file_name = if lang == "en-US" { "en-US.json" } else { "zh-CN.json" };
-    let path = match app
-        .path()
-        .resolve(format!("i18n/tray/{file_name}"), tauri::path::BaseDirectory::Resource)
-    {
+    let file_name = if lang == "en-US" {
+        "en-US.json"
+    } else {
+        "zh-CN.json"
+    };
+    let path = match app.path().resolve(
+        format!("i18n/tray/{file_name}"),
+        tauri::path::BaseDirectory::Resource,
+    ) {
         Ok(p) => p,
         Err(_) => return fallback.clone(),
     };
@@ -165,7 +169,8 @@ pub(crate) fn setup(app: &App) -> tauri::Result<()> {
                         }
                     };
                     // 双击尾巴上的 Click(Up):直接忽略,不再排入延迟任务
-                    let since_double = now_millis().saturating_sub(LAST_DOUBLE_CLICK_MS.load(Ordering::SeqCst));
+                    let since_double =
+                        now_millis().saturating_sub(LAST_DOUBLE_CLICK_MS.load(Ordering::SeqCst));
                     if since_double < DOUBLE_CLICK_SUPPRESS.as_millis() as u64 {
                         return;
                     }

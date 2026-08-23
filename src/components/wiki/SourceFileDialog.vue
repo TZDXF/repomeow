@@ -108,14 +108,14 @@ const rangeLabel = computed(() => {
       >
         {{ t("files.binary") }}
       </p>
-      <!-- CodeViewer 宿主需要确定高度(CM 自带 scroller) -->
+      <!-- CodeViewer 宿主需要确定高度(CM 自带 scroller);必须直接作为有界 flex
+           容器的子元素——中间再套普通 div 会使其高度变为 auto,CM 的 height:100%
+            解析失败退化为全文档高度,内容溢出弹窗且无滚动条 -->
       <div v-else class="flex h-[65vh] flex-col">
         <p v-if="preview.truncated" class="shrink-0 pb-1 text-xs text-muted-foreground">
           {{ t("files.truncated") }}
         </p>
-        <div class="min-h-0 flex-1">
-          <CodeViewer ref="viewer" :text="preview.text" :path="relPath ?? ''" :wrap="false" />
-        </div>
+        <CodeViewer ref="viewer" :text="preview.text" :path="relPath ?? ''" :wrap="false" />
       </div>
     </DialogContent>
   </Dialog>

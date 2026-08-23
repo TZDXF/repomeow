@@ -165,7 +165,17 @@ mod tests {
         let conn = test_conn();
         let pid = add_project(&conn);
 
-        set_pinned(&conn, pid, "packageScript", ".\ndev", true, "dev", "npm run dev", None).unwrap();
+        set_pinned(
+            &conn,
+            pid,
+            "packageScript",
+            ".\ndev",
+            true,
+            "dev",
+            "npm run dev",
+            None,
+        )
+        .unwrap();
         set_pinned(
             &conn,
             pid,
@@ -178,7 +188,17 @@ mod tests {
         )
         .unwrap();
         // 重复标记幂等,且刷新快照
-        set_pinned(&conn, pid, "packageScript", ".\ndev", true, "dev", "npm run dev", None).unwrap();
+        set_pinned(
+            &conn,
+            pid,
+            "packageScript",
+            ".\ndev",
+            true,
+            "dev",
+            "npm run dev",
+            None,
+        )
+        .unwrap();
 
         let items = list(&conn, None).unwrap();
         assert_eq!(items.len(), 2);
@@ -199,9 +219,29 @@ mod tests {
         let conn = test_conn();
         let pid = add_project(&conn);
 
-        set_pinned(&conn, pid, "packageScript", ".\ndev", true, "dev", "npm run dev", None).unwrap();
+        set_pinned(
+            &conn,
+            pid,
+            "packageScript",
+            ".\ndev",
+            true,
+            "dev",
+            "npm run dev",
+            None,
+        )
+        .unwrap();
         // 同一 target 再次标记:不新增行,快照被刷新
-        set_pinned(&conn, pid, "packageScript", ".\ndev", true, "dev-v2", "npm run dev2", Some("packages/web")).unwrap();
+        set_pinned(
+            &conn,
+            pid,
+            "packageScript",
+            ".\ndev",
+            true,
+            "dev-v2",
+            "npm run dev2",
+            Some("packages/web"),
+        )
+        .unwrap();
 
         let items = list(&conn, Some(pid)).unwrap();
         assert_eq!(items.len(), 1);
@@ -247,7 +287,17 @@ mod tests {
             None,
         )
         .unwrap();
-        set_pinned(&conn, pid, "packageScript", ".\ndev", true, "dev", "npm run dev", None).unwrap();
+        set_pinned(
+            &conn,
+            pid,
+            "packageScript",
+            ".\ndev",
+            true,
+            "dev",
+            "npm run dev",
+            None,
+        )
+        .unwrap();
 
         let items = list(&conn, Some(pid)).unwrap();
         let custom = items.iter().find(|p| p.kind == "customCommand").unwrap();
@@ -261,7 +311,17 @@ mod tests {
     fn cascades_on_project_delete() {
         let conn = test_conn();
         let pid = add_project(&conn);
-        set_pinned(&conn, pid, "composeFile", "compose.yml", true, "compose.yml", "docker compose -f \"compose.yml\"", None).unwrap();
+        set_pinned(
+            &conn,
+            pid,
+            "composeFile",
+            "compose.yml",
+            true,
+            "compose.yml",
+            "docker compose -f \"compose.yml\"",
+            None,
+        )
+        .unwrap();
 
         conn.execute("DELETE FROM projects WHERE id = ?1", params![pid])
             .unwrap();

@@ -80,79 +80,118 @@ static AGENTS: &[AgentDef] = &[
     AgentDef {
         id: "claude",
         name: "Claude Code",
-        kind: AgentKind::Npx { pkg: "@agentclientprotocol/claude-agent-acp", args: &[] },
+        kind: AgentKind::Npx {
+            pkg: "@agentclientprotocol/claude-agent-acp",
+            args: &[],
+        },
         login_hint: "终端运行 claude 并按提示登录(Anthropic 账号)",
     },
     AgentDef {
         id: "codex",
         name: "Codex",
-        kind: AgentKind::Npx { pkg: "@agentclientprotocol/codex-acp", args: &[] },
+        kind: AgentKind::Npx {
+            pkg: "@agentclientprotocol/codex-acp",
+            args: &[],
+        },
         login_hint: "终端运行 codex login 登录(OpenAI 账号)",
     },
     AgentDef {
         id: "gemini",
         name: "Gemini CLI",
-        kind: AgentKind::Npx { pkg: "@google/gemini-cli", args: &["--acp"] },
+        kind: AgentKind::Npx {
+            pkg: "@google/gemini-cli",
+            args: &["--acp"],
+        },
         login_hint: "终端运行 gemini 并按提示登录(Google 账号)",
     },
     AgentDef {
         id: "copilot",
         name: "GitHub Copilot",
-        kind: AgentKind::Npx { pkg: "@github/copilot", args: &["--acp"] },
+        kind: AgentKind::Npx {
+            pkg: "@github/copilot",
+            args: &["--acp"],
+        },
         login_hint: "终端运行 copilot 并按提示登录(GitHub 账号)",
     },
     AgentDef {
         id: "grok",
         name: "Grok Build",
-        kind: AgentKind::Npx { pkg: "@xai-official/grok", args: &["agent", "stdio"] },
+        kind: AgentKind::Npx {
+            pkg: "@xai-official/grok",
+            args: &["agent", "stdio"],
+        },
         login_hint: "终端运行 grok 并配置 xAI 凭证",
     },
     AgentDef {
         id: "qwen",
         name: "Qwen Code",
-        kind: AgentKind::Npx { pkg: "@qwen-code/qwen-code", args: &["--acp"] },
+        kind: AgentKind::Npx {
+            pkg: "@qwen-code/qwen-code",
+            args: &["--acp"],
+        },
         login_hint: "终端运行 qwen 并按提示登录",
     },
     AgentDef {
         id: "cline",
         name: "Cline",
-        kind: AgentKind::Npx { pkg: "cline", args: &["--acp"] },
+        kind: AgentKind::Npx {
+            pkg: "cline",
+            args: &["--acp"],
+        },
         login_hint: "终端运行 cline 并按提示登录",
     },
     AgentDef {
         id: "glm",
         name: "GLM",
-        kind: AgentKind::Npx { pkg: "glm-acp-agent", args: &[] },
+        kind: AgentKind::Npx {
+            pkg: "glm-acp-agent",
+            args: &[],
+        },
         login_hint: "配置 GLM Coding Plan 的 API Key 后使用(见 glm-acp-agent 文档)",
     },
     AgentDef {
         id: "pi",
         name: "Pi",
-        kind: AgentKind::Npx { pkg: "pi-acp", args: &[] },
+        kind: AgentKind::Npx {
+            pkg: "pi-acp",
+            args: &[],
+        },
         login_hint: "先安装 pi(社区适配器 pi-acp,功能受限:无权限请求/图像)",
     },
     AgentDef {
         id: "opencode",
         name: "OpenCode",
-        kind: AgentKind::Binary { cmd: "opencode", args: &["acp"] },
+        kind: AgentKind::Binary {
+            cmd: "opencode",
+            args: &["acp"],
+        },
         login_hint: "安装 opencode 并完成登录(opencode.ai)",
     },
     AgentDef {
         id: "goose",
         name: "goose",
-        kind: AgentKind::Binary { cmd: "goose", args: &["acp"] },
+        kind: AgentKind::Binary {
+            cmd: "goose",
+            args: &["acp"],
+        },
         login_hint: "安装 goose 并完成登录(block/goose)",
     },
     AgentDef {
         id: "cursor",
         name: "Cursor",
-        kind: AgentKind::Binary { cmd: "cursor-agent", args: &["acp"] },
+        kind: AgentKind::Binary {
+            cmd: "cursor-agent",
+            args: &["acp"],
+        },
         login_hint: "安装 cursor-agent(Cursor 付费计划)",
     },
     AgentDef {
         id: "kimi",
         name: "Kimi CLI",
-        kind: AgentKind::Binary { cmd: "kimi", args: &["acp"] },
+        kind: AgentKind::Binary {
+            cmd: "kimi",
+            args: &["acp"],
+        },
         login_hint: "安装 Kimi CLI 并完成登录(Moonshot 账号)",
     },
 ];
@@ -217,8 +256,8 @@ pub enum AcpEvent {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AcpStartResult {
-    run_id: String,
-    agent_name: String,
+    pub(crate) run_id: String,
+    pub(crate) agent_name: String,
     /// agent 上报的会话配置选项(模型/思考强度等下拉),未上报为空
     config_options: Vec<AcpConfigOptionInfo>,
     /// 旧式 modes(无 config_options 的 agent 用它选模型档位),未上报为空
@@ -237,20 +276,20 @@ pub struct AcpTestResult {
 #[serde(rename_all = "camelCase")]
 pub struct AcpPromptResult {
     stop_reason: String,
-    text: String,
+    pub(crate) text: String,
     /// 本次 prompt 的 token 用量(ACP unstable 字段;agent 未上报为 None)
-    usage: Option<AcpTokenUsage>,
+    pub(crate) usage: Option<AcpTokenUsage>,
 }
 
 /// 一次 prompt 的 token 用量(ACP PromptResponse.usage,unstable 字段)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AcpTokenUsage {
-    total_tokens: u64,
-    input_tokens: u64,
-    output_tokens: u64,
+    pub(crate) total_tokens: u64,
+    pub(crate) input_tokens: u64,
+    pub(crate) output_tokens: u64,
     thought_tokens: Option<u64>,
-    cached_read_tokens: Option<u64>,
+    pub(crate) cached_read_tokens: Option<u64>,
     cached_write_tokens: Option<u64>,
 }
 
@@ -300,7 +339,7 @@ pub struct AcpModeInfo {
 enum JobMsg {
     Prompt {
         prompt: String,
-        channel: Channel<AcpEvent>,
+        sender: AcpEventSender,
         done: oneshot::Sender<Result<AcpPromptResult, AppError>>,
     },
 }
@@ -340,8 +379,21 @@ fn agent_pids() -> &'static Mutex<HashSet<u32>> {
 
 /// 当前 prompt 的流式汇聚点:通知回调写入(累积正文 + Channel 推送),驱动循环读取
 struct PromptSink {
-    channel: Channel<AcpEvent>,
+    sender: AcpEventSender,
     text: String,
+}
+
+#[derive(Clone)]
+pub(crate) struct AcpEventSender(Arc<dyn Fn(AcpEvent) + Send + Sync>);
+
+impl AcpEventSender {
+    pub(crate) fn new(send: impl Fn(AcpEvent) + Send + Sync + 'static) -> Self {
+        Self(Arc::new(send))
+    }
+
+    fn send(&self, event: AcpEvent) {
+        (self.0)(event);
+    }
 }
 
 type SharedSink = Arc<Mutex<Option<PromptSink>>>;
@@ -363,7 +415,9 @@ pub async fn acp_start(
     run_session(
         agent_id,
         custom_command,
-        SessionMode::Generate { cwd: PathBuf::from(&cwd) },
+        SessionMode::Generate {
+            cwd: PathBuf::from(&cwd),
+        },
         model,
         thinking,
         cwd,
@@ -379,15 +433,7 @@ pub async fn acp_test(
     custom_command: Option<String>,
 ) -> AppResult<AcpTestResult> {
     let cwd = std::env::temp_dir().display().to_string();
-    let result = run_session(
-        agent_id,
-        custom_command,
-        SessionMode::Test,
-        None,
-        None,
-        cwd,
-    )
-    .await?;
+    let result = run_session(agent_id, custom_command, SessionMode::Test, None, None, cwd).await?;
     Ok(AcpTestResult {
         agent_name: result.agent_name,
         config_options: result.config_options,
@@ -403,6 +449,17 @@ pub async fn acp_prompt(
     prompt: String,
     on_event: Channel<AcpEvent>,
 ) -> AppResult<AcpPromptResult> {
+    let sender = AcpEventSender::new(move |event| {
+        let _ = on_event.send(event);
+    });
+    acp_prompt_with(run_id, prompt, sender).await
+}
+
+pub(crate) async fn acp_prompt_with(
+    run_id: String,
+    prompt: String,
+    sender: AcpEventSender,
+) -> AppResult<AcpPromptResult> {
     let (done_tx, done_rx) = oneshot::channel();
     {
         let jobs = agent_jobs().lock().unwrap();
@@ -411,12 +468,19 @@ pub async fn acp_prompt(
             .ok_or_else(|| AppError::coded(ErrorCode::AgentPromptFailed, "会话不存在或已结束"))?;
         session
             .job_tx
-            .send(JobMsg::Prompt { prompt, channel: on_event, done: done_tx })
+            .send(JobMsg::Prompt {
+                prompt,
+                sender,
+                done: done_tx,
+            })
             .map_err(|_| AppError::coded(ErrorCode::AgentPromptFailed, "会话已结束"))?;
     }
     match done_rx.await {
         Ok(res) => res,
-        Err(_) => Err(AppError::coded(ErrorCode::AgentPromptFailed, "会话在生成中中断(agent 进程退出)")),
+        Err(_) => Err(AppError::coded(
+            ErrorCode::AgentPromptFailed,
+            "会话在生成中中断(agent 进程退出)",
+        )),
     }
 }
 
@@ -548,7 +612,10 @@ async fn run_session(
         let stderr_tail = stderr_tail.clone();
         tauri::async_runtime::spawn(async move {
             let handshake_err = |e: agent_client_protocol::Error, tail: &Arc<Mutex<Vec<u8>>>| {
-                AppError::coded(ErrorCode::AgentHandshakeFailed, format!("{e}{}", tail_text(tail)))
+                AppError::coded(
+                    ErrorCode::AgentHandshakeFailed,
+                    format!("{e}{}", tail_text(tail)),
+                )
             };
             let result = Client
                 .builder()
@@ -682,9 +749,9 @@ async fn run_session(
                                         None => break,
                                     };
                                     match msg {
-                                        JobMsg::Prompt { prompt, channel, done } => {
+                                        JobMsg::Prompt { prompt, sender, done } => {
                                             *sink.lock().unwrap() =
-                                                Some(PromptSink { channel, text: String::new() });
+                                                Some(PromptSink { sender, text: String::new() });
                                             let mut fut = std::pin::pin!(
                                                 conn.send_request(PromptRequest::new(
                                                     session_id.clone(),
@@ -765,7 +832,10 @@ async fn run_session(
             return Err(cleanup_start_failure(
                 pid,
                 &run_id,
-                AppError::coded(ErrorCode::AgentHandshakeFailed, "连接中断(agent 进程提前退出)"),
+                AppError::coded(
+                    ErrorCode::AgentHandshakeFailed,
+                    "连接中断(agent 进程提前退出)",
+                ),
             ));
         }
         Err(_) => {
@@ -778,7 +848,11 @@ async fn run_session(
     };
     agent_jobs().lock().unwrap().insert(
         run_id,
-        AgentSession { pid, job_tx, cancel },
+        AgentSession {
+            pid,
+            job_tx,
+            cancel,
+        },
     );
     Ok(outcome)
 }
@@ -809,7 +883,10 @@ fn session_options_snapshot(
         .map(|m| {
             m.available_modes
                 .iter()
-                .map(|mode| AcpModeInfo { id: mode.id.to_string(), name: mode.name.clone() })
+                .map(|mode| AcpModeInfo {
+                    id: mode.id.to_string(),
+                    name: mode.name.clone(),
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -823,14 +900,18 @@ fn config_option_info(opt: &SessionConfigOption) -> AcpConfigOptionInfo {
             let choices = match &sel.options {
                 SessionConfigSelectOptions::Ungrouped(list) => list
                     .iter()
-                    .map(|o| AcpConfigChoice { id: o.value.to_string(), name: o.name.clone() })
+                    .map(|o| AcpConfigChoice {
+                        id: o.value.to_string(),
+                        name: o.name.clone(),
+                    })
                     .collect(),
                 SessionConfigSelectOptions::Grouped(groups) => groups
                     .iter()
                     .flat_map(|g| {
-                        g.options
-                            .iter()
-                            .map(|o| AcpConfigChoice { id: o.value.to_string(), name: o.name.clone() })
+                        g.options.iter().map(|o| AcpConfigChoice {
+                            id: o.value.to_string(),
+                            name: o.name.clone(),
+                        })
                     })
                     .collect(),
                 _ => Vec::new(),
@@ -897,8 +978,7 @@ async fn apply_session_config(
                 eprintln!("[agent] 未应用模型选择 {value:?}(不在 agent 上报的模型列表内)");
             }
         } else if modes.iter().any(|m| m.id == value) {
-            let req =
-                SetSessionModeRequest::new(session_id.clone(), value.to_string());
+            let req = SetSessionModeRequest::new(session_id.clone(), value.to_string());
             match tokio::time::timeout(CONFIG_TIMEOUT, conn.send_request(req).block_task()).await {
                 Ok(Ok(_)) => {}
                 Ok(Err(e)) => eprintln!("[agent] set_mode 失败: {e}"),
@@ -941,7 +1021,8 @@ fn resolve_spawn(
         let program_path = resolve_program(program)?;
         return Ok((program_path, args.to_vec(), program.clone()));
     }
-    let id = agent_id.ok_or_else(|| AppError::coded(ErrorCode::AgentNotDetected, "未指定 agent"))?;
+    let id =
+        agent_id.ok_or_else(|| AppError::coded(ErrorCode::AgentNotDetected, "未指定 agent"))?;
     let def = AGENTS
         .iter()
         .find(|d| d.id == id)
@@ -949,7 +1030,10 @@ fn resolve_spawn(
     match &def.kind {
         AgentKind::Npx { pkg, args } => {
             let npx = which::which("npx").map_err(|_| {
-                AppError::coded(ErrorCode::AgentNotDetected, format!("{} 需要 Node.js(npx)", def.name))
+                AppError::coded(
+                    ErrorCode::AgentNotDetected,
+                    format!("{} 需要 Node.js(npx)", def.name),
+                )
             })?;
             let mut full = vec!["-y".to_string(), (*pkg).to_string()];
             full.extend(args.iter().map(|s| s.to_string()));
@@ -959,7 +1043,11 @@ fn resolve_spawn(
             let path = resolve_program(cmd).map_err(|_| {
                 AppError::coded(ErrorCode::AgentNotDetected, format!("未检测到 {cmd} 命令"))
             })?;
-            Ok((path, args.iter().map(|s| s.to_string()).collect(), def.name.to_string()))
+            Ok((
+                path,
+                args.iter().map(|s| s.to_string()).collect(),
+                def.name.to_string(),
+            ))
         }
     }
 }
@@ -969,8 +1057,12 @@ fn resolve_program(program: &str) -> AppResult<PathBuf> {
     if program.contains('/') || program.contains('\\') || Path::new(program).is_absolute() {
         Ok(PathBuf::from(program))
     } else {
-        which::which(program)
-            .map_err(|_| AppError::coded(ErrorCode::AgentNotDetected, format!("未找到命令: {program}")))
+        which::which(program).map_err(|_| {
+            AppError::coded(
+                ErrorCode::AgentNotDetected,
+                format!("未找到命令: {program}"),
+            )
+        })
     }
 }
 
@@ -1054,22 +1146,22 @@ fn route_session_update(sink: &SharedSink, update: SessionUpdate) {
 }
 
 fn push_chunk(sink: &SharedSink, delta: &str) {
-    let (channel, text) = {
+    let (sender, text) = {
         let mut guard = sink.lock().unwrap();
         match guard.as_mut() {
             Some(s) => {
                 s.text.push_str(delta);
-                (s.channel.clone(), s.text.clone())
+                (s.sender.clone(), s.text.clone())
             }
             None => return,
         }
     };
-    let _ = channel.send(AcpEvent::Chunk { text });
+    sender.send(AcpEvent::Chunk { text });
 }
 
 fn push_activity(sink: &SharedSink, text: String) {
     if let Some(s) = sink.lock().unwrap().as_ref() {
-        let _ = s.channel.send(AcpEvent::Activity { text });
+        s.sender.send(AcpEvent::Activity { text });
     }
 }
 
@@ -1082,7 +1174,11 @@ fn read_file_within(
     limit: Option<u32>,
 ) -> std::io::Result<String> {
     let root_canon = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-    let full = if path.is_absolute() { path.to_path_buf() } else { root.join(path) };
+    let full = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    };
     let canon = full.canonicalize()?;
     if !canon.starts_with(&root_canon) {
         return Err(std::io::Error::new(
@@ -1153,7 +1249,10 @@ mod tests {
         assert_eq!(info.category.as_deref(), Some("thought_level"));
         assert_eq!(
             info.choices,
-            vec![AcpConfigChoice { id: "low".into(), name: "Low".into() }]
+            vec![AcpConfigChoice {
+                id: "low".into(),
+                name: "Low".into()
+            }]
         );
 
         assert_eq!(
@@ -1165,7 +1264,10 @@ mod tests {
 
     #[test]
     fn parse_command_line_splits_and_quotes() {
-        assert_eq!(parse_command_line("npx -y pkg --acp"), ["npx", "-y", "pkg", "--acp"]);
+        assert_eq!(
+            parse_command_line("npx -y pkg --acp"),
+            ["npx", "-y", "pkg", "--acp"]
+        );
         assert_eq!(
             parse_command_line(r#""C:\Program Files\agent.exe" --acp "a b""#),
             ["C:\\Program Files\\agent.exe", "--acp", "a b"]
@@ -1181,9 +1283,15 @@ mod tests {
         std::fs::write(&file, "l1\nl2\nl3\n").unwrap();
 
         // 相对路径 + 行区间
-        assert_eq!(read_file_within(&dir, Path::new("a.txt"), Some(2), Some(1)).unwrap(), "l2");
+        assert_eq!(
+            read_file_within(&dir, Path::new("a.txt"), Some(2), Some(1)).unwrap(),
+            "l2"
+        );
         // 绝对路径
-        assert_eq!(read_file_within(&dir, &file, None, None).unwrap(), "l1\nl2\nl3\n");
+        assert_eq!(
+            read_file_within(&dir, &file, None, None).unwrap(),
+            "l1\nl2\nl3\n"
+        );
         // 越界(指向 root 之外)拒绝
         assert!(read_file_within(&dir, Path::new("../escape.txt"), None, None).is_err());
         std::fs::remove_dir_all(&dir).ok();

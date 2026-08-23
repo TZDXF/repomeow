@@ -253,7 +253,12 @@ struct MovePlan {
 }
 
 /// 校验移动参数并计算目标路径(不触碰磁盘)
-fn prepare_move(conn: &Connection, id: i64, target_parent: &str, dir_name: &str) -> AppResult<MovePlan> {
+fn prepare_move(
+    conn: &Connection,
+    id: i64,
+    target_parent: &str,
+    dir_name: &str,
+) -> AppResult<MovePlan> {
     let project = get(conn, id)?;
     let src = std::path::PathBuf::from(&project.path);
     if !src.is_dir() {
@@ -261,10 +266,16 @@ fn prepare_move(conn: &Connection, id: i64, target_parent: &str, dir_name: &str)
     }
     let parent = std::path::Path::new(target_parent.trim());
     if !parent.is_dir() {
-        return Err(AppError::coded(ErrorCode::InvalidPath, target_parent.trim()));
+        return Err(AppError::coded(
+            ErrorCode::InvalidPath,
+            target_parent.trim(),
+        ));
     }
     let dir_name = dir_name.trim();
-    if dir_name.is_empty() || dir_name == "." || dir_name == ".." || dir_name.contains('/')
+    if dir_name.is_empty()
+        || dir_name == "."
+        || dir_name == ".."
+        || dir_name.contains('/')
         || dir_name.contains('\\')
     {
         return Err(AppError::coded(ErrorCode::MoveInvalidDirName, dir_name));
@@ -272,7 +283,9 @@ fn prepare_move(conn: &Connection, id: i64, target_parent: &str, dir_name: &str)
     let target = parent.join(dir_name);
     // 目标路径归一化后再比较与落库:用户输入的 parent 可能是正斜杠风格,
     // 与库里登记的反斜杠路径字面不等会让"移动到自身位置"绕过 MoveSameLocation 检查
-    let target_str = crate::path_util::clean(&target).to_string_lossy().to_string();
+    let target_str = crate::path_util::clean(&target)
+        .to_string_lossy()
+        .to_string();
     // Windows 文件系统大小写不敏感,统一按忽略大小写判断"位置未变化"
     if target_str.eq_ignore_ascii_case(&project.path) {
         return Err(AppError::coded(ErrorCode::MoveSameLocation, ""));
@@ -297,7 +310,11 @@ fn prepare_move(conn: &Connection, id: i64, target_parent: &str, dir_name: &str)
     if registered.is_some() {
         return Err(AppError::coded(ErrorCode::ProjectPathConflict, target_str));
     }
-    Ok(MovePlan { src, target, target_str })
+    Ok(MovePlan {
+        src,
+        target,
+        target_str,
+    })
 }
 
 /// 磁盘移动:同盘直接 rename;跨盘退回"复制 + 删除源"
@@ -321,7 +338,16 @@ fn copy_across_devices(src: &std::path::Path, target: &std::path::Path) -> AppRe
         .arg(src)
         .arg(target)
         .args([
-            "/E", "/SL", "/COPY:DAT", "/DCOPY:T", "/R:1", "/W:1", "/NFL", "/NDL", "/NJH", "/NJS",
+            "/E",
+            "/SL",
+            "/COPY:DAT",
+            "/DCOPY:T",
+            "/R:1",
+            "/W:1",
+            "/NFL",
+            "/NDL",
+            "/NJH",
+            "/NJS",
             "/NP",
         ])
         .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
@@ -332,7 +358,14 @@ fn copy_across_devices(src: &std::path::Path, target: &std::path::Path) -> AppRe
     if code >= 8 {
         let _ = std::fs::remove_dir_all(target);
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let tail: String = stdout.chars().rev().take(200).collect::<String>().chars().rev().collect();
+        let tail: String = stdout
+            .chars()
+            .rev()
+            .take(200)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
         return Err(AppError::coded(
             ErrorCode::MoveRobocopyFailed,
             format!("code={code} tail={tail}"),
@@ -386,7 +419,12 @@ fn apply_move(conn: &Connection, id: i64, plan: &MovePlan) -> AppResult<()> {
 /// 同盘直接 rename;跨盘自动退回"复制 + 删除源"(大目录耗时较长,由异步命令承载)。
 // 命令端为不持锁移动拆成了 prepare_move/move_folder/apply_move 三阶段,此组合函数供测试使用
 #[allow(dead_code)]
-pub fn move_dir(conn: &Connection, id: i64, target_parent: &str, dir_name: &str) -> AppResult<Project> {
+pub fn move_dir(
+    conn: &Connection,
+    id: i64,
+    target_parent: &str,
+    dir_name: &str,
+) -> AppResult<Project> {
     let plan = prepare_move(conn, id, target_parent, dir_name)?;
     move_folder(&plan.src, &plan.target)?;
     apply_move(conn, id, &plan)?;
@@ -481,7 +519,10 @@ pub fn remove(conn: &Connection, id: i64) -> AppResult<()> {
 pub fn normalize_stored_paths(conn: &Connection) -> usize {
     let rows: Vec<(i64, String)> = conn
         .prepare("SELECT id, path FROM projects")
-        .and_then(|mut stmt| stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect())
+        .and_then(|mut stmt| {
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect()
+        })
         .unwrap_or_default();
     let mut changed = 0;
     for (id, path) in rows {
@@ -1027,10 +1068,8 @@ mod tests {
         assert_eq!(hit[0].name, "Alpha");
 
         // 任一词不命中即无结果;多余空白不影响切分
-        assert!(
-            list(&conn, Some("web  alpha   beta ".into()), None)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(list(&conn, Some("web  alpha   beta ".into()), None)
+            .unwrap()
+            .is_empty());
     }
 }

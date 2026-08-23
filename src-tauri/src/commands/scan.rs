@@ -47,9 +47,17 @@ mod tests {
         let dir = temp_project_dir("assets");
         let p = Path::new(&dir);
 
-        fs::write(p.join("package.json"), r#"{"name":"demo","scripts":{"dev":"vite"}}"#).unwrap();
+        fs::write(
+            p.join("package.json"),
+            r#"{"name":"demo","scripts":{"dev":"vite"}}"#,
+        )
+        .unwrap();
         fs::create_dir_all(p.join("deploy")).unwrap();
-        fs::write(p.join("deploy/app.yml"), "services:\n  web:\n    image: nginx\n").unwrap();
+        fs::write(
+            p.join("deploy/app.yml"),
+            "services:\n  web:\n    image: nginx\n",
+        )
+        .unwrap();
 
         let assets = scan_assets(&dir).unwrap();
         assert_eq!(assets.package_scripts.len(), 1);
@@ -85,7 +93,9 @@ mod tests {
         let assets = scan_assets(&dir).unwrap();
         assert_eq!(assets.java_builds.len(), 1);
         assert_eq!(assets.java_builds[0].dir, ".");
-        assert!(assets.java_builds[0].run_command.contains("spring-boot:run"));
+        assert!(assets.java_builds[0]
+            .run_command
+            .contains("spring-boot:run"));
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -97,7 +107,10 @@ mod tests {
         let assets = scan_assets(r"D:\code\ruoyi-vue-pro").unwrap();
         println!("package_scripts: {}", assets.package_scripts.len());
         for g in &assets.java_builds {
-            println!("java_build: dir={} tool={:?} cmd={}", g.dir, g.tool, g.run_command);
+            println!(
+                "java_build: dir={} tool={:?} cmd={}",
+                g.dir, g.tool, g.run_command
+            );
         }
     }
 }

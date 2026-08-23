@@ -1,10 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { i18n } from "@/i18n";
-import { createWikiKernel, regenerateWikiPage, type WikiGenKernel } from "@/lib/wiki-generator";
-import { loadWiki, saveWikiMeta, wikiChangedFiles } from "@/lib/wiki";
+import { regenerateWikiPage, updateWiki } from "@/lib/wiki-generator";
+import { loadWiki } from "@/lib/wiki";
 import { useWikiStore } from "@/stores/wiki";
-import type { WikiData, WikiOutlinePage } from "@/types";
 
 const generationHarness = vi.hoisted(() => {
   const finishes = new Map<string, () => void>();
@@ -13,9 +12,8 @@ const generationHarness = vi.hoisted(() => {
 });
 
 vi.mock("@/lib/wiki-generator", () => ({
-  backendIdOf: () => "builtin",
-  createWikiKernel: vi.fn(),
   regenerateWikiPage: vi.fn(),
+  updateWiki: vi.fn(),
   generateWiki: vi.fn(
     async (
       ...[project, _options, _signal, callbacks]: [
@@ -40,11 +38,8 @@ vi.mock("@/lib/wiki-generator", () => ({
 }));
 
 vi.mock("@/lib/wiki", () => ({
-  commitWiki: vi.fn(),
   deleteWiki: vi.fn(),
   loadWiki: vi.fn(async () => null),
-  saveWikiMeta: vi.fn(),
-  wikiChangedFiles: vi.fn(),
 }));
 
 vi.mock("@/stores/settings", () => ({
@@ -66,25 +61,23 @@ describe("wiki store generation concurrency", () => {
     generationHarness.errors.clear();
     generationHarness.finishes.clear();
     vi.mocked(loadWiki).mockResolvedValue(null);
-    vi.mocked(saveWikiMeta).mockResolvedValue(undefined);
-    vi.mocked(regenerateWikiPage).mockResolvedValue(undefined);
-    vi.mocked(createWikiKernel).mockResolvedValue({
-      backendId: "builtin",
-      concurrency: 1,
+    vi.mocked(regenerateWikiPage).mockResolvedValue({
       model: "test-model",
-      generateOutline: vi.fn(),
-      generatePage: vi.fn(),
-      dispose: vi.fn().mockResolvedValue(undefined),
-    } satisfies WikiGenKernel);
+      generator: "builtin",
+    });
   });
 
   it("allows different projects to generate independently", async () => {
     const store = useWikiStore();
-    const first = store.generate({ path: "D:\\repos\\first", name: "first" }, "zh-CN");
-    const second = store.generate({ path: "D:\\repos\\second", name: "second" }, "zh-CN");
+    const first = store.generate({ id: 1, path: "D:\\repos\\first", name: "first" }, "zh-CN");
+    const second = store.generate({ id: 2, path: "D:\\repos\\second", name: "second" }, "zh-CN");
 
     expect(store.isGenerating("D:\\repos\\first")).toBe(true);
     expect(store.isGenerating("D:\\repos\\second")).toBe(true);
+    expect(store.backgroundTasks).toHaveLength(2);
+    expect(store.backgroundTasks).toEqual(
+      expect.arrayContaining([expect.objectContaining({ projectId: 1, action: "generate" })]),
+    );
 
     generationHarness.finishes.get("D:\\repos\\first")?.();
     await first;
@@ -92,12 +85,14 @@ describe("wiki store generation concurrency", () => {
     expect(store.generationFor("D:\\repos\\first")?.phase).toBe("done");
     expect(store.isGenerating("D:\\repos\\first")).toBe(false);
     expect(store.isGenerating("D:\\repos\\second")).toBe(true);
+    expect(store.backgroundTasks).toHaveLength(1);
 
     generationHarness.finishes.get("D:\\repos\\second")?.();
     await second;
 
     expect(store.generationFor("D:\\repos\\second")?.phase).toBe("done");
     expect(store.generating).toBe(false);
+    expect(store.backgroundTasks).toHaveLength(0);
   });
 
   it("将大纲解析错误转换为友好的用户提示", async () => {
@@ -115,114 +110,40 @@ describe("wiki store generation concurrency", () => {
   });
 });
 
-function createWikiData(): WikiData {
-  const pages: Array<WikiOutlinePage & { content: string }> = [
-    {
-      id: "overview",
-      file: "01-overview.md",
-      title: "Overview",
-      description: "Project overview",
-      section: null,
-      importance: "high",
-      relevantFiles: ["README.md", "src/main.ts"],
-      relatedPages: [],
-      content: "old overview",
-    },
-    {
-      id: "settings",
-      file: "02-settings.md",
-      title: "Settings",
-      description: "Settings",
-      section: null,
-      importance: "medium",
-      relevantFiles: ["src/settings.ts"],
-      relatedPages: [],
-      content: "old settings",
-    },
-  ];
-  return {
-    meta: {
-      version: 1,
-      projectPath: "D:\\repos\\wiki-auto-update",
-      generatedAt: "2026-08-23T00:00:00Z",
-      headSha: "old-head",
-      model: "test-model",
-      language: "zh-CN",
-      status: "completed",
-      outline: pages,
-      generator: "builtin",
-    },
-    pages,
-    stale: true,
-  };
-}
-
 describe("wiki store automatic update", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     setActivePinia(createPinia());
-    vi.mocked(saveWikiMeta).mockResolvedValue(undefined);
-    vi.mocked(regenerateWikiPage).mockResolvedValue(undefined);
-    vi.mocked(createWikiKernel).mockResolvedValue({
-      backendId: "builtin",
-      concurrency: 1,
+    vi.mocked(regenerateWikiPage).mockResolvedValue({
       model: "test-model",
-      generateOutline: vi.fn(),
-      generatePage: vi.fn(),
-      dispose: vi.fn().mockResolvedValue(undefined),
-    } satisfies WikiGenKernel);
+      generator: "builtin",
+    });
   });
 
-  it("HEAD 变化后立即按 relevantFiles 重生成命中的页面", async () => {
-    const data = createWikiData();
-    vi.mocked(loadWiki).mockResolvedValue(data);
-    vi.mocked(wikiChangedFiles).mockResolvedValue({
-      files: ["docs/notes.md", "src/main.ts"],
-      headSha: "new-head",
-    });
+  it("HEAD 变化后把自动增量任务整体交给后端", async () => {
+    vi.mocked(updateWiki).mockResolvedValue(1);
+    const project = { path: "D:\\repos\\wiki-auto-update", name: "wiki-auto-update" };
 
-    const count = await useWikiStore().autoUpdate(
-      { path: data.meta.projectPath, name: "wiki-auto-update" },
-      "zh-CN",
-    );
+    const count = await useWikiStore().autoUpdate(project, "zh-CN");
 
     expect(count).toBe(1);
-    expect(regenerateWikiPage).toHaveBeenCalledTimes(1);
-    expect(regenerateWikiPage).toHaveBeenCalledWith(
-      expect.anything(),
-      data.meta.projectPath,
-      expect.objectContaining({ id: "overview" }),
-      "zh-CN",
-      expect.any(AbortSignal),
-      { changedFiles: ["docs/notes.md", "src/main.ts"] },
+    expect(updateWiki).toHaveBeenCalledWith(
+      project,
+      expect.objectContaining({ backend: { kind: "builtin" } }),
+      true,
+      expect.any(Function),
     );
-    expect(saveWikiMeta).toHaveBeenCalledWith(
-      data.meta.projectPath,
-      expect.objectContaining({ headSha: "new-head" }),
-      "update",
-    );
+    expect(regenerateWikiPage).not.toHaveBeenCalled();
   });
 
-  it("没有 relevantFiles 命中时不创建生成内核，只推进已检查 HEAD", async () => {
-    const data = createWikiData();
-    vi.mocked(loadWiki).mockResolvedValue(data);
-    vi.mocked(wikiChangedFiles).mockResolvedValue({
-      files: ["docs/notes.md"],
-      headSha: "new-head",
-    });
+  it("后端判定没有受影响页面时返回 0", async () => {
+    vi.mocked(updateWiki).mockResolvedValue(0);
+    const project = { path: "D:\\repos\\wiki-auto-update", name: "wiki-auto-update" };
 
-    const count = await useWikiStore().autoUpdate(
-      { path: data.meta.projectPath, name: "wiki-auto-update" },
-      "zh-CN",
-    );
+    const count = await useWikiStore().autoUpdate(project, "zh-CN");
 
     expect(count).toBe(0);
-    expect(createWikiKernel).not.toHaveBeenCalled();
     expect(regenerateWikiPage).not.toHaveBeenCalled();
-    expect(saveWikiMeta).toHaveBeenCalledWith(
-      data.meta.projectPath,
-      expect.objectContaining({ headSha: "new-head", model: "test-model" }),
-      "update",
-    );
+    expect(updateWiki).toHaveBeenCalledOnce();
   });
 });

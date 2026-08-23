@@ -6,12 +6,12 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, State, ipc::Channel};
-use tokio::sync::Semaphore;
+use tauri::{ipc::Channel, AppHandle, Emitter, Manager, State};
+use tokio::sync::{Notify, Semaphore};
 
 use git2::{
-    BranchType, Delta, DiffFindOptions, DiffOptions, Patch, Repository, Sort,
-    Status as Git2Status, StatusOptions,
+    BranchType, Delta, DiffFindOptions, DiffOptions, Patch, Repository, Sort, Status as Git2Status,
+    StatusOptions,
 };
 
 use crate::commands::account;
@@ -78,12 +78,7 @@ fn fetch_finished(path: &str, ok: bool) {
     if ok {
         tracker.retry_after.remove(&key);
     } else {
-        let fails = tracker
-            .retry_after
-            .get(&key)
-            .map(|(_, f)| *f)
-            .unwrap_or(0)
-            + 1;
+        let fails = tracker.retry_after.get(&key).map(|(_, f)| *f).unwrap_or(0) + 1;
         let backoff = FETCH_RETRY_BASE
             .saturating_mul(2u32.saturating_pow(fails.saturating_sub(1)))
             .min(FETCH_RETRY_MAX);
@@ -172,7 +167,9 @@ pub enum GitCheckScope {
         #[serde(rename = "projectId")]
         project_id: i64,
     },
-    Path { path: String },
+    Path {
+        path: String,
+    },
 }
 
 /// 所有 Git 状态来源最终都发布为同一种事件,消费者按变化标记订阅所需逻辑。
@@ -323,7 +320,9 @@ fn friendly_git_error(raw: &str) -> AppError {
     // 上游远程分支已被删除:pull 当前分支时报 "no such ref was fetched",
     // fetch/pull 指定分支时报 "couldn't find remote ref"(不同 git 版本大小写不一)
     if text.contains("no such ref was fetched")
-        || text.to_ascii_lowercase().contains("couldn't find remote ref")
+        || text
+            .to_ascii_lowercase()
+            .contains("couldn't find remote ref")
     {
         return coded(ErrorCode::GitRemoteBranchGone, "");
     }
@@ -413,7 +412,11 @@ fn format_git_time(t: git2::Time) -> String {
     let offset = chrono::FixedOffset::east_opt(t.offset_minutes() * 60)
         .unwrap_or_else(|| chrono::FixedOffset::east_opt(0).expect("零时区恒合法"));
     chrono::DateTime::from_timestamp(t.seconds(), 0)
-        .map(|dt| dt.with_timezone(&offset).format("%Y-%m-%d %H:%M").to_string())
+        .map(|dt| {
+            dt.with_timezone(&offset)
+                .format("%Y-%m-%d %H:%M")
+                .to_string()
+        })
         .unwrap_or_default()
 }
 
@@ -430,7 +433,10 @@ fn parse_log_datetime(s: &str) -> Option<i64> {
                 .and_then(|d| d.and_hms_opt(0, 0, 0))
         })?;
     // single():夏令时歧义/不存在时刻放弃过滤而非误过滤
-    Local.from_local_datetime(&naive).single().map(|dt| dt.timestamp())
+    Local
+        .from_local_datetime(&naive)
+        .single()
+        .map(|dt| dt.timestamp())
 }
 
 /// 当前 HEAD 的分支显示名(复刻 porcelain v2 `# branch.head` 语义):
@@ -504,9 +510,7 @@ pub fn status(path: &str) -> AppResult<GitStatus> {
         .recurse_untracked_dirs(false)
         .include_ignored(false);
     let workdir = repo.workdir().map(|p| p.to_string_lossy().to_string());
-    let statuses = repo
-        .statuses(Some(&mut opts))
-        .map_err(git_err)?;
+    let statuses = repo.statuses(Some(&mut opts)).map_err(git_err)?;
     for entry in statuses.iter() {
         let s = entry.status();
         if s.contains(Git2Status::CONFLICTED) {
@@ -649,6 +653,91 @@ pub struct GitRemote {
 pub struct GitStatusItem {
     pub path: String,
     pub status: GitStatus,
+}
+
+const GIT_UPDATE_SCHEDULE_ID: &str = "git_update";
+const DEFAULT_GIT_CHECK_INTERVAL_MINUTES: u64 = 10;
+const MIN_GIT_CHECK_INTERVAL_MINUTES: u64 = 1;
+const MAX_GIT_CHECK_INTERVAL_MINUTES: u64 = 24 * 60;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemSchedule {
+    pub id: String,
+    pub enabled: bool,
+    pub interval_minutes: u64,
+    pub last_run_at: Option<i64>,
+}
+
+impl Default for SystemSchedule {
+    fn default() -> Self {
+        Self {
+            id: GIT_UPDATE_SCHEDULE_ID.to_string(),
+            enabled: true,
+            interval_minutes: DEFAULT_GIT_CHECK_INTERVAL_MINUTES,
+            last_run_at: None,
+        }
+    }
+}
+
+/// Git 监控配置变更通知：设置页保存后立即唤醒休眠中的 monitor_loop。
+pub struct GitMonitorNotify(pub Arc<Notify>);
+
+fn read_git_system_schedule(conn: &rusqlite::Connection) -> AppResult<SystemSchedule> {
+    conn.query_row(
+        "SELECT id, enabled, interval_minutes, last_run_at FROM system_schedules WHERE id = ?1",
+        [GIT_UPDATE_SCHEDULE_ID],
+        |row| {
+            Ok(SystemSchedule {
+                id: row.get(0)?,
+                enabled: row.get::<_, i64>(1)? != 0,
+                interval_minutes: row.get::<_, u64>(2)?,
+                last_run_at: row.get(3)?,
+            })
+        },
+    )
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn list_system_schedules(db: State<'_, Db>) -> AppResult<Vec<SystemSchedule>> {
+    let conn = db.0.lock().unwrap();
+    Ok(vec![read_git_system_schedule(&conn)?])
+}
+
+#[tauri::command]
+pub fn save_system_schedule(
+    app: AppHandle,
+    db: State<'_, Db>,
+    id: String,
+    enabled: bool,
+    interval_minutes: u64,
+) -> AppResult<SystemSchedule> {
+    if id != GIT_UPDATE_SCHEDULE_ID {
+        return Err(AppError::coded(
+            ErrorCode::DbError,
+            format!("unknown system schedule: {id}"),
+        ));
+    }
+    let interval = interval_minutes.clamp(
+        MIN_GIT_CHECK_INTERVAL_MINUTES,
+        MAX_GIT_CHECK_INTERVAL_MINUTES,
+    );
+    let schedule = {
+        let conn = db.0.lock().unwrap();
+        conn.execute(
+            "INSERT INTO system_schedules (id, enabled, interval_minutes, last_run_at)
+             VALUES (?1, ?2, ?3, NULL)
+             ON CONFLICT(id) DO UPDATE SET enabled = excluded.enabled,
+                 interval_minutes = excluded.interval_minutes",
+            rusqlite::params![GIT_UPDATE_SCHEDULE_ID, enabled as i64, interval],
+        )?;
+        read_git_system_schedule(&conn)?
+    };
+    if let Some(notify) = app.try_state::<GitMonitorNotify>() {
+        notify.0.notify_one();
+    }
+    Ok(schedule)
 }
 
 #[derive(Debug, Clone)]
@@ -909,18 +998,50 @@ pub async fn check_git_status(
     Ok(check_targets(&app, targets, force, fetch_remote, "manual").await)
 }
 
-/// 统一后台检查周期:本地状态、fetch 与自动快进在同一流水线执行。
-const GIT_CHECK_INTERVAL: Duration = Duration::from_secs(30);
 /// 启动后首轮刷新的延迟:先让首屏渲染完成,避免启动瞬间与列表请求抢资源
 const GIT_CHECK_FIRST_DELAY: Duration = Duration::from_secs(3);
+
+fn load_git_monitor_schedule(app: &AppHandle) -> SystemSchedule {
+    let db = app.state::<Db>();
+    let conn = db.0.lock().unwrap();
+    read_git_system_schedule(&conn).unwrap_or_default()
+}
+
+fn mark_git_monitor_run(app: &AppHandle) {
+    let db = app.state::<Db>();
+    let conn = db.0.lock().unwrap();
+    if let Err(error) = conn.execute(
+        "UPDATE system_schedules SET last_run_at = ?1 WHERE id = ?2",
+        rusqlite::params![crate::time_util::now_ts(), GIT_UPDATE_SCHEDULE_ID],
+    ) {
+        eprintln!("[git] 更新定时检查执行时间失败: {error}");
+    }
+}
 
 pub async fn monitor_loop(app: AppHandle) {
     tokio::time::sleep(GIT_CHECK_FIRST_DELAY).await;
     loop {
-        if let Ok(targets) = load_check_targets(&app, GitCheckScope::All) {
-            check_targets(&app, targets, false, true, "periodic").await;
+        let schedule = load_git_monitor_schedule(&app);
+        if schedule.enabled {
+            if let Ok(targets) = load_check_targets(&app, GitCheckScope::All) {
+                check_targets(&app, targets, false, true, "periodic").await;
+                mark_git_monitor_run(&app);
+            }
         }
-        tokio::time::sleep(GIT_CHECK_INTERVAL).await;
+        let interval = schedule.interval_minutes.clamp(
+            MIN_GIT_CHECK_INTERVAL_MINUTES,
+            MAX_GIT_CHECK_INTERVAL_MINUTES,
+        );
+        let sleep = tokio::time::sleep(Duration::from_secs(interval * 60));
+        tokio::pin!(sleep);
+        if let Some(notify) = app.try_state::<GitMonitorNotify>() {
+            tokio::select! {
+                _ = &mut sleep => {}
+                _ = notify.0.notified() => {}
+            }
+        } else {
+            sleep.await;
+        }
     }
 }
 
@@ -935,13 +1056,14 @@ fn list_remotes_blocking(path: &str) -> AppResult<Vec<GitRemote>> {
     let Some(repo) = open_repo(path)? else {
         return Ok(vec![]);
     };
-    let names = repo
-        .remotes()
-        .map_err(git_err)?;
+    let names = repo.remotes().map_err(git_err)?;
     let mut out: Vec<GitRemote> = Vec::new();
     for name in names.iter().flatten() {
         // 无 URL 的 remote(纯 pushurl 等)跳过,与 `git remote -v` 一致取 fetch 地址
-        let url = repo.find_remote(name).ok().and_then(|r| r.url().map(String::from));
+        let url = repo
+            .find_remote(name)
+            .ok()
+            .and_then(|r| r.url().map(String::from));
         if let Some(url) = url.filter(|u| !u.is_empty()) {
             out.push(GitRemote {
                 name: name.to_string(),
@@ -1052,13 +1174,10 @@ fn local_branch_names(path: &str) -> AppResult<Vec<String>> {
 /// 本地分支短名列表(剥 refs/heads/ 前缀,与 git log %D 装饰命名一致;
 /// 不用 short 消歧规则,避免分支与 remote 同名时输出 "heads/zc" 导致图谱定位失败)
 fn local_branch_names_of(repo: &Repository) -> AppResult<Vec<String>> {
-    let iter = repo
-        .branches(Some(BranchType::Local))
-        .map_err(git_err)?;
+    let iter = repo.branches(Some(BranchType::Local)).map_err(git_err)?;
     let mut names = Vec::new();
     for item in iter {
-        let (branch, _) =
-            item.map_err(git_err)?;
+        let (branch, _) = item.map_err(git_err)?;
         if let Some(name) = branch.name().ok().flatten() {
             names.push(name.to_string());
         }
@@ -1080,12 +1199,9 @@ fn list_branches_blocking(path: &str) -> AppResult<GitBranches> {
 
     // 远程分支:剥 refs/remotes/ 前缀,过滤 origin/HEAD 这类符号引用
     let mut remote = Vec::new();
-    let remote_iter = repo
-        .branches(Some(BranchType::Remote))
-        .map_err(git_err)?;
+    let remote_iter = repo.branches(Some(BranchType::Remote)).map_err(git_err)?;
     for item in remote_iter {
-        let (branch, _) =
-            item.map_err(git_err)?;
+        let (branch, _) = item.map_err(git_err)?;
         if branch.get().kind() == Some(git2::ReferenceType::Symbolic) {
             continue;
         }
@@ -1161,7 +1277,11 @@ pub async fn git_init(
     let status = run_blocking(move || {
         let branch = {
             let b = branch.trim();
-            if b.is_empty() { "main" } else { b }
+            if b.is_empty() {
+                "main"
+            } else {
+                b
+            }
         };
         if let Err(e) = run_git(&path, &["init", "-b", branch]) {
             let msg = e.to_string();
@@ -1172,7 +1292,11 @@ pub async fn git_init(
                 return Err(e);
             }
         }
-        if let Some(url) = remote_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+        if let Some(url) = remote_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|u| !u.is_empty())
+        {
             // 先查 origin 是否存在:已存在走 set-url,不存在走 add,保证幂等
             if run_git(&path, &["remote", "get-url", "origin"]).is_ok() {
                 run_git(&path, &["remote", "set-url", "origin", url])?;
@@ -1203,8 +1327,10 @@ pub async fn git_checkout(
     start_point: Option<String>,
 ) -> AppResult<GitStatus> {
     let event_path = path.clone();
-    let status = run_blocking(move || checkout_blocking(&path, &branch, create, remote, start_point.as_deref()))
-        .await?;
+    let status = run_blocking(move || {
+        checkout_blocking(&path, &branch, create, remote, start_point.as_deref())
+    })
+    .await?;
     publish_write_status(&app, &event_path, &status, "checkout", true);
     Ok(status)
 }
@@ -1298,8 +1424,8 @@ pub async fn git_commit(
     paths: Option<Vec<String>>,
 ) -> AppResult<GitStatus> {
     let event_path = path.clone();
-    let status = run_blocking(move || commit_blocking(&path, &message, include_untracked, paths))
-        .await?;
+    let status =
+        run_blocking(move || commit_blocking(&path, &message, include_untracked, paths)).await?;
     publish_write_status(&app, &event_path, &status, "commit", true);
     Ok(status)
 }
@@ -1354,7 +1480,11 @@ fn commit_blocking(
 /// 为其他本地分支时不切换工作区,经 `git fetch <remote> <src>:<branch>` 快进更新引用
 /// (分叉或分支被其他 worktree 占用时由 git 报错透传)
 #[tauri::command]
-pub async fn git_pull(app: AppHandle, path: String, branch: Option<String>) -> AppResult<GitPullResult> {
+pub async fn git_pull(
+    app: AppHandle,
+    path: String,
+    branch: Option<String>,
+) -> AppResult<GitPullResult> {
     let event_path = path.clone();
     let result = run_blocking(move || match branch {
         Some(b) if !b.is_empty() && current_branch(&path).as_deref() != Some(b.as_str()) => {
@@ -1425,7 +1555,11 @@ fn current_branch(path: &str) -> Option<String> {
 /// 解析本地分支的 upstream,返回 (远端名, 远端分支名);未配置或已失效时返回 None
 fn upstream_of(path: &str, branch: &str) -> Option<(String, String)> {
     let out = git_command(path)
-        .args(["rev-parse", "--abbrev-ref", &format!("{branch}@{{upstream}}")])
+        .args([
+            "rev-parse",
+            "--abbrev-ref",
+            &format!("{branch}@{{upstream}}"),
+        ])
         .output()
         .ok()?;
     if !out.status.success() {
@@ -1467,7 +1601,11 @@ fn default_push_remote(path: &str) -> Option<String> {
 /// branch 为其他本地分支时推送该分支:有 upstream 推到 upstream 对应分支,
 /// 无 upstream 回退 `git push -u <默认远端> <branch>` 并建立跟踪
 #[tauri::command]
-pub async fn git_push(app: AppHandle, path: String, branch: Option<String>) -> AppResult<GitStatus> {
+pub async fn git_push(
+    app: AppHandle,
+    path: String,
+    branch: Option<String>,
+) -> AppResult<GitStatus> {
     let event_path = path.clone();
     let status = run_blocking(move || match branch {
         Some(b) if !b.is_empty() && current_branch(&path).as_deref() != Some(b.as_str()) => {
@@ -1682,9 +1820,7 @@ fn list_worktrees_blocking(path: &str) -> AppResult<Vec<GitWorktree>> {
     if let Some(workdir) = repo.workdir() {
         list.push(worktree_info_of(&repo, workdir, true));
     }
-    let names = repo
-        .worktrees()
-        .map_err(git_err)?;
+    let names = repo.worktrees().map_err(git_err)?;
     for name in names.iter().flatten() {
         let Ok(wt) = repo.find_worktree(name) else {
             continue;
@@ -1734,7 +1870,10 @@ fn ensure_worktree_excluded(commondir: &Path, workdir: &Path, worktree_path: &Pa
         return;
     }
     if let Err(e) = std::fs::create_dir_all(&info_dir) {
-        eprintln!("[git] 写入 worktree 排除失败(创建 {}): {e}", info_dir.display());
+        eprintln!(
+            "[git] 写入 worktree 排除失败(创建 {}): {e}",
+            info_dir.display()
+        );
         return;
     }
     let mut content = existing;
@@ -1836,7 +1975,10 @@ fn worktree_add_blocking(
     } else {
         branch.split_once('/').map(|(_, s)| s).unwrap_or(branch)
     };
-    if existing.iter().any(|w| w.branch.as_deref() == Some(local_name)) {
+    if existing
+        .iter()
+        .any(|w| w.branch.as_deref() == Some(local_name))
+    {
         return Err(AppError::coded(ErrorCode::GitBranchCheckedOut, local_name));
     }
     let target = resolve_worktree_target(&main_root, input, branch);
@@ -1892,7 +2034,9 @@ fn attach_remote_worktree(
     } else {
         run_git(
             path,
-            &["worktree", "add", "--track", "-b", local_name, target, remote],
+            &[
+                "worktree", "add", "--track", "-b", local_name, target, remote,
+            ],
         )?;
     }
     Ok(())
@@ -1930,7 +2074,13 @@ pub async fn git_worktree_remove(
 ) -> AppResult<Vec<GitWorktree>> {
     let event_path = path.clone();
     let worktrees = run_blocking(move || {
-        worktree_remove_blocking(&path, &worktree_path, force, delete_branch, branch.as_deref())
+        worktree_remove_blocking(
+            &path,
+            &worktree_path,
+            force,
+            delete_branch,
+            branch.as_deref(),
+        )
     })
     .await?;
     if let Ok(status) = run_blocking({
@@ -1963,9 +2113,12 @@ fn worktree_remove_blocking(
     }
     // 分支名优先取 worktree 登记;登记已不在(上次删 worktree 成功、分支未删的重试)
     // 时用前端传入的候选名
-    let branch = target
-        .and_then(|t| t.branch.clone())
-        .or_else(|| branch_hint.map(str::trim).filter(|s| !s.is_empty()).map(str::to_string));
+    let branch = target.and_then(|t| t.branch.clone()).or_else(|| {
+        branch_hint
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    });
     if target.is_some() && Path::new(worktree_path).exists() {
         let mut args = vec!["worktree", "remove"];
         if force {
@@ -2002,9 +2155,13 @@ pub async fn git_merge(
     squash: bool,
 ) -> AppResult<GitMergeResult> {
     let event_path = path.clone();
-    let result = run_blocking(move || merge_blocking(&path, &branch, target.as_deref(), squash))
-        .await?;
-    let changed_path = if result.merged_in.is_empty() { &event_path } else { &result.merged_in };
+    let result =
+        run_blocking(move || merge_blocking(&path, &branch, target.as_deref(), squash)).await?;
+    let changed_path = if result.merged_in.is_empty() {
+        &event_path
+    } else {
+        &result.merged_in
+    };
     publish_write_status(&app, changed_path, &result.status, "merge", true);
     Ok(result)
 }
@@ -2297,7 +2454,8 @@ fn commit_context_blocking(path: &str) -> AppResult<GitCommitContext> {
     // 未跟踪清单(等价 ls-files --others --exclude-standard:递归目录、不含忽略文件),
     // 剔除嵌套 git 仓库目录(子仓库是独立项目,不算本仓库内容)
     let mut sopts = StatusOptions::new();
-    sopts.include_untracked(true)
+    sopts
+        .include_untracked(true)
         .recurse_untracked_dirs(true)
         .include_ignored(false);
     let statuses = repo.statuses(Some(&mut sopts)).map_err(git_err)?;
@@ -2437,7 +2595,11 @@ pub(crate) fn run_git_log(
         let author_name = author_sig.name().unwrap_or_default();
         // --author 语义:匹配 "Name <email>"(git 为正则,这里用包含匹配覆盖常规用法)
         if let Some(a) = author {
-            let full = format!("{} <{}>", author_name, author_sig.email().unwrap_or_default());
+            let full = format!(
+                "{} <{}>",
+                author_name,
+                author_sig.email().unwrap_or_default()
+            );
             if !full.contains(a) {
                 continue;
             }
@@ -2569,7 +2731,8 @@ fn build_graph_revwalk<'r>(
         return Ok(None);
     }
     let mut walk = repo.revwalk().map_err(walk_err)?;
-    walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME).map_err(walk_err)?;
+    walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)
+        .map_err(walk_err)?;
     for tip in tips {
         walk.push(tip).map_err(walk_err)?;
     }
@@ -2667,16 +2830,9 @@ fn commit_diff<'r>(
     if commit.parent_count() > 1 {
         return Ok(None);
     }
-    let new_tree = commit
-        .tree()
-        .map_err(git_err)?;
+    let new_tree = commit.tree().map_err(git_err)?;
     let old_tree = if commit.parent_count() == 1 {
-        Some(
-            commit
-                .parent(0)
-                .and_then(|p| p.tree())
-                .map_err(git_err)?,
-        )
+        Some(commit.parent(0).and_then(|p| p.tree()).map_err(git_err)?)
     } else {
         None
     };
@@ -2799,7 +2955,13 @@ pub async fn git_commit_file_diff(
     ignore_ws: Option<String>,
 ) -> AppResult<GitCommitFileDiff> {
     run_blocking(move || {
-        commit_file_diff_blocking(&path, &hash, &file_path, old_path.as_deref(), ignore_ws.as_deref())
+        commit_file_diff_blocking(
+            &path,
+            &hash,
+            &file_path,
+            old_path.as_deref(),
+            ignore_ws.as_deref(),
+        )
     })
     .await
 }
@@ -2882,18 +3044,14 @@ fn commit_file_blob_blocking(
     } else {
         commit
     };
-    let tree = commit
-        .tree()
-        .map_err(git_err)?;
+    let tree = commit.tree().map_err(git_err)?;
     let Ok(entry) = tree.get_path(Path::new(file_path)) else {
         return Ok(None);
     };
     if entry.kind() != Some(git2::ObjectType::Blob) {
         return Ok(None);
     }
-    let blob = repo
-        .find_blob(entry.id())
-        .map_err(git_err)?;
+    let blob = repo.find_blob(entry.id()).map_err(git_err)?;
     if blob.size() > COMMIT_BLOB_MAX_BYTES {
         return Err(AppError::coded(
             ErrorCode::GitCommandFailed,
@@ -3145,7 +3303,10 @@ pub async fn git_clone(
         ));
     }
     if target.exists() {
-        return Err(AppError::coded(ErrorCode::GitCloneTargetExists, target_path.clone()));
+        return Err(AppError::coded(
+            ErrorCode::GitCloneTargetExists,
+            target_path.clone(),
+        ));
     }
 
     let mut command = tokio::process::Command::new("git");
@@ -3226,7 +3387,10 @@ pub async fn git_clone(
             Ok(None) => tokio::time::sleep(std::time::Duration::from_millis(200)).await,
             Err(e) => {
                 clone_jobs().lock().await.remove(&job_id);
-                break Err(AppError::coded(ErrorCode::GitClonePollFailed, e.to_string()));
+                break Err(AppError::coded(
+                    ErrorCode::GitClonePollFailed,
+                    e.to_string(),
+                ));
             }
         }
     };
@@ -3303,8 +3467,7 @@ mod tests {
             GitCheckScope::All
         ));
         assert!(matches!(
-            serde_json::from_str::<GitCheckScope>(r#"{"kind":"project","projectId":42}"#)
-                .unwrap(),
+            serde_json::from_str::<GitCheckScope>(r#"{"kind":"project","projectId":42}"#).unwrap(),
             GitCheckScope::Project { project_id: 42 }
         ));
         assert!(matches!(
@@ -3438,7 +3601,8 @@ mod tests {
         fs::write(dir.join("a.txt"), "hello world\n").unwrap();
         git(&dir, &["commit", "-am", "update"]);
 
-        let d = commit_file_diff_blocking(dir.to_str().unwrap(), "HEAD", "a.txt", None, None).unwrap();
+        let d =
+            commit_file_diff_blocking(dir.to_str().unwrap(), "HEAD", "a.txt", None, None).unwrap();
         assert!(d.diff.contains("@@"), "应含 hunk 头: {}", d.diff);
         assert!(d.diff.contains("+hello world"), "实际: {}", d.diff);
         assert!(!d.truncated);
@@ -3457,8 +3621,13 @@ mod tests {
         fs::write(dir.join("a.txt"), "l1\nl2\na1\na2\nl3\nl4\nl5\n").unwrap();
         git(&dir, &["commit", "-am", "add"]);
 
-        let d = commit_file_diff_blocking(dir.to_str().unwrap(), "HEAD", "a.txt", None, None).unwrap();
-        assert!(d.diff.contains("@@ -1,5 +1,7 @@"), "hunk 头应覆盖全文件: {}", d.diff);
+        let d =
+            commit_file_diff_blocking(dir.to_str().unwrap(), "HEAD", "a.txt", None, None).unwrap();
+        assert!(
+            d.diff.contains("@@ -1,5 +1,7 @@"),
+            "hunk 头应覆盖全文件: {}",
+            d.diff
+        );
         assert!(d.diff.contains("+a1"), "实际: {}", d.diff);
         assert!(d.diff.contains("\n l1\n"), "应保留上下文行: {}", d.diff);
 
@@ -3469,8 +3638,14 @@ mod tests {
     fn remotes_list_names_and_urls() {
         let dir = temp_dir("remotes");
         init_repo(&dir);
-        git(&dir, &["remote", "add", "origin", "git@github.com:user/repo.git"]);
-        git(&dir, &["remote", "add", "upstream", "https://example.com/a/b.git"]);
+        git(
+            &dir,
+            &["remote", "add", "origin", "git@github.com:user/repo.git"],
+        );
+        git(
+            &dir,
+            &["remote", "add", "upstream", "https://example.com/a/b.git"],
+        );
 
         let remotes = list_remotes_blocking(dir.to_str().unwrap()).unwrap();
         assert_eq!(remotes.len(), 2);
@@ -3481,7 +3656,9 @@ mod tests {
 
         // 非仓库 → 空列表
         let plain = temp_dir("remotes-plain");
-        assert!(list_remotes_blocking(plain.to_str().unwrap()).unwrap().is_empty());
+        assert!(list_remotes_blocking(plain.to_str().unwrap())
+            .unwrap()
+            .is_empty());
 
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_dir_all(&plain);
@@ -3519,7 +3696,8 @@ mod tests {
 
     #[test]
     fn friendly_error_maps_untracked_overwritten() {
-        let raw = "error: The following untracked working tree files would be overwritten by checkout:\n\
+        let raw =
+            "error: The following untracked working tree files would be overwritten by checkout:\n\
                    \tfoo.txt\n\
                    Please move or remove them before you switch branches.\n\
                    Aborting";
@@ -3768,8 +3946,11 @@ mod tests {
         assert_eq!(st.modified, 1);
         assert_eq!(st.untracked, 0);
         // 提交内容只含选中的两个文件
-        let out = run_git(dir.to_str().unwrap(), &["show", "--name-status", "--format=", "HEAD"])
-            .unwrap();
+        let out = run_git(
+            dir.to_str().unwrap(),
+            &["show", "--name-status", "--format=", "HEAD"],
+        )
+        .unwrap();
         let names = String::from_utf8_lossy(&out.stdout);
         assert!(names.contains("M\ta.txt"));
         assert!(names.contains("A\tc.txt"));
@@ -3939,15 +4120,25 @@ mod tests {
         );
 
         // 检出远程分支:本地无同名分支 → 创建跟踪分支
-        let st =
-            checkout_blocking(clone_b.to_str().unwrap(), "origin/feature", false, true, None)
-                .unwrap();
+        let st = checkout_blocking(
+            clone_b.to_str().unwrap(),
+            "origin/feature",
+            false,
+            true,
+            None,
+        )
+        .unwrap();
         assert_eq!(st.branch.as_deref(), Some("feature"));
 
         // 本地已有同名分支 → 直接切换(幂等,不报错)
-        let st =
-            checkout_blocking(clone_b.to_str().unwrap(), "origin/feature", false, true, None)
-                .unwrap();
+        let st = checkout_blocking(
+            clone_b.to_str().unwrap(),
+            "origin/feature",
+            false,
+            true,
+            None,
+        )
+        .unwrap();
         assert_eq!(st.branch.as_deref(), Some("feature"));
 
         let _ = fs::remove_dir_all(&origin);
@@ -4007,7 +4198,12 @@ mod tests {
 
         // upstream 应指向 github/main
         let out = git_command(clone.to_str().unwrap())
-            .args(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])
+            .args([
+                "rev-parse",
+                "--abbrev-ref",
+                "--symbolic-full-name",
+                "@{upstream}",
+            ])
             .output()
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "github/main");
@@ -4069,7 +4265,10 @@ mod tests {
     fn pull_branch_fast_forwards_non_current_branch() {
         let (origin, clone_a) = setup_origin_with_feature("pullbr-ff");
         let clone_b = clone_with_config("pullbr-ff-b", &origin);
-        git(&clone_b, &["branch", "--track", "feature", "origin/feature"]);
+        git(
+            &clone_b,
+            &["branch", "--track", "feature", "origin/feature"],
+        );
 
         // clone_a 推进 feature 并推送,clone_b 的 feature 落后
         fs::write(clone_a.join("f.txt"), "f2").unwrap();
@@ -4080,7 +4279,10 @@ mod tests {
         assert!(result.conflicts.is_empty());
         // 工作区仍停留在 main,本地 feature 已快进到 origin/feature
         assert_eq!(result.status.branch.as_deref(), Some("main"));
-        assert_eq!(rev_parse(&clone_b, "feature"), rev_parse(&clone_b, "origin/feature"));
+        assert_eq!(
+            rev_parse(&clone_b, "feature"),
+            rev_parse(&clone_b, "origin/feature")
+        );
 
         let _ = fs::remove_dir_all(&origin);
         let _ = fs::remove_dir_all(&clone_a);
@@ -4118,7 +4320,10 @@ mod tests {
     fn pull_branch_remote_deleted_returns_gone_error() {
         let (origin, clone_a) = setup_origin_with_feature("pullbr-gone");
         let clone_b = clone_with_config("pullbr-gone-b", &origin);
-        git(&clone_b, &["branch", "--track", "feature", "origin/feature"]);
+        git(
+            &clone_b,
+            &["branch", "--track", "feature", "origin/feature"],
+        );
         // 远端删除 feature
         git(&clone_a, &["push", "origin", "--delete", "feature"]);
 
@@ -4185,7 +4390,10 @@ mod tests {
             .output()
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "origin/topic");
-        assert_eq!(rev_parse(&clone_b, "topic"), rev_parse(&clone_b, "origin/topic"));
+        assert_eq!(
+            rev_parse(&clone_b, "topic"),
+            rev_parse(&clone_b, "origin/topic")
+        );
 
         let _ = fs::remove_dir_all(&origin);
         let _ = fs::remove_dir_all(&clone_a);
@@ -4709,12 +4917,12 @@ mod tests {
         let empty = temp_dir("graph-empty");
         init_repo(&empty);
         let empty_repo = open_repo(empty.to_str().unwrap()).unwrap().unwrap();
-        assert!(build_graph_revwalk(&empty_repo, None, None).unwrap().is_none());
-        assert!(
-            build_graph_revwalk(&empty_repo, Some(vec![]), None)
-                .unwrap()
-                .is_none()
-        );
+        assert!(build_graph_revwalk(&empty_repo, None, None)
+            .unwrap()
+            .is_none());
+        assert!(build_graph_revwalk(&empty_repo, Some(vec![]), None)
+            .unwrap()
+            .is_none());
 
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_dir_all(&empty);
@@ -4734,13 +4942,18 @@ mod tests {
             .filter_map(|oid| repo.find_commit(oid).ok())
             .map(|c| deco.commit_entry(&c))
             .collect();
-        let all_refs: Vec<&str> = commits.iter().flat_map(|c| c.refs.iter().map(String::as_str)).collect();
+        let all_refs: Vec<&str> = commits
+            .iter()
+            .flat_map(|c| c.refs.iter().map(String::as_str))
+            .collect();
         assert!(all_refs.contains(&"origin/main"), "实际: {all_refs:?}");
         // origin/HEAD 符号引用不出现在装饰中
         assert!(!all_refs.contains(&"origin/HEAD"), "实际: {all_refs:?}");
 
         // include_remote=false:只走本地分支+标签,feature 提交不可达
-        let walk = build_graph_revwalk(&repo, None, Some(false)).unwrap().unwrap();
+        let walk = build_graph_revwalk(&repo, None, Some(false))
+            .unwrap()
+            .unwrap();
         let _deco = GraphDeco::collect(&repo);
         let subjects: Vec<String> = walk
             .flatten()
@@ -4769,7 +4982,8 @@ mod tests {
 
         // 相对路径 + {branch} 占位符创建
         let added =
-            worktree_add_blocking(path, ".worktrees/{branch}", "feature/x", true, None, None).unwrap();
+            worktree_add_blocking(path, ".worktrees/{branch}", "feature/x", true, None, None)
+                .unwrap();
         assert_eq!(added.len(), 2);
         let wt = added.iter().find(|w| !w.is_main).unwrap();
         assert_eq!(wt.branch.as_deref(), Some("feature/x"));
@@ -4777,27 +4991,26 @@ mod tests {
         assert!(Path::new(&wt.path).join("a.txt").exists());
 
         // 分支已被 worktree 检出 → git_branch_checked_out
-        let dup =
-            worktree_add_blocking(path, ".worktrees/dup", "feature/x", true, None, None).unwrap_err();
+        let dup = worktree_add_blocking(path, ".worktrees/dup", "feature/x", true, None, None)
+            .unwrap_err();
         assert!(dup.is_code(ErrorCode::GitBranchCheckedOut));
 
         // 挂载已有(未检出)分支
         git(&dir, &["branch", "topic"]);
         let attached =
             worktree_add_blocking(path, ".worktrees/topic", "topic", false, None, None).unwrap();
-        assert!(
-            attached
-                .iter()
-                .any(|w| w.branch.as_deref() == Some("topic"))
-        );
+        assert!(attached
+            .iter()
+            .any(|w| w.branch.as_deref() == Some("topic")));
 
         // 挂载已被其它 worktree 检出的分支 → git_branch_checked_out
-        let occupied =
-            worktree_add_blocking(path, ".worktrees/topic2", "topic", false, None, None).unwrap_err();
+        let occupied = worktree_add_blocking(path, ".worktrees/topic2", "topic", false, None, None)
+            .unwrap_err();
         assert!(occupied.is_code(ErrorCode::GitBranchCheckedOut));
 
         // 主工作区不可删除
-        let rm_main = worktree_remove_blocking(path, &initial[0].path, false, false, None).unwrap_err();
+        let rm_main =
+            worktree_remove_blocking(path, &initial[0].path, false, false, None).unwrap_err();
         assert!(rm_main.is_code(ErrorCode::GitCommandFailed));
 
         // 删除 worktree 并删分支
@@ -4876,7 +5089,10 @@ mod tests {
         // 提交对话框排除它,与状态计数不一致)
         worktree_add_blocking(path, ".worktrees/feature", "feature", true, None, None).unwrap();
         let exclude = fs::read_to_string(dir.join(".git/info/exclude")).unwrap();
-        assert!(exclude.contains("/.worktrees/feature/"), "exclude: {exclude}");
+        assert!(
+            exclude.contains("/.worktrees/feature/"),
+            "exclude: {exclude}"
+        );
         let st = status(path).unwrap();
         assert_eq!(st.untracked, 0, "worktree 目录不应计入未跟踪");
 
@@ -4925,9 +5141,15 @@ mod tests {
         let path_b = clone_b.to_str().unwrap();
 
         // 1. 本地无同名分支:挂载 origin/feature → 显式创建跟踪分支(而非游离 HEAD)
-        let list =
-            worktree_add_blocking(path_b, ".worktrees/feature", "origin/feature", false, None, None)
-                .unwrap();
+        let list = worktree_add_blocking(
+            path_b,
+            ".worktrees/feature",
+            "origin/feature",
+            false,
+            None,
+            None,
+        )
+        .unwrap();
         let wt = list.iter().find(|w| !w.is_main).unwrap();
         assert_eq!(wt.branch.as_deref(), Some("feature"));
         assert!(!wt.detached);
@@ -4939,9 +5161,15 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&up.stdout).trim(), "origin/feature");
 
         // 远程引用落地名已被 worktree 检出 → git_branch_checked_out
-        let occupied =
-            worktree_add_blocking(path_b, ".worktrees/feature2", "origin/feature", false, None, None)
-                .unwrap_err();
+        let occupied = worktree_add_blocking(
+            path_b,
+            ".worktrees/feature2",
+            "origin/feature",
+            false,
+            None,
+            None,
+        )
+        .unwrap_err();
         assert!(occupied.is_code(ErrorCode::GitBranchCheckedOut));
 
         // 2. 本地同名分支落后于远程:先快进对齐到远程提交再挂载
@@ -4952,12 +5180,25 @@ mod tests {
         git(&clone_a, &["commit", "-m", "t2"]);
         git(&clone_a, &["push", "origin", "topic"]);
         git(&clone_b, &["fetch", "origin"]);
-        let list =
-            worktree_add_blocking(path_b, ".worktrees/topic", "origin/topic", false, None, None).unwrap();
-        let wt = list.iter().find(|w| w.branch.as_deref() == Some("topic")).unwrap();
+        let list = worktree_add_blocking(
+            path_b,
+            ".worktrees/topic",
+            "origin/topic",
+            false,
+            None,
+            None,
+        )
+        .unwrap();
+        let wt = list
+            .iter()
+            .find(|w| w.branch.as_deref() == Some("topic"))
+            .unwrap();
         // 远程新提交在 worktree 中可见,且本地 topic 已对齐 origin/topic
         assert!(Path::new(&wt.path).join("t2.txt").exists());
-        let local_rev = git_command(path_b).args(["rev-parse", "topic"]).output().unwrap();
+        let local_rev = git_command(path_b)
+            .args(["rev-parse", "topic"])
+            .output()
+            .unwrap();
         let remote_rev = git_command(path_b)
             .args(["rev-parse", "origin/topic"])
             .output()
@@ -4976,8 +5217,15 @@ mod tests {
         git(&clone_a, &["commit", "-m", "h2"]);
         git(&clone_a, &["push", "origin", "hotfix"]);
         git(&clone_b, &["fetch", "origin"]);
-        let err = worktree_add_blocking(path_b, ".worktrees/hotfix", "origin/hotfix", false, None, None)
-            .unwrap_err();
+        let err = worktree_add_blocking(
+            path_b,
+            ".worktrees/hotfix",
+            "origin/hotfix",
+            false,
+            None,
+            None,
+        )
+        .unwrap_err();
         assert!(err.is_code(ErrorCode::GitBranchDiverged));
 
         // 4. 本地同名分支领先远程(远程是其祖先):直接挂载本地分支,保留本地提交
@@ -4986,9 +5234,19 @@ mod tests {
         git(&clone_b, &["add", "ahead-local.txt"]);
         git(&clone_b, &["commit", "-m", "ahead-local"]);
         git(&clone_b, &["checkout", "main"]);
-        let list =
-            worktree_add_blocking(path_b, ".worktrees/ahead", "origin/ahead", false, None, None).unwrap();
-        let wt = list.iter().find(|w| w.branch.as_deref() == Some("ahead")).unwrap();
+        let list = worktree_add_blocking(
+            path_b,
+            ".worktrees/ahead",
+            "origin/ahead",
+            false,
+            None,
+            None,
+        )
+        .unwrap();
+        let wt = list
+            .iter()
+            .find(|w| w.branch.as_deref() == Some("ahead"))
+            .unwrap();
         assert!(Path::new(&wt.path).join("ahead-local.txt").exists());
 
         let _ = fs::remove_dir_all(&origin);

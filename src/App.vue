@@ -10,12 +10,17 @@ import TitleBar from "@/components/TitleBar.vue";
 import BatchProgressFloat from "@/components/report/BatchProgressFloat.vue";
 import { onListen } from "@/lib/tauri";
 import { usePinsStore } from "@/stores/pins";
+import { useBackgroundTasksStore } from "@/stores/background-tasks";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
 import { useTagsStore } from "@/stores/tags";
 import { useUpdateStore } from "@/stores/update";
 import { useWikiStore } from "@/stores/wiki";
-import type { GitProjectChangedPayload, ReportGeneratedPayload } from "@/types";
+import type {
+  BackgroundTaskProgressPayload,
+  GitProjectChangedPayload,
+  ReportGeneratedPayload,
+} from "@/types";
 
 const router = useRouter();
 const { t } = useI18n();
@@ -25,11 +30,13 @@ const tagsStore = useTagsStore();
 const settingsStore = useSettingsStore();
 const updateStore = useUpdateStore();
 const wikiStore = useWikiStore();
+const backgroundTasksStore = useBackgroundTasksStore();
 
 // 托盘迷你弹窗窗口:仅加载主题/语言与项目列表,跳过标题栏、更新检查等主窗口专属逻辑
 const isTrayPopup = getCurrentWindow().label === "tray-popup";
 
 let unlistenGit: UnlistenFn | undefined;
+let unlistenBackgroundTasks: UnlistenFn | undefined;
 
 onMounted(async () => {
   // 托盘弹窗窗口已开 OS 级透明,body 不再刷底色,让玻璃皮肤能透出桌面
@@ -45,6 +52,10 @@ onMounted(async () => {
     }
   }
   if (!isTrayPopup) {
+    unlistenBackgroundTasks = await onListen<BackgroundTaskProgressPayload>(
+      "background://task-progress",
+      (payload) => backgroundTasksStore.applyProgress(payload),
+    );
     // 先订阅再拉取首批状态,避免启动阶段后台检查事件先于监听器到达。
     unlistenGit = await onListen<GitProjectChangedPayload>("git://project-changed", (payload) => {
       store.applyGitProjectEvent(payload);
@@ -53,7 +64,7 @@ onMounted(async () => {
       if (!settingsStore.wikiAutoUpdate && !payload.wiki_auto_update) return;
       const name = payload.name ?? payload.path;
       wikiStore
-        .autoUpdate({ path: payload.path, name }, settingsStore.language)
+        .autoUpdate({ id: payload.project_id, path: payload.path, name }, settingsStore.language)
         .then((count) => {
           if (count > 0) {
             toast.success(t("wiki.autoUpdated", { name, count }));
@@ -128,6 +139,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   unlistenGit?.();
+  unlistenBackgroundTasks?.();
 });
 </script>
 

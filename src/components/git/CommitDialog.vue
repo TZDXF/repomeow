@@ -28,7 +28,7 @@ import { baseName } from "@/lib/path";
 import { cmd } from "@/lib/tauri";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
-import type { GitCommitContext, GitCommitFileDiff, GitWorktreeFile, Project } from "@/types";
+import type { GitCommitFileDiff, GitWorktreeFile, Project } from "@/types";
 
 const { t } = useI18n();
 const props = defineProps<{ project: Project }>();
@@ -396,9 +396,7 @@ async function generate() {
   if (generating.value || committable.value === 0) return;
   generating.value = true;
   try {
-    const ctx = await cmd<GitCommitContext>("git_commit_context", { path: props.project.path });
-    if (!ctx.stat && !ctx.diff && ctx.untracked.length === 0) return;
-    message.value = await generateCommitMessage(ctx, props.project, settings.language);
+    message.value = await generateCommitMessage(props.project, settings.language);
   } catch (e) {
     toast.error(e instanceof Error ? e.message : String(e));
   } finally {

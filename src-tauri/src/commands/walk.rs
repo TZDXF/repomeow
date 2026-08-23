@@ -319,7 +319,10 @@ fn ensure_watcher(root: &Path) {
             cache.lock().unwrap().remove(&root_owned);
         }
     }) else {
-        eprintln!("[walk] 创建文件监听器失败({}),降级为纯 TTL 失效", root.display());
+        eprintln!(
+            "[walk] 创建文件监听器失败({}),降级为纯 TTL 失效",
+            root.display()
+        );
         return;
     };
     match watcher.watch(root, notify::RecursiveMode::Recursive) {
@@ -327,7 +330,10 @@ fn ensure_watcher(root: &Path) {
             map.insert(root.to_path_buf(), watcher);
         }
         Err(e) => {
-            eprintln!("[walk] 监听安装失败({}): {e},降级为纯 TTL 失效", root.display());
+            eprintln!(
+                "[walk] 监听安装失败({}): {e},降级为纯 TTL 失效",
+                root.display()
+            );
         }
     }
 }
@@ -430,15 +436,15 @@ mod tests {
 
         // 根层:只一层(不出现 src/main.rs)、含目录与空目录、跳过 .git
         let entries = dir_entries(&dir, Path::new(""));
-        let by_path: std::collections::HashMap<String, &DirEntry> = entries
-            .iter()
-            .map(|e| (to_slash(&e.path), e))
-            .collect();
+        let by_path: std::collections::HashMap<String, &DirEntry> =
+            entries.iter().map(|e| (to_slash(&e.path), e)).collect();
         for expected in ["src", "empty", "logs", ".env", ".gitignore"] {
             assert!(by_path.contains_key(expected), "缺少 {expected}");
         }
         assert!(!by_path.keys().any(|p| p.contains('/')), "只应有一层");
-        assert!(!by_path.keys().any(|p| p == ".git" || p.starts_with(".git/")));
+        assert!(!by_path
+            .keys()
+            .any(|p| p == ".git" || p.starts_with(".git/")));
         assert!(by_path["src"].is_dir && by_path["empty"].is_dir);
         assert!(!by_path[".env"].is_dir);
         // 被 .gitignore 排除的目录整体标 ignored,其余不标
@@ -449,13 +455,14 @@ mod tests {
         // 换 src 验证嵌套忽略)
         fs::write(dir.join("src/.gitignore"), "nested/\n").unwrap();
         let entries = dir_entries(&dir, Path::new("src"));
-        let by_path: std::collections::HashMap<String, &DirEntry> = entries
-            .iter()
-            .map(|e| (to_slash(&e.path), e))
-            .collect();
+        let by_path: std::collections::HashMap<String, &DirEntry> =
+            entries.iter().map(|e| (to_slash(&e.path), e)).collect();
         assert!(by_path.contains_key("src/main.rs"));
         assert!(by_path.contains_key("src/nested"));
-        assert!(by_path["src/nested"].ignored, "子目录自己的 .gitignore 应生效");
+        assert!(
+            by_path["src/nested"].ignored,
+            "子目录自己的 .gitignore 应生效"
+        );
 
         // 父目录被排除时全部子项继承 ignored(git 语义:规则靠剪枝生效,
         // 直接以被排除目录为起点遍历时子项自身不命中规则)
@@ -469,10 +476,8 @@ mod tests {
         fs::write(dir.join("build/output.txt"), "x").unwrap();
         fs::write(dir.join("build/keep.txt"), "x").unwrap();
         let entries = dir_entries(&dir, Path::new("build"));
-        let by_path: std::collections::HashMap<String, &DirEntry> = entries
-            .iter()
-            .map(|e| (to_slash(&e.path), e))
-            .collect();
+        let by_path: std::collections::HashMap<String, &DirEntry> =
+            entries.iter().map(|e| (to_slash(&e.path), e)).collect();
         assert!(by_path["build/output.txt"].ignored);
         assert!(!by_path["build/keep.txt"].ignored);
 
@@ -509,10 +514,8 @@ mod tests {
 
         // 软链按目标类型归类:指向目录的是目录、指向文件的是文件,悬空链接不出现
         let entries = dir_entries(&dir, Path::new(""));
-        let by_path: std::collections::HashMap<String, &DirEntry> = entries
-            .iter()
-            .map(|e| (to_slash(&e.path), e))
-            .collect();
+        let by_path: std::collections::HashMap<String, &DirEntry> =
+            entries.iter().map(|e| (to_slash(&e.path), e)).collect();
         assert!(by_path["linked_dir"].is_dir, "指向目录的软链应为目录");
         assert!(!by_path["linked.txt"].is_dir, "指向文件的软链应为文件");
         assert!(!by_path.contains_key("dangling"), "悬空软链不应出现");
@@ -520,7 +523,9 @@ mod tests {
         // 展开软链目录能列出目标内容(pnpm node_modules 场景)
         let entries = dir_entries(&dir, Path::new("linked_dir"));
         assert!(
-            entries.iter().any(|e| e.path == Path::new("linked_dir/inside.txt")),
+            entries
+                .iter()
+                .any(|e| e.path == Path::new("linked_dir/inside.txt")),
             "软链目录的子项应可列出"
         );
 
@@ -563,7 +568,9 @@ mod tests {
         assert!(!is_asset_relevant(Path::new("/p/README.md")));
         assert!(!is_asset_relevant(Path::new("/p/src/main.rs")));
         // node_modules 被遍历跳过,内部 package.json 变更无关
-        assert!(!is_asset_relevant(Path::new("/p/node_modules/dep/package.json")));
+        assert!(!is_asset_relevant(Path::new(
+            "/p/node_modules/dep/package.json"
+        )));
     }
 
     #[test]

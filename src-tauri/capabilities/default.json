@@ -21,11 +21,6 @@
     "store:default",
     "updater:default",
     "process:allow-restart",
-    "autostart:default",
-    {
-      "identifier": "http:default",
-      "comment": "AI 接口地址由用户自定义(含局域网 HTTP 服务),放开全部 http/https URL",
-      "allow": [{ "url": "http://*:*" }, { "url": "https://*:*" }]
-    }
+    "autostart:default"
   ]
 }

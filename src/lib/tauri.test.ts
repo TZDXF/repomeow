@@ -184,17 +184,5 @@ describe("translateCommandError / cmd 本地化路径(新契约)", () => {
       expect(err.message).toBe("底层 IO 失败");
       expect(err.cause).toBe(original);
     });
-
-    it("参数透传:invoked name + camelCase args 原样下传", async () => {
-      invokeMock.mockResolvedValueOnce(null);
-      await cmd("save_report_history", {
-        projectIds: [1, 2],
-        dateFrom: "2026-07-01",
-      });
-      expect(invokeMock).toHaveBeenCalledWith("save_report_history", {
-        projectIds: [1, 2],
-        dateFrom: "2026-07-01",
-      });
-    });
   });
 });

@@ -225,7 +225,10 @@ fn save_image(dir: &Path, image: &str, dest: &Path) -> AppResult<()> {
             format!("image={image}"),
         ));
     }
-    Err(AppError::coded(ErrorCode::DockerSaveFailed, stderr.trim().to_string()))
+    Err(AppError::coded(
+        ErrorCode::DockerSaveFailed,
+        stderr.trim().to_string(),
+    ))
 }
 
 /// 导出单个服务:container → docker export(需容器已创建);image → docker save(只需本地有镜像)
@@ -256,20 +259,17 @@ fn export_one(
                 })?;
             save_image(dir, &image, dest)
         }
-        _ => Err(AppError::coded(ErrorCode::DockerUnknownExportKind, kind.to_string())),
+        _ => Err(AppError::coded(
+            ErrorCode::DockerUnknownExportKind,
+            kind.to_string(),
+        )),
     }
 }
 
 /// 导出 compose 文件全部服务到目录(dest 为目录):逐服务导出 `<service>-<kind>.tar`。
 /// container:需容器已创建,未创建的跳过;image:只需本地有镜像,按名去重避免重复 save,
 /// 本地缺失的镜像跳过。一个都没导出时才报错
-fn export_all(
-    dir: &Path,
-    file: &str,
-    kind: &str,
-    dest_dir: &str,
-    language: &str,
-) -> AppResult<()> {
+fn export_all(dir: &Path, file: &str, kind: &str, dest_dir: &str, language: &str) -> AppResult<()> {
     let dest_dir = Path::new(dest_dir);
     if !dest_dir.is_dir() {
         return Err(AppError::coded(
@@ -296,7 +296,10 @@ fn export_all(
         return Ok(());
     }
     if kind != "container" {
-        return Err(AppError::coded(ErrorCode::DockerUnknownExportKind, kind.to_string()));
+        return Err(AppError::coded(
+            ErrorCode::DockerUnknownExportKind,
+            kind.to_string(),
+        ));
     }
     let cfg = ensure_ok(
         docker_action_label("读取服务列表", "list services", language),

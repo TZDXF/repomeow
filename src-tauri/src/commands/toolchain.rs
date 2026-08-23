@@ -156,7 +156,12 @@ fn detect_toolchains_blocking() -> Vec<ToolchainStatus> {
 
     let rustup_found = statuses.iter().any(|s| s.id == "rustup" && s.found);
     for status in &mut statuses {
-        status.caps = caps_for(&status.id, status.found, status.source.as_deref(), rustup_found);
+        status.caps = caps_for(
+            &status.id,
+            status.found,
+            status.source.as_deref(),
+            rustup_found,
+        );
         // nvm 的远端列表只有 windows(nvm-windows 的 `nvm list available`)能拉
         if status.id == "nvm" {
             status.caps.can_list_remote = nvm_binary;
@@ -433,10 +438,11 @@ fn parse_uv_python_remote(text: &str) -> Vec<ToolchainRemoteVersion> {
                 .strip_prefix("cpython-")
                 .or_else(|| token.strip_prefix("pypy-"))?;
             let version = rest.split(['-', '+']).next()?.to_string();
-            seen.insert(version.clone()).then_some(ToolchainRemoteVersion {
-                name: version,
-                tag: None,
-            })
+            seen.insert(version.clone())
+                .then_some(ToolchainRemoteVersion {
+                    name: version,
+                    tag: None,
+                })
         })
         .collect()
 }

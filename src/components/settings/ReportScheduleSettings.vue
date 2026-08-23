@@ -5,6 +5,7 @@ import { toast } from "vue-sonner";
 import {
   CalendarClock,
   Clock,
+  GitBranch,
   Loader2,
   Pencil,
   Play,
@@ -40,13 +41,14 @@ import { formatLocalDateTime } from "@/lib/format";
 import { cmd } from "@/lib/tauri";
 import { useProjectsStore } from "@/stores/projects";
 import { useTagsStore } from "@/stores/tags";
-import type { ReportSchedule } from "@/types";
+import type { ReportSchedule, SystemSchedule } from "@/types";
 
 const { t, locale } = useI18n();
 const projectStore = useProjectsStore();
 const tagsStore = useTagsStore();
 
 const schedules = ref<ReportSchedule[]>([]);
+const systemSchedules = ref<SystemSchedule[]>([]);
 const loading = ref(false);
 /** 手动执行中的任务 id 集合(按钮 loading 态) */
 const runningIds = ref<string[]>([]);
@@ -69,11 +71,40 @@ const activeProjects = computed(() => projectStore.projects.filter((p) => !p.arc
 async function load() {
   loading.value = true;
   try {
-    schedules.value = await cmd<ReportSchedule[]>("list_report_schedules");
+    const [reportItems, systemItems] = await Promise.all([
+      cmd<ReportSchedule[]>("list_report_schedules"),
+      cmd<SystemSchedule[]>("list_system_schedules"),
+    ]);
+    schedules.value = reportItems;
+    systemSchedules.value = systemItems;
   } catch (e) {
     toast.error(t("reportSchedule.saveFailed"));
   } finally {
     loading.value = false;
+  }
+}
+
+async function saveSystemSchedule(
+  schedule: SystemSchedule,
+  enabled: boolean,
+  intervalMinutes: number,
+) {
+  const saved = await cmd<SystemSchedule>("save_system_schedule", {
+    id: schedule.id,
+    enabled,
+    intervalMinutes,
+  });
+  const index = systemSchedules.value.findIndex((item) => item.id === saved.id);
+  if (index !== -1) {
+    systemSchedules.value[index] = saved;
+  }
+}
+
+async function toggleSystemSchedule(schedule: SystemSchedule) {
+  try {
+    await saveSystemSchedule(schedule, !schedule.enabled, schedule.intervalMinutes);
+  } catch {
+    toast.error(t("reportSchedule.saveFailed"));
   }
 }
 
@@ -117,6 +148,30 @@ async function runNow(s: ReportSchedule) {
 
 const dialogOpen = ref(false);
 const editing = ref<ReportSchedule | null>(null);
+const systemDialogOpen = ref(false);
+const systemEditing = ref<SystemSchedule | null>(null);
+const formSystemInterval = ref(10);
+
+function openSystemEdit(schedule: SystemSchedule) {
+  systemEditing.value = schedule;
+  formSystemInterval.value = schedule.intervalMinutes;
+  systemDialogOpen.value = true;
+}
+
+async function submitSystemSchedule() {
+  const schedule = systemEditing.value;
+  if (!schedule) {
+    return;
+  }
+  const interval = Math.min(24 * 60, Math.max(1, Math.round(formSystemInterval.value || 10)));
+  try {
+    await saveSystemSchedule(schedule, schedule.enabled, interval);
+    toast.success(t("reportSchedule.saved"));
+    systemDialogOpen.value = false;
+  } catch {
+    toast.error(t("reportSchedule.saveFailed"));
+  }
+}
 
 // form
 const formName = ref("");
@@ -283,9 +338,7 @@ function lastRun(ts: number | null) {
 
 watch(
   () => projectStore.projects.length,
-  (n) => {
-    if (n) load();
-  },
+  () => load(),
   { immediate: true },
 );
 </script>
@@ -303,9 +356,61 @@ watch(
       </Button>
     </div>
 
+    <!-- 应用内置任务：固定存在，只允许启停和修改执行间隔 -->
+    <div v-if="systemSchedules.length" class="flex flex-col gap-2">
+      <div
+        v-for="schedule in systemSchedules"
+        :key="schedule.id"
+        class="flex items-center gap-3 rounded-md border p-3"
+      >
+        <GitBranch class="h-4 w-4 shrink-0 text-primary" />
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2">
+            <span class="truncate text-sm font-medium">
+              {{ t("reportSchedule.systemGitUpdate") }}
+            </span>
+            <Badge variant="outline" class="text-[11px]">
+              {{ t("reportSchedule.systemTask") }}
+            </Badge>
+            <Badge :variant="schedule.enabled ? 'default' : 'secondary'" class="text-[11px]">
+              {{ schedule.enabled ? t("reportSchedule.enabled") : t("reportSchedule.disabled") }}
+            </Badge>
+          </div>
+          <div class="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+            <Clock class="h-3 w-3" />
+            {{ t("reportSchedule.everyMinutes", { count: schedule.intervalMinutes }) }}
+          </div>
+          <div class="mt-1 text-[11px] text-muted-foreground">
+            {{ t("reportSchedule.lastRun") }}: {{ lastRun(schedule.lastRunAt) }}
+          </div>
+        </div>
+        <div class="flex shrink-0 items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            class="h-7 w-7"
+            :title="schedule.enabled ? t('reportSchedule.disabled') : t('reportSchedule.enabled')"
+            @click="toggleSystemSchedule(schedule)"
+          >
+            <Power v-if="schedule.enabled" class="h-3.5 w-3.5 text-green-500" />
+            <PowerOff v-else class="h-3.5 w-3.5 text-muted-foreground" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            class="h-7 w-7"
+            :title="t('reportSchedule.edit')"
+            @click="openSystemEdit(schedule)"
+          >
+            <Pencil class="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </div>
+    </div>
+
     <!-- empty -->
     <div
-      v-if="!loading && !schedules.length"
+      v-if="!loading && !systemSchedules.length && !schedules.length"
       class="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground"
     >
       <CalendarClock class="mx-auto mb-2 h-8 w-8 opacity-40" />
@@ -419,6 +524,39 @@ watch(
         </div>
       </div>
     </div>
+
+    <!-- 内置任务间隔编辑：不可更名、不可删除 -->
+    <Dialog v-model:open="systemDialogOpen">
+      <DialogContent class="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>{{ t("reportSchedule.editSystemTask") }}</DialogTitle>
+          <DialogDescription>{{ t("reportSchedule.systemTaskHint") }}</DialogDescription>
+        </DialogHeader>
+        <div class="flex flex-col gap-1.5 py-2">
+          <label class="text-sm font-medium">{{ t("reportSchedule.intervalLabel") }}</label>
+          <div class="flex items-center gap-2">
+            <Input
+              v-model.number="formSystemInterval"
+              type="number"
+              min="1"
+              max="1440"
+              step="1"
+              class="h-8 w-28"
+            />
+            <span class="text-sm text-muted-foreground">{{ t("reportSchedule.minutes") }}</span>
+          </div>
+          <p class="text-[11px] text-muted-foreground">
+            {{ t("reportSchedule.intervalHint") }}
+          </p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" size="sm" @click="systemDialogOpen = false">
+            {{ t("common.cancel") }}
+          </Button>
+          <Button size="sm" @click="submitSystemSchedule">{{ t("common.save") }}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <!-- create / edit dialog -->
     <Dialog v-model:open="dialogOpen">

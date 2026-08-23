@@ -1,16 +1,7 @@
-import { generateReport } from "@/lib/ai";
-import { runPool } from "@/lib/async-pool";
+import { generateBatchReports } from "@/lib/ai";
 import { cmd } from "@/lib/tauri";
 import type { SupportedLocale } from "@/i18n";
-import type {
-  BatchRange,
-  GitCommitInfo,
-  GitUser,
-  Project,
-  ReportDateRange,
-  ReportPeriodType,
-  SaveReportCommit,
-} from "@/types";
+import type { BatchRange, Project, ReportDateRange, ReportPeriodType } from "@/types";
 
 export type BatchItemStatus =
   | "pending"
@@ -101,13 +92,6 @@ export interface BatchRunOptions {
   concurrency: number;
 }
 
-interface ProjectCommitsWithId {
-  projectId: number;
-  projectName: string;
-  projectDescription: string;
-  commits: GitCommitInfo[];
-}
-
 /**
  * 时段状态变更回调:执行层不直接修改 item,状态变更统一上报,
  * 由调用方(store)以不可变方式写回响应式数组,保证 UI 更新链路可靠
@@ -131,102 +115,23 @@ export async function runBatchItems(
   signal: AbortSignal,
   onStatus: BatchStatusCallback,
 ): Promise<void> {
-  // 预解析各项目的 git 用户身份(仅「我自己」模式需要;失败的项目不过滤作者)
-  const authors = new Map<number, string | undefined>();
-  if (options.authorMode === "me") {
-    await Promise.all(
-      options.projects.map(async (p) => {
-        const user = await cmd<GitUser>("git_current_user", { path: p.path }).catch(() => null);
-        authors.set(p.id, user?.name || user?.email || undefined);
-      }),
-    );
-  }
-
-  /** 已被并发池派发执行的任务(item 不再本地变更状态,用此集合判断"未派发") */
-  const dispatched = new Set<BatchItem>();
-
-  async function runOne(item: BatchItem) {
-    dispatched.add(item);
-    onStatus(item, "running");
-    try {
-      const since = `${item.dateFrom} 00:00:00`;
-      const until = `${item.dateTo} 23:59:59`;
-      const data: ProjectCommitsWithId[] = await Promise.all(
-        options.projects.map(async (p) => ({
-          projectId: p.id,
-          projectName: p.name,
-          projectDescription: p.description,
-          commits: await cmd<GitCommitInfo[]>("git_log", {
-            path: p.path,
-            since,
-            until,
-            maxCount: 500,
-            author: authors.get(p.id),
-          }),
-        })),
+  await generateBatchReports(
+    {
+      items,
+      projectIds: options.projects.map((project) => project.id),
+      authorMode: options.authorMode,
+      language: options.language,
+      periodType: options.periodType,
+      concurrency: options.concurrency,
+    },
+    signal,
+    (event) => {
+      const item = items.find(
+        (candidate) => candidate.dateFrom === event.dateFrom && candidate.dateTo === event.dateTo,
       );
-      if (signal.aborted) {
-        onStatus(item, "cancelled");
-        return;
+      if (item) {
+        onStatus(item, event.status as BatchItemStatus, event.error);
       }
-      // 排除没有提交的项目;该时段全部无提交则跳过
-      const withCommits = data.filter((d) => d.commits.length);
-      if (!withCommits.length) {
-        onStatus(item, "skipped-no-commits");
-        return;
-      }
-
-      // AI 请求挂中止信号,取消时立即中断
-      const result = await generateReport(
-        withCommits,
-        item.label,
-        options.language,
-        options.periodType,
-        signal,
-      );
-      // 保存前最后检查:取消的时段不写入历史
-      if (signal.aborted) {
-        onStatus(item, "cancelled");
-        return;
-      }
-
-      const commitData: SaveReportCommit[] = withCommits.map((d) => ({
-        projectId: d.projectId,
-        projectName: d.projectName,
-        projectDescription: d.projectDescription,
-        commits: d.commits,
-      }));
-      await cmd<number>("save_report_history", {
-        projectIds: commitData.map((c) => c.projectId).filter((id): id is number => id != null),
-        dateFrom: item.dateFrom,
-        dateTo: item.dateTo,
-        rangeLabel: item.label,
-        authorMode: options.authorMode,
-        language: options.language,
-        periodType: options.periodType,
-        result,
-        commitData,
-      });
-      onStatus(item, "done");
-    } catch (e) {
-      // 中止导致的异常归为取消而非失败
-      if (signal.aborted) {
-        onStatus(item, "cancelled");
-        return;
-      }
-      onStatus(item, "failed", e instanceof Error ? e.message : String(e));
-    }
-  }
-
-  const tasks = items.filter((i) => i.status === "pending").map((item) => () => runOne(item));
-  await runPool(options.concurrency, tasks, signal);
-
-  // 取消后未派发的任务标记为 cancelled(状态不经本地修改,以是否派发为准)
-  if (signal.aborted) {
-    for (const item of items) {
-      if (item.status === "pending" && !dispatched.has(item)) {
-        onStatus(item, "cancelled");
-      }
-    }
-  }
+    },
+  );
 }

@@ -40,10 +40,7 @@ pub(crate) fn java_builds_from_files(dir: &Path, files: &[PathBuf]) -> Vec<JavaB
         };
         let parent = rel.parent().filter(|p| !p.as_os_str().is_empty());
         let dir_rel = parent.map(walk::to_slash).unwrap_or_else(|| ".".into());
-        if groups
-            .iter()
-            .any(|g| g.dir == dir_rel && g.tool == tool)
-        {
+        if groups.iter().any(|g| g.dir == dir_rel && g.tool == tool) {
             continue;
         }
         let Some(content) = read_capped(&dir.join(rel)) else {
@@ -277,7 +274,9 @@ fn candidate_homes() -> Vec<PathBuf> {
 /// where/which java 的全部命中路径(找不到或执行失败返回空)
 fn java_paths_on_path() -> Vec<PathBuf> {
     #[cfg(windows)]
-    let probe = crate::commands::open::hidden(std::process::Command::new("where")).arg("java").output();
+    let probe = crate::commands::open::hidden(std::process::Command::new("where"))
+        .arg("java")
+        .output();
     #[cfg(not(windows))]
     let probe = std::process::Command::new("which").arg("java").output();
     let out = match probe {
@@ -543,10 +542,12 @@ fn resolve_adoptium_asset(major: u32) -> AppResult<RemoteAsset> {
         adoptium_os(),
     );
     let releases: Vec<AdoptiumRelease> = http_json(&url)?;
-    let release = releases
-        .into_iter()
-        .next()
-        .ok_or_else(|| AppError::coded(ErrorCode::JdkInstallFailed, format!("java {major}: no GA release")))?;
+    let release = releases.into_iter().next().ok_or_else(|| {
+        AppError::coded(
+            ErrorCode::JdkInstallFailed,
+            format!("java {major}: no GA release"),
+        )
+    })?;
     // Windows 用 zip 解压安装;非 Windows 的 package 资产是 tar.gz
     let want_zip = cfg!(windows);
     let package = release
@@ -560,7 +561,12 @@ fn resolve_adoptium_asset(major: u32) -> AppResult<RemoteAsset> {
                 p.name.ends_with(".tar.gz")
             }
         })
-        .ok_or_else(|| AppError::coded(ErrorCode::JdkInstallFailed, format!("java {major}: no archive asset")))?;
+        .ok_or_else(|| {
+            AppError::coded(
+                ErrorCode::JdkInstallFailed,
+                format!("java {major}: no archive asset"),
+            )
+        })?;
     let version = release
         .release_name
         .strip_prefix("jdk-")
@@ -586,7 +592,12 @@ fn resolve_zulu_asset(major: u32) -> AppResult<RemoteAsset> {
     let package = packages
         .iter()
         .find(|p| is_zulu_jdk_zip(&p.name) && !p.java_version.is_empty())
-        .ok_or_else(|| AppError::coded(ErrorCode::JdkInstallFailed, format!("java {major}: no jdk zip asset")))?;
+        .ok_or_else(|| {
+            AppError::coded(
+                ErrorCode::JdkInstallFailed,
+                format!("java {major}: no jdk zip asset"),
+            )
+        })?;
     Ok(RemoteAsset {
         url: package.download_url.clone(),
         file_name: package.name.clone(),
@@ -794,8 +805,10 @@ fn move_dir(src: &Path, dest: &Path) -> AppResult<()> {
 fn install_jdk_blocking(app: &AppHandle, vendor: JdkVendor, major: u32) -> AppResult<JdkCandidate> {
     let asset = resolve_asset(vendor, major)?;
     let jdk_root = jdks_root()?;
-    let tmp_file =
-        std::env::temp_dir().join(format!("repomeow-jdk-{}", asset.file_name.replace(['/', '\\'], "_")));
+    let tmp_file = std::env::temp_dir().join(format!(
+        "repomeow-jdk-{}",
+        asset.file_name.replace(['/', '\\'], "_")
+    ));
     if let Err(e) = download_with_progress(app, &asset.url, &tmp_file) {
         let _ = std::fs::remove_file(&tmp_file);
         return Err(e);
@@ -842,15 +855,20 @@ fn install_jdk_blocking(app: &AppHandle, vendor: JdkVendor, major: u32) -> AppRe
     let result = (|| -> AppResult<JdkCandidate> {
         // 幂等:目标已存在且是有效 JDK 直接返回现有安装
         if java_bin(&target).is_some() {
-            let version = probe_java_version(&java_bin(&target).expect("checked"))
-                .ok_or_else(|| AppError::coded(ErrorCode::JdkInstallFailed, display_path(&target)))?;
+            let version =
+                probe_java_version(&java_bin(&target).expect("checked")).ok_or_else(|| {
+                    AppError::coded(ErrorCode::JdkInstallFailed, display_path(&target))
+                })?;
             return Ok(JdkCandidate {
                 path: display_path(&target),
                 version,
             });
         }
         if target.exists() {
-            return Err(AppError::coded(ErrorCode::JdkInstallFailed, display_path(&target)));
+            return Err(AppError::coded(
+                ErrorCode::JdkInstallFailed,
+                display_path(&target),
+            ));
         }
         move_dir(&top, &target)?;
         let java = java_bin(&target)
@@ -879,11 +897,7 @@ pub async fn list_remote_jdks(vendor: JdkVendor) -> AppResult<Vec<RemoteJdkRelea
 
 /// 在线下载并安装 JDK 到 ~/.jdks(install_jdk_blocking 见块注释)
 #[tauri::command]
-pub async fn install_jdk(
-    app: AppHandle,
-    vendor: JdkVendor,
-    major: u32,
-) -> AppResult<JdkCandidate> {
+pub async fn install_jdk(app: AppHandle, vendor: JdkVendor, major: u32) -> AppResult<JdkCandidate> {
     tokio::task::spawn_blocking(move || install_jdk_blocking(&app, vendor, major))
         .await
         .map_err(|e| AppError::coded(ErrorCode::IoError, e.to_string()))?
@@ -936,7 +950,11 @@ mod tests {
         .unwrap();
         // 无任何 spring 标记的普通 Java pom -> 跳过
         fs::create_dir_all(dir.join("plain")).unwrap();
-        fs::write(dir.join("plain/pom.xml"), "<project><artifactId>demo</artifactId></project>").unwrap();
+        fs::write(
+            dir.join("plain/pom.xml"),
+            "<project><artifactId>demo</artifactId></project>",
+        )
+        .unwrap();
         // gradle 子项目 + 根目录 wrapper
         fs::create_dir_all(dir.join("svc")).unwrap();
         fs::write(
@@ -995,10 +1013,19 @@ mod tests {
         assert_eq!(groups[0].run_dir, ".");
         assert_eq!(groups[0].run_command, "mvn spring-boot:run");
         // 常用操作:根模块直接跟生命周期目标
-        let action_cmds: Vec<&str> = groups[0].more_actions.iter().map(|a| a.command.as_str()).collect();
+        let action_cmds: Vec<&str> = groups[0]
+            .more_actions
+            .iter()
+            .map(|a| a.command.as_str())
+            .collect();
         assert_eq!(
             action_cmds,
-            vec!["mvn clean", "mvn package -DskipTests", "mvn install -DskipTests", "mvn test"]
+            vec![
+                "mvn clean",
+                "mvn package -DskipTests",
+                "mvn install -DskipTests",
+                "mvn test"
+            ]
         );
 
         let _ = fs::remove_dir_all(&dir);
@@ -1057,12 +1084,18 @@ mod tests {
         assert!(is_zulu_jdk_zip("zulu17.68.17-ca-jdk17.0.20-win_x64.zip"));
         assert!(is_zulu_jdk_zip("zulu8.84.0.15-ca-jdk8.0.452-win_x64.zip"));
         // fx / crac / jre 变体排除
-        assert!(!is_zulu_jdk_zip("zulu17.68.17-ca-fx-jdk17.0.20-win_x64.zip"));
-        assert!(!is_zulu_jdk_zip("zulu17.66.19-ca-crac-jdk17.0.19-win_x64.zip"));
+        assert!(!is_zulu_jdk_zip(
+            "zulu17.68.17-ca-fx-jdk17.0.20-win_x64.zip"
+        ));
+        assert!(!is_zulu_jdk_zip(
+            "zulu17.66.19-ca-crac-jdk17.0.19-win_x64.zip"
+        ));
         assert!(!is_zulu_jdk_zip("zulu17.68.17-ca-jre17.0.20-win_x64.zip"));
         // 非 zip 安装包排除
         assert!(!is_zulu_jdk_zip("zulu17.68.17-ca-jdk17.0.20-win_x64.msi"));
-        assert!(!is_zulu_jdk_zip("zulu17.68.17-ca-jdk17.0.20-win_x64.tar.gz"));
+        assert!(!is_zulu_jdk_zip(
+            "zulu17.68.17-ca-jdk17.0.20-win_x64.tar.gz"
+        ));
     }
 
     #[test]

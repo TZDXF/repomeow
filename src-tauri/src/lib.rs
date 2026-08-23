@@ -1,3 +1,5 @@
+mod ai;
+mod background_task;
 mod commands;
 mod db;
 mod error;
@@ -16,6 +18,15 @@ use tokio::sync::Notify;
 
 /// 应用数据目录名(位于用户主目录下)
 pub(crate) const APP_DATA_DIR_NAME: &str = ".repomeow";
+
+/// RepoMeow 持久化数据根目录。AI、提示词、Wiki 等后端模块统一从这里派生路径。
+pub(crate) fn app_data_dir(app: &tauri::AppHandle) -> error::AppResult<std::path::PathBuf> {
+    let home = app
+        .path()
+        .home_dir()
+        .map_err(|e| error::AppError::coded(error::ErrorCode::IoError, e.to_string()))?;
+    Ok(home.join(APP_DATA_DIR_NAME))
+}
 
 /// 运行期缓存根目录:安装目录(exe 所在目录)下的 `data/` 子目录,
 /// 用于编辑器图标提取产物(icons/)与 chinese-days 缓存等可再生的运行期文件。
@@ -44,7 +55,6 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::new().build())
-        .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         // 开机自启(Windows 注册表 Run 项 / macOS LaunchAgent,由设置页开关控制);
@@ -68,6 +78,8 @@ pub fn run() {
             // 调度通知:用于定时任务变更时唤醒后台 scheduler
             let notify = Arc::new(Notify::new());
             app.manage(commands::report::ScheduleNotify(notify));
+            let git_monitor_notify = Arc::new(Notify::new());
+            app.manage(commands::git::GitMonitorNotify(git_monitor_notify));
 
             // 系统托盘(图标 + 迷你项目列表弹窗)
             tray::setup(app)?;
@@ -182,6 +194,7 @@ pub fn run() {
             commands::window::show_main_window,
             commands::window::hide_tray_popup,
             commands::prompt::get_ai_prompts,
+            commands::prompt::get_default_ai_prompts,
             commands::prompt::set_ai_prompts,
             commands::prompt::open_prompts_dir,
             commands::tag::list_tags,
@@ -212,7 +225,6 @@ pub fn run() {
             commands::hidden::set_hidden_item,
             commands::pin::list_pinned_commands,
             commands::pin::set_pinned_command,
-            commands::report::save_report_history,
             commands::report::list_report_history,
             commands::report::get_report_history,
             commands::report::delete_report_history,
@@ -226,24 +238,27 @@ pub fn run() {
             commands::report::list_report_schedules,
             commands::report::save_report_schedules,
             commands::report::run_report_schedule_now,
-            commands::wiki::collect_wiki_context,
-            commands::wiki::read_wiki_files,
+            commands::git::list_system_schedules,
+            commands::git::save_system_schedule,
             commands::wiki::get_wiki_dir,
-            commands::wiki::begin_wiki,
-            commands::wiki::save_wiki_page,
-            commands::wiki::save_wiki_meta,
-            commands::wiki::commit_wiki,
             commands::wiki::load_wiki,
             commands::wiki::has_wiki,
             commands::wiki::delete_wiki,
             commands::wiki::open_wiki_dir,
-            commands::wiki::wiki_changed_files,
             commands::agent::agent_list,
             commands::agent::acp_start,
             commands::agent::acp_prompt,
             commands::agent::acp_cancel,
             commands::agent::acp_test,
-            commands::usage::record_ai_usage,
+            commands::ai::ai_list_models,
+            commands::ai::ai_test_connection,
+            commands::ai::ai_generate_commit_message,
+            commands::ai::ai_generate_and_save_report,
+            commands::ai::ai_generate_batch_reports,
+            commands::ai::ai_generate_wiki,
+            commands::ai::ai_regenerate_wiki_page,
+            commands::ai::ai_update_wiki,
+            commands::ai::ai_cancel_run,
             commands::usage::get_ai_usage_summary,
             commands::usage::list_ai_usage_log,
             commands::usage::clear_ai_usage_log,

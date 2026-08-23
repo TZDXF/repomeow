@@ -71,6 +71,7 @@ mod tests {
             "settings",
             "hidden_items",
             "ai_usage_log",
+            "system_schedules",
         ] {
             let count: i64 = conn
                 .query_row(
@@ -81,6 +82,16 @@ mod tests {
                 .unwrap();
             assert_eq!(count, 1, "表 {table} 应存在");
         }
+        let (enabled, interval_minutes): (i64, i64) = conn
+            .query_row(
+                "SELECT enabled, interval_minutes FROM system_schedules WHERE id = 'git_update'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(enabled, 1);
+        assert_eq!(interval_minutes, 10);
+
         // 迁移幂等:重复执行不报错
         migrations::run(&conn).expect("migrations idempotent");
 

@@ -122,13 +122,9 @@ async function toggleWikiAutoUpdate(enabled: boolean) {
       <table class="w-full table-fixed text-sm">
         <thead class="sticky top-0 z-10 bg-background">
           <tr class="border-b text-left text-xs text-muted-foreground">
-            <th class="w-[22%] px-3 py-2 font-medium">
+            <th class="px-3 py-2 font-medium">
               {{ t("settings.tracking.columns.project") }}
             </th>
-            <th class="w-[30%] px-3 py-2 font-medium">
-              {{ t("settings.tracking.columns.description") }}
-            </th>
-            <th class="px-3 py-2 font-medium">{{ t("settings.tracking.columns.tags") }}</th>
             <th class="w-24 px-3 py-2 text-center font-medium">
               {{ t("settings.tracking.columns.wiki") }}
             </th>
@@ -143,16 +139,9 @@ async function toggleWikiAutoUpdate(enabled: boolean) {
             :key="p.id"
             class="border-b transition-colors last:border-0 hover:bg-accent/60"
           >
-            <td class="px-3 py-2 font-medium">
-              <p class="truncate" :title="p.name">{{ p.name }}</p>
-            </td>
-            <td class="px-3 py-2 text-xs text-muted-foreground">
-              <p class="truncate" :title="p.description || undefined">
-                {{ p.description || "-" }}
-              </p>
-            </td>
             <td class="px-3 py-2">
-              <div v-if="p.tags.length" class="flex flex-wrap gap-1">
+              <p class="truncate font-medium" :title="p.name">{{ p.name }}</p>
+              <div v-if="p.tags.length" class="mt-1.5 flex flex-wrap gap-1">
                 <Badge
                   v-for="tag in p.tags"
                   :key="tag.id"
@@ -163,7 +152,12 @@ async function toggleWikiAutoUpdate(enabled: boolean) {
                   {{ tag.name }}
                 </Badge>
               </div>
-              <span v-else class="text-xs text-muted-foreground">-</span>
+              <p
+                class="mt-0.5 truncate text-xs text-muted-foreground"
+                :title="p.description || undefined"
+              >
+                {{ p.description || "-" }}
+              </p>
             </td>
             <td class="px-3 py-2">
               <div class="flex justify-center">
@@ -187,7 +181,7 @@ async function toggleWikiAutoUpdate(enabled: boolean) {
             </td>
           </tr>
           <tr v-if="!filteredProjects.length">
-            <td colspan="5" class="py-8 text-center text-xs text-muted-foreground">
+            <td colspan="3" class="py-8 text-center text-xs text-muted-foreground">
               {{
                 store.projects.length
                   ? t("settings.tracking.noMatch")

@@ -2,20 +2,18 @@ import { computed, reactive, ref } from "vue";
 import { defineStore } from "pinia";
 import { i18n, type SupportedLocale } from "@/i18n";
 import {
-  backendIdOf,
-  createWikiKernel,
   generateWiki,
   regenerateWikiPage,
+  updateWiki,
   type WikiGenBackend,
-  type WikiGenKernel,
   type WikiGenOptions,
   type WikiGenPhase,
   type WikiPageStatus,
 } from "@/lib/wiki-generator";
-import { commitWiki, deleteWiki, loadWiki, saveWikiMeta, wikiChangedFiles } from "@/lib/wiki";
+import { deleteWiki, loadWiki } from "@/lib/wiki";
 import { cleanPath } from "@/lib/path";
 import { useSettingsStore } from "@/stores/settings";
-import type { WikiChangedFiles, WikiData, WikiOutlinePage } from "@/types";
+import type { WikiData, WikiOutlinePage } from "@/types";
 
 /** 生成进度中的单页状态(进度 UI 直接渲染) */
 export interface WikiGenPageItem {
@@ -26,12 +24,36 @@ export interface WikiGenPageItem {
 
 /** 单个项目的整本生成状态;不同项目各自持有一份,可同时生成 */
 export interface WikiGenerationState {
+  projectId?: number;
+  projectName: string;
   phase: WikiGenPhase | "idle";
   pages: WikiGenPageItem[];
   error: string;
   streamContents: Record<string, string>;
   /** 本轮整本生成开始时间,供离开页面后返回时继续展示真实耗时 */
   startedAt: number;
+}
+
+export interface WikiBackgroundTask {
+  id: string;
+  action: "generate" | "update" | "page";
+  projectId?: number;
+  projectName: string;
+  completed: number;
+  total: number;
+}
+
+interface WikiUpdateProgress {
+  projectId?: number;
+  projectName: string;
+  completed: number;
+  total: number;
+}
+
+interface WikiTaskProject {
+  id?: number;
+  path: string;
+  name: string;
 }
 
 function isActiveGeneration(state: WikiGenerationState | undefined): boolean {
@@ -74,7 +96,6 @@ function buildGenOptions(language: SupportedLocale): WikiGenOptions {
   return {
     language,
     concurrency: settings.aiConcurrency,
-    model: settings.aiModel,
     backend,
   };
 }
@@ -108,6 +129,42 @@ export const useWikiStore = defineStore("wiki", () => {
   /** 是否存在任意整本生成任务,供需要全局概览的调用方使用 */
   const generating = computed(() => Object.values(generations).some(isActiveGeneration));
 
+  /** 标题栏使用的 Wiki 后台任务摘要；整本生成、增量更新、单页重生成统一计数。 */
+  const backgroundTasks = computed<WikiBackgroundTask[]>(() => {
+    const tasks: WikiBackgroundTask[] = Object.entries(generations)
+      .filter(([, state]) => isActiveGeneration(state))
+      .map(([key, state]) => ({
+        id: `generate:${key}`,
+        action: "generate",
+        projectId: state.projectId,
+        projectName: state.projectName,
+        completed: state.pages.filter((page) =>
+          ["done", "failed", "cancelled"].includes(page.status),
+        ).length,
+        total: state.pages.length,
+      }));
+    if (updateProgress.value) {
+      tasks.push({
+        id: `update:${updateProgress.value.projectName}`,
+        action: "update",
+        projectId: updateProgress.value.projectId,
+        projectName: updateProgress.value.projectName,
+        completed: updateProgress.value.completed,
+        total: updateProgress.value.total,
+      });
+    } else if (pageRegeneration.value) {
+      tasks.push({
+        id: `page:${pageRegeneration.value.projectName}:${pageRegeneration.value.pageTitle}`,
+        action: "page",
+        projectId: pageRegeneration.value.projectId,
+        projectName: pageRegeneration.value.projectName,
+        completed: 0,
+        total: 1,
+      });
+    }
+    return tasks;
+  });
+
   async function load(projectPath: string) {
     // 切换到另一个项目时先清空,避免旧项目内容闪现
     if (dataFor.value !== projectPath) data.value = null;
@@ -121,7 +178,7 @@ export const useWikiStore = defineStore("wiki", () => {
   }
 
   /** 整本生成;同一项目避免重复启动,不同项目可并行;结束后按当前查看项目刷新展示 */
-  function generate(project: { path: string; name: string }, language: SupportedLocale) {
+  function generate(project: WikiTaskProject, language: SupportedLocale) {
     const key = generationKey(project.path);
     if (isGenerating(project.path)) return generationRuns.get(key) ?? Promise.resolve();
     const run = runGenerate(project, language, key);
@@ -129,13 +186,11 @@ export const useWikiStore = defineStore("wiki", () => {
     return run;
   }
 
-  async function runGenerate(
-    project: { path: string; name: string },
-    language: SupportedLocale,
-    key: string,
-  ) {
+  async function runGenerate(project: WikiTaskProject, language: SupportedLocale, key: string) {
     const controller = new AbortController();
     const state = reactive<WikiGenerationState>({
+      projectId: project.id,
+      projectName: project.name,
       phase: "idle",
       pages: [],
       error: "",
@@ -168,6 +223,7 @@ export const useWikiStore = defineStore("wiki", () => {
       });
     } catch (e) {
       state.error = toFriendlyWikiGenerationError(e);
+      state.phase = controller.signal.aborted ? "cancelled" : "failed";
     } finally {
       generationControllers.delete(key);
       generationRuns.delete(key);
@@ -186,24 +242,35 @@ export const useWikiStore = defineStore("wiki", () => {
 
   /** 单页重生成:就地更新该页内容,保持其余页面与 meta 不变 */
   const regeneratingPage = ref<string | null>(null);
+  const pageRegeneration = ref<{
+    projectId?: number;
+    projectName: string;
+    pageTitle: string;
+  } | null>(null);
   async function regeneratePage(
-    project: { path: string; name: string },
+    project: WikiTaskProject,
     page: WikiOutlinePage,
     language: SupportedLocale,
   ) {
     if (isGenerating(project.path) || regeneratingPage.value) return;
     regeneratingPage.value = page.id;
-    // agent 后端为本次重生成单独起会话(原生成会话早已结束),完成后即收尾
-    let kernel: WikiGenKernel | null = null;
+    pageRegeneration.value = {
+      projectId: project.id,
+      projectName: project.name,
+      pageTitle: page.title,
+    };
     try {
-      kernel = await createWikiKernel(project, buildGenOptions(language));
-      await regenerateWikiPage(kernel, project.path, page, language, new AbortController().signal);
-      // git 快照提交(辅助管理,失败不影响页面内容,下次操作会补提交)
-      await commitWiki(project.path, "page", page.title).catch(() => {});
+      await regenerateWikiPage(
+        project,
+        buildGenOptions(language),
+        page,
+        language,
+        new AbortController().signal,
+      );
       if (dataFor.value === project.path) await load(project.path);
     } finally {
       regeneratingPage.value = null;
-      await kernel?.dispose().catch(() => {});
+      pageRegeneration.value = null;
     }
   }
 
@@ -213,77 +280,31 @@ export const useWikiStore = defineStore("wiki", () => {
    * 无 headSha(非 git 项目)或历史被改写时抛错,由调用方退化为整本重生成
    */
   const updating = ref(false);
-  async function update(
-    project: { path: string; name: string },
-    language: SupportedLocale,
-  ): Promise<number> {
-    const d = data.value;
-    if (!d || updating.value || isGenerating(project.path)) return 0;
-    const fromSha = d.meta.headSha;
-    if (!fromSha) throw new Error("no head sha");
+  const updateProgress = ref<WikiUpdateProgress | null>(null);
+  async function update(project: WikiTaskProject, language: SupportedLocale): Promise<number> {
+    if (!data.value || updating.value || isGenerating(project.path)) return 0;
     const options = buildGenOptions(language);
-    // 跨后端(如内置 API ↔ agent)的旧 wiki 不做增量:抛错由调用方退化为整本重生成
-    if ((d.meta.generator ?? "builtin") !== backendIdOf(options.backend)) {
-      throw new Error("generator mismatch");
-    }
     updating.value = true;
+    updateProgress.value = {
+      projectId: project.id,
+      projectName: project.name,
+      completed: 0,
+      total: 0,
+    };
     try {
-      const changed = await wikiChangedFiles(project.path, fromSha);
-      return await applyUpdate(project, d, language, changed, options);
+      const count = await updateWiki(project, options, false, (progress) => {
+        if (updateProgress.value) {
+          updateProgress.value.completed = progress.completed;
+          updateProgress.value.total = progress.total;
+        }
+      });
+      if (dataFor.value === project.path) await load(project.path);
+      return count;
     } finally {
       updating.value = false;
+      updateProgress.value = null;
       regeneratingPage.value = null;
     }
-  }
-
-  /** 增量更新核心:重生成 changed 命中的页面并推进 meta.headSha(调用方持有 updating 标记) */
-  async function applyUpdate(
-    project: { path: string; name: string },
-    d: WikiData,
-    language: SupportedLocale,
-    changed: WikiChangedFiles,
-    options: WikiGenOptions,
-  ): Promise<number> {
-    const changedSet = new Set(changed.files);
-    const affected = d.pages.filter((p) => p.relevantFiles.some((f) => changedSet.has(f)));
-    // 没有页面受影响时不创建生成内核,仅推进已检查 HEAD，避免后续重复扫描同一批
-    // 无关变更，也避免 Wiki 因无关源码变化一直显示为过时。
-    if (!affected.length) {
-      if (changed.headSha) {
-        await saveWikiMeta(project.path, { ...d.meta, headSha: changed.headSha }, "update");
-      }
-      if (dataFor.value === project.path) await load(project.path);
-      return 0;
-    }
-    let kernel: WikiGenKernel | null = null;
-    try {
-      kernel = await createWikiKernel(project, options);
-      for (const page of affected) {
-        regeneratingPage.value = page.id;
-        // 页数少(通常个位数),串行足够;保持与 regeneratePage 同一互斥标记
-        // eslint-disable-next-line no-await-in-loop
-        await regenerateWikiPage(
-          kernel,
-          project.path,
-          page,
-          language,
-          new AbortController().signal,
-          { changedFiles: changed.files },
-        );
-      }
-      regeneratingPage.value = null;
-      if (changed.headSha) {
-        await saveWikiMeta(
-          project.path,
-          { ...d.meta, headSha: changed.headSha, model: kernel.model, generator: kernel.backendId },
-          "update",
-        );
-      }
-    } finally {
-      await kernel?.dispose().catch(() => {});
-    }
-    if (dataFor.value === project.path) await load(project.path);
-    return affected.length;
   }
 
   /**
@@ -295,7 +316,7 @@ export const useWikiStore = defineStore("wiki", () => {
    * 执行失败向外抛,由调用方提示
    */
   let autoQueue: Promise<unknown> = Promise.resolve();
-  function autoUpdate(project: { path: string; name: string }, language: SupportedLocale) {
+  function autoUpdate(project: WikiTaskProject, language: SupportedLocale) {
     const run = autoQueue.then(() => runAutoUpdate(project, language));
     // 队列自身吞掉异常继续前进;错误经返回的 promise 交给触发方
     autoQueue = run.then(
@@ -306,28 +327,32 @@ export const useWikiStore = defineStore("wiki", () => {
   }
 
   async function runAutoUpdate(
-    project: { path: string; name: string },
+    project: WikiTaskProject,
     language: SupportedLocale,
   ): Promise<number> {
     if (updating.value || isGenerating(project.path) || regeneratingPage.value) {
       return 0;
     }
     const options = buildGenOptions(language);
-    // agent 后端不参与自动增量更新:后台无人值守跑 agent 会静默消耗订阅额度,
-    // 增量更新只留给用户在 wiki 页手动触发
-    if (options.backend.kind !== "builtin") return 0;
-    const d = await loadWiki(project.path).catch(() => null);
-    const fromSha = d?.meta.headSha;
-    if (!d || !fromSha) return 0;
-    // 跨后端的旧 wiki 不自动增量(手动更新会退化为整本重生成),静默跳过
-    if ((d.meta.generator ?? "builtin") !== backendIdOf(options.backend)) return 0;
-    const changed = await wikiChangedFiles(project.path, fromSha).catch(() => null);
-    if (!changed) return 0;
     updating.value = true;
+    updateProgress.value = {
+      projectId: project.id,
+      projectName: project.name,
+      completed: 0,
+      total: 0,
+    };
     try {
-      return await applyUpdate(project, d, language, changed, options);
+      const count = await updateWiki(project, options, true, (progress) => {
+        if (updateProgress.value) {
+          updateProgress.value.completed = progress.completed;
+          updateProgress.value.total = progress.total;
+        }
+      });
+      if (dataFor.value === project.path) await load(project.path);
+      return count;
     } finally {
       updating.value = false;
+      updateProgress.value = null;
       regeneratingPage.value = null;
     }
   }
@@ -352,6 +377,7 @@ export const useWikiStore = defineStore("wiki", () => {
     generationFor,
     isGenerating,
     generating,
+    backgroundTasks,
     regeneratingPage,
     updating,
     load,

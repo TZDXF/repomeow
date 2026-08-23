@@ -11,13 +11,12 @@ use std::fs;
 use std::path::PathBuf;
 
 use chrono::{Datelike, Local, NaiveDate, NaiveTime, Timelike};
-use reqwest::Client;
-use serde::Deserialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::select;
 use tokio::time::{self, Duration, Instant};
 
+use crate::ai::{prompts, sdk};
 use crate::commands::git::{run_git_current_user, run_git_log};
 use crate::commands::report::{read_schedules, ReportGeneratedPayload, ReportSchedule};
 use crate::error::{AppError, AppResult, ErrorCode};
@@ -29,15 +28,7 @@ const IDLE_INTERVAL: Duration = Duration::from_secs(60);
 
 // ── AI config (from settings.json) ──────────────────────────────────────
 
-#[derive(Deserialize, Default)]
-struct AiConfig {
-    #[serde(default)]
-    ai_base_url: String,
-    #[serde(default)]
-    ai_api_key: String,
-    #[serde(default)]
-    ai_model: String,
-}
+type AiConfig = sdk::AiConfig;
 
 fn load_ai_config(data_dir: &PathBuf) -> AiConfig {
     let path = data_dir.join("settings.json");
@@ -62,6 +53,7 @@ fn load_ai_config(data_dir: &PathBuf) -> AiConfig {
                 .unwrap_or_default(),
         })
         .unwrap_or_default()
+        .normalized()
 }
 
 /// 从 settings.json 读取界面语言(报告语言与其保持一致),默认 zh-CN
@@ -102,164 +94,18 @@ fn load_report_prompt(data_dir: &PathBuf, report_type: &str) -> String {
 /// 内置默认提示词(与前端 ai-prompts.ts 一致)
 fn default_prompt(report_type: &str) -> &'static str {
     if report_type == "weekly" {
-        "You are a technical project manager. Generate a concise weekly report in Markdown based on git commit records.\n\nGuidelines:\n- Group commits by project\n- Summarize the week's progress, highlighting key changes and their impact\n- Use bullet points for clarity\n- Keep it professional and actionable"
+        prompts::DEFAULT_WEEKLY_REPORT_PROMPT
     } else {
-        "You are a technical project manager. Generate a concise daily report in Markdown based on git commit records.\n\nGuidelines:\n- Group commits by project\n- Highlight key changes and their impact\n- Use bullet points for clarity\n- Keep it professional and actionable"
+        prompts::DEFAULT_REPORT_PROMPT
     }
-}
-
-// ── OpenAI Chat Completions ────────────────────────────────────────────
-
-#[derive(Deserialize)]
-struct ChatResponse {
-    choices: Vec<ChatChoice>,
-    #[serde(default)]
-    usage: Option<ChatUsage>,
-}
-
-/// OpenAI 兼容响应的 token 用量(部分网关不返回,保持 Option 容错)
-#[derive(Debug, Deserialize)]
-struct ChatUsage {
-    #[serde(default)]
-    prompt_tokens: Option<i64>,
-    #[serde(default)]
-    completion_tokens: Option<i64>,
-    #[serde(default)]
-    total_tokens: Option<i64>,
-    /// prompt_tokens_details.cached_tokens(缓存命中的输入 tokens)
-    #[serde(default)]
-    prompt_tokens_details: Option<ChatPromptDetails>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChatPromptDetails {
-    #[serde(default)]
-    cached_tokens: Option<i64>,
-}
-
-#[derive(Deserialize)]
-struct ChatChoice {
-    message: ChatMessage,
-}
-
-#[derive(Deserialize)]
-struct ChatMessage {
-    content: String,
-}
-
-/// 大小写不敏感地查找 ASCII 子串,返回字节索引(标签均为 ASCII,字节索引与原串对齐)
-fn find_ascii_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
-    if needle.len() > haystack.len() {
-        return None;
-    }
-    haystack
-        .as_bytes()
-        .windows(needle.len())
-        .position(|w| w.eq_ignore_ascii_case(needle.as_bytes()))
-}
-
-/// 大小写不敏感地判断 ASCII 前缀
-fn starts_with_ascii_case_insensitive(s: &str, prefix: &str) -> bool {
-    s.len() >= prefix.len() && s.as_bytes()[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes())
-}
-
-/// 剥离输出开头的 <think>...</think> 思考块(推理模型或中转服务可能把思考过程混入正文)。
-/// 只处理响应起始位置的思考块:正文中出现的 <think> 字样(如报告介绍该功能本身)必须保留
-fn strip_thinking(text: &str) -> String {
-    let mut out = text.trim_start();
-    while starts_with_ascii_case_insensitive(out, "<think>") {
-        match find_ascii_case_insensitive(out, "</think>") {
-            Some(i) => out = out[i + "</think>".len()..].trim_start(),
-            // 未闭合的思考块:整段都是思考,没有正文
-            None => return String::new(),
-        }
-    }
-    out.trim().to_string()
-}
-
-/// 按服务商/模型名给出"关闭思考模式"请求参数(仅匹配已知支持方,避免严格网关因未知字段 400)
-fn thinking_off_params(base_url: &str, model: &str) -> serde_json::Map<String, Value> {
-    let s = format!("{} {}", base_url.to_lowercase(), model.to_lowercase());
-    let m = model.to_lowercase();
-    let mut map = serde_json::Map::new();
-    if s.contains("qwen") || s.contains("dashscope") || s.contains("aliyuncs") {
-        // 阿里云百炼 / DashScope 兼容模式
-        map.insert("enable_thinking".into(), Value::Bool(false));
-        if !s.contains("dashscope") && !s.contains("aliyuncs") {
-            // 自建 vLLM/SGLang 部署的 Qwen3 系
-            map.insert(
-                "chat_template_kwargs".into(),
-                serde_json::json!({ "enable_thinking": false }),
-            );
-        }
-    } else if s.contains("glm")
-        || s.contains("zhipu")
-        || s.contains("bigmodel")
-        || s.contains("doubao")
-        || s.contains("volces")
-    {
-        // 智谱 GLM / 火山方舟(豆包)系
-        map.insert("thinking".into(), serde_json::json!({ "type": "disabled" }));
-    } else if m.starts_with("step-3") || m.starts_with("step-r") {
-        // 阶跃星辰 Step 推理系(Step 3.5/3.7 Flash 等):官方接口无完全关闭思考的开关,
-        // 用最低推理档尽量缩短思考;思考内容经独立 reasoning 字段返回,不混入正文
-        map.insert("reasoning_effort".into(), Value::String("low".into()));
-    }
-    map
 }
 
 async fn call_ai(
-    client: &Client,
     config: &AiConfig,
     system_prompt: &str,
     user_prompt: &str,
-) -> AppResult<(String, Option<ChatUsage>)> {
-    let url = format!(
-        "{}/chat/completions",
-        config.ai_base_url.trim_end_matches('/')
-    );
-
-    let mut body = serde_json::json!({
-        "model": config.ai_model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-    });
-    // 命中已知推理模型提供方时注入"关闭思考模式"参数
-    if let Some(obj) = body.as_object_mut() {
-        obj.extend(thinking_off_params(&config.ai_base_url, &config.ai_model));
-    }
-
-    let resp = client
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", config.ai_api_key))
-        .header("Content-Type", "application/json")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| AppError::coded(ErrorCode::AiRequestFailed, e.to_string()))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(AppError::coded(
-            ErrorCode::AiResponseError,
-            format!("status={status} body={text}"),
-        ));
-    }
-
-    let data: ChatResponse = resp
-        .json()
-        .await
-        .map_err(|e| AppError::coded(ErrorCode::AiResponseParseFailed, e.to_string()))?;
-
-    let content = data
-        .choices
-        .first()
-        .map(|c| c.message.content.clone())
-        .ok_or_else(|| AppError::coded(ErrorCode::AiEmptyResponse, ""))?;
-    Ok((strip_thinking(&content), data.usage))
+) -> AppResult<sdk::ChatOutput> {
+    sdk::chat(config, Some(system_prompt), user_prompt, false, None, None).await
 }
 
 // ── prompt builder ─────────────────────────────────────────────────────
@@ -500,12 +346,9 @@ fn due_schedules(
 
             // 日报:报告日 = 触发日前一天(次日生成)或当天;星期过滤按报告日判定
             let report_date = daily_report_date(today, s.previous_day);
-            daily_filters_allow(
-                report_date,
-                s.weekdays_only,
-                s.chinese_workday_only,
-                &|d| workday::is_workday(d, cache_root),
-            )
+            daily_filters_allow(report_date, s.weekdays_only, s.chinese_workday_only, &|d| {
+                workday::is_workday(d, cache_root)
+            })
         })
         .cloned()
         .collect()
@@ -548,7 +391,9 @@ fn mark_last_run(conn: &rusqlite::Connection, schedule_id: &str) -> AppResult<()
     if updated != 1 {
         return Err(AppError::coded(
             ErrorCode::DbError,
-            format!("scheduler: last_run_at update missing schedule_id={schedule_id} updated={updated}"),
+            format!(
+                "scheduler: last_run_at update missing schedule_id={schedule_id} updated={updated}"
+            ),
         ));
     }
     Ok(())
@@ -564,22 +409,15 @@ fn delete_report_history_row(conn: &rusqlite::Connection, history_id: i64) -> Ap
     if deleted != 1 {
         return Err(AppError::coded(
             ErrorCode::DbError,
-            format!("scheduler: orphan report_history cleanup failed id={history_id} deleted={deleted}"),
+            format!(
+                "scheduler: orphan report_history cleanup failed id={history_id} deleted={deleted}"
+            ),
         ));
     }
     Ok(())
 }
 
 // ── schedule execution ─────────────────────────────────────────────────
-
-/// 报告调度/AI 生成共用的异步客户端:仅设连接超时、不设总超时
-/// (LLM 生成耗时不可预估,总超时会切断长响应;此处与 java/account 各自的客户端语义不同)
-pub(crate) fn report_http_client() -> Client {
-    Client::builder()
-        .connect_timeout(Duration::from_secs(15))
-        .build()
-        .unwrap_or_else(|_| Client::new())
-}
 
 /// 执行一次定时任务:拉取提交 → 调 AI → 写报告历史 → 更新运行时间 → emit 事件。
 /// 成功返回报告历史 id;任何失败以 Err 返回。
@@ -588,10 +426,16 @@ pub(crate) fn report_http_client() -> Client {
 /// 报告历史,并保留原始更新错误;只有运行时间更新成功后才发送前端事件。
 pub(crate) async fn fire_schedule(
     app: &AppHandle,
-    client: &Client,
     data_dir: &PathBuf,
     schedule: &ReportSchedule,
 ) -> AppResult<i64> {
+    let task_label = if schedule.name.is_empty() {
+        schedule.report_type.clone()
+    } else {
+        schedule.name.clone()
+    };
+    let mut background_task =
+        crate::background_task::BackgroundTask::new(app, "report", task_label, 4);
     eprintln!(
         "[scheduler] 触发任务({}) @ {}",
         schedule.report_type,
@@ -609,12 +453,11 @@ pub(crate) async fn fire_schedule(
     let effective_project_ids: Vec<i64> = {
         let db = app.state::<crate::db::Db>();
         let conn = db.0.lock().unwrap();
-        let tag_pids = crate::commands::report::tag_project_ids(&conn, &schedule.tag_ids).map_err(
-            |e| {
+        let tag_pids =
+            crate::commands::report::tag_project_ids(&conn, &schedule.tag_ids).map_err(|e| {
                 eprintln!("[scheduler] 按标签反查项目失败: {e}");
                 e
-            },
-        )?;
+            })?;
         let mut ids = schedule.project_ids.clone();
         for pid in tag_pids {
             if !ids.contains(&pid) {
@@ -661,6 +504,7 @@ pub(crate) async fn fire_schedule(
     } else {
         format!("{system_prompt}\n\nRespond in English.")
     };
+    background_task.set_completed(1);
 
     // 4. 计算日期范围
     let today = Local::now().date_naive();
@@ -735,6 +579,7 @@ pub(crate) async fn fire_schedule(
         // 不写历史、不更新 last_run_at,让下一次循环再次尝试
         return Err(AppError::coded(ErrorCode::SchedulerNoCommits, ""));
     }
+    background_task.set_completed(2);
 
     // 6. 组装 prompt
     let prompt_data: Vec<(String, String, Vec<GitCommitInfo>)> = commits_by_project
@@ -745,12 +590,15 @@ pub(crate) async fn fire_schedule(
 
     // 7. 调用 AI(失败不写历史、不更新 last_run_at)
     let ai_started = std::time::Instant::now();
-    let (result, ai_usage) = call_ai(client, &ai_config, &system_prompt, &user_prompt)
+    let output = call_ai(&ai_config, &system_prompt, &user_prompt)
         .await
         .map_err(|e| {
             eprintln!("[scheduler] {schedule_name}: AI 调用失败: {e}");
             e
         })?;
+    let result = output.text;
+    let ai_usage = output.usage;
+    background_task.set_completed(3);
 
     // 8. 一次性事务保存报告历史 + 关联 commits,失败回滚。
     // 复用 AppHandle 托管 Db 锁,避免与主线程独立连接产生毫秒级竞争窗口。
@@ -782,14 +630,11 @@ pub(crate) async fn fire_schedule(
         let usage_record = crate::models::AiUsageRecord {
             task_type: "report".to_string(),
             model: ai_config.ai_model.clone(),
-            input_tokens: ai_usage.as_ref().and_then(|u| u.prompt_tokens),
-            output_tokens: ai_usage.as_ref().and_then(|u| u.completion_tokens),
-            total_tokens: ai_usage.as_ref().and_then(|u| u.total_tokens),
+            input_tokens: ai_usage.as_ref().and_then(|usage| usage.input_tokens),
+            output_tokens: ai_usage.as_ref().and_then(|usage| usage.output_tokens),
+            total_tokens: ai_usage.as_ref().and_then(|usage| usage.total_tokens),
             duration_ms: Some(ai_started.elapsed().as_millis() as i64),
-            cached_tokens: ai_usage
-                .as_ref()
-                .and_then(|u| u.prompt_tokens_details.as_ref())
-                .and_then(|d| d.cached_tokens),
+            cached_tokens: ai_usage.as_ref().and_then(|usage| usage.cached_tokens),
         };
         if let Err(e) = crate::commands::usage::insert_usage_row(&tx, &usage_record, now) {
             eprintln!("[scheduler] {schedule_name}: 用量日志写入失败: {e}");
@@ -814,6 +659,7 @@ pub(crate) async fn fire_schedule(
         return Err(mark_err);
     }
     drop(conn);
+    background_task.set_completed(4);
 
     // 10. 通知前端
     let payload = ReportGeneratedPayload {
@@ -849,7 +695,6 @@ pub async fn run(app: AppHandle) {
         .state::<crate::commands::report::ScheduleNotify>()
         .0
         .clone();
-    let client = report_http_client();
 
     loop {
         // 重新加载定时任务(从 SQLite 读取;锁在此行结束后立即释放,不跨 await)
@@ -867,7 +712,7 @@ pub async fn run(app: AppHandle) {
         // 先检查是否有当前时刻应触发的任务(±1 分钟容差,防止 sleep_until 因重算延迟漏掉)
         let due = due_schedules(&schedules, &now_local, &cache_root);
         for s in &due {
-            if let Err(e) = fire_schedule(&app, &client, &data_dir, s).await {
+            if let Err(e) = fire_schedule(&app, &data_dir, s).await {
                 eprintln!("[scheduler] {}: 执行失败: {e}", s.name);
             }
         }
@@ -904,7 +749,7 @@ pub async fn run(app: AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_schedule_name, strip_thinking, ChatResponse};
+    use super::default_schedule_name;
 
     #[test]
     fn default_schedule_name_follows_ui_language() {
@@ -915,72 +760,6 @@ mod tests {
         // 英文(en-US):Weekly / Daily Schedule
         assert_eq!(default_schedule_name(true, "en-US"), "Weekly Schedule");
         assert_eq!(default_schedule_name(false, "en-US"), "Daily Schedule");
-    }
-
-    #[test]
-    fn strips_leading_think_block() {
-        assert_eq!(strip_thinking("<think>推理过程</think>正文"), "正文");
-        // 大小写不敏感 + 前导空白
-        assert_eq!(strip_thinking("  <THINK>推理</THINK>\n正文"), "正文");
-        // 多个连续思考块
-        assert_eq!(
-            strip_thinking("<think>a</think><think>b</think>正文"),
-            "正文"
-        );
-    }
-
-    #[test]
-    fn chat_response_parses_usage() {
-        // 标准 OpenAI 兼容响应:usage 三字段 + 缓存明细齐全
-        let data: ChatResponse = serde_json::from_str(
-            r#"{"choices":[{"message":{"content":"hi"}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15,"prompt_tokens_details":{"cached_tokens":6}}}"#,
-        )
-        .unwrap();
-        let u = data.usage.unwrap();
-        assert_eq!(u.prompt_tokens, Some(10));
-        assert_eq!(u.completion_tokens, Some(5));
-        assert_eq!(u.total_tokens, Some(15));
-        assert_eq!(
-            u.prompt_tokens_details.and_then(|d| d.cached_tokens),
-            Some(6)
-        );
-
-        // 部分网关不返回 usage:缺字段不报错
-        let data: ChatResponse = serde_json::from_str(
-            r#"{"choices":[{"message":{"content":"hi"}}]}"#,
-        )
-        .unwrap();
-        assert!(data.usage.is_none());
-
-        // usage 内个别字段缺失时按 None 容错(含缓存明细整体缺失)
-        let data: ChatResponse = serde_json::from_str(
-            r#"{"choices":[{"message":{"content":"hi"}}],"usage":{"total_tokens":7}}"#,
-        )
-        .unwrap();
-        let u = data.usage.unwrap();
-        assert_eq!(u.total_tokens, Some(7));
-        assert_eq!(u.prompt_tokens, None);
-        assert!(u.prompt_tokens_details.is_none());
-    }
-
-    #[test]
-    fn unclosed_leading_think_yields_empty() {
-        assert_eq!(strip_thinking("<think>只有思考没有正文"), "");
-    }
-
-    #[test]
-    fn keeps_think_mentions_in_body() {
-        // 回归:正文(如介绍思考剥离功能的报告)中出现的 <think> 字样必须保留
-        let report = "# 日报\n支持成对/未闭合的`<think>`标签块自动剥离\n其余内容";
-        assert_eq!(strip_thinking(report), report);
-        // 正文中的成对标签同样保留
-        let paired = "摘要\n示例:<think>x</think> 是标签";
-        assert_eq!(strip_thinking(paired), paired);
-    }
-
-    #[test]
-    fn plain_text_unchanged() {
-        assert_eq!(strip_thinking("  普通报告  "), "普通报告");
     }
 
     #[test]

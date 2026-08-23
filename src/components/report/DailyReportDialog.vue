@@ -39,7 +39,7 @@ import { Switch } from "@/components/ui/switch";
 import HolidayCalendar from "@/components/report/HolidayCalendar.vue";
 import HolidayRangeCalendar from "@/components/report/HolidayRangeCalendar.vue";
 import TagCheckList from "@/components/tags/TagCheckList.vue";
-import { generateReport, type ProjectCommits } from "@/lib/ai";
+import { generateAndSaveReport, type ProjectCommits } from "@/lib/ai";
 import { planBatchItems, type BatchItem } from "@/lib/batch-report";
 import { formatCommitTime, formatDate, parseDateStr } from "@/lib/format";
 import { copyToClipboard } from "@/lib/utils";
@@ -453,9 +453,8 @@ async function generate() {
     toast.error(t("report.noProjects"));
     return;
   }
-  // 过滤掉时间范围内没有提交的项目:不进 prompt,也不写入历史
-  const data = commitData.value.filter((d) => d.commits.length);
-  if (!data.length) {
+  // 预览数据只用于提前反馈；后端会重新读取项目和 Git 提交并保存一致的快照。
+  if (!commitData.value.some((project) => project.commits.length)) {
     result.value = "";
     toast.info(t("report.noCommits"));
     return;
@@ -467,51 +466,23 @@ async function generate() {
     const dateTo = formatDate(range.value.to);
     const rangeLabel =
       dateFrom === dateTo ? dateFrom : t("report.rangeLabel", { from: dateFrom, to: dateTo });
-    result.value = await generateReport(data, rangeLabel, settings.language, mode.value);
-
-    // 生成成功后自动保存到报告历史(仅含有提交的项目)
-    // 项目映射必须完整,否则中止保存并提示刷新项目列表。
-    const missingNames: string[] = [];
-    const commitDataForSave: {
-      projectId: number;
-      projectName: string;
-      projectDescription: string;
-      commits: GitCommitInfo[];
-    }[] = [];
-    for (const d of data) {
-      const project = activeProjects.value.find((p) => p.name === d.projectName);
-      if (!project) {
-        missingNames.push(d.projectName);
-        continue;
-      }
-      commitDataForSave.push({
-        projectId: project.id,
-        projectName: d.projectName,
-        projectDescription: d.projectDescription,
-        commits: d.commits,
-      });
-    }
-    if (missingNames.length) {
-      toast.warning(t("report.missingProjectMapping", { names: missingNames.join(", ") }), {
-        duration: 8000,
-      });
-      return;
-    }
-    if (!commitDataForSave.length) {
-      toast.error(t("report.noProjects"));
-      return;
-    }
-    savedHistoryId.value = await cmd<number>("save_report_history", {
-      projectIds: commitDataForSave.map((c) => c.projectId),
+    const generated = await generateAndSaveReport({
+      projectIds: ids,
       dateFrom,
       dateTo,
       rangeLabel,
       authorMode: authorMode.value,
       language: settings.language,
       periodType: mode.value,
-      result: result.value,
-      commitData: commitDataForSave,
     });
+    if (!generated) {
+      result.value = "";
+      toast.info(t("report.noCommits"));
+      return;
+    }
+    result.value = generated.result;
+    commitData.value = generated.commitData;
+    savedHistoryId.value = generated.historyId;
   } catch (e) {
     toast.error(e instanceof Error ? e.message : String(e));
   } finally {

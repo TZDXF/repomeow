@@ -63,6 +63,18 @@ pub fn get_ai_prompts(app: AppHandle) -> AppResult<AiPrompts> {
     })
 }
 
+/// 返回后端内置默认模板，仅供设置页作为只读占位预览；生成逻辑不依赖前端副本。
+#[tauri::command]
+pub fn get_default_ai_prompts() -> AiPrompts {
+    AiPrompts {
+        commit: crate::ai::prompts::DEFAULT_COMMIT_PROMPT.trim().to_string(),
+        report: crate::ai::prompts::DEFAULT_REPORT_PROMPT.trim().to_string(),
+        report_weekly: crate::ai::prompts::DEFAULT_WEEKLY_REPORT_PROMPT
+            .trim()
+            .to_string(),
+    }
+}
+
 #[tauri::command]
 pub fn set_ai_prompts(app: AppHandle, prompts: AiPrompts) -> AppResult<()> {
     let dir = prompts_dir(&app)?;

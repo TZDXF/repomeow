@@ -6,9 +6,8 @@
 //! pages/ 与 meta.json 而保留 .git,重新生成在同一历史上演进;删除(delete_wiki)
 //! 不走 git,整目录直接移除(含 .git)。
 //!
-//! 生成流水线在前端编排(参照 batch-report):collect_wiki_context 收集文件树与清单
-//! → LLM 产 XML 大纲 → 逐页 read_wiki_files 取相关文件全文喂 LLM → save_wiki_page 逐页
-//! 落盘 → save_wiki_meta 最后写入(meta.json 存在且 status=completed 才算有效 wiki)。
+//! 生成流水线由 `commands::ai` 在后端编排：收集文件树与清单 → SDK/ACP 生成大纲
+//! → 逐页读取相关文件并生成正文 → 原子落盘页面 → 最后写入 meta 并提交快照。
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -180,7 +179,7 @@ pub struct WikiData {
     pub stale: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WikiManifest {
     pub path: String,
@@ -188,11 +187,11 @@ pub struct WikiManifest {
 }
 
 /// 结构阶段的输入:过滤后的文件树 + README + 根目录清单文件 + 当前 HEAD
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WikiContext {
     pub file_tree: String,
-    /// 过滤后的完整文件清单(/ 分隔相对路径,不折叠),前端用于校验大纲标注的相关文件
+    /// 过滤后的完整文件清单(/ 分隔相对路径,不折叠),后端用于校验大纲标注的相关文件
     pub paths: Vec<String>,
     pub file_count: usize,
     pub tree_truncated: bool,
@@ -201,7 +200,7 @@ pub struct WikiContext {
     pub head_sha: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WikiFileContent {
     pub path: String,
@@ -307,7 +306,10 @@ fn render_file_tree(paths: &[String]) -> (String, bool) {
             };
             let parent = &lines[i][..pos];
             let start = i;
-            while i < lines.len() && lines[i].rfind('/').is_some_and(|p| &lines[i][..p] == parent)
+            while i < lines.len()
+                && lines[i]
+                    .rfind('/')
+                    .is_some_and(|p| &lines[i][..p] == parent)
             {
                 i += 1;
             }
@@ -334,10 +336,7 @@ fn render_file_tree(paths: &[String]) -> (String, bool) {
             return (kept.join("\n"), true);
         };
         let parent = lines[start][..lines[start].rfind('/').unwrap()].to_string();
-        lines.splice(
-            start..start + len,
-            [format!("{parent}/ ({len} files)")],
-        );
+        lines.splice(start..start + len, [format!("{parent}/ ({len} files)")]);
     }
 }
 
@@ -369,8 +368,7 @@ fn read_manifests(root: &Path) -> Vec<WikiManifest> {
 }
 
 /// 收集结构阶段上下文:过滤后的文件树 + README(截断)+ 根目录清单文件 + 当前 HEAD
-#[tauri::command]
-pub fn collect_wiki_context(project_path: String) -> AppResult<WikiContext> {
+pub(crate) fn collect_wiki_context(project_path: String) -> AppResult<WikiContext> {
     files::ensure_dir(&project_path)?;
     let root = Path::new(&project_path);
     let paths: Vec<String> = walk::project_files_cached(root)
@@ -408,17 +406,16 @@ pub fn collect_wiki_context(project_path: String) -> AppResult<WikiContext> {
 /// 读取单页生成所需的相关文件全文。LLM 大纲标注的路径可能不存在或幻觉,
 /// 逐个 canonicalize 校验(拒绝越界与符号链接逃逸),读不到的静默跳过;
 /// 二进制文件跳过;单文件超 PAGE_FILE_MAX_CHARS 截断;总预算耗尽即停止
-#[tauri::command]
-pub fn read_wiki_files(
-    project_path: String,
-    rel_paths: Vec<String>,
+pub(crate) fn read_wiki_files_in(
+    project_path: &str,
+    rel_paths: &[String],
 ) -> AppResult<Vec<WikiFileContent>> {
     files::ensure_dir(&project_path)?;
     let root_canon = fs::canonicalize(&project_path)?;
     let mut out = Vec::new();
     let mut budget = PAGE_TOTAL_MAX_CHARS;
     for rel in rel_paths {
-        let Ok(file) = fs::canonicalize(root_canon.join(&rel)) else {
+        let Ok(file) = fs::canonicalize(root_canon.join(rel)) else {
             continue;
         };
         if !file.starts_with(&root_canon) || !file.is_file() {
@@ -556,7 +553,12 @@ fn begin_wiki_in(dir: &Path) -> AppResult<()> {
 
 /// 组提交信息:固定中文,与仓库提交信息约定一致,不随应用语言切换;
 /// 统一附「当前代码 HEAD 前 7 位」便于对照 wiki 版本对应的代码版本(非 git 项目省略)
-fn commit_message(kind: WikiCommitKind, meta: &WikiMeta, title: Option<&str>, head: Option<&str>) -> String {
+fn commit_message(
+    kind: WikiCommitKind,
+    meta: &WikiMeta,
+    title: Option<&str>,
+    head: Option<&str>,
+) -> String {
     let short = head.filter(|s| s.len() >= 7).map(|s| &s[..7]);
     match kind {
         WikiCommitKind::Generate => match short {
@@ -601,7 +603,10 @@ fn commit_wiki_in(dir: &Path, message: &str) -> AppResult<()> {
     if !status.status.success() {
         return Err(AppError::coded(
             ErrorCode::GitCommandFailed,
-            format!("git status: {}", String::from_utf8_lossy(&status.stderr).trim()),
+            format!(
+                "git status: {}",
+                String::from_utf8_lossy(&status.stderr).trim()
+            ),
         ));
     }
     if status.stdout.iter().all(|b| b.is_ascii_whitespace()) {
@@ -663,26 +668,23 @@ fn remove_wiki_dir(dir: &Path) -> AppResult<()> {
 }
 
 /// 开始一次全新生成:清空旧 pages/ 与 meta.json,保留 .git 历史
-#[tauri::command]
-pub fn begin_wiki(app: AppHandle, project_path: String) -> AppResult<()> {
+pub(crate) fn begin_wiki(app: AppHandle, project_path: String) -> AppResult<()> {
     begin_wiki_in(&wiki_dir(&app, &project_path)?)
 }
 
 /// 写入单个页面(tmp + rename);file_name 必须匹配 `NN-slug.md`
-#[tauri::command]
-pub fn save_wiki_page(
-    app: AppHandle,
-    project_path: String,
-    file_name: String,
-    content: String,
+pub(crate) fn save_wiki_page_internal(
+    app: &AppHandle,
+    project_path: &str,
+    file_name: &str,
+    content: &str,
 ) -> AppResult<()> {
-    save_page_in(&wiki_dir(&app, &project_path)?, &file_name, &content)
+    save_page_in(&wiki_dir(app, project_path)?, file_name, content)
 }
 
 /// 写入 meta.json(最后调用;version 与 generated_at 由后端覆写),随后自动做一次
 /// git 快照提交。meta 落盘成功即整本有效,提交失败仅记日志不阻断(下次操作会补提交)
-#[tauri::command]
-pub fn save_wiki_meta(
+pub(crate) fn save_wiki_meta(
     app: AppHandle,
     project_path: String,
     meta: WikiMeta,
@@ -704,8 +706,7 @@ pub fn save_wiki_meta(
 
 /// 手动触发一次 git 快照提交:单页重新生成等不经 save_wiki_meta 的场景。
 /// kind=Page 需要 title;generate/update 读盘上现有 meta 组提交信息
-#[tauri::command]
-pub fn commit_wiki(
+pub(crate) fn commit_wiki(
     app: AppHandle,
     project_path: String,
     kind: WikiCommitKind,
@@ -716,7 +717,12 @@ pub fn commit_wiki(
         .ok()
         .and_then(|raw| serde_json::from_str::<WikiMeta>(&raw).ok())
         .unwrap_or_default();
-    let message = commit_message(kind, &meta, title.as_deref(), head_sha(&project_path).as_deref());
+    let message = commit_message(
+        kind,
+        &meta,
+        title.as_deref(),
+        head_sha(&project_path).as_deref(),
+    );
     commit_wiki_in(&dir, &message)
 }
 
@@ -759,8 +765,7 @@ pub struct WikiChangedFiles {
 /// 增量更新用:列出 from_sha..HEAD 之间变更的文件(/ 分隔相对路径)。
 /// 非 git 仓库返回空表(调用方退化为整本重生成);from_sha 无法解析时报错
 /// (仓库历史被改写,调用方同样退化为整本重生成)
-#[tauri::command]
-pub fn wiki_changed_files(
+pub(crate) fn wiki_changed_files(
     project_path: String,
     from_sha: String,
 ) -> AppResult<WikiChangedFiles> {
@@ -894,7 +899,9 @@ mod tests {
         let mut paths = Vec::new();
         for d in 0..50 {
             for f in 0..50 {
-                paths.push(format!("src/module-{d:03}/sub/file-{f:03}-with-a-long-name.rs"));
+                paths.push(format!(
+                    "src/module-{d:03}/sub/file-{f:03}-with-a-long-name.rs"
+                ));
             }
         }
         let (tree, truncated) = render_file_tree(&paths);
@@ -960,8 +967,15 @@ mod tests {
                 .collect();
             let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
             oids.push(
-                repo.commit(Some("HEAD"), &sig, &sig, &format!("c{i}"), &tree, &parent_refs)
-                    .unwrap(),
+                repo.commit(
+                    Some("HEAD"),
+                    &sig,
+                    &sig,
+                    &format!("c{i}"),
+                    &tree,
+                    &parent_refs,
+                )
+                .unwrap(),
             );
         }
         let path = dir.to_string_lossy().to_string();

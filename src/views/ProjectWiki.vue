@@ -336,7 +336,7 @@ function generate() {
   const p = project.value;
   if (!p) return;
   wiki
-    .generate({ path: p.path, name: p.name }, settings.language)
+    .generate({ id: p.id, path: p.path, name: p.name }, settings.language)
     .then(() => {
       const result = wiki.generationFor(p.path);
       if (result?.phase === "failed") {
@@ -361,7 +361,7 @@ async function regeneratePage(page: WikiPageData) {
   const p = project.value;
   if (!p) return;
   try {
-    await wiki.regeneratePage({ path: p.path, name: p.name }, page, settings.language);
+    await wiki.regeneratePage({ id: p.id, path: p.path, name: p.name }, page, settings.language);
     toast.success(t("wiki.pageRegenerated"));
   } catch (e) {
     toast.error(t("wiki.failed", { error: String(e) }));
@@ -385,7 +385,7 @@ async function updateWiki() {
   const p = project.value;
   if (!p) return;
   try {
-    const count = await wiki.update({ path: p.path, name: p.name }, settings.language);
+    const count = await wiki.update({ id: p.id, path: p.path, name: p.name }, settings.language);
     toast.success(count > 0 ? t("wiki.updatedPages", { count }) : t("wiki.updateNoop"));
   } catch {
     generate();

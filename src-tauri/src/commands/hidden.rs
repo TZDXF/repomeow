@@ -28,7 +28,10 @@ pub fn set_hidden(
     hidden: bool,
 ) -> AppResult<()> {
     if !KINDS.contains(&kind) {
-        return Err(AppError::coded(ErrorCode::HiddenItemTypeUnknown, kind.to_string()));
+        return Err(AppError::coded(
+            ErrorCode::HiddenItemTypeUnknown,
+            kind.to_string(),
+        ));
     }
     if target_key.is_empty() {
         return Err(AppError::coded(ErrorCode::HiddenItemKeyRequired, ""));

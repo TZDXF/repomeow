@@ -72,18 +72,31 @@ fn cache_hit(entry: Option<&IconCacheEntry>, target: &str, mtime: u64, png_exist
 }
 
 /// 单个 kind 的完整流程:解析图标源 → 命中缓存直接用,否则提取并写 PNG
-fn icon_for_kind(kind: EditorKind, dir: &Path, cache: &mut IconCache, dirty: &mut bool) -> Option<PathBuf> {
+fn icon_for_kind(
+    kind: EditorKind,
+    dir: &Path,
+    cache: &mut IconCache,
+    dirty: &mut bool,
+) -> Option<PathBuf> {
     let id = kind_id(kind);
     let png = dir.join(format!("{id}.png"));
     for target in resolve_icon_candidates(kind) {
         let target_str = target.to_string_lossy().into_owned();
-        let Some(mtime) = file_mtime(&target) else { continue };
+        let Some(mtime) = file_mtime(&target) else {
+            continue;
+        };
         if cache_hit(cache.get(&id), &target_str, mtime, png.exists()) {
             return Some(png);
         }
         if let Some((w, h, rgba)) = extract_rgba(&target) {
             write_png(&png, w, h, &rgba).ok()?;
-            cache.insert(id, IconCacheEntry { target: target_str, mtime });
+            cache.insert(
+                id,
+                IconCacheEntry {
+                    target: target_str,
+                    mtime,
+                },
+            );
             *dirty = true;
             return Some(png);
         }
@@ -94,9 +107,7 @@ fn icon_for_kind(kind: EditorKind, dir: &Path, cache: &mut IconCache, dirty: &mu
 
 /// 取全部打开方式的真实图标:kind id → PNG 绝对路径(提取失败为 null)
 #[tauri::command]
-pub async fn get_editor_icons(
-    db: State<'_, Db>,
-) -> AppResult<HashMap<String, Option<String>>> {
+pub async fn get_editor_icons(db: State<'_, Db>) -> AppResult<HashMap<String, Option<String>>> {
     let dir = icons_dir();
     // 锁内只读缓存:图标提取(PE/icns 解析 + PNG 缩放编码写盘)是重 IO,必须在锁外执行,
     // 否则冷缓存时长时间持有全局唯一 DB 连接,阻塞 hidden/script 等其他命令(数百 ms 级)
@@ -128,7 +139,10 @@ fn extract_all(
     let mut result = HashMap::new();
     for kind in ALL_KINDS {
         let path = icon_for_kind(kind, &dir, &mut cache, &mut dirty);
-        result.insert(kind_id(kind), path.map(|p| p.to_string_lossy().into_owned()));
+        result.insert(
+            kind_id(kind),
+            path.map(|p| p.to_string_lossy().into_owned()),
+        );
     }
     (result, cache, dirty)
 }
@@ -262,7 +276,12 @@ fn exe_refs_in_script(content: &str, shim_dir: &Path) -> Vec<PathBuf> {
         let mut start = end;
         while start > 0 {
             let c = bytes[start - 1] as char;
-            if c.is_whitespace() || matches!(c, '"' | '\'' | '|' | '&' | '<' | '>' | '(' | ')' | ';' | ',') {
+            if c.is_whitespace()
+                || matches!(
+                    c,
+                    '"' | '\'' | '|' | '&' | '<' | '>' | '(' | ')' | ';' | ','
+                )
+            {
                 break;
             }
             start -= 1;
@@ -279,7 +298,10 @@ fn exe_refs_in_script(content: &str, shim_dir: &Path) -> Vec<PathBuf> {
 #[cfg(any(windows, test))]
 fn expand_shim_token(token: &str, shim_dir: &Path) -> Option<PathBuf> {
     let mut out = String::with_capacity(token.len());
-    let dp0 = format!("{}\\", shim_dir.to_string_lossy().trim_end_matches(['/', '\\']));
+    let dp0 = format!(
+        "{}\\",
+        shim_dir.to_string_lossy().trim_end_matches(['/', '\\'])
+    );
     let mut rest = token;
     while let Some(i) = rest.find('%') {
         out.push_str(&rest[..i]);
@@ -314,7 +336,11 @@ fn bundle_from_cli(cli: &str) -> Option<PathBuf> {
     if !out.status.success() {
         return None;
     }
-    let first = String::from_utf8_lossy(&out.stdout).lines().next()?.trim().to_string();
+    let first = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .next()?
+        .trim()
+        .to_string();
     if first.is_empty() {
         return None;
     }
@@ -395,7 +421,11 @@ fn icns_in_bundle(bundle: &Path) -> Option<PathBuf> {
 #[cfg(any(target_os = "macos", test))]
 fn icon_file_from_info_plist(bytes: &[u8]) -> Option<String> {
     let value = plist::Value::from_reader(std::io::Cursor::new(bytes)).ok()?;
-    let name = value.as_dictionary()?.get("CFBundleIconFile")?.as_string()?.trim();
+    let name = value
+        .as_dictionary()?
+        .get("CFBundleIconFile")?
+        .as_string()?
+        .trim();
     if name.is_empty() {
         return None;
     }
@@ -431,8 +461,16 @@ fn extract_from_pe(exe: &Path) -> Option<(u32, u32, Vec<u8>)> {
 
     /// 组图标条目的像素数(宽/高字节为 0 表示 256)
     fn entry_pixels(e: &GRPICONDIRENTRY) -> u32 {
-        let w = if e.bWidth == 0 { 256 } else { u32::from(e.bWidth) };
-        let h = if e.bHeight == 0 { 256 } else { u32::from(e.bHeight) };
+        let w = if e.bWidth == 0 {
+            256
+        } else {
+            u32::from(e.bWidth)
+        };
+        let h = if e.bHeight == 0 {
+            256
+        } else {
+            u32::from(e.bHeight)
+        };
         w * h
     }
 
@@ -457,10 +495,16 @@ fn extract_from_pe(exe: &Path) -> Option<(u32, u32, Vec<u8>)> {
     let mut entries = group.entries().to_vec();
     entries.sort_by_key(|e| std::cmp::Reverse(entry_pixels(e)));
     for entry in &entries {
-        let Ok(data) = group.image(entry.nId) else { continue };
+        let Ok(data) = group.image(entry.nId) else {
+            continue;
+        };
         let ico_bytes = build_single_icon_ico(entry, data);
-        let Ok(dir) = ico::IconDir::read(std::io::Cursor::new(ico_bytes)) else { continue };
-        let Some(first) = dir.entries().first() else { continue };
+        let Ok(dir) = ico::IconDir::read(std::io::Cursor::new(ico_bytes)) else {
+            continue;
+        };
+        let Some(first) = dir.entries().first() else {
+            continue;
+        };
         if let Ok(img) = first.decode() {
             return Some((img.width(), img.height(), img.rgba_data().to_vec()));
         }
@@ -493,9 +537,14 @@ fn write_png(path: &Path, w: u32, h: u32, rgba: &[u8]) -> AppResult<()> {
     let img = image::RgbaImage::from_raw(w, h, rgba.to_vec())
         .ok_or_else(|| AppError::coded(ErrorCode::IoError, "icon pixel buffer size mismatch"))?;
     if w > ICON_SIZE || h > ICON_SIZE {
-        image::imageops::resize(&img, ICON_SIZE, ICON_SIZE, image::imageops::FilterType::Lanczos3)
-            .save(path)
-            .map_err(|e| AppError::coded(ErrorCode::IoError, e.to_string()))
+        image::imageops::resize(
+            &img,
+            ICON_SIZE,
+            ICON_SIZE,
+            image::imageops::FilterType::Lanczos3,
+        )
+        .save(path)
+        .map_err(|e| AppError::coded(ErrorCode::IoError, e.to_string()))
     } else {
         img.save(path)
             .map_err(|e| AppError::coded(ErrorCode::IoError, e.to_string()))
@@ -517,7 +566,10 @@ mod tests {
 
     #[test]
     fn cache_hit_rules() {
-        let entry = IconCacheEntry { target: r"C:\a\code.exe".into(), mtime: 10 };
+        let entry = IconCacheEntry {
+            target: r"C:\a\code.exe".into(),
+            mtime: 10,
+        };
         assert!(cache_hit(Some(&entry), r"C:\a\code.exe", 10, true));
         // mtime 变化(编辑器升级)→ 重新提取
         assert!(!cache_hit(Some(&entry), r"C:\a\code.exe", 11, true));
@@ -556,7 +608,10 @@ mod tests {
         let shim_dir = Path::new(r"C:\shim");
         let content = r#""%SystemRoot%\System32\cmd.exe" %*"#;
         let refs = exe_refs_in_script(content, shim_dir);
-        assert_eq!(refs, vec![PathBuf::from(root).join("System32").join("cmd.exe")]);
+        assert_eq!(
+            refs,
+            vec![PathBuf::from(root).join("System32").join("cmd.exe")]
+        );
     }
 
     #[test]
@@ -580,10 +635,15 @@ mod tests {
         let p = Path::new("/Users/me/Applications/IntelliJ IDEA Ultimate.app/Contents/MacOS/idea");
         assert_eq!(
             bundle_root_from_path(p),
-            Some(PathBuf::from("/Users/me/Applications/IntelliJ IDEA Ultimate.app"))
+            Some(PathBuf::from(
+                "/Users/me/Applications/IntelliJ IDEA Ultimate.app"
+            ))
         );
         // 不在 .app 内
-        assert_eq!(bundle_root_from_path(Path::new("/usr/local/bin/code")), None);
+        assert_eq!(
+            bundle_root_from_path(Path::new("/usr/local/bin/code")),
+            None
+        );
     }
 
     #[test]
@@ -592,12 +652,18 @@ mod tests {
 <plist version="1.0"><dict>
 <key>CFBundleIconFile</key><string>Code</string>
 </dict></plist>"#;
-        assert_eq!(icon_file_from_info_plist(xml), Some("Code.icns".to_string()));
+        assert_eq!(
+            icon_file_from_info_plist(xml),
+            Some("Code.icns".to_string())
+        );
         // 已带后缀
         let xml2 = br#"<?xml version="1.0"?><plist version="1.0"><dict>
 <key>CFBundleIconFile</key><string>AppIcon.icns</string>
 </dict></plist>"#;
-        assert_eq!(icon_file_from_info_plist(xml2), Some("AppIcon.icns".to_string()));
+        assert_eq!(
+            icon_file_from_info_plist(xml2),
+            Some("AppIcon.icns".to_string())
+        );
         // 缺 key / 空值
         let xml3 = br#"<?xml version="1.0"?><plist version="1.0"><dict></dict></plist>"#;
         assert_eq!(icon_file_from_info_plist(xml3), None);
@@ -630,5 +696,3 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 }
-
-
