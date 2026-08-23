@@ -88,16 +88,10 @@ pub fn run() {
                 scheduler::run(handle).await;
             });
 
-            // 后台 git 状态刷新循环(替代前端轮询:批量状态推送 + fetch 治理)
+            // 统一 Git 检查循环:本地状态、fetch、自动快进与事件发布共用同一入口
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                commands::git::status_refresher_loop(handle).await;
-            });
-
-            // 跟踪更新循环:开启跟踪的项目远端有更新时自动快进拉取(无法快进即取消,不提醒)
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                commands::git::auto_pull_loop(handle).await;
+                commands::git::monitor_loop(handle).await;
             });
 
             Ok(())
@@ -145,10 +139,8 @@ pub fn run() {
             commands::project::set_project_auto_pull,
             commands::project::set_project_wiki_auto_update,
             commands::project::delete_project,
-            commands::git::get_git_status,
-            commands::git::refresh_all_git_status,
+            commands::git::check_git_status,
             commands::git::list_git_remotes,
-            commands::git::fetch_git_remote_async,
             commands::git::list_git_branches,
             commands::git::git_init,
             commands::git::git_checkout,

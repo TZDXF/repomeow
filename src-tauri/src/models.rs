@@ -214,7 +214,7 @@ pub struct Project {
     /// 跟踪更新:开启后后台循环在远端有更新时自动快进拉取(无法快进即取消,不提醒)
     pub auto_pull: bool,
     /// Wiki 自动增量更新(项目级):跟踪拉取后未同步提交数达全局阈值时自动增量更新;
-    /// 还需前端全局开关打开且 auto_pull 开启才会触发
+    /// 本地 HEAD 变化后按前端全局/项目级策略触发,与 auto_pull 相互独立
     pub wiki_auto_update: bool,
     pub created_at: i64,
     pub updated_at: i64,

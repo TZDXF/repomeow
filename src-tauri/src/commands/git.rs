@@ -5,8 +5,8 @@ use std::process::{Command, Output};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State, Window, ipc::Channel};
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter, Manager, State, ipc::Channel};
 use tokio::sync::Semaphore;
 
 use git2::{
@@ -50,19 +50,23 @@ fn fetch_tracker() -> &'static Mutex<FetchTracker> {
     })
 }
 
-/// 该路径当前是否允许发起 fetch(不在进行中、不在退避期)。
-/// key 与 STATUS_CACHE 同步走 clean_str,避免 Windows 上同一仓库的混合
-/// 分隔符路径撞出两条独立条目,绕过进行中去重 / 失败退避
-fn fetch_due(path: &str) -> bool {
+/// 原子检查并登记一次 fetch,避免多个检查请求在判断与登记之间发生竞争。
+/// key 与 STATUS_CACHE 同步走 clean_str,避免 Windows 上同一仓库的混合路径
+/// 绕过进行中去重 / 失败退避。
+fn try_begin_fetch(path: &str) -> bool {
     let key = crate::path_util::clean_str(path);
-    let tracker = fetch_tracker().lock().unwrap();
+    let mut tracker = fetch_tracker().lock().unwrap();
     if tracker.in_progress.contains(&key) {
         return false;
     }
-    match tracker.retry_after.get(&key) {
+    let due = match tracker.retry_after.get(&key) {
         Some((at, _)) => *at <= Instant::now(),
         None => true,
+    };
+    if due {
+        tracker.in_progress.insert(key);
     }
+    due
 }
 
 /// fetch 结束回调:成功清除退避记录;失败按连续失败次数指数退避,
@@ -159,19 +163,31 @@ pub fn cleanup_on_exit() {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct GitUpdatedPayload {
-    pub project_id: i64,
-    pub remote_ahead: i32,
-    pub last_fetch_at: i64,
+/// 统一 Git 检查范围。all/project 用于已登记项目,path 用于临时 worktree。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum GitCheckScope {
+    All,
+    Project {
+        #[serde(rename = "projectId")]
+        project_id: i64,
+    },
+    Path { path: String },
 }
 
-/// "git://auto-pulled" 事件载荷:跟踪更新快进拉取成功时发出,
-/// pulled = 本轮快进合并的提交数(拉取前 behind 计数),供前端联动 wiki 自动增量更新
+/// 所有 Git 状态来源最终都发布为同一种事件,消费者按变化标记订阅所需逻辑。
 #[derive(Debug, Clone, Serialize)]
-pub struct GitAutoPulledPayload {
-    pub project_id: i64,
-    pub pulled: i32,
+pub struct GitProjectChangedPayload {
+    pub project_id: Option<i64>,
+    pub name: Option<String>,
+    pub path: String,
+    pub status: GitStatus,
+    pub head_sha: Option<String>,
+    pub head_changed: bool,
+    pub auto_pulled: bool,
+    pub pulled_commits: i32,
+    pub source: String,
+    pub wiki_auto_update: bool,
 }
 
 /// 构造 git 命令:禁用终端凭据交互(GUI 应用无人应答会挂起,凭据管理器
@@ -621,19 +637,13 @@ fn repo_has_remote(path: &str) -> bool {
         .is_some_and(|names| !names.is_empty())
 }
 
-#[tauri::command]
-pub async fn get_git_status(path: String, force: Option<bool>) -> AppResult<GitStatus> {
-    let force = force.unwrap_or(false);
-    run_blocking(move || status_cached(&path, force)).await
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct GitRemote {
     pub name: String,
     pub url: String,
 }
 
-// ── 批量查询与后台刷新循环 ──────────────────────────────────────────────
+// ── 统一状态检查与后台刷新 ──────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize)]
 pub struct GitStatusItem {
@@ -641,88 +651,276 @@ pub struct GitStatusItem {
     pub status: GitStatus,
 }
 
-/// 批量状态查询的并发上限(git 子进程数量)
+#[derive(Debug, Clone)]
+struct GitCheckTarget {
+    project_id: Option<i64>,
+    name: Option<String>,
+    path: String,
+    auto_pull: bool,
+    wiki_auto_update: bool,
+}
+
+/// 路径 → 上次已发布的 HEAD。用于发现应用外部 Git 操作造成的 HEAD 变化。
+static HEAD_CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
+
+fn head_cache() -> &'static Mutex<HashMap<String, Option<String>>> {
+    HEAD_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn head_sha(path: &str) -> Option<String> {
+    let repo = open_repo(path).ok().flatten()?;
+    let head = repo.head().ok()?;
+    let sha = head.peel_to_commit().ok()?.id().to_string();
+    Some(sha)
+}
+
+fn observe_head(path: &str, current: Option<String>, force_changed: bool) -> bool {
+    let key = crate::path_util::clean_str(path);
+    let previous = head_cache().lock().unwrap().insert(key, current.clone());
+    match previous {
+        Some(old) => old != current,
+        None => force_changed,
+    }
+}
+
+fn load_check_targets(app: &AppHandle, scope: GitCheckScope) -> AppResult<Vec<GitCheckTarget>> {
+    if let GitCheckScope::Path { path } = scope {
+        return Ok(vec![GitCheckTarget {
+            project_id: None,
+            name: None,
+            path: crate::path_util::clean_str(&path),
+            auto_pull: false,
+            wiki_auto_update: false,
+        }]);
+    }
+
+    let db = app.state::<Db>();
+    let conn = db.0.lock().unwrap();
+    let (sql, project_id) = match scope {
+        GitCheckScope::All => (
+            "SELECT id, name, path, auto_pull, wiki_auto_update FROM projects WHERE archived_at IS NULL",
+            None,
+        ),
+        GitCheckScope::Project { project_id } => (
+            "SELECT id, name, path, auto_pull, wiki_auto_update FROM projects WHERE archived_at IS NULL AND id = ?1",
+            Some(project_id),
+        ),
+        GitCheckScope::Path { .. } => unreachable!(),
+    };
+    let mut stmt = conn.prepare(sql)?;
+    let map = |row: &rusqlite::Row<'_>| {
+        Ok(GitCheckTarget {
+            project_id: Some(row.get(0)?),
+            name: Some(row.get(1)?),
+            path: row.get(2)?,
+            auto_pull: row.get(3)?,
+            wiki_auto_update: row.get(4)?,
+        })
+    };
+    let targets = if let Some(id) = project_id {
+        stmt.query_map([id], map)?.collect::<Result<Vec<_>, _>>()?
+    } else {
+        stmt.query_map([], map)?.collect::<Result<Vec<_>, _>>()?
+    };
+    if let Some(id) = project_id {
+        if targets.is_empty() {
+            return Err(AppError::coded(ErrorCode::ProjectNotFound, id.to_string()));
+        }
+    }
+    Ok(targets)
+}
+
+fn emit_project_changed(
+    app: &AppHandle,
+    target: &GitCheckTarget,
+    status: GitStatus,
+    source: &str,
+    force_head_changed: bool,
+    auto_pulled: bool,
+    pulled_commits: i32,
+) {
+    let head_sha = head_sha(&target.path);
+    let head_changed = observe_head(&target.path, head_sha.clone(), force_head_changed);
+    let _ = app.emit(
+        "git://project-changed",
+        GitProjectChangedPayload {
+            project_id: target.project_id,
+            name: target.name.clone(),
+            path: target.path.clone(),
+            status,
+            head_sha,
+            head_changed,
+            auto_pulled,
+            pulled_commits,
+            source: source.to_string(),
+            wiki_auto_update: target.wiki_auto_update,
+        },
+    );
+}
+
+fn target_for_path(app: &AppHandle, path: &str) -> GitCheckTarget {
+    let clean = crate::path_util::clean_str(path);
+    let db = app.state::<Db>();
+    let conn = db.0.lock().unwrap();
+    conn.query_row(
+        "SELECT id, name, path, auto_pull, wiki_auto_update FROM projects WHERE archived_at IS NULL AND path = ?1",
+        [&clean],
+        |row| {
+            Ok(GitCheckTarget {
+                project_id: Some(row.get(0)?),
+                name: Some(row.get(1)?),
+                path: row.get(2)?,
+                auto_pull: row.get(3)?,
+                wiki_auto_update: row.get(4)?,
+            })
+        },
+    )
+    .unwrap_or(GitCheckTarget {
+        project_id: None,
+        name: None,
+        path: clean,
+        auto_pull: false,
+        wiki_auto_update: false,
+    })
+}
+
+/// Git 写操作成功后的唯一发布入口。
+fn publish_write_status(
+    app: &AppHandle,
+    path: &str,
+    status: &GitStatus,
+    source: &str,
+    head_may_change: bool,
+) {
+    let target = target_for_path(app, path);
+    emit_project_changed(
+        app,
+        &target,
+        status.clone(),
+        source,
+        head_may_change,
+        false,
+        0,
+    );
+}
+
+/// 单批状态查询并发上限。
 const STATUS_CONCURRENCY: usize = 8;
 
-/// 批量查询多个路径的 git 状态(带缓存),结果按路径排序返回;
-/// 单个路径查询失败时跳过,不阻断其他项目
-pub async fn refresh_statuses_batch(paths: &[String], force: bool) -> Vec<GitStatusItem> {
+async fn status_async(path: &str, force: bool) -> Option<GitStatus> {
+    let path = path.to_string();
+    tokio::task::spawn_blocking(move || status_cached(&path, force))
+        .await
+        .ok()?
+        .ok()
+}
+
+async fn check_target(
+    app: AppHandle,
+    target: GitCheckTarget,
+    force: bool,
+    fetch_remote: bool,
+    source: String,
+) -> Option<GitStatusItem> {
+    let path = target.path.clone();
+    let mut status = status_async(&path, force).await?;
+
+    let mut auto_pulled = false;
+    let mut pulled_commits = 0;
+    if fetch_remote && status.is_repo && try_begin_fetch(&path) {
+        let fetch_semaphore = FETCH_PERMITS.get_or_init(|| Semaphore::new(3));
+        let _fetch_permit = fetch_semaphore.acquire().await;
+        let ok = fetch_with_timeout(&path).await;
+        if ok {
+            if let Some(mut refreshed) = status_async(&path, true).await {
+                refreshed.last_fetch_at = Some(crate::time_util::now_ts());
+                status = refreshed;
+                if target.auto_pull && status.behind > 0 {
+                    pulled_commits = status.behind;
+                    let pulled = tokio::task::spawn_blocking({
+                        let path = path.clone();
+                        move || ff_pull_blocking(&path)
+                    })
+                    .await
+                    .unwrap_or(false);
+                    if pulled {
+                        if let Some(mut refreshed) = status_async(&path, true).await {
+                            refreshed.last_fetch_at = Some(crate::time_util::now_ts());
+                            status = refreshed;
+                            auto_pulled = true;
+                        }
+                    }
+                }
+                cache_status(&path, &status);
+            }
+        }
+        fetch_finished(&path, ok);
+    }
+
+    emit_project_changed(
+        &app,
+        &target,
+        status.clone(),
+        &source,
+        auto_pulled,
+        auto_pulled,
+        pulled_commits,
+    );
+    Some(GitStatusItem { path, status })
+}
+
+async fn check_targets(
+    app: &AppHandle,
+    targets: Vec<GitCheckTarget>,
+    force: bool,
+    fetch_remote: bool,
+    source: &str,
+) -> Vec<GitStatusItem> {
     let semaphore = Arc::new(Semaphore::new(STATUS_CONCURRENCY));
     let mut set = tokio::task::JoinSet::new();
-    for path in paths {
-        let path = path.clone();
+    for target in targets {
+        let app = app.clone();
         let semaphore = semaphore.clone();
+        let source = source.to_string();
         set.spawn(async move {
             let _permit = semaphore.acquire().await;
-            // spawn_blocking 闭包独立持有 path 副本,避免与外层 async move 冲突
-            let st = tokio::task::spawn_blocking({
-                let path = path.clone();
-                move || status_cached(&path, force)
-            })
-            .await;
-            (path, st)
+            check_target(app, target, force, fetch_remote, source).await
         });
     }
     let mut items = Vec::new();
     while let Some(joined) = set.join_next().await {
-        if let Ok((path, Ok(Ok(st)))) = joined {
-            items.push(GitStatusItem { path, status: st });
+        if let Ok(Some(item)) = joined {
+            items.push(item);
         }
     }
     items.sort_by(|a, b| a.path.cmp(&b.path));
     items
 }
 
-/// 批量获取多个项目的 git 状态(带缓存):一次 IPC 返回全部,替代逐项目轮询。
-/// force 为 true 时绕过缓存强制重查(启动/用户主动刷新)
+/// 前端与后台共用的唯一 Git 检查入口。
 #[tauri::command]
-pub async fn refresh_all_git_status(
-    paths: Vec<String>,
+pub async fn check_git_status(
+    app: AppHandle,
+    scope: GitCheckScope,
     force: bool,
+    fetch_remote: bool,
 ) -> AppResult<Vec<GitStatusItem>> {
-    Ok(refresh_statuses_batch(&paths, force).await)
+    let targets = load_check_targets(&app, scope)?;
+    Ok(check_targets(&app, targets, force, fetch_remote, "manual").await)
 }
 
-/// 状态刷新周期(与原前端轮询间隔一致)
-const STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
+/// 统一后台检查周期:本地状态、fetch 与自动快进在同一流水线执行。
+const GIT_CHECK_INTERVAL: Duration = Duration::from_secs(30);
 /// 启动后首轮刷新的延迟:先让首屏渲染完成,避免启动瞬间与列表请求抢资源
-const STATUS_REFRESH_FIRST_DELAY: Duration = Duration::from_secs(3);
+const GIT_CHECK_FIRST_DELAY: Duration = Duration::from_secs(3);
 
-/// 读取所有未归档项目的 (id, path)
-fn list_active_project_paths(app: &AppHandle) -> Vec<(i64, String)> {
-    let Some(db) = app.try_state::<Db>() else {
-        return Vec::new();
-    };
-    let conn = db.0.lock().unwrap();
-    let mut stmt = match conn.prepare("SELECT id, path FROM projects WHERE archived_at IS NULL") {
-        Ok(s) => s,
-        Err(_) => return Vec::new(),
-    };
-    stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
-        .map(|rows| rows.filter_map(Result::ok).collect())
-        .unwrap_or_default()
-}
-
-/// 后台 git 状态刷新循环(替代前端 setInterval 轮询):
-/// 启动 3s 后执行首轮(先让首屏渲染完成,避免启动瞬间与列表请求抢资源),
-/// 之后每 30s 批量查询所有未归档项目状态(带缓存)并事件推送全量,
-/// 随后调度一轮后台 fetch(进行中去重 + 失败退避 + 超时 kill)。
-/// 网络失败只在这里发生一次,不再由前端逐项目轮询放大
-pub async fn status_refresher_loop(app: AppHandle) {
-    tokio::time::sleep(STATUS_REFRESH_FIRST_DELAY).await;
+pub async fn monitor_loop(app: AppHandle) {
+    tokio::time::sleep(GIT_CHECK_FIRST_DELAY).await;
     loop {
-        let projects = list_active_project_paths(&app);
-        if !projects.is_empty() {
-            let paths: Vec<String> = projects.iter().map(|(_, p)| p.clone()).collect();
-            let items = refresh_statuses_batch(&paths, false).await;
-            if !items.is_empty() {
-                let _ = app.emit("git://status-updated", items);
-            }
-            for (id, path) in &projects {
-                fetch_schedule(&app, *id, path.clone());
-            }
+        if let Ok(targets) = load_check_targets(&app, GitCheckScope::All) {
+            check_targets(&app, targets, false, true, "periodic").await;
         }
-        tokio::time::sleep(STATUS_REFRESH_INTERVAL).await;
+        tokio::time::sleep(GIT_CHECK_INTERVAL).await;
     }
 }
 
@@ -813,156 +1011,6 @@ fn kill_process_tree(mut child: tokio::process::Child) {
     // 非 Windows 主路径;Windows 上作为 taskkill 的兜底(重复 kill 无害)
     let _ = child.start_kill();
     let _ = child.wait();
-}
-
-/// 调度一次后台 fetch(进行中/退避期跳过)。
-/// fetch 成功后强制重查本地状态回填缓存,并把远端领先数经 "git://updated"
-/// 广播给所有窗口(原实现只发触发窗口,广播后多窗口状态天然一致)
-fn fetch_schedule(app: &AppHandle, project_id: i64, path: String) {
-    if !fetch_due(&path) {
-        return;
-    }
-    // 入登记也走 clean_str,与 fetch_due / fetch_finished 共享同一 key,
-    // 否则 fetch_finished 的 remove 找不到对应条目,会泄漏 in_progress
-    let key = crate::path_util::clean_str(&path);
-    fetch_tracker().lock().unwrap().in_progress.insert(key);
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let semaphore = FETCH_PERMITS.get_or_init(|| Semaphore::new(3));
-        let _permit = semaphore.acquire().await;
-        let ok = fetch_with_timeout(&path).await;
-        if ok {
-            let st = tokio::task::spawn_blocking({
-                let path = path.clone();
-                move || status_cached(&path, true)
-            })
-            .await;
-            if let Ok(Ok(st)) = st {
-                if st.is_repo {
-                    let payload = GitUpdatedPayload {
-                        project_id,
-                        remote_ahead: st.behind,
-                        last_fetch_at: crate::time_util::now_ts(),
-                    };
-                    let _ = app.emit("git://updated", payload);
-                }
-            }
-        }
-        fetch_finished(&path, ok);
-    });
-}
-
-/// 后台 fetch:不返回数据,完成后 emit "git://updated"
-#[tauri::command]
-pub fn fetch_git_remote_async(window: Window, project_id: i64, path: String) {
-    fetch_schedule(window.app_handle(), project_id, path);
-}
-
-// ── 跟踪更新(自动拉取) ──────────────────────────────────────────────
-
-/// 跟踪项目的检查周期(每轮对各项目先 fetch 再按需快进)
-const AUTO_PULL_INTERVAL: Duration = Duration::from_secs(60);
-
-/// 读取所有开启「跟踪更新」且未归档项目的 (id, path)
-fn list_tracked_project_paths(app: &AppHandle) -> Vec<(i64, String)> {
-    let Some(db) = app.try_state::<Db>() else {
-        return Vec::new();
-    };
-    let conn = db.0.lock().unwrap();
-    let mut stmt = match conn
-        .prepare("SELECT id, path FROM projects WHERE archived_at IS NULL AND auto_pull = 1")
-    {
-        Ok(s) => s,
-        Err(_) => return Vec::new(),
-    };
-    stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
-        .map(|rows| rows.filter_map(Result::ok).collect())
-        .unwrap_or_default()
-}
-
-/// 跟踪更新后台循环:启动延迟后每分钟检查一轮开启跟踪的项目
-pub async fn auto_pull_loop(app: AppHandle) {
-    tokio::time::sleep(STATUS_REFRESH_FIRST_DELAY).await;
-    loop {
-        for (id, path) in list_tracked_project_paths(&app) {
-            auto_pull_schedule(&app, id, path);
-        }
-        tokio::time::sleep(AUTO_PULL_INTERVAL).await;
-    }
-}
-
-/// 调度一次跟踪项目的自动拉取(进行中/退避期跳过,与 fetch_schedule 共用同一治理):
-/// 先 fetch,状态显示落后 upstream 时执行 `git merge --ff-only @{u}` 快进。
-/// 仅快进保证不产生合并提交;分叉、无 upstream、本地改动会被覆盖等可能冲突的
-/// 情形 git 直接拒绝且不留合并状态——即「有冲突则取消」,全程静默不提醒。
-/// 快进成功后回填状态缓存并广播,前端徽标即时更新;
-/// 另 emit "git://auto-pulled"(project_id + 本轮拉取提交数),供前端联动 wiki 自动增量更新
-fn auto_pull_schedule(app: &AppHandle, project_id: i64, path: String) {
-    if !fetch_due(&path) {
-        return;
-    }
-    let key = crate::path_util::clean_str(&path);
-    fetch_tracker().lock().unwrap().in_progress.insert(key);
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let semaphore = FETCH_PERMITS.get_or_init(|| Semaphore::new(3));
-        let _permit = semaphore.acquire().await;
-        let ok = fetch_with_timeout(&path).await;
-        if ok {
-            let st = tokio::task::spawn_blocking({
-                let path = path.clone();
-                move || status_cached(&path, true)
-            })
-            .await;
-            if let Ok(Ok(st)) = st {
-                if st.is_repo && st.behind > 0 {
-                    // 快进前的 behind 即本轮拉取的提交数,事件里带上
-                    let pulled_count = st.behind;
-                    let pulled = tokio::task::spawn_blocking({
-                        let path = path.clone();
-                        move || ff_pull_blocking(&path)
-                    })
-                    .await;
-                    if let Ok(true) = pulled {
-                        let st = tokio::task::spawn_blocking({
-                            let path = path.clone();
-                            move || {
-                                let st = status(&path)?;
-                                cache_status(&path, &st);
-                                Ok::<_, AppError>(st)
-                            }
-                        })
-                        .await;
-                        if let Ok(Ok(st)) = st {
-                            let _ = app.emit(
-                                "git://status-updated",
-                                vec![GitStatusItem {
-                                    path: path.clone(),
-                                    status: st,
-                                }],
-                            );
-                            let _ = app.emit(
-                                "git://updated",
-                                GitUpdatedPayload {
-                                    project_id,
-                                    remote_ahead: 0,
-                                    last_fetch_at: crate::time_util::now_ts(),
-                                },
-                            );
-                            let _ = app.emit(
-                                "git://auto-pulled",
-                                GitAutoPulledPayload {
-                                    project_id,
-                                    pulled: pulled_count,
-                                },
-                            );
-                        }
-                    }
-                }
-            }
-        }
-        fetch_finished(&path, ok);
-    });
 }
 
 /// `git merge --ff-only @{u}`:仅快进合并,不可能产生合并提交。
@@ -1104,11 +1152,13 @@ fn list_branches_blocking(path: &str) -> AppResult<GitBranches> {
 /// 让"绑定仓库 → 改仓库地址"这种二次操作不会因 git 拒绝而抛错
 #[tauri::command]
 pub async fn git_init(
+    app: AppHandle,
     path: String,
     branch: String,
     remote_url: Option<String>,
 ) -> AppResult<GitStatus> {
-    run_blocking(move || {
+    let event_path = path.clone();
+    let status = run_blocking(move || {
         let branch = {
             let b = branch.trim();
             if b.is_empty() { "main" } else { b }
@@ -1134,7 +1184,9 @@ pub async fn git_init(
         cache_status(&path, &st);
         Ok(st)
     })
-    .await
+    .await?;
+    publish_write_status(&app, &event_path, &status, "init", true);
+    Ok(status)
 }
 
 /// 切换分支;create 为 true 时创建并切换(`git checkout -b`),
@@ -1143,14 +1195,18 @@ pub async fn git_init(
 /// 否则创建跟踪分支(`git checkout -b feature --track origin/feature`)
 #[tauri::command]
 pub async fn git_checkout(
+    app: AppHandle,
     path: String,
     branch: String,
     create: bool,
     remote: bool,
     start_point: Option<String>,
 ) -> AppResult<GitStatus> {
-    run_blocking(move || checkout_blocking(&path, &branch, create, remote, start_point.as_deref()))
-        .await
+    let event_path = path.clone();
+    let status = run_blocking(move || checkout_blocking(&path, &branch, create, remote, start_point.as_deref()))
+        .await?;
+    publish_write_status(&app, &event_path, &status, "checkout", true);
+    Ok(status)
 }
 
 fn checkout_blocking(
@@ -1235,12 +1291,17 @@ fn nested_repo_dirs(path: &str) -> Vec<String> {
 /// 不在 paths 中的已暂存文件不进入本次提交(分批/挑选提交场景)
 #[tauri::command]
 pub async fn git_commit(
+    app: AppHandle,
     path: String,
     message: String,
     include_untracked: bool,
     paths: Option<Vec<String>>,
 ) -> AppResult<GitStatus> {
-    run_blocking(move || commit_blocking(&path, &message, include_untracked, paths)).await
+    let event_path = path.clone();
+    let status = run_blocking(move || commit_blocking(&path, &message, include_untracked, paths))
+        .await?;
+    publish_write_status(&app, &event_path, &status, "commit", true);
+    Ok(status)
 }
 
 fn commit_blocking(
@@ -1293,14 +1354,17 @@ fn commit_blocking(
 /// 为其他本地分支时不切换工作区,经 `git fetch <remote> <src>:<branch>` 快进更新引用
 /// (分叉或分支被其他 worktree 占用时由 git 报错透传)
 #[tauri::command]
-pub async fn git_pull(path: String, branch: Option<String>) -> AppResult<GitPullResult> {
-    run_blocking(move || match branch {
+pub async fn git_pull(app: AppHandle, path: String, branch: Option<String>) -> AppResult<GitPullResult> {
+    let event_path = path.clone();
+    let result = run_blocking(move || match branch {
         Some(b) if !b.is_empty() && current_branch(&path).as_deref() != Some(b.as_str()) => {
             pull_branch_blocking(&path, &b)
         }
         _ => pull_blocking(&path),
     })
-    .await
+    .await?;
+    publish_write_status(&app, &event_path, &result.status, "pull", true);
+    Ok(result)
 }
 
 fn pull_blocking(path: &str) -> AppResult<GitPullResult> {
@@ -1403,14 +1467,17 @@ fn default_push_remote(path: &str) -> Option<String> {
 /// branch 为其他本地分支时推送该分支:有 upstream 推到 upstream 对应分支,
 /// 无 upstream 回退 `git push -u <默认远端> <branch>` 并建立跟踪
 #[tauri::command]
-pub async fn git_push(path: String, branch: Option<String>) -> AppResult<GitStatus> {
-    run_blocking(move || match branch {
+pub async fn git_push(app: AppHandle, path: String, branch: Option<String>) -> AppResult<GitStatus> {
+    let event_path = path.clone();
+    let status = run_blocking(move || match branch {
         Some(b) if !b.is_empty() && current_branch(&path).as_deref() != Some(b.as_str()) => {
             push_branch_blocking(&path, &b)
         }
         _ => push_blocking(&path),
     })
-    .await
+    .await?;
+    publish_write_status(&app, &event_path, &status, "push", false);
+    Ok(status)
 }
 
 /// 推送非当前检出的本地分支(不影响工作区)
@@ -1434,11 +1501,15 @@ fn push_branch_blocking(path: &str, branch: &str) -> AppResult<GitStatus> {
 /// force=true 用 -D 强删。当前检出或被其他 worktree 占用的分支由 git 拒绝,错误透传
 #[tauri::command]
 pub async fn git_branch_delete(
+    app: AppHandle,
     path: String,
     branch: String,
     force: bool,
 ) -> AppResult<GitStatus> {
-    run_blocking(move || branch_delete_blocking(&path, &branch, force)).await
+    let event_path = path.clone();
+    let status = run_blocking(move || branch_delete_blocking(&path, &branch, force)).await?;
+    publish_write_status(&app, &event_path, &status, "branch_delete", false);
+    Ok(status)
 }
 
 fn branch_delete_blocking(path: &str, branch: &str, force: bool) -> AppResult<GitStatus> {
@@ -1457,8 +1528,15 @@ fn branch_delete_blocking(path: &str, branch: &str, force: bool) -> AppResult<Gi
 /// `git push <remote> --delete <short>`;名称不含远端前缀时报 git_branch_name_required,
 /// 远端不存在或分支不存在等由 git 报错,经 friendly_git_error 透传
 #[tauri::command]
-pub async fn git_remote_branch_delete(path: String, branch: String) -> AppResult<GitStatus> {
-    run_blocking(move || remote_branch_delete_blocking(&path, &branch)).await
+pub async fn git_remote_branch_delete(
+    app: AppHandle,
+    path: String,
+    branch: String,
+) -> AppResult<GitStatus> {
+    let event_path = path.clone();
+    let status = run_blocking(move || remote_branch_delete_blocking(&path, &branch)).await?;
+    publish_write_status(&app, &event_path, &status, "remote_branch_delete", false);
+    Ok(status)
 }
 
 fn remote_branch_delete_blocking(path: &str, branch: &str) -> AppResult<GitStatus> {
@@ -1697,6 +1775,7 @@ fn resolve_worktree_target(main_root: &str, input: &str, branch: &str) -> PathBu
 /// 分支已被其它 worktree 检出时报 git_branch_checked_out
 #[tauri::command]
 pub async fn git_worktree_add(
+    app: AppHandle,
     path: String,
     worktree_path: String,
     branch: String,
@@ -1704,7 +1783,8 @@ pub async fn git_worktree_add(
     start_point: Option<String>,
     base_branch: Option<String>,
 ) -> AppResult<Vec<GitWorktree>> {
-    run_blocking(move || {
+    let event_path = path.clone();
+    let worktrees = run_blocking(move || {
         worktree_add_blocking(
             &path,
             &worktree_path,
@@ -1714,7 +1794,16 @@ pub async fn git_worktree_add(
             base_branch.as_deref(),
         )
     })
+    .await?;
+    if let Ok(status) = run_blocking({
+        let path = event_path.clone();
+        move || status_cached(&path, true)
+    })
     .await
+    {
+        publish_write_status(&app, &event_path, &status, "worktree_add", false);
+    }
+    Ok(worktrees)
 }
 
 fn worktree_add_blocking(
@@ -1832,16 +1921,27 @@ fn is_ancestor(path: &str, a: &str, b: &str) -> AppResult<bool> {
 /// 分支 -d 因未合并失败后的强制重试)时改为 prune 清理登记,并按 branch 继续删分支
 #[tauri::command]
 pub async fn git_worktree_remove(
+    app: AppHandle,
     path: String,
     worktree_path: String,
     force: bool,
     delete_branch: bool,
     branch: Option<String>,
 ) -> AppResult<Vec<GitWorktree>> {
-    run_blocking(move || {
+    let event_path = path.clone();
+    let worktrees = run_blocking(move || {
         worktree_remove_blocking(&path, &worktree_path, force, delete_branch, branch.as_deref())
     })
+    .await?;
+    if let Ok(status) = run_blocking({
+        let path = event_path.clone();
+        move || status_cached(&path, true)
+    })
     .await
+    {
+        publish_write_status(&app, &event_path, &status, "worktree_remove", false);
+    }
+    Ok(worktrees)
 }
 
 fn worktree_remove_blocking(
@@ -1895,12 +1995,18 @@ fn worktree_remove_blocking(
 /// 与 pull 一致:产生冲突不算失败,返回冲突文件列表由前端引导解决
 #[tauri::command]
 pub async fn git_merge(
+    app: AppHandle,
     path: String,
     branch: String,
     target: Option<String>,
     squash: bool,
 ) -> AppResult<GitMergeResult> {
-    run_blocking(move || merge_blocking(&path, &branch, target.as_deref(), squash)).await
+    let event_path = path.clone();
+    let result = run_blocking(move || merge_blocking(&path, &branch, target.as_deref(), squash))
+        .await?;
+    let changed_path = if result.merged_in.is_empty() { &event_path } else { &result.merged_in };
+    publish_write_status(&app, changed_path, &result.status, "merge", true);
+    Ok(result)
 }
 
 fn merge_blocking(
@@ -1972,14 +2078,17 @@ fn merge_blocking(
 
 /// 中止进行中的合并(`git merge --abort`),返回最新状态
 #[tauri::command]
-pub async fn git_merge_abort(path: String) -> AppResult<GitStatus> {
-    run_blocking(move || {
+pub async fn git_merge_abort(app: AppHandle, path: String) -> AppResult<GitStatus> {
+    let event_path = path.clone();
+    let status = run_blocking(move || {
         run_git(&path, &["merge", "--abort"])?;
         let st = status(&path)?;
         cache_status(&path, &st);
         Ok(st)
     })
-    .await
+    .await?;
+    publish_write_status(&app, &event_path, &status, "merge_abort", true);
+    Ok(status)
 }
 
 /// 变基是否处于中断状态:git dir 下存在 rebase-merge / rebase-apply 目录。
@@ -1999,8 +2108,11 @@ fn rebase_in_progress(path: &str) -> bool {
 /// 将当前分支变基到 onto 之上。冲突/中断不算失败:返回冲突文件与 in_progress,
 /// 由前端引导用户外部解决后 --continue,或调用 git_rebase_abort 中止
 #[tauri::command]
-pub async fn git_rebase(path: String, onto: String) -> AppResult<GitRebaseResult> {
-    run_blocking(move || rebase_blocking(&path, &onto)).await
+pub async fn git_rebase(app: AppHandle, path: String, onto: String) -> AppResult<GitRebaseResult> {
+    let event_path = path.clone();
+    let result = run_blocking(move || rebase_blocking(&path, &onto)).await?;
+    publish_write_status(&app, &event_path, &result.status, "rebase", true);
+    Ok(result)
 }
 
 fn rebase_blocking(path: &str, onto: &str) -> AppResult<GitRebaseResult> {
@@ -2032,14 +2144,17 @@ fn rebase_blocking(path: &str, onto: &str) -> AppResult<GitRebaseResult> {
 
 /// 中止进行中的变基(`git rebase --abort`),返回最新状态
 #[tauri::command]
-pub async fn git_rebase_abort(path: String) -> AppResult<GitStatus> {
-    run_blocking(move || {
+pub async fn git_rebase_abort(app: AppHandle, path: String) -> AppResult<GitStatus> {
+    let event_path = path.clone();
+    let status = run_blocking(move || {
         run_git(&path, &["rebase", "--abort"])?;
         let st = status(&path)?;
         cache_status(&path, &st);
         Ok(st)
     })
-    .await
+    .await?;
+    publish_write_status(&app, &event_path, &status, "rebase_abort", true);
+    Ok(status)
 }
 /// 送入 AI 的 diff 长度上限(超出截断,避免 token 爆炸)
 const DIFF_MAX_CHARS: usize = 30_000;
@@ -3180,6 +3295,45 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::PathBuf;
+
+    #[test]
+    fn git_check_scope_deserializes_all_project_and_path() {
+        assert!(matches!(
+            serde_json::from_str::<GitCheckScope>(r#"{"kind":"all"}"#).unwrap(),
+            GitCheckScope::All
+        ));
+        assert!(matches!(
+            serde_json::from_str::<GitCheckScope>(r#"{"kind":"project","projectId":42}"#)
+                .unwrap(),
+            GitCheckScope::Project { project_id: 42 }
+        ));
+        assert!(matches!(
+            serde_json::from_str::<GitCheckScope>(r#"{"kind":"path","path":"D:/repo"}"#)
+                .unwrap(),
+            GitCheckScope::Path { path } if path == "D:/repo"
+        ));
+    }
+
+    #[test]
+    fn fetch_registration_is_atomic_and_released_after_finish() {
+        let path = format!("atomic-fetch-{}", crate::time_util::now_ts_nanos());
+        assert!(try_begin_fetch(&path));
+        assert!(!try_begin_fetch(&path));
+        fetch_finished(&path, true);
+        assert!(try_begin_fetch(&path));
+        fetch_finished(&path, true);
+    }
+
+    #[test]
+    fn observe_head_only_reports_real_changes_after_initial_snapshot() {
+        let path = format!("observe-head-{}", crate::time_util::now_ts_nanos());
+        assert!(!observe_head(&path, Some("a".into()), false));
+        assert!(!observe_head(&path, Some("a".into()), false));
+        assert!(observe_head(&path, Some("b".into()), false));
+
+        let forced = format!("observe-head-forced-{}", crate::time_util::now_ts_nanos());
+        assert!(observe_head(&forced, Some("a".into()), true));
+    }
 
     fn temp_dir(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(

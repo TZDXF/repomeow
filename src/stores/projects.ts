@@ -2,13 +2,14 @@ import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 import { cmd } from "@/lib/tauri";
 import type {
+  GitCheckScope,
   GitBranches,
   GitMergeResult,
   GitPullResult,
   GitRebaseResult,
   GitStatus,
   GitStatusItem,
-  GitUpdatedPayload,
+  GitProjectChangedPayload,
   GitWorktree,
   Project,
 } from "@/types";
@@ -99,13 +100,28 @@ export const useProjectsStore = defineStore("projects", () => {
   /**
    * 刷新单个项目的 git 状态。
    * 默认走后端 15s 缓存:详情页进入等高频场景直接命中,避免每次进大仓库都重跑
-   * git status;缓存过期由后端 30s 后台刷新循环兜底保鲜,结果经 git://status-updated 推送。
+   * git status;缓存过期由后端 30s 统一检查循环兜底保鲜,结果经统一事件推送。
    * git 写操作本身会返回最新状态并回填缓存,不经过此函数。
    * force: true 用于路径变更(重定向/移动目录)后必须拿到最新状态的场景。
    */
   async function refreshGitStatus(project: Project, options: { force?: boolean } = {}) {
     const force = options.force ?? false;
-    const run = () => cmd<GitStatus>("get_git_status", { path: project.path, force });
+    const registered = projects.value.some((p) => p.id === project.id && p.path === project.path);
+    const scope: GitCheckScope = registered
+      ? { kind: "project", projectId: project.id }
+      : { kind: "path", path: project.path };
+    const run = async () => {
+      const items = await cmd<GitStatusItem[]>("check_git_status", {
+        scope,
+        force,
+        fetchRemote: false,
+      });
+      const item = items.find((i) => i.path === project.path) ?? items[0];
+      if (!item) {
+        throw new Error("git status unavailable");
+      }
+      return item.status;
+    };
     try {
       project.git = await run();
     } catch {
@@ -123,10 +139,13 @@ export const useProjectsStore = defineStore("projects", () => {
    * force 为 true 时绕过缓存强制重查(启动/用户主动刷新)
    */
   async function refreshAllGitStatus(force = false) {
-    const paths = projects.value.map((p) => p.path);
-    if (!paths.length) return;
     try {
-      const items = await cmd<GitStatusItem[]>("refresh_all_git_status", { paths, force });
+      const scope: GitCheckScope = { kind: "all" };
+      const items = await cmd<GitStatusItem[]>("check_git_status", {
+        scope,
+        force,
+        fetchRemote: false,
+      });
       applyGitStatusItems(items);
     } catch {
       // 失败静默:由后端事件推送/窗口聚焦兜底补充
@@ -141,6 +160,18 @@ export const useProjectsStore = defineStore("projects", () => {
       const st = byPath.get(p.path);
       if (st) p.git = st;
     });
+  }
+
+  /** 后台检查与 Git 写操作的统一事件入口。 */
+  function applyGitProjectEvent(payload: GitProjectChangedPayload) {
+    const project =
+      (payload.project_id == null
+        ? undefined
+        : projects.value.find((p) => p.id === payload.project_id)) ??
+      projects.value.find((p) => p.path === payload.path);
+    if (project && project.path === payload.path) {
+      project.git = payload.status;
+    }
   }
 
   async function addProject(path: string, name: string, description?: string) {
@@ -221,7 +252,7 @@ export const useProjectsStore = defineStore("projects", () => {
     }
   }
 
-  /** 设置/取消项目级「Wiki 自动增量更新」:实际触发还需全局开关与「跟踪更新」开启 */
+  /** 设置/取消项目级「Wiki 自动增量更新」:与跟踪更新相互独立 */
   async function setWikiAutoUpdate(id: number, enabled: boolean) {
     await cmd("set_project_wiki_auto_update", { id, enabled });
     const p = projects.value.find((x) => x.id === id);
@@ -246,15 +277,6 @@ export const useProjectsStore = defineStore("projects", () => {
   async function deleteProject(id: number) {
     await cmd("delete_project", { id });
     archivedProjects.value = archivedProjects.value.filter((p) => p.id !== id);
-  }
-
-  /** 后台 fetch 完成后由 git://updated 事件调用 */
-  function updateGitRemote(projectId: number, payload: GitUpdatedPayload) {
-    const p = projects.value.find((x) => x.id === projectId);
-    if (p?.git) {
-      p.git.remote_ahead = payload.remote_ahead;
-      p.git.last_fetch_at = payload.last_fetch_at;
-    }
   }
 
   // --- Git 写操作:错误向上抛出由 UI toast,成功后用返回的最新状态就地更新 ---
@@ -470,7 +492,7 @@ export const useProjectsStore = defineStore("projects", () => {
     refreshGitStatus,
     refreshAllGitStatus,
     applyGitStatusItems,
-    updateGitRemote,
+    applyGitProjectEvent,
     listBranches,
     initRepository,
     checkoutBranch,

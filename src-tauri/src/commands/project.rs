@@ -454,8 +454,8 @@ pub fn set_auto_pull(conn: &Connection, id: i64, enabled: bool) -> AppResult<()>
     Ok(())
 }
 
-/// 设置/取消项目级「Wiki 自动增量更新」:实际触发还需前端全局开关打开,
-/// 且「跟踪更新」(auto_pull)开启——开关状态独立保留,便于提前配置
+/// 设置/取消项目级「Wiki 自动增量更新」:本地 HEAD 变化后独立触发,
+/// 与「跟踪更新」(auto_pull)互不依赖
 pub fn set_wiki_auto_update(conn: &Connection, id: i64, enabled: bool) -> AppResult<()> {
     let changed = conn.execute(
         "UPDATE projects SET wiki_auto_update = ?1 WHERE id = ?2",

@@ -2,10 +2,12 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
-import { BookOpenText, Search } from "@lucide/vue";
+import { Search } from "@lucide/vue";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
+import { matchesTrackingProject } from "@/lib/tracking";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
 import type { Project } from "@/types";
@@ -21,23 +23,12 @@ onMounted(() => {
   }
 });
 
-/** 搜索关键字,匹配名称/描述/路径 */
+/** 搜索关键字,匹配名称/描述/路径/标签 */
 const searchInput = ref("");
 
 const filteredProjects = computed(() => {
-  // 空格切分为多个查询词,词间 AND:每个词至少命中名称/描述/路径之一
-  const terms = searchInput.value.toLowerCase().split(/\s+/).filter(Boolean);
-  if (terms.length === 0) return store.projects;
-  return store.projects.filter((p) => {
-    const fields = [p.name, p.description, p.path].map((s) => s.toLowerCase());
-    return terms.every((q) => fields.some((f) => f.includes(q)));
-  });
+  return store.projects.filter((project) => matchesTrackingProject(project, searchInput.value));
 });
-
-/** 已跟踪的项目排在前面,组内保持列表原有顺序 */
-const sortedProjects = computed(() =>
-  [...filteredProjects.value].sort((a, b) => Number(b.auto_pull) - Number(a.auto_pull)),
-);
 
 const trackedCount = computed(() => store.projects.filter((p) => p.auto_pull).length);
 
@@ -71,9 +62,8 @@ async function toggleWiki(project: Project, enabled: boolean) {
   }
 }
 
-/** Wiki 开关的三态提示:未跟踪 / 全局已开启(勾选被忽略并禁用) / 正常 */
-function wikiToggleTitle(p: Project): string {
-  if (!p.auto_pull) return t("settings.tracking.wikiToggleNeedsTracking");
+/** Wiki 开关提示:全局已开启时项目值被忽略,否则可独立配置。 */
+function wikiToggleTitle(): string {
   if (settings.wikiAutoUpdate) return t("settings.tracking.wikiToggleGloballyOn");
   return t("settings.tracking.wikiToggleHint");
 }
@@ -151,7 +141,7 @@ function commitThreshold() {
       </div>
     </div>
 
-    <div class="relative mt-4 w-64 max-w-full">
+    <div class="relative mt-4 w-80 max-w-full">
       <Search
         class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
       />
@@ -166,44 +156,86 @@ function commitThreshold() {
       {{ t("settings.tracking.trackedCount", { count: trackedCount }) }}
     </p>
 
-    <!-- 列表区跟随窗口高度:占满剩余空间,内部滚动 -->
-    <ScrollArea class="mt-3 min-h-0 flex-1">
-      <div class="flex flex-col gap-1">
-        <div
-          v-for="p in sortedProjects"
-          :key="p.id"
-          class="flex items-center justify-between gap-3 rounded-md px-2 py-1.5 hover:bg-accent"
-        >
-          <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-medium">{{ p.name }}</p>
-            <p class="truncate text-xs text-muted-foreground" :title="p.path">{{ p.path }}</p>
-          </div>
-          <div class="flex shrink-0 items-center gap-4">
-            <!-- Wiki 自动增量更新(项目级):依赖该项目的跟踪更新;
-                 全局开关打开时所有跟踪项目都参与,勾选被忽略并禁用 -->
-            <div class="flex items-center gap-1.5">
-              <BookOpenText class="h-3.5 w-3.5 text-muted-foreground" />
-              <Switch
-                :model-value="p.wiki_auto_update"
-                :disabled="!p.auto_pull || settings.wikiAutoUpdate || wikiPendingIds.has(p.id)"
-                :title="wikiToggleTitle(p)"
-                @update:model-value="toggleWiki(p, $event)"
-              />
-            </div>
-            <Switch
-              :model-value="p.auto_pull"
-              :disabled="pendingIds.has(p.id)"
-              :title="t('settings.tracking.toggleHint')"
-              @update:model-value="toggle(p, $event)"
-            />
-          </div>
-        </div>
-        <p v-if="!sortedProjects.length" class="py-6 text-center text-xs text-muted-foreground">
-          {{
-            store.projects.length ? t("settings.tracking.noMatch") : t("settings.tracking.empty")
-          }}
-        </p>
-      </div>
+    <!-- 表格区跟随窗口高度:切换开关仅更新当前行,不改变后端名称排序 -->
+    <ScrollArea class="mt-3 min-h-0 flex-1 rounded-md border">
+      <table class="w-full table-fixed text-sm">
+        <thead class="sticky top-0 z-10 bg-background">
+          <tr class="border-b text-left text-xs text-muted-foreground">
+            <th class="w-[22%] px-3 py-2 font-medium">
+              {{ t("settings.tracking.columns.project") }}
+            </th>
+            <th class="w-[30%] px-3 py-2 font-medium">
+              {{ t("settings.tracking.columns.description") }}
+            </th>
+            <th class="px-3 py-2 font-medium">{{ t("settings.tracking.columns.tags") }}</th>
+            <th class="w-24 px-3 py-2 text-center font-medium">
+              {{ t("settings.tracking.columns.wiki") }}
+            </th>
+            <th class="w-24 px-3 py-2 text-center font-medium">
+              {{ t("settings.tracking.columns.tracking") }}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="p in filteredProjects"
+            :key="p.id"
+            class="border-b transition-colors last:border-0 hover:bg-accent/60"
+          >
+            <td class="px-3 py-2 font-medium">
+              <p class="truncate" :title="p.name">{{ p.name }}</p>
+            </td>
+            <td class="px-3 py-2 text-xs text-muted-foreground">
+              <p class="truncate" :title="p.description || undefined">
+                {{ p.description || "-" }}
+              </p>
+            </td>
+            <td class="px-3 py-2">
+              <div v-if="p.tags.length" class="flex flex-wrap gap-1">
+                <Badge
+                  v-for="tag in p.tags"
+                  :key="tag.id"
+                  variant="secondary"
+                  class="px-1.5 py-0 text-[11px]"
+                  :style="{ backgroundColor: tag.color + '22', color: tag.color }"
+                >
+                  {{ tag.name }}
+                </Badge>
+              </div>
+              <span v-else class="text-xs text-muted-foreground">-</span>
+            </td>
+            <td class="px-3 py-2">
+              <div class="flex justify-center">
+                <Switch
+                  :model-value="p.wiki_auto_update"
+                  :disabled="settings.wikiAutoUpdate || wikiPendingIds.has(p.id)"
+                  :title="wikiToggleTitle()"
+                  @update:model-value="toggleWiki(p, $event)"
+                />
+              </div>
+            </td>
+            <td class="px-3 py-2">
+              <div class="flex justify-center">
+                <Switch
+                  :model-value="p.auto_pull"
+                  :disabled="pendingIds.has(p.id)"
+                  :title="t('settings.tracking.toggleHint')"
+                  @update:model-value="toggle(p, $event)"
+                />
+              </div>
+            </td>
+          </tr>
+          <tr v-if="!filteredProjects.length">
+            <td colspan="5" class="py-8 text-center text-xs text-muted-foreground">
+              {{
+                store.projects.length
+                  ? t("settings.tracking.noMatch")
+                  : t("settings.tracking.empty")
+              }}
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </ScrollArea>
   </section>
 </template>

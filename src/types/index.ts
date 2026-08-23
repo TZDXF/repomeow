@@ -83,6 +83,25 @@ export interface GitStatusItem {
   status: GitStatus;
 }
 
+export type GitCheckScope =
+  | { kind: "all" }
+  | { kind: "project"; projectId: number }
+  | { kind: "path"; path: string };
+
+/** 统一 Git 状态事件:后台检查与应用内写操作均通过此协议发布。 */
+export interface GitProjectChangedPayload {
+  project_id: number | null;
+  name: string | null;
+  path: string;
+  status: GitStatus;
+  head_sha: string | null;
+  head_changed: boolean;
+  auto_pulled: boolean;
+  pulled_commits: number;
+  source: string;
+  wiki_auto_update: boolean;
+}
+
 /** 一个 git remote 及其地址 */
 export interface GitRemote {
   name: string;
@@ -561,18 +580,6 @@ export interface PinnedCommand {
   /** 自定义命令的图标名(后端 list 时实时 JOIN custom_commands,其他 kind 为 null) */
   icon: string | null;
   created_at: number;
-}
-
-export interface GitUpdatedPayload {
-  project_id: number;
-  remote_ahead: number;
-  last_fetch_at: number;
-}
-
-/** git://auto-pulled 事件载荷:跟踪更新快进拉取成功(pulled = 本轮拉取的提交数) */
-export interface GitAutoPulledPayload {
-  project_id: number;
-  pulled: number;
 }
 
 /** 报告类型:日报(单日) | 周报(日期范围) */

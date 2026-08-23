@@ -83,8 +83,8 @@ export const useSettingsStore = defineStore("settings", () => {
   /** 启动时自动检查更新 */
   const autoCheckUpdate = ref(true);
   /**
-   * Wiki 自动增量更新全局开关(与「跟踪更新」联动,默认关闭):打开 = 所有跟踪项目
-   * 都参与自动增量更新(项目勾选被忽略并在 UI 禁用);关闭 = 仅项目勾选了的参与
+   * Wiki 自动增量更新全局开关(默认关闭):打开 = 所有项目都参与自动增量更新
+   * (项目勾选被忽略并在 UI 禁用);关闭 = 仅项目勾选了的参与
    * (projects 表 wiki_auto_update)。阈值见 wikiAutoUpdateThreshold
    */
   const wikiAutoUpdate = ref(false);
