@@ -140,17 +140,19 @@ async function toggleWikiAutoUpdate(enabled: boolean) {
             class="border-b transition-colors last:border-0 hover:bg-accent/60"
           >
             <td class="px-3 py-2">
-              <p class="truncate font-medium" :title="p.name">{{ p.name }}</p>
-              <div v-if="p.tags.length" class="mt-1.5 flex flex-wrap gap-1">
-                <Badge
-                  v-for="tag in p.tags"
-                  :key="tag.id"
-                  variant="secondary"
-                  class="px-1.5 py-0 text-[11px]"
-                  :style="{ backgroundColor: tag.color + '22', color: tag.color }"
-                >
-                  {{ tag.name }}
-                </Badge>
+              <div class="flex items-center gap-1.5">
+                <p class="truncate font-medium" :title="p.name">{{ p.name }}</p>
+                <div v-if="p.tags.length" class="flex min-w-0 items-center gap-1 overflow-hidden">
+                  <Badge
+                    v-for="tag in p.tags"
+                    :key="tag.id"
+                    variant="secondary"
+                    class="shrink-0 px-1.5 py-0 text-[11px]"
+                    :style="{ backgroundColor: tag.color + '22', color: tag.color }"
+                  >
+                    {{ tag.name }}
+                  </Badge>
+                </div>
               </div>
               <p
                 class="mt-0.5 truncate text-xs text-muted-foreground"
