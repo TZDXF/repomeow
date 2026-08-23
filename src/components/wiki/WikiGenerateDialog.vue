@@ -99,6 +99,7 @@ const probeState = ref<{
   key: string;
   loading: boolean;
   failed: boolean;
+  error: string;
   result: AcpTestResult | null;
 } | null>(null);
 
@@ -116,16 +117,22 @@ async function probeAgent(force = false) {
   ) {
     return;
   }
-  probeState.value = { key, loading: true, failed: false, result: null };
+  probeState.value = { key, loading: true, failed: false, error: "", result: null };
   try {
     // acpTestCached 命中会话缓存时立即返回,不会重复 spawn
     const result = await acpTestCached(key, { agentId: backend.value }, force);
     if (probeKey.value === key) {
-      probeState.value = { key, loading: false, failed: false, result };
+      probeState.value = { key, loading: false, failed: false, error: "", result };
     }
-  } catch {
+  } catch (error) {
     if (probeKey.value === key) {
-      probeState.value = { key, loading: false, failed: true, result: null };
+      probeState.value = {
+        key,
+        loading: false,
+        failed: true,
+        error: error instanceof Error ? error.message : String(error),
+        result: null,
+      };
     }
   }
 }
@@ -193,7 +200,7 @@ const probeHint = computed(() => {
     return t("wiki.agentFetchingModels");
   }
   if (probeFailed.value) {
-    return t("wiki.agentFetchModelsFailed");
+    return t("wiki.agentFetchModelsFailed", { error: probeState.value?.error });
   }
   if (probeState.value?.result && !modelChoices.value.length && !thinkingChoices.value.length) {
     return t("wiki.agentNoModelOptions");

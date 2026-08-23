@@ -121,7 +121,7 @@ export function acpCancel(runId: string): Promise<void> {
 }
 
 /**
- * 设置页「测试」/自动获取模型清单:spawn + 握手 + 建临时会话,返回 agent 名称
+ * 自动获取模型清单:spawn + 握手 + 建临时会话,返回 agent 名称
  * 与其上报的 configOptions/modes(下拉数据源),随即收尾进程。
  */
 export function acpTest(opts: {

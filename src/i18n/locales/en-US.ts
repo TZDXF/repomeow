@@ -848,7 +848,7 @@ export default {
     agentThinking: "Thinking effort",
     agentThinkingDefault: "Default",
     agentFetchingModels: "Fetching model list from the agent...",
-    agentFetchModelsFailed: 'Failed to fetch the model list; click "Test" to see the error',
+    agentFetchModelsFailed: "Failed to fetch the model list: {error}",
     agentNoModelOptions:
       "This agent did not report model / thinking-effort options; its defaults will be used",
     regeneratePage: "Regenerate this page",

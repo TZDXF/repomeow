@@ -820,7 +820,7 @@ export default {
     agentThinking: "思考强度",
     agentThinkingDefault: "默认",
     agentFetchingModels: "正在从 agent 获取模型清单…",
-    agentFetchModelsFailed: "获取模型清单失败,可点「测试」查看报错",
+    agentFetchModelsFailed: "获取模型清单失败：{error}",
     agentNoModelOptions: "该 agent 未上报模型/思考强度选项,将使用其默认配置",
     regeneratePage: "重新生成此页",
     pageRegenerated: "页面已重新生成",
