@@ -823,6 +823,7 @@ export default {
     autoUpdateFailed: "「{name}」的 Wiki 自动更新失败:{error}",
     writing: "正在生成",
     sources: "来源文件",
+    relatedPages: "相关页面",
     waitingFirstChunk: "等待模型输出第一段内容…",
     importance: {
       high: "页面重要性：高",

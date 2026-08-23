@@ -76,6 +76,27 @@ watch(
 );
 const current = computed(() => pages.value.find((p) => p.id === selectedId.value) ?? null);
 
+/** 当前页关联的有效 Wiki 页面;保持大纲 relatedPages 声明顺序并忽略无效/重复/self ID */
+const currentRelatedPages = computed<WikiPageData[]>(() => {
+  const page = current.value;
+  if (!page) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const related: WikiPageData[] = [];
+  for (const id of page.relatedPages) {
+    if (id === page.id || seen.has(id)) {
+      continue;
+    }
+    const target = pages.value.find((item) => item.id === id);
+    if (target) {
+      seen.add(id);
+      related.push(target);
+    }
+  }
+  return related;
+});
+
 /** importance 色点(参照 deepwiki-open:high 紫 / medium 琥珀 / low 珊瑚) */
 function importanceClass(importance: string): string {
   switch (importance) {
@@ -224,6 +245,17 @@ const activeId = computed(() =>
 function selectPage(id: string) {
   if (generatingHere.value) previewId.value = id;
   else selectedId.value = id;
+}
+
+/** 从正文底部跳转相关页面后回到正文顶部,与 deepwiki-open 的页面导航行为一致 */
+function selectRelatedPage(id: string) {
+  selectPage(id);
+  void nextTick(() => {
+    const viewport = scrollViewport();
+    if (viewport) {
+      setViewportScroll(viewport, "top");
+    }
+  });
 }
 
 // ── 流式预览自动跟随滚动(用户上翻阅读时暂停,回到底部自动恢复) ─────────────
@@ -720,6 +752,25 @@ const beforeDownload = createBeforeDownload(t);
                     <span v-if="sourceRangeLabel(f)" class="shrink-0 text-primary">{{
                       sourceRangeLabel(f)
                     }}</span>
+                  </button>
+                </div>
+              </div>
+              <!-- 相关页面(按 relatedPages 中的页面 ID 查找并跳转) -->
+              <div v-if="currentRelatedPages.length" class="mt-6 border-t pt-3">
+                <p class="mb-2 text-xs font-medium text-muted-foreground">
+                  {{ t("wiki.relatedPages") }}
+                </p>
+                <div class="flex flex-wrap gap-1.5">
+                  <button
+                    v-for="page in currentRelatedPages"
+                    :key="page.id"
+                    type="button"
+                    class="flex max-w-full items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    :title="page.title"
+                    @click="selectRelatedPage(page.id)"
+                  >
+                    <BookOpenText class="h-3 w-3 shrink-0" />
+                    <span class="truncate">{{ page.title }}</span>
                   </button>
                 </div>
               </div>

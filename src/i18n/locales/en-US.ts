@@ -854,6 +854,7 @@ export default {
     autoUpdateFailed: 'Automatic wiki update failed for "{name}": {error}',
     writing: "Writing",
     sources: "Source files",
+    relatedPages: "Related pages",
     waitingFirstChunk: "Waiting for the first chunk from the model...",
     importance: {
       high: "Page importance: high",
