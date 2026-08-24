@@ -983,6 +983,14 @@ fn wiki_backend_id(backend: &WikiGenerationBackend) -> String {
     }
 }
 
+fn should_reject_wiki_backend_change(
+    previous_backend: Option<&str>,
+    current_backend: &str,
+    automatic: bool,
+) -> bool {
+    !automatic && previous_backend.unwrap_or("builtin") != current_backend
+}
+
 async fn generate_builtin_outline_pages(
     app: &AppHandle,
     db: &Db,
@@ -1766,9 +1774,10 @@ pub async fn ai_regenerate_wiki_page(
 }
 
 /// 增量更新的变更检测、受影响页面筛选、页面生成与 meta 推进全部在后端完成。
-/// 生成后端始终从项目 Wiki 目录的 config.json 读取。自动更新遇到旧 wiki、历史
-/// 改写或后端切换时静默跳过；手动更新对不可增量的情况返回错误，由界面沿既有
-/// 语义退化为整本重生成。
+/// 生成后端始终从项目 Wiki 目录的 config.json 读取。自动更新不比较旧 Wiki 记录的
+/// 生成后端或模型，直接用当前项目配置重生成受影响页面；遇到旧 Wiki 或历史改写时仍
+/// 静默跳过。手动更新遇到后端切换等不可增量情况时返回错误，由界面沿既有语义
+/// 退化为整本重生成。
 #[tauri::command]
 pub async fn ai_update_wiki(
     app: AppHandle,
@@ -1788,10 +1797,11 @@ pub async fn ai_update_wiki(
         return Err(AppError::coded(ErrorCode::GitCommandFailed, "no head sha"));
     };
     let backend_id = wiki_backend_id(&backend);
-    if data.meta.generator.as_deref().unwrap_or("builtin") != backend_id {
-        if request.automatic {
-            return Ok(0);
-        }
+    if should_reject_wiki_backend_change(
+        data.meta.generator.as_deref(),
+        &backend_id,
+        request.automatic,
+    ) {
         return Err(AppError::coded(
             ErrorCode::AiRequestFailed,
             "generator mismatch",
@@ -1920,7 +1930,23 @@ pub async fn ai_update_wiki(
 mod tests {
     use serde_json::json;
 
-    use super::{sanitize_agent_retry_notices, WikiGenerationEvent};
+    use super::{
+        sanitize_agent_retry_notices, should_reject_wiki_backend_change, WikiGenerationEvent,
+    };
+
+    #[test]
+    fn automatic_wiki_update_accepts_backend_change() {
+        assert!(!should_reject_wiki_backend_change(
+            Some("acp:pi"),
+            "acp:opencode",
+            true,
+        ));
+        assert!(should_reject_wiki_backend_change(
+            Some("acp:pi"),
+            "acp:opencode",
+            false,
+        ));
+    }
 
     #[test]
     fn wiki_progress_event_uses_frontend_field_names() {

@@ -154,7 +154,7 @@ pub struct WikiMeta {
     #[serde(default)]
     pub outline: Vec<WikiOutlinePage>,
     /// 生成后端标识("builtin" / "acp:<agentId>");旧 meta 缺省视为内置。
-    /// 前端增量更新遇后端切换时退化为整本重生成
+    /// 前端手动增量更新遇后端切换时退化为整本重生成
     #[serde(default)]
     pub generator: Option<String>,
 }

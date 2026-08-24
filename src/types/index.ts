@@ -290,7 +290,7 @@ export interface WikiMeta {
   status: string;
   outline: WikiOutlinePage[];
   /** 生成后端标识("builtin" / "acp:<agentId>";旧 meta 缺省视为内置)。
-   *  增量更新遇后端切换时退化为整本重生成 */
+   *  手动增量更新遇后端切换时退化为整本重生成 */
   generator?: string | null;
 }
 
