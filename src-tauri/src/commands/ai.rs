@@ -906,20 +906,38 @@ fn agent_wiki_page_prompt(
 fn record_acp_usage(
     db: &Db,
     model: &str,
+    prompt: &str,
     result: &super::agent::AcpPromptResult,
     duration_ms: i64,
 ) {
-    let Some(usage) = result.usage else { return };
+    let (input_tokens, output_tokens, total_tokens, cached_tokens) = match result.usage {
+        Some(usage) => (
+            i64::try_from(usage.input_tokens).ok(),
+            i64::try_from(usage.output_tokens).ok(),
+            i64::try_from(usage.total_tokens).ok(),
+            usage
+                .cached_read_tokens
+                .and_then(|value| i64::try_from(value).ok()),
+        ),
+        None => {
+            let input = super::usage::estimate_text_tokens(model, prompt);
+            let output = super::usage::estimate_text_tokens(model, &result.text);
+            (
+                Some(input),
+                Some(output),
+                Some(input.saturating_add(output)),
+                None,
+            )
+        }
+    };
     let record = AiUsageRecord {
         task_type: "wiki".into(),
         model: model.to_string(),
-        input_tokens: i64::try_from(usage.input_tokens).ok(),
-        output_tokens: i64::try_from(usage.output_tokens).ok(),
-        total_tokens: i64::try_from(usage.total_tokens).ok(),
+        input_tokens,
+        output_tokens,
+        total_tokens,
         duration_ms: Some(duration_ms),
-        cached_tokens: usage
-            .cached_read_tokens
-            .and_then(|value| i64::try_from(value).ok()),
+        cached_tokens,
     };
     if let Ok(conn) = db.0.lock() {
         let _ = insert_usage_row(&conn, &record, now_ts());
@@ -1099,6 +1117,7 @@ async fn generate_agent_outline_pages(
         record_acp_usage(
             db,
             usage_model,
+            &prompt,
             &result,
             started.elapsed().as_millis() as i64,
         );
@@ -1163,6 +1182,7 @@ async fn generate_agent_page_to_disk(
                 record_acp_usage(
                     db,
                     usage_model,
+                    &prompt,
                     &result,
                     started.elapsed().as_millis() as i64,
                 );

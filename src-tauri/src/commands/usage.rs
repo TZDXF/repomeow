@@ -17,6 +17,18 @@ const RETENTION_SECS: i64 = 90 * 24 * 60 * 60;
 /// 明细日志分页单页大小上限(前端「加载更多」按此步进)
 pub const LIST_PAGE_SIZE: i64 = 50;
 
+/// ACP agent 未上报 usage 时的本地估算。优先按已知 OpenAI 模型选择编码器，
+/// 未知/第三方模型统一回退 o200k_base；只覆盖应用可见的 prompt 与最终正文，
+/// 不包含 agent 内部工具调用和上下文，因此结果是保守估算值。
+pub(crate) fn estimate_text_tokens(model: &str, text: &str) -> i64 {
+    let configured_model = model
+        .rsplit_once(" · ")
+        .map_or(model, |(_, configured)| configured);
+    let bpe = tiktoken_rs::bpe_for_model(configured_model)
+        .unwrap_or_else(|_| tiktoken_rs::o200k_base_singleton());
+    i64::try_from(bpe.count_ordinary(text)).unwrap_or(i64::MAX)
+}
+
 pub(crate) fn insert_usage_row(
     conn: &Connection,
     record: &AiUsageRecord,
@@ -203,6 +215,16 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         db::init(&conn).unwrap();
         conn
+    }
+
+    #[test]
+    fn estimates_tokens_with_model_and_unknown_fallback() {
+        assert_eq!(estimate_text_tokens("gpt-4o", "hello world"), 2);
+        assert_eq!(
+            estimate_text_tokens("Pi ACP adapter · company/custom-model", "hello world"),
+            2,
+        );
+        assert_eq!(estimate_text_tokens("unknown", ""), 0);
     }
 
     fn rec_cached(

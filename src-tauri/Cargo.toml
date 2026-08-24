@@ -63,6 +63,8 @@ base64 = "0.22"
 # ACP(Agent Client Protocol)官方客户端:wiki agent 后端与本地 coding agent CLI 的 JSON-RPC over stdio 交互
 # unstable_end_turn_token_usage:PromptResponse.usage(UNSTABLE,agent 未必上报)供用量统计
 agent-client-protocol = { version = "2", features = ["unstable_end_turn_token_usage"] }
+# ACP agent 未上报 usage 时,按发送的 prompt 与最终正文估算 token 数
+tiktoken-rs = "0.12"
 # agent 子进程 spawn(与 agent-client-protocol 内部实现同源;自带 unix 进程组/Windows 无窗口标志)
 async-process = "2"
 # stderr 尾部采集等 futures AsyncRead 用法
