@@ -138,6 +138,9 @@ pub enum WikiGenerationBackend {
         model: Option<String>,
         #[serde(default)]
         thinking: Option<String>,
+        /// 页面并发数(agent 每页独立会话,可并行生成;None/0 = 默认 2,上限 8)
+        #[serde(default)]
+        concurrency: Option<usize>,
     },
 }
 
@@ -201,6 +204,9 @@ pub enum WikiGenerationEvent {
         status: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+        /// 该页生成耗时(毫秒,done 时上报)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
     },
     Progress {
         page_id: String,
@@ -235,11 +241,17 @@ struct WikiRetryNotice {
 }
 
 fn retry_notice(error: &AppError, attempt: usize, max_attempts: usize) -> WikiRetryNotice {
+    // agent 后端的限流信号混在底层错误文本里(stderr/协议错误),按内容识别
+    let text = error.to_string().to_lowercase();
+    let rate_limited = error.code() == "ai_rate_limited"
+        || text.contains("429")
+        || text.contains("rate limit")
+        || text.contains("too many requests");
     WikiRetryNotice {
         attempt,
         max_attempts,
         delay_seconds: 1_u64 << attempt.min(4),
-        reason: if error.code() == "ai_rate_limited" {
+        reason: if rate_limited {
             "rateLimited".into()
         } else {
             "temporary".into()
@@ -806,10 +818,8 @@ fn wiki_outline_user_prompt(context: &super::wiki::WikiContext, project_name: &s
     )
 }
 
-fn wiki_page_user_prompt(
-    page: &super::wiki::WikiOutlinePage,
-    files: &[super::wiki::WikiFileContent],
-) -> String {
+/// 相关文件全文区块:逐行 `N: ` 前缀(行级引用用),内置与 agent 后端的页面 prompt 共用
+fn wiki_files_section(files: &[super::wiki::WikiFileContent]) -> String {
     let files_section = files
         .iter()
         .map(|file| {
@@ -829,14 +839,24 @@ fn wiki_page_user_prompt(
         .collect::<Vec<_>>()
         .join("\n\n");
     format!(
-        "Wiki page: {}\nCoverage: {}\n\nSource files:\n{}",
-        page.title,
-        page.description,
+        "Source files:\n{}",
         if files_section.is_empty() {
             "(no source files available)"
         } else {
             &files_section
         }
+    )
+}
+
+fn wiki_page_user_prompt(
+    page: &super::wiki::WikiOutlinePage,
+    files: &[super::wiki::WikiFileContent],
+) -> String {
+    format!(
+        "Wiki page: {}\nCoverage: {}\n\n{}",
+        page.title,
+        page.description,
+        wiki_files_section(files)
     )
 }
 
@@ -863,23 +883,14 @@ fn outline_retry_prompt(original: &str, validation_error: &str) -> String {
     )
 }
 
+/// agent 页面 prompt(混合模式):相关文件全文直接喂入(与内置后端同预算同行号前缀),
+/// agent 仅在不足时少量补读,不再逐文件工具调用
 fn agent_wiki_page_prompt(
     page: &super::wiki::WikiOutlinePage,
+    files: &[super::wiki::WikiFileContent],
     changed_files: &[String],
     language: &str,
 ) -> String {
-    let relevant = if page.relevant_files.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "\n\nSuggested source files (verify they still exist):\n{}",
-            page.relevant_files
-                .iter()
-                .map(|path| format!("- {path}"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        )
-    };
     let changed = if changed_files.is_empty() {
         String::new()
     } else {
@@ -893,13 +904,13 @@ fn agent_wiki_page_prompt(
         )
     };
     format!(
-        "{}\n\nRespond in {}.\n\nWiki page: {}\nCoverage: {}{}{}",
+        "{}\n\nRespond in {}.\n\nWiki page: {}\nCoverage: {}{}\n\n{}",
         AGENT_WIKI_PAGE_PROMPT.trim(),
         language_name(language),
         page.title,
         page.description,
-        relevant,
         changed,
+        wiki_files_section(files),
     )
 }
 
@@ -1095,6 +1106,113 @@ async fn generate_builtin_page_to_disk(
     }))
 }
 
+/// agent 后端的会话参数。每个页面(及每次重试)独立建会话:长会话上下文累积是
+/// max_tokens/max_turn_requests 类中断的主因,独立会话让每个 prompt 都从干净上下文开始;
+/// 也正因为会话互不共享状态,页面可以按 concurrency 并行生成。
+#[derive(Clone)]
+struct AgentSessionParams {
+    agent_id: Option<String>,
+    custom_command: Option<String>,
+    cwd: String,
+    model: Option<String>,
+    thinking: Option<String>,
+    /// 页面并发数(1-8,默认 2)
+    concurrency: usize,
+}
+
+impl AgentSessionParams {
+    fn from_backend(backend: &WikiGenerationBackend, cwd: &str) -> Option<Self> {
+        let WikiGenerationBackend::Agent {
+            agent_id,
+            custom_command,
+            model,
+            thinking,
+            concurrency,
+        } = backend
+        else {
+            return None;
+        };
+        Some(Self {
+            agent_id: agent_id.clone(),
+            custom_command: custom_command.clone(),
+            cwd: cwd.to_string(),
+            model: model.clone(),
+            thinking: thinking.clone(),
+            concurrency: concurrency.filter(|c| *c > 0).unwrap_or(2).clamp(1, 8),
+        })
+    }
+
+    /// 用量/元信息里的模型标识:agent 名称 · 所选模型(未选模型则只有名称)
+    fn usage_model(&self, agent_name: &str) -> String {
+        self.model
+            .as_ref()
+            .map(|model| format!("{agent_name} · {model}"))
+            .unwrap_or_else(|| agent_name.to_string())
+    }
+}
+
+/// 当前进行中的 agent 会话集合;整本生成期间随大纲/页面推进轮换(并发页面
+/// 会同时存在多个会话),取消时终止集合内全部会话(杀进程树)
+#[derive(Clone, Default)]
+struct AgentSessionSlot(Arc<Mutex<HashSet<String>>>);
+
+impl AgentSessionSlot {
+    fn track(&self, run_id: &str) {
+        self.0.lock().unwrap().insert(run_id.to_string());
+    }
+
+    fn untrack(&self, run_id: &str) {
+        self.0.lock().unwrap().remove(run_id);
+    }
+
+    fn cancel_all(&self) {
+        let ids: Vec<String> = self.0.lock().unwrap().drain().collect();
+        for id in ids {
+            let _ = super::agent::acp_cancel(id);
+        }
+    }
+}
+
+/// 取消监视:运行取消时终止槽位里的全部 agent 会话
+fn watch_agent_cancel(
+    token: CancellationToken,
+    slot: AgentSessionSlot,
+) -> tauri::async_runtime::JoinHandle<()> {
+    tauri::async_runtime::spawn(async move {
+        token.cancelled().await;
+        slot.cancel_all();
+    })
+}
+
+/// 建立一次 agent 会话并登记到槽位
+async fn open_agent_session(
+    params: &AgentSessionParams,
+    slot: &AgentSessionSlot,
+) -> AppResult<super::agent::AcpStartResult> {
+    let started = super::agent::acp_start(
+        params.agent_id.clone(),
+        params.custom_command.clone(),
+        params.cwd.clone(),
+        params.model.clone(),
+        params.thinking.clone(),
+    )
+    .await?;
+    slot.track(&started.run_id);
+    Ok(started)
+}
+
+/// 结束会话:从槽位移除 + 取消(进程由 acp_cancel 的宽限杀与驱动任务收尾兜底)
+fn close_agent_session(slot: &AgentSessionSlot, run_id: &str) {
+    slot.untrack(run_id);
+    let _ = super::agent::acp_cancel(run_id.to_string());
+}
+
+/// 单页生成的运行统计(进度面板展示耗时;usage_model 回填 meta)
+struct AgentPageStats {
+    duration_ms: u64,
+    usage_model: String,
+}
+
 async fn generate_agent_outline_pages(
     db: &Db,
     run_id: &str,
@@ -1129,6 +1247,19 @@ async fn generate_agent_outline_pages(
             &result,
             started.elapsed().as_millis() as i64,
         );
+        // 非正常停止(max_tokens/max_turn_requests 等):部分 JSON 无纠错价值,
+        // 用原始 prompt 重新生成;refusal 重试无意义,快速失败
+        if result.stop_reason != "end_turn" {
+            if result.stop_reason == "refusal" {
+                return Err(AppError::coded(
+                    ErrorCode::AgentPromptFailed,
+                    "agent 拒绝生成大纲(stop_reason=refusal)",
+                ));
+            }
+            last_error = format!("agent 中途停止(stop_reason={})", result.stop_reason);
+            prompt = original_prompt.clone();
+            continue;
+        }
         let (cleaned, retry) = sanitize_agent_retry_notices(&result.text);
         if let Some(notice) = retry {
             on_retry(notice);
@@ -1151,19 +1282,44 @@ async fn generate_agent_outline_pages(
 async fn generate_agent_page_to_disk(
     app: &AppHandle,
     db: &Db,
-    run_id: &str,
-    usage_model: &str,
-    project_path: &str,
+    params: &AgentSessionParams,
+    slot: &AgentSessionSlot,
     page: &super::wiki::WikiOutlinePage,
     language: &str,
     changed_files: &[String],
+    cancel: &CancellationToken,
     on_progress: Arc<dyn Fn(String) + Send + Sync>,
     on_activity: Arc<dyn Fn(String) + Send + Sync>,
     on_retry: Arc<dyn Fn(WikiRetryNotice) + Send + Sync>,
-) -> AppResult<()> {
-    let prompt = agent_wiki_page_prompt(page, changed_files, language);
+) -> AppResult<AgentPageStats> {
+    // 混合模式:相关文件全文(与内置后端同预算)直接进 prompt,agent 不再逐文件工具调用
+    let files = super::wiki::read_wiki_files_in(&params.cwd, &page.relevant_files)?;
+    let prompt = agent_wiki_page_prompt(page, &files, changed_files, language);
+    let page_started = Instant::now();
     let mut last_error = None;
-    for _ in 0..=2 {
+    const MAX_ATTEMPTS: usize = 3;
+    for attempt in 1..=MAX_ATTEMPTS {
+        if cancel.is_cancelled() {
+            return Err(AppError::coded(ErrorCode::AgentCanceled, ""));
+        }
+        // 每次尝试独立会话:重试不再背负上一轮的上下文(可能正是 max_tokens 的成因)
+        let started = match open_agent_session(params, slot).await {
+            Ok(started) => started,
+            Err(error) => {
+                // agent 未安装/未登录没有重试意义
+                let fatal = error.code() == "agent_not_detected";
+                last_error = Some(error);
+                if fatal {
+                    break;
+                }
+                if attempt < MAX_ATTEMPTS {
+                    let notice = retry_notice(last_error.as_ref().unwrap(), attempt, MAX_ATTEMPTS);
+                    on_retry(notice.clone());
+                    wait_for_wiki_retry(cancel, &notice).await?;
+                }
+                continue;
+            }
+        };
         on_progress(String::new());
         let progress = on_progress.clone();
         let activity = on_activity.clone();
@@ -1184,29 +1340,69 @@ async fn generate_agent_page_to_disk(
             }
             super::agent::AcpEvent::Activity { text } => activity(text),
         });
-        let started = Instant::now();
-        match super::agent::acp_prompt_with(run_id.to_string(), prompt.clone(), sender).await {
+        let attempt_started = Instant::now();
+        let outcome =
+            super::agent::acp_prompt_with(started.run_id.clone(), prompt.clone(), sender).await;
+        close_agent_session(slot, &started.run_id);
+        let usage_model = params.usage_model(&started.agent_name);
+        match outcome {
             Ok(result) => {
                 record_acp_usage(
                     db,
-                    usage_model,
+                    &usage_model,
                     &prompt,
                     &result,
-                    started.elapsed().as_millis() as i64,
+                    attempt_started.elapsed().as_millis() as i64,
                 );
-                let (cleaned, _) = sanitize_agent_retry_notices(&result.text);
-                let page_content = sdk::strip_thinking(&cleaned);
-                if page_content.is_empty() {
-                    last_error = Some(AppError::coded(
-                        ErrorCode::AgentPromptFailed,
-                        "wiki page response is empty after removing thinking content",
-                    ));
-                    continue;
+                match result.stop_reason.as_str() {
+                    "end_turn" => {
+                        let (cleaned, _) = sanitize_agent_retry_notices(&result.text);
+                        let page_content = sdk::strip_thinking(&cleaned);
+                        if page_content.is_empty() {
+                            last_error = Some(AppError::coded(
+                                ErrorCode::AgentPromptFailed,
+                                "wiki page response is empty after removing thinking content",
+                            ));
+                        } else {
+                            super::wiki::save_wiki_page_internal(
+                                app,
+                                &params.cwd,
+                                &page.file,
+                                &page_content,
+                            )?;
+                            return Ok(AgentPageStats {
+                                duration_ms: page_started.elapsed().as_millis() as u64,
+                                usage_model,
+                            });
+                        }
+                    }
+                    // 模型拒绝:重试同一 prompt 无意义,快速失败
+                    "refusal" => {
+                        return Err(AppError::coded(
+                            ErrorCode::AgentPromptFailed,
+                            "agent 拒绝生成该页(stop_reason=refusal)",
+                        ));
+                    }
+                    // max_tokens/max_turn_requests/unknown:下次尝试换新会话重试
+                    other => {
+                        last_error = Some(AppError::coded(
+                            ErrorCode::AgentPromptFailed,
+                            format!("agent 中途停止(stop_reason={other})"),
+                        ));
+                    }
                 }
-                super::wiki::save_wiki_page_internal(app, project_path, &page.file, &page_content)?;
-                return Ok(());
             }
-            Err(error) => last_error = Some(error),
+            Err(error) => {
+                if cancel.is_cancelled() || error.code() == "agent_canceled" {
+                    return Err(error);
+                }
+                last_error = Some(error);
+            }
+        }
+        if attempt < MAX_ATTEMPTS {
+            let notice = retry_notice(last_error.as_ref().unwrap(), attempt, MAX_ATTEMPTS);
+            on_retry(notice.clone());
+            wait_for_wiki_retry(cancel, &notice).await?;
         }
     }
     Err(last_error.unwrap_or_else(|| {
@@ -1271,7 +1467,8 @@ pub async fn ai_generate_wiki(
     );
     let backend_id;
     let meta_model;
-    let mut agent_run_id = None;
+    let mut agent_params = None;
+    let mut agent_slot = None;
     let mut agent_cancel_watch = None;
 
     let pages_result = match &backend {
@@ -1309,43 +1506,31 @@ pub async fn ai_generate_wiki(
             )
             .await
         }
-        WikiGenerationBackend::Agent {
-            agent_id,
-            custom_command,
-            model,
-            thinking,
-        } => {
-            let started = match super::agent::acp_start(
-                agent_id.clone(),
-                custom_command.clone(),
-                request.project_path.clone(),
-                model.clone(),
-                thinking.clone(),
-            )
-            .await
-            {
-                Ok(started) => started,
-                Err(error) => return fail_wiki_generation(&on_event, &run.token, error),
-            };
-            backend_id = format!("acp:{}", agent_id.as_deref().unwrap_or("custom"));
-            meta_model = model
-                .as_ref()
-                .map(|model| format!("{} · {model}", started.agent_name))
-                .unwrap_or_else(|| started.agent_name.clone());
-            agent_run_id = Some(started.run_id.clone());
-            let token = run.token.clone();
-            let cancel_id = started.run_id.clone();
-            agent_cancel_watch = Some(tauri::async_runtime::spawn(async move {
-                token.cancelled().await;
-                let _ = super::agent::acp_cancel(cancel_id);
-            }));
+        WikiGenerationBackend::Agent { .. } => {
+            let params = AgentSessionParams::from_backend(&backend, &request.project_path)
+                .expect("agent backend");
+            let slot = AgentSessionSlot::default();
+            agent_cancel_watch = Some(watch_agent_cancel(run.token.clone(), slot.clone()));
             send_wiki_event(
                 &on_event,
                 WikiGenerationEvent::Phase {
                     phase: "outlining".into(),
                 },
             );
-            generate_agent_outline_pages(
+            // 大纲用一个独立会话(纠错重试复用同一会话以保留上下文);
+            // 页面生成在下方逐页另起会话
+            let started = match open_agent_session(&params, &slot).await {
+                Ok(started) => started,
+                Err(error) => {
+                    if let Some(watch) = agent_cancel_watch.take() {
+                        watch.abort();
+                    }
+                    return fail_wiki_generation(&on_event, &run.token, error);
+                }
+            };
+            backend_id = format!("acp:{}", params.agent_id.as_deref().unwrap_or("custom"));
+            meta_model = params.usage_model(&started.agent_name);
+            let result = generate_agent_outline_pages(
                 &db,
                 &started.run_id,
                 &meta_model,
@@ -1380,7 +1565,11 @@ pub async fn ai_generate_wiki(
                     })
                 },
             )
-            .await
+            .await;
+            close_agent_session(&slot, &started.run_id);
+            agent_params = Some(params);
+            agent_slot = Some(slot);
+            result
         }
     };
 
@@ -1390,8 +1579,8 @@ pub async fn ai_generate_wiki(
             if let Some(watch) = agent_cancel_watch.take() {
                 watch.abort();
             }
-            if let Some(id) = agent_run_id {
-                let _ = super::agent::acp_cancel(id);
+            if let Some(slot) = &agent_slot {
+                slot.cancel_all();
             }
             let phase = if run.token.is_cancelled() {
                 "cancelled"
@@ -1411,8 +1600,8 @@ pub async fn ai_generate_wiki(
         if let Some(watch) = agent_cancel_watch.take() {
             watch.abort();
         }
-        if let Some(id) = agent_run_id.take() {
-            let _ = super::agent::acp_cancel(id);
+        if let Some(slot) = &agent_slot {
+            slot.cancel_all();
         }
         send_wiki_event(
             &on_event,
@@ -1427,8 +1616,8 @@ pub async fn ai_generate_wiki(
         if let Some(watch) = agent_cancel_watch.take() {
             watch.abort();
         }
-        if let Some(id) = agent_run_id.take() {
-            let _ = super::agent::acp_cancel(id);
+        if let Some(slot) = &agent_slot {
+            slot.cancel_all();
         }
         return fail_wiki_generation(&on_event, &run.token, error);
     }
@@ -1439,6 +1628,7 @@ pub async fn ai_generate_wiki(
                 page: page.clone(),
                 status: "pending".into(),
                 error: None,
+                duration_ms: None,
             },
         );
     }
@@ -1468,8 +1658,10 @@ pub async fn ai_generate_wiki(
                                 page: page.clone(),
                                 status: "running".into(),
                                 error: None,
+                                                duration_ms: None,
                             },
                         );
+                        let page_started = Instant::now();
                         let progress_channel = channel.clone();
                         let retry_channel = channel.clone();
                         let progress_page_id = page.id.clone();
@@ -1529,6 +1721,7 @@ pub async fn ai_generate_wiki(
                                 page,
                                 status: status.into(),
                                 error,
+                                                duration_ms: Some(page_started.elapsed().as_millis() as u64),
                             },
                         );
                     }
@@ -1536,102 +1729,119 @@ pub async fn ai_generate_wiki(
                 .await;
         }
         WikiGenerationBackend::Agent { .. } => {
-            let id = agent_run_id.as_ref().expect("agent run id").clone();
-            for page in pages.clone() {
-                if run.token.is_cancelled() {
-                    send_wiki_event(
-                        &on_event,
-                        WikiGenerationEvent::Page {
-                            page,
-                            status: "cancelled".into(),
-                            error: None,
-                        },
-                    );
-                    continue;
-                }
-                send_wiki_event(
-                    &on_event,
-                    WikiGenerationEvent::Page {
-                        page: page.clone(),
-                        status: "running".into(),
-                        error: None,
-                    },
-                );
-                let progress_channel = on_event.clone();
-                let activity_channel = on_event.clone();
-                let retry_channel = on_event.clone();
-                let progress_page_id = page.id.clone();
-                let retry_page_id = page.id.clone();
-                let result = generate_agent_page_to_disk(
-                    &app,
-                    &db,
-                    &id,
-                    &meta_model,
-                    &request.project_path,
-                    &page,
-                    &request.language,
-                    &[],
-                    Arc::new(move |content| {
-                        send_wiki_event(
-                            &progress_channel,
-                            WikiGenerationEvent::Progress {
-                                page_id: progress_page_id.clone(),
-                                content,
-                            },
-                        );
-                    }),
-                    Arc::new(move |text| {
-                        send_wiki_event(
-                            &activity_channel,
-                            WikiGenerationEvent::ActivityBatch {
-                                activity_type: "tool".into(),
-                                items: vec![text],
-                            },
-                        );
-                    }),
-                    Arc::new(move |notice: WikiRetryNotice| {
-                        send_wiki_event(
-                            &retry_channel,
-                            WikiGenerationEvent::Retry {
-                                page_id: Some(retry_page_id.clone()),
-                                attempt: notice.attempt,
-                                max_attempts: notice.max_attempts,
-                                delay_seconds: notice.delay_seconds,
-                                reason: notice.reason,
-                            },
-                        );
-                    }),
-                )
-                .await;
-                let (status, error) = if run.token.is_cancelled() {
-                    ("cancelled", None)
-                } else {
-                    match result {
-                        Ok(()) => ("done", None),
-                        Err(error) => {
-                            let message = error.to_string();
-                            page_errors.lock().unwrap().push(error);
-                            ("failed", Some(message))
+            let params = agent_params.as_ref().expect("agent params").clone();
+            let slot = agent_slot.as_ref().expect("agent slot").clone();
+            // 每页独立会话,互不共享上下文,可以按配置并发(默认 2,上限 8)
+            stream::iter(pages.clone())
+                .for_each_concurrent(params.concurrency, |page| {
+                    let app = app.clone();
+                    let db = &db;
+                    let params = params.clone();
+                    let slot = slot.clone();
+                    let token = run.token.clone();
+                    let channel = on_event.clone();
+                    let language = request.language.clone();
+                    let page_errors = page_errors.clone();
+                    async move {
+                        if token.is_cancelled() {
+                            send_wiki_event(
+                                &channel,
+                                WikiGenerationEvent::Page {
+                                    page,
+                                    status: "cancelled".into(),
+                                    error: None,
+                                    duration_ms: None,
+                                },
+                            );
+                            return;
                         }
+                        send_wiki_event(
+                            &channel,
+                            WikiGenerationEvent::Page {
+                                page: page.clone(),
+                                status: "running".into(),
+                                error: None,
+                                duration_ms: None,
+                            },
+                        );
+                        let progress_channel = channel.clone();
+                        let activity_channel = channel.clone();
+                        let retry_channel = channel.clone();
+                        let progress_page_id = page.id.clone();
+                        let retry_page_id = page.id.clone();
+                        let result = generate_agent_page_to_disk(
+                            &app,
+                            db,
+                            &params,
+                            &slot,
+                            &page,
+                            &language,
+                            &[],
+                            &token,
+                            Arc::new(move |content| {
+                                send_wiki_event(
+                                    &progress_channel,
+                                    WikiGenerationEvent::Progress {
+                                        page_id: progress_page_id.clone(),
+                                        content,
+                                    },
+                                );
+                            }),
+                            Arc::new(move |text| {
+                                send_wiki_event(
+                                    &activity_channel,
+                                    WikiGenerationEvent::ActivityBatch {
+                                        activity_type: "tool".into(),
+                                        items: vec![text],
+                                    },
+                                );
+                            }),
+                            Arc::new(move |notice: WikiRetryNotice| {
+                                send_wiki_event(
+                                    &retry_channel,
+                                    WikiGenerationEvent::Retry {
+                                        page_id: Some(retry_page_id.clone()),
+                                        attempt: notice.attempt,
+                                        max_attempts: notice.max_attempts,
+                                        delay_seconds: notice.delay_seconds,
+                                        reason: notice.reason,
+                                    },
+                                );
+                            }),
+                        )
+                        .await;
+                        let (status, error, duration_ms) = if token.is_cancelled() {
+                            ("cancelled", None, None)
+                        } else {
+                            match result {
+                                Ok(stats) => ("done", None, Some(stats.duration_ms)),
+                                Err(error) => {
+                                    let message = error.to_string();
+                                    page_errors.lock().unwrap().push(error);
+                                    ("failed", Some(message), None)
+                                }
+                            }
+                        };
+                        send_wiki_event(
+                            &channel,
+                            WikiGenerationEvent::Page {
+                                page,
+                                status: status.into(),
+                                error,
+                                duration_ms,
+                            },
+                        );
                     }
-                };
-                send_wiki_event(
-                    &on_event,
-                    WikiGenerationEvent::Page {
-                        page,
-                        status: status.into(),
-                        error,
-                    },
-                );
-            }
+                })
+                .await;
         }
     }
 
-    if let Some(id) = agent_run_id {
-        let _ = super::agent::acp_cancel(id);
-    }
     if let Some(watch) = agent_cancel_watch.take() {
         watch.abort();
+    }
+    if let Some(slot) = &agent_slot {
+        slot.cancel_all();
     }
     if run.token.is_cancelled() {
         send_wiki_event(
@@ -1712,53 +1922,34 @@ pub async fn ai_regenerate_wiki_page(
                 generator: "builtin".into(),
             }
         }
-        WikiGenerationBackend::Agent {
-            agent_id,
-            custom_command,
-            model,
-            thinking,
-        } => {
-            let started = super::agent::acp_start(
-                agent_id.clone(),
-                custom_command,
-                request.project_path.clone(),
-                model.clone(),
-                thinking,
-            )
-            .await?;
-            let usage_model = model
-                .as_ref()
-                .map(|model| format!("{} · {model}", started.agent_name))
-                .unwrap_or_else(|| started.agent_name.clone());
-            let token = run.token.clone();
-            let cancel_id = started.run_id.clone();
-            let cancel_watch = tauri::async_runtime::spawn(async move {
-                token.cancelled().await;
-                let _ = super::agent::acp_cancel(cancel_id);
-            });
+        WikiGenerationBackend::Agent { .. } => {
+            let params = AgentSessionParams::from_backend(&backend, &request.project_path)
+                .expect("agent backend");
+            let slot = AgentSessionSlot::default();
+            let cancel_watch = watch_agent_cancel(run.token.clone(), slot.clone());
             let progress = Arc::new(move |content: String| {
                 let _ = on_progress.send(content);
             });
             let result = generate_agent_page_to_disk(
                 &app,
                 &db,
-                &started.run_id,
-                &usage_model,
-                &request.project_path,
+                &params,
+                &slot,
                 &request.page,
                 &request.language,
                 &request.changed_files,
+                &run.token,
                 progress,
                 Arc::new(|_| {}),
                 Arc::new(|_| {}),
             )
             .await;
-            let _ = super::agent::acp_cancel(started.run_id);
+            slot.cancel_all();
             cancel_watch.abort();
-            result?;
+            let stats = result?;
             RegeneratedWikiPage {
-                model: usage_model,
-                generator: format!("acp:{}", agent_id.as_deref().unwrap_or("custom")),
+                model: stats.usage_model,
+                generator: format!("acp:{}", params.agent_id.as_deref().unwrap_or("custom")),
             }
         }
     };
@@ -1855,57 +2046,73 @@ pub async fn ai_update_wiki(
                     });
                 }
             }
-            WikiGenerationBackend::Agent {
-                agent_id,
-                custom_command,
-                model,
-                thinking,
-            } => {
-                let started = super::agent::acp_start(
-                    agent_id.clone(),
-                    custom_command.clone(),
-                    request.project_path.clone(),
-                    model.clone(),
-                    thinking.clone(),
-                )
-                .await?;
-                generated_model = model
-                    .as_ref()
-                    .map(|model| format!("{} · {model}", started.agent_name))
-                    .unwrap_or_else(|| started.agent_name.clone());
-                let token = run.token.clone();
-                let cancel_id = started.run_id.clone();
-                let cancel_watch = tauri::async_runtime::spawn(async move {
-                    token.cancelled().await;
-                    let _ = super::agent::acp_cancel(cancel_id);
-                });
-                let outcome = async {
-                    for (index, page) in affected.iter().enumerate() {
-                        generate_agent_page_to_disk(
-                            &app,
-                            &db,
-                            &started.run_id,
-                            &generated_model,
-                            &request.project_path,
-                            page,
-                            &request.language,
-                            &changed.files,
-                            Arc::new(|_| {}),
-                            Arc::new(|_| {}),
-                            Arc::new(|_| {}),
-                        )
-                        .await?;
-                        let _ = on_event.send(WikiUpdateEvent {
-                            completed: index + 1,
-                            total,
-                        });
-                    }
-                    Ok::<(), AppError>(())
-                }
-                .await;
-                let _ = super::agent::acp_cancel(started.run_id);
+            WikiGenerationBackend::Agent { .. } => {
+                let params = AgentSessionParams::from_backend(&backend, &request.project_path)
+                    .expect("agent backend");
+                let slot = AgentSessionSlot::default();
+                let cancel_watch = watch_agent_cancel(run.token.clone(), slot.clone());
+                // 与整本生成同款并发:出错即取消其余页面,最终上报第一个错误
+                let first_error = Arc::new(Mutex::new(None::<AppError>));
+                let model_cell = Arc::new(Mutex::new(generated_model.clone()));
+                let completed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+                stream::iter(affected.clone())
+                    .for_each_concurrent(params.concurrency, |page| {
+                        let app = app.clone();
+                        let db = &db;
+                        let params = params.clone();
+                        let slot = slot.clone();
+                        let token = run.token.clone();
+                        let language = request.language.clone();
+                        let changed_files = changed.files.clone();
+                        let first_error = first_error.clone();
+                        let model_cell = model_cell.clone();
+                        let completed = completed.clone();
+                        let on_event = on_event.clone();
+                        async move {
+                            if token.is_cancelled() {
+                                return;
+                            }
+                            match generate_agent_page_to_disk(
+                                &app,
+                                db,
+                                &params,
+                                &slot,
+                                &page,
+                                &language,
+                                &changed_files,
+                                &token,
+                                Arc::new(|_| {}),
+                                Arc::new(|_| {}),
+                                Arc::new(|_| {}),
+                            )
+                            .await
+                            {
+                                Ok(stats) => {
+                                    *model_cell.lock().unwrap() = stats.usage_model;
+                                }
+                                Err(error) => {
+                                    if !token.is_cancelled() {
+                                        *first_error.lock().unwrap() = Some(error);
+                                        // 取消其余页面(经 cancel watch 杀进行中会话)
+                                        token.cancel();
+                                    }
+                                }
+                            }
+                            let done = completed.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                            let _ = on_event.send(WikiUpdateEvent {
+                                completed: done,
+                                total,
+                            });
+                        }
+                    })
+                    .await;
+                generated_model = model_cell.lock().unwrap().clone();
+                slot.cancel_all();
                 cancel_watch.abort();
-                outcome?;
+                let first_error = first_error.lock().unwrap().take();
+                if let Some(error) = first_error {
+                    return Err(error);
+                }
             }
         }
     }

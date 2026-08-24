@@ -852,6 +852,9 @@ export default {
     agentModelDefault: "Default (use the agent's own config)",
     agentThinking: "Thinking effort",
     agentThinkingDefault: "Default",
+    agentConcurrency: "Concurrency",
+    agentConcurrencyHint:
+      "Pages generated in parallel (1-8, default 2). Higher is faster but uses more agent quota",
     agentFetchingModels: "Fetching model list from the agent...",
     agentFetchModelsFailed: "Failed to fetch the model list: {error}",
     agentNoModelOptions:
@@ -900,6 +903,7 @@ export default {
       activityScan: "scan",
       activityRead: "read",
       activityTool: "tool",
+      toolCalls: "{count} tool calls",
       found: "loaded",
       notFound: "not found",
       treeTruncated: "; large file tree folded",

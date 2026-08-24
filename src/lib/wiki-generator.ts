@@ -18,9 +18,19 @@ export type WikiGenPhase =
 
 export type WikiPageStatus = "pending" | "running" | "done" | "failed" | "cancelled";
 
+/** 单页生成的运行统计(目前只有耗时;agent 页面是混合喂入,工具调用已趋零不再上报) */
+export interface WikiPageStats {
+  durationMs?: number;
+}
+
 export interface WikiGenCallbacks {
   onPhase: (phase: WikiGenPhase) => void;
-  onPage: (page: WikiOutlinePage, status: WikiPageStatus, error?: string) => void;
+  onPage: (
+    page: WikiOutlinePage,
+    status: WikiPageStatus,
+    error?: string,
+    stats?: WikiPageStats,
+  ) => void;
   /** 页面流式生成的增量内容(partial 为当前已生成的全部正文,非增量片段) */
   onPageProgress?: (page: WikiOutlinePage, partial: string) => void;
   onContext?: (context: WikiContextSummary) => void;
@@ -60,6 +70,8 @@ export type WikiGenBackend =
       /** 模型/思考强度 id(设置页从 agent 上报的选项列表选择;空 = agent 默认) */
       model?: string;
       thinking?: string;
+      /** 页面并发数(每页独立会话可并行;1-8,空 = 默认 2) */
+      concurrency?: number;
     };
 
 /** 单个项目独立保存于 Wiki 目录 config.json 的生成配置。 */
@@ -70,7 +82,7 @@ export interface WikiGenerationConfig {
 
 export interface WikiGenOptions {
   language: SupportedLocale;
-  /** 并发生成的页数(复用设置的 aiConcurrency;agent 内核固定为单会话顺序,忽略此值) */
+  /** 并发生成的页数(内置后端用;agent 后端用项目生成配置里的 concurrency,忽略此值) */
   concurrency: number;
 }
 
@@ -81,7 +93,12 @@ export interface WikiPageHints {
 
 type WikiGenerationEvent =
   | { kind: "phase"; phase: WikiGenPhase }
-  | { kind: "page"; page: WikiOutlinePage; status: WikiPageStatus; error?: string }
+  | ({
+      kind: "page";
+      page: WikiOutlinePage;
+      status: WikiPageStatus;
+      error?: string;
+    } & WikiPageStats)
   | { kind: "progress"; pageId: string; content: string }
   | ({ kind: "retry" } & WikiRetryStatus)
   | ({ kind: "context" } & WikiContextSummary)
@@ -103,7 +120,9 @@ export async function generateWiki(
       onPhase(event.phase);
     } else if (event.kind === "page") {
       pages.set(event.page.id, event.page);
-      onPage(event.page, event.status, event.error);
+      onPage(event.page, event.status, event.error, {
+        durationMs: event.durationMs,
+      });
     } else if (event.kind === "progress") {
       const page = pages.get(event.pageId);
       if (page) {

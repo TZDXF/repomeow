@@ -552,12 +552,14 @@ fn legacy_wiki_config(app: &AppHandle) -> WikiGenerationConfig {
                 .filter(|v| !v.is_empty()),
             model,
             thinking,
+            concurrency: None,
         },
         Some(agent_id) => super::ai::WikiGenerationBackend::Agent {
             agent_id: Some(agent_id.to_string()),
             custom_command: None,
             model,
             thinking,
+            concurrency: None,
         },
     };
     WikiGenerationConfig {
@@ -998,6 +1000,7 @@ mod tests {
                     custom_command: None,
                     model: Some("gpt-5".into()),
                     thinking: Some("high".into()),
+                    concurrency: Some(3),
                 },
             },
         )
@@ -1009,11 +1012,13 @@ mod tests {
                 agent_id,
                 model,
                 thinking,
+                concurrency,
                 ..
             } => {
                 assert_eq!(agent_id.as_deref(), Some("codex"));
                 assert_eq!(model.as_deref(), Some("gpt-5"));
                 assert_eq!(thinking.as_deref(), Some("high"));
+                assert_eq!(concurrency, Some(3));
             }
             crate::commands::ai::WikiGenerationBackend::Builtin => panic!("应读回 agent 配置"),
         }

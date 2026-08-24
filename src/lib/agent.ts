@@ -62,6 +62,7 @@ export interface AcpTestResult {
 }
 
 export interface AcpPromptResult {
+  /** "endTurn" 为正常完成;maxTokens/maxTurnRequests/refusal 等也会返回(附已累计文本) */
   stopReason: string;
   text: string;
   /** 本次 prompt 的 token 用量(ACP unstable 字段;agent 未上报为 null) */

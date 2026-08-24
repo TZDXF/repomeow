@@ -22,6 +22,8 @@ export interface WikiGenPageItem {
   page: WikiOutlinePage;
   status: WikiPageStatus;
   error?: string;
+  /** 该页生成耗时(毫秒,done 时上报) */
+  durationMs?: number;
 }
 
 /** 单个项目的整本生成状态;不同项目各自持有一份,可同时生成 */
@@ -34,6 +36,8 @@ export interface WikiGenerationState {
   streamContents: Record<string, string>;
   context: WikiContextSummary | null;
   activities: WikiGenerationActivity[];
+  /** agent 大纲阶段的工具调用次数(探索强度指标;权限决策行不计入) */
+  toolCalls: number;
   retries: Record<string, WikiRetryStatus>;
   /** 本轮整本生成开始时间,供离开页面后返回时继续展示真实耗时 */
   startedAt: number;
@@ -207,6 +211,7 @@ export const useWikiStore = defineStore("wiki", () => {
       streamContents: {},
       context: null,
       activities: [],
+      toolCalls: 0,
       retries: {},
       startedAt: Date.now(),
     });
@@ -218,16 +223,19 @@ export const useWikiStore = defineStore("wiki", () => {
           state.phase = p;
           if (p !== "outlining") delete state.retries.outline;
         },
-        onPage: (page, status, error) => {
+        onPage: (page, status, error, stats) => {
           const item = state.pages.find((i) => i.page.id === page.id);
+          const friendly = error ? toFriendlyWikiGenerationError(error) : undefined;
           if (item) {
             item.status = status;
-            item.error = error ? toFriendlyWikiGenerationError(error) : undefined;
+            item.error = friendly;
+            if (stats?.durationMs !== undefined) item.durationMs = stats.durationMs;
           } else {
             state.pages.push({
               page: { ...page },
               status,
-              error: error ? toFriendlyWikiGenerationError(error) : undefined,
+              error: friendly,
+              durationMs: stats?.durationMs,
             });
           }
           // 页面进入终态后清掉流式预览内容
@@ -248,6 +256,11 @@ export const useWikiStore = defineStore("wiki", () => {
           if (state.activities.length > 2_000) {
             state.activities.splice(0, state.activities.length - 2_000);
           }
+          // 大纲阶段的探索强度:权限决策行(已允许/已拒绝)不是工具调用,不计入
+          state.toolCalls += activities.filter(
+            (a) =>
+              a.type === "tool" && !a.text.startsWith("已允许") && !a.text.startsWith("已拒绝"),
+          ).length;
         },
         onRetry: (retry) => {
           state.retries[retry.pageId ?? "outline"] = { ...retry };

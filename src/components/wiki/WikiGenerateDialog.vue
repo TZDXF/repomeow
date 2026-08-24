@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { acpTestCached, agentList, type AcpTestResult } from "@/lib/agent";
 import { loadWikiConfig, saveWikiConfig } from "@/lib/wiki";
 import type { WikiGenBackend, WikiGenerationConfig } from "@/lib/wiki-generator";
@@ -66,6 +67,8 @@ onMounted(() => {
 const backend = ref("builtin");
 const model = ref("");
 const thinking = ref("");
+/** 页面并发数(agent 后端每页独立会话,可并行;1-8,默认 2) */
+const concurrency = ref(2);
 const configLoading = ref(false);
 const configSaving = ref(false);
 const configError = ref("");
@@ -96,6 +99,7 @@ async function loadProjectConfig() {
   backend.value = "builtin";
   model.value = "";
   thinking.value = "";
+  concurrency.value = 2;
   try {
     const config = await loadWikiConfig(props.projectPath);
     if (sequence !== loadSequence || !props.open) return;
@@ -105,6 +109,7 @@ async function loadProjectConfig() {
       backend.value = normalizeBackend(config.backend.agentId ?? "custom");
       model.value = config.backend.model ?? "";
       thinking.value = config.backend.thinking ?? "";
+      concurrency.value = Math.min(8, Math.max(1, config.backend.concurrency ?? 2));
     }
     // 已选中 agent 后端时立即自动获取模型清单(命中缓存则零开销)
     void probeAgent();
@@ -261,6 +266,7 @@ async function confirm() {
           agentId: backend.value,
           model: model.value || undefined,
           thinking: thinking.value || undefined,
+          concurrency: Math.min(8, Math.max(1, Math.round(concurrency.value) || 2)),
         };
   const config: WikiGenerationConfig = { version: 1, backend: selectedBackend };
   configSaving.value = true;
@@ -351,6 +357,17 @@ async function confirm() {
                   </SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div class="flex min-w-0 flex-col gap-1.5">
+              <label class="text-sm font-medium">{{ t("wiki.agentConcurrency") }}</label>
+              <Input
+                v-model.number="concurrency"
+                type="number"
+                min="1"
+                max="8"
+                :disabled="configLoading || configSaving"
+              />
+              <p class="text-xs text-muted-foreground">{{ t("wiki.agentConcurrencyHint") }}</p>
             </div>
           </div>
           <p

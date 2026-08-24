@@ -12,8 +12,8 @@
 //!   modes(session/set_mode)
 //! - 进程管理:自行 spawn 以持有 PID(Windows 用 taskkill /T /F 杀整棵进程树,
 //!   覆盖 npx.cmd→cmd→node 包装链;crate 内置 ChildGuard 在 Windows 只杀直接子进程)
-//! - 客户端回调:fs/read_text_file(限定会话 cwd 内,防越界读)+ 权限请求
-//!   (headless 场景固定自动选第一个选项,并作为活动行告知前端;不暴露用户决策)
+//! - 客户端回调:fs/read_text_file(限定会话 cwd 内,防越界读)+ 权限请求白名单
+//!   (headless 场景自动放行只读类工具、拒绝写操作与命令执行,决策作为活动行外显)
 //!
 //! 生成编排在前端(stores/wiki.ts + lib/wiki-generator.ts):本模块只提供
 //! 「一次 prompt → 流式事件 + 最终全文」的通用会话能力,不感知 wiki 语义。
@@ -25,12 +25,12 @@ use std::time::Duration;
 
 use agent_client_protocol::schema::v1::{
     CancelNotification, ClientCapabilities, ContentBlock, FileSystemCapabilities, Implementation,
-    InitializeRequest, NewSessionRequest, NewSessionResponse, PromptRequest, ReadTextFileRequest,
-    ReadTextFileResponse, RequestPermissionOutcome, RequestPermissionRequest,
+    InitializeRequest, NewSessionRequest, NewSessionResponse, PermissionOptionKind, PromptRequest,
+    ReadTextFileRequest, ReadTextFileResponse, RequestPermissionOutcome, RequestPermissionRequest,
     RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption,
     SessionConfigOptionCategory, SessionConfigOptionValue, SessionConfigSelectOptions, SessionId,
     SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest,
-    StopReason, TextContent, ToolCallLocation, Usage,
+    StopReason, TextContent, ToolCallLocation, ToolKind, Usage,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{Agent, ByteStreams, Client, ConnectionTo};
@@ -53,6 +53,9 @@ const CONFIG_TIMEOUT: Duration = Duration::from_secs(10);
 const STDERR_TAIL_MAX: usize = 8 * 1024;
 /// fs/read_text_file 单次返回上限
 const READ_FILE_MAX: usize = 256 * 1024;
+/// 单次 prompt 的总超时:超时先发 session/cancel + 宽限,仍未收尾即放弃会话
+/// (驱动任务退出会杀进程树;调用方按可重试错误换新会话)
+const PROMPT_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 // ── 精选 agent 清单(摘自 https://cdn.agentclientprotocol.com/registry)──────
 
@@ -275,7 +278,9 @@ pub struct AcpTestResult {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AcpPromptResult {
-    stop_reason: String,
+    /// 停止原因:"end_turn" 为正常完成;"max_tokens" / "max_turn_requests" / "refusal"
+    /// 等非正常结束也连同已累计文本一并返回,由调用方分类处置(重试/快速失败)
+    pub(crate) stop_reason: String,
     pub(crate) text: String,
     /// 本次 prompt 的 token 用量(ACP unstable 字段;agent 未上报为 None)
     pub(crate) usage: Option<AcpTokenUsage>,
@@ -485,21 +490,22 @@ pub(crate) async fn acp_prompt_with(
     }
 }
 
-/// 取消会话:发 session/cancel;宽限后仍未收尾则按 PID 杀进程树(覆盖 npx 包装链)
+/// 取消并关闭会话:先从注册表移除(job_tx 随注册项丢弃,驱动循环在处理完当前
+/// prompt 后自然退出),再发 session/cancel 通知进行中的 prompt 收尾;
+/// 宽限后进程仍未退出则按 PID 杀进程树(覆盖 npx 包装链)
 #[tauri::command]
 pub fn acp_cancel(run_id: String) -> AppResult<()> {
-    let pid = {
-        let jobs = agent_jobs().lock().unwrap();
-        let session = jobs
-            .get(&run_id)
-            .ok_or_else(|| AppError::coded(ErrorCode::AgentPromptFailed, "会话不存在或已结束"))?;
-        session.cancel.notify_one();
-        session.pid
-    };
+    let session = agent_jobs()
+        .lock()
+        .unwrap()
+        .remove(&run_id)
+        .ok_or_else(|| AppError::coded(ErrorCode::AgentPromptFailed, "会话不存在或已结束"))?;
+    session.cancel.notify_one();
+    let pid = session.pid;
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(CANCEL_GRACE).await;
-        // 仍在注册表 = agent 未自行收尾(agent_jobs 由驱动任务在结束时移除)
-        if agent_jobs().lock().unwrap().contains_key(&run_id) {
+        // agent_pids 由驱动任务在结束时移除;仍在 = agent 未自行收尾
+        if agent_pids().lock().unwrap().contains(&pid) {
             kill_agent_pid(pid);
         }
     });
@@ -634,19 +640,17 @@ async fn run_session(
                     {
                         let sink = sink.clone();
                         async move |req: RequestPermissionRequest, responder, _cx| {
-                            // headless 生成场景:固定自动放行第一个选项(本机自己的仓库
-                            // + 用户自己认证的 agent),决策作为活动行告知前端
+                            // headless 生成场景:按工具类别白名单自动决策并外显为活动行
                             let title = req.tool_call.fields.title.clone().unwrap_or_default();
-                            push_activity(&sink, format!("已允许: {title}"));
-                            let outcome = req
-                                .options
-                                .first()
-                                .map(|o| {
-                                    RequestPermissionOutcome::Selected(
-                                        SelectedPermissionOutcome::new(o.option_id.clone()),
-                                    )
-                                })
-                                .unwrap_or(RequestPermissionOutcome::Cancelled);
+                            let (allowed, outcome) = decide_permission(&req);
+                            push_activity(
+                                &sink,
+                                if allowed {
+                                    format!("已允许: {title}")
+                                } else {
+                                    format!("已拒绝(生成 wiki 只读): {title}")
+                                },
+                            );
                             let _ = responder.respond(RequestPermissionResponse::new(outcome));
                             Ok(())
                         }
@@ -768,15 +772,34 @@ async fn run_session(
                                                 ))
                                                 .block_task()
                                             );
+                                            // 单次 prompt 总超时:防止 agent 无限探索/卡死
+                                            let mut timeout =
+                                                std::pin::pin!(tokio::time::sleep(PROMPT_TIMEOUT));
+                                            enum Wait<T> {
+                                                Done(T),
+                                                TimedOut,
+                                            }
                                             // 等待响应期间可多次响应取消:发 session/cancel
                                             // 后继续等最终响应(stopReason=cancelled)
                                             let resp = loop {
                                                 tokio::select! {
-                                                    r = &mut fut => break r,
+                                                    r = &mut fut => break Wait::Done(r),
                                                     _ = cancel.notified() => {
                                                         let _ = conn.send_notification(
                                                             CancelNotification::new(session_id.clone()),
                                                         );
+                                                    }
+                                                    _ = &mut timeout => {
+                                                        let _ = conn.send_notification(
+                                                            CancelNotification::new(session_id.clone()),
+                                                        );
+                                                        // 宽限内仍未收尾即放弃;连接不可复用
+                                                        let _ = tokio::time::timeout(
+                                                            CANCEL_GRACE,
+                                                            &mut fut,
+                                                        )
+                                                        .await;
+                                                        break Wait::TimedOut;
                                                     }
                                                 }
                                             };
@@ -786,22 +809,36 @@ async fn run_session(
                                                 .take()
                                                 .map(|s| s.text)
                                                 .unwrap_or_default();
+                                            if matches!(resp, Wait::TimedOut) {
+                                                let _ = done.send(Err(AppError::coded(
+                                                    ErrorCode::AgentPromptFailed,
+                                                    format!(
+                                                        "prompt 超过 {}s 未结束(prompt_timeout)",
+                                                        PROMPT_TIMEOUT.as_secs()
+                                                    ),
+                                                )));
+                                                // 会话可能已卡死:退出驱动循环,
+                                                // 收尾逻辑杀进程树;调用方重试会换新会话
+                                                break;
+                                            }
+                                            let Wait::Done(resp) = resp else {
+                                                unreachable!()
+                                            };
                                             let out = match resp {
                                                 Ok(r) => match r.stop_reason {
-                                                    StopReason::EndTurn => Ok(AcpPromptResult {
-                                                        stop_reason: "end_turn".into(),
-                                                        text,
-                                                        // PromptResponse.usage 即本次 prompt 消耗
-                                                        usage: r.usage.map(Into::into),
-                                                    }),
                                                     StopReason::Cancelled => Err(AppError::coded(
                                                         ErrorCode::AgentCanceled,
                                                         "",
                                                     )),
-                                                    other => Err(AppError::coded(
-                                                        ErrorCode::AgentPromptFailed,
-                                                        format!("stop_reason={}", stop_reason_str(other)),
-                                                    )),
+                                                    // 非 EndTurn 的停止原因连同已累计文本交给
+                                                    // 调用方分类处置(换会话重试/快速失败)
+                                                    reason => Ok(AcpPromptResult {
+                                                        stop_reason: stop_reason_str(reason)
+                                                            .into(),
+                                                        text,
+                                                        // PromptResponse.usage 即本次 prompt 消耗
+                                                        usage: r.usage.map(Into::into),
+                                                    }),
                                                 },
                                                 Err(e) => Err(AppError::ai_provider_error(
                                                     ErrorCode::AgentPromptFailed,
@@ -1204,43 +1241,85 @@ fn known_tool_title(sink: &SharedSink, call_id: &str) -> Option<String> {
         .cloned()
 }
 
-/// 工具参数由各家 agent 自定义，不在客户端猜测字段语义，直接展示其上报的 rawInput；
-/// 未上报 rawInput 时才回退展示 ACP 标准 locations。
+/// 工具调用活动行:`{title} {关键参数摘要}` 单行紧凑格式(前端日志逐行展示,
+/// 不再 dump 原始 JSON)。工具参数由各家 agent 自定义,不猜测字段语义:
+/// 优先提取常见键(file_path/command/query 等),否则紧凑 JSON 截断;
+/// 未上报 rawInput 时回退 ACP 标准 locations 路径
 fn tool_activity_text(
     title: &str,
     locations: &[ToolCallLocation],
     raw_input: Option<&serde_json::Value>,
 ) -> String {
     if let Some(input) = raw_input {
-        return format!("工具: {title}\n{}", format_tool_input(input));
+        return format!("{title} {}", summarize_tool_input(input));
     }
     if locations.is_empty() {
-        return format!("工具: {title}");
+        return title.to_string();
     }
-    let locations = serde_json::to_value(locations).unwrap_or(serde_json::Value::Null);
-    format!("工具: {title}\n{}", format_tool_input(&locations))
+    let paths = locations
+        .iter()
+        .map(|l| l.path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{title} {}", truncate_inline(&paths))
 }
 
-fn format_tool_input(input: &serde_json::Value) -> String {
-    serde_json::to_string_pretty(input).unwrap_or_else(|_| input.to_string())
+/// 从工具 rawInput 提取单行摘要:常见键的值拼接(兼容一层 arguments 包装),
+/// 无常见键时紧凑 JSON。超长值截断、换行折叠为空格
+fn summarize_tool_input(input: &serde_json::Value) -> String {
+    const KEYS: &[&str] = &[
+        "file_path",
+        "path",
+        "command",
+        "cmd",
+        "pattern",
+        "query",
+        "url",
+        "description",
+    ];
+    if let Some(obj) = input.as_object() {
+        let target = obj
+            .get("arguments")
+            .and_then(|v| v.as_object())
+            .unwrap_or(obj);
+        let parts: Vec<String> = KEYS
+            .iter()
+            .filter_map(|key| target.get(*key))
+            .map(|v| {
+                v.as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| v.to_string())
+            })
+            .map(|s| truncate_inline(&s))
+            .collect();
+        if !parts.is_empty() {
+            return parts.join(" ");
+        }
+    }
+    truncate_inline(&input.to_string())
+}
+
+/// 单行化并截断到 120 字符(工具日志展示用)
+fn truncate_inline(text: &str) -> String {
+    let one_line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut chars = one_line.chars();
+    let truncated: String = chars.by_ref().take(120).collect();
+    if chars.next().is_some() {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
 }
 
 fn read_tool_activity_text(path: &Path, line: Option<u32>, limit: Option<u32>) -> String {
-    let mut input = serde_json::Map::new();
-    input.insert(
-        "path".into(),
-        serde_json::Value::String(path.display().to_string()),
-    );
+    let mut text = format!("read {}", path.display());
     if let Some(line) = line {
-        input.insert("line".into(), serde_json::Value::from(line));
+        text += &format!(":{line}");
     }
     if let Some(limit) = limit {
-        input.insert("limit".into(), serde_json::Value::from(limit));
+        text += &format!("+{limit}");
     }
-    format!(
-        "工具: read\n{}",
-        format_tool_input(&serde_json::Value::Object(input))
-    )
+    text
 }
 
 fn push_chunk(sink: &SharedSink, delta: &str) {
@@ -1261,6 +1340,37 @@ fn push_activity(sink: &SharedSink, text: String) {
     if let Some(s) = sink.lock().unwrap().as_ref() {
         s.sender.send(AcpEvent::Activity { text });
     }
+}
+
+/// headless 生成的权限决策:读文件/搜索/思考/抓取等只读类工具自动放行,
+/// 写文件与命令执行(Edit/Delete/Move/Execute/SwitchMode)一律拒绝——生成 wiki
+/// 不需要改文件或跑命令,放任执行既拖慢生成又可能污染仓库。优先一次性选项,
+/// 避免「总是允许/拒绝」把单次决策扩散到后续所有工具调用;无匹配选项则取消。
+fn decide_permission(req: &RequestPermissionRequest) -> (bool, RequestPermissionOutcome) {
+    let allow = !matches!(
+        req.tool_call.fields.kind,
+        Some(
+            ToolKind::Edit | ToolKind::Delete | ToolKind::Move | ToolKind::Execute
+            | ToolKind::SwitchMode
+        )
+    );
+    let pick = |primary: PermissionOptionKind, fallback: PermissionOptionKind| {
+        req.options
+            .iter()
+            .find(|o| o.kind == primary)
+            .or_else(|| req.options.iter().find(|o| o.kind == fallback))
+    };
+    let option = if allow {
+        pick(PermissionOptionKind::AllowOnce, PermissionOptionKind::AllowAlways)
+    } else {
+        pick(PermissionOptionKind::RejectOnce, PermissionOptionKind::RejectAlways)
+    };
+    let outcome = option
+        .map(|o| {
+            RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(o.option_id.clone()))
+        })
+        .unwrap_or(RequestPermissionOutcome::Cancelled);
+    (allow, outcome)
 }
 
 /// fs/read_text_file 回调实现:路径限制在 root 内(canonicalize 防越界),
@@ -1374,7 +1484,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_activity_preserves_raw_input_without_field_adaptation() {
+    fn tool_activity_summarizes_raw_input_inline() {
         let locations = vec![ToolCallLocation::new(r"D:\repo\src\main.rs")];
         let input = serde_json::json!({
             "arguments": {
@@ -1383,24 +1493,30 @@ mod tests {
                 "query": "must not be displayed"
             }
         });
+        // 常见键提取为单行摘要(兼容 arguments 包装;多个常见键拼接)
         let text = tool_activity_text("read", &locations, Some(&input));
-        assert_eq!(text, format!("工具: read\n{}", format_tool_input(&input)));
-        assert!(text.contains("file_path"));
-        assert!(text.contains("limit"));
-        assert!(text.contains("must not be displayed"));
-        assert!(!text.contains(r"D:\repo\src\main.rs"));
+        assert_eq!(text, "read src/lib.rs must not be displayed");
 
-        let fallback = tool_activity_text("read", &locations, None);
-        let locations_json = serde_json::to_value(&locations).unwrap();
+        // 无常见键时紧凑 JSON 截断为一行
+        let other = serde_json::json!({"verbose": {"nested": true}});
         assert_eq!(
-            fallback,
-            format!("工具: read\n{}", format_tool_input(&locations_json))
+            tool_activity_text("custom", &[], Some(&other)),
+            r#"custom {"verbose":{"nested":true}}"#
         );
 
+        // 无 rawInput 回退 locations 路径
+        let fallback = tool_activity_text("read", &locations, None);
+        assert_eq!(fallback, r"read D:\repo\src\main.rs");
+
         let callback = read_tool_activity_text(Path::new("src/lib.rs"), Some(20), Some(40));
-        assert!(callback.contains("src/lib.rs"));
-        assert!(callback.contains("\"line\": 20"));
-        assert!(callback.contains("\"limit\": 40"));
+        assert_eq!(callback, "read src/lib.rs:20+40");
+
+        // 超长值截断为单行
+        let long = serde_json::json!({"command": "x".repeat(300)});
+        let text = tool_activity_text("bash", &[], Some(&long));
+        assert!(text.len() < 140);
+        assert!(text.ends_with('…'));
+        assert!(!text.contains('\n'));
     }
 
     #[test]

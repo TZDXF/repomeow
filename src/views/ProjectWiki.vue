@@ -198,9 +198,21 @@ function activityTypeLabel(type: WikiGenerationActivityType): string {
   }
 }
 
-function activityText(type: WikiGenerationActivityType, text: string): string {
-  return type === "tool" ? text.replace(/^工具:\s*/, "") : text;
+function activityText(_type: WikiGenerationActivityType, text: string): string {
+  return text;
 }
+
+/** 权限决策行的着色(agent 后端外显的自动决策,拒绝需醒目) */
+function activityTextClass(text: string): string {
+  if (text.startsWith("已拒绝")) return "text-amber-600 dark:text-amber-400";
+  if (text.startsWith("已允许")) return "text-muted-foreground/70";
+  return "text-muted-foreground";
+}
+
+/** agent 大纲阶段的工具调用次数(探索强度指标,仅大纲阶段展示) */
+const outlineToolCalls = computed(() =>
+  generation.value?.phase === "outlining" ? (generation.value?.toolCalls ?? 0) : 0,
+);
 
 /** 每秒刷新展示用时;生成开始时间由全局 store 持有,路由返回后不会重新计时 */
 const now = useNow({ interval: 1000 });
@@ -253,6 +265,7 @@ interface WikiNavItem {
   importance: string;
   status?: WikiPageStatus;
   error?: string;
+  durationMs?: number;
 }
 
 const navItems = computed<WikiNavItem[]>(() => {
@@ -264,6 +277,7 @@ const navItems = computed<WikiNavItem[]>(() => {
       importance: i.page.importance,
       status: i.status,
       error: i.error,
+      durationMs: i.durationMs,
     }));
   }
   return pages.value.map((p) => ({
@@ -273,6 +287,15 @@ const navItems = computed<WikiNavItem[]>(() => {
     importance: p.importance,
   }));
 });
+
+/** 完成页的耗时(`m:ss`) */
+function pageStatsText(item: WikiNavItem): string {
+  if (item.durationMs === undefined) return "";
+  const totalSeconds = Math.max(0, Math.round(item.durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
 
 /** 按 section 保序分组;无 section 的页面归入 null 组(扁平展示) */
 const navGroups = computed(() => {
@@ -696,6 +719,12 @@ const beforeDownload = createBeforeDownload(t);
                     </TooltipContent>
                   </Tooltip>
                   <span class="min-w-0 flex-1 truncate" :title="p.title">{{ p.title }}</span>
+                  <span
+                    v-if="p.status === 'done' && p.durationMs !== undefined"
+                    class="shrink-0 text-[10px] tabular-nums text-muted-foreground"
+                  >
+                    {{ pageStatsText(p) }}
+                  </span>
                 </button>
               </div>
             </nav>
@@ -766,6 +795,13 @@ const beforeDownload = createBeforeDownload(t);
               >
                 {{ contextSummaryText }}
               </p>
+              <p
+                v-if="outlineToolCalls > 0"
+                class="mt-2 text-xs tabular-nums text-muted-foreground"
+                role="status"
+              >
+                {{ t("wiki.progress.toolCalls", { count: outlineToolCalls }) }}
+              </p>
               <div
                 v-if="visibleActivities.length"
                 ref="activityLogHost"
@@ -781,9 +817,12 @@ const beforeDownload = createBeforeDownload(t);
                   <span class="shrink-0 text-primary/80">{{
                     activityTypeLabel(activity.type)
                   }}</span>
-                  <span class="min-w-0 whitespace-pre-wrap break-all text-muted-foreground">{{
-                    activityText(activity.type, activity.text)
-                  }}</span>
+                  <span
+                    class="min-w-0 truncate"
+                    :class="activityTextClass(activity.text)"
+                    :title="activityText(activity.type, activity.text)"
+                    >{{ activityText(activity.type, activity.text) }}</span
+                  >
                 </div>
               </div>
               <p v-else class="mt-4 max-w-sm text-xs leading-5 text-muted-foreground">

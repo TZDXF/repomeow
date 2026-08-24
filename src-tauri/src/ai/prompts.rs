@@ -82,9 +82,10 @@ mod tests {
     #[test]
     fn agent_wiki_prompts_require_silent_self_validation() {
         for prompt in [AGENT_WIKI_OUTLINE_PROMPT, AGENT_WIKI_PAGE_PROMPT] {
-            assert!(prompt.contains("Explore the repository and use tools silently."));
             assert!(prompt.contains("If any criterion fails, revise the draft"));
             assert!(prompt.contains("the application owns persistence"));
+            // 工具预算与禁令:限制探索次数,禁止跑命令/构建/测试
+            assert!(prompt.contains("Never run shell commands"));
         }
 
         for prompt in [DEFAULT_WIKI_OUTLINE_PROMPT, AGENT_WIKI_OUTLINE_PROMPT] {
@@ -92,7 +93,12 @@ mod tests {
             assert!(prompt.contains("\"relevantFiles\""));
             assert!(!prompt.contains("<wiki_structure>"));
         }
+        assert!(AGENT_WIKI_OUTLINE_PROMPT.contains("Explore the repository and use tools silently."));
+        assert!(AGENT_WIKI_OUTLINE_PROMPT.contains("at most 20 additional files"));
         assert!(AGENT_WIKI_OUTLINE_PROMPT.contains("The first non-whitespace character is"));
+        // 页面生成是混合模式:相关文件全文已喂入,只允许少量补充读取
+        assert!(AGENT_WIKI_PAGE_PROMPT.contains("at most 5 additional repository files"));
+        assert!(AGENT_WIKI_PAGE_PROMPT.contains("`N: `"));
         assert!(AGENT_WIKI_PAGE_PROMPT.contains("The first non-whitespace characters are"));
         assert!(AGENT_WIKI_PAGE_PROMPT.contains("Nothing — including an acknowledgement"));
     }

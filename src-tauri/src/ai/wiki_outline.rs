@@ -4,6 +4,7 @@ use serde::Deserialize;
 
 use crate::commands::wiki::WikiOutlinePage;
 
+/// 严格形态:未知字段直接报错,驱动上层「带错误反馈」的纠错重试
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct OutlineDocument {
@@ -30,6 +31,97 @@ struct OutlinePage {
     importance: String,
     relevant_files: Vec<String>,
     related_pages: Vec<String>,
+}
+
+/// 宽松形态:容忍 agent 附加的未知字段(语义校验不变,仍由下方逐条检查)
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LenientOutlineDocument {
+    title: String,
+    description: String,
+    sections: Vec<LenientOutlineSection>,
+    pages: Vec<LenientOutlinePage>,
+}
+
+#[derive(Deserialize)]
+struct LenientOutlineSection {
+    id: String,
+    title: String,
+    pages: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LenientOutlinePage {
+    id: String,
+    title: String,
+    description: String,
+    importance: String,
+    relevant_files: Vec<String>,
+    related_pages: Vec<String>,
+}
+
+impl From<LenientOutlineDocument> for OutlineDocument {
+    fn from(doc: LenientOutlineDocument) -> Self {
+        Self {
+            title: doc.title,
+            description: doc.description,
+            sections: doc
+                .sections
+                .into_iter()
+                .map(|s| OutlineSection {
+                    id: s.id,
+                    title: s.title,
+                    pages: s.pages,
+                })
+                .collect(),
+            pages: doc
+                .pages
+                .into_iter()
+                .map(|p| OutlinePage {
+                    id: p.id,
+                    title: p.title,
+                    description: p.description,
+                    importance: p.importance,
+                    relevant_files: p.relevant_files,
+                    related_pages: p.related_pages,
+                })
+                .collect(),
+        }
+    }
+}
+
+/// 从可能夹带前言/围栏/尾缀的文本中提取第一个完整平衡的 JSON 对象
+/// (字符串字面量与转义正确跳过)。找不到返回 None。
+fn extract_json_object(text: &str) -> Option<&str> {
+    let start = text.find('{')?;
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (offset, ch) in text[start..].char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&text[start..=start + offset]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn valid_id(value: &str) -> bool {
@@ -61,20 +153,38 @@ pub fn parse_outline(
     raw: &str,
     valid_files: &HashSet<String>,
 ) -> Result<Vec<WikiOutlinePage>, String> {
-    let text = raw.trim();
-    if !text.starts_with('{') || !text.ends_with('}') {
-        return Err(
-            "wiki outline response must contain only one complete JSON object starting with `{` and ending with `}`; remove commentary, fences, control tokens, and truncated content"
-                .to_string(),
-        );
-    }
-    let document: OutlineDocument = serde_json::from_str(text).map_err(|error| {
-        format!(
-            "wiki outline JSON parse failed at line {}, column {}: {error}",
-            error.line(),
-            error.column(),
-        )
-    })?;
+    let trimmed = raw.trim();
+    // 容错降级(参照 deepwiki-open):agent 输出夹带前言/Markdown 围栏/控制尾缀时,
+    // 先提取第一个完整平衡的 JSON 对象再解析;完全没有对象才判定格式错误
+    let text = if trimmed.starts_with('{') && trimmed.ends_with('}') {
+        trimmed.to_string()
+    } else {
+        match extract_json_object(trimmed) {
+            Some(object) => object.to_string(),
+            None => return Err(
+                "wiki outline response must contain one complete JSON object starting with `{` and ending with `}`; remove commentary, fences, control tokens, and truncated content"
+                    .to_string(),
+            ),
+        }
+    };
+    // 先严格解析(未知字段报错,驱动精确纠错);仅在「多出未知字段」时降级宽松解析
+    let document: OutlineDocument = match serde_json::from_str(&text) {
+        Ok(document) => document,
+        Err(strict_error) => {
+            match serde_json::from_str::<LenientOutlineDocument>(&text) {
+                Ok(lenient) => lenient.into(),
+                // 宽松也失败 = 存在比未知字段更根本的语法/类型错误,报宽松错误更准确
+                Err(lenient_error) => {
+                    let _ = strict_error;
+                    return Err(format!(
+                        "wiki outline JSON parse failed at line {}, column {}: {lenient_error}",
+                        lenient_error.line(),
+                        lenient_error.column(),
+                    ));
+                }
+            }
+        }
+    };
 
     let mut errors = Vec::new();
     if document.title.trim().is_empty() {
@@ -290,16 +400,37 @@ mod tests {
     }
 
     #[test]
-    fn rejects_commentary_fences_truncation_and_control_tokens() {
+    fn salvages_json_from_commentary_fences_and_control_tokens() {
         let raw = valid_document().to_string();
-        for invalid in [
+        // 前言 / Markdown 围栏 / 控制尾缀:提取第一个完整 JSON 对象后正常解析
+        for salvageable in [
             format!("正在生成。\n{raw}"),
             format!("```json\n{raw}\n```"),
-            raw[..raw.len() - 1].to_string(),
             format!("{raw}<]minimax[>"),
         ] {
-            assert!(parse_outline(&invalid, &valid_files()).is_err());
+            let pages = parse_outline(&salvageable, &valid_files()).unwrap();
+            assert_eq!(pages.len(), 6);
         }
+        // 截断(没有闭合的 `}`)仍拒绝
+        assert!(parse_outline(&raw[..raw.len() - 1], &valid_files()).is_err());
+        // 完全不是 JSON 仍拒绝
+        assert!(parse_outline("无法生成大纲", &valid_files()).is_err());
+    }
+
+    #[test]
+    fn tolerates_unknown_fields_but_reports_schema_errors() {
+        // 未知字段(agent 常附加 extra 键):宽松解析放行
+        let mut document = valid_document();
+        document["unexpected"] = json!(true);
+        document["pages"][0]["extra"] = json!({"note": "agent added"});
+        let pages = parse_outline(&document.to_string(), &valid_files()).unwrap();
+        assert_eq!(pages.len(), 6);
+
+        // 缺失必需字段:仍报错驱动纠错重试
+        let mut document = valid_document();
+        document.as_object_mut().unwrap().remove("sections");
+        let error = parse_outline(&document.to_string(), &valid_files()).unwrap_err();
+        assert!(error.contains("missing field `sections`"));
     }
 
     #[test]
@@ -314,20 +445,22 @@ mod tests {
     }
 
     #[test]
-    fn rejects_wrong_page_count_and_unknown_fields() {
+    fn rejects_wrong_page_count() {
         let mut document = valid_document();
         document["pages"] = json!([]);
         let error = parse_outline(&document.to_string(), &valid_files()).unwrap_err();
         assert!(error.contains("must contain 6-10 items"));
+    }
 
-        let mut document = valid_document();
-        document["unexpected"] = json!(true);
-        let error = parse_outline(&document.to_string(), &valid_files()).unwrap_err();
-        assert!(error.contains("unknown field"));
-
-        let mut document = valid_document();
-        document.as_object_mut().unwrap().remove("sections");
-        let error = parse_outline(&document.to_string(), &valid_files()).unwrap_err();
-        assert!(error.contains("missing field `sections`"));
+    #[test]
+    fn extracts_first_balanced_json_object_respecting_strings() {
+        // 字符串内的花括号与转义引号不影响配平
+        let text = r#"前言 {"title": "a } \" {", "pages": []} 尾随"#;
+        assert_eq!(
+            extract_json_object(text),
+            Some(r#"{"title": "a } \" {", "pages": []}"#)
+        );
+        assert_eq!(extract_json_object("no json here"), None);
+        assert_eq!(extract_json_object("{ unclosed"), None);
     }
 }
