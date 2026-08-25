@@ -16,20 +16,20 @@ use tauri::{AppHandle, State};
 use crate::db::Db;
 use crate::error::AppResult;
 
-#[allow(unused_imports)]
-pub use calendar::{get_calendar_meta_impl, get_reports_by_range_impl, CalendarMeta, HolidayData};
+pub use calendar::{CalendarMeta, HolidayData};
 pub(crate) use history::save_report_history_impl;
-#[allow(unused_imports)]
 pub use history::{
-    count_commits_batch, delete_report_history_impl, list_report_history_impl,
-    load_report_commits_batch, resolve_project_names_batch, ReportCommitItem,
     ReportGeneratedPayload, ReportHistoryDetail, ReportHistoryItem, SaveReportCommit,
 };
-#[allow(unused_imports)]
-pub use planning::{BatchRange, ReportDateRange, WorkWeekRange, WorkWeekRanges};
-#[allow(unused_imports)]
-pub use schedules::{
-    read_schedules, tag_project_ids, update_last_run_at, ReportSchedule, ScheduleNotify,
+pub use planning::{BatchRange, ReportDateRange, WorkWeekRanges};
+pub use schedules::{read_schedules, tag_project_ids, ReportSchedule, ScheduleNotify};
+
+#[cfg(test)]
+pub use calendar::{get_calendar_meta_impl, get_reports_by_range_impl};
+#[cfg(test)]
+pub use history::{
+    count_commits_batch, delete_report_history_impl, list_report_history_impl,
+    load_report_commits_batch, resolve_project_names_batch,
 };
 
 #[tauri::command]

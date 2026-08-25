@@ -899,10 +899,6 @@ export default {
       preparing: "Preparing the page list",
       contextSummary:
         "Outline context: selected {files} source/document files; README: {readme}; root manifests: {manifests}{truncated}",
-      activityTitle: "Generation activity",
-      activityScan: "scan",
-      activityRead: "read",
-      activityTool: "tool",
       toolCalls: "{count} tool calls",
       found: "loaded",
       notFound: "not found",

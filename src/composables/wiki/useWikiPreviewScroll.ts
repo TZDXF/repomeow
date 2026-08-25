@@ -4,9 +4,7 @@ interface WikiPreviewScrollOptions {
   generating: Readonly<Ref<boolean>>;
   activePreviewId: Readonly<Ref<string | null | undefined>>;
   previewContent: Readonly<Ref<string>>;
-  activityCount: Readonly<Ref<number>>;
   previewHost: Ref<HTMLElement | null>;
-  activityLogHost: Ref<HTMLElement | null>;
 }
 
 /**
@@ -60,22 +58,6 @@ export function useWikiPreviewScroll(options: WikiPreviewScrollOptions) {
     if (viewport) {
       setViewportScroll(viewport, "bottom");
     }
-  });
-
-  watch(options.activityCount, async () => {
-    await nextTick();
-    const element = options.activityLogHost.value;
-    if (element) {
-      element.scrollTop = element.scrollHeight;
-    }
-  });
-
-  watch(options.activityLogHost, async (element) => {
-    if (!element) {
-      return;
-    }
-    await nextTick();
-    element.scrollTop = element.scrollHeight;
   });
 
   watch(

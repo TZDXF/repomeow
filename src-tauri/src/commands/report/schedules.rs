@@ -190,12 +190,3 @@ pub fn tag_project_ids(conn: &Connection, tag_ids: &[i64]) -> AppResult<Vec<i64>
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
-
-#[allow(dead_code)]
-pub fn update_last_run_at(conn: &Connection, schedule_id: &str, timestamp: i64) -> AppResult<()> {
-    conn.execute(
-        "UPDATE report_schedules SET last_run_at = ?1 WHERE id = ?2",
-        params![timestamp, schedule_id],
-    )?;
-    Ok(())
-}
