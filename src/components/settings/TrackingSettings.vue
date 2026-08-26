@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
+import { cmd } from "@/lib/tauri";
 import { matchesTrackingProject } from "@/lib/tracking";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
@@ -16,10 +17,18 @@ const { t } = useI18n();
 const store = useProjectsStore();
 const settings = useSettingsStore();
 
-// 设置页可能直达(未经项目列表页),项目列表为空时补拉一次(不带 git 状态)
-onMounted(() => {
-  if (!store.projects.length) {
-    store.fetchProjects({ withGit: false });
+/**
+ * 本页独立维护全量项目列表,不走 store.projects:
+ * 后者会被首页的搜索/标签筛选裁剪(筛选条件在 fetchProjects 时随 list_projects 下发),
+ * 跟踪更新配置需要看到全部项目,与首页筛选互不影响。
+ */
+const allProjects = ref<Project[]>([]);
+
+onMounted(async () => {
+  try {
+    allProjects.value = await cmd<Project[]>("list_projects", { query: null, tagIds: null });
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : String(e));
   }
 });
 
@@ -27,10 +36,10 @@ onMounted(() => {
 const searchInput = ref("");
 
 const filteredProjects = computed(() => {
-  return store.projects.filter((project) => matchesTrackingProject(project, searchInput.value));
+  return allProjects.value.filter((project) => matchesTrackingProject(project, searchInput.value));
 });
 
-const trackedCount = computed(() => store.projects.filter((p) => p.auto_pull).length);
+const trackedCount = computed(() => allProjects.value.filter((p) => p.auto_pull).length);
 
 /** 逐项目切换中的开关置灰,避免连点造成命令乱序 */
 const pendingIds = ref<Set<number>>(new Set());
@@ -40,6 +49,7 @@ async function toggle(project: Project, enabled: boolean) {
   pendingIds.value.add(project.id);
   try {
     await store.setAutoPull(project.id, enabled);
+    project.auto_pull = enabled;
   } catch (e) {
     toast.error(e instanceof Error ? e.message : String(e));
   } finally {
@@ -55,6 +65,7 @@ async function toggleWiki(project: Project, enabled: boolean) {
   wikiPendingIds.value.add(project.id);
   try {
     await store.setWikiAutoUpdate(project.id, enabled);
+    project.wiki_auto_update = enabled;
   } catch (e) {
     toast.error(e instanceof Error ? e.message : String(e));
   } finally {
@@ -185,9 +196,7 @@ async function toggleWikiAutoUpdate(enabled: boolean) {
           <tr v-if="!filteredProjects.length">
             <td colspan="3" class="py-8 text-center text-xs text-muted-foreground">
               {{
-                store.projects.length
-                  ? t("settings.tracking.noMatch")
-                  : t("settings.tracking.empty")
+                allProjects.length ? t("settings.tracking.noMatch") : t("settings.tracking.empty")
               }}
             </td>
           </tr>
