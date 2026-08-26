@@ -62,6 +62,8 @@ export interface WikiGenerationState {
   pages: WikiGenPageItem[];
   error: string;
   streamContents: Record<string, string>;
+  /** 每页最近一次流式 chunk 到达时间(毫秒),并行生成时用于让预览跟随最活跃的页 */
+  lastChunkAt: Record<string, number>;
   context: WikiContextSummary | null;
   /** agent 工具调用累计次数(大纲探索 + 页面补读;权限决策行不计入),驱动书写动画 */
   toolCalls: number;
@@ -275,6 +277,7 @@ export const useWikiStore = defineStore("wiki", () => {
       pages: [],
       error: "",
       streamContents: {},
+      lastChunkAt: {},
       context: null,
       toolCalls: 0,
       retries: {},
@@ -306,11 +309,13 @@ export const useWikiStore = defineStore("wiki", () => {
           // 页面进入终态后清掉流式预览内容
           if (status !== "running" && status !== "pending") {
             delete state.streamContents[page.id];
+            delete state.lastChunkAt[page.id];
             delete state.retries[page.id];
           }
         },
         onPageProgress: (page, partial) => {
           state.streamContents[page.id] = partial;
+          state.lastChunkAt[page.id] = Date.now();
           if (partial) delete state.retries[page.id];
         },
         onContext: (context) => {

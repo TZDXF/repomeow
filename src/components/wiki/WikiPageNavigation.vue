@@ -114,6 +114,13 @@ function pageStatsText(item: WikiNavItem): string {
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
+
+/** 生成中页面的实时字数;<1000 原样展示,否则缩写为 k,避免宽度抖动 */
+function pageWordCountText(item: WikiNavItem): string {
+  const count = item.wordCount ?? 0;
+  if (count < 1000) return t("wiki.charCount", { count });
+  return t("wiki.charCount", { count: `${(count / 1000).toFixed(1)}k` });
+}
 </script>
 
 <template>
@@ -245,7 +252,13 @@ function pageStatsText(item: WikiNavItem): string {
                 {{ t("wiki.unread") }}
               </span>
               <span
-                v-if="item.status === 'done' && item.durationMs !== undefined"
+                v-if="item.status === 'running' && item.wordCount !== undefined"
+                class="shrink-0 text-[10px] tabular-nums text-primary/80"
+              >
+                {{ pageWordCountText(item) }}
+              </span>
+              <span
+                v-else-if="item.status === 'done' && item.durationMs !== undefined"
                 class="shrink-0 text-[10px] tabular-nums text-muted-foreground"
               >
                 {{ pageStatsText(item) }}

@@ -21,7 +21,7 @@ import type { WikiGenPhase } from "@/lib/wiki-generator";
 import { parseWikiSources } from "@/lib/wiki-parse";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
-import { useWikiStore } from "@/stores/wiki";
+import { useWikiStore, type WikiGenPageItem } from "@/stores/wiki";
 import type { Project, WikiPageData } from "@/types";
 
 const { t } = useI18n();
@@ -119,15 +119,29 @@ const elapsedText = computed(() => {
   return hours > 0 ? `${String(hours).padStart(2, "0")}:${pair}` : pair;
 });
 
-/** 手动选中的预览页;未选或选中页不可预览时自动跟随第一个正在生成的页 */
+/** 手动选中的预览页;未选或选中页不可预览时自动跟随最近有输出的生成中页面 */
 const previewId = ref<string | null>(null);
 const previewItem = computed(() => {
-  const list = generation.value?.pages ?? [];
+  const state = generation.value;
+  const list = state?.pages ?? [];
   const manual = list.find((i) => i.page.id === previewId.value);
-  if (manual && (generation.value?.streamContents[manual.page.id] || manual.status === "running")) {
+  if (manual && (state?.streamContents[manual.page.id] || manual.status === "running")) {
     return manual;
   }
-  return list.find((i) => i.status === "running") ?? null;
+  // 并行生成时跟随最近一次收到 chunk 的页,避免停在一个迟迟不输出的页上;
+  // 都还没产出时按大纲顺序取第一个
+  let active: WikiGenPageItem | undefined;
+  for (const item of list) {
+    if (item.status !== "running") continue;
+    if (!active) {
+      active = item;
+      continue;
+    }
+    const at = state?.lastChunkAt[item.page.id] ?? 0;
+    const activeAt = state?.lastChunkAt[active.page.id] ?? 0;
+    if (at > activeAt) active = item;
+  }
+  return active ?? null;
 });
 const previewContent = computed(() =>
   previewItem.value ? (generation.value?.streamContents[previewItem.value.page.id] ?? "") : "",
@@ -159,6 +173,10 @@ const navItems = computed<WikiNavItem[]>(() => {
       status: i.status,
       error: i.error,
       durationMs: i.durationMs,
+      wordCount:
+        i.status === "running"
+          ? (generation.value?.streamContents[i.page.id]?.length ?? 0)
+          : undefined,
     }));
   }
   return pages.value.map((p) => ({

@@ -9,5 +9,7 @@ export interface WikiNavItem {
   status?: WikiPageStatus;
   error?: string;
   durationMs?: number;
+  /** 生成中该页已产出的字符数(running 页实时更新) */
+  wordCount?: number;
   unread?: boolean;
 }
