@@ -604,7 +604,7 @@ export default {
     commitCount: "{count} 条提交",
     projectNoCommits: "该时间范围内没有提交",
     excludedNoCommits: "无提交,不计入",
-    generate: "生成日报",
+    generate: "生成",
     generating: "生成中...",
     copy: "复制 Markdown",
     noProjects: "请至少选择一个项目",

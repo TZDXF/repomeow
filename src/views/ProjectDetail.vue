@@ -210,7 +210,7 @@ async function saveDesc() {
 
 <template>
   <div v-if="project" class="flex h-full flex-col overflow-y-auto">
-    <header class="shrink-0 border-b px-6 py-4">
+    <header class="shrink-0 border-b px-4 py-3">
       <div class="flex items-start justify-between gap-4">
         <div class="flex min-w-0 items-center gap-2">
           <Button
