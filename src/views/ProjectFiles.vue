@@ -4,32 +4,28 @@ import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
-import { ArrowLeft, Code, Eye, FileQuestion, FolderTree, Search, WrapText } from "@lucide/vue";
-import { onClickOutside, useLocalStorage } from "@vueuse/core";
+import { ArrowLeft, Code, Eye, FileQuestion, FolderTree, WrapText } from "@lucide/vue";
+import { useLocalStorage } from "@vueuse/core";
 import { Markdown, type ControlsConfig, type NodeRenderers } from "vue-stream-markdown";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import CodeViewer from "@/components/files/CodeViewer.vue";
+import FileNameSearch from "@/components/files/FileNameSearch.vue";
 import FindBar from "@/components/files/FindBar.vue";
-import TextSearchPanel from "@/components/files/TextSearchPanel.vue";
-import FileTreeList from "@/components/common/FileTreeList.vue";
+import ProjectFilesSidebar from "@/components/files/ProjectFilesSidebar.vue";
 import MdImage from "@/components/markdown/MdImage.vue";
 import MdLink from "@/components/markdown/MdLink.vue";
 import { MD_BASE_PATH_KEY } from "@/components/markdown/keys";
 import ImageViewer from "@/components/files/ImageViewer.vue";
 import { cmd } from "@/lib/tauri";
-import { debounce } from "@/lib/utils";
-import { extOf, IMAGE_EXTS, isReadmeName } from "@/lib/file-kind";
+import { extOf, IMAGE_EXTS } from "@/lib/file-kind";
 import { hasScheme, resolvePath } from "@/lib/markdown";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
-import { buildVisibleRows, entryName, prefetchTargets, sortDirEntries } from "@/lib/lazy-file-tree";
-import { fileIcon } from "@/lib/file-icons";
-import { buildFindRegExp, type FindQuery } from "@/lib/text-search";
-import { Icon } from "@iconify/vue";
+import type { FindQuery } from "@/lib/text-search";
+import { useFileFind } from "@/composables/files/useFileFind";
+import { useLazyProjectFiles } from "@/composables/files/useLazyProjectFiles";
 import { useSettingsStore } from "@/stores/settings";
 import { useProjectsStore } from "@/stores/projects";
-import type { FilePreview, Project, ProjectFileEntry } from "@/types";
+import type { FilePreview, Project } from "@/types";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -56,272 +52,17 @@ const rootPath = computed(() => {
   );
 });
 
-// ── 文件树(逐层懒加载 + 单层后台预取) ───────────────────────────────────────
-// childrenMap key 为目录相对路径(根为 ""),值为该层已排序子项;不变的预取策略:
-// 任何可见目录行的下一层已加载或在途——点击展开时数据已经就位,无需等待后端
-const childrenMap = ref(new Map<string, ProjectFileEntry[]>());
-const expandedFolders = ref(new Set<string>());
-const listLoading = ref(false);
-const listError = ref(false);
-let listSeq = 0;
-const inflight = new Map<string, Promise<void>>();
-
-const PREFETCH_CONCURRENCY = 4;
-const prefetchQueue: string[] = [];
-const prefetchQueued = new Set<string>();
-let prefetchActive = 0;
-
-async function ensureChildren(dir: string): Promise<void> {
-  if (childrenMap.value.has(dir)) {
-    return;
-  }
-  const existing = inflight.get(dir);
-  if (existing) {
-    return existing;
-  }
-  if (!project.value) {
-    return;
-  }
-  const path = rootPath.value;
-  const seq = listSeq;
-  const p = (async () => {
-    try {
-      const entries = await cmd<ProjectFileEntry[]>("list_project_files", {
-        path,
-        dir: dir || null,
-      });
-      if (seq !== listSeq) {
-        return;
-      }
-      const next = new Map(childrenMap.value);
-      next.set(dir, sortDirEntries(entries));
-      childrenMap.value = next;
-      // 目录处于展开 frontier(根或已展开)时,其可见子目录的下一层提前后台就位
-      if (dir === "" || expandedFolders.value.has(dir)) prefetchNext(entries);
-    } catch {
-      if (seq !== listSeq) {
-        return;
-      }
-      if (dir === "") {
-        listError.value = true;
-      } else {
-        // 单层失败按已加载空层处理,避免反复展开打满 IPC;下次刷新可恢复
-        const next = new Map(childrenMap.value);
-        next.set(dir, []);
-        childrenMap.value = next;
-      }
-    } finally {
-      inflight.delete(dir);
-    }
-  })();
-  inflight.set(dir, p);
-  return p;
-}
-
-function prefetchNext(children: ProjectFileEntry[]) {
-  for (const dir of prefetchTargets(children)) {
-    if (childrenMap.value.has(dir) || inflight.has(dir) || prefetchQueued.has(dir)) {
-      continue;
-    }
-    prefetchQueued.add(dir);
-    prefetchQueue.push(dir);
-  }
-  pumpPrefetch();
-}
-
-function pumpPrefetch() {
-  while (prefetchActive < PREFETCH_CONCURRENCY && prefetchQueue.length) {
-    const dir = prefetchQueue.shift()!;
-    prefetchQueued.delete(dir);
-    prefetchActive++;
-    void ensureChildren(dir).finally(() => {
-      prefetchActive--;
-      pumpPrefetch();
-    });
-  }
-}
-
-function toggleFolder(fullPath: string) {
-  const children = childrenMap.value.get(fullPath);
-  if (children && children.length === 0) {
-    return; // 已知空目录无展开意义
-  }
-  const next = new Set(expandedFolders.value);
-  if (next.has(fullPath)) {
-    next.delete(fullPath);
-  } else {
-    next.add(fullPath);
-    if (children) {
-      // 子层已就位:补孙级预取(兜住子层到达时本目录尚未展开的竞态)
-      prefetchNext(children);
-    } else {
-      // 预取未覆盖(点击快过预取,或不参与预取的排除目录):按需拉取,行内显加载占位
-      void ensureChildren(fullPath);
-    }
-  }
-  expandedFolders.value = next;
-}
-
-const visibleRows = computed(() => buildVisibleRows(childrenMap.value, expandedFolders.value));
-
-const rootEmpty = computed(
-  () => childrenMap.value.has("") && childrenMap.value.get("")!.length === 0,
-);
-
-async function loadFiles() {
-  if (!project.value) {
-    return;
-  }
-  listSeq++;
-  inflight.clear();
-  prefetchQueue.length = 0;
-  prefetchQueued.clear();
-  childrenMap.value = new Map();
-  expandedFolders.value = new Set();
-  listLoading.value = true;
-  listError.value = false;
-  try {
-    await ensureChildren("");
-    // 进入页面默认打开根目录 README(无 README 保持空态);加载间隙用户已点选时不覆盖
-    const readme = childrenMap.value
-      .get("")
-      ?.find((e) => !e.isDir && isReadmeName(entryName(e.path)));
-    if (readme && selected.value === null) {
-      selected.value = readme.path;
-    }
-  } finally {
-    listLoading.value = false;
-  }
-}
-
-// 项目或工作区变化(根路径变化)时整树重载(选中/预览清理见下方预览状态声明处的 watch)
-watch(rootPath, () => void loadFiles(), { immediate: true });
-
-// ── 头部文件搜索:右侧按钮触发,顶部中间搜索框 + 下拉选项 ─────────────────────
-// 懒加载后前端没有全量清单,搜索下沉后端 search_project_files
-// (遍历口径:未被 .gitignore/.ignore 排除的文件,与原「被排除文件不参与」一致)
-const FILE_SEARCH_LIMIT = 50;
-const fileSearchOpen = ref(false);
-const fileSearchText = ref("");
-const fileSearchIndex = ref(0);
-const fileSearchResults = ref<ProjectFileEntry[]>([]);
-const fileSearchLimited = ref(false);
-const fileSearchBox = ref<HTMLElement | null>(null);
-const fileSearchBtn = ref<InstanceType<typeof Button> | null>(null);
-let fileSearchSeq = 0;
-/** 文件搜索防抖:输入停 200ms 后查询 */
-const debouncedRunFileSearch = debounce((q: string) => void runFileSearch(q), 200);
-
-watch(fileSearchText, () => {
-  fileSearchIndex.value = 0;
-  const q = fileSearchText.value.trim();
-  if (!q) {
-    debouncedRunFileSearch.cancel();
-    fileSearchResults.value = [];
-    fileSearchLimited.value = false;
-    return;
-  }
-  debouncedRunFileSearch(q);
-});
-
-async function runFileSearch(q: string) {
-  if (!project.value) {
-    return;
-  }
-  const seq = ++fileSearchSeq;
-  try {
-    const res = await cmd<ProjectFileEntry[]>("search_project_files", {
-      path: rootPath.value,
-      query: q,
-      limit: FILE_SEARCH_LIMIT + 1, // 多取一条判断是否截断
-    });
-    if (seq !== fileSearchSeq) {
-      return;
-    }
-    fileSearchLimited.value = res.length > FILE_SEARCH_LIMIT;
-    fileSearchResults.value = res.slice(0, FILE_SEARCH_LIMIT);
-  } catch {
-    if (seq !== fileSearchSeq) {
-      return;
-    }
-    fileSearchResults.value = [];
-    fileSearchLimited.value = false;
-  }
-}
-
-onClickOutside(fileSearchBox, closeFileSearch, { ignore: [fileSearchBtn] });
-
-function toggleFileSearch() {
-  if (fileSearchOpen.value) {
-    closeFileSearch();
-    return;
-  }
-  fileSearchOpen.value = true;
-  void nextTick(() => fileSearchBox.value?.querySelector("input")?.focus());
-}
-
-function closeFileSearch() {
-  fileSearchOpen.value = false;
-  fileSearchText.value = "";
-  fileSearchIndex.value = 0;
-  debouncedRunFileSearch.cancel();
-  fileSearchSeq++;
-  fileSearchResults.value = [];
-  fileSearchLimited.value = false;
-}
+// ── 选中与预览 ──────────────────────────────────────────────────────────────
+const selected = ref<string | null>(null);
+const { listError, listLoading, revealPath, rootEmpty, toggleFolder, visibleRows } =
+  useLazyProjectFiles({ rootPath, selected });
 
 async function openFileFromSearch(path: string) {
   selected.value = path;
   leftView.value = "tree";
-  closeFileSearch();
-  // 沿路径确保各级祖先子层加载(互相独立,并行)并展开,让选中项在树中可见
-  const segs = path.split("/");
-  const prefixes: string[] = [];
-  let prefix = "";
-  for (let i = 0; i < segs.length - 1; i++) {
-    prefix = prefix ? `${prefix}/${segs[i]}` : segs[i];
-    prefixes.push(prefix);
-  }
-  await Promise.all(prefixes.map((p) => ensureChildren(p)));
-  const next = new Set(expandedFolders.value);
-  for (const p of prefixes) {
-    next.add(p);
-  }
-  expandedFolders.value = next;
-  void nextTick(() => {
-    document.querySelector(".file-row-selected")?.scrollIntoView({ block: "center" });
-  });
+  await revealPath(path);
 }
 
-async function onFileSearchKeydown(e: KeyboardEvent) {
-  const total = fileSearchResults.value.length;
-  if (e.key === "ArrowDown") {
-    e.preventDefault();
-    if (total) fileSearchIndex.value = (fileSearchIndex.value + 1) % total;
-  } else if (e.key === "ArrowUp") {
-    e.preventDefault();
-    if (total) fileSearchIndex.value = (fileSearchIndex.value - 1 + total) % total;
-  } else if (e.key === "Enter") {
-    e.preventDefault();
-    // 结果经防抖异步到达:Enter 立即补一次查询,避免按到防抖窗口内的旧结果
-    debouncedRunFileSearch.cancel();
-    const q = fileSearchText.value.trim();
-    if (q) {
-      await runFileSearch(q);
-    }
-    const hit = fileSearchResults.value[fileSearchIndex.value] ?? fileSearchResults.value[0];
-    if (hit) {
-      void openFileFromSearch(hit.path);
-    }
-  } else if (e.key === "Escape") {
-    e.preventDefault();
-    e.stopPropagation(); // 不触发行内查找条的全局 Esc 关闭
-    closeFileSearch();
-  }
-}
-
-// ── 选中与预览 ──────────────────────────────────────────────────────────────
-const selected = ref<string | null>(null);
 const previewError = ref(false);
 const previewText = ref<string | null>(null);
 // 当前 previewText 所属文件(与 text 同步赋值/清空):区分「选中了什么」与「内容就位没有」,
@@ -415,85 +156,23 @@ const mdRenderable = computed(
 // ── 搜索:左栏全文搜索面板 + 文件内查找条 ─────────────────────────────────────
 const codeViewer = ref<InstanceType<typeof CodeViewer> | null>(null);
 const findBarRef = ref<InstanceType<typeof FindBar> | null>(null);
-const searchPanelRef = ref<InstanceType<typeof TextSearchPanel> | null>(null);
+const sidebarRef = ref<InstanceType<typeof ProjectFilesSidebar> | null>(null);
 
 const leftView = ref<"tree" | "search">("tree");
-
-const findOpen = ref(false);
-const findText = ref("");
-const findCase = ref(false);
-const findWord = ref(false);
-const findRegex = ref(false);
-const findTotal = ref(0);
-const findIndex = ref(-1);
-
-const findQuery = computed<FindQuery>(() => ({
-  text: findText.value,
-  caseSensitive: findCase.value,
-  wholeWord: findWord.value,
-  useRegex: findRegex.value,
-}));
-
-const findInvalid = computed(() => {
-  if (!findRegex.value || !findText.value.trim()) return false;
-  return (
-    buildFindRegExp({
-      text: findText.value,
-      caseSensitive: true,
-      wholeWord: true,
-      useRegex: true,
-    }) === null
-  );
-});
-
-function refreshFind(scrollToCurrent: boolean) {
-  const cv = codeViewer.value;
-  if (!cv) return;
-  const ranges = cv.runFind(findQuery.value);
-  findTotal.value = ranges.length;
-  findIndex.value = cv.getFindCursor();
-  if (scrollToCurrent && ranges.length) findIndex.value = cv.gotoMatch(cv.getFindCursor());
-}
-
-// 输入/模式变化即重查;文档就位或切换(切文件)后若查找条仍开着则重跑
-watch([findText, findCase, findWord, findRegex], () => {
-  if (findOpen.value) refreshFind(true);
-});
-// 文档就位或切换(切文件)后若查找条仍开着则在就位的新文档上重查;
-// 必须 post-flush:pre 会在 CodeViewer 内部 watch(props.text) 换文档之前执行,
-// 跑在旧文档上得到上一个文件的结果;post 也保证 MD 渲染切源码时跑在新挂载实例上
-watch(
-  [codeVisible, previewText],
-  () => {
-    if (findOpen.value && codeVisible.value) refreshFind(false);
-  },
-  { flush: "post" },
-);
-
-function findStep(delta: number) {
-  if (!findTotal.value) return;
-  findIndex.value = codeViewer.value?.gotoMatch(findIndex.value + delta) ?? -1;
-}
-
-function onFindToggle(key: "caseSensitive" | "wholeWord" | "useRegex") {
-  if (key === "caseSensitive") findCase.value = !findCase.value;
-  else if (key === "wholeWord") findWord.value = !findWord.value;
-  else findRegex.value = !findRegex.value;
-}
-
-function openFind() {
-  if (!codeVisible.value) return;
-  findOpen.value = true;
-  refreshFind(true);
-  findBarRef.value?.focusInput();
-}
-
-function closeFind() {
-  findOpen.value = false;
-  findTotal.value = 0;
-  findIndex.value = -1;
-  codeViewer.value?.clearFind();
-}
+const {
+  closeFind,
+  findCase,
+  findIndex,
+  findInvalid,
+  findOpen,
+  findRegex,
+  findStep,
+  findText,
+  findTotal,
+  findWord,
+  onFindToggle,
+  openFind,
+} = useFileFind({ codeViewer, codeVisible, findBarRef, previewText });
 
 // ── 全文搜索结果跳转:打开文件并定位到命中行 ──────────────────────────────────
 const pendingJump = ref<{ path: string; line: number; query: FindQuery } | null>(null);
@@ -534,7 +213,7 @@ function onKeydown(e: KeyboardEvent) {
     if (e.shiftKey) {
       e.preventDefault();
       leftView.value = "search";
-      searchPanelRef.value?.focusInput();
+      sidebarRef.value?.focusSearch();
     } else if (codeVisible.value) {
       e.preventDefault();
       openFind();
@@ -637,68 +316,7 @@ function startTreeResize(e: PointerEvent) {
       <span class="min-w-0 flex-1 truncate text-sm font-medium" :title="rootPath">
         {{ project.name }}
       </span>
-      <!-- 文件搜索:右侧按钮触发,顶部中间搜索框 + 下拉选项 -->
-      <div
-        v-if="fileSearchOpen"
-        ref="fileSearchBox"
-        class="absolute left-1/2 top-1/2 z-50 w-[min(28rem,60%)] -translate-x-1/2 -translate-y-1/2"
-      >
-        <Search
-          class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
-        />
-        <Input
-          v-model="fileSearchText"
-          :placeholder="t('files.searchPlaceholder')"
-          class="h-8 bg-background pl-8 text-sm"
-          @keydown="onFileSearchKeydown"
-        />
-        <div
-          v-if="fileSearchText.trim()"
-          class="absolute left-0 right-0 top-full mt-1 max-h-80 overflow-auto rounded-md border bg-popover p-1 shadow-md"
-        >
-          <p
-            v-if="!fileSearchResults.length"
-            class="px-2 py-3 text-center text-xs text-muted-foreground"
-          >
-            {{ t("files.noMatch") }}
-          </p>
-          <template v-else>
-            <button
-              v-for="(f, i) in fileSearchResults"
-              :key="f.path"
-              type="button"
-              class="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm"
-              :class="i === fileSearchIndex ? 'bg-accent text-accent-foreground' : ''"
-              :title="f.path"
-              @mouseenter="fileSearchIndex = i"
-              @click="openFileFromSearch(f.path)"
-            >
-              <Icon
-                :icon="fileIcon(f.path.slice(f.path.lastIndexOf('/') + 1))"
-                class="h-4 w-4 shrink-0"
-              />
-              <span class="min-w-0 truncate">{{ f.path }}</span>
-            </button>
-            <p
-              v-if="fileSearchLimited"
-              class="border-t px-2 py-1.5 text-center text-xs text-muted-foreground"
-            >
-              {{ t("files.searchLimited", { count: FILE_SEARCH_LIMIT }) }}
-            </p>
-          </template>
-        </div>
-      </div>
-      <Button
-        ref="fileSearchBtn"
-        variant="ghost"
-        size="icon"
-        class="h-8 w-8 shrink-0"
-        :class="fileSearchOpen ? 'bg-accent' : ''"
-        :title="t('files.searchPlaceholder')"
-        @click="toggleFileSearch"
-      >
-        <Search class="h-4 w-4" />
-      </Button>
+      <FileNameSearch :root="rootPath" @open="openFileFromSearch" />
     </header>
 
     <div class="flex min-h-0 flex-1">
@@ -707,54 +325,19 @@ function startTreeResize(e: PointerEvent) {
         class="flex h-full min-h-0 shrink-0 flex-col border-r"
         :style="{ width: `${treeWidth}px` }"
       >
-        <div class="flex shrink-0 items-center gap-1.5 border-b px-2 py-2">
-          <span class="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
-            {{ leftView === "tree" ? t("files.treeView") : t("files.textSearchTitle") }}
-          </span>
-          <div class="flex shrink-0 items-center gap-0.5">
-            <Button
-              variant="ghost"
-              size="icon"
-              class="h-7 w-7"
-              :class="leftView === 'tree' ? 'bg-accent' : ''"
-              :title="t('files.treeView')"
-              @click="leftView = 'tree'"
-            >
-              <FolderTree class="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              class="h-7 w-7"
-              :class="leftView === 'search' ? 'bg-accent' : ''"
-              :title="t('files.searchView')"
-              @click="leftView = 'search'"
-            >
-              <Search class="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        </div>
-        <template v-if="leftView === 'tree'">
-          <ScrollArea class="min-h-0 flex-1">
-            <p v-if="listLoading" class="p-4 text-sm text-muted-foreground">
-              {{ t("common.loading") }}
-            </p>
-            <p v-else-if="listError" class="p-4 text-sm text-destructive">
-              {{ t("files.listFailed") }}
-            </p>
-            <p v-else-if="rootEmpty" class="p-4 text-sm text-muted-foreground">
-              {{ t("files.empty") }}
-            </p>
-            <FileTreeList
-              v-else
-              :rows="visibleRows"
-              :selected="selected"
-              @select="(row) => (selected = row.fullPath)"
-              @toggle="(row) => toggleFolder(row.fullPath)"
-            />
-          </ScrollArea>
-        </template>
-        <TextSearchPanel v-else ref="searchPanelRef" :root="rootPath" @open="onSearchOpen" />
+        <ProjectFilesSidebar
+          ref="sidebarRef"
+          v-model:view="leftView"
+          :empty="rootEmpty"
+          :error="listError"
+          :loading="listLoading"
+          :root="rootPath"
+          :rows="visibleRows"
+          :selected="selected"
+          @open="onSearchOpen"
+          @select="(path) => (selected = path)"
+          @toggle="toggleFolder"
+        />
       </div>
 
       <!-- 拖拽条 -->

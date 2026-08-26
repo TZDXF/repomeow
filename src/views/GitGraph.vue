@@ -1,60 +1,27 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef, triggerRef, watch, type Ref } from "vue";
+import { computed, ref, shallowRef, triggerRef, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { toast } from "vue-sonner";
 import { Channel } from "@tauri-apps/api/core";
 import { useElementSize, useLocalStorage, useVirtualList } from "@vueuse/core";
-import {
-  ArrowDownToLine,
-  ArrowLeft,
-  ArrowUpToLine,
-  ChevronDown,
-  ChevronRight,
-  Folder,
-  GitBranch,
-  Globe,
-  ListFilter,
-  Loader2,
-  PanelLeftClose,
-  PanelLeftOpen,
-  PanelRightOpen,
-  RefreshCw,
-  Search,
-  Tag as TagIcon,
-  Trash2,
-  X,
-} from "@lucide/vue";
-import { Badge } from "@/components/ui/badge";
+import { Loader2, PanelRightOpen } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
-import { buildBranchTree, type BranchTreeNode } from "@/lib/branch-tree";
-import {
-  createGraphLayouter,
-  laneColor,
-  type GraphEdgeLayout,
-  type GraphNodeLayout,
-} from "@/lib/git-graph";
+import { createGraphLayouter, type GraphEdgeLayout, type GraphNodeLayout } from "@/lib/git-graph";
 import { cmd } from "@/lib/tauri";
 import { useProjectsStore } from "@/stores/projects";
+import {
+  useGitGraphColumnSizing,
+  useGitGraphDetailSizing,
+} from "@/composables/git/useGitGraphSizing";
+import { useGitGraphBranchActions } from "@/composables/git/useGitGraphBranchActions";
 import ConflictDialog from "@/components/git/ConflictDialog.vue";
 import CommitDetailPanel from "@/components/git/CommitDetailPanel.vue";
 import GitBranchDeleteDialog from "@/components/git/GitBranchDeleteDialog.vue";
-import GitBranchTrackBadges from "@/components/git/GitBranchTrackBadges.vue";
-import type { GitBranches, GitBranchTrack, GitGraphCommit } from "@/types";
+import GitGraphHeader from "@/components/git/GitGraphHeader.vue";
+import GitGraphSidebar from "@/components/git/GitGraphSidebar.vue";
+import GitGraphTable from "@/components/git/GitGraphTable.vue";
+import type { GitBranches, GitGraphCommit } from "@/types";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -89,8 +56,6 @@ const currentBranch = computed(() => project.value?.git?.branch ?? "");
 const ROW_H = 32;
 const LANE_W = 16;
 const GRAPH_PAD = 4;
-const NODE_R = 4;
-const HEADER_H = 32;
 // 流式批次大小(后端钳制 50..2000)
 const BATCH_SIZE = 500;
 
@@ -103,13 +68,6 @@ const totalCount = computed(() => nodes.value.length);
 
 /** 图形区自然宽度:泳道间距固定,空间不足时表格横向滚动或裁剪图谱列,而不是压缩泳道 */
 const graphWidth = computed(() => laneCount.value * LANE_W + GRAPH_PAD * 2);
-
-function nodeX(lane: number) {
-  return GRAPH_PAD + lane * LANE_W + LANE_W / 2;
-}
-function nodeY(row: number) {
-  return row * ROW_H + ROW_H / 2;
-}
 
 // --- 虚拟列表:只渲染可视窗口内的行与连线 ---
 // 不用 vueuse 的 wrapperProps(它按"流式行 + marginTop 偏移"设计);
@@ -126,180 +84,9 @@ const {
 const startIndex = computed(() => visibleNodes.value[0]?.index ?? 0);
 const endIndex = computed(() => visibleNodes.value[visibleNodes.value.length - 1]?.index ?? 0);
 
-// --- 表格列:图谱/描述/作者/提交/日期,拖拽表头分隔条调整列宽 ---
-const COL_MIN_W = { desc: 160, author: 64, commit: 80, date: 96 } as const;
-/** 图谱列最小宽度:至少保留一个泳道的空间(列宽可小于图形自然宽度,超出部分裁剪而非压缩) */
-const GRAPH_COL_MIN_W = LANE_W + GRAPH_PAD * 2;
-/** 图谱列默认展示的泳道数:更多泳道经 clip-path 裁剪,可拖宽 */
-const GRAPH_DEFAULT_LANES = 5;
-/** 显式列宽(px,持久化到 localStorage);graph 为 0 表示自动(按默认泳道数展示);
- *  descDelta 为描述列相对"占满剩余宽度"的拖拽增量,0 表示完全自适应 */
-const colWidths = useLocalStorage(
-  "repomeow:graph-col-widths",
-  { graph: 0, descDelta: 0, author: 120, commit: 96, date: 150 },
-  { mergeDefaults: true },
-);
-
 const { width: containerWidth } = useElementSize(containerProps.ref);
-
-/** 图谱列宽:未拖拽过时默认展示 GRAPH_DEFAULT_LANES 个泳道,可拖窄(图形裁剪)或拖宽 */
-const graphColWidth = computed(() =>
-  colWidths.value.graph > 0
-    ? Math.max(colWidths.value.graph, GRAPH_COL_MIN_W)
-    : Math.min(graphWidth.value, GRAPH_DEFAULT_LANES * LANE_W + GRAPH_PAD * 2),
-);
-/** 图谱列被拖窄时的水平裁剪:纵向保留 overflow-visible,让穿越可视窗口的长线完整绘制 */
-const graphClipPath = computed(() => {
-  const overflow = graphWidth.value - graphColWidth.value;
-  return overflow > 0 ? `inset(-9999px ${overflow}px -9999px -9999px)` : "none";
-});
-/** 描述列可用的剩余宽度:容器减去其余列后的空间(容器过窄时可小于最小宽度) */
-const descRestWidth = computed(
-  () =>
-    containerWidth.value -
-    graphColWidth.value -
-    colWidths.value.author -
-    colWidths.value.commit -
-    colWidths.value.date,
-);
-/** 描述列宽:占满容器剩余宽度并叠加拖拽增量;窗口尺寸变化、两侧面板开合时随剩余空间同步伸缩,不低于最小宽度 */
-const descColWidth = computed(() =>
-  Math.max(descRestWidth.value + colWidths.value.descDelta, COL_MIN_W.desc),
-);
-const totalWidth = computed(
-  () =>
-    graphColWidth.value +
-    descColWidth.value +
-    colWidths.value.author +
-    colWidths.value.commit +
-    colWidths.value.date,
-);
-
-type ColKey = "graph" | "desc" | "author" | "commit" | "date";
-
-function colWidth(key: ColKey) {
-  if (key === "graph") {
-    return graphColWidth.value;
-  }
-  if (key === "desc") {
-    return descColWidth.value;
-  }
-  return colWidths.value[key];
-}
-
-/** 拖拽调整列宽:图谱列下限为单个泳道宽度,其余列有各自最小宽度;
- *  描述列记录相对剩余宽度的增量而非绝对宽度,容器尺寸变化时保持自适应 */
-function startColResize(key: ColKey, e: PointerEvent) {
-  e.preventDefault();
-  const startX = e.clientX;
-  const startW = colWidth(key);
-  const minW = key === "graph" ? GRAPH_COL_MIN_W : COL_MIN_W[key];
-  const restAtStart = descRestWidth.value;
-  const onMove = (ev: PointerEvent) => {
-    const target = Math.max(minW, Math.round(startW + ev.clientX - startX));
-    if (key === "desc") {
-      colWidths.value.descDelta = target - restAtStart;
-    } else {
-      colWidths.value[key] = target;
-    }
-  };
-  const onUp = () => {
-    window.removeEventListener("pointermove", onMove);
-    window.removeEventListener("pointerup", onUp);
-  };
-  window.addEventListener("pointermove", onMove);
-  window.addEventListener("pointerup", onUp);
-}
-
-// --- 右侧提交详情分栏:选中提交时展示,拖拽分隔条调宽(持久化) ---
-const detailWidth = useLocalStorage("repomeow:graph-detail-width", 480);
-/** 详情面板折叠状态(持久化):折叠后保留窄条,点击重新展开 */
-const detailOpen = useLocalStorage("repomeow:graph-detail-open", true);
-const DETAIL_MIN_W = 320;
-/** 详情面板拖宽时为提交表格保留的最小宽度 */
-const TABLE_MIN_W = 480;
-
-/** 主内容行(侧栏 + 表格 + 详情)实测宽度:详情面板的宽度上限随它动态计算,不设固定上限 */
-const mainRowEl = ref<HTMLElement | null>(null);
-const { width: mainRowWidth } = useElementSize(mainRowEl);
-
-/** 详情面板宽度上限:主行宽减去左侧栏与表格最小宽度;窗口缩放、左栏开合时自适应 */
-const detailMaxWidth = computed(() => {
-  if (!mainRowWidth.value) {
-    return DETAIL_MIN_W;
-  }
-  let sidebarW = 0;
-  if (hasSidebar.value) {
-    sidebarW = sidebarOpen.value ? 224 : 32;
-  }
-  return Math.max(DETAIL_MIN_W, Math.floor(mainRowWidth.value) - sidebarW - TABLE_MIN_W);
-});
-
-/** 渲染用详情宽度:持久化值可能超过当前可用空间(窗口被拖窄过),按上限 clamp,变宽后原设定自然恢复 */
-const effectiveDetailWidth = computed(() => Math.min(detailWidth.value, detailMaxWidth.value));
-
-function startDetailResize(e: PointerEvent) {
-  e.preventDefault();
-  const startX = e.clientX;
-  const startW = effectiveDetailWidth.value;
-  const maxW = detailMaxWidth.value;
-  const onMove = (ev: PointerEvent) => {
-    detailWidth.value = Math.min(
-      maxW,
-      Math.max(DETAIL_MIN_W, Math.round(startW - (ev.clientX - startX))),
-    );
-  };
-  const onUp = () => {
-    window.removeEventListener("pointermove", onMove);
-    window.removeEventListener("pointerup", onUp);
-  };
-  window.addEventListener("pointermove", onMove);
-  window.addEventListener("pointerup", onUp);
-}
-
-/** 可视窗口内的连线:edges 按 fromRow 升序,二分截断后按 toRow 过滤(保留穿越窗口的长线) */
-const visibleEdges = computed(() => {
-  const all = edges.value;
-  const bottom = endIndex.value;
-  const top = startIndex.value;
-  let lo = 0;
-  let hi = all.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (all[mid].fromRow <= bottom) {
-      lo = mid + 1;
-    } else {
-      hi = mid;
-    }
-  }
-  const out: GraphEdgeLayout[] = [];
-  for (let i = 0; i < lo; i++) {
-    if (all[i].toRow >= top) {
-      out.push(all[i]);
-    }
-  }
-  return out;
-});
-
-/** SVG 画布顶部对应的像素偏移(连线/节点坐标需减去该值) */
-const svgOffsetY = computed(() => startIndex.value * ROW_H);
-
-function nodeYRel(row: number) {
-  return nodeY(row) - svgOffsetY.value;
-}
-
-/** 连线路径:同泳道直线;跨泳道先在一行高内 S 形换道,再直线落到目标 */
-function edgePath(e: GraphEdgeLayout): string {
-  const x1 = nodeX(e.fromLane);
-  const y1 = nodeYRel(e.fromRow);
-  const x2 = nodeX(e.toLane);
-  const y2 = nodeYRel(e.toRow);
-  if (x1 === x2) {
-    return `M ${x1} ${y1} L ${x2} ${y2}`;
-  }
-  const bendY = Math.min(y1 + ROW_H, y2);
-  return `M ${x1} ${y1} C ${x1} ${y1 + ROW_H * 0.6}, ${x2} ${y1 + ROW_H * 0.4}, ${x2} ${bendY} L ${x2} ${y2}`;
-}
+const { colWidths, graphColWidth, graphClipPath, descColWidth, totalWidth, startColResize } =
+  useGitGraphColumnSizing(containerWidth, graphWidth);
 
 // --- 分支筛选 ---
 /** 筛选目标分支:左侧选中的分支,未选择时回退到当前检出的分支 */
@@ -343,76 +130,12 @@ const hasSidebar = computed(
 
 /** 左侧分支/标签列表整体折叠(持久化) */
 const sidebarOpen = useLocalStorage("repomeow:graph-sidebar-open", true);
-
-// --- 左侧列表:分组/目录折叠 ---
-/** 已折叠的分组(local/remote/tags) */
-const collapsedSections = ref<Set<string>>(new Set());
-/** 已折叠的分支目录(带分组前缀避免本地/远程同名目录互相影响) */
-const collapsedFolders = ref<Set<string>>(new Set());
-
-function toggleInSet(target: Ref<Set<string>>, key: string) {
-  const next = new Set(target.value);
-  if (next.has(key)) {
-    next.delete(key);
-  } else {
-    next.add(key);
-  }
-  target.value = next;
-}
-
-function toggleSection(key: string) {
-  toggleInSet(collapsedSections, key);
-}
-
-function toggleFolder(key: string) {
-  toggleInSet(collapsedFolders, key);
-}
-
-interface BranchTreeRow {
-  node: BranchTreeNode;
-  depth: number;
-}
-
-/** 折叠键带分组前缀:本地目录与远程目录可能同名(如本地 feature 与 origin/feature) */
-function branchRows(names: string[], prefix: string): BranchTreeRow[] {
-  const out: BranchTreeRow[] = [];
-  // 拍平分支树为可视行(跳过已折叠目录的子级)
-  const walk = (nodes: BranchTreeNode[], depth: number) => {
-    for (const node of nodes) {
-      out.push({ node, depth });
-      if (node.children.length && !collapsedFolders.value.has(`${prefix}:${node.fullPath}`)) {
-        walk(node.children, depth + 1);
-      }
-    }
-  };
-  walk(buildBranchTree(names), 0);
-  return out;
-}
-
-const localRows = computed(() => branchRows(branches.value.local, "local"));
-const remoteRows = computed(() => branchRows(branches.value.remote, "remote"));
-
-/** 分支名 → upstream 跟踪差值(只收录配置了 upstream 的本地分支) */
-const trackByName = computed(() => {
-  const m = new Map<string, GitBranchTrack>();
-  for (const tr of branches.value.tracking) {
-    m.set(tr.name, tr);
-  }
-  return m;
-});
-
-function trackOf(branch: string | null) {
-  return branch ? trackByName.value.get(branch) : undefined;
-}
-
-/** 行点击:叶子分支选中定位;目录行(本身不是分支)切换折叠 */
-function onBranchRowClick(prefix: string, row: BranchTreeRow) {
-  if (row.node.branch) {
-    selectBranch(row.node.branch);
-  } else if (row.node.children.length) {
-    toggleFolder(`${prefix}:${row.node.fullPath}`);
-  }
-}
+const mainRowEl = ref<HTMLElement | null>(null);
+const { detailOpen, effectiveDetailWidth, startDetailResize } = useGitGraphDetailSizing(
+  hasSidebar,
+  sidebarOpen,
+  mainRowEl,
+);
 
 // --- 搜索 ---
 const searchResults = computed<GitGraphCommit[]>(() => {
@@ -563,115 +286,22 @@ function selectBranch(name: string) {
   }
 }
 
-// --- 本地分支右键:拉取 / 推送(非当前分支由后端快进更新或直接推送,不切换工作区) ---
-const branchOp = ref<{ branch: string; op: "pull" | "push" } | null>(null);
-const conflictOpen = ref(false);
-const conflictFiles = ref<string[]>([]);
-
-async function pullBranch(name: string): Promise<boolean> {
-  const p = project.value;
-  if (!p || branchOp.value) {
-    return false;
-  }
-  branchOp.value = { branch: name, op: "pull" };
-  try {
-    const conflicts = await store.pullRepository(p, name);
-    if (conflicts.length) {
-      // 仅当前分支的 pull 可能产生合并冲突:引导用户在编辑器/终端中解决
-      conflictFiles.value = conflicts;
-      conflictOpen.value = true;
-      return false;
-    }
-    toast.success(t("git.pull.success"));
-    load();
-    return true;
-  } catch (e) {
-    toast.error(String(e));
-    return false;
-  } finally {
-    branchOp.value = null;
-  }
-}
-
-async function pushBranch(name: string) {
-  const p = project.value;
-  if (!p || branchOp.value) {
-    return;
-  }
-  branchOp.value = { branch: name, op: "push" };
-  try {
-    await store.pushRepository(p, name);
-    toast.success(t("git.push.success"));
-    load();
-  } catch (e) {
-    const code = (e as Error & { code?: string }).code;
-    if (code === "git_push_rejected") {
-      // 远端有本地缺失的提交:给出拉取并推送的快捷修复入口
-      toast.error(t("git.push.rejected"), {
-        action: { label: t("git.push.pullAndPush"), onClick: () => pullThenPushBranch(name) },
-      });
-    } else {
-      toast.error(String(e));
-    }
-  } finally {
-    branchOp.value = null;
-  }
-}
-
-/** 先拉取;无冲突则自动重试推送 */
-async function pullThenPushBranch(name: string) {
-  if (await pullBranch(name)) {
-    await pushBranch(name);
-  }
-}
-
-// --- 删除本地分支:先 -d 安全删除;未合并时对话框切换为强制删除确认(-D) ---
-const deleteOpen = ref(false);
-const deleteTarget = ref("");
-const deleteNeedsForce = ref(false);
-const deleting = ref(false);
-
-function askDeleteBranch(name: string) {
-  deleteTarget.value = name;
-  deleteNeedsForce.value = false;
-  deleteOpen.value = true;
-}
-
-async function confirmDeleteBranch() {
-  const p = project.value;
-  const name = deleteTarget.value;
-  if (!p || !name || deleting.value) {
-    return;
-  }
-  deleting.value = true;
-  try {
-    await store.deleteBranch(p, name, deleteNeedsForce.value);
-    toast.success(t("git.branch.deleted", { name }));
-    deleteOpen.value = false;
-    // 被删分支恰为筛选目标时清除选中,避免触发对已删分支的重新拉取
-    if (selectedBranch.value === name) {
-      selectedBranch.value = "";
-    }
-    load();
-  } catch (e) {
-    const code = (e as Error & { code?: string }).code;
-    if (code === "git_branch_not_merged" && !deleteNeedsForce.value) {
-      deleteNeedsForce.value = true;
-    } else {
-      toast.error(String(e));
-      deleteOpen.value = false;
-    }
-  } finally {
-    deleting.value = false;
-  }
-}
+const {
+  askDeleteBranch,
+  branchOp,
+  confirmDeleteBranch,
+  conflictFiles,
+  conflictOpen,
+  deleteNeedsForce,
+  deleteOpen,
+  deleteTarget,
+  deleting,
+  pullBranch,
+  pushBranch,
+} = useGitGraphBranchActions(project, selectedBranch, load);
 
 function toggleSelect(commit: GitGraphCommit) {
   selected.value = selected.value?.hash === commit.hash ? null : commit;
-}
-
-function shortHash(hash: string) {
-  return hash.slice(0, 7);
 }
 
 function isTag(refName: string) {
@@ -684,280 +314,35 @@ function tagName(refName: string) {
 
 <template>
   <div v-if="project" class="flex h-full flex-col">
-    <header class="flex items-center gap-2 border-b px-4 py-3">
-      <Button
-        variant="ghost"
-        size="icon"
-        class="h-8 w-8 shrink-0"
-        :title="t('git.graph.back')"
-        @click="router.push(`/projects/${project.id}`)"
-      >
-        <ArrowLeft class="h-4 w-4" />
-      </Button>
-      <div class="min-w-0 flex-1">
-        <h1 class="truncate text-sm font-medium">
-          {{ project.name }} · {{ t("git.graph.title") }}
-        </h1>
-      </div>
-
-      <!-- 搜索:提交信息 / hash / 作者 -->
-      <div class="relative w-60 shrink-0">
-        <Search
-          class="absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
-        />
-        <Input
-          v-model="searchQuery"
-          :placeholder="t('git.graph.searchPlaceholder')"
-          class="h-8 pr-7 pl-8 text-xs"
-          @keydown.enter.prevent="searchResults[0] && locateCommit(searchResults[0])"
-          @keydown.esc="searchQuery = ''"
-        />
-        <button
-          v-if="searchQuery"
-          class="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
-          @click="searchQuery = ''"
-        >
-          <X class="h-3.5 w-3.5" />
-        </button>
-        <div
-          v-if="searchQuery.trim()"
-          class="absolute top-full right-0 z-50 mt-1 max-h-72 w-80 overflow-auto rounded-md border bg-popover p-1 shadow-md"
-        >
-          <p v-if="!searchResults.length" class="px-2 py-1.5 text-xs text-muted-foreground">
-            {{ t("git.graph.searchEmpty") }}
-          </p>
-          <button
-            v-for="c in searchResults"
-            :key="c.hash"
-            class="flex w-full flex-col gap-0.5 rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-accent"
-            @click="locateCommit(c)"
-          >
-            <span class="truncate text-xs">{{ c.subject }}</span>
-            <span class="truncate font-mono text-[10px] text-muted-foreground">
-              {{ shortHash(c.hash) }} · {{ c.author }} · {{ c.date }}
-            </span>
-          </button>
-        </div>
-      </div>
-
-      <!-- 分支筛选:所有分支 / 当前分支(左侧选中的分支) -->
-      <DropdownMenu>
-        <DropdownMenuTrigger as-child>
-          <Button variant="outline" size="sm" class="max-w-48 shrink-0 gap-1">
-            <ListFilter class="h-3.5 w-3.5 shrink-0" />
-            <span class="truncate">{{ filterLabel }}</span>
-            <ChevronDown class="h-3 w-3 shrink-0 opacity-60" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" class="w-56">
-          <DropdownMenuRadioGroup v-model="filterValue">
-            <DropdownMenuRadioItem value="all">
-              {{ t("git.graph.filterAll") }}
-            </DropdownMenuRadioItem>
-            <DropdownMenuRadioItem value="current" :disabled="!resolvedFilterBranch">
-              {{ t("git.graph.filterCurrent") }}
-              <span v-if="resolvedFilterBranch" class="ml-1 truncate text-muted-foreground">
-                ({{ resolvedFilterBranch }})
-              </span>
-            </DropdownMenuRadioItem>
-          </DropdownMenuRadioGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      <span v-if="totalCount" class="shrink-0 text-xs text-muted-foreground">
-        {{ t("git.graph.commitsCount", { count: totalCount }) }}
-      </span>
-      <Button variant="outline" size="sm" class="shrink-0" :disabled="loading" @click="load">
-        <Loader2 v-if="loading" class="h-3.5 w-3.5 animate-spin" />
-        <RefreshCw v-else class="h-3.5 w-3.5" />
-        {{ t("git.graph.refresh") }}
-      </Button>
-    </header>
+    <GitGraphHeader
+      v-model:search-query="searchQuery"
+      v-model:filter-value="filterValue"
+      :project-name="project.name"
+      :search-results="searchResults"
+      :filter-label="filterLabel"
+      :resolved-filter-branch="resolvedFilterBranch"
+      :total-count="totalCount"
+      :loading="loading"
+      @back="router.push(`/projects/${project.id}`)"
+      @locate="locateCommit"
+      @refresh="load"
+    />
 
     <div ref="mainRowEl" class="flex min-h-0 flex-1">
-      <!-- 左侧分支/标签列表(SourceTree 风格),点击定位到顶端提交;
-           展开时列表顶部可折叠,收起后保留窄条,点击窄条重新展开 -->
-      <aside v-if="hasSidebar && sidebarOpen" class="flex w-56 shrink-0 flex-col border-r">
-        <div class="flex items-center justify-end px-2 pt-1.5">
-          <button
-            class="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            :title="t('git.graph.toggleSidebar')"
-            @click="sidebarOpen = false"
-          >
-            <PanelLeftClose class="h-3.5 w-3.5" />
-          </button>
-        </div>
-        <div class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 pt-1 pb-2">
-          <template v-if="branches.local.length">
-            <button
-              class="flex items-center gap-1 px-1 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase transition-colors hover:text-foreground"
-              @click="toggleSection('local')"
-            >
-              <ChevronRight
-                class="h-3 w-3 transition-transform"
-                :class="collapsedSections.has('local') ? '' : 'rotate-90'"
-              />
-              {{ t("git.branch.local") }}
-            </button>
-            <template v-if="!collapsedSections.has('local')">
-              <ContextMenu v-for="row in localRows" :key="`local:${row.node.fullPath}`">
-                <!-- 目录行(本身不是分支)禁用右键菜单 -->
-                <ContextMenuTrigger as-child :disabled="!row.node.branch">
-                  <button
-                    class="flex w-full items-center gap-1.5 rounded-sm py-1 pr-2 text-left text-xs transition-colors hover:bg-accent"
-                    :class="[
-                      row.node.branch === currentBranch ? 'font-semibold' : '',
-                      row.node.branch && selectedBranch === row.node.branch ? 'bg-accent' : '',
-                    ]"
-                    :style="{ paddingLeft: `${8 + row.depth * 12}px` }"
-                    @click="onBranchRowClick('local', row)"
-                  >
-                    <span
-                      v-if="row.node.children.length"
-                      class="shrink-0 text-muted-foreground"
-                      @click.stop="toggleFolder(`local:${row.node.fullPath}`)"
-                    >
-                      <ChevronRight
-                        class="h-3 w-3 transition-transform"
-                        :class="
-                          collapsedFolders.has(`local:${row.node.fullPath}`) ? '' : 'rotate-90'
-                        "
-                      />
-                    </span>
-                    <span v-else class="w-3 shrink-0" />
-                    <Folder
-                      v-if="row.node.children.length"
-                      class="h-3 w-3 shrink-0 text-muted-foreground"
-                    />
-                    <GitBranch v-else class="h-3 w-3 shrink-0 text-muted-foreground" />
-                    <span class="truncate">{{ row.node.name }}</span>
-                    <span class="ml-auto flex shrink-0 items-center gap-1.5">
-                      <!-- 右键菜单点击后已关闭,拉取/推送 loading 展示在分支行上 -->
-                      <Loader2
-                        v-if="branchOp?.branch === row.node.branch"
-                        class="h-3 w-3 animate-spin text-muted-foreground"
-                      />
-                      <GitBranchTrackBadges
-                        :ahead="trackOf(row.node.branch)?.ahead ?? 0"
-                        :behind="trackOf(row.node.branch)?.behind ?? 0"
-                      />
-                      <span
-                        v-if="row.node.branch === currentBranch"
-                        class="h-1.5 w-1.5 shrink-0 rounded-full bg-green-500"
-                      />
-                    </span>
-                  </button>
-                </ContextMenuTrigger>
-                <ContextMenuContent v-if="row.node.branch" class="w-40">
-                  <ContextMenuItem
-                    class="gap-2 text-xs"
-                    :disabled="!!branchOp"
-                    @click="pullBranch(row.node.branch!)"
-                  >
-                    <ArrowDownToLine class="h-3.5 w-3.5" />
-                    {{ t("git.actions.pull") }}
-                  </ContextMenuItem>
-                  <ContextMenuItem
-                    class="gap-2 text-xs"
-                    :disabled="!!branchOp"
-                    @click="pushBranch(row.node.branch!)"
-                  >
-                    <ArrowUpToLine class="h-3.5 w-3.5" />
-                    {{ t("git.actions.push") }}
-                  </ContextMenuItem>
-                  <!-- 当前检出分支不可删除(git 会拒绝),直接禁用 -->
-                  <ContextMenuItem
-                    class="gap-2 text-xs"
-                    variant="destructive"
-                    :disabled="!!branchOp || row.node.branch === currentBranch"
-                    @click="askDeleteBranch(row.node.branch!)"
-                  >
-                    <Trash2 class="h-3.5 w-3.5" />
-                    {{ t("git.branch.delete") }}
-                  </ContextMenuItem>
-                </ContextMenuContent>
-              </ContextMenu>
-            </template>
-          </template>
-          <template v-if="branches.remote.length">
-            <button
-              class="flex items-center gap-1 px-1 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase transition-colors hover:text-foreground"
-              @click="toggleSection('remote')"
-            >
-              <ChevronRight
-                class="h-3 w-3 transition-transform"
-                :class="collapsedSections.has('remote') ? '' : 'rotate-90'"
-              />
-              {{ t("git.branch.remote") }}
-            </button>
-            <template v-if="!collapsedSections.has('remote')">
-              <button
-                v-for="row in remoteRows"
-                :key="`remote:${row.node.fullPath}`"
-                class="flex items-center gap-1.5 rounded-sm py-1 pr-2 text-left text-xs transition-colors hover:bg-accent"
-                :class="row.node.branch && selectedBranch === row.node.branch ? 'bg-accent' : ''"
-                :style="{ paddingLeft: `${8 + row.depth * 12}px` }"
-                @click="onBranchRowClick('remote', row)"
-              >
-                <span
-                  v-if="row.node.children.length"
-                  class="shrink-0 text-muted-foreground"
-                  @click.stop="toggleFolder(`remote:${row.node.fullPath}`)"
-                >
-                  <ChevronRight
-                    class="h-3 w-3 transition-transform"
-                    :class="collapsedFolders.has(`remote:${row.node.fullPath}`) ? '' : 'rotate-90'"
-                  />
-                </span>
-                <span v-else class="w-3 shrink-0" />
-                <!-- 顶层目录即远端名,用 Globe 图标;更深层目录用 Folder -->
-                <Globe
-                  v-if="row.node.children.length && row.depth === 0"
-                  class="h-3 w-3 shrink-0 text-muted-foreground"
-                />
-                <Folder
-                  v-else-if="row.node.children.length"
-                  class="h-3 w-3 shrink-0 text-muted-foreground"
-                />
-                <GitBranch v-else class="h-3 w-3 shrink-0 text-muted-foreground" />
-                <span class="truncate">{{ row.node.name }}</span>
-              </button>
-            </template>
-          </template>
-          <template v-if="tags.length">
-            <button
-              class="flex items-center gap-1 px-1 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase transition-colors hover:text-foreground"
-              @click="toggleSection('tags')"
-            >
-              <ChevronRight
-                class="h-3 w-3 transition-transform"
-                :class="collapsedSections.has('tags') ? '' : 'rotate-90'"
-              />
-              {{ t("git.graph.tags") }}
-            </button>
-            <template v-if="!collapsedSections.has('tags')">
-              <button
-                v-for="tag in tags"
-                :key="tag"
-                class="flex items-center gap-1.5 rounded-sm px-2 py-1 text-left text-xs transition-colors hover:bg-accent"
-                @click="locateTag(tag)"
-              >
-                <TagIcon class="h-3 w-3 shrink-0 text-amber-600 dark:text-amber-400" />
-                <span class="truncate">{{ tag }}</span>
-              </button>
-            </template>
-          </template>
-        </div>
-      </aside>
-      <!-- 收起后的窄条:整条可点击重新展开 -->
-      <button
-        v-else-if="hasSidebar"
-        class="flex w-8 shrink-0 items-start justify-center border-r pt-2.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        :title="t('git.graph.toggleSidebar')"
-        @click="sidebarOpen = true"
-      >
-        <PanelLeftOpen class="h-3.5 w-3.5" />
-      </button>
+      <GitGraphSidebar
+        v-if="hasSidebar"
+        v-model:open="sidebarOpen"
+        :branches="branches"
+        :tags="tags"
+        :current-branch="currentBranch"
+        :selected-branch="selectedBranch"
+        :branch-op="branchOp"
+        @select-branch="selectBranch"
+        @locate-tag="locateTag"
+        @pull-branch="pullBranch"
+        @push-branch="pushBranch"
+        @delete-branch="askDeleteBranch"
+      />
 
       <div v-bind="containerProps" class="relative flex-1 overflow-auto">
         <div v-if="loading && !totalCount" class="flex h-full items-center justify-center">
@@ -977,191 +362,26 @@ function tagName(refName: string) {
           {{ t("git.graph.empty") }}
         </div>
 
-        <template v-else>
-          <!-- 表头:列名 + 拖拽分隔条调整列宽(图谱列可拖窄,图形裁剪而非压缩) -->
-          <div
-            class="sticky top-0 z-20 flex items-center border-b bg-background text-xs font-medium text-muted-foreground"
-            :style="{ width: `${totalWidth}px`, height: `${HEADER_H}px` }"
-          >
-            <div
-              class="relative flex h-full items-center px-2"
-              :style="{ width: `${graphColWidth}px` }"
-            >
-              {{ t("git.graph.columns.graph") }}
-              <span
-                class="absolute top-0 right-0 z-10 h-full w-1.5 translate-x-1/2 cursor-col-resize transition-colors hover:bg-primary/50"
-                @pointerdown="startColResize('graph', $event)"
-              />
-            </div>
-            <div
-              class="relative flex h-full items-center border-l px-2"
-              :style="{ width: `${descColWidth}px` }"
-            >
-              {{ t("git.graph.columns.description") }}
-              <!-- 拖拽按增量调整;双击清除增量恢复完全自适应 -->
-              <span
-                class="absolute top-0 right-0 z-10 h-full w-1.5 translate-x-1/2 cursor-col-resize transition-colors hover:bg-primary/50"
-                @pointerdown="startColResize('desc', $event)"
-                @dblclick="colWidths.descDelta = 0"
-              />
-            </div>
-            <div
-              class="relative flex h-full items-center border-l px-2"
-              :style="{ width: `${colWidths.author}px` }"
-            >
-              {{ t("git.graph.columns.author") }}
-              <span
-                class="absolute top-0 right-0 z-10 h-full w-1.5 translate-x-1/2 cursor-col-resize transition-colors hover:bg-primary/50"
-                @pointerdown="startColResize('author', $event)"
-              />
-            </div>
-            <div
-              class="relative flex h-full items-center border-l px-2"
-              :style="{ width: `${colWidths.commit}px` }"
-            >
-              {{ t("git.graph.columns.commit") }}
-              <span
-                class="absolute top-0 right-0 z-10 h-full w-1.5 translate-x-1/2 cursor-col-resize transition-colors hover:bg-primary/50"
-                @pointerdown="startColResize('commit', $event)"
-              />
-            </div>
-            <div
-              class="relative flex h-full items-center border-l px-2"
-              :style="{ width: `${colWidths.date}px` }"
-            >
-              {{ t("git.graph.columns.date") }}
-              <span
-                class="absolute top-0 right-0 z-10 h-full w-1.5 translate-x-1/2 cursor-col-resize transition-colors hover:bg-primary/50"
-                @pointerdown="startColResize('date', $event)"
-              />
-            </div>
-          </div>
-
-          <div
-            class="relative"
-            :style="{ height: `${totalCount * ROW_H}px`, width: `${totalWidth}px` }"
-          >
-            <!-- 泳道连线与节点(SVG 只覆盖可视窗口;overflow-visible 让穿越窗口的长线完整绘制;
-                 图谱列被拖窄时经 clip-path 只做水平裁剪,泳道间距不变;
-                 z-10 让图形压在行选中/hover 背景之上,避免高亮盖住节点与连线) -->
-            <svg
-              class="pointer-events-none absolute left-0 z-10 overflow-visible"
-              :style="{
-                top: `${svgOffsetY}px`,
-                width: `${graphWidth}px`,
-                height: `${(endIndex - startIndex + 1) * ROW_H}px`,
-                clipPath: graphClipPath,
-              }"
-            >
-              <path
-                v-for="(e, i) in visibleEdges"
-                :key="i"
-                :d="edgePath(e)"
-                :stroke="laneColor(e.color)"
-                stroke-width="1.5"
-                fill="none"
-              />
-              <template v-for="{ data: n, index } in visibleNodes" :key="n.commit.hash">
-                <circle
-                  v-if="n.commit.is_head"
-                  :cx="nodeX(n.lane)"
-                  :cy="nodeYRel(index)"
-                  :r="NODE_R + 2.5"
-                  fill="none"
-                  :stroke="laneColor(n.color)"
-                  stroke-width="1.5"
-                />
-                <circle
-                  :cx="nodeX(n.lane)"
-                  :cy="nodeYRel(index)"
-                  :r="selected?.hash === n.commit.hash ? NODE_R + 1 : NODE_R"
-                  :fill="laneColor(n.color)"
-                  class="stroke-background"
-                  stroke-width="2"
-                />
-              </template>
-            </svg>
-
-            <!-- 提交信息行(虚拟列表,仅渲染可视窗口内的行;单元格宽度与表头列一致) -->
-            <div
-              v-for="{ data: n, index } in visibleNodes"
-              :key="n.commit.hash"
-              class="absolute left-0 flex cursor-pointer items-center transition-colors hover:bg-accent/60"
-              :class="
-                selected?.hash === n.commit.hash
-                  ? 'bg-accent'
-                  : matchHashes.has(n.commit.hash)
-                    ? 'bg-amber-500/15'
-                    : ''
-              "
-              :style="{
-                top: `${index * ROW_H}px`,
-                height: `${ROW_H}px`,
-                width: `${totalWidth}px`,
-              }"
-              @click="toggleSelect(n.commit)"
-            >
-              <!-- 图谱列占位:节点与连线由 SVG 覆盖绘制 -->
-              <div class="h-full shrink-0" :style="{ width: `${graphColWidth}px` }" />
-              <div
-                class="flex h-full min-w-0 shrink-0 items-center gap-2 overflow-hidden px-2"
-                :style="{ width: `${descColWidth}px` }"
-              >
-                <Badge
-                  v-if="n.commit.is_head"
-                  variant="default"
-                  class="h-5 shrink-0 px-1.5 text-[10px]"
-                >
-                  HEAD
-                </Badge>
-                <template v-for="r in n.commit.refs" :key="r">
-                  <Badge
-                    v-if="isTag(r)"
-                    variant="outline"
-                    class="h-5 max-w-40 shrink-0 gap-1 px-1.5 text-[10px] text-amber-600 dark:text-amber-400"
-                  >
-                    <TagIcon class="h-2.5 w-2.5 shrink-0" />
-                    <span class="truncate">{{ tagName(r) }}</span>
-                  </Badge>
-                  <Badge
-                    v-else
-                    variant="secondary"
-                    class="h-5 max-w-40 shrink-0 gap-1 px-1.5 text-[10px]"
-                  >
-                    <GitBranch class="h-2.5 w-2.5 shrink-0" />
-                    <span class="truncate">{{ r }}</span>
-                  </Badge>
-                </template>
-                <span class="min-w-0 flex-1 truncate text-sm">{{ n.commit.subject }}</span>
-              </div>
-              <span
-                class="shrink-0 truncate px-2 text-xs text-muted-foreground"
-                :style="{ width: `${colWidths.author}px` }"
-              >
-                {{ n.commit.author }}
-              </span>
-              <span
-                class="shrink-0 truncate px-2 font-mono text-xs text-muted-foreground"
-                :style="{ width: `${colWidths.commit}px` }"
-              >
-                {{ shortHash(n.commit.hash) }}
-              </span>
-              <span
-                class="shrink-0 truncate px-2 text-xs text-muted-foreground"
-                :style="{ width: `${colWidths.date}px` }"
-              >
-                {{ n.commit.date }}
-              </span>
-            </div>
-          </div>
-
-          <p
-            v-if="!streamDone"
-            class="sticky bottom-0 border-t bg-background/95 px-4 py-2 text-center text-xs text-muted-foreground backdrop-blur"
-          >
-            {{ t("git.graph.loadingMore", { count: totalCount }) }}
-          </p>
-        </template>
+        <GitGraphTable
+          v-else
+          :visible-nodes="visibleNodes"
+          :edges="edges"
+          :start-index="startIndex"
+          :end-index="endIndex"
+          :total-count="totalCount"
+          :stream-done="streamDone"
+          :selected-hash="selected?.hash"
+          :match-hashes="matchHashes"
+          :graph-width="graphWidth"
+          :graph-col-width="graphColWidth"
+          :graph-clip-path="graphClipPath"
+          :desc-col-width="descColWidth"
+          :total-width="totalWidth"
+          :col-widths="colWidths"
+          @select="toggleSelect"
+          @start-col-resize="startColResize"
+          @reset-desc-width="colWidths.descDelta = 0"
+        />
       </div>
 
       <!-- 右侧提交详情分栏:选中提交行时展示,拖拽分隔条调宽(把手以边线为中心);

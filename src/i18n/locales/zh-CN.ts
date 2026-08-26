@@ -868,10 +868,6 @@ export default {
       preparing: "正在准备页面清单",
       contextSummary:
         "大纲上下文：已筛选 {files} 个源码/文档文件；README：{readme}；根目录清单：{manifests} 个{truncated}",
-      activityTitle: "生成活动",
-      activityScan: "扫描",
-      activityRead: "读取",
-      activityTool: "工具",
       toolCalls: "已调用 {count} 次工具",
       found: "已读取",
       notFound: "未找到",

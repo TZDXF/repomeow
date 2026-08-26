@@ -7,7 +7,6 @@ import {
   updateWiki,
   type WikiGenOptions,
   type WikiGenPhase,
-  type WikiGenerationActivity,
   type WikiContextSummary,
   type WikiPageStatus,
   type WikiRetryStatus,
@@ -64,8 +63,7 @@ export interface WikiGenerationState {
   error: string;
   streamContents: Record<string, string>;
   context: WikiContextSummary | null;
-  activities: WikiGenerationActivity[];
-  /** agent 大纲阶段的工具调用次数(探索强度指标;权限决策行不计入) */
+  /** agent 工具调用累计次数(大纲探索 + 页面补读;权限决策行不计入),驱动书写动画 */
   toolCalls: number;
   retries: Record<string, WikiRetryStatus>;
   /** 本轮整本生成开始时间,供离开页面后返回时继续展示真实耗时 */
@@ -278,7 +276,6 @@ export const useWikiStore = defineStore("wiki", () => {
       error: "",
       streamContents: {},
       context: null,
-      activities: [],
       toolCalls: 0,
       retries: {},
       startedAt: Date.now(),
@@ -320,11 +317,8 @@ export const useWikiStore = defineStore("wiki", () => {
           state.context = { ...context };
         },
         onActivities: (activities) => {
-          state.activities.push(...activities);
-          if (state.activities.length > 2_000) {
-            state.activities.splice(0, state.activities.length - 2_000);
-          }
-          // 大纲阶段的探索强度:权限决策行(已允许/已拒绝)不是工具调用,不计入
+          // 工具调用次数驱动书写动画的粒子与徽标;权限决策行(已允许/已拒绝)
+          // 不是工具调用,不计入。逐行活动日志已不展示,文本不再留存
           state.toolCalls += activities.filter(
             (a) =>
               a.type === "tool" && !a.text.startsWith("已允许") && !a.text.startsWith("已拒绝"),
