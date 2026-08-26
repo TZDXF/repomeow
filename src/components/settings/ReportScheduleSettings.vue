@@ -389,7 +389,7 @@ watch(
             variant="ghost"
             size="icon"
             class="h-7 w-7"
-            :title="schedule.enabled ? t('reportSchedule.disabled') : t('reportSchedule.enabled')"
+            :title="schedule.enabled ? t('reportSchedule.enabled') : t('reportSchedule.disabled')"
             @click="toggleSystemSchedule(schedule)"
           >
             <Power v-if="schedule.enabled" class="h-3.5 w-3.5 text-green-500" />
@@ -497,7 +497,7 @@ watch(
             variant="ghost"
             size="icon"
             class="h-7 w-7"
-            :title="s.enabled ? t('reportSchedule.disabled') : t('reportSchedule.enabled')"
+            :title="s.enabled ? t('reportSchedule.enabled') : t('reportSchedule.disabled')"
             @click="toggleSchedule(s)"
           >
             <Power v-if="s.enabled" class="h-3.5 w-3.5 text-green-500" />
