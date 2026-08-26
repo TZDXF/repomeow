@@ -851,6 +851,7 @@ export default {
     autoUpdated: "「{name}」的 Wiki 已自动增量更新({count} 个页面)",
     autoUpdateFailed: "「{name}」的 Wiki 自动更新失败:{error}",
     writing: "正在生成",
+    unread: "未读",
     sources: "来源文件",
     relatedPages: "相关页面",
     waitingFirstChunk: "等待模型输出第一段内容…",

@@ -189,6 +189,12 @@ pub struct WikiUpdateEvent {
     total: usize,
 }
 
+#[derive(Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WikiUpdateResult {
+    updated_page_ids: Vec<String>,
+}
+
 #[derive(Clone, Serialize)]
 #[serde(
     tag = "kind",
@@ -1975,15 +1981,15 @@ pub async fn ai_update_wiki(
     db: State<'_, Db>,
     request: UpdateWikiRequest,
     on_event: Channel<WikiUpdateEvent>,
-) -> AppResult<usize> {
+) -> AppResult<WikiUpdateResult> {
     let run = RegisteredRun::new(request.run_id);
     let Some(data) = super::wiki::load_wiki(app.clone(), request.project_path.clone())? else {
-        return Ok(0);
+        return Ok(WikiUpdateResult::default());
     };
     let backend = super::wiki::load_wiki_config_internal(&app, &request.project_path)?.backend;
     let Some(from_sha) = data.meta.head_sha.clone() else {
         if request.automatic {
-            return Ok(0);
+            return Ok(WikiUpdateResult::default());
         }
         return Err(AppError::coded(ErrorCode::GitCommandFailed, "no head sha"));
     };
@@ -2000,7 +2006,7 @@ pub async fn ai_update_wiki(
     }
     let changed = match super::wiki::wiki_changed_files(request.project_path.clone(), from_sha) {
         Ok(changed) => changed,
-        Err(_) if request.automatic => return Ok(0),
+        Err(_) if request.automatic => return Ok(WikiUpdateResult::default()),
         Err(error) => return Err(error),
     };
     let changed_set: HashSet<&str> = changed.files.iter().map(String::as_str).collect();
@@ -2098,7 +2104,8 @@ pub async fn ai_update_wiki(
                                     }
                                 }
                             }
-                            let done = completed.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                            let done =
+                                completed.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
                             let _ = on_event.send(WikiUpdateEvent {
                                 completed: done,
                                 total,
@@ -2130,7 +2137,9 @@ pub async fn ai_update_wiki(
             Some(super::wiki::WikiCommitKind::Update),
         )?;
     }
-    Ok(total)
+    Ok(WikiUpdateResult {
+        updated_page_ids: affected.into_iter().map(|page| page.id).collect(),
+    })
 }
 
 #[cfg(test)]
@@ -2139,6 +2148,7 @@ mod tests {
 
     use super::{
         sanitize_agent_retry_notices, should_reject_wiki_backend_change, WikiGenerationEvent,
+        WikiUpdateResult,
     };
 
     #[test]
@@ -2153,6 +2163,19 @@ mod tests {
             "acp:opencode",
             false,
         ));
+    }
+
+    #[test]
+    fn wiki_update_result_uses_frontend_field_names() {
+        let value = serde_json::to_value(WikiUpdateResult {
+            updated_page_ids: vec!["overview".into(), "architecture".into()],
+        })
+        .unwrap();
+
+        assert_eq!(
+            value,
+            json!({ "updatedPageIds": ["overview", "architecture"] })
+        );
     }
 
     #[test]

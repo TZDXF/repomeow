@@ -165,6 +165,10 @@ export interface WikiUpdateProgress {
   total: number;
 }
 
+export interface WikiUpdateResult {
+  updatedPageIds: string[];
+}
+
 /** 单页/增量生成桥；ACP 会话、重试与落盘均在后端。 */
 export async function regenerateWikiPage(
   project: { path: string; name: string },
@@ -201,11 +205,11 @@ export async function updateWiki(
   options: WikiGenOptions,
   automatic: boolean,
   onProgress: (progress: WikiUpdateProgress) => void,
-): Promise<number> {
+): Promise<WikiUpdateResult> {
   const id = `wiki-update-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const channel = new Channel<WikiUpdateProgress>();
   channel.onmessage = onProgress;
-  return cmd<number>("ai_update_wiki", {
+  return cmd<WikiUpdateResult>("ai_update_wiki", {
     request: {
       runId: id,
       projectPath: project.path,

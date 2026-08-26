@@ -11,6 +11,16 @@ const generationHarness = vi.hoisted(() => {
   return { errors, finishes };
 });
 
+const localStorageData = new Map<string, string>();
+
+beforeEach(() => {
+  localStorageData.clear();
+  vi.stubGlobal("localStorage", {
+    getItem: vi.fn((key: string) => localStorageData.get(key) ?? null),
+    setItem: vi.fn((key: string, value: string) => localStorageData.set(key, value)),
+  });
+});
+
 vi.mock("@/lib/wiki-generator", () => ({
   regenerateWikiPage: vi.fn(),
   updateWiki: vi.fn(),
@@ -134,7 +144,7 @@ describe("wiki store automatic update", () => {
   });
 
   it("HEAD 变化后把自动增量任务整体交给后端读取项目配置", async () => {
-    vi.mocked(updateWiki).mockResolvedValue(1);
+    vi.mocked(updateWiki).mockResolvedValue({ updatedPageIds: ["overview"] });
     const project = { path: "D:\\repos\\wiki-auto-update", name: "wiki-auto-update" };
 
     const count = await useWikiStore().autoUpdate(project, "zh-CN");
@@ -150,7 +160,7 @@ describe("wiki store automatic update", () => {
   });
 
   it("后端判定没有受影响页面时返回 0", async () => {
-    vi.mocked(updateWiki).mockResolvedValue(0);
+    vi.mocked(updateWiki).mockResolvedValue({ updatedPageIds: [] });
     const project = { path: "D:\\repos\\wiki-auto-update", name: "wiki-auto-update" };
 
     const count = await useWikiStore().autoUpdate(project, "zh-CN");
@@ -158,5 +168,21 @@ describe("wiki store automatic update", () => {
     expect(count).toBe(0);
     expect(regenerateWikiPage).not.toHaveBeenCalled();
     expect(updateWiki).toHaveBeenCalledOnce();
+  });
+
+  it("把增量更新页面持久化为未读，打开页面后清除", async () => {
+    vi.mocked(updateWiki).mockResolvedValue({ updatedPageIds: ["overview", "architecture"] });
+    const project = { path: "D:\\repos\\wiki-auto-update", name: "wiki-auto-update" };
+
+    await useWikiStore().autoUpdate(project, "zh-CN");
+    expect(useWikiStore().isPageUnread(project.path, "overview")).toBe(true);
+
+    setActivePinia(createPinia());
+    const restored = useWikiStore();
+    expect(restored.isPageUnread(project.path, "architecture")).toBe(true);
+
+    restored.markPageRead(project.path, "architecture");
+    expect(restored.isPageUnread(project.path, "architecture")).toBe(false);
+    expect(restored.isPageUnread(project.path, "overview")).toBe(true);
   });
 });

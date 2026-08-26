@@ -17,6 +17,35 @@ import { cleanPath } from "@/lib/path";
 import { useSettingsStore } from "@/stores/settings";
 import type { WikiData, WikiOutlinePage } from "@/types";
 
+const WIKI_UNREAD_STORAGE_KEY = "repomeow:wiki-unread-pages";
+
+/** 未读页属于本机 UI 状态，不写入 wiki meta，避免阅读操作污染 wiki git 历史。 */
+function loadUnreadPages(): Record<string, string[]> {
+  try {
+    const raw = globalThis.localStorage?.getItem(WIKI_UNREAD_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed).flatMap(([path, ids]) =>
+        Array.isArray(ids)
+          ? [[path, [...new Set(ids.filter((id): id is string => typeof id === "string"))]]]
+          : [],
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function saveUnreadPages(unreadPages: Record<string, string[]>) {
+  try {
+    globalThis.localStorage?.setItem(WIKI_UNREAD_STORAGE_KEY, JSON.stringify(unreadPages));
+  } catch {
+    // localStorage 不可用时仅退化为当前会话内有效，不影响增量更新主流程。
+  }
+}
+
 /** 生成进度中的单页状态(进度 UI 直接渲染) */
 export interface WikiGenPageItem {
   page: WikiOutlinePage;
@@ -124,6 +153,35 @@ export const useWikiStore = defineStore("wiki", () => {
   /** data 所属的项目路径 */
   const dataFor = ref<string | null>(null);
   const loading = ref(false);
+  const unreadPages = reactive<Record<string, string[]>>(loadUnreadPages());
+
+  function isPageUnread(projectPath: string, pageId: string): boolean {
+    return unreadPages[generationKey(projectPath)]?.includes(pageId) ?? false;
+  }
+
+  function markPagesUnread(projectPath: string, pageIds: string[]) {
+    if (!pageIds.length) return;
+    const key = generationKey(projectPath);
+    unreadPages[key] = [...new Set([...(unreadPages[key] ?? []), ...pageIds])];
+    saveUnreadPages(unreadPages);
+  }
+
+  function markPageRead(projectPath: string, pageId: string) {
+    const key = generationKey(projectPath);
+    const current = unreadPages[key];
+    if (!current?.includes(pageId)) return;
+    const remaining = current.filter((id) => id !== pageId);
+    if (remaining.length) unreadPages[key] = remaining;
+    else delete unreadPages[key];
+    saveUnreadPages(unreadPages);
+  }
+
+  function clearUnreadPages(projectPath: string) {
+    const key = generationKey(projectPath);
+    if (!(key in unreadPages)) return;
+    delete unreadPages[key];
+    saveUnreadPages(unreadPages);
+  }
 
   // ── 生成进度 ──
   const generations = reactive<Record<string, WikiGenerationState>>({});
@@ -186,6 +244,16 @@ export const useWikiStore = defineStore("wiki", () => {
     loading.value = true;
     try {
       data.value = await loadWiki(projectPath);
+      if (data.value) {
+        const key = generationKey(projectPath);
+        const validIds = new Set(data.value.pages.map((page) => page.id));
+        const validUnread = (unreadPages[key] ?? []).filter((id) => validIds.has(id));
+        if (validUnread.length !== (unreadPages[key]?.length ?? 0)) {
+          if (validUnread.length) unreadPages[key] = validUnread;
+          else delete unreadPages[key];
+          saveUnreadPages(unreadPages);
+        }
+      }
     } finally {
       loading.value = false;
     }
@@ -266,6 +334,7 @@ export const useWikiStore = defineStore("wiki", () => {
           state.retries[retry.pageId ?? "outline"] = { ...retry };
         },
       });
+      if (state.phase === "done") clearUnreadPages(project.path);
     } catch (e) {
       state.error = toFriendlyWikiGenerationError(e);
       state.phase = controller.signal.aborted ? "cancelled" : "failed";
@@ -331,14 +400,15 @@ export const useWikiStore = defineStore("wiki", () => {
       total: 0,
     };
     try {
-      const count = await updateWiki(project, options, false, (progress) => {
+      const result = await updateWiki(project, options, false, (progress) => {
         if (updateProgress.value) {
           updateProgress.value.completed = progress.completed;
           updateProgress.value.total = progress.total;
         }
       });
+      markPagesUnread(project.path, result.updatedPageIds);
       if (dataFor.value === project.path) await load(project.path);
-      return count;
+      return result.updatedPageIds.length;
     } finally {
       updating.value = false;
       updateProgress.value = null;
@@ -381,14 +451,15 @@ export const useWikiStore = defineStore("wiki", () => {
       total: 0,
     };
     try {
-      const count = await updateWiki(project, options, true, (progress) => {
+      const result = await updateWiki(project, options, true, (progress) => {
         if (updateProgress.value) {
           updateProgress.value.completed = progress.completed;
           updateProgress.value.total = progress.total;
         }
       });
+      markPagesUnread(project.path, result.updatedPageIds);
       if (dataFor.value === project.path) await load(project.path);
-      return count;
+      return result.updatedPageIds.length;
     } finally {
       updating.value = false;
       updateProgress.value = null;
@@ -405,6 +476,7 @@ export const useWikiStore = defineStore("wiki", () => {
       await run.catch(() => {});
     }
     await deleteWiki(projectPath);
+    clearUnreadPages(projectPath);
     delete generations[key];
     if (dataFor.value === projectPath) data.value = null;
   }
@@ -419,6 +491,8 @@ export const useWikiStore = defineStore("wiki", () => {
     backgroundTasks,
     regeneratingPage,
     updating,
+    isPageUnread,
+    markPageRead,
     load,
     generate,
     cancel,

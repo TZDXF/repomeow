@@ -883,6 +883,7 @@ export default {
     autoUpdated: 'Wiki for "{name}" was updated automatically ({count} page(s))',
     autoUpdateFailed: 'Automatic wiki update failed for "{name}": {error}',
     writing: "Writing",
+    unread: "Unread",
     sources: "Source files",
     relatedPages: "Related pages",
     waitingFirstChunk: "Waiting for the first chunk from the model...",

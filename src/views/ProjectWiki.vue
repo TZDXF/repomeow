@@ -101,16 +101,22 @@ const currentRelatedPages = computed<WikiPageData[]>(() => {
   return related;
 });
 
-/** importance 色点(参照 deepwiki-open:high 紫 / medium 琥珀 / low 珊瑚) */
+/** importance H/M/L 徽标，颜色与文字双重编码，避免只靠色点辨认。 */
 function importanceClass(importance: string): string {
   switch (importance) {
     case "high":
-      return "bg-violet-500";
+      return "border-violet-400/60 bg-violet-500/10 text-violet-600 dark:text-violet-300";
     case "low":
-      return "bg-rose-400";
+      return "border-sky-400/60 bg-sky-500/10 text-sky-600 dark:text-sky-300";
     default:
-      return "bg-amber-400";
+      return "border-amber-400/60 bg-amber-500/10 text-amber-700 dark:text-amber-300";
   }
+}
+
+function importanceCode(importance: string): "H" | "M" | "L" {
+  if (importance === "high") return "H";
+  if (importance === "low") return "L";
+  return "M";
 }
 
 function importanceLabel(importance: string): string {
@@ -266,6 +272,7 @@ interface WikiNavItem {
   status?: WikiPageStatus;
   error?: string;
   durationMs?: number;
+  unread?: boolean;
 }
 
 const navItems = computed<WikiNavItem[]>(() => {
@@ -285,6 +292,7 @@ const navItems = computed<WikiNavItem[]>(() => {
     title: p.title,
     section: p.section ?? null,
     importance: p.importance,
+    unread: project.value ? wiki.isPageUnread(project.value.path, p.id) : false,
   }));
 });
 
@@ -315,8 +323,18 @@ const activeId = computed(() =>
 
 function selectPage(id: string) {
   if (generatingHere.value) previewId.value = id;
-  else selectedId.value = id;
+  else {
+    selectedId.value = id;
+    if (project.value) wiki.markPageRead(project.value.path, id);
+  }
 }
+
+/** 页面进入正文视口即视为已读；也覆盖首次打开和更新后仍停留在当前页的情况。 */
+watch(current, (page) => {
+  if (page && project.value && !generatingHere.value) {
+    wiki.markPageRead(project.value.path, page.id);
+  }
+});
 
 /** 从正文底部跳转相关页面后回到正文顶部,与 deepwiki-open 的页面导航行为一致 */
 function selectRelatedPage(id: string) {
@@ -705,13 +723,11 @@ const beforeDownload = createBeforeDownload(t);
                   <Tooltip v-else>
                     <TooltipTrigger as-child>
                       <span
-                        class="flex h-3.5 w-3.5 shrink-0 items-center justify-center"
+                        class="flex h-4 min-w-4 shrink-0 items-center justify-center rounded border px-0.5 text-[9px] font-bold leading-none"
+                        :class="importanceClass(p.importance)"
                         :aria-label="importanceLabel(p.importance)"
                       >
-                        <span
-                          class="h-1.5 w-1.5 rounded-full"
-                          :class="importanceClass(p.importance)"
-                        />
+                        {{ importanceCode(p.importance) }}
                       </span>
                     </TooltipTrigger>
                     <TooltipContent side="right">
@@ -719,6 +735,12 @@ const beforeDownload = createBeforeDownload(t);
                     </TooltipContent>
                   </Tooltip>
                   <span class="min-w-0 flex-1 truncate" :title="p.title">{{ p.title }}</span>
+                  <span
+                    v-if="p.unread"
+                    class="shrink-0 rounded bg-primary/10 px-1 py-0.5 text-[9px] font-medium leading-none text-primary"
+                  >
+                    {{ t("wiki.unread") }}
+                  </span>
                   <span
                     v-if="p.status === 'done' && p.durationMs !== undefined"
                     class="shrink-0 text-[10px] tabular-nums text-muted-foreground"
