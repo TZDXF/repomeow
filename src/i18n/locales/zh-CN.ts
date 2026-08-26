@@ -832,7 +832,7 @@ export default {
     regeneratePage: "重新生成此页",
     pageRegenerated: "页面已重新生成",
     openDir: "打开目录",
-    delete: "删除 Wiki",
+    delete: "删除",
     deleted: "Wiki 已删除",
     deleteFailed: "删除失败:{error}",
     emptyTitle: "还没有生成 Wiki",
@@ -843,7 +843,7 @@ export default {
     cancel: "取消生成",
     failed: "生成失败：{error}",
     invalidOutline: "AI 返回的大纲格式不完整。请重试生成；如果多次失败，请更换模型或生成后端。",
-    update: "更新 Wiki",
+    update: "更新",
     updateHint:
       "增量更新:只重新生成受代码变更影响的页面;新增文件不会触发新页面,结构变化建议整本重新生成",
     updatedPages: "已更新 {count} 个页面",

@@ -74,6 +74,10 @@ const { t } = useI18n();
         <GitPullRequestArrow v-else class="h-4 w-4" />
         {{ t("wiki.update") }}
       </Button>
+      <Button variant="outline" size="sm" @click="emit('regenerate')">
+        <RefreshCw class="h-4 w-4" />
+        {{ t("wiki.regenerate") }}
+      </Button>
       <Button
         variant="outline"
         size="sm"
@@ -82,17 +86,23 @@ const { t } = useI18n();
       >
         <SlidersHorizontal class="h-4 w-4" />
       </Button>
-      <Button variant="outline" size="sm" @click="emit('regenerate')">
-        <RefreshCw class="h-4 w-4" />
-        {{ t("wiki.regenerate") }}
-      </Button>
-      <Button variant="outline" size="sm" @click="emit('openDir')">
+      <Button
+        variant="outline"
+        size="icon"
+        class="h-8 w-8"
+        :title="t('wiki.openDir')"
+        @click="emit('openDir')"
+      >
         <FolderOpen class="h-4 w-4" />
-        {{ t("wiki.openDir") }}
       </Button>
-      <Button variant="outline" size="sm" @click="emit('remove')">
+      <Button
+        variant="outline"
+        size="icon"
+        class="h-8 w-8 text-destructive hover:text-destructive"
+        :title="t('wiki.delete')"
+        @click="emit('remove')"
+      >
         <Trash2 class="h-4 w-4" />
-        {{ t("wiki.delete") }}
       </Button>
     </template>
   </header>

@@ -862,7 +862,7 @@ export default {
     regeneratePage: "Regenerate this page",
     pageRegenerated: "Page regenerated",
     openDir: "Open Folder",
-    delete: "Delete Wiki",
+    delete: "Delete",
     deleted: "Wiki deleted",
     deleteFailed: "Delete failed: {error}",
     emptyTitle: "No wiki yet",
@@ -875,7 +875,7 @@ export default {
     failed: "Generation failed: {error}",
     invalidOutline:
       "The AI returned an incomplete wiki outline. Try again; if it keeps failing, switch the model or generation backend.",
-    update: "Update Wiki",
+    update: "Update",
     updateHint:
       "Incremental update: only regenerates pages affected by code changes. New files do not create new pages — regenerate the whole wiki after structural changes.",
     updatedPages: "Updated {count} page(s)",
