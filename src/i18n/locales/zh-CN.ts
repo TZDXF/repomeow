@@ -528,9 +528,9 @@ export default {
         authorsTitle: "提交者排行",
         authorsCommits: "{count} 次提交",
         otherAuthors: "其他 {count} 人",
-        fileTypes: "文件类型分布(当前代码)",
-        typeOther: "其他类型",
-        extOther: "无扩展名等",
+        fileTypes: "语言分布(当前代码)",
+        fileTypesEmpty: "当前代码未识别到语言文件",
+        typeOther: "其他语言",
         typeTooltip: "{files} 个文件,共 {bytes}",
       },
       columns: {

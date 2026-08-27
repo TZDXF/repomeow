@@ -5,11 +5,12 @@ import {
   buildCumulativeCommits,
   COMMIT_CALENDAR_WEEKS,
   dayKeyOf,
+  filterLanguageFileTypes,
   heatLevel,
   topWithOther,
   weekdayHourAt,
 } from "@/lib/git-stats";
-import type { GitDayStat } from "@/types";
+import type { GitDayStat, GitFileTypeStat } from "@/types";
 
 /** 由 "YYYY-MM-DD" 构造 GitDayStat(t 取该日 UTC 零点) */
 function day(dayStr: string, count: number, additions = 0, deletions = 0): GitDayStat {
@@ -133,5 +134,23 @@ describe("weekdayHourAt", () => {
     expect(weekdayHourAt(grid, 1, 0)).toBe(24);
     expect(weekdayHourAt(grid, 6, 23)).toBe(167);
     expect(weekdayHourAt([], 6, 23)).toBe(0);
+  });
+});
+
+describe("filterLanguageFileTypes", () => {
+  const ft = (ext: string): GitFileTypeStat => ({ ext, files: 1, bytes: 100 });
+
+  it("只保留语言类文件,排除图片/配置/数据与未知扩展名", () => {
+    const filtered = filterLanguageFileTypes(
+      ["rs", "vue", "md", "dockerfile", "png", "icns", "yaml", "lock", "json", "svg", "xyz"].map(
+        ft,
+      ),
+    );
+    expect(filtered.map((f) => f.ext)).toEqual(["rs", "vue", "md", "dockerfile"]);
+  });
+
+  it("排除后端的 (other) 归并键;空输入返回空数组", () => {
+    expect(filterLanguageFileTypes([ft("(other)"), ft("noext")])).toEqual([]);
+    expect(filterLanguageFileTypes([])).toEqual([]);
   });
 });

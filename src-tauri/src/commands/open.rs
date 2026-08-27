@@ -1073,32 +1073,4 @@ mod tests {
     fn find_wt_does_not_panic() {
         let _wt = find_wt();
     }
-
-    /// 手动验证用(会真实弹出 wt 窗口):走与 spawn_terminal 相同的参数构造,
-    /// 在 git bash 中执行含 `;` 的多行命令并写 marker 文件,验证 wt 不再拆分
-    #[cfg(windows)]
-    #[test]
-    #[ignore = "manual: opens a real Windows Terminal window"]
-    fn manual_wt_gitbash_multiline_command() {
-        let bash = find_git_bash().expect("git bash not found");
-        let tools = ShellTools {
-            bash: Some(&bash),
-            ps: "powershell",
-        };
-        let command = flatten_multiline(
-            Some("echo hello-from-wt\necho wt-b64-ok > /d/code/project-dev/.wt_b64_marker"),
-            ShellKind::GitBash.separator(),
-        );
-        let args = build_wt_args(
-            r"D:\code\project-dev",
-            "wt-b64-manual",
-            command.as_deref(),
-            ShellKind::GitBash,
-            tools,
-        );
-        Command::new(find_wt().expect("wt not found"))
-            .args(args)
-            .spawn()
-            .unwrap();
-    }
 }

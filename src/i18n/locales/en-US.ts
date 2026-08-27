@@ -543,9 +543,9 @@ export default {
         authorsTitle: "Top contributors",
         authorsCommits: "{count} commits",
         otherAuthors: "{count} others",
-        fileTypes: "File types (current tree)",
-        typeOther: "Other types",
-        extOther: "No extension, etc.",
+        fileTypes: "Languages (current tree)",
+        fileTypesEmpty: "No language files detected in the current tree",
+        typeOther: "Other languages",
         typeTooltip: "{files} files, {bytes} total",
       },
       columns: {
