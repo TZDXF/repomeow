@@ -117,6 +117,7 @@ src-tauri/migrations/ SQL 迁移,NNN_name.sql(当前 001~010)
 
 - **git 双层实现**:只读查询(status/分支/worktree 列表/log/graph/commit 文件与 diff/remote 列表/当前用户)走 git2(libgit2,`Cargo.toml` 里 default-features = false);写操作(checkout/commit/merge/rebase/worktree 增删/init)与网络操作(fetch/pull/push/clone)仍走系统 git CLI(`git_command`/`run_git`),以继承用户凭证环境(GCM 等)。新增 git 读路径优先复用 git2 层的 `open_repo`/`format_git_time`/`commit_diff` 等辅助;libgit2 revwalk 的纯时间排序在完全相同时间戳下不稳定,需排序时加 `Sort::TOPOLOGICAL` 保底。
 - git 相关命令已禁用终端凭据交互询问;涉及凭证的改动注意保持非交互。
+- **执行命令的终端选择**:设置项 `terminal`(settings.json,cmd/powershell/gitbash,默认 cmd,仅 Windows 生效)由 Rust 侧 `commands/open.rs` 的 `resolve_shell` 经 `tray::read_setting_string` 在执行时读取,前端调用点不传参;`spawn_terminal` 按 shell 分支(cmd 走原 wt `cmd /k` / `start` 兜底;powershell 把工作目录交给 wt `-d` / `start /D`,命令整体 UTF-16LE+base64 走 `-EncodedCommand`,可执行文件优先 pwsh(PowerShell 7 才支持 `&&`),回退系统自带 powershell;gitbash 由 `find_git_bash` 从 `where git` 推导 `<Git>\bin\bash.exe`——禁用裸 `where bash`,会命中 WSL——未安装回退 cmd)。`toolchain_op` 的命令文本是 cmd 专属语法(`del /f`、`%USERPROFILE%`、`&` 串联),固定 `ShellKind::Cmd` 不跟随设置。多行命令摊平(`flatten_multiline`)先按保守规则合并 `\` 续行(仅当 `\` 前是空白字符,避免误并行尾是 Windows 路径的既有命令),再按 shell 用 ` & `/`; ` 连接。
 - `run_in_terminal` 在系统终端新窗口执行命令,Windows 优先 Windows Terminal。
 - Vite dev 端口 1420 被占用会直接失败(strictPort),`tauri dev` 前先确认端口空闲。
 - `src-tauri/target-cdk/` 与 `scripts/` 是未跟踪的本地目录,勿当源码处理。

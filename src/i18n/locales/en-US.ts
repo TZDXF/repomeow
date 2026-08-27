@@ -1204,6 +1204,19 @@ export default {
       closeToExit: "Quit",
       closeToExitHint: "Closing the window quits the app",
     },
+    terminal: {
+      title: "Terminal for Commands",
+      description:
+        "The terminal used to run npm scripts, custom commands and more. Windows only. A bash-style \\ continuation in a multi-line command is joined into a single line before execution",
+      cmd: "cmd",
+      cmdHint: "Windows Command Prompt (default), best compatibility",
+      powershell: "PowerShell",
+      powershellHint:
+        "Commands are passed encoded, more robust for special characters; prefers pwsh when PowerShell 7 is installed",
+      gitbash: "Git Bash",
+      gitbashHint:
+        "Bash shipped with Git for Windows, for bash-style commands; falls back to cmd when Git is not found",
+    },
     autostart: {
       launchAtLogin: "Launch at login",
       launchAtLoginHint:

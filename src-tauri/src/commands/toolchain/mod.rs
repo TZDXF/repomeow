@@ -11,7 +11,7 @@ mod remote;
 mod rust;
 mod version;
 
-use crate::commands::open::spawn_terminal;
+use crate::commands::open::{spawn_terminal, ShellKind};
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::{ToolchainRemoteVersion, ToolchainStatus};
 
@@ -48,7 +48,14 @@ pub fn toolchain_op(tool: String, op: String, version: Option<String>) -> AppRes
         let home = user_home_path()
             .map(|path| display_path(&path))
             .unwrap_or_else(|| ".".to_string());
-        return spawn_terminal(&home, &format!("Toolchain: {tool}"), Some(&command));
+        // 工具链命令文本是 cmd 专属语法(del /f、%USERPROFILE%、`&` 串联),
+        // 在 PowerShell / bash 下会直接报错,固定走 cmd,不跟随终端设置
+        return spawn_terminal(
+            &home,
+            &format!("Toolchain: {tool}"),
+            Some(&command),
+            ShellKind::Cmd,
+        );
     }
     Err(unsupported(tool, op))
 }

@@ -1163,6 +1163,17 @@ export default {
       closeToExit: "直接退出",
       closeToExitHint: "关闭窗口即退出应用",
     },
+    terminal: {
+      title: "执行命令的终端",
+      description:
+        "运行 npm 脚本、自定义命令等操作所使用的终端,仅 Windows 生效;多行命令中 bash 风格的 \\ 续行会自动合并为单行执行",
+      cmd: "cmd",
+      cmdHint: "Windows 命令提示符(默认),兼容性最好",
+      powershell: "PowerShell",
+      powershellHint: "命令经编码传递,对特殊字符更稳健;装有 PowerShell 7 时优先使用 pwsh",
+      gitbash: "Git Bash",
+      gitbashHint: "Git for Windows 自带的 Bash,适合 bash 风格命令;未检测到 Git 时回退 cmd",
+    },
     autostart: {
       launchAtLogin: "开机自动启动",
       launchAtLoginHint: "登录系统后自动启动应用,静默驻留系统托盘,不弹出主窗口",

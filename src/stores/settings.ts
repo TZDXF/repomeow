@@ -20,6 +20,8 @@ export type ProjectsViewMode = "grid" | "table";
 export type ProjectsSortKey = "name" | "updated" | "created";
 /** 关闭主窗口行为:tray = 最小化到系统托盘,exit = 直接退出 */
 export type CloseAction = "tray" | "exit";
+/** 执行命令的终端(仅 Windows 生效;该键同时被 Rust 侧 spawn_terminal 经 read_setting_string 读取) */
+export type TerminalKind = "cmd" | "powershell" | "gitbash";
 // 应用数据统一存放于用户主目录下的 .repomeow 目录(与 Rust 端 APP_DATA_DIR_NAME 保持一致)
 const APP_DATA_DIR_NAME = ".repomeow";
 const STORE_FILE = "settings.json";
@@ -81,6 +83,8 @@ export const useSettingsStore = defineStore("settings", () => {
   const wikiAutoUpdate = ref(false);
   /** 关闭主窗口行为(默认最小化到托盘) */
   const closeAction = ref<CloseAction>("tray");
+  /** 执行命令的终端(默认 cmd,仅 Windows 生效) */
+  const terminal = ref<TerminalKind>("cmd");
   /** 启用 GitHub CLI(gh)作为「账号仓库」的虚拟账号来源(默认关闭,opt-in) */
   const enableGhCli = ref(false);
   /** 新建 worktree 的默认目录模板:支持 {branch} 占位符与相对路径(相对主工作区根解析) */
@@ -363,6 +367,7 @@ export const useSettingsStore = defineStore("settings", () => {
         autoCheckUpdate: "true",
         wikiAutoUpdate: "false",
         closeAction: "tray",
+        terminal: "cmd",
         enableGhCli: "false",
         worktreeDirTemplate: ".worktrees/{branch}",
       },
@@ -442,6 +447,11 @@ export const useSettingsStore = defineStore("settings", () => {
     const savedCloseAction = await fileStore.get<CloseAction>("closeAction");
     if (savedCloseAction === "tray" || savedCloseAction === "exit") {
       closeAction.value = savedCloseAction;
+    }
+    // 执行命令的终端:白名单校验,非法值回退 cmd(该键同时被 Rust 侧 spawn_terminal 读取)
+    const savedTerminal = await fileStore.get<TerminalKind>("terminal");
+    if (savedTerminal === "cmd" || savedTerminal === "powershell" || savedTerminal === "gitbash") {
+      terminal.value = savedTerminal;
     }
     // GitHub CLI 集成开关:存为字符串 "true"/"false",非法值回退 false
     const savedEnableGhCli = await fileStore.get<string>("enableGhCli");
@@ -623,6 +633,12 @@ export const useSettingsStore = defineStore("settings", () => {
     await persist("closeAction", value);
   }
 
+  async function setTerminal(value: TerminalKind) {
+    if (value !== "cmd" && value !== "powershell" && value !== "gitbash") return;
+    terminal.value = value;
+    await persist("terminal", value);
+  }
+
   async function setEnableGhCli(value: boolean) {
     enableGhCli.value = value;
     await persist("enableGhCli", String(value));
@@ -734,6 +750,7 @@ export const useSettingsStore = defineStore("settings", () => {
     autoCheckUpdate,
     wikiAutoUpdate,
     closeAction,
+    terminal,
     enableGhCli,
     worktreeDirTemplate,
     jdkList,
@@ -763,6 +780,7 @@ export const useSettingsStore = defineStore("settings", () => {
     setAutoCheckUpdate,
     setWikiAutoUpdate,
     setCloseAction,
+    setTerminal,
     setEnableGhCli,
     setWorktreeDirTemplate,
     saveJdk,
