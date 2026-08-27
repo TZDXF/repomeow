@@ -13,13 +13,35 @@ use crate::db::Db;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::workday;
 
-/// 日历标注数据：某月每天的报告数量 + 节假日/调休列表。
+/// 某天各类型报告的数量(供日历按类型分色展示标记)
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct CalendarDayReports {
+    pub daily: i64,
+    pub weekly: i64,
+}
+
+impl CalendarDayReports {
+    /// 按 period_type 累加;未知类型不计入(当前仅 daily/weekly)
+    fn add(&mut self, period_type: &str, count: i64) {
+        match period_type {
+            "daily" => self.daily += count,
+            "weekly" => self.weekly += count,
+            _ => {}
+        }
+    }
+}
+
+/// 日历标注数据：某月每天的报告数量(按类型拆分) + 节假日/调休列表及其中英节日名。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CalendarMeta {
-    pub dates: HashMap<String, i64>,
+    pub dates: HashMap<String, CalendarDayReports>,
     pub holidays: Vec<String>,
     pub workdays: Vec<String>,
+    /// 法定节假日 → 节日名(供日历直接展示真实节日)
+    pub holiday_names: HashMap<String, workday::HolidayName>,
+    /// 调休补班日 → 所补节日名
+    pub workday_names: HashMap<String, workday::HolidayName>,
 }
 
 /// 为动态 WHERE 条件追加项目/标签/类型过滤(供日历与按日查询共用)。
@@ -84,16 +106,19 @@ pub fn get_calendar_meta(
 ) -> AppResult<CalendarMeta> {
     let conn = db.0.lock().unwrap();
     let dates = get_calendar_meta_impl(&conn, year, month, &project_ids, &tag_ids, &report_type)?;
-    let (holidays, workdays) = workday::load_data(&workday::cache_root()).unwrap_or_default();
+    let data = workday::load_data(&workday::cache_root()).unwrap_or_default();
 
     Ok(CalendarMeta {
         dates,
-        holidays: holidays.into_iter().collect(),
-        workdays: workdays.into_iter().collect(),
+        holidays: data.holidays.into_iter().collect(),
+        workdays: data.workdays.into_iter().collect(),
+        holiday_names: data.holiday_names,
+        workday_names: data.workday_names,
     })
 }
 
 /// 日历查询覆盖周一开始的 6 × 7 月视图网格，包含相邻月份填充日。
+/// 返回日期 → 各类型报告数(按 date_to + period_type 聚合)。
 pub fn get_calendar_meta_impl(
     conn: &Connection,
     year: i32,
@@ -101,7 +126,7 @@ pub fn get_calendar_meta_impl(
     project_ids: &[i64],
     tag_ids: &[i64],
     report_type: &Option<String>,
-) -> AppResult<HashMap<String, i64>> {
+) -> AppResult<HashMap<String, CalendarDayReports>> {
     let month_start = NaiveDate::from_ymd_opt(year, month, 1).ok_or_else(|| {
         AppError::coded(
             ErrorCode::ReportInvalidYearMonth,
@@ -128,18 +153,22 @@ pub fn get_calendar_meta_impl(
     );
 
     let sql = format!(
-        "SELECT h.date_to, COUNT(*) FROM report_history h WHERE {} GROUP BY h.date_to",
+        "SELECT h.date_to, h.period_type, COUNT(*) FROM report_history h WHERE {} GROUP BY h.date_to, h.period_type",
         conditions.join(" AND ")
     );
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(rusqlite::params_from_iter(params_vec), |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, i64>(2)?,
+        ))
     })?;
 
-    let mut dates = HashMap::new();
+    let mut dates: HashMap<String, CalendarDayReports> = HashMap::new();
     for row in rows {
-        let (date, count) = row?;
-        dates.insert(date, count);
+        let (date, period_type, count) = row?;
+        dates.entry(date).or_default().add(&period_type, count);
     }
     Ok(dates)
 }
@@ -149,13 +178,19 @@ pub fn get_calendar_meta_impl(
 pub struct HolidayData {
     pub holidays: Vec<String>,
     pub workdays: Vec<String>,
+    /// 法定节假日 → 节日名(供日历直接展示真实节日)
+    pub holiday_names: HashMap<String, workday::HolidayName>,
+    /// 调休补班日 → 所补节日名
+    pub workday_names: HashMap<String, workday::HolidayName>,
 }
 
 pub fn get_holiday_data() -> AppResult<HolidayData> {
-    let (holidays, workdays) = workday::load_data(&workday::cache_root()).unwrap_or_default();
+    let data = workday::load_data(&workday::cache_root()).unwrap_or_default();
     Ok(HolidayData {
-        holidays: holidays.into_iter().collect(),
-        workdays: workdays.into_iter().collect(),
+        holidays: data.holidays.into_iter().collect(),
+        workdays: data.workdays.into_iter().collect(),
+        holiday_names: data.holiday_names,
+        workday_names: data.workday_names,
     })
 }
 

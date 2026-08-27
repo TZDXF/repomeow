@@ -18,7 +18,12 @@ import {
   CalendarPrevButton,
 } from "@/components/ui/calendar";
 import type { CalendarMeta, ReportViewMode } from "@/types";
-import { getHolidayDayClass, getHolidayDayTitle, isWeekendDate } from "@/lib/holidays";
+import {
+  getHolidayDayClass,
+  getHolidayDayTitle,
+  isWeekendDate,
+  type HolidayDayContext,
+} from "@/lib/holidays";
 import "@/styles/holiday-calendar.css";
 import { useSettingsStore } from "@/stores/settings";
 
@@ -39,8 +44,13 @@ const emit = defineEmits<{
 const { t } = useI18n();
 const settings = useSettingsStore();
 
-const holidaySet = computed(() => new Set(props.calendarData?.holidays ?? []));
-const workdaySet = computed(() => new Set(props.calendarData?.workdays ?? []));
+/** 节假日判定数据(日期集合 + 真实节日名称表),随 calendarData 更新 */
+const dayCtx = computed<HolidayDayContext>(() => ({
+  holidaySet: new Set(props.calendarData?.holidays ?? []),
+  workdaySet: new Set(props.calendarData?.workdays ?? []),
+  holidayNames: props.calendarData?.holidayNames ?? {},
+  workdayNames: props.calendarData?.workdayNames ?? {},
+}));
 const reportDates = computed(() => props.calendarData?.dates ?? {});
 
 /** 使用浏览器 Intl API 生成周一~周日的短标签，避免 t() 数组不可靠 */
@@ -208,21 +218,21 @@ function yearCellClass(year: number): string {
 // ── helpers ─────────────────────────────────────────────────────────────
 
 function getDayClass(dv: DateValue): string {
-  return getHolidayDayClass(dv.toString(), isWeekendDate(dv), holidaySet.value, workdaySet.value);
+  return getHolidayDayClass(dv.toString(), isWeekendDate(dv), dayCtx.value);
 }
 
 function getDayTitle(dv: DateValue): string | undefined {
-  return getHolidayDayTitle(
-    dv.toString(),
-    isWeekendDate(dv),
-    holidaySet.value,
-    workdaySet.value,
-    t,
-  );
+  return getHolidayDayTitle(dv.toString(), isWeekendDate(dv), dayCtx.value, settings.language, t);
 }
 
-function getReportCount(dv: DateValue): number {
-  return reportDates.value[dv.toString()] ?? 0;
+/** 当天日报数量(中性色圆点) */
+function getDailyCount(dv: DateValue): number {
+  return reportDates.value[dv.toString()]?.daily ?? 0;
+}
+
+/** 当天周报数量(紫色圆点) */
+function getWeeklyCount(dv: DateValue): number {
+  return reportDates.value[dv.toString()]?.weekly ?? 0;
 }
 
 /** 周报范围高亮:日期是否落在 highlightRange 闭区间内(字符串即 ISO 日期,可直接字典序比较) */
@@ -399,13 +409,21 @@ function asDateValue(dv: any): DateValue {
                 getSelectionClass(cellDate) || getHighlightClass(cellDate),
               ]"
               :title="getDayTitle(cellDate)"
-              class="relative flex size-8 items-center justify-center rounded-md p-0 font-normal text-sm"
+              class="group/cell flex size-8 flex-col items-center justify-center rounded-md p-0 font-normal text-sm"
             >
-              {{ cellDate.day }}
-              <span
-                v-if="getReportCount(cellDate) > 0"
-                class="absolute bottom-0.5 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full bg-primary"
-              />
+              <span class="leading-none">{{ cellDate.day }}</span>
+              <!-- 报告标记行固定高度,无报告留空对齐:日报=中性点、周报=紫点(与右侧列表徽章同色);
+                   选中态底色为主色,中性点切换为主色前景保证对比 -->
+              <span class="mt-0.5 flex h-1.5 items-center justify-center gap-1">
+                <span
+                  v-if="getDailyCount(cellDate) > 0"
+                  class="h-1.5 w-1.5 rounded-full bg-foreground/60 group-data-[selected]/cell:bg-primary-foreground/80"
+                />
+                <span
+                  v-if="getWeeklyCount(cellDate) > 0"
+                  class="h-1.5 w-1.5 rounded-full bg-violet-500"
+                />
+              </span>
             </CalendarCellTrigger>
           </CalendarCell>
         </CalendarGridRow>

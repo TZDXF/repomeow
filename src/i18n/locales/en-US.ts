@@ -537,8 +537,6 @@ export default {
         churnTrend: "Code churn (per commit)",
         churnCell: "+{adds} / −{dels} lines",
         churnNet: "Net: {net} lines",
-        churnUp: "Net increase",
-        churnDown: "Net decrease",
         churnTotalLine: "Cumulative net: {total} lines",
         authorsTitle: "Top contributors",
         authorsCommits: "{count} commits",

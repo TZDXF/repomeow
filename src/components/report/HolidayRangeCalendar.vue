@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { DateValue, RangeCalendarRootEmits, RangeCalendarRootProps } from "reka-ui";
-import type { HTMLAttributes } from "vue";
+import { computed, type HTMLAttributes } from "vue";
 import { reactiveOmit } from "@vueuse/core";
 import { RangeCalendarRoot, useForwardPropsEmits } from "reka-ui";
 import { useI18n } from "vue-i18n";
@@ -10,6 +10,7 @@ import {
   getHolidayDayTitle,
   isWeekendDate,
   useHolidayData,
+  type HolidayDayContext,
 } from "@/lib/holidays";
 import "@/styles/holiday-calendar.css";
 import {
@@ -34,21 +35,23 @@ const delegatedProps = reactiveOmit(props, "class");
 
 const forwarded = useForwardPropsEmits(delegatedProps, emits);
 
-const { t } = useI18n();
-const { holidaySet, workdaySet } = useHolidayData();
+const { t, locale } = useI18n();
+const { holidaySet, workdaySet, holidayNames, workdayNames } = useHolidayData();
+
+/** 节假日判定数据(日期集合 + 真实节日名称表) */
+const dayCtx = computed<HolidayDayContext>(() => ({
+  holidaySet: holidaySet.value,
+  workdaySet: workdaySet.value,
+  holidayNames: holidayNames.value,
+  workdayNames: workdayNames.value,
+}));
 
 function dayClass(dv: DateValue): string {
-  return getHolidayDayClass(dv.toString(), isWeekendDate(dv), holidaySet.value, workdaySet.value);
+  return getHolidayDayClass(dv.toString(), isWeekendDate(dv), dayCtx.value);
 }
 
 function dayTitle(dv: DateValue): string | undefined {
-  return getHolidayDayTitle(
-    dv.toString(),
-    isWeekendDate(dv),
-    holidaySet.value,
-    workdaySet.value,
-    t,
-  );
+  return getHolidayDayTitle(dv.toString(), isWeekendDate(dv), dayCtx.value, locale.value, t);
 }
 </script>
 

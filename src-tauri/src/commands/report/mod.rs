@@ -16,7 +16,7 @@ use tauri::{AppHandle, State};
 use crate::db::Db;
 use crate::error::AppResult;
 
-pub use calendar::{CalendarMeta, HolidayData};
+pub use calendar::{CalendarDayReports, CalendarMeta, HolidayData};
 pub(crate) use history::save_report_history_impl;
 pub use history::{
     ReportGeneratedPayload, ReportHistoryDetail, ReportHistoryItem, SaveReportCommit,

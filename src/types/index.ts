@@ -738,17 +738,37 @@ export interface ReportGeneratedPayload {
   dateTo: string;
 }
 
-/** 日历标注数据：某月每天报告数 + 节假日/调休 */
+/** 节日名称(中/英双语,来自 chinese-days 数据) */
+export interface HolidayName {
+  en: string;
+  zh: string;
+}
+
+/** 日历某天各类型报告数量(供日历按类型分色展示标记) */
+export interface CalendarDayReports {
+  daily: number;
+  weekly: number;
+}
+
+/** 日历标注数据：某月每天报告数(按类型拆分) + 节假日/调休及其中英节日名 */
 export interface CalendarMeta {
-  dates: Record<string, number>;
+  dates: Record<string, CalendarDayReports>;
   holidays: string[];
   workdays: string[];
+  /** 法定节假日 → 节日名 */
+  holidayNames: Record<string, HolidayName>;
+  /** 调休补班日 → 所补节日名 */
+  workdayNames: Record<string, HolidayName>;
 }
 
 /** 节假日/调休标注数据(get_holiday_data 返回的全集,供日期选择日历高亮) */
 export interface HolidayData {
   holidays: string[];
   workdays: string[];
+  /** 法定节假日 → 节日名 */
+  holidayNames: Record<string, HolidayName>;
+  /** 调休补班日 → 所补节日名 */
+  workdayNames: Record<string, HolidayName>;
 }
 
 /** 批量生成的单个时段(plan_batch_report_ranges;daily 为单日,weekly 为一个工作周) */

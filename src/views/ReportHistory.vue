@@ -31,6 +31,7 @@ import ReportCalendar from "@/components/report/ReportCalendar.vue";
 import TagCheckList from "@/components/tags/TagCheckList.vue";
 import { cmd, onListen } from "@/lib/tauri";
 import { formatCommitTime, formatDate, formatLocalDateTime, parseDateStr } from "@/lib/format";
+import { localizedHolidayName } from "@/lib/holidays";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
 import { useSettingsStore } from "@/stores/settings";
 import { useProjectsStore } from "@/stores/projects";
@@ -45,11 +46,22 @@ import type {
 
 type TypeFilter = "all" | ReportPeriodType;
 
-const TYPE_OPTIONS: { value: TypeFilter; labelKey: string }[] = [
+/**
+ * dotClass 让日报/周报筛选按钮兼任颜色图例,与日历标记、右侧列表徽章一致:
+ * 日报=中性色、周报=紫色
+ */
+const TYPE_OPTIONS: { value: TypeFilter; labelKey: string; dotClass?: string }[] = [
   { value: "all", labelKey: "reportHistory.typeAll" },
-  { value: "daily", labelKey: "reportHistory.typeDaily" },
-  { value: "weekly", labelKey: "reportHistory.typeWeekly" },
+  { value: "daily", labelKey: "reportHistory.typeDaily", dotClass: "bg-foreground/60" },
+  { value: "weekly", labelKey: "reportHistory.typeWeekly", dotClass: "bg-violet-500" },
 ];
+
+/** 类型筛选按钮上的色点:激活态按钮底色为主色,中性色日报点切换为主色前景保证对比;紫点保持不变 */
+function typeDotClass(opt: (typeof TYPE_OPTIONS)[number]): string {
+  if (!opt.dotClass) return "";
+  if (opt.value === "daily" && filterType.value === "daily") return "bg-primary-foreground/80";
+  return opt.dotClass;
+}
 
 /** 日历选中视角:日(单日) | 周(周一至周日) | 月(整月),决定右侧列表的日期范围 */
 const VIEW_OPTIONS: { value: ReportViewMode; labelKey: string }[] = [
@@ -230,14 +242,21 @@ const rangeLabel = computed(() => {
   return `${from.toLocaleDateString(lang, opt)} – ${to.toLocaleDateString(lang, opt)}, ${to.getFullYear()}`;
 });
 
-/** 周末/节假日徽章仅日视角有意义(周/月范围混合多种日期类型) */
+/** 周末/节假日徽章仅日视角有意义(周/月范围混合多种日期类型);节假日优先展示真实节日名 */
 const dateBadge = computed(() => {
   if (viewMode.value !== "day" || !selectedDate.value) return null;
   const ds = selectedDate.value;
-  if (calendarData.value?.holidays.includes(ds))
-    return { label: t("reportHistory.holiday"), variant: "secondary" as const };
-  if (calendarData.value?.workdays.includes(ds))
-    return { label: t("reportHistory.makeupWorkday"), variant: "secondary" as const };
+  const data = calendarData.value;
+  const lang = settings.language;
+  if (data?.holidays.includes(ds)) {
+    const name = localizedHolidayName(data.holidayNames[ds], lang);
+    return { label: name ?? t("reportHistory.holiday"), variant: "secondary" as const };
+  }
+  if (data?.workdays.includes(ds)) {
+    const base = t("reportHistory.makeupWorkday");
+    const name = localizedHolidayName(data.workdayNames[ds], lang);
+    return { label: name ? `${base} · ${name}` : base, variant: "secondary" as const };
+  }
   const d = parseDateStr(ds);
   if (d.getDay() === 0 || d.getDay() === 6)
     return { label: t("reportHistory.weekend"), variant: "outline" as const };
@@ -434,6 +453,11 @@ watch(
                 class="h-7 flex-1 px-2 text-xs"
                 @click="filterType = opt.value"
               >
+                <span
+                  v-if="opt.dotClass"
+                  class="h-1.5 w-1.5 rounded-full"
+                  :class="typeDotClass(opt)"
+                />
                 {{ t(opt.labelKey) }}
               </Button>
             </div>

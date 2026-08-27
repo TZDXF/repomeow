@@ -3,19 +3,20 @@
 //! 数据源: <https://cdn.jsdelivr.net/npm/chinese-days/dist/chinese-days.json>
 //! 覆盖范围: 2004–2026 年官方节假日和调休安排。
 //! 无数据年份回退为常规周一～周五判断。
+//! 日期对应的值为 "English Name,中文名,天数" 字符串,解析为中英节日名供日历展示。
 //!
 //! 缓存结构:把 `chinese-days.json` 包成 `{ "downloaded_at": <unix_ts>, "data": <原 JSON> }`,
 //! 仅在包络解析成功且 `downloaded_at` 位于 TTL 内时使用缓存。
 //! 文件不存在、解析失败、字段缺失或 TTL 过期时重新拉取数据。
 //! 缓存文件位于安装目录 data/ 下(见 cache_root)。
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::{Datelike, NaiveDate, Utc};
 use reqwest::blocking::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
 use crate::error::{AppError, AppResult, ErrorCode};
@@ -25,6 +26,24 @@ const CDN_URL: &str = "https://cdn.jsdelivr.net/npm/chinese-days/dist/chinese-da
 const CACHE_FILE: &str = "chinese-days.json";
 /// 缓存有效期(秒),默认 30 天
 const CACHE_TTL_SECS: i64 = 30 * 86400;
+
+/// 节日名称(中/英双语,来自 chinese-days 值段 "English,中文,天数")
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HolidayName {
+    pub en: String,
+    pub zh: String,
+}
+
+/// chinese-days 解析结果:节假日/调休日期集合 + 各自日期对应的节日名称
+#[derive(Debug, Default)]
+pub struct WorkdayData {
+    pub holidays: HashSet<String>,
+    pub workdays: HashSet<String>,
+    /// 法定节假日 → 节日名(如 2026-02-15 → 春节/Spring Festival)
+    pub holiday_names: HashMap<String, HolidayName>,
+    /// 调休补班日 → 所补节日名
+    pub workday_names: HashMap<String, HolidayName>,
+}
 
 #[derive(Debug, Deserialize)]
 struct ChineseDaysData {
@@ -41,9 +60,9 @@ struct CacheEnvelope {
 }
 
 /// 加载工作日数据:优先读缓存,过期或不存在时从 CDN 拉取并写入缓存。
-/// 返回 holidays 与 workdays 两个日期集合(均为 "YYYY-MM-DD" 格式)。
+/// 返回 holidays/workdays 日期集合("YYYY-MM-DD")及各自日期的中英节日名。
 /// `cache_root` 为运行时数据根目录(`runtime_data_root`,缓存文件直接位于其下)。
-pub fn load_data(cache_root: &PathBuf) -> AppResult<(HashSet<String>, HashSet<String>)> {
+pub fn load_data(cache_root: &PathBuf) -> AppResult<WorkdayData> {
     let cache_path = cache_root.join(CACHE_FILE);
 
     // 缓存仅在包络合法且 TTL 未过期时命中
@@ -75,7 +94,7 @@ pub fn load_data(cache_root: &PathBuf) -> AppResult<(HashSet<String>, HashSet<St
 
 /// 纯函数:仅当缓存是合法 envelope 且未过期时才返回解析结果。
 /// 失败 / 不存在 / 字段缺失 / 过期 → 返回 `None`,由调用方决定是否触发 fetch。
-fn try_load_envelope(cache_path: &Path) -> Option<(HashSet<String>, HashSet<String>)> {
+fn try_load_envelope(cache_path: &Path) -> Option<WorkdayData> {
     let raw = fs::read_to_string(cache_path).ok()?;
     let (parsed, ts) = parse_cache(&raw)?;
     let age = Utc::now().timestamp().saturating_sub(ts);
@@ -102,35 +121,61 @@ fn write_cache(cache_path: &std::path::Path, body: &str) {
 
 /// 解析缓存包络。
 /// 格式合法时返回数据与下载时间戳,否则返回 `None`。
-fn parse_cache(raw: &str) -> Option<((HashSet<String>, HashSet<String>), i64)> {
+fn parse_cache(raw: &str) -> Option<(WorkdayData, i64)> {
     let env: CacheEnvelope = serde_json::from_str(raw).ok()?;
-    let holidays: HashSet<String> = env
-        .data
-        .holidays
-        .map(|m| m.keys().cloned().collect())
-        .unwrap_or_default();
-    let workdays: HashSet<String> = env
-        .data
-        .workdays
-        .map(|m| m.keys().cloned().collect())
-        .unwrap_or_default();
-    Some(((holidays, workdays), env.downloaded_at))
+    Some((build_data(env.data), env.downloaded_at))
 }
 
-fn parse_data(json: &str) -> AppResult<(HashSet<String>, HashSet<String>)> {
+/// 解析 chinese-days 的值段("English,中文,天数")为中英节日名。
+/// 从右往左切分:末段为放假天数(不使用),中段为中文名,其余为英文名;
+/// 非字符串、段数不足或名称为空时返回 `None`(该日期仍计入集合,仅无名称)。
+fn parse_holiday_name(value: &serde_json::Value) -> Option<HolidayName> {
+    let s = value.as_str()?;
+    let mut parts = s.rsplitn(3, ',');
+    let _days = parts.next()?;
+    let zh = parts.next()?.trim();
+    let en = parts.next()?.trim();
+    if en.is_empty() || zh.is_empty() {
+        return None;
+    }
+    Some(HolidayName {
+        en: en.to_string(),
+        zh: zh.to_string(),
+    })
+}
+
+/// 把 holidays/workdays 原始 map 拆成日期集合 + 日期→节日名映射
+fn collect_dates_and_names(
+    map: Option<serde_json::Map<String, serde_json::Value>>,
+) -> (HashSet<String>, HashMap<String, HolidayName>) {
+    let mut dates = HashSet::new();
+    let mut names = HashMap::new();
+    if let Some(m) = map {
+        for (date, value) in m {
+            if let Some(name) = parse_holiday_name(&value) {
+                names.insert(date.clone(), name);
+            }
+            dates.insert(date);
+        }
+    }
+    (dates, names)
+}
+
+fn build_data(data: ChineseDaysData) -> WorkdayData {
+    let (holidays, holiday_names) = collect_dates_and_names(data.holidays);
+    let (workdays, workday_names) = collect_dates_and_names(data.workdays);
+    WorkdayData {
+        holidays,
+        workdays,
+        holiday_names,
+        workday_names,
+    }
+}
+
+fn parse_data(json: &str) -> AppResult<WorkdayData> {
     let data: ChineseDaysData = serde_json::from_str(json)
         .map_err(|e| AppError::coded(ErrorCode::WorkdayParseFailed, e.to_string()))?;
-
-    let holidays: HashSet<String> = data
-        .holidays
-        .map(|m| m.keys().cloned().collect())
-        .unwrap_or_default();
-    let workdays: HashSet<String> = data
-        .workdays
-        .map(|m| m.keys().cloned().collect())
-        .unwrap_or_default();
-
-    Ok((holidays, workdays))
+    Ok(build_data(data))
 }
 
 /// 判断给定日期是否为中国工作日(含调休补班,排除法定节假日)。
@@ -142,7 +187,7 @@ fn parse_data(json: &str) -> AppResult<(HashSet<String>, HashSet<String>)> {
 /// `cache_root` 为运行时数据根目录(安装目录 data/)。
 pub fn is_workday(date: NaiveDate, cache_root: &PathBuf) -> bool {
     // 数据拉取失败时回退为常规周一～周五判断
-    let (holidays, workdays) = match load_data(cache_root) {
+    let data = match load_data(cache_root) {
         Ok(d) => d,
         Err(e) => {
             eprintln!("[workday] 加载工作日数据失败,回退常规判断: {e}");
@@ -153,11 +198,11 @@ pub fn is_workday(date: NaiveDate, cache_root: &PathBuf) -> bool {
     let date_str = date.format("%Y-%m-%d").to_string();
 
     // 调休上班(周日/周六补班)优先级最高
-    if workdays.contains(&date_str) {
+    if data.workdays.contains(&date_str) {
         return true;
     }
     // 法定节假日
-    if holidays.contains(&date_str) {
+    if data.holidays.contains(&date_str) {
         return false;
     }
     // 常规判断
@@ -178,14 +223,17 @@ pub struct WorkdayChecker {
 
 impl WorkdayChecker {
     pub fn load(cache_root: &PathBuf) -> Self {
-        let (holidays, workdays) = match load_data(cache_root) {
+        let data = match load_data(cache_root) {
             Ok(d) => d,
             Err(e) => {
                 eprintln!("[workday] 加载工作日数据失败,回退常规判断: {e}");
-                (HashSet::new(), HashSet::new())
+                WorkdayData::default()
             }
         };
-        Self { holidays, workdays }
+        Self {
+            holidays: data.holidays,
+            workdays: data.workdays,
+        }
     }
 
     pub fn is_workday(&self, date: NaiveDate) -> bool {
@@ -235,17 +283,41 @@ mod tests {
         assert!(!is_regular_weekday(sun));
     }
 
-    /// 构造一个伪 chinese-days JSON 的最小可用形态
+    /// 构造一个伪 chinese-days JSON 的最小可用形态(值段与 CDN 真实格式一致:"English,中文,天数")
     fn sample_inner_json() -> serde_json::Value {
         serde_json::json!({
             "holidays": {
-                "2026-10-01": { "name": "国庆", "date": "2026-10-01" },
-                "2026-10-02": { "name": "国庆", "date": "2026-10-02" },
+                "2026-10-01": "National Day,国庆节,3",
+                "2026-10-02": "National Day,国庆节,3",
             },
             "workdays": {
-                "2026-09-27": { "name": "调休", "date": "2026-09-27" },
+                "2026-09-27": "National Day,国庆节,3",
             },
         })
+    }
+
+    #[test]
+    fn parse_holiday_name_extracts_bilingual_names() {
+        let name = parse_holiday_name(&serde_json::json!("New Year's Day,元旦,1")).unwrap();
+        assert_eq!(name.en, "New Year's Day");
+        assert_eq!(name.zh, "元旦");
+    }
+
+    #[test]
+    fn parse_holiday_name_tolerates_comma_in_english_name() {
+        // 英文名含逗号时从右侧切分,英文名保留完整
+        let name = parse_holiday_name(&serde_json::json!("Day, Half,Foo节,2")).unwrap();
+        assert_eq!(name.en, "Day, Half");
+        assert_eq!(name.zh, "Foo节");
+    }
+
+    #[test]
+    fn parse_holiday_name_rejects_malformed_values() {
+        // 非字符串 / 段数不足 / 名称为空 → None(日期仍计入集合)
+        assert!(parse_holiday_name(&serde_json::json!({"name": "国庆"})).is_none());
+        assert!(parse_holiday_name(&serde_json::json!("元旦")).is_none());
+        assert!(parse_holiday_name(&serde_json::json!(",元旦,1")).is_none());
+        assert!(parse_holiday_name(&serde_json::json!("New Year's Day,,1")).is_none());
     }
 
     #[test]
@@ -256,13 +328,27 @@ mod tests {
             "data": inner,
         })
         .to_string();
-        let ((holidays, workdays), ts) = parse_cache(&envelope).expect("应解析包络");
+        let (data, ts) = parse_cache(&envelope).expect("应解析包络");
         assert_eq!(ts, 1_700_000_000);
-        let mut h: Vec<&String> = holidays.iter().collect();
+        let mut h: Vec<&String> = data.holidays.iter().collect();
         h.sort();
         assert_eq!(h, vec!["2026-10-01", "2026-10-02"]);
-        let w: Vec<&String> = workdays.iter().collect();
+        let w: Vec<&String> = data.workdays.iter().collect();
         assert_eq!(w, vec!["2026-09-27"]);
+        assert_eq!(
+            data.holiday_names.get("2026-10-01"),
+            Some(&HolidayName {
+                en: "National Day".to_string(),
+                zh: "国庆节".to_string(),
+            })
+        );
+        assert_eq!(
+            data.workday_names.get("2026-09-27"),
+            Some(&HolidayName {
+                en: "National Day".to_string(),
+                zh: "国庆节".to_string(),
+            })
+        );
     }
 
     #[test]
@@ -296,12 +382,15 @@ mod tests {
 
         let parsed = try_load_envelope(&path)
             .expect("fresh envelope should be honored without mtime fallback");
-        let (holidays, workdays) = parsed;
         assert_eq!(
-            holidays,
+            parsed.holidays,
             HashSet::from(["2026-10-01".to_string(), "2026-10-02".to_string()])
         );
-        assert_eq!(workdays, HashSet::from(["2026-09-27".to_string()]));
+        assert_eq!(parsed.workdays, HashSet::from(["2026-09-27".to_string()]));
+        assert_eq!(
+            parsed.holiday_names.get("2026-10-02").map(|n| n.zh.as_str()),
+            Some("国庆节")
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -350,15 +439,24 @@ mod tests {
     #[test]
     fn parse_data_handles_missing_optional_sections() {
         // holidays 缺失 → 空集合;workdays 缺失 → 空集合
-        let no_holidays = serde_json::json!({"workdays": { "2026-09-27": {} }}).to_string();
-        let (h, w) = parse_data(&no_holidays).unwrap();
-        assert!(h.is_empty());
-        assert_eq!(w, HashSet::from(["2026-09-27".to_string()]));
+        let no_holidays = serde_json::json!({"workdays": { "2026-09-27": "National Day,国庆节,3" }}).to_string();
+        let d = parse_data(&no_holidays).unwrap();
+        assert!(d.holidays.is_empty());
+        assert_eq!(d.workdays, HashSet::from(["2026-09-27".to_string()]));
 
-        let no_workdays = serde_json::json!({"holidays": { "2026-10-01": {} }}).to_string();
-        let (h, w) = parse_data(&no_workdays).unwrap();
-        assert_eq!(h, HashSet::from(["2026-10-01".to_string()]));
-        assert!(w.is_empty());
+        let no_workdays = serde_json::json!({"holidays": { "2026-10-01": "National Day,国庆节,3" }}).to_string();
+        let d = parse_data(&no_workdays).unwrap();
+        assert_eq!(d.holidays, HashSet::from(["2026-10-01".to_string()]));
+        assert!(d.workdays.is_empty());
+    }
+
+    #[test]
+    fn parse_data_keeps_dates_whose_name_is_malformed() {
+        // 值段格式异常时日期仍计入集合,仅缺失名称
+        let raw = serde_json::json!({"holidays": { "2026-10-01": {} }}).to_string();
+        let d = parse_data(&raw).unwrap();
+        assert_eq!(d.holidays, HashSet::from(["2026-10-01".to_string()]));
+        assert!(d.holiday_names.is_empty());
     }
 
     #[test]
@@ -376,7 +474,7 @@ mod tests {
         write_cache(&path, &body);
 
         let raw = std::fs::read_to_string(&path).unwrap();
-        let ((holidays, workdays), ts) = parse_cache(&raw).expect("应解析刚刚写入的包络");
+        let (data, ts) = parse_cache(&raw).expect("应解析刚刚写入的包络");
         // 时间戳应接近现在(±10 秒)
         let now = Utc::now().timestamp();
         assert!(
@@ -384,10 +482,10 @@ mod tests {
             "downloaded_at 应为当前时刻(now={now}, ts={ts})"
         );
         assert_eq!(
-            holidays,
+            data.holidays,
             HashSet::from(["2026-10-01".to_string(), "2026-10-02".to_string()])
         );
-        assert_eq!(workdays, HashSet::from(["2026-09-27".to_string()]));
+        assert_eq!(data.workdays, HashSet::from(["2026-09-27".to_string()]));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -408,7 +506,7 @@ mod tests {
             ("just_inside", make(just_inside), true),
             ("just_outside", make(just_outside), false),
         ] {
-            let ((_, _), ts) = parse_cache(&raw).unwrap();
+            let (_data, ts) = parse_cache(&raw).unwrap();
             let age = Utc::now().timestamp().saturating_sub(ts);
             assert_eq!(
                 age < CACHE_TTL_SECS,

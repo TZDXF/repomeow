@@ -522,8 +522,6 @@ export default {
         churnTrend: "代码变更趋势(按提交)",
         churnCell: "+{adds} / −{dels} 行",
         churnNet: "净变更:{net} 行",
-        churnUp: "净新增",
-        churnDown: "净减少",
         churnTotalLine: "累计净变更:{total} 行",
         authorsTitle: "提交者排行",
         authorsCommits: "{count} 次提交",

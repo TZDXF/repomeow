@@ -15,9 +15,10 @@ const props = defineProps<{
 const { t } = useI18n();
 const { themeStamp } = useChartTheme();
 
-/** 阳线(净新增)/阴线(净减少)配色,沿用旧版 emerald/rose 语义 */
+/** 阳线(净新增)/阴线(净减少)配色,沿用旧版 emerald/rose 语义;累计线用 indigo 与红绿区分 */
 const UP_COLOR = "#10b981";
 const DOWN_COLOR = "#f43f5e";
+const LINE_COLOR = "#6366f1";
 
 /** 数据量大时 dataZoom 默认窗口只展示最近的蜡烛数(滚轮缩放/拖动平移查看更早) */
 const DEFAULT_VISIBLE_CANDLES = 200;
@@ -152,6 +153,18 @@ const option = computed<EChartsCoreOption>(() => {
           borderColor0: DOWN_COLOR,
         },
       },
+      {
+        // 累计净变更折线:连接每根蜡烛收盘价,与 K 线同刻度;
+        // 缩放很小时蜡烛挤在一起看不清,折线承担走势总览
+        type: "line",
+        data: candles.map((k) => [k.t, k.close]),
+        showSymbol: false,
+        lineStyle: { color: LINE_COLOR, width: 1.5 },
+        itemStyle: { color: LINE_COLOR },
+        // 数据量大时按像素抽样,走势不变、渲染更快
+        sampling: "lttb",
+        emphasis: { disabled: true },
+      },
     ],
   };
 });
@@ -161,16 +174,6 @@ const option = computed<EChartsCoreOption>(() => {
   <template v-if="commits.length">
     <div class="h-48">
       <EChart :option="option" />
-    </div>
-    <div class="mt-2 flex items-center justify-end gap-3 text-[10px] text-muted-foreground">
-      <span class="flex items-center gap-1">
-        <span class="h-2.5 w-2.5 rounded-[2px]" :style="{ backgroundColor: UP_COLOR }" />
-        {{ t("git.graph.analysis.churnUp") }}
-      </span>
-      <span class="flex items-center gap-1">
-        <span class="h-2.5 w-2.5 rounded-[2px]" :style="{ backgroundColor: DOWN_COLOR }" />
-        {{ t("git.graph.analysis.churnDown") }}
-      </span>
     </div>
   </template>
   <p v-else class="py-6 text-center text-xs text-muted-foreground">

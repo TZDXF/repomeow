@@ -289,13 +289,32 @@ mod tests {
         // 2026-07-05: 1 份周报
         insert_report(&conn, &[p], "2026-06-29", "2026-07-05", "weekly", 2);
         // 2026-07-10: 0 份,不应出现在 map 中
-        // 2026-07-15: 1 份日报
+        // 2026-07-15: 1 份日报 + 1 份周报(混合日)
         insert_report(&conn, &[p], "2026-07-15", "2026-07-15", "daily", 1);
+        insert_report(&conn, &[p], "2026-07-09", "2026-07-15", "weekly", 1);
         // 7 月范围:2026-07-01 ~ 2026-07-31
         let dates = get_calendar_meta_impl(&conn, 2026, 7, &[], &[], &None).unwrap();
-        assert_eq!(dates.get("2026-07-01").copied(), Some(2));
-        assert_eq!(dates.get("2026-07-05").copied(), Some(1));
-        assert_eq!(dates.get("2026-07-15").copied(), Some(1));
+        assert_eq!(
+            dates.get("2026-07-01"),
+            Some(&CalendarDayReports {
+                daily: 2,
+                weekly: 0
+            })
+        );
+        assert_eq!(
+            dates.get("2026-07-05"),
+            Some(&CalendarDayReports {
+                daily: 0,
+                weekly: 1
+            })
+        );
+        assert_eq!(
+            dates.get("2026-07-15"),
+            Some(&CalendarDayReports {
+                daily: 1,
+                weekly: 1
+            })
+        );
         assert!(!dates.contains_key("2026-07-10"));
     }
 
@@ -307,11 +326,29 @@ mod tests {
         insert_report(&conn, &[p1], "2026-07-01", "2026-07-01", "daily", 1);
         insert_report(&conn, &[p2], "2026-07-01", "2026-07-01", "daily", 1);
         let only_p1 = get_calendar_meta_impl(&conn, 2026, 7, &[p1], &[], &None).unwrap();
-        assert_eq!(only_p1.get("2026-07-01").copied(), Some(1));
+        assert_eq!(
+            only_p1.get("2026-07-01"),
+            Some(&CalendarDayReports {
+                daily: 1,
+                weekly: 0
+            })
+        );
         let only_p2 = get_calendar_meta_impl(&conn, 2026, 7, &[p2], &[], &None).unwrap();
-        assert_eq!(only_p2.get("2026-07-01").copied(), Some(1));
+        assert_eq!(
+            only_p2.get("2026-07-01"),
+            Some(&CalendarDayReports {
+                daily: 1,
+                weekly: 0
+            })
+        );
         let both = get_calendar_meta_impl(&conn, 2026, 7, &[p1, p2], &[], &None).unwrap();
-        assert_eq!(both.get("2026-07-01").copied(), Some(2));
+        assert_eq!(
+            both.get("2026-07-01"),
+            Some(&CalendarDayReports {
+                daily: 2,
+                weekly: 0
+            })
+        );
     }
 
     #[test]
@@ -332,12 +369,16 @@ mod tests {
 
         let dates = get_calendar_meta_impl(&conn, 2026, 7, &[], &[], &None).unwrap();
 
+        let one_daily = CalendarDayReports {
+            daily: 1,
+            weekly: 0,
+        };
         // 前月填充日
-        assert_eq!(dates.get("2026-06-29").copied(), Some(1));
+        assert_eq!(dates.get("2026-06-29"), Some(&one_daily));
         // 当月内对照点
-        assert_eq!(dates.get("2026-07-15").copied(), Some(1));
+        assert_eq!(dates.get("2026-07-15"), Some(&one_daily));
         // 下月填充日
-        assert_eq!(dates.get("2026-08-04").copied(), Some(1));
+        assert_eq!(dates.get("2026-08-04"), Some(&one_daily));
         // 超出网格末尾的日期不应出现
         assert!(!dates.contains_key("2026-08-10"));
     }
@@ -350,11 +391,23 @@ mod tests {
         insert_report(&conn, &[p], "2026-06-29", "2026-07-05", "weekly", 1);
         let only_daily =
             get_calendar_meta_impl(&conn, 2026, 7, &[], &[], &Some("daily".into())).unwrap();
-        assert_eq!(only_daily.get("2026-07-01").copied(), Some(1));
+        assert_eq!(
+            only_daily.get("2026-07-01"),
+            Some(&CalendarDayReports {
+                daily: 1,
+                weekly: 0
+            })
+        );
         assert!(!only_daily.contains_key("2026-07-05"));
         let only_weekly =
             get_calendar_meta_impl(&conn, 2026, 7, &[], &[], &Some("weekly".into())).unwrap();
-        assert_eq!(only_weekly.get("2026-07-05").copied(), Some(1));
+        assert_eq!(
+            only_weekly.get("2026-07-05"),
+            Some(&CalendarDayReports {
+                daily: 0,
+                weekly: 1
+            })
+        );
         assert!(!only_weekly.contains_key("2026-07-01"));
     }
 
