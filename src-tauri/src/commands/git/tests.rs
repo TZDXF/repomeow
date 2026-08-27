@@ -1838,6 +1838,25 @@ fn project_stats_aggregates_history_churn_and_file_types() {
     );
     let adds: u64 = stats.by_day.iter().map(|d| d.additions).sum();
     assert_eq!(adds, stats.total_additions);
+    // 逐提交 churn:合并提交不进明细,合计与总数一致,按时间升序
+    assert_eq!(stats.churn_commits.len(), 3);
+    let adds: u64 = stats.churn_commits.iter().map(|c| c.additions).sum();
+    let dels: u64 = stats.churn_commits.iter().map(|c| c.deletions).sum();
+    assert_eq!((adds, dels), (stats.total_additions, stats.total_deletions));
+    assert!(
+        stats
+            .churn_commits
+            .windows(2)
+            .all(|w| w[0].t <= w[1].t)
+    );
+    assert!(stats.churn_commits.iter().all(|c| c.short_id.len() == 7));
+    let mut subjects: Vec<&str> = stats
+        .churn_commits
+        .iter()
+        .map(|c| c.subject.as_str())
+        .collect();
+    subjects.sort_unstable();
+    assert_eq!(subjects, ["feature", "init", "main work"]);
     // HEAD 树文件类型:a.txt / b.txt 归 "txt"
     let txt = stats
         .file_types

@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::models::GitCommitChurn;
+
 use std::collections::BTreeMap;
 
 use git2::{ObjectType, TreeWalkResult};
@@ -135,6 +137,8 @@ struct StatsAccumulator {
     weekday_hour: [u32; 168],
     /// key = 本地日桶,BTreeMap 保证输出按日升序
     by_day: BTreeMap<i64, DayAcc>,
+    /// 逐提交 churn 明细(仅非合并提交,随 churn 上限一同截断);revwalk 新→旧,finish 时按时间排序
+    churn_commits: Vec<GitCommitChurn>,
     file_types: HashMap<String, (u64, u64)>,
 }
 
@@ -152,6 +156,7 @@ impl Default for StatsAccumulator {
             authors: HashMap::new(),
             weekday_hour: [0; 168],
             by_day: BTreeMap::new(),
+            churn_commits: Vec::new(),
             file_types: HashMap::new(),
         }
     }
@@ -208,6 +213,20 @@ impl StatsAccumulator {
         author_acc.deletions += deletions;
         self.total_additions += additions;
         self.total_deletions += deletions;
+        let mut short_id = commit.id().to_string();
+        short_id.truncate(7);
+        self.churn_commits.push(GitCommitChurn {
+            t: ts,
+            short_id,
+            subject: commit
+                .summary()
+                .unwrap_or_default()
+                .chars()
+                .take(80)
+                .collect(),
+            additions,
+            deletions,
+        });
     }
 
     /// HEAD 树的文件类型分布:仅统计 blob(symlink/submodule 跳过)
@@ -269,6 +288,10 @@ impl StatsAccumulator {
             })
             .collect::<Vec<_>>();
 
+        // revwalk 新→旧,前端 K 线按时间轴渲染需要升序;稳定排序保持同刻提交的拓扑序
+        let mut churn_commits = self.churn_commits;
+        churn_commits.sort_by_key(|c| c.t);
+
         GitProjectStats {
             total_commits: self.total_commits,
             merge_commits: self.merge_commits,
@@ -278,6 +301,7 @@ impl StatsAccumulator {
             total_additions: self.total_additions,
             total_deletions: self.total_deletions,
             churn_truncated: self.churn_truncated,
+            churn_commits,
             authors,
             weekday_hour: self.weekday_hour.to_vec(),
             by_day,

@@ -39,7 +39,7 @@ function cellTitle(weekday: number, hour: number): string {
 
 <template>
   <div class="overflow-x-auto pb-1">
-    <div class="w-max">
+    <div class="mx-auto w-max">
       <!-- 小时刻度行:与格子列对齐(星期标签列宽 48px + 间距 3px) -->
       <div class="flex gap-[3px] pl-[51px]">
         <span

@@ -4,22 +4,23 @@ import { useI18n } from "vue-i18n";
 import type { EChartsCoreOption } from "echarts/core";
 import EChart from "@/components/common/EChart.vue";
 import { useChartTheme } from "@/composables/useChartTheme";
-import { buildChurnCandles } from "@/lib/git-stats";
-import type { GitDayStat } from "@/types";
+import { formatLocalDateTime } from "@/lib/format";
+import type { GitCommitChurn } from "@/types";
 
 const props = defineProps<{
-  byDay: GitDayStat[];
+  /** 逐提交增删行(仅非合并提交),按 committer 时间升序 */
+  commits: GitCommitChurn[];
 }>();
 
 const { t } = useI18n();
 const { themeStamp } = useChartTheme();
 
-/** 最近一年按周聚合的 K 线蜡烛:实体 0~净变更,影线 −deletions~additions */
-const candles = computed(() => buildChurnCandles(props.byDay));
-
 /** 阳线(净新增)/阴线(净减少)配色,沿用旧版 emerald/rose 语义 */
 const UP_COLOR = "#10b981";
 const DOWN_COLOR = "#f43f5e";
+
+/** 数据量大时 dataZoom 默认窗口只展示最近的蜡烛数(滚轮缩放/拖动平移查看更早) */
+const DEFAULT_VISIBLE_CANDLES = 200;
 
 /**
  * 读根节点主题 CSS 变量并归一化为 rgb/#hex。
@@ -32,6 +33,15 @@ function resolveCssColor(name: string, fallback: string): string {
   if (!ctx) return fallback;
   ctx.fillStyle = raw;
   return ctx.fillStyle;
+}
+
+/** tooltip 是 HTML 渲染,提交信息首行必须转义 */
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 /** 带符号行数:+120 / −80(负号与 churnCell 一致用 U+2212) */
@@ -52,10 +62,24 @@ const option = computed<EChartsCoreOption>(() => {
   void themeStamp.value;
   const axisColor = resolveCssColor("--muted-foreground", "#888888");
   const borderColor = resolveCssColor("--border", "#e5e5e5");
-  const list = candles.value;
+  const list = props.commits;
+  const len = list.length;
+  const startPercent =
+    len > DEFAULT_VISIBLE_CANDLES ? (1 - DEFAULT_VISIBLE_CANDLES / len) * 100 : 0;
+  // 金融 K 线形态:open 接上一根 close(累计净变更),蜡烛沿代码量走势起伏;
+  // 影线 = 本次新增推高(+additions)/删除下探(−deletions)的位置
+  let prev = 0;
+  const candles = list.map((c) => {
+    const open = prev;
+    const close = prev + c.additions - c.deletions;
+    const k = { t: c.t * 1000, open, close, low: prev - c.deletions, high: prev + c.additions };
+    prev = close;
+    return k;
+  });
   return {
     animationDuration: 300,
-    grid: { left: 4, right: 8, top: 12, bottom: 0, containLabel: true },
+    // 底部留出 dataZoom 滑条的位置
+    grid: { left: 4, right: 8, top: 12, bottom: 22, containLabel: true },
     tooltip: {
       trigger: "axis",
       axisPointer: { type: "cross", label: { show: false } },
@@ -66,20 +90,24 @@ const option = computed<EChartsCoreOption>(() => {
         const first = (Array.isArray(params) ? params[0] : params) as
           | { dataIndex?: number }
           | undefined;
-        const c = typeof first?.dataIndex === "number" ? list[first.dataIndex] : undefined;
-        if (!c) return "";
+        const idx = typeof first?.dataIndex === "number" ? first.dataIndex : -1;
+        const c = list[idx];
+        const k = candles[idx];
+        if (!c || !k) return "";
+        const net = c.additions - c.deletions;
         return [
-          t("git.graph.analysis.churnCell", { week: c.day, adds: c.additions, dels: c.deletions }),
-          t("git.graph.analysis.churnNet", { net: signed(c.close) }),
-        ].join("<br/>");
+          `<div style="font-weight:600;max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(c.subject)} <span style="opacity:.55;font-weight:400">#${c.shortId}</span></div>`,
+          `<div style="opacity:.75">${formatLocalDateTime(c.t)}</div>`,
+          `<div>${t("git.graph.analysis.churnCell", { adds: c.additions, dels: c.deletions })} · ${t("git.graph.analysis.churnNet", { net: signed(net) })}</div>`,
+          `<div style="opacity:.75">${t("git.graph.analysis.churnTotalLine", { total: signed(k.close) })}</div>`,
+        ].join("");
       },
     },
     xAxis: {
-      type: "category",
-      data: list.map((c) => c.day),
+      type: "time",
       axisTick: { show: false },
       axisLine: { lineStyle: { color: borderColor } },
-      axisLabel: { color: axisColor, hideOverlap: true, formatter: (v: string) => v.slice(5) },
+      axisLabel: { color: axisColor, hideOverlap: true },
     },
     yAxis: {
       type: "value",
@@ -87,10 +115,35 @@ const option = computed<EChartsCoreOption>(() => {
       axisLabel: { color: axisColor, formatter: (v: number) => abbrev(v) },
       splitLine: { lineStyle: { color: borderColor } },
     },
+    dataZoom: [
+      { type: "inside", start: startPercent, end: 100 },
+      {
+        type: "slider",
+        start: startPercent,
+        end: 100,
+        height: 14,
+        bottom: 2,
+        borderColor: "transparent",
+        backgroundColor: "transparent",
+        fillerColor: "rgba(128,128,128,0.15)",
+        handleStyle: { color: axisColor },
+        moveHandleStyle: { color: axisColor },
+        dataBackground: {
+          lineStyle: { color: axisColor },
+          areaStyle: { color: axisColor, opacity: 0.1 },
+        },
+        selectedDataBackground: {
+          lineStyle: { color: axisColor },
+          areaStyle: { color: axisColor, opacity: 0.2 },
+        },
+        textStyle: { color: axisColor },
+      },
+    ],
     series: [
       {
         type: "candlestick",
-        data: list.map((c) => [c.open, c.close, c.low, c.high]),
+        // [时刻, open, close, low, high]:实体为前后两次提交的累计净变更,影线覆盖删除下探~新增推高
+        data: candles.map((k) => [k.t, k.open, k.close, k.low, k.high]),
         barMaxWidth: 12,
         itemStyle: {
           color: UP_COLOR,
@@ -105,8 +158,8 @@ const option = computed<EChartsCoreOption>(() => {
 </script>
 
 <template>
-  <template v-if="candles.length">
-    <div class="h-40">
+  <template v-if="commits.length">
+    <div class="h-48">
       <EChart :option="option" />
     </div>
     <div class="mt-2 flex items-center justify-end gap-3 text-[10px] text-muted-foreground">

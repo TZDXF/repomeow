@@ -281,8 +281,8 @@ pub(crate) fn find_wt() -> Option<String> {
 
 /// 构造 wt 参数:`wt --title "<title>" -d "<path>" [<shell> <args...>]`
 /// 不带命令时 cmd 分支由 wt 打开默认配置文件的 shell,其余分支显式启动所选 shell;
-/// 带命令时按 shell 包装(cmd /k、powershell -NoExit -EncodedCommand、bash -c '...; exec bash'),
-/// 跑完窗口保留
+/// 带命令时按 shell 包装(cmd /k、powershell -NoExit -EncodedCommand、
+/// bash -c 经 encode_bash_command 编码),跑完窗口保留
 #[cfg(windows)]
 fn build_wt_args(
     path: &str,
@@ -320,13 +320,28 @@ fn build_wt_args(
                     "--login".into(),
                     "-i".into(),
                     "-c".into(),
-                    format!("{c}; exec bash"),
+                    encode_bash_command(c),
                 ]),
                 None => args.extend(["--login".into(), "-i".into()]),
             }
         }
     }
     args
+}
+
+/// Git Bash 命令在 wt 命令行下的安全包装:wt 把命令行中的 `;` 一律视为子命令
+/// 分隔符(引号内也不豁免),且其分词器不识别 `\"` 转义——`-c` 负载中内嵌的
+/// 双引号会把参数切碎。与 PowerShell 的 -EncodedCommand 同理,把完整负载
+/// (用户命令 + 保活的 exec bash)base64 编码,由 bash 启动后经进程替代解码执行:
+/// `source <(echo <b64> | base64 -d)`。base64 字母表不含 wt 的任何特殊字符,
+/// 负载内不出现 `;` 与双引号;source 直接按脚本语法解析解码结果,不经分词/glob,
+/// 命令里的字符串字面量原样保留。
+#[cfg(windows)]
+fn encode_bash_command(command: &str) -> String {
+    use base64::Engine as _;
+    let payload = format!("{command}; exec bash");
+    let b64 = base64::engine::general_purpose::STANDARD.encode(payload);
+    format!("source <(echo {b64} | base64 -d)")
 }
 
 /// PowerShell 命令编码:脚本整体转 UTF-16LE 后 base64,配合 -EncodedCommand 使用,
@@ -871,29 +886,37 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn wt_args_gitbash_keeps_window_with_exec_bash() {
+    fn wt_args_gitbash_encodes_command_to_hide_semicolons_from_wt() {
+        use base64::Engine as _;
         let bash = r"C:\Program Files\Git\bin\bash.exe";
+        let tools = ShellTools {
+            bash: Some(bash),
+            ps: "powershell",
+        };
         let args = build_wt_args(
             r"D:\code\foo",
             "t",
             Some("npm run dev"),
             ShellKind::GitBash,
-            ShellTools {
-                bash: Some(bash),
-                ps: "powershell",
-            },
+            tools,
         );
-        assert_eq!(
-            args[4..],
-            [bash, "--login", "-i", "-c", "npm run dev; exec bash"]
-        );
-        let args = build_wt_args(r"D:\p", "t", None,
-            ShellKind::GitBash,
-            ShellTools {
-                bash: Some(bash),
-                ps: "powershell",
-            },
-        );
+        assert_eq!(args[4..8], [bash, "--login", "-i", "-c"]);
+        // wt 可见的命令行中不允许出现 `;` 与内层双引号(wt 会把 `;` 当子命令
+        // 分隔符拆成多个标签页,且其分词器不识别 `\"` 转义)
+        let c_arg = &args[8];
+        assert!(!c_arg.contains(';'));
+        assert!(!c_arg.contains('"'));
+        // 负载是 base64 编码的「用户命令 + 保活 exec bash」,由 bash 解码执行
+        let b64 = c_arg
+            .strip_prefix("source <(echo ")
+            .and_then(|s| s.strip_suffix(" | base64 -d)"))
+            .unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .unwrap();
+        assert_eq!(String::from_utf8(decoded).unwrap(), "npm run dev; exec bash");
+        // 不带命令时仅开交互式 bash,无需编码
+        let args = build_wt_args(r"D:\p", "t", None, ShellKind::GitBash, tools);
         assert_eq!(args[4..], [bash, "--login", "-i"]);
     }
 
@@ -1049,5 +1072,33 @@ mod tests {
     #[test]
     fn find_wt_does_not_panic() {
         let _wt = find_wt();
+    }
+
+    /// 手动验证用(会真实弹出 wt 窗口):走与 spawn_terminal 相同的参数构造,
+    /// 在 git bash 中执行含 `;` 的多行命令并写 marker 文件,验证 wt 不再拆分
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "manual: opens a real Windows Terminal window"]
+    fn manual_wt_gitbash_multiline_command() {
+        let bash = find_git_bash().expect("git bash not found");
+        let tools = ShellTools {
+            bash: Some(&bash),
+            ps: "powershell",
+        };
+        let command = flatten_multiline(
+            Some("echo hello-from-wt\necho wt-b64-ok > /d/code/project-dev/.wt_b64_marker"),
+            ShellKind::GitBash.separator(),
+        );
+        let args = build_wt_args(
+            r"D:\code\project-dev",
+            "wt-b64-manual",
+            command.as_deref(),
+            ShellKind::GitBash,
+            tools,
+        );
+        Command::new(find_wt().expect("wt not found"))
+            .args(args)
+            .spawn()
+            .unwrap();
     }
 }

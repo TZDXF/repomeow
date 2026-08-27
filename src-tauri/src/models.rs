@@ -191,6 +191,8 @@ pub struct GitProjectStats {
     pub total_deletions: u64,
     /// 提交数超过 churn 统计上限时为 true:增删行只覆盖最近一部分提交
     pub churn_truncated: bool,
+    /// 逐提交增删行(仅非合并提交,受 churn 上限约束),按 committer 时间升序
+    pub churn_commits: Vec<GitCommitChurn>,
     /// 按提交数降序
     pub authors: Vec<GitAuthorStat>,
     /// 7*24 行主序:行 = 周一..周日,列 = 0..23 时(提交者本地时间)
@@ -222,6 +224,20 @@ pub struct GitAuthorStat {
 pub struct GitDayStat {
     pub t: i64,
     pub count: u32,
+    pub additions: u64,
+    pub deletions: u64,
+}
+
+/// 单次非合并提交的增删行(代码变更趋势逐提交 K 线的数据点)
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitChurn {
+    /// committer 时间(Unix 秒,真实时刻;与 by_day 仅作日历标识的 t 不同)
+    pub t: i64,
+    /// 短 hash(前 7 位)
+    pub short_id: String,
+    /// 提交信息首行(截断 80 字符)
+    pub subject: String,
     pub additions: u64,
     pub deletions: u64,
 }

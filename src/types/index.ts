@@ -213,6 +213,18 @@ export interface GitDayStat {
   deletions: number;
 }
 
+/** 单次非合并提交的增删行(代码变更趋势逐提交 K 线的数据点) */
+export interface GitCommitChurn {
+  /** committer 时间(Unix 秒,真实时刻;与 GitDayStat 仅作日历标识的 t 不同) */
+  t: number;
+  /** 短 hash(前 7 位) */
+  shortId: string;
+  /** 提交信息首行(截断 80 字符) */
+  subject: string;
+  additions: number;
+  deletions: number;
+}
+
 /** HEAD 树上一种扩展名的文件分布 */
 export interface GitFileTypeStat {
   /** 小写扩展名(不含点);无扩展名的清单文件按文件名(如 dockerfile),其余进 "(other)" */
@@ -235,6 +247,8 @@ export interface GitProjectStats {
   totalDeletions: number;
   /** true 时增删行只覆盖最近一部分提交(提交数超过 churn 统计上限) */
   churnTruncated: boolean;
+  /** 逐提交增删行(仅非合并提交,受 churn 上限约束),按 committer 时间升序 */
+  churnCommits: GitCommitChurn[];
   /** 按提交数降序 */
   authors: GitAuthorStat[];
   /** 7*24 行主序:行 = 周一..周日,列 = 0..23 时(提交者本地时间) */

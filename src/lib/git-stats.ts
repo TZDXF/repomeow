@@ -1,6 +1,6 @@
 /** 提交统计(git_project_stats)的前端聚合与图表数据构建 */
 import { formatDate } from "@/lib/format";
-import type { GitDayStat } from "@/types";
+import type { GitDayStat, GitFileTypeStat } from "@/types";
 
 /** 提交日历热力图周列数:53 周 ≈ 最近 12 个月(GitHub 贡献图一整年) */
 export const COMMIT_CALENDAR_WEEKS = 53;
@@ -117,39 +117,73 @@ export function aggregateWeeks(byDay: GitDayStat[], limit = TREND_WEEKS): GitWee
   return [...weeks.values()].sort((a, b) => a.day.localeCompare(b.day)).slice(-limit);
 }
 
-/** 代码变更 K 线蜡烛:实体为 0~净变更,影线覆盖 −deletions~additions */
-export interface ChurnCandle {
-  /** 周起始日期 YYYY-MM-DD */
+/** 累计提交曲线的一点:t 为该日 UTC 零点刻度(秒),total 为截至当日的累计提交数 */
+export interface CumulativePoint {
+  t: number;
+  /** 日期 YYYY-MM-DD(tooltip 展示用) */
   day: string;
-  /** 开盘,恒为 0(变更从零点出发) */
-  open: number;
-  /** 收盘,净变更 = additions − deletions */
-  close: number;
-  /** 影线最低 = −deletions */
-  low: number;
-  /** 影线最高 = additions */
-  high: number;
-  additions: number;
-  deletions: number;
+  total: number;
 }
 
-/** 按日聚合 → 每周一根 K 线蜡烛(净新增为阳线,净减少为阴线),按周升序取最近 limit 周 */
-export function buildChurnCandles(byDay: GitDayStat[], limit = TREND_WEEKS): ChurnCandle[] {
-  return aggregateWeeks(byDay, limit).map((w) => ({
-    day: w.day,
-    open: 0,
-    close: w.additions - w.deletions,
-    low: -w.deletions,
-    high: w.additions,
-    additions: w.additions,
-    deletions: w.deletions,
-  }));
+/**
+ * 按日聚合 → 全历史累计提交曲线,按日升序逐点累加。
+ * 依赖 byDay 契约(全历史、按日升序、只含有提交的日子);不做时间窗口截断,
+ * 曲线覆盖项目从首次提交至今的完整增长走势
+ */
+export function buildCumulativeCommits(byDay: GitDayStat[]): CumulativePoint[] {
+  let total = 0;
+  return byDay.map((d) => {
+    total += d.count;
+    return { t: d.t, day: dayKeyOf(d.t), total };
+  });
 }
 
 /** Top N + 其余归并为一项(merge 由调用方求和);不足 N 项时原样返回 */
 export function topWithOther<T>(items: T[], limit: number, merge: (rest: T[]) => T): T[] {
   if (items.length <= limit) return items;
   return [...items.slice(0, limit), merge(items.slice(limit))];
+}
+
+/**
+ * 语言类文件扩展名(小写,不含点),对标 GitHub 语言条的 Linguist 口径:
+ * 仅编程/脚本/查询/标记语言;图片、字体、音视频、压缩包、二进制产物与
+ * 配置/数据文件(json/yaml/toml/xml/lock/csv 等)一律不计
+ */
+const LANGUAGE_EXTS: ReadonlySet<string> = new Set([
+  // 主流编程语言
+  "rs", "go", "py", "pyw", "pyi", "java", "kt", "kts", "scala", "groovy", "gradle",
+  "c", "h", "cc", "cpp", "cxx", "c++", "hpp", "hh", "hxx", "inl", "cu", "cuh",
+  "cs", "csx", "vb", "vbs", "fs", "fsi", "fsx", "m", "mm", "swift",
+  "js", "mjs", "cjs", "jsx", "ts", "mts", "cts", "tsx", "coffee",
+  "vue", "svelte", "astro", "rb", "erb", "php", "phtml", "dart", "lua",
+  "pl", "pm", "r", "jl", "ex", "exs", "erl", "hrl", "clj", "cljs", "cljc",
+  "hs", "lhs", "ml", "mli", "nim", "zig", "d", "pas", "f", "f90", "f95", "f03",
+  "cob", "cbl", "asm", "s", "v", "sv", "vhd", "vhdl", "sol", "move", "wat",
+  "elm", "purs", "rkt", "scm", "lisp", "lsp", "el", "hx", "vala", "cr",
+  "odin", "gleam", "mojo", "adb", "ads", "awk", "tcl", "applescript", "vim",
+  // 脚本 / Shell / 构建
+  "sh", "bash", "zsh", "fish", "ksh", "bat", "cmd", "ps1", "psm1", "psd1", "cmake",
+  // 查询 / 接口描述 / 基础设施即代码
+  "sql", "graphql", "gql", "proto", "tf", "hcl", "nix",
+  // 着色器
+  "glsl", "vert", "frag", "geom", "comp", "wgsl", "hlsl",
+  // 笔记本 / 排版
+  "ipynb", "tex", "sty", "cls", "bib", "rmd",
+  // 标记 / 模板 / 样式(GitHub 语言条同样计入 HTML/CSS/Markdown)
+  "html", "htm", "xhtml", "css", "scss", "sass", "less", "styl",
+  "md", "markdown", "mdx", "rst", "adoc", "asciidoc", "org",
+  "ejs", "hbs", "handlebars", "mustache", "twig", "njk", "liquid", "pug", "jade",
+  // 无扩展名的脚本类清单文件(与后端 SPECIAL_FILENAMES 对应)
+  "dockerfile", "makefile", "jenkinsfile", "vagrantfile", "gemfile", "rakefile",
+  "podfile", "justfile",
+]);
+
+/**
+ * 文件类型分布 → 仅保留语言类(对标 GitHub 语言条),
+ * 未知扩展名与后端的 "(other)" 归并键一并排除;保持后端返回的字节降序
+ */
+export function filterLanguageFileTypes(fileTypes: GitFileTypeStat[]): GitFileTypeStat[] {
+  return fileTypes.filter((f) => LANGUAGE_EXTS.has(f.ext));
 }
 
 /** 作息热力图取值:weekdayHour 为 7*24 行主序(行 = 周一..周日) */

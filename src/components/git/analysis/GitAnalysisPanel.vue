@@ -8,11 +8,11 @@ import type { GitProjectStats } from "@/types";
 import AnalysisCard from "./AnalysisCard.vue";
 import AnalysisSummaryCards from "./AnalysisSummaryCards.vue";
 import AuthorStatsList from "./AuthorStatsList.vue";
+import ChurnCandleChart from "./ChurnCandleChart.vue";
 import CommitCalendarHeatmap from "./CommitCalendarHeatmap.vue";
+import CumulativeCommitsChart from "./CumulativeCommitsChart.vue";
 import FileTypeStats from "./FileTypeStats.vue";
 import WeekdayHourHeatmap from "./WeekdayHourHeatmap.vue";
-import WeeklyChurnChart from "./WeeklyChurnChart.vue";
-import WeeklyTrendChart from "./WeeklyTrendChart.vue";
 
 const props = defineProps<{
   /** 项目路径(分析对象) */
@@ -98,8 +98,8 @@ const churnHint = computed(() =>
         <AnalysisCard :title="t('git.graph.analysis.weekdayHour')">
           <WeekdayHourHeatmap :weekday-hour="stats.weekdayHour" />
         </AnalysisCard>
-        <AnalysisCard :title="t('git.graph.analysis.trend')">
-          <WeeklyTrendChart :by-day="stats.byDay" />
+        <AnalysisCard :title="t('git.graph.analysis.cumulative')">
+          <CumulativeCommitsChart :by-day="stats.byDay" />
         </AnalysisCard>
       </div>
 
@@ -108,12 +108,12 @@ const churnHint = computed(() =>
           <AuthorStatsList :authors="stats.authors" />
         </AnalysisCard>
         <AnalysisCard :title="t('git.graph.analysis.fileTypes')">
-          <FileTypeStats :file-types="stats.fileTypes" :total-bytes="stats.totalBytes" />
+          <FileTypeStats :file-types="stats.fileTypes" />
         </AnalysisCard>
       </div>
 
       <AnalysisCard :title="t('git.graph.analysis.churnTrend')" :hint="churnHint">
-        <WeeklyChurnChart :by-day="stats.byDay" />
+        <ChurnCandleChart :commits="stats.churnCommits" />
       </AnalysisCard>
     </div>
   </div>

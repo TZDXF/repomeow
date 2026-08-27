@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateWeeks,
-  buildChurnCandles,
   buildCommitCalendar,
+  buildCumulativeCommits,
   COMMIT_CALENDAR_WEEKS,
   dayKeyOf,
   heatLevel,
@@ -98,21 +98,22 @@ describe("aggregateWeeks", () => {
   });
 });
 
-describe("buildChurnCandles", () => {
-  it("每周一根蜡烛:实体 0~净变更,影线 −deletions~additions", () => {
-    const candles = buildChurnCandles([
-      day("2026-08-24", 1, 100, 30), // 周一
-      day("2026-08-26", 1, 20, 40), // 同周,合计 120 增 70 删,净 +50
-      day("2026-08-31", 1, 10, 80), // 下一周,净 −70
+describe("buildCumulativeCommits", () => {
+  it("按日升序逐点累加,保留日期与原时刻", () => {
+    const points = buildCumulativeCommits([
+      day("2026-08-24", 3),
+      day("2026-08-26", 2),
+      day("2026-09-01", 5),
     ]);
-    expect(candles).toEqual([
-      { day: "2026-08-24", open: 0, close: 50, low: -70, high: 120, additions: 120, deletions: 70 },
-      { day: "2026-08-31", open: 0, close: -70, low: -80, high: 10, additions: 10, deletions: 80 },
+    expect(points).toEqual([
+      { t: Date.parse("2026-08-24T00:00:00Z") / 1000, day: "2026-08-24", total: 3 },
+      { t: Date.parse("2026-08-26T00:00:00Z") / 1000, day: "2026-08-26", total: 5 },
+      { t: Date.parse("2026-09-01T00:00:00Z") / 1000, day: "2026-09-01", total: 10 },
     ]);
   });
 
   it("空输入返回空数组", () => {
-    expect(buildChurnCandles([])).toEqual([]);
+    expect(buildCumulativeCommits([])).toEqual([]);
   });
 });
 
