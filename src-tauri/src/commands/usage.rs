@@ -11,8 +11,12 @@ use crate::error::AppResult;
 use crate::models::{AiUsageDayStat, AiUsageEntry, AiUsageRecord, AiUsageSummary, AiUsageTaskStat};
 use crate::time_util::now_ts;
 
-/// 日志保留期:启动 prune 时清理更早的记录
-const RETENTION_SECS: i64 = 90 * 24 * 60 * 60;
+/// 日志保留期:启动 prune 时清理更早的记录。
+/// 190 天 ≈ 半年热力图窗口(27 周 = 189 天,含周对齐余量)
+const RETENTION_SECS: i64 = 190 * 24 * 60 * 60;
+
+/// 按日聚合返回的最大天数(前端热力图 27 周 = 189 天)
+const BY_DAY_LIMIT: i64 = 190;
 
 /// 明细日志分页单页大小上限(前端「加载更多」按此步进)
 pub const LIST_PAGE_SIZE: i64 = 50;
@@ -111,7 +115,7 @@ fn usage_summary(conn: &Connection) -> AppResult<AiUsageSummary> {
         by_task.push(row?);
     }
 
-    // 按日本机时区分组(SQLite localtime 与 chrono Local 同源系统时区),取最近 30 天倒序
+    // 按日本机时区分组(SQLite localtime 与 chrono Local 同源系统时区),取最近 BY_DAY_LIMIT 天倒序
     let mut by_day = Vec::new();
     let mut stmt = conn.prepare(
         "SELECT date(created_at, 'unixepoch', 'localtime') AS day, COUNT(*),
@@ -122,9 +126,9 @@ fn usage_summary(conn: &Connection) -> AppResult<AiUsageSummary> {
          FROM ai_usage_log
          GROUP BY day
          ORDER BY day DESC
-         LIMIT 30",
+         LIMIT ?1",
     )?;
-    let rows = stmt.query_map([], |r| {
+    let rows = stmt.query_map([BY_DAY_LIMIT], |r| {
         Ok(AiUsageDayStat {
             day: r.get(0)?,
             calls: r.get(1)?,

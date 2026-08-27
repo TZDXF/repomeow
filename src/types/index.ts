@@ -723,7 +723,7 @@ export interface AiUsageTaskStat {
   cachedTokens: number;
 }
 
-/** 按日聚合的一行(day 为本机时区 YYYY-MM-DD,最近 30 天倒序) */
+/** 按日聚合的一行(day 为本机时区 YYYY-MM-DD,最近约半年倒序) */
 export interface AiUsageDayStat {
   day: string;
   calls: number;

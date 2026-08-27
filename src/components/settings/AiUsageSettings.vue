@@ -18,7 +18,8 @@ import {
 import { AI_TASK_TYPES } from "@/lib/ai-usage";
 import { formatCompactNumber, formatLocalDateTime } from "@/lib/format";
 import { cmd } from "@/lib/tauri";
-import type { AiUsageEntry, AiUsageSummary } from "@/types";
+import { buildUsageHeatmap, type UsageHeatCell } from "@/lib/usage-heatmap";
+import type { AiUsageEntry, AiUsageSummary, AiUsageTaskStat } from "@/types";
 
 const { t } = useI18n();
 
@@ -110,19 +111,53 @@ const cells = computed(() => [
   tokenCell(t("settings.usage.totalTokens"), summary.value?.totalTokens ?? null),
 ]);
 
-/** 按日趋势正序排列,高度按当日 tokens 归一化 */
-const dayBars = computed(() => {
-  const days = [...(summary.value?.byDay ?? [])].reverse();
-  const max = Math.max(...days.map((d) => d.totalTokens), 1);
-  return days.map((d) => ({
-    ...d,
-    heightPct: Math.max((d.totalTokens / max) * 100, d.totalTokens > 0 ? 6 : 2),
-  }));
+/** 最近半年热力图(周列 × 周一~周日行;空窗口也照常渲染,保持布局稳定) */
+const heatmap = computed(() => buildUsageHeatmap(summary.value?.byDay ?? []));
+
+const monthLabelByCol = computed(() => {
+  const map = new Map<number, number>();
+  for (const { col, month } of heatmap.value.monthLabels) map.set(col, month);
+  return map;
 });
 
-const maxTaskTokens = computed(() =>
-  Math.max(...(summary.value?.byTask ?? []).map((s) => s.totalTokens), 1),
-);
+/** 强度档对应配色:0 档为空底,1-4 档按 primary 透明度递增(亮暗主题/皮肤自适应) */
+const LEVEL_CLASSES = [
+  "bg-muted",
+  "bg-primary/25",
+  "bg-primary/45",
+  "bg-primary/70",
+  "bg-primary",
+] as const;
+
+function levelClass(level: number): string {
+  return LEVEL_CLASSES[level] ?? LEVEL_CLASSES[0];
+}
+
+/** 星期标签列只在一/三/五行显示文字,其余行占位对齐 */
+function weekdayLabel(row: number): string {
+  const keys = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+  return row % 2 === 0 ? t(`settings.usage.weekdayShort.${keys[row]}`) : "";
+}
+
+function cellTitle(cell: UsageHeatCell): string {
+  if (cell.calls === 0 && cell.totalTokens === 0) {
+    return t("settings.usage.dayEmpty", { date: cell.day });
+  }
+  return t("settings.usage.dayTooltip", {
+    date: cell.day,
+    count: fmtExact(cell.calls),
+    tokens: fmtExact(cell.totalTokens),
+  });
+}
+
+function taskStatTitle(stat: AiUsageTaskStat): string {
+  return t("settings.usage.taskTooltip", {
+    calls: fmtExact(stat.calls),
+    input: fmtExact(stat.inputTokens),
+    output: fmtExact(stat.outputTokens),
+    cached: fmtExact(stat.cachedTokens),
+  });
+}
 
 function fmtExact(n: number | null | undefined): string {
   return n == null ? "—" : n.toLocaleString();
@@ -144,14 +179,6 @@ function tokenCell(label: string, value: number | null) {
 function taskLabel(taskType: string): string {
   const key = `settings.usage.tasks.${taskType}`;
   return t(key);
-}
-
-function dayTitle(day: string, calls: number, totalTokens: number): string {
-  return t("settings.usage.dayTooltip", {
-    date: day,
-    count: fmtExact(calls),
-    tokens: fmtExact(totalTokens),
-  });
 }
 
 /** 输入 → 输出;缓存命中大于 0 时以括号附在输入后(缓存是输入的子集) */
@@ -200,53 +227,92 @@ function ioTitle(entry: AiUsageEntry): string {
         </div>
       </div>
 
-      <!-- 任务类型分布 -->
+      <!-- 最近半年热力图(GitHub 贡献图风格:周列 × 周一~周日行) -->
+      <div class="mt-1 border-t pt-4">
+        <label class="text-sm font-medium">{{ t("settings.usage.trend") }}</label>
+        <div class="mt-2 flex gap-1.5">
+          <!-- 星期标签列:与格子行对齐(月份标签行高约 10px + 间距 4px) -->
+          <div class="mt-[14px] flex w-4 shrink-0 flex-col gap-[3px]">
+            <span
+              v-for="row in 7"
+              :key="row"
+              class="flex h-3 items-center text-[10px] leading-none text-muted-foreground"
+            >
+              {{ weekdayLabel(row - 1) }}
+            </span>
+          </div>
+          <div class="min-w-0">
+            <!-- 月份标签:标在包含当月 1 号的周列上方,文字溢出空槽位即可 -->
+            <div class="flex gap-[3px]">
+              <span
+                v-for="col in heatmap.weeks.length"
+                :key="col"
+                class="w-3 shrink-0 overflow-visible text-[10px] leading-none whitespace-nowrap text-muted-foreground"
+              >
+                {{
+                  monthLabelByCol.has(col - 1)
+                    ? t(`settings.usage.monthShort.m${monthLabelByCol.get(col - 1)}`)
+                    : ""
+                }}
+              </span>
+            </div>
+            <div class="mt-1 flex gap-[3px]">
+              <div v-for="(week, col) in heatmap.weeks" :key="col" class="flex flex-col gap-[3px]">
+                <div
+                  v-for="cell in week"
+                  :key="cell.day"
+                  class="h-3 w-3 rounded-[2px]"
+                  :class="
+                    cell.future
+                      ? 'invisible'
+                      : `${levelClass(cell.level)} hover:ring-1 hover:ring-foreground/40`
+                  "
+                  :title="cell.future ? undefined : cellTitle(cell)"
+                />
+              </div>
+            </div>
+            <!-- 图例 -->
+            <div
+              class="mt-1.5 flex items-center justify-end gap-1 text-[10px] text-muted-foreground"
+            >
+              <span>{{ t("settings.usage.legendLess") }}</span>
+              <span
+                v-for="lvl in 5"
+                :key="lvl"
+                class="h-2.5 w-2.5 rounded-[2px]"
+                :class="levelClass(lvl - 1)"
+              />
+              <span>{{ t("settings.usage.legendMore") }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 任务类型分布(列表:类型 · 次数 · 合计 tokens) -->
       <div class="mt-1 border-t pt-4">
         <label class="text-sm font-medium">{{ t("settings.usage.distribution") }}</label>
-        <div v-if="summary.byTask.length" class="mt-2 flex flex-col gap-1.5">
+        <div v-if="summary.byTask.length" class="mt-2 flex flex-col gap-0.5">
           <div
             v-for="stat in summary.byTask"
             :key="stat.taskType"
-            class="flex items-center gap-2 text-sm"
-            :title="`${stat.calls} · ${stat.inputTokens.toLocaleString()} → ${stat.outputTokens.toLocaleString()}`"
+            class="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent"
+            :title="taskStatTitle(stat)"
           >
             <Badge variant="secondary" class="w-20 shrink-0 justify-center">
               {{ taskLabel(stat.taskType) }}
             </Badge>
-            <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-accent">
-              <div
-                class="h-full rounded-full bg-primary/70"
-                :style="{
-                  width: `${Math.max((stat.totalTokens / maxTaskTokens) * 100, stat.totalTokens > 0 ? 4 : 0)}%`,
-                }"
-              />
-            </div>
-            <span class="shrink-0 text-xs tabular-nums text-muted-foreground">
-              {{ stat.totalTokens > 0 ? fmtTokens(stat.totalTokens) : "" }}
+            <span class="shrink-0 tabular-nums text-muted-foreground">
+              {{ t("settings.usage.callsCount", { count: fmtExact(stat.calls) }) }}
+            </span>
+            <span class="min-w-0 flex-1" />
+            <span class="shrink-0 font-medium tabular-nums" :title="fmtExact(stat.totalTokens)">
+              {{ stat.totalTokens > 0 ? fmtTokens(stat.totalTokens) : "—" }}
             </span>
           </div>
         </div>
         <p v-else class="py-4 text-center text-xs text-muted-foreground">
           {{ t("settings.usage.empty") }}
         </p>
-      </div>
-
-      <!-- 近 30 天趋势 -->
-      <div v-if="dayBars.length" class="mt-1 border-t pt-4">
-        <label class="text-sm font-medium">{{ t("settings.usage.trend") }}</label>
-        <div class="mt-2 flex h-24 items-end gap-[3px]">
-          <div
-            v-for="d in dayBars"
-            :key="d.day"
-            class="min-w-0 w-1 flex-1 rounded-t-sm bg-primary/70 transition-[height]"
-            :style="{ height: `${d.heightPct}%` }"
-            :title="dayTitle(d.day, d.calls, d.totalTokens)"
-          />
-        </div>
-        <div class="mt-1 flex justify-between text-xs tabular-nums text-muted-foreground">
-          <span>{{ dayBars[0]?.day }}</span>
-          <span>{{ dayBars[dayBars.length - 1]?.day }}</span>
-        </div>
       </div>
     </template>
 

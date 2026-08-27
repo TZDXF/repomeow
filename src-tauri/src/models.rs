@@ -174,6 +174,68 @@ pub struct GitCommitFileDiff {
     pub truncated: bool,
 }
 
+/// 项目级 git 统计(git_project_stats,图谱页数据分析面板用);全量历史聚合,只回传聚合结果
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitProjectStats {
+    pub total_commits: u64,
+    pub merge_commits: u64,
+    /// 最早提交的 committer 时间(Unix 秒)
+    pub first_commit_at: Option<i64>,
+    /// 最新提交的 committer 时间(Unix 秒)
+    pub last_commit_at: Option<i64>,
+    /// 有提交的天然日数量(按提交者本地时区)
+    pub active_days: u64,
+    /// 累计增删行(仅统计非合并提交,且受 churn 上限约束;二进制不计)
+    pub total_additions: u64,
+    pub total_deletions: u64,
+    /// 提交数超过 churn 统计上限时为 true:增删行只覆盖最近一部分提交
+    pub churn_truncated: bool,
+    /// 按提交数降序
+    pub authors: Vec<GitAuthorStat>,
+    /// 7*24 行主序:行 = 周一..周日,列 = 0..23 时(提交者本地时间)
+    pub weekday_hour: Vec<u32>,
+    /// 按天然日升序
+    pub by_day: Vec<GitDayStat>,
+    /// HEAD 树按扩展名分布,按字节数降序
+    pub file_types: Vec<GitFileTypeStat>,
+    pub total_files: u64,
+    pub total_bytes: u64,
+}
+
+/// 一位提交者的统计(email 归并,展示名为最近一次使用的名字)
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitAuthorStat {
+    pub name: String,
+    pub email: String,
+    pub commits: u64,
+    pub additions: u64,
+    pub deletions: u64,
+    pub first_commit_at: i64,
+    pub last_commit_at: i64,
+}
+
+/// 一天的提交聚合;t 为该日零点的 Unix 秒(提交者本地时区)
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitDayStat {
+    pub t: i64,
+    pub count: u32,
+    pub additions: u64,
+    pub deletions: u64,
+}
+
+/// HEAD 树上一种扩展名的文件分布
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitFileTypeStat {
+    /// 小写扩展名(不含点);无扩展名的特殊文件名按文件名归并(如 dockerfile),其余进 "(other)"
+    pub ext: String,
+    pub files: u64,
+    pub bytes: u64,
+}
+
 /// 工作区待提交的一个变更文件(git_worktree_files,提交对话框变更预览用)
 #[derive(Debug, Clone, Serialize)]
 pub struct GitWorktreeFile {
@@ -556,7 +618,7 @@ pub struct AiUsageSummary {
     pub total_tokens: i64,
     pub total_cached_tokens: i64,
     pub by_task: Vec<AiUsageTaskStat>,
-    /// 按日本机时区分组,最近 30 天倒序
+    /// 按日本机时区分组,最近约半年(190 天)倒序
     pub by_day: Vec<AiUsageDayStat>,
 }
 

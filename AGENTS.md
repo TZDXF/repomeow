@@ -99,9 +99,9 @@ src-tauri/migrations/ SQL 迁移,NNN_name.sql(当前 001~010)
 
 ## AI 用量统计(commands/usage.rs + lib/ai-usage.ts)
 
-- 每次 LLM 调用逐条写入 SQLite `ai_usage_log`(迁移 009):时间、任务类型(`commit / report / wiki` 三类,日报周报并入 report,测试连接不计量;前后端取值一致)、模型、输入/输出/合计 tokens、耗时、缓存命中 tokens(cached_tokens,输入的子集:OpenAI 兼容的 prompt_tokens_details.cached_tokens / ACP 的 cachedReadTokens;迁移 010);token 列可空(provider 未返回 usage 时行仍在,计入调用次数但不计入 SUM)。展示在设置页「AI 用量」分类(`AiUsageSettings.vue`:汇总四格 + 任务类型分布 + 近 30 天纯 div 迷你柱状 + 明细分页列表与清空)。
+- 每次 LLM 调用逐条写入 SQLite `ai_usage_log`(迁移 009):时间、任务类型(`commit / report / wiki` 三类,日报周报并入 report,测试连接不计量;前后端取值一致)、模型、输入/输出/合计 tokens、耗时、缓存命中 tokens(cached_tokens,输入的子集:OpenAI 兼容的 prompt_tokens_details.cached_tokens / ACP 的 cachedReadTokens;迁移 010);token 列可空(provider 未返回 usage 时行仍在,计入调用次数但不计入 SUM)。展示在设置页「AI 用量」分类(`AiUsageSettings.vue`:汇总五格 + 最近半年热力图 + 任务类型分布列表(类型 · 次数 · 合计 tokens)+ 明细分页列表与清空;热力图网格/分档逻辑在 `lib/usage-heatmap.ts`,27 周 × 7 行周一起始,强度按窗口内最大日 tokens 分 4 档,有调用但无 tokens 的日子记最低档)。
 - **三条采集链路**:①前端内置 API 全部收敛在 `lib/ai.ts`(AI SDK 的 usage 已解析,generateText 解构 `usage`、streamText 消费 `result.usage`,SDK 自动带 `stream_options.include_usage`),经 `lib/ai-usage.ts` 的 `recordAiUsage` fire-and-forget 上报,**记录失败绝不影响生成主流程**;②Rust 定时报告(scheduler.rs)`ChatResponse` 解析 `usage` 字段,用量行与报告历史同一事务落库(复用 `insert_usage_row`);③ACP agent 后端:`agent-client-protocol` 开启 `unstable_end_turn_token_usage` feature 读 PromptResponse.usage——按**单次 prompt 口径**直接记录(不可对相邻响应做累计差分,否则后一请求用量较小时会误记为空);agent 未上报时用 `tiktoken-rs` 统计应用可见的 prompt 与最终正文(已知 OpenAI 模型选择对应编码器,未知/第三方模型回退 `o200k_base`),该兜底不含 agent 内部工具调用和上下文,属于保守估算,cached tokens 留空。
-- 重试语义:大纲/页面每次重试尝试各自成行;失败请求不记录。日志保留期 90 天(`lib.rs` setup 时 `prune_old_entries` 清理);命令域另有 `list_ai_usage_log`(倒序分页 + 任务筛选)与 `clear_ai_usage_log`。按日聚合用 SQLite `date(created_at,'unixepoch','localtime')`(本机时区)。
+- 重试语义:大纲/页面每次重试尝试各自成行;失败请求不记录。日志保留期 190 天(`lib.rs` setup 时 `prune_old_entries` 清理;与半年热力图窗口对齐);命令域另有 `list_ai_usage_log`(倒序分页 + 任务筛选)与 `clear_ai_usage_log`。按日聚合用 SQLite `date(created_at,'unixepoch','localtime')`(本机时区)。
 
 ## 前端约定
 
