@@ -48,7 +48,7 @@ function cellTitle(cell: CommitCalendarCell): string {
 
 <template>
   <div class="overflow-x-auto pb-1">
-    <div class="flex w-max gap-1.5">
+    <div class="mx-auto flex w-max gap-1.5">
       <!-- 星期标签列:与格子行对齐(月份标签行高约 10px + 间距 4px) -->
       <div class="mt-[14px] flex w-4 shrink-0 flex-col gap-[3px]">
         <span
@@ -90,17 +90,6 @@ function cellTitle(cell: CommitCalendarCell): string {
           </div>
         </div>
       </div>
-    </div>
-    <!-- 图例 -->
-    <div class="mt-1.5 flex items-center justify-end gap-1 text-[10px] text-muted-foreground">
-      <span>{{ t("settings.usage.legendLess") }}</span>
-      <span
-        v-for="lvl in 5"
-        :key="lvl"
-        class="h-2.5 w-2.5 rounded-[2px]"
-        :class="levelClass(lvl - 1)"
-      />
-      <span>{{ t("settings.usage.legendMore") }}</span>
     </div>
   </div>
 </template>

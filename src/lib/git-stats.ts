@@ -117,6 +117,35 @@ export function aggregateWeeks(byDay: GitDayStat[], limit = TREND_WEEKS): GitWee
   return [...weeks.values()].sort((a, b) => a.day.localeCompare(b.day)).slice(-limit);
 }
 
+/** 代码变更 K 线蜡烛:实体为 0~净变更,影线覆盖 −deletions~additions */
+export interface ChurnCandle {
+  /** 周起始日期 YYYY-MM-DD */
+  day: string;
+  /** 开盘,恒为 0(变更从零点出发) */
+  open: number;
+  /** 收盘,净变更 = additions − deletions */
+  close: number;
+  /** 影线最低 = −deletions */
+  low: number;
+  /** 影线最高 = additions */
+  high: number;
+  additions: number;
+  deletions: number;
+}
+
+/** 按日聚合 → 每周一根 K 线蜡烛(净新增为阳线,净减少为阴线),按周升序取最近 limit 周 */
+export function buildChurnCandles(byDay: GitDayStat[], limit = TREND_WEEKS): ChurnCandle[] {
+  return aggregateWeeks(byDay, limit).map((w) => ({
+    day: w.day,
+    open: 0,
+    close: w.additions - w.deletions,
+    low: -w.deletions,
+    high: w.additions,
+    additions: w.additions,
+    deletions: w.deletions,
+  }));
+}
+
 /** Top N + 其余归并为一项(merge 由调用方求和);不足 N 项时原样返回 */
 export function topWithOther<T>(items: T[], limit: number, merge: (rest: T[]) => T): T[] {
   if (items.length <= limit) return items;
