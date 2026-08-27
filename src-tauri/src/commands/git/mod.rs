@@ -18,9 +18,10 @@ use crate::commands::account;
 use crate::db::Db;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::{
-    GitBranchTrack, GitBranches, GitCommitContext, GitCommitFile, GitCommitFileDiff, GitCommitInfo,
-    GitGraphBatch, GitGraphCommit, GitMergeResult, GitPullResult, GitRebaseResult, GitStatus,
-    GitUntrackedFile, GitUser, GitWorktree, GitWorktreeFile,
+    GitAuthorStat, GitBranchTrack, GitBranches, GitCommitContext, GitCommitFile, GitCommitFileDiff,
+    GitCommitInfo, GitDayStat, GitFileTypeStat, GitGraphBatch, GitGraphCommit, GitMergeResult,
+    GitProjectStats, GitPullResult, GitRebaseResult, GitStatus, GitUntrackedFile, GitUser,
+    GitWorktree, GitWorktreeFile,
 };
 
 mod fetch;
@@ -79,6 +80,8 @@ mod integrate;
 pub use integrate::*;
 mod history_diff;
 pub use history_diff::*;
+mod stats;
+pub use stats::*;
 mod clone;
 pub use clone::*;
 #[cfg(test)]

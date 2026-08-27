@@ -164,6 +164,7 @@ pub fn run() {
             commands::git::git_commit_context,
             commands::git::git_log,
             commands::git::git_graph_log,
+            commands::git::git_project_stats,
             commands::git::git_commit_files,
             commands::git::git_commit_file_diff,
             commands::git::git_commit_file_blob,

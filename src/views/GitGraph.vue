@@ -21,6 +21,7 @@ import GitBranchDeleteDialog from "@/components/git/GitBranchDeleteDialog.vue";
 import GitGraphHeader from "@/components/git/GitGraphHeader.vue";
 import GitGraphSidebar from "@/components/git/GitGraphSidebar.vue";
 import GitGraphTable from "@/components/git/GitGraphTable.vue";
+import GitAnalysisPanel from "@/components/git/analysis/GitAnalysisPanel.vue";
 import type { GitBranches, GitGraphCommit } from "@/types";
 
 const { t } = useI18n();
@@ -50,6 +51,27 @@ const filterValue = ref("all");
 const selectedBranch = ref("");
 // 搜索:匹配提交信息 / hash / 作者
 const searchQuery = ref("");
+
+// 视图切换:graph = 提交图谱;analysis = 数据分析(全量历史统计面板),选择持久化
+const viewMode = useLocalStorage<"graph" | "analysis">("repomeow:graph-view", "graph");
+// 分析面板懒激活:首次切入才挂载,之后保持存活,避免来回切换反复全量统计
+const analysisActivated = ref(viewMode.value === "analysis");
+const analysisPanel = ref<InstanceType<typeof GitAnalysisPanel> | null>(null);
+
+watch(viewMode, (v) => {
+  if (v === "analysis") {
+    analysisActivated.value = true;
+  }
+});
+
+/** 头部刷新按当前视图分发:图谱重新流式加载;分析重新统计 */
+function onRefresh() {
+  if (viewMode.value === "analysis") {
+    analysisPanel.value?.reload();
+  } else {
+    load();
+  }
+}
 
 const currentBranch = computed(() => project.value?.git?.branch ?? "");
 
@@ -317,6 +339,7 @@ function tagName(refName: string) {
     <GitGraphHeader
       v-model:search-query="searchQuery"
       v-model:filter-value="filterValue"
+      v-model:view="viewMode"
       :project-name="project.name"
       :search-results="searchResults"
       :filter-label="filterLabel"
@@ -325,10 +348,10 @@ function tagName(refName: string) {
       :loading="loading"
       @back="router.push(`/projects/${project.id}`)"
       @locate="locateCommit"
-      @refresh="load"
+      @refresh="onRefresh"
     />
 
-    <div ref="mainRowEl" class="flex min-h-0 flex-1">
+    <div v-show="viewMode === 'graph'" ref="mainRowEl" class="flex min-h-0 flex-1">
       <GitGraphSidebar
         v-if="hasSidebar"
         v-model:open="sidebarOpen"
@@ -413,6 +436,15 @@ function tagName(refName: string) {
         </button>
       </template>
     </div>
+
+    <!-- 数据分析视图:首次切入才挂载,之后保持存活;替换整个图谱主行(全宽仪表盘) -->
+    <GitAnalysisPanel
+      v-if="analysisActivated"
+      v-show="viewMode === 'analysis'"
+      ref="analysisPanel"
+      class="min-h-0 flex-1"
+      :path="project.path"
+    />
 
     <!-- 拉取产生合并冲突时的解决引导(仅当前分支的 pull 可能出现) -->
     <ConflictDialog v-model:open="conflictOpen" :project="project" :conflicts="conflictFiles" />

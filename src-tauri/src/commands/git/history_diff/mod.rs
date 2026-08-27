@@ -6,12 +6,13 @@ mod history;
 mod worktree_changes;
 
 pub(crate) use history::run_git_log;
+pub(crate) use history::build_graph_revwalk;
 #[cfg(test)]
 pub(crate) use commit_changes::{commit_file_diff_blocking, commit_files_blocking};
 #[cfg(test)]
 pub(crate) use commit_context::commit_context_blocking;
 #[cfg(test)]
-pub(crate) use history::{build_graph_revwalk, GraphDeco};
+pub(crate) use history::GraphDeco;
 #[cfg(test)]
 pub(crate) use worktree_changes::{worktree_file_diff_blocking, worktree_files_blocking};
 

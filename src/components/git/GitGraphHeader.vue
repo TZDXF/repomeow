@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { ArrowLeft, ChevronDown, ListFilter, Loader2, RefreshCw, Search, X } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import type { GitGraphCommit } from "@/types";
 
 defineProps<{
@@ -29,6 +31,9 @@ const emit = defineEmits<{
 
 const searchQuery = defineModel<string>("searchQuery", { required: true });
 const filterValue = defineModel<string>("filterValue", { required: true });
+/** 视图切换:graph = 提交图谱;analysis = 数据分析 */
+const view = defineModel<string>("view", { required: true });
+const isGraph = computed(() => view.value === "graph");
 const { t } = useI18n();
 
 function shortHash(hash: string) {
@@ -51,7 +56,27 @@ function shortHash(hash: string) {
       <h1 class="truncate text-sm font-medium">{{ projectName }} · {{ t("git.graph.title") }}</h1>
     </div>
 
-    <div class="relative w-60 shrink-0">
+    <!-- 视图切换:图谱 | 分析 -->
+    <div class="flex shrink-0 rounded-md border p-0.5">
+      <button
+        v-for="v in ['graph', 'analysis'] as const"
+        :key="v"
+        class="rounded px-2.5 py-1 text-xs transition-colors"
+        :class="
+          cn(
+            view === v
+              ? 'bg-accent font-medium text-foreground'
+              : 'text-muted-foreground hover:text-foreground',
+          )
+        "
+        @click="view = v"
+      >
+        {{ t(v === "graph" ? "git.graph.viewGraph" : "git.graph.viewAnalysis") }}
+      </button>
+    </div>
+
+    <!-- 搜索/筛选仅作用于图谱视图 -->
+    <div v-if="isGraph" class="relative w-60 shrink-0">
       <Search
         class="absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
       />
@@ -90,7 +115,7 @@ function shortHash(hash: string) {
       </div>
     </div>
 
-    <DropdownMenu>
+    <DropdownMenu v-if="isGraph">
       <DropdownMenuTrigger as-child>
         <Button variant="outline" size="sm" class="max-w-48 shrink-0 gap-1">
           <ListFilter class="h-3.5 w-3.5 shrink-0" />
@@ -113,7 +138,7 @@ function shortHash(hash: string) {
       </DropdownMenuContent>
     </DropdownMenu>
 
-    <span v-if="totalCount" class="shrink-0 text-xs text-muted-foreground">
+    <span v-if="isGraph && totalCount" class="shrink-0 text-xs text-muted-foreground">
       {{ t("git.graph.commitsCount", { count: totalCount }) }}
     </span>
     <Button

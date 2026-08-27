@@ -194,6 +194,59 @@ export interface GitCommitFileDiff {
   truncated: boolean;
 }
 
+/** 一位提交者的统计(git_project_stats;email 归并,展示名为最近一次使用的名字) */
+export interface GitAuthorStat {
+  name: string;
+  email: string;
+  commits: number;
+  additions: number;
+  deletions: number;
+  firstCommitAt: number;
+  lastCommitAt: number;
+}
+
+/** 一天的提交聚合;t 的 UTC 日期即提交者本地日期(仅作日历标识,非真实时刻) */
+export interface GitDayStat {
+  t: number;
+  count: number;
+  additions: number;
+  deletions: number;
+}
+
+/** HEAD 树上一种扩展名的文件分布 */
+export interface GitFileTypeStat {
+  /** 小写扩展名(不含点);无扩展名的清单文件按文件名(如 dockerfile),其余进 "(other)" */
+  ext: string;
+  files: number;
+  bytes: number;
+}
+
+/** 项目级 git 统计(git_project_stats,图谱页数据分析面板用);全量历史聚合 */
+export interface GitProjectStats {
+  totalCommits: number;
+  mergeCommits: number;
+  /** 最早/最新提交的 committer 时间(Unix 秒);空仓库为 null */
+  firstCommitAt: number | null;
+  lastCommitAt: number | null;
+  /** 有提交的天然日数量(按提交者本地时区) */
+  activeDays: number;
+  /** 累计增删行(仅非合并提交,且受 churn 上限约束;二进制不计) */
+  totalAdditions: number;
+  totalDeletions: number;
+  /** true 时增删行只覆盖最近一部分提交(提交数超过 churn 统计上限) */
+  churnTruncated: boolean;
+  /** 按提交数降序 */
+  authors: GitAuthorStat[];
+  /** 7*24 行主序:行 = 周一..周日,列 = 0..23 时(提交者本地时间) */
+  weekdayHour: number[];
+  /** 按天然日升序 */
+  byDay: GitDayStat[];
+  /** HEAD 树按扩展名分布,按字节数降序 */
+  fileTypes: GitFileTypeStat[];
+  totalFiles: number;
+  totalBytes: number;
+}
+
 /** 单个文件的预览内容(read_file_preview) */
 export interface FilePreview {
   /** 文本内容;二进制文件为 null */

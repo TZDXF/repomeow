@@ -29,6 +29,22 @@ export function formatCompactNumber(value: number): string {
   return `${rounded.toLocaleString(i18n.global.locale.value, { maximumFractionDigits: 1 })}${unit.suffix}`;
 }
 
+/** 字节数 → 可读大小(B/KB/MB/GB,1000 进制,保留 1 位小数) */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "0 B";
+  if (bytes < 1000) return `${Math.round(bytes)} B`;
+  const units = ["KB", "MB", "GB", "TB"] as const;
+  let value = bytes;
+  let unit = "B";
+  for (const u of units) {
+    if (value < 1000) break;
+    value /= 1000;
+    unit = u;
+  }
+  const rounded = Math.round(value * 10) / 10;
+  return `${rounded.toLocaleString(i18n.global.locale.value, { maximumFractionDigits: 1 })} ${unit}`;
+}
+
 /** Unix 秒时间戳 → 当前语言的相对时间 */
 export function formatRelativeTime(tsSeconds: number | null): string {
   if (!tsSeconds) return i18n.global.t("common.never");
