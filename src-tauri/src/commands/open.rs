@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::process::Command;
 
+use serde::Serialize;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use tauri::{AppHandle, State};
@@ -10,7 +11,7 @@ use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::EditorKind;
 
 /// 执行命令所用的终端 shell(对应前端 settings.json 的 `terminal` 键,仅 Windows 生效)。
-/// Cmd 是默认与兜底值:设置缺失/非法、Git Bash 未安装时都回退到这里。
+/// Cmd 是默认与兜底值:设置缺失/非法、所选 shell 不可用时都回退到这里。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum ShellKind {
     Cmd,
@@ -37,16 +38,92 @@ impl ShellKind {
     }
 }
 
-/// 从 settings.json 读取终端选择(与 closeAction 同一读取通道,执行时才读,天然拿到最新值)
+/// 前端设置页展示的三种命令解释器可用性。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct TerminalShellCapabilities {
+    cmd: bool,
+    powershell: bool,
+    gitbash: bool,
+}
+
+/// 当前平台的命令终端能力；字段名固定与前端契约保持一致。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalCapabilities {
+    is_windows: bool,
+    windows_terminal: bool,
+    shells: TerminalShellCapabilities,
+}
+
+/// 构造可序列化的能力结果。非 Windows 平台强制把全部能力置为 false，避免调用方
+/// 误把构建机或测试注入的探测结果当成可用终端。
+fn build_terminal_capabilities(
+    is_windows: bool,
+    windows_terminal: bool,
+    cmd: bool,
+    powershell: bool,
+    gitbash: bool,
+) -> TerminalCapabilities {
+    TerminalCapabilities {
+        is_windows,
+        windows_terminal: is_windows && windows_terminal,
+        shells: TerminalShellCapabilities {
+            cmd: is_windows && cmd,
+            powershell: is_windows && powershell,
+            gitbash: is_windows && gitbash,
+        },
+    }
+}
+
+/// 请求的 shell 不可用时统一回退 Cmd。保持为纯函数，便于覆盖“提前回退”语义；
+/// 调用方须先完成对应 shell 的实际探测。
+#[cfg(any(windows, test))]
+fn fallback_to_cmd_if_unavailable(requested: ShellKind, available: bool) -> ShellKind {
+    if available {
+        requested
+    } else {
+        ShellKind::Cmd
+    }
+}
+
+/// 从 settings.json 读取终端选择(与 closeAction 同一读取通道,执行时才读,天然拿到最新值)，
+/// 并在命令被包装成 shell 专属语法之前完成可用性回退。
 #[cfg(windows)]
 pub(crate) fn resolve_shell(app: &AppHandle) -> ShellKind {
-    ShellKind::from_setting(crate::tray::read_setting_string(app, "terminal"))
+    let requested = ShellKind::from_setting(crate::tray::read_setting_string(app, "terminal"));
+    let available = match requested {
+        ShellKind::Cmd => true,
+        ShellKind::PowerShell => find_powershell().is_some(),
+        ShellKind::GitBash => find_git_bash().is_some(),
+    };
+    let resolved = fallback_to_cmd_if_unavailable(requested, available);
+    if resolved != requested {
+        eprintln!("[open] 配置的命令终端不可用，回退到 cmd 执行");
+    }
+    resolved
 }
 
 /// 非 Windows 平台无终端选择,固定返回占位值(spawn_terminal 会忽略)
 #[cfg(not(windows))]
 pub(crate) fn resolve_shell(_app: &AppHandle) -> ShellKind {
     ShellKind::Cmd
+}
+
+/// 实时探测设置页需要的终端能力，不写入持久缓存。
+#[tauri::command]
+pub fn detect_terminal_capabilities() -> AppResult<TerminalCapabilities> {
+    #[cfg(windows)]
+    let capabilities = build_terminal_capabilities(
+        true,
+        find_wt().is_some(),
+        cmd_available(),
+        find_powershell().is_some(),
+        find_git_bash().is_some(),
+    );
+    #[cfg(not(windows))]
+    let capabilities = build_terminal_capabilities(false, false, false, false, false);
+
+    Ok(capabilities)
 }
 
 /// detect_editors 结果在 settings 表中的缓存 key(JSON: { "<kind>": bool })
@@ -94,8 +171,8 @@ pub(crate) fn hidden(#[allow(unused_mut)] mut cmd: Command) -> Command {
 struct ShellTools<'a> {
     /// git bash 的 bash.exe 全路径(GitBash 分支使用)
     bash: Option<&'a str>,
-    /// PowerShell 可执行文件名:PATH 上有 pwsh 时优先(PowerShell 7 才支持 && / ||),
-    /// 否则回退系统自带的 Windows PowerShell 5.1
+    /// 已探测到的 PowerShell 可执行文件名:PATH 上有 pwsh 时优先
+    /// (PowerShell 7 才支持 && / ||),否则使用 Windows PowerShell 5.1
     ps: &'a str,
 }
 
@@ -108,24 +185,28 @@ pub fn spawn_terminal(
     command: Option<&str>,
     shell: ShellKind,
 ) -> AppResult<()> {
-    // Git Bash 未安装时回退 cmd:被执行的命令往往是 npm 这类通用命令,降级执行优于报错阻断
-    let (shell, bash) = match shell {
+    // 即使调用方已提前探测，启动前仍防御性复查，覆盖运行期间卸载或直接传入
+    // ShellKind 的调用点。被执行的命令往往是 npm 这类通用命令，降级优于阻断。
+    let (shell, bash, ps) = match shell {
         ShellKind::GitBash => match find_git_bash() {
-            Some(bash) => (ShellKind::GitBash, Some(bash)),
+            Some(bash) => (ShellKind::GitBash, Some(bash), "powershell"),
             None => {
                 eprintln!("[open] 未找到 Git for Windows 的 bash.exe,回退到 cmd 执行");
-                (ShellKind::Cmd, None)
+                (ShellKind::Cmd, None, "powershell")
             }
         },
-        other => (other, None),
+        ShellKind::PowerShell => match find_powershell() {
+            Some(ps) => (ShellKind::PowerShell, None, ps),
+            None => {
+                eprintln!("[open] 未找到 pwsh.exe 或 powershell.exe,回退到 cmd 执行");
+                (ShellKind::Cmd, None, "powershell")
+            }
+        },
+        ShellKind::Cmd => (ShellKind::Cmd, None, "powershell"),
     };
     let tools = ShellTools {
         bash: bash.as_deref(),
-        ps: if shell == ShellKind::PowerShell {
-            find_powershell()
-        } else {
-            "powershell"
-        },
+        ps,
     };
     let command = flatten_multiline(command, shell.separator());
     let command = command.as_deref();
@@ -258,7 +339,8 @@ fn sanitize_cmd_text(s: &str) -> String {
 }
 
 /// 定位 wt.exe:先查 AppX 执行别名(Store / 官网安装都会注册),
-/// 再用 where 搜 PATH(覆盖 scoop / choco / 绿色版等安装方式);找不到返回 None
+/// 再用 where 搜 PATH(覆盖 scoop / choco / 绿色版等安装方式)。WinGet Links 中的
+/// `wt.exe` 可能是 Worktrunk 等同名工具,不能据此认定为 Windows Terminal。
 #[cfg(windows)]
 pub(crate) fn find_wt() -> Option<String> {
     if let Ok(local) = std::env::var("LOCALAPPDATA") {
@@ -271,12 +353,20 @@ pub(crate) fn find_wt() -> Option<String> {
     match probe {
         Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
             .lines()
-            .next()
             .map(str::trim)
-            .filter(|s| !s.is_empty())
+            .find(|path| !path.is_empty() && !is_winget_link(path))
             .map(str::to_string),
         _ => None,
     }
+}
+
+/// WinGet 的通用链接目录只表示“有一个包声明了该命令名”,无法区分 Windows Terminal
+/// 与 Worktrunk 等同名 `wt.exe`;官方 MSIX 版会走上面的 WindowsApps 执行别名。
+#[cfg(any(windows, test))]
+fn is_winget_link(path: &str) -> bool {
+    path.replace('/', "\\")
+        .to_ascii_lowercase()
+        .contains(r"\microsoft\winget\links\")
 }
 
 /// 构造 wt 参数:`wt --title "<title>" -d "<path>" [<shell> <args...>]`
@@ -356,15 +446,36 @@ fn encode_powershell_command(command: &str) -> String {
     base64::engine::general_purpose::STANDARD.encode(utf16_le)
 }
 
-/// PowerShell 可执行文件名:优先 pwsh(PowerShell 7+,支持 && / || 短路运算符),
-/// 不在 PATH 时回退系统自带的 Windows PowerShell 5.1(powershell.exe, && 会直接语法错误)
+/// 按探测结果选择 PowerShell 可执行文件名。保持为纯函数供单元测试覆盖优先级和
+/// “两者都不可用”的分支。
 #[cfg(windows)]
-fn find_powershell() -> &'static str {
-    let probe = hidden(Command::new("where")).arg("pwsh").output();
-    match probe {
-        Ok(out) if out.status.success() => "pwsh",
-        _ => "powershell",
+fn select_powershell(
+    pwsh_available: bool,
+    windows_powershell_available: bool,
+) -> Option<&'static str> {
+    if pwsh_available {
+        Some("pwsh")
+    } else if windows_powershell_available {
+        Some("powershell")
+    } else {
+        None
     }
+}
+
+/// PowerShell 可执行文件名:优先 pwsh(PowerShell 7+,支持 && / || 短路运算符),
+/// 再确认系统 Windows PowerShell 5.1 是否确实可执行；两者都不可用时返回 None。
+#[cfg(windows)]
+fn find_powershell() -> Option<&'static str> {
+    let pwsh_available = command_on_path("pwsh");
+    let windows_powershell_available = !pwsh_available && command_on_path("powershell");
+    select_powershell(pwsh_available, windows_powershell_available)
+}
+
+/// cmd 是 Windows 启动兜底，同时仍按实际 ComSpec / PATH 给设置页返回可用性标记。
+#[cfg(windows)]
+fn cmd_available() -> bool {
+    std::env::var_os("ComSpec").is_some_and(|path| std::path::Path::new(&path).is_file())
+        || command_on_path("cmd")
 }
 
 /// 定位 Git for Windows 的 bash.exe:先从 `where git` 的结果推导
@@ -978,6 +1089,86 @@ mod tests {
             script,
             "Write-Host 'echo ''hi'' && echo done'; echo 'hi' && echo done"
         );
+    }
+
+    #[test]
+    fn terminal_capabilities_serialize_with_frontend_contract() {
+        let capabilities = build_terminal_capabilities(true, false, true, false, true);
+        assert_eq!(
+            serde_json::to_value(capabilities).unwrap(),
+            serde_json::json!({
+                "isWindows": true,
+                "windowsTerminal": false,
+                "shells": {
+                    "cmd": true,
+                    "powershell": false,
+                    "gitbash": true,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn non_windows_terminal_capabilities_are_all_false() {
+        // 即使探测输入为 true，平台不支持时也不向前端暴露任何 Windows 能力。
+        let capabilities = build_terminal_capabilities(false, true, true, true, true);
+        assert_eq!(
+            serde_json::to_value(capabilities).unwrap(),
+            serde_json::json!({
+                "isWindows": false,
+                "windowsTerminal": false,
+                "shells": {
+                    "cmd": false,
+                    "powershell": false,
+                    "gitbash": false,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn unavailable_requested_shell_falls_back_to_cmd() {
+        assert_eq!(
+            fallback_to_cmd_if_unavailable(ShellKind::PowerShell, false),
+            ShellKind::Cmd
+        );
+        assert_eq!(
+            fallback_to_cmd_if_unavailable(ShellKind::GitBash, false),
+            ShellKind::Cmd
+        );
+        assert_eq!(
+            fallback_to_cmd_if_unavailable(ShellKind::PowerShell, true),
+            ShellKind::PowerShell
+        );
+        assert_eq!(
+            fallback_to_cmd_if_unavailable(ShellKind::GitBash, true),
+            ShellKind::GitBash
+        );
+        // Cmd 没有其他可回退的解释器，即使探测异常也保持 Cmd。
+        assert_eq!(
+            fallback_to_cmd_if_unavailable(ShellKind::Cmd, false),
+            ShellKind::Cmd
+        );
+    }
+
+    #[test]
+    fn generic_winget_wt_link_is_not_treated_as_windows_terminal() {
+        assert!(is_winget_link(
+            r"C:\Users\me\AppData\Local\Microsoft\WinGet\Links\wt.exe"
+        ));
+        assert!(!is_winget_link(
+            r"C:\Users\me\AppData\Local\Microsoft\WindowsApps\wt.exe"
+        ));
+        assert!(!is_winget_link(r"C:\tools\scoop\shims\wt.exe"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn powershell_selection_prefers_pwsh_and_requires_an_available_binary() {
+        assert_eq!(select_powershell(true, true), Some("pwsh"));
+        assert_eq!(select_powershell(true, false), Some("pwsh"));
+        assert_eq!(select_powershell(false, true), Some("powershell"));
+        assert_eq!(select_powershell(false, false), None);
     }
 
     #[test]

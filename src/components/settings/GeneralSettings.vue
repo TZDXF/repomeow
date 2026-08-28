@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onMounted, ref } from "vue";
 import { Separator } from "@/components/ui/separator";
 import ThemeSettings from "@/components/settings/ThemeSettings.vue";
 import MdThemeSettings from "@/components/settings/MdThemeSettings.vue";
@@ -8,6 +9,13 @@ import TerminalSettings from "@/components/settings/TerminalSettings.vue";
 import WorktreeSettings from "@/components/settings/WorktreeSettings.vue";
 import TraySettings from "@/components/settings/TraySettings.vue";
 import AutostartSettings from "@/components/settings/AutostartSettings.vue";
+import { getTerminalCapabilities, type TerminalCapabilities } from "@/lib/terminal";
+
+const terminalCapabilities = ref<TerminalCapabilities | null>(null);
+
+onMounted(async () => {
+  terminalCapabilities.value = await getTerminalCapabilities();
+});
 </script>
 
 <template>
@@ -17,8 +25,10 @@ import AutostartSettings from "@/components/settings/AutostartSettings.vue";
     <MdThemeSettings />
     <Separator />
     <OpenWithSettings />
-    <Separator />
-    <TerminalSettings />
+    <template v-if="terminalCapabilities?.isWindows">
+      <Separator />
+      <TerminalSettings :availability="terminalCapabilities" />
+    </template>
     <Separator />
     <WorktreeSettings />
     <Separator />

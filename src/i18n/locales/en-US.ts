@@ -1207,7 +1207,11 @@ export default {
     terminal: {
       title: "Terminal for Commands",
       description:
-        "The terminal used to run npm scripts, custom commands and more. Windows only. A bash-style \\ continuation in a multi-line command is joined into a single line before execution",
+        "The terminal used to run npm scripts, custom commands and more. A bash-style \\ continuation in a multi-line command is joined into a single line before execution",
+      windowsTerminalHost: "Windows Terminal window host",
+      available: "Available",
+      notDetected: "Not detected",
+      selectedUnavailable: "The selected shell was not detected; commands will fall back to cmd",
       cmd: "cmd",
       cmdHint: "Windows Command Prompt (default), best compatibility",
       powershell: "PowerShell",

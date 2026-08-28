@@ -191,6 +191,7 @@ pub fn run() {
             commands::open::open_with_custom_command,
             commands::open::open_in_editor,
             commands::open::detect_editors,
+            commands::open::detect_terminal_capabilities,
             commands::editor_icon::get_editor_icons,
             commands::window::show_main_window,
             commands::window::hide_tray_popup,
