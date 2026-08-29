@@ -45,6 +45,7 @@ export function semanticTotal(result: SemanticDiffResult | null): number {
 // ── 第 2 期:语义导航(结构树 / 搜索 / 关系)─────────────────────────────────
 
 import type {
+  SemanticContextResult,
   SemanticEntityRef,
   SemanticFileEntitiesResult,
   SemanticFileEntity,
@@ -162,6 +163,38 @@ export function dedupeEntityRefs(refs: SemanticEntityRef[]): SemanticEntityRef[]
 /** callers/refs 的分组结果拍平为去重后的关系项列表 */
 export function flattenRelationGroups(groups: SemanticRelationGroup[]): SemanticEntityRef[] {
   return dedupeEntityRefs(groups.flatMap((group) => group.related));
+}
+
+// ── 第 4B 期:复制 AI 上下文 ────────────────────────────────────────────────
+
+/**
+ * 把 sem context 结果拼成可复制给 AI 的 Markdown 文本:头部一行实体标识,
+ * 随后每个 entry 一节(名称/类型/文件/角色/约 tokens + 源码),末尾附因预算
+ * 省略的聚合计数。无 entry 时返回空串。仅在用户显式确认后调用,不落库。
+ */
+export function buildContextText(result: SemanticContextResult): string {
+  if (!result.entries.length) return "";
+  const lines: string[] = [
+    `# AI context: ${result.entity} (${result.entityId || result.entity})`,
+    "",
+  ];
+  for (const entry of result.entries) {
+    lines.push(
+      `## ${entry.name} (${entry.entityType}, ${entry.filePath}, ${entry.role}, ~${entry.tokens} tokens)`,
+    );
+    lines.push("");
+    lines.push(entry.content.trimEnd());
+    lines.push("");
+  }
+  for (const group of result.omitted) {
+    lines.push(
+      `Omitted due to budget: ${group.entities} entities, ${group.tests} tests (${group.role})`,
+    );
+  }
+  if (result.targetOmitted) {
+    lines.push("Note: target entity source was omitted due to budget.");
+  }
+  return lines.join("\n").trimEnd();
 }
 
 // ── 影响分析小图(SemanticMiniGraph)布局辅助 ─────────────────────────────────

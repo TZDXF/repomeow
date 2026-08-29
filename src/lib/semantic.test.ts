@@ -64,6 +64,7 @@ describe("semanticTotal", () => {
 // ── 第 2 期:语义导航 ─────────────────────────────────────────────────────────
 
 import {
+  buildContextText,
   buildOutlineTree,
   compareEntitiesForDisplay,
   dedupeEntityRefs,
@@ -72,7 +73,12 @@ import {
   sliceGraphSide,
   truncateGraphLabel,
 } from "@/lib/semantic";
-import type { SemanticEntityRef, SemanticFileEntity, SemanticRelationGroup } from "@/types";
+import type {
+  SemanticContextResult,
+  SemanticEntityRef,
+  SemanticFileEntity,
+  SemanticRelationGroup,
+} from "@/types";
 
 function entity(partial: Partial<SemanticFileEntity> & { name: string }): SemanticFileEntity {
   return {
@@ -234,5 +240,82 @@ describe("truncateGraphLabel", () => {
     const out = truncateGraphLabel(long);
     expect(out).toHaveLength(22);
     expect(out.endsWith("…")).toBe(true);
+  });
+});
+
+// ── 第 4B 期:复制 AI 上下文 ──────────────────────────────────────────────────
+
+function contextResult(partial: Partial<SemanticContextResult>): SemanticContextResult {
+  return {
+    engineVersion: "0.23.1",
+    entity: "now_ts",
+    entityId: "src-tauri/src/time_util.rs::function::now_ts",
+    budget: 2000,
+    totalTokens: 0,
+    truncated: false,
+    targetOmitted: false,
+    entries: [],
+    omitted: [],
+    ...partial,
+  };
+}
+
+describe("buildContextText", () => {
+  it("returns empty string when there are no entries", () => {
+    expect(buildContextText(contextResult({}))).toBe("");
+  });
+
+  it("renders one markdown section per entry with source content", () => {
+    const text = buildContextText(
+      contextResult({
+        entries: [
+          {
+            entityId: "src/a.ts::function::foo",
+            name: "foo",
+            entityType: "function",
+            filePath: "src/a.ts",
+            role: "target",
+            tokens: 12,
+            content: "function foo() {\n  return 1;\n}\n",
+          },
+          {
+            entityId: "src/b.ts::function::bar",
+            name: "bar",
+            entityType: "function",
+            filePath: "src/b.ts",
+            role: "direct_dependent",
+            tokens: 8,
+            content: "const bar = () => foo();",
+          },
+        ],
+      }),
+    );
+    expect(text).toContain("# AI context: now_ts (src-tauri/src/time_util.rs::function::now_ts)");
+    expect(text).toContain("## foo (function, src/a.ts, target, ~12 tokens)");
+    expect(text).toContain("function foo() {");
+    expect(text).toContain("## bar (function, src/b.ts, direct_dependent, ~8 tokens)");
+    expect(text.endsWith("const bar = () => foo();")).toBe(true);
+  });
+
+  it("appends omitted groups and target-omitted note", () => {
+    const text = buildContextText(
+      contextResult({
+        targetOmitted: true,
+        entries: [
+          {
+            entityId: "src/a.ts::function::foo",
+            name: "foo",
+            entityType: "function",
+            filePath: "src/a.ts",
+            role: "target",
+            tokens: 1,
+            content: "foo",
+          },
+        ],
+        omitted: [{ role: "direct_dependent", entities: 8, tests: 3 }],
+      }),
+    );
+    expect(text).toContain("Omitted due to budget: 8 entities, 3 tests (direct_dependent)");
+    expect(text).toContain("target entity source was omitted");
   });
 });
