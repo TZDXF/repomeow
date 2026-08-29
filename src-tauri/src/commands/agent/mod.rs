@@ -10,6 +10,7 @@
 
 mod callbacks;
 mod config;
+pub(crate) mod conflict;
 mod process;
 mod registry;
 mod session;
@@ -111,8 +112,14 @@ enum JobMsg {
 }
 
 enum SessionMode {
-    Generate { cwd: PathBuf },
+    Generate { cwd: PathBuf, access: AgentAccess },
     Test,
+}
+
+#[derive(Clone, Copy)]
+enum AgentAccess {
+    ReadOnly,
+    WorkspaceWrite,
 }
 
 struct AcpHandshake {
@@ -165,9 +172,26 @@ pub async fn acp_start(
         custom_command,
         SessionMode::Generate {
             cwd: PathBuf::from(&cwd),
+            access: AgentAccess::ReadOnly,
         },
         model,
         thinking,
+        cwd,
+    )
+    .await
+}
+
+/// 显式用户操作触发的代码冲突解决会话：允许 agent 在工作区内写文件并执行工具。
+pub(crate) async fn acp_start_writable(agent_id: String, cwd: String) -> AppResult<AcpStartResult> {
+    run_session(
+        Some(agent_id),
+        None,
+        SessionMode::Generate {
+            cwd: PathBuf::from(&cwd),
+            access: AgentAccess::WorkspaceWrite,
+        },
+        None,
+        None,
         cwd,
     )
     .await

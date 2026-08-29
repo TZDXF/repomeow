@@ -19,6 +19,7 @@ import { useUpdateStore } from "@/stores/update";
 import { useWikiStore } from "@/stores/wiki";
 import type {
   BackgroundTaskProgressPayload,
+  ConflictResolutionFinishedPayload,
   GitProjectChangedPayload,
   ReportGeneratedPayload,
 } from "@/types";
@@ -41,6 +42,7 @@ useStreamMarkdownWheelZoom();
 
 let unlistenGit: UnlistenFn | undefined;
 let unlistenBackgroundTasks: UnlistenFn | undefined;
+let unlistenConflictResolution: UnlistenFn | undefined;
 
 onMounted(async () => {
   // 托盘弹窗窗口已开 OS 级透明,body 不再刷底色,让玻璃皮肤能透出桌面
@@ -59,6 +61,18 @@ onMounted(async () => {
     unlistenBackgroundTasks = await onListen<BackgroundTaskProgressPayload>(
       "background://task-progress",
       (payload) => backgroundTasksStore.applyProgress(payload),
+    );
+    unlistenConflictResolution = await onListen<ConflictResolutionFinishedPayload>(
+      "agent://conflict-resolution-finished",
+      (payload) => {
+        if (payload.success) {
+          toast.success(t("git.conflict.agentResolved"));
+        } else if (payload.error) {
+          toast.error(t("git.conflict.agentFailed", { error: payload.error }));
+        } else {
+          toast.warning(t("git.conflict.agentIncomplete", { count: payload.remaining.length }));
+        }
+      },
     );
     // 先订阅再拉取首批状态,避免启动阶段后台检查事件先于监听器到达。
     unlistenGit = await onListen<GitProjectChangedPayload>("git://project-changed", (payload) => {
@@ -147,6 +161,7 @@ onMounted(async () => {
 onUnmounted(() => {
   unlistenGit?.();
   unlistenBackgroundTasks?.();
+  unlistenConflictResolution?.();
 });
 </script>
 

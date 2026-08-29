@@ -74,6 +74,10 @@ pub enum ErrorCode {
     GitBranchDiverged,
     /// 分支未完全合并,删除需强制(-D)
     GitBranchNotMerged,
+    /// stash 列表在用户确认操作前已变化，index 不再对应原 OID
+    GitStashChanged,
+    /// 当前工作区没有符合选项的可储藏内容
+    GitStashNothingToSave,
     /// 合并目标分支未被任何 worktree 检出,且无法快进(分叉或要求 squash);
     /// message 携带目标分支名
     GitMergeNeedsCheckout,
@@ -250,6 +254,8 @@ impl ErrorCode {
             Self::GitBranchExists => "git_branch_exists",
             Self::GitBranchDiverged => "git_branch_diverged",
             Self::GitBranchNotMerged => "git_branch_not_merged",
+            Self::GitStashChanged => "git_stash_changed",
+            Self::GitStashNothingToSave => "git_stash_nothing_to_save",
             Self::GitMergeNeedsCheckout => "git_merge_needs_checkout",
             // 账号
             Self::AccountNotFound => "account_not_found",

@@ -84,6 +84,37 @@ describe("background tasks store", () => {
     expect(store.history[0]?.target).toEqual({ kind: "wiki", projectId: 7 });
   });
 
+  it("接收 Agent 冲突任务并保留项目跳转目标", () => {
+    const store = useBackgroundTasksStore();
+    store.applyProgress({
+      task_id: "conflict-1",
+      kind: "conflict",
+      label: "RepoMeow · Agent",
+      completed: 0,
+      total: 2,
+      status: "running",
+      project_id: 9,
+    });
+
+    expect(store.tasks[0]).toEqual(
+      expect.objectContaining({
+        kind: "conflict",
+        target: { kind: "project", projectId: 9 },
+      }),
+    );
+
+    store.applyProgress({
+      task_id: "conflict-1",
+      kind: "conflict",
+      label: "RepoMeow · Agent",
+      completed: 2,
+      total: 2,
+      status: "finished",
+      project_id: 9,
+    });
+    expect(store.history[0]?.target).toEqual({ kind: "project", projectId: 9 });
+  });
+
   it("每类历史最多保留十条", () => {
     const store = useBackgroundTasksStore();
     for (let index = 0; index < 12; index += 1) {

@@ -2,10 +2,12 @@ use std::path::Path;
 
 use agent_client_protocol::schema::v1::{
     SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectGroup,
-    SessionConfigSelectOption, ToolCallLocation,
+    SessionConfigSelectOption, ToolCallLocation, ToolKind,
 };
 
-use super::callbacks::{read_file_within, read_tool_activity_text, tool_activity_text};
+use super::callbacks::{
+    permission_allowed, read_file_within, read_tool_activity_text, tool_activity_text,
+};
 use super::config::{category_str, config_option_info};
 use super::registry::parse_command_line;
 use super::AcpConfigChoice;
@@ -102,6 +104,18 @@ fn tool_activity_summarizes_raw_input_inline() {
     assert!(text.len() < 140);
     assert!(text.ends_with('…'));
     assert!(!text.contains('\n'));
+}
+
+#[test]
+fn writable_sessions_allow_code_changes_but_not_mode_switches() {
+    assert!(!permission_allowed(Some(&ToolKind::Edit), false));
+    assert!(!permission_allowed(Some(&ToolKind::Execute), false));
+    assert!(permission_allowed(Some(&ToolKind::Edit), true));
+    assert!(permission_allowed(Some(&ToolKind::Delete), true));
+    assert!(permission_allowed(Some(&ToolKind::Move), true));
+    assert!(permission_allowed(Some(&ToolKind::Execute), true));
+    assert!(!permission_allowed(Some(&ToolKind::SwitchMode), true));
+    assert!(permission_allowed(None, true));
 }
 
 #[test]

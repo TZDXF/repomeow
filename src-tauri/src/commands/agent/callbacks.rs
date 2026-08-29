@@ -197,11 +197,12 @@ pub(super) fn push_activity(sink: &SharedSink, text: String) {
     }
 }
 
-pub(super) fn decide_permission(
-    req: &RequestPermissionRequest,
-) -> (bool, RequestPermissionOutcome) {
-    let allow = !matches!(
-        req.tool_call.fields.kind,
+pub(super) fn permission_allowed(kind: Option<&ToolKind>, allow_workspace_write: bool) -> bool {
+    if allow_workspace_write {
+        return !matches!(kind, Some(ToolKind::SwitchMode));
+    }
+    !matches!(
+        kind,
         Some(
             ToolKind::Edit
                 | ToolKind::Delete
@@ -209,7 +210,14 @@ pub(super) fn decide_permission(
                 | ToolKind::Execute
                 | ToolKind::SwitchMode
         )
-    );
+    )
+}
+
+pub(super) fn decide_permission(
+    req: &RequestPermissionRequest,
+    allow_workspace_write: bool,
+) -> (bool, RequestPermissionOutcome) {
+    let allow = permission_allowed(req.tool_call.fields.kind.as_ref(), allow_workspace_write);
     let pick = |primary: PermissionOptionKind, fallback: PermissionOptionKind| {
         req.options
             .iter()

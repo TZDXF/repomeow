@@ -2,12 +2,11 @@ import { computed, reactive, ref } from "vue";
 import { defineStore } from "pinia";
 import type { BackgroundTaskProgressPayload } from "@/types";
 
-export type BackgroundTaskKind = "report" | "wiki";
+export type BackgroundTaskKind = "report" | "wiki" | "conflict";
 
-export interface BackgroundTaskTarget {
-  kind: "wiki";
-  projectId: number;
-}
+export type BackgroundTaskTarget =
+  | { kind: "wiki"; projectId: number }
+  | { kind: "project"; projectId: number };
 
 export interface BackgroundTaskItem {
   id: string;
@@ -45,7 +44,7 @@ function storage(): Storage | null {
 }
 
 function isTaskKind(value: unknown): value is BackgroundTaskKind {
-  return value === "report" || value === "wiki";
+  return value === "report" || value === "wiki" || value === "conflict";
 }
 
 function isTaskTarget(value: unknown): value is BackgroundTaskTarget {
@@ -53,7 +52,9 @@ function isTaskTarget(value: unknown): value is BackgroundTaskTarget {
     return false;
   }
   const target = value as Partial<BackgroundTaskTarget>;
-  return target.kind === "wiki" && typeof target.projectId === "number";
+  return (
+    (target.kind === "wiki" || target.kind === "project") && typeof target.projectId === "number"
+  );
 }
 
 function isStoredTask(value: unknown): value is BackgroundTaskItem {
@@ -200,6 +201,10 @@ export const useBackgroundTasksStore = defineStore("backgroundTasks", () => {
         label: payload.label,
         completed: payload.completed,
         total: payload.total,
+        target:
+          payload.kind === "conflict" && typeof payload.project_id === "number"
+            ? { kind: "project", projectId: payload.project_id }
+            : undefined,
       },
     });
   }

@@ -20,8 +20,8 @@ use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::{
     GitAuthorStat, GitBranchTrack, GitBranches, GitCommitContext, GitCommitFile, GitCommitFileDiff,
     GitCommitInfo, GitDayStat, GitFileTypeStat, GitGraphBatch, GitGraphCommit, GitMergeResult,
-    GitProjectStats, GitPullResult, GitRebaseResult, GitStatus, GitUntrackedFile, GitUser,
-    GitWorktree, GitWorktreeFile,
+    GitProjectStats, GitPullResult, GitRebaseResult, GitStash, GitStatus, GitUntrackedFile,
+    GitUser, GitWorktree, GitWorktreeFile,
 };
 
 mod fetch;
@@ -74,6 +74,8 @@ mod refs;
 pub use refs::*;
 mod operations;
 pub use operations::*;
+mod stash;
+pub use stash::*;
 mod worktree;
 pub use worktree::*;
 mod integrate;

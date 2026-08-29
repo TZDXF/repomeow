@@ -101,7 +101,7 @@ pub(super) fn ff_pull_blocking(path: &str) -> bool {
 }
 
 /// 当前处于合并冲突状态的文件(相对仓库根的路径)
-pub(super) fn unmerged_files(path: &str) -> Vec<String> {
+pub(crate) fn unmerged_files(path: &str) -> Vec<String> {
     let Ok(out) = git_command(path)
         .args(["diff", "--name-only", "--diff-filter=U"])
         .output()

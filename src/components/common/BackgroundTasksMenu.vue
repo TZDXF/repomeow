@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Clock3,
   FileText,
+  GitMerge,
   History,
   LoaderCircle,
   Trash2,
@@ -41,12 +42,14 @@ interface TaskGroup {
 const KIND_ICONS: Record<BackgroundTaskKind, Component> = {
   report: FileText,
   wiki: BookOpenText,
+  conflict: GitMerge,
 };
 
 function kindLabel(kind: BackgroundTaskKind): string {
   return {
     report: t("titleBar.reportTask"),
     wiki: t("titleBar.wikiTask"),
+    conflict: t("titleBar.conflictTask"),
   }[kind];
 }
 
@@ -99,7 +102,7 @@ watch(open, (isOpen) => {
 });
 
 const taskGroups = computed<TaskGroup[]>(() => {
-  const kinds: BackgroundTaskKind[] = ["report", "wiki"];
+  const kinds: BackgroundTaskKind[] = ["report", "wiki", "conflict"];
   return kinds.flatMap((kind) => {
     const tasks = store.tasks.filter((task) => task.kind === kind);
     if (!tasks.length) {
@@ -133,10 +136,11 @@ function finishedTime(task: BackgroundTaskItem): string {
 }
 
 async function openTask(task: BackgroundTaskItem) {
-  if (task.target?.kind !== "wiki") {
+  if (!task.target) {
     return;
   }
-  await router.push(`/projects/${task.target.projectId}/wiki`);
+  const suffix = task.target.kind === "wiki" ? "/wiki" : "";
+  await router.push(`/projects/${task.target.projectId}${suffix}`);
   open.value = false;
 }
 </script>

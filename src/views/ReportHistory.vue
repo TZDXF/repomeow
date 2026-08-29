@@ -3,10 +3,12 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { toast } from "vue-sonner";
+import { save } from "@tauri-apps/plugin-dialog";
 import {
   ArrowLeft,
   CalendarIcon,
   ChevronRight,
+  Download,
   FileText,
   FolderGit2,
   Loader2,
@@ -33,6 +35,11 @@ import { cmd, onListen } from "@/lib/tauri";
 import { formatCommitTime, formatDate, formatLocalDateTime, parseDateStr } from "@/lib/format";
 import { localizedHolidayName } from "@/lib/holidays";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
+import {
+  buildReportExportMarkdown,
+  createReportExportFilename,
+  type ReportExportLabels,
+} from "@/lib/report-export";
 import { useSettingsStore } from "@/stores/settings";
 import { useProjectsStore } from "@/stores/projects";
 import { useTagsStore } from "@/stores/tags";
@@ -367,6 +374,48 @@ async function confirmDeleteReport() {
   }
 }
 
+const exporting = ref(false);
+
+const exportLabels = computed<ReportExportLabels>(() => ({
+  collection: t("reportHistory.exportCollection"),
+  daily: t("reportHistory.typeDaily"),
+  weekly: t("reportHistory.typeWeekly"),
+  dateRange: t("reportHistory.exportDateRange"),
+  projects: t("reportHistory.exportProjects"),
+  generatedAt: t("reportHistory.generatedAt"),
+  commits: t("reportHistory.exportCommitCount"),
+  commitDetails: t("reportHistory.commits"),
+}));
+
+/** 导出单条报告或当前筛选范围内的全部报告为一个 Markdown 文件。 */
+async function exportReports(items: ReportHistoryDetail[]) {
+  if (!items.length || exporting.value) {
+    return;
+  }
+  exporting.value = true;
+  try {
+    const labels = exportLabels.value;
+    const path = await save({
+      title: t("reportHistory.exportDialogTitle"),
+      defaultPath: createReportExportFilename(items, labels),
+      filters: [{ name: "Markdown", extensions: ["md"] }],
+    });
+    if (!path) {
+      return;
+    }
+    const content = buildReportExportMarkdown(items, {
+      labels,
+      formatCreatedAt: (timestamp) => formatLocalDateTime(timestamp),
+    });
+    await cmd<void>("save_text_file", { path, content });
+    toast.success(t("reportHistory.exported", { path }));
+  } catch (e) {
+    toast.error(t("reportHistory.exportFailed", { error: String(e) }));
+  } finally {
+    exporting.value = false;
+  }
+}
+
 // ── watchers ────────────────────────────────────────────────────────────
 
 function onMonthChange(year: number, month: number) {
@@ -678,10 +727,21 @@ watch(
           <ScrollArea v-else class="min-h-0 flex-1">
             <div class="flex flex-col gap-3 p-4">
               <!-- toolbar -->
-              <div class="flex items-center justify-between">
+              <div class="flex items-center justify-between gap-2">
                 <h3 class="text-xs font-medium text-muted-foreground">
                   {{ t("reportHistory.reportCount", { count: reports.length }) }}
                 </h3>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="h-7 gap-1.5 px-2.5 text-xs"
+                  :disabled="exporting"
+                  @click="exportReports(reports)"
+                >
+                  <Loader2 v-if="exporting" class="h-3.5 w-3.5 animate-spin" />
+                  <Download v-else class="h-3.5 w-3.5" />
+                  {{ t("reportHistory.exportAll") }}
+                </Button>
               </div>
 
               <!-- report cards -->
@@ -733,6 +793,16 @@ watch(
                   <Badge variant="secondary" class="text-[11px] shrink-0">
                     {{ t("reportHistory.totalCommits", { count: r.totalCommits }) }}
                   </Badge>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    class="h-5 w-5 shrink-0 text-muted-foreground"
+                    :title="t('reportHistory.export')"
+                    :disabled="exporting"
+                    @click.stop="exportReports([r])"
+                  >
+                    <Download class="h-3 w-3" />
+                  </Button>
                   <Button
                     variant="ghost"
                     size="icon"

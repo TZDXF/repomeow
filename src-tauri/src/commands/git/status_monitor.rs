@@ -497,7 +497,7 @@ pub(super) fn target_for_path(app: &AppHandle, path: &str) -> GitCheckTarget {
 }
 
 /// Git 写操作成功后的唯一发布入口。
-pub(super) fn publish_write_status(
+pub(crate) fn publish_write_status(
     app: &AppHandle,
     path: &str,
     status: &GitStatus,

@@ -14,6 +14,7 @@ struct BackgroundTaskPayload<'a> {
     completed: usize,
     total: usize,
     status: &'a str,
+    project_id: Option<i64>,
 }
 
 /// Rust 后台任务的统一进度事件守卫。创建即发布 running，离开作用域时无论成功或失败
@@ -25,6 +26,7 @@ pub(crate) struct BackgroundTask {
     label: String,
     completed: usize,
     total: usize,
+    project_id: Option<i64>,
 }
 
 impl BackgroundTask {
@@ -34,16 +36,42 @@ impl BackgroundTask {
         label: impl Into<String>,
         total: usize,
     ) -> Self {
+        Self::create(app, kind, label.into(), total, None)
+    }
+
+    /// 创建一个可从前端任务中心跳回项目详情的后台任务。
+    pub(crate) fn new_for_project(
+        app: &AppHandle,
+        kind: &'static str,
+        label: impl Into<String>,
+        total: usize,
+        project_id: i64,
+    ) -> Self {
+        Self::create(app, kind, label.into(), total, Some(project_id))
+    }
+
+    fn create(
+        app: &AppHandle,
+        kind: &'static str,
+        label: String,
+        total: usize,
+        project_id: Option<i64>,
+    ) -> Self {
         let task = Self {
             app: app.clone(),
             task_id: format!("{kind}-{}", NEXT_TASK_ID.fetch_add(1, Ordering::Relaxed)),
             kind,
-            label: label.into(),
+            label,
             completed: 0,
             total,
+            project_id,
         };
         task.emit("running");
         task
+    }
+
+    pub(crate) fn id(&self) -> &str {
+        &self.task_id
     }
 
     pub(crate) fn set_completed(&mut self, completed: usize) {
@@ -61,6 +89,7 @@ impl BackgroundTask {
                 completed: self.completed,
                 total: self.total,
                 status,
+                project_id: self.project_id,
             },
         );
     }

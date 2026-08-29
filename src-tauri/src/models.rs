@@ -52,6 +52,16 @@ pub struct GitBranches {
     pub tracking: Vec<GitBranchTrack>,
 }
 
+/// 一条 Git stash 记录。列表由 libgit2 读取，index 对应 `stash@{index}`。
+#[derive(Debug, Clone, Serialize)]
+pub struct GitStash {
+    pub index: usize,
+    pub oid: String,
+    pub message: String,
+    pub author: String,
+    pub created_at: i64,
+}
+
 /// 一个 git worktree(来自 `git worktree list --porcelain`)
 #[derive(Debug, Clone, Serialize)]
 pub struct GitWorktree {

@@ -44,6 +44,15 @@ export interface GitBranches {
   tracking: GitBranchTrack[];
 }
 
+/** 一条 Git stash 记录，index 对应 `stash@{index}`。 */
+export interface GitStash {
+  index: number;
+  oid: string;
+  message: string;
+  author: string;
+  created_at: number;
+}
+
 /** 一个 git worktree(来自 `git worktree list --porcelain`) */
 export interface GitWorktree {
   /** 绝对路径(git 输出,Windows 上为 '/' 分隔) */
@@ -110,6 +119,17 @@ export interface BackgroundTaskProgressPayload {
   completed: number;
   total: number;
   status: "running" | "finished";
+  project_id?: number | null;
+}
+
+/** 本地 agent 冲突解决后台任务的完成事件。 */
+export interface ConflictResolutionFinishedPayload {
+  task_id: string;
+  project_id: number;
+  path: string;
+  success: boolean;
+  remaining: string[];
+  error: string | null;
 }
 
 /** 一个 git remote 及其地址 */

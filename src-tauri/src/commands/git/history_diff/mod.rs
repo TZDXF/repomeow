@@ -17,10 +17,10 @@ pub(crate) use history::GraphDeco;
 pub(crate) use worktree_changes::{worktree_file_diff_blocking, worktree_files_blocking};
 
 /// 提交详情面板单文件 diff 的长度上限(超出截断,避免大文件撑爆 IPC)
-const COMMIT_DIFF_MAX_CHARS: usize = 200_000;
+pub(super) const COMMIT_DIFF_MAX_CHARS: usize = 200_000;
 
 /// 按 char 边界安全截断,返回 (文本, 是否截断)
-fn truncate_chars(text: &str, max: usize) -> (String, bool) {
+pub(super) fn truncate_chars(text: &str, max: usize) -> (String, bool) {
     if text.chars().count() <= max {
         return (text.to_string(), false);
     }
@@ -37,7 +37,7 @@ fn truncate_chars(text: &str, max: usize) -> (String, bool) {
 /// context_lines 拉满:u32::MAX 会使 libgit2 的 hunk 边界计算溢出,
 /// 产生 @@ -4,2- +4 @@ 畸形头且丢上下文;100k 已足够——行数超 10 万的文件
 /// 体积必然超过 COMMIT_DIFF_MAX_CHARS 字符上限,会先被截断
-fn apply_display_opts(opts: &mut DiffOptions, ignore_ws: Option<&str>) {
+pub(super) fn apply_display_opts(opts: &mut DiffOptions, ignore_ws: Option<&str>) {
     opts.context_lines(100_000);
     // 忽略空白差异:eol=仅行尾 / change=空白数量变化 / all=全部空白(对应 git 的 -b / -w 语义)
     match ignore_ws {

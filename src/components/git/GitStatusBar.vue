@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { ChevronDown, FolderGit2, GitBranch, Loader2 } from "@lucide/vue";
+import { ArchiveRestore, ChevronDown, FolderGit2, GitBranch, Loader2 } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import GitBranchMenu from "@/components/git/GitBranchMenu.vue";
 import GitBranchTrackBadges from "@/components/git/GitBranchTrackBadges.vue";
 import GitInitDialog from "@/components/git/GitInitDialog.vue";
+import GitStashDialog from "@/components/git/GitStashDialog.vue";
 import type { Project } from "@/types";
 
 const { t } = useI18n();
@@ -15,6 +16,7 @@ const props = defineProps<{ project: Project }>();
 const git = computed(() => props.project.git);
 /** 非 git 仓库时展示「初始化仓库」配置对话框 */
 const initDialogOpen = ref(false);
+const stashDialogOpen = ref(false);
 
 const ahead = computed(() => git.value?.ahead ?? 0);
 const behind = computed(() => git.value?.behind ?? 0);
@@ -66,6 +68,11 @@ const changesTitle = computed(
           </Badge>
         </template>
       </GitBranchMenu>
+      <Button variant="outline" size="xs" @click="stashDialogOpen = true">
+        <ArchiveRestore class="h-3.5 w-3.5" />
+        {{ t("git.stash.manage") }}
+      </Button>
+      <GitStashDialog v-model:open="stashDialogOpen" :project="project" />
     </template>
   </div>
 </template>
