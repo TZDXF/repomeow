@@ -194,6 +194,13 @@ pub enum ErrorCode {
     AgentPromptFailed,
     AgentCanceled,
 
+    // ── sem 语义分析 Sidecar ─────────────────────────────────────────
+    SemanticToolMissing,
+    SemanticToolFailed,
+    SemanticOutputInvalid,
+    SemanticAnalysisTimeout,
+    SemanticOutputTooLarge,
+
     // ── 工作日 ────────────────────────────────────────────────────────
     WorkdayHttpClientFailed,
     WorkdayFetchFailed,
@@ -347,6 +354,12 @@ impl ErrorCode {
             Self::AgentHandshakeFailed => "agent_handshake_failed",
             Self::AgentPromptFailed => "agent_prompt_failed",
             Self::AgentCanceled => "agent_canceled",
+            // sem 语义分析
+            Self::SemanticToolMissing => "semantic_tool_missing",
+            Self::SemanticToolFailed => "semantic_tool_failed",
+            Self::SemanticOutputInvalid => "semantic_output_invalid",
+            Self::SemanticAnalysisTimeout => "semantic_analysis_timeout",
+            Self::SemanticOutputTooLarge => "semantic_output_too_large",
             // 工作日
             Self::WorkdayHttpClientFailed => "workday_http_client_failed",
             Self::WorkdayFetchFailed => "workday_fetch_failed",

@@ -30,6 +30,7 @@ export default {
     hoursAgo: "{count} hr ago",
     daysAgo: "{count} day ago",
     refresh: "Refresh",
+    retry: "Retry",
     view: "View",
   },
   errors: {
@@ -190,6 +191,12 @@ export default {
     agent_handshake_failed: "Failed to establish a connection with the agent",
     agent_prompt_failed: "Agent generation failed",
     agent_canceled: "Agent generation was cancelled",
+    // sem semantic analysis
+    semantic_tool_missing: "The bundled semantic analysis tool is unavailable",
+    semantic_tool_failed: "Semantic analysis failed",
+    semantic_output_invalid: "Semantic analysis returned an invalid result",
+    semantic_analysis_timeout: "Semantic analysis timed out",
+    semantic_output_too_large: "Semantic analysis output was too large and was stopped",
     // workday
     workday_http_client_failed: "Failed to build HTTP client",
     workday_fetch_failed: "Failed to fetch China workday data",
@@ -539,6 +546,21 @@ export default {
         diffLoadFailed: "Failed to load diff",
         imageOld: "Old version",
         imageNew: "New version",
+      },
+      semantic: {
+        entities: "Entities ({count})",
+        empty: "No recognizable entity changes in this commit",
+        cosmetic: "Cosmetic",
+        binaryFiles: "Binary files",
+        change: {
+          added: "Added",
+          modified: "Modified",
+          deleted: "Deleted",
+          moved: "Moved",
+          renamed: "Renamed",
+          reordered: "Reordered",
+          binary: "Binary",
+        },
       },
       filterAll: "All branches",
       filterCurrent: "Current branch",

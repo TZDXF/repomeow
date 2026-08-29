@@ -50,6 +50,11 @@ const GENERIC_DETAIL_CODES = new Set([
   "agent_spawn_failed",
   "agent_handshake_failed",
   "agent_prompt_failed",
+  // sem Sidecar:message 含进程启动错误、退出码、stderr 或解析细节
+  "semantic_tool_missing",
+  "semantic_tool_failed",
+  "semantic_output_invalid",
+  "semantic_output_too_large",
 ]);
 
 /**

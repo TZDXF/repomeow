@@ -31,6 +31,7 @@ export default {
     hoursAgo: "{count} 小时前",
     daysAgo: "{count} 天前",
     refresh: "刷新",
+    retry: "重试",
     view: "查看",
   },
   errors: {
@@ -182,6 +183,12 @@ export default {
     agent_handshake_failed: "与 agent 建立连接失败",
     agent_prompt_failed: "agent 生成失败",
     agent_canceled: "agent 生成已取消",
+    // sem 语义分析
+    semantic_tool_missing: "内置语义分析工具不可用",
+    semantic_tool_failed: "语义分析失败",
+    semantic_output_invalid: "语义分析结果格式无效",
+    semantic_analysis_timeout: "语义分析超时",
+    semantic_output_too_large: "语义分析结果过大，已终止",
     // 工作日
     workday_http_client_failed: "创建 HTTP 客户端失败",
     workday_fetch_failed: "拉取中国工作日数据失败",
@@ -522,6 +529,21 @@ export default {
         diffLoadFailed: "变动内容加载失败",
         imageOld: "旧版本",
         imageNew: "新版本",
+      },
+      semantic: {
+        entities: "实体({count})",
+        empty: "该提交没有可识别的实体变化",
+        cosmetic: "外观",
+        binaryFiles: "二进制文件",
+        change: {
+          added: "新增",
+          modified: "修改",
+          deleted: "删除",
+          moved: "移动",
+          renamed: "重命名",
+          reordered: "重排",
+          binary: "二进制",
+        },
       },
       filterAll: "所有分支",
       filterCurrent: "当前分支",

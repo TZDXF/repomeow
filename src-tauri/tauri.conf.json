@@ -26,16 +26,22 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["**"]
+        "scope": [
+          "**"
+        ]
       }
     }
   },
   "bundle": {
     "active": true,
     "targets": "nsis",
+    "externalBin": [
+      "binaries/sem"
+    ],
     "createUpdaterArtifacts": true,
     "resources": [
-      "i18n/tray/*.json"
+      "i18n/tray/*.json",
+      "third-party/sem/*"
     ],
     "icon": [
       "icons/32x32.png",

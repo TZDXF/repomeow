@@ -28,6 +28,10 @@ plans
 
 docs/
 
+# 构建时按目标平台下载的 sem sidecar；仅保留目录占位文件
+src-tauri/binaries/*
+!src-tauri/binaries/.gitkeep
+
 # scripts/release/*.mjs and scripts/release/README.md are tracked (release pipeline).
 # Local-only scratch under scripts/release/ stays ignored.
 scripts/release/_local/

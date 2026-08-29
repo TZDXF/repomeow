@@ -214,6 +214,49 @@ export interface GitCommitFileDiff {
   truncated: boolean;
 }
 
+/** sem CLI 的实体级提交差异；仅保留定位/分类字段，不经 IPC 传输实体全文。 */
+export interface SemanticChange {
+  entityId: string;
+  changeType: string;
+  entityType: string;
+  entityName: string;
+  startLine: number;
+  endLine: number;
+  oldStartLine: number | null;
+  oldEndLine: number | null;
+  oldEntityName: string | null;
+  filePath: string;
+  oldFilePath: string | null;
+  structuralChange: boolean | null;
+}
+
+export interface SemanticBinaryChange {
+  changeType: string;
+  filePath: string;
+  oldFilePath: string | null;
+  fileStatus: string;
+}
+
+export interface SemanticDiffSummary {
+  fileCount: number;
+  added: number;
+  modified: number;
+  deleted: number;
+  moved: number;
+  renamed: number;
+  reordered: number;
+  binary: number;
+  orphan: number;
+  total: number;
+}
+
+export interface SemanticDiffResult {
+  engineVersion: string;
+  summary: SemanticDiffSummary;
+  changes: SemanticChange[];
+  binaryChanges: SemanticBinaryChange[];
+}
+
 /** 一位提交者的统计(git_project_stats;email 归并,展示名为最近一次使用的名字) */
 export interface GitAuthorStat {
   name: string;

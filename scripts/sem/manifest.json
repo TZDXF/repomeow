@@ -1,0 +1,31 @@
+{
+  "version": "0.23.1",
+  "repository": "https://github.com/Ataraxy-Labs/sem",
+  "targets": {
+    "x86_64-pc-windows-msvc": {
+      "asset": "sem-windows-x86_64.tar.gz",
+      "sha256": "9408ce214cb3801b7e30bae8f83b8c644745d271a21e4eaa8a8b4768edc945a9",
+      "binary": "sem.exe"
+    },
+    "aarch64-apple-darwin": {
+      "asset": "sem-darwin-arm64.tar.gz",
+      "sha256": "e3ff57379a9bbbf74573d967c71479e5aec5cdbfa1eba5a45eb5f034a9a35803",
+      "binary": "sem"
+    },
+    "x86_64-apple-darwin": {
+      "asset": "sem-darwin-x86_64.tar.gz",
+      "sha256": "320a5c1254ba3a56a7550e8f0bef4b2e69b7c679e87fc67cd4999d47611788e2",
+      "binary": "sem"
+    },
+    "aarch64-unknown-linux-gnu": {
+      "asset": "sem-linux-arm64.tar.gz",
+      "sha256": "23a7d508960583d10765423ffc053070b7cc216f25257e923ab7fa4b2625f480",
+      "binary": "sem"
+    },
+    "x86_64-unknown-linux-gnu": {
+      "asset": "sem-linux-x86_64.tar.gz",
+      "sha256": "c876a8a444415d20f3215136a1cfdf4495b835745dcefe80a6f9dd94ce5e3189",
+      "binary": "sem"
+    }
+  }
+}

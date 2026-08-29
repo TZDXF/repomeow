@@ -83,6 +83,8 @@ src-tauri/migrations/ SQL 迁移,NNN_name.sql(当前 001~010)
 7. **路径别名** `@/` → `src/`(tsconfig + vite + vitest 三处均已配置)。
 8. **路径风格统一**:禁止各处 ad-hoc `replace('\\', "/")` / `split("/")`,一律走统一辅助——Rust 侧 `path_util.rs`(`clean_str` 落库/缓存 key 用平台分隔符、`to_forward_slash` IPC/git pathspec 用 `/`)、前端 `src/lib/path.ts`(`cleanPath` / `toForwardSlash` / `baseName` / `splitDirName` / `displayRelativeTo`)。项目路径入库前必须 `clean_str`;IPC 输出的仓库内路径恒为 `/` 分隔;各类 HashMap/缓存 key 必须经归一化后再做读写与 invalidate。
 
+9. **sem 语义分析 Sidecar**:官方 sem CLI 以 Tauri xternalBin 内置,固定版本/平台资产/SHA-256 在 scripts/sem/manifest.json,运行 pnpm sem:prepare 下载到被忽略的 src-tauri/binaries/sem-<target>;升级版本须同步 src-tauri/third-party/sem/NOTICE 并做安装包冒烟测试。应用只从 Rust commands/semantic/ 暴露固定操作,禁止前端传任意 CLI 参数,子进程固定设置 DO_NOT_TRACK / SEM_NO_NETWORK 等环境变量,不得调用 sem update/login/mcp;Sidecar 只随 RepoMeow 版本更新。cargo check 前若二进制尚未准备,先运行 pnpm sem:prepare。
+
 ## wiki 生成管线(commands/wiki/ + lib/wiki-generator.ts)
 
 - 内置 API 后端两阶段(参照 deepwiki-open,无 embedding/RAG):`collect_wiki_context` 收集过滤后的文件树(walk 缓存 + 产物/二进制/锁文件黑名单,超预算按目录折叠)+ README + 根目录清单文件 → LLM 产严格 JSON 大纲(`ai/wiki_outline.rs` 校验完整对象、字段、页数、文件与交叉引用;初次生成后最多纠错 2 次,每次把具体错误反馈给模型)→ 逐页 `read_wiki_files` 取相关文件全文喂 LLM(单页重试 2 次,并发走 `aiConcurrency`)→ `save_wiki_page` 逐页落盘 → `save_wiki_meta` 收尾。取消时不写 meta,整本视为无效。(agent 后端见下,collect/落盘阶段两后端共用。)

@@ -187,6 +187,8 @@ pub fn run() {
             commands::git::git_merge_abort,
             commands::git::git_rebase,
             commands::git::git_rebase_abort,
+            commands::semantic::semantic_status,
+            commands::semantic::semantic_commit_diff,
             commands::account::list_git_accounts,
             commands::account::add_git_account,
             commands::account::update_git_account,
@@ -278,10 +280,11 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|_app_handle, event| {
             // 事件循环退出前(正常关闭 / 退出到托盘 / 系统关机销毁窗口):
-            // 杀掉所有仍在运行的 git/agent 子进程,避免其成为孤儿
+            // 杀掉所有仍在运行的 git/agent/sem 子进程,避免其成为孤儿
             if let tauri::RunEvent::Exit = event {
                 commands::git::cleanup_on_exit();
                 commands::agent::cleanup_on_exit();
+                commands::semantic::cleanup_on_exit();
             }
         });
 }
