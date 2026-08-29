@@ -164,6 +164,22 @@ export function flattenRelationGroups(groups: SemanticRelationGroup[]): Semantic
   return dedupeEntityRefs(groups.flatMap((group) => group.related));
 }
 
+// ── 影响分析小图(SemanticMiniGraph)布局辅助 ─────────────────────────────────
+
+/** 小图单侧节点截取:最多 max 个,extra 为折叠进「+N」占位节点的数量 */
+export function sliceGraphSide(
+  list: SemanticEntityRef[],
+  max = 8,
+): { shown: SemanticEntityRef[]; extra: number } {
+  const shown = list.slice(0, max);
+  return { shown, extra: list.length - shown.length };
+}
+
+/** 小图节点标签截断(SVG 内定宽,超长省略) */
+export function truncateGraphLabel(text: string, max = 22): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
 // ── 会话级小型缓存(内存 Map,进程退出即清;不落 SQLite)──────────────────────
 
 const fileEntitiesCache = new Map<string, SemanticFileEntitiesResult>();

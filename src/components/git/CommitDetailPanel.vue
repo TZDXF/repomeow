@@ -212,7 +212,11 @@ async function openImpactTarget(entity: SemanticEntityRef) {
   }
 }
 
-function selectSemanticFile(filePath: string, oldFilePath: string | null) {
+/** 语义变更点击的行定位请求:seq 递增保证同一行重复点击也触发 */
+const diffReveal = ref<{ line: number; seq: number } | null>(null);
+let diffRevealSeq = 0;
+
+function selectSemanticFile(filePath: string, oldFilePath: string | null, line: number | null) {
   const file = files.value.find(
     (candidate) =>
       candidate.path === filePath ||
@@ -221,11 +225,14 @@ function selectSemanticFile(filePath: string, oldFilePath: string | null) {
         (candidate.path === oldFilePath || candidate.old_path === oldFilePath)),
   );
   if (file) {
-    void selectFile(file);
+    void selectFile(file, false, line);
   }
 }
 
-async function selectFile(file: GitCommitFile, force = false) {
+async function selectFile(file: GitCommitFile, force = false, revealLine: number | null = null) {
+  // 定位请求先于早退判断下发:同文件重复点击时 diff 不重取,但 DiffViewer 仍按新 seq 滚动
+  diffReveal.value =
+    revealLine != null && revealLine > 0 ? { line: revealLine, seq: ++diffRevealSeq } : null;
   if (!force && selectedPath.value === file.path && (diff.value || imagePanes.value.length)) {
     return;
   }
@@ -676,6 +683,7 @@ onBeforeUnmount(() => {
         :error="diffError"
         :split-applicable="splitApplicable"
         :can-open-ide="canOpenInIde"
+        :reveal="diffReveal"
         @open-ide="selectedFile && openFile(selectedFile)"
       />
     </div>

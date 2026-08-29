@@ -11,6 +11,8 @@ const props = defineProps<{
   landedDiff: GitCommitFileDiff | null;
   lineHtml: Map<DiffLine, string>;
   wordRanges: Map<DiffLine, [number, number]>;
+  /** 短暂高亮的新文件行号(语义变更定位;仅右侧窗格,1.6s 后由父组件清除) */
+  revealLine?: number | null;
 }>();
 
 const emit = defineEmits<{
@@ -259,7 +261,14 @@ defineExpose({ scrollToRow });
           >
             <div class="diff-fold-wave h-5" />
           </button>
-          <div v-else class="h-5 pl-2" :class="row.line?.kind === 'add' ? 'bg-green-500/10' : ''">
+          <div
+            v-else
+            class="h-5 pl-2 transition-colors"
+            :class="[
+              row.line?.kind === 'add' ? 'bg-green-500/10' : '',
+              revealLine != null && row.line?.newLine === revealLine ? 'bg-primary/20' : '',
+            ]"
+          >
             <span v-if="hlOf(row.line)" class="diff-hl whitespace-pre" v-html="hlOf(row.line)" />
             <span v-else class="whitespace-pre">{{ sideText(row.line) }}</span>
           </div>

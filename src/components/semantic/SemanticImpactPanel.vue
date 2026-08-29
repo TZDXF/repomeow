@@ -1,16 +1,16 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { ClipboardCopy, Loader2, RefreshCw, X } from "@lucide/vue";
+import { Loader2, Network, RefreshCw } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import SemanticEntityList from "@/components/semantic/SemanticEntityList.vue";
+import SemanticMiniGraph from "@/components/semantic/SemanticMiniGraph.vue";
 import { useSemanticRequest } from "@/composables/useSemanticRequest";
 import { dedupeEntityRefs } from "@/lib/semantic";
-import { cmd } from "@/lib/tauri";
-import { copyToClipboard } from "@/lib/utils";
-import type { SemanticContextResult, SemanticEntityRef, SemanticImpactResult } from "@/types";
+import { cmd, onListen } from "@/lib/tauri";
+import type { GitProjectChangedPayload, SemanticEntityRef, SemanticImpactResult } from "@/types";
 
 // 影响分析面板(文件页与 GitGraph 实体视图共用):
 // sem impact 基于当前工作树/HEAD 的实体图——查看历史提交时须提示「按当前代码结构分析」;
@@ -35,8 +35,28 @@ const { t } = useI18n();
 const depth = ref(2);
 const tab = ref<"affected" | "tests" | "dependencies" | "dependents">("affected");
 
-// ── 会话缓存:root + entity + depth(应用会话内有效;HEAD 变化由宿主重开面板) ──
+// ── 会话缓存:root + entity + depth;HEAD 变化使整个项目的缓存失效并自动重载 ──
 const impactCache = new Map<string, SemanticImpactResult>();
+
+function clearCacheForRoot() {
+  const prefix = `${props.root}::`;
+  for (const key of impactCache.keys()) {
+    if (key.startsWith(prefix)) impactCache.delete(key);
+  }
+}
+
+let unlistenGitChanged: (() => void) | null = null;
+onMounted(async () => {
+  unlistenGitChanged = await onListen<GitProjectChangedPayload>(
+    "git://project-changed",
+    (payload) => {
+      if (!payload.head_changed || payload.path !== props.root) return;
+      clearCacheForRoot();
+      if (open.value && props.entity) void load(true);
+    },
+  );
+});
+onBeforeUnmount(() => unlistenGitChanged?.());
 
 function cacheKey(): string | null {
   const entity = props.entity;
@@ -81,56 +101,14 @@ watch([open, () => props.entity, depth], ([isOpen]) => {
 
 const entityMissing = computed(() => request.errorCode.value === "semantic_entity_not_found");
 
-// ── 复制 AI 上下文(sem context,默认 budget 2000 / hops 1)────────────────────
-// 用户显式触发;返回正文是源码,仅展示包含哪些文件/实体清单,确认后才复制。
-const contextPreview = ref<SemanticContextResult | null>(null);
-
-const contextRequest = useSemanticRequest((requestId: string) => {
-  const entity = props.entity;
-  if (!entity) return Promise.reject(new Error("no entity"));
-  return cmd<SemanticContextResult>("semantic_entity_context", {
-    path: props.root,
-    entityId: entity.entityId ?? undefined,
-    entityName: entity.entityId ? undefined : entity.name,
-    filePath: entity.filePath || undefined,
-    budget: 2000,
-    hops: 1,
-    requestId,
-  });
-});
-
-async function prepareContext() {
-  contextPreview.value = null;
-  const result = await contextRequest.run();
-  if (result) contextPreview.value = result;
-}
-
-function buildContextText(result: SemanticContextResult): string {
-  const parts = result.entries.map(
-    (entry) =>
-      `### ${entry.name} (${entry.entityType}, ${entry.filePath}, role: ${entry.role}, ~${entry.tokens} tokens)\n\n${entry.content}`,
-  );
-  return parts.join("\n\n");
-}
-
-async function copyContext() {
-  const result = contextPreview.value;
-  if (!result) return;
-  await copyToClipboard(buildContextText(result));
-  contextPreview.value = null;
-}
-
-watch(open, (isOpen) => {
-  if (!isOpen) {
-    contextPreview.value = null;
-    contextRequest.cancel();
-  }
-});
-
 const affected = computed(() => request.result.value?.affected ?? []);
 const tests = computed(() => dedupeEntityRefs(request.result.value?.tests ?? []));
 const dependencies = computed(() => request.result.value?.dependencies ?? []);
 const dependents = computed(() => request.result.value?.dependents ?? []);
+
+// ── 关系小图:只画 target + 直接依赖/调用者;两侧都为空时无图可画,禁用开关 ──
+const showGraph = ref(true);
+const hasDirectRelations = computed(() => dependencies.value.length + dependents.value.length > 0);
 
 const tabs = computed(() => {
   const r = request.result.value;
@@ -175,15 +153,14 @@ const tabs = computed(() => {
         <div class="flex-1" />
         <Button
           variant="ghost"
-          size="sm"
-          class="h-7 gap-1 px-2 text-xs"
-          :disabled="contextRequest.loading.value"
-          :title="t('files.semantic.copyContextHint')"
-          @click="prepareContext"
+          size="icon"
+          class="h-7 w-7"
+          :class="showGraph && hasDirectRelations ? '' : 'text-muted-foreground'"
+          :disabled="!hasDirectRelations"
+          :title="t('files.semantic.graphToggle')"
+          @click="showGraph = !showGraph"
         >
-          <Loader2 v-if="contextRequest.loading.value" class="h-3.5 w-3.5 animate-spin" />
-          <ClipboardCopy v-else class="h-3.5 w-3.5" />
-          {{ t("files.semantic.copyContext") }}
+          <Network class="h-3.5 w-3.5" />
         </Button>
         <Button
           variant="ghost"
@@ -195,47 +172,6 @@ const tabs = computed(() => {
           <RefreshCw class="h-3.5 w-3.5" />
         </Button>
       </div>
-
-      <!-- AI 上下文预览:明确列出将复制的文件/实体,确认后才写入剪贴板 -->
-      <div v-if="contextPreview" class="shrink-0 rounded-md border bg-muted/40 px-3 py-2 text-xs">
-        <div class="flex items-center gap-2">
-          <span class="min-w-0 flex-1 truncate font-medium">
-            {{
-              t("files.semantic.contextReady", {
-                count: contextPreview.entries.length,
-                tokens: contextPreview.totalTokens,
-              })
-            }}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            class="h-6 gap-1 px-2 text-[11px]"
-            @click="copyContext"
-          >
-            <ClipboardCopy class="h-3 w-3" />
-            {{ t("files.semantic.copyConfirm") }}
-          </Button>
-          <Button variant="ghost" size="icon" class="h-5 w-5" @click="contextPreview = null">
-            <X class="h-3 w-3" />
-          </Button>
-        </div>
-        <ul class="mt-1 space-y-0.5 text-muted-foreground">
-          <li
-            v-for="entry in contextPreview.entries"
-            :key="entry.entityId"
-            class="truncate font-mono"
-          >
-            {{ entry.filePath }} · {{ entry.name }} ({{ entry.role }})
-          </li>
-        </ul>
-        <p v-if="contextPreview.truncated" class="mt-1 text-[11px] text-muted-foreground">
-          {{ t("files.semantic.truncated") }}
-        </p>
-      </div>
-      <p v-else-if="contextRequest.error.value" class="shrink-0 px-1 py-1 text-xs text-destructive">
-        {{ contextRequest.error.value }}
-      </p>
 
       <p
         v-if="showCurrentCodeNotice"
@@ -280,6 +216,16 @@ const tabs = computed(() => {
               {{ t(`files.semantic.impactTab.${card.key}`) }}
             </div>
           </div>
+        </div>
+
+        <!-- 关系小图:target + 直接依赖/调用者(sem 实际返回的边) -->
+        <div v-if="showGraph && hasDirectRelations" class="shrink-0 rounded-md border px-2 py-1">
+          <SemanticMiniGraph
+            :target="request.result.value.entity"
+            :dependencies="dependencies"
+            :dependents="dependents"
+            @open="(e) => emit('open', e)"
+          />
         </div>
 
         <div class="flex shrink-0 items-center gap-1 border-b">

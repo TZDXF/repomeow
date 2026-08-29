@@ -14,7 +14,8 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  select: [filePath: string, oldFilePath: string | null];
+  /** 选中变更:打开对应文件 diff 并定位到该行(删除的实体用旧文件行号近似落点) */
+  select: [filePath: string, oldFilePath: string | null, line: number | null];
   retry: [];
   /** 打开该变更实体的影响分析 */
   impact: [change: SemanticChange];
@@ -57,11 +58,12 @@ function changeClass(type: string) {
 }
 
 function selectChange(change: SemanticChange) {
-  emit("select", change.filePath, change.oldFilePath);
+  const line = change.startLine > 0 ? change.startLine : change.oldStartLine;
+  emit("select", change.filePath, change.oldFilePath, line && line > 0 ? line : null);
 }
 
 function selectBinary(change: SemanticBinaryChange) {
-  emit("select", change.filePath, change.oldFilePath);
+  emit("select", change.filePath, change.oldFilePath, null);
 }
 </script>
 

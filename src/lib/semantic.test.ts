@@ -69,6 +69,8 @@ import {
   dedupeEntityRefs,
   entityDisplayName,
   flattenRelationGroups,
+  sliceGraphSide,
+  truncateGraphLabel,
 } from "@/lib/semantic";
 import type { SemanticEntityRef, SemanticFileEntity, SemanticRelationGroup } from "@/types";
 
@@ -208,5 +210,29 @@ describe("entityDisplayName", () => {
   it("falls back to entity type when name is empty", () => {
     expect(entityDisplayName({ name: "", entityType: "section" })).toBe("section");
     expect(entityDisplayName({ name: "run", entityType: "function" })).toBe("run");
+  });
+});
+
+describe("sliceGraphSide", () => {
+  it("caps shown nodes and reports the folded remainder", () => {
+    const many = Array.from({ length: 10 }, (_, i) => ref({ name: `n${i}`, startLine: i }));
+    const { shown, extra } = sliceGraphSide(many, 8);
+    expect(shown).toHaveLength(8);
+    expect(extra).toBe(2);
+  });
+
+  it("keeps all nodes without remainder when within the cap", () => {
+    const few = [ref({ name: "a" }), ref({ name: "b" })];
+    expect(sliceGraphSide(few)).toEqual({ shown: few, extra: 0 });
+  });
+});
+
+describe("truncateGraphLabel", () => {
+  it("truncates overlong labels with ellipsis", () => {
+    expect(truncateGraphLabel("short")).toBe("short");
+    const long = "a".repeat(30);
+    const out = truncateGraphLabel(long);
+    expect(out).toHaveLength(22);
+    expect(out.endsWith("…")).toBe(true);
   });
 });

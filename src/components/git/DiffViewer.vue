@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, ref, shallowRef, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useLocalStorage } from "@vueuse/core";
 import {
@@ -50,6 +50,9 @@ const props = defineProps<{
   splitApplicable: boolean;
   /** 当前文件是否可在 IDE 打开(已删除文件工作区已不存在,不可打开) */
   canOpenIde: boolean;
+  /** 定位请求:新文件 1-based 行号 + 序号(同一行重复点击靠 seq 变化再触发);
+   *  语义变更列表点击时由父组件下发,diff 尚未落地则落地后自动执行 */
+  reveal?: { line: number; seq: number } | null;
 }>();
 
 /** 忽略空白差异模式:none 不忽略 / eol 行尾 / change 空白数量变化 / all 全部空白。
@@ -115,6 +118,8 @@ watch(
     expandedFolds.value = new Set();
     currentScrollTop.value = 0;
     currentRowPos.value = 0;
+    // 切文件前已有点击定位请求:行模型落地后再执行
+    if (props.reveal) void revealLine(props.reveal.line);
   },
   { immediate: true },
 );
@@ -250,6 +255,74 @@ const hasExpandedFolds = computed(() => expandedFolds.value.size > 0);
 function collapseAllFolds() {
   expandedFolds.value = new Set();
 }
+
+// --- 行定位(语义变更列表点击):目标为新文件 1-based 行号;
+// 命中折叠隐藏段先展开该折叠区,再滚动到目标行(约 1/3 屏高处)并短暂高亮 ---
+/** 当前短暂高亮的新文件行号(1.6s 后自动清除) */
+const revealLineNo = ref<number | null>(null);
+let revealTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function revealLine(target: number) {
+  if (!Number.isFinite(target) || target <= 0 || !diffLines.value.length) return;
+  // 与 foldContextLines 同口径在未折叠行序列上定位,目标落在折叠隐藏段内则先展开
+  const base = landedDiff.value?.truncated
+    ? diffLines.value
+    : diffLines.value.filter((line) => line.kind !== "hunk");
+  const targetIdx = base.findIndex((line) => line.newLine != null && line.newLine >= target);
+  if (targetIdx < 0) return;
+  const MIN_RUN = 12;
+  const EDGE = 3;
+  let i = 0;
+  while (i < base.length) {
+    if (base[i].kind !== "ctx") {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < base.length && base[j].kind === "ctx") j++;
+    if (j - i > MIN_RUN && targetIdx >= i + EDGE && targetIdx < j - EDGE) {
+      const key = `${i}:${j - i}`;
+      if (!expandedFolds.value.has(key)) {
+        const next = new Set(expandedFolds.value);
+        next.add(key);
+        expandedFolds.value = next;
+      }
+      break;
+    }
+    i = j;
+  }
+  const resolved = base[targetIdx].newLine;
+  revealLineNo.value = resolved;
+  clearTimeout(revealTimer);
+  revealTimer = setTimeout(() => {
+    revealLineNo.value = null;
+  }, 1600);
+  await nextTick();
+  if (splitActive.value) {
+    const idx = sideRows.value.findIndex(
+      (row) => row.kind === "line" && row.right?.newLine != null && row.right.newLine >= target,
+    );
+    if (idx < 0) return;
+    splitViewEl.value?.scrollToRow(Math.max(idx - 8, 0));
+    return;
+  }
+  const idx = displayLines.value.findIndex(
+    (line) => line.kind !== "fold" && line.newLine != null && line.newLine >= target,
+  );
+  if (idx < 0 || !unifiedEl.value) return;
+  const h = rowHeightPx();
+  const top = Math.max(h / 5 + idx * h - unifiedEl.value.clientHeight / 3, 0);
+  unifiedEl.value.scrollTop = top;
+  currentScrollTop.value = top;
+}
+
+// diff 落地后若已有定位请求则执行;同文件重复点击靠 reveal.seq 变化触发
+watch(
+  () => props.reveal,
+  (req) => {
+    if (req) void revealLine(req.line);
+  },
+);
 </script>
 
 <template>
@@ -352,6 +425,7 @@ function collapseAllFolds() {
       :landed-diff="landedDiff"
       :line-html="lineHtml"
       :word-ranges="wordRanges"
+      :reveal-line="revealLineNo"
       @expand-fold="expandFold"
     />
 
@@ -391,10 +465,11 @@ function collapseAllFolds() {
           </button>
           <div
             v-else
-            class="flex w-full"
-            :class="
-              line.kind === 'add' ? 'bg-green-500/10' : line.kind === 'del' ? 'bg-red-500/10' : ''
-            "
+            class="flex w-full transition-colors"
+            :class="[
+              line.kind === 'add' ? 'bg-green-500/10' : line.kind === 'del' ? 'bg-red-500/10' : '',
+              revealLineNo != null && line.newLine === revealLineNo ? 'bg-primary/20' : '',
+            ]"
           >
             <span class="w-10 shrink-0 pr-2 text-right text-muted-foreground/50 select-none">
               {{ line.oldLine ?? "" }}
