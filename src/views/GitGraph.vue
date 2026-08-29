@@ -293,6 +293,22 @@ function locateRef(name: string) {
   }
 }
 
+// ── ?commit=<sha> 定位(实体历史跳转):等流式加载完成后按完整/前缀 hash 定位 ──
+function locateHash(hash: string) {
+  const node = layouter.nodes.find((n) => n.commit.hash.startsWith(hash));
+  if (node) {
+    locateNode(node);
+  } else {
+    toast.info(t("git.graph.commitNotFound"));
+  }
+}
+
+watch([() => route.query.commit, streamDone], ([hash, done]) => {
+  if (typeof hash === "string" && hash && done) {
+    locateHash(hash);
+  }
+});
+
 function locateTag(tag: string) {
   const node = layouter.nodes.find((n) => n.commit.refs.some((r) => r === `tag: ${tag}`));
   if (node) {

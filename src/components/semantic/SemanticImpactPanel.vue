@@ -1,0 +1,336 @@
+<script setup lang="ts">
+import { computed, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
+import { ClipboardCopy, Loader2, RefreshCw, X } from "@lucide/vue";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import SemanticEntityList from "@/components/semantic/SemanticEntityList.vue";
+import { useSemanticRequest } from "@/composables/useSemanticRequest";
+import { dedupeEntityRefs } from "@/lib/semantic";
+import { cmd } from "@/lib/tauri";
+import { copyToClipboard } from "@/lib/utils";
+import type { SemanticContextResult, SemanticEntityRef, SemanticImpactResult } from "@/types";
+
+// 影响分析面板(文件页与 GitGraph 实体视图共用):
+// sem impact 基于当前工作树/HEAD 的实体图——查看历史提交时须提示「按当前代码结构分析」;
+// 已删除实体(semantic_entity_not_found)展示「当前版本已不存在」,不回退同名实体。
+
+const props = defineProps<{
+  root: string;
+  entity: SemanticEntityRef | null;
+  /** 查看的提交不是 HEAD 时显示「按当前代码结构分析」提示 */
+  showCurrentCodeNotice?: boolean;
+}>();
+
+const emit = defineEmits<{
+  /** 跳到源码(由宿主决定:文件页内定位 / 编辑器打开) */
+  open: [entity: SemanticEntityRef];
+}>();
+
+const open = defineModel<boolean>("open", { required: true });
+
+const { t } = useI18n();
+
+const depth = ref(2);
+const tab = ref<"affected" | "tests" | "dependencies" | "dependents">("affected");
+
+// ── 会话缓存:root + entity + depth(应用会话内有效;HEAD 变化由宿主重开面板) ──
+const impactCache = new Map<string, SemanticImpactResult>();
+
+function cacheKey(): string | null {
+  const entity = props.entity;
+  if (!entity) return null;
+  return `${props.root}::${entity.entityId ?? `${entity.filePath}:${entity.name}`}::${depth.value}`;
+}
+
+const request = useSemanticRequest((requestId: string) => {
+  const entity = props.entity;
+  if (!entity) return Promise.reject(new Error("no entity"));
+  return cmd<SemanticImpactResult>("semantic_entity_impact", {
+    path: props.root,
+    entityId: entity.entityId ?? undefined,
+    entityName: entity.entityId ? undefined : entity.name,
+    filePath: entity.filePath || undefined,
+    depth: depth.value,
+    requestId,
+  });
+});
+
+async function load(force = false) {
+  if (!props.entity) return;
+  const key = cacheKey()!;
+  if (!force) {
+    const cached = impactCache.get(key);
+    if (cached) {
+      request.result.value = cached;
+      return;
+    }
+  }
+  const result = await request.run();
+  if (result) {
+    if (impactCache.size > 100) impactCache.clear();
+    impactCache.set(key, result);
+  }
+}
+
+watch([open, () => props.entity, depth], ([isOpen]) => {
+  if (isOpen) void load();
+  else request.cancel();
+});
+
+const entityMissing = computed(() => request.errorCode.value === "semantic_entity_not_found");
+
+// ── 复制 AI 上下文(sem context,默认 budget 2000 / hops 1)────────────────────
+// 用户显式触发;返回正文是源码,仅展示包含哪些文件/实体清单,确认后才复制。
+const contextPreview = ref<SemanticContextResult | null>(null);
+
+const contextRequest = useSemanticRequest((requestId: string) => {
+  const entity = props.entity;
+  if (!entity) return Promise.reject(new Error("no entity"));
+  return cmd<SemanticContextResult>("semantic_entity_context", {
+    path: props.root,
+    entityId: entity.entityId ?? undefined,
+    entityName: entity.entityId ? undefined : entity.name,
+    filePath: entity.filePath || undefined,
+    budget: 2000,
+    hops: 1,
+    requestId,
+  });
+});
+
+async function prepareContext() {
+  contextPreview.value = null;
+  const result = await contextRequest.run();
+  if (result) contextPreview.value = result;
+}
+
+function buildContextText(result: SemanticContextResult): string {
+  const parts = result.entries.map(
+    (entry) =>
+      `### ${entry.name} (${entry.entityType}, ${entry.filePath}, role: ${entry.role}, ~${entry.tokens} tokens)\n\n${entry.content}`,
+  );
+  return parts.join("\n\n");
+}
+
+async function copyContext() {
+  const result = contextPreview.value;
+  if (!result) return;
+  await copyToClipboard(buildContextText(result));
+  contextPreview.value = null;
+}
+
+watch(open, (isOpen) => {
+  if (!isOpen) {
+    contextPreview.value = null;
+    contextRequest.cancel();
+  }
+});
+
+const affected = computed(() => request.result.value?.affected ?? []);
+const tests = computed(() => dedupeEntityRefs(request.result.value?.tests ?? []));
+const dependencies = computed(() => request.result.value?.dependencies ?? []);
+const dependents = computed(() => request.result.value?.dependents ?? []);
+
+const tabs = computed(() => {
+  const r = request.result.value;
+  return [
+    { key: "affected" as const, count: r?.total ?? 0 },
+    { key: "tests" as const, count: tests.value.length },
+    { key: "dependencies" as const, count: dependencies.value.length },
+    { key: "dependents" as const, count: dependents.value.length },
+  ];
+});
+</script>
+
+<template>
+  <Dialog v-model:open="open">
+    <DialogContent class="flex max-h-[85vh] flex-col sm:max-w-2xl">
+      <DialogHeader class="shrink-0">
+        <DialogTitle class="flex items-center gap-2 pr-8 text-sm">
+          <span class="min-w-0 flex-1 truncate font-mono" :title="entity?.entityId ?? undefined">
+            {{ entity?.name }}
+          </span>
+          <span v-if="entity" class="shrink-0 text-xs font-normal text-muted-foreground">
+            {{ entity.entityType }} · {{ entity.filePath }}:{{ entity.startLine }}
+          </span>
+        </DialogTitle>
+      </DialogHeader>
+
+      <div class="flex shrink-0 items-center gap-2 border-b pb-2">
+        <span class="text-xs text-muted-foreground">{{ t("files.semantic.impactDepth") }}</span>
+        <div class="flex items-center gap-0.5">
+          <Button
+            v-for="n in [1, 2, 3, 4, 5]"
+            :key="n"
+            variant="ghost"
+            size="sm"
+            class="h-6 w-7 px-0 text-xs"
+            :class="depth === n ? 'bg-accent' : 'text-muted-foreground'"
+            @click="depth = n"
+          >
+            {{ n }}
+          </Button>
+        </div>
+        <div class="flex-1" />
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-7 gap-1 px-2 text-xs"
+          :disabled="contextRequest.loading.value"
+          :title="t('files.semantic.copyContextHint')"
+          @click="prepareContext"
+        >
+          <Loader2 v-if="contextRequest.loading.value" class="h-3.5 w-3.5 animate-spin" />
+          <ClipboardCopy v-else class="h-3.5 w-3.5" />
+          {{ t("files.semantic.copyContext") }}
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          class="h-7 w-7"
+          :title="t('common.refresh')"
+          @click="load(true)"
+        >
+          <RefreshCw class="h-3.5 w-3.5" />
+        </Button>
+      </div>
+
+      <!-- AI 上下文预览:明确列出将复制的文件/实体,确认后才写入剪贴板 -->
+      <div v-if="contextPreview" class="shrink-0 rounded-md border bg-muted/40 px-3 py-2 text-xs">
+        <div class="flex items-center gap-2">
+          <span class="min-w-0 flex-1 truncate font-medium">
+            {{
+              t("files.semantic.contextReady", {
+                count: contextPreview.entries.length,
+                tokens: contextPreview.totalTokens,
+              })
+            }}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            class="h-6 gap-1 px-2 text-[11px]"
+            @click="copyContext"
+          >
+            <ClipboardCopy class="h-3 w-3" />
+            {{ t("files.semantic.copyConfirm") }}
+          </Button>
+          <Button variant="ghost" size="icon" class="h-5 w-5" @click="contextPreview = null">
+            <X class="h-3 w-3" />
+          </Button>
+        </div>
+        <ul class="mt-1 space-y-0.5 text-muted-foreground">
+          <li
+            v-for="entry in contextPreview.entries"
+            :key="entry.entityId"
+            class="truncate font-mono"
+          >
+            {{ entry.filePath }} · {{ entry.name }} ({{ entry.role }})
+          </li>
+        </ul>
+        <p v-if="contextPreview.truncated" class="mt-1 text-[11px] text-muted-foreground">
+          {{ t("files.semantic.truncated") }}
+        </p>
+      </div>
+      <p v-else-if="contextRequest.error.value" class="shrink-0 px-1 py-1 text-xs text-destructive">
+        {{ contextRequest.error.value }}
+      </p>
+
+      <p
+        v-if="showCurrentCodeNotice"
+        class="shrink-0 rounded-md bg-muted px-3 py-1.5 text-xs text-muted-foreground"
+      >
+        {{ t("files.semantic.impactCurrentCode") }}
+      </p>
+
+      <div
+        v-if="request.loading.value"
+        class="flex flex-1 items-center justify-center gap-2 py-10 text-sm text-muted-foreground"
+      >
+        <Loader2 class="h-4 w-4 animate-spin" />
+        {{ t("common.loading") }}
+      </div>
+
+      <p
+        v-else-if="entityMissing"
+        class="flex-1 px-1 py-10 text-center text-sm text-muted-foreground"
+      >
+        {{ t("files.semantic.impactEntityGone") }}
+      </p>
+
+      <div v-else-if="request.error.value" class="flex flex-1 flex-col items-center gap-2 py-10">
+        <p class="whitespace-pre-line text-xs text-destructive">{{ request.error.value }}</p>
+        <Button variant="outline" size="sm" class="h-7 gap-1.5 text-xs" @click="load(true)">
+          <RefreshCw class="h-3 w-3" />
+          {{ t("common.retry") }}
+        </Button>
+      </div>
+
+      <template v-else-if="request.result.value">
+        <!-- 摘要卡 -->
+        <div class="grid shrink-0 grid-cols-4 gap-2">
+          <div
+            v-for="card in tabs"
+            :key="card.key"
+            class="rounded-md border px-2 py-1.5 text-center"
+          >
+            <div class="text-sm font-semibold">{{ card.count }}</div>
+            <div class="text-[10px] text-muted-foreground">
+              {{ t(`files.semantic.impactTab.${card.key}`) }}
+            </div>
+          </div>
+        </div>
+
+        <div class="flex shrink-0 items-center gap-1 border-b">
+          <Button
+            v-for="card in tabs"
+            :key="card.key"
+            variant="ghost"
+            size="sm"
+            class="h-7 px-2 text-xs"
+            :class="tab === card.key ? 'bg-accent' : 'text-muted-foreground'"
+            @click="tab = card.key"
+          >
+            {{ t(`files.semantic.impactTab.${card.key}`) }} ({{ card.count }})
+          </Button>
+        </div>
+
+        <p
+          v-if="request.result.value.truncated"
+          class="shrink-0 px-1 py-1 text-[11px] text-muted-foreground"
+        >
+          {{ t("files.semantic.truncated") }}
+        </p>
+
+        <ScrollArea class="min-h-0 flex-1">
+          <SemanticEntityList
+            v-if="tab === 'affected'"
+            :items="affected"
+            show-depth
+            :empty-text="t('files.semantic.impactEmpty')"
+            @open="(e) => emit('open', e)"
+          />
+          <SemanticEntityList
+            v-else-if="tab === 'tests'"
+            :items="tests"
+            :empty-text="t('files.semantic.impactNoTests')"
+            @open="(e) => emit('open', e)"
+          />
+          <SemanticEntityList
+            v-else-if="tab === 'dependencies'"
+            :items="dependencies"
+            :empty-text="t('files.semantic.impactEmpty')"
+            @open="(e) => emit('open', e)"
+          />
+          <SemanticEntityList
+            v-else
+            :items="dependents"
+            :empty-text="t('files.semantic.impactEmpty')"
+            @open="(e) => emit('open', e)"
+          />
+        </ScrollArea>
+      </template>
+    </DialogContent>
+  </Dialog>
+</template>

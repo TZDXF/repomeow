@@ -7,6 +7,7 @@ use tauri::{AppHandle, State};
 use crate::ai::prompts::{effective_system_prompt, DEFAULT_COMMIT_PROMPT};
 use crate::ai::sdk;
 use crate::commands::git;
+use crate::commands::semantic;
 use crate::db::Db;
 use crate::error::AppResult;
 
@@ -28,7 +29,10 @@ pub async fn ai_generate_commit_message(
     db: State<'_, Db>,
     request: GenerateCommitMessageRequest,
 ) -> AppResult<String> {
+    let project_path = request.project_path.clone();
     let context = git::git_commit_context(request.project_path).await?;
+    // 实体级语义摘要(sem Sidecar,仅结构线索;失败/超时/无实体静默回退原 prompt)
+    let semantic_summary = semantic::worktree_diff_summary(&app, &project_path).await;
     let description = request.project_description.trim();
     let project_section = if description.is_empty() {
         format!("Project: {}", request.project_name)
@@ -93,8 +97,14 @@ pub async fn ai_generate_commit_message(
                 .join("\n\n")
         )
     };
+    let semantic_section = match &semantic_summary {
+        Some(summary) => format!(
+            "\n\nSemantic change summary (entity-level hints; the raw diff below remains the source of truth):\n{summary}"
+        ),
+        None => String::new(),
+    };
     let user_prompt = format!(
-        "{project_section}{recent_section}\n\nChange summary (git diff --stat):\n{}\n\nDiff:{truncated_note}\n{}{}{}",
+        "{project_section}{recent_section}\n\nChange summary (git diff --stat):\n{}{semantic_section}\n\nDiff:{truncated_note}\n{}{}{}",
         if context.stat.is_empty() { "(none)" } else { &context.stat },
         if context.diff.is_empty() { "(empty)" } else { &context.diff },
         untracked_names,

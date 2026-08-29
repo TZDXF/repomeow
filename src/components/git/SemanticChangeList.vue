@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
-import { FileCode2, Loader2, RefreshCw } from "@lucide/vue";
+import { FileCode2, Loader2, Network, RefreshCw } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { groupSemanticChanges } from "@/lib/semantic";
 import type { SemanticBinaryChange, SemanticChange, SemanticDiffResult } from "@/types";
@@ -16,6 +16,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [filePath: string, oldFilePath: string | null];
   retry: [];
+  /** 打开该变更实体的影响分析 */
+  impact: [change: SemanticChange];
 }>();
 
 const { t, te } = useI18n();
@@ -108,39 +110,51 @@ function selectBinary(change: SemanticBinaryChange) {
         <FileCode2 class="h-3 w-3 shrink-0" />
         <span class="truncate font-mono">{{ group.path }}</span>
       </div>
-      <button
+      <div
         v-for="change in group.changes"
         :key="change.entityId + ':' + change.changeType"
-        type="button"
-        class="flex w-full items-center gap-1.5 px-3 py-1 text-left font-mono text-xs transition-colors hover:bg-accent/60"
+        class="group flex w-full items-center gap-1.5 px-3 py-1 text-left font-mono text-xs transition-colors hover:bg-accent/60"
         :class="selectedPath === change.filePath ? 'bg-accent' : ''"
-        :title="`${changeLabel(change.changeType)} · ${change.filePath}:${change.startLine}`"
-        @click="selectChange(change)"
       >
-        <span
-          class="w-3 shrink-0 text-center font-semibold"
-          :class="changeClass(change.changeType)"
+        <button
+          type="button"
+          class="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+          :title="`${changeLabel(change.changeType)} · ${change.filePath}:${change.startLine}`"
+          @click="selectChange(change)"
         >
-          {{ changeMark(change.changeType) }}
-        </span>
-        <span class="min-w-0 flex-1 truncate">
-          <span v-if="change.oldEntityName" class="text-muted-foreground line-through">
-            {{ change.oldEntityName }}
+          <span
+            class="w-3 shrink-0 text-center font-semibold"
+            :class="changeClass(change.changeType)"
+          >
+            {{ changeMark(change.changeType) }}
           </span>
-          <span v-if="change.oldEntityName" class="text-muted-foreground"> → </span>
-          {{ change.entityName }}
-        </span>
-        <span class="shrink-0 text-[10px] text-muted-foreground">{{ change.entityType }}</span>
-        <span
-          v-if="change.structuralChange === false"
-          class="shrink-0 rounded bg-muted px-1 text-[9px] text-muted-foreground"
+          <span class="min-w-0 flex-1 truncate">
+            <span v-if="change.oldEntityName" class="text-muted-foreground line-through">
+              {{ change.oldEntityName }}
+            </span>
+            <span v-if="change.oldEntityName" class="text-muted-foreground"> → </span>
+            {{ change.entityName }}
+          </span>
+          <span class="shrink-0 text-[10px] text-muted-foreground">{{ change.entityType }}</span>
+          <span
+            v-if="change.structuralChange === false"
+            class="shrink-0 rounded bg-muted px-1 text-[9px] text-muted-foreground"
+          >
+            {{ t("git.graph.semantic.cosmetic") }}
+          </span>
+          <span v-if="change.startLine" class="shrink-0 text-[10px] text-muted-foreground">
+            :{{ change.startLine }}
+          </span>
+        </button>
+        <button
+          type="button"
+          class="hidden h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground group-hover:flex"
+          :title="t('files.semantic.impactAction')"
+          @click.stop="emit('impact', change)"
         >
-          {{ t("git.graph.semantic.cosmetic") }}
-        </span>
-        <span v-if="change.startLine" class="shrink-0 text-[10px] text-muted-foreground">
-          :{{ change.startLine }}
-        </span>
-      </button>
+          <Network class="h-3 w-3" />
+        </button>
+      </div>
     </section>
 
     <section v-if="result.binaryChanges.length">

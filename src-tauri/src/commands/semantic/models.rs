@@ -64,6 +64,188 @@ pub struct SemanticChange {
     pub structural_change: Option<bool>,
 }
 
+/// 对前端稳定的实体引用。sem 各命令的字段风格不一(id / entityId / file /
+/// file_path、lines 数组 / start_line 对),统一为 camelCase DTO;实体全文
+/// (content / beforeContent / afterContent)一律不进 IPC。
+///
+/// `entity_id`:能按 sem 规则(`parent_id::name`,根实体为 `file::type::name`)
+/// 可靠构造时给出,否则为 null;前端遇到 null 时回退用 name + filePath 查询。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticEntityRef {
+    #[serde(default)]
+    pub entity_id: Option<String>,
+    pub name: String,
+    pub entity_type: String,
+    pub file_path: String,
+    #[serde(default)]
+    pub start_line: usize,
+    #[serde(default)]
+    pub end_line: usize,
+}
+
+/// 带父子关系的文件内实体(semantic_file_entities 返回项)。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticFileEntity {
+    #[serde(flatten)]
+    pub entity: SemanticEntityRef,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticFileEntitiesResult {
+    pub engine_version: String,
+    pub file_path: String,
+    pub entities: Vec<SemanticFileEntity>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticFindResult {
+    pub engine_version: String,
+    pub query: String,
+    pub results: Vec<SemanticEntityRef>,
+    pub truncated: bool,
+}
+
+/// callers/refs 返回的分组:目标实体 + 关系项(名称不唯一时可能有多组)。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticRelationGroup {
+    pub entity: SemanticEntityRef,
+    pub related: Vec<SemanticEntityRef>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticRelationResult {
+    pub engine_version: String,
+    pub groups: Vec<SemanticRelationGroup>,
+    pub truncated: bool,
+}
+
+/// 传递影响实体:在实体引用上附带相对目标实体的深度。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticImpactedEntity {
+    #[serde(flatten)]
+    pub entity: SemanticEntityRef,
+    #[serde(default)]
+    pub depth: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticImpactResult {
+    pub engine_version: String,
+    pub entity: SemanticEntityRef,
+    pub dependencies: Vec<SemanticEntityRef>,
+    pub dependents: Vec<SemanticEntityRef>,
+    pub affected: Vec<SemanticImpactedEntity>,
+    pub tests: Vec<SemanticEntityRef>,
+    pub total: usize,
+    pub depth: usize,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticBlameEntry {
+    pub name: String,
+    pub entity_type: String,
+    #[serde(default)]
+    pub start_line: usize,
+    #[serde(default)]
+    pub end_line: usize,
+    pub author: String,
+    pub commit: String,
+    pub date: String,
+    #[serde(default)]
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticFileBlameResult {
+    pub engine_version: String,
+    pub file_path: String,
+    pub entries: Vec<SemanticBlameEntry>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticEntityLogChange {
+    pub change_type: String,
+    #[serde(default)]
+    pub structural_change: Option<bool>,
+    #[serde(default)]
+    pub file_path: String,
+    pub commit_sha: String,
+    #[serde(default)]
+    pub author: String,
+    #[serde(default)]
+    pub date: String,
+    #[serde(default)]
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticEntityLogResult {
+    pub engine_version: String,
+    pub entity: String,
+    pub entity_type: String,
+    pub file_path: String,
+    pub changes: Vec<SemanticEntityLogChange>,
+    pub truncated: bool,
+}
+
+/// sem context 的单条上下文。`content` 是源码片段:仅在用户显式触发后经
+/// IPC 返回,不落库、不写日志。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticContextEntry {
+    pub entity_id: String,
+    pub name: String,
+    pub entity_type: String,
+    pub file_path: String,
+    pub role: String,
+    #[serde(default)]
+    pub tokens: usize,
+    pub content: String,
+}
+
+/// 因预算被省略的一组实体(按角色聚合计数)。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticContextOmitted {
+    #[serde(default)]
+    pub role: String,
+    #[serde(default)]
+    pub entities: usize,
+    #[serde(default)]
+    pub tests: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticContextResult {
+    pub engine_version: String,
+    pub entity: String,
+    pub entity_id: String,
+    pub budget: usize,
+    pub total_tokens: usize,
+    pub truncated: bool,
+    pub target_omitted: bool,
+    pub entries: Vec<SemanticContextEntry>,
+    pub omitted: Vec<SemanticContextOmitted>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SemanticBinaryChange {

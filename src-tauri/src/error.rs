@@ -200,6 +200,8 @@ pub enum ErrorCode {
     SemanticOutputInvalid,
     SemanticAnalysisTimeout,
     SemanticOutputTooLarge,
+    SemanticCanceled,
+    SemanticEntityNotFound,
 
     // ── 工作日 ────────────────────────────────────────────────────────
     WorkdayHttpClientFailed,
@@ -360,6 +362,8 @@ impl ErrorCode {
             Self::SemanticOutputInvalid => "semantic_output_invalid",
             Self::SemanticAnalysisTimeout => "semantic_analysis_timeout",
             Self::SemanticOutputTooLarge => "semantic_output_too_large",
+            Self::SemanticCanceled => "semantic_canceled",
+            Self::SemanticEntityNotFound => "semantic_entity_not_found",
             // 工作日
             Self::WorkdayHttpClientFailed => "workday_http_client_failed",
             Self::WorkdayFetchFailed => "workday_fetch_failed",

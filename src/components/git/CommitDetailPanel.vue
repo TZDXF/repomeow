@@ -20,6 +20,7 @@ import FileTreeList from "@/components/common/FileTreeList.vue";
 import DiffViewer from "@/components/git/DiffViewer.vue";
 import ImageDiffPreview from "@/components/git/ImageDiffPreview.vue";
 import SemanticChangeList from "@/components/git/SemanticChangeList.vue";
+import SemanticImpactPanel from "@/components/semantic/SemanticImpactPanel.vue";
 import { statusClass } from "@/lib/git-status";
 import { buildFileTree, flatFileRows, flattenVisibleTree } from "@/lib/file-tree";
 import { extOf, imageMimeOf, isImagePath } from "@/lib/file-kind";
@@ -29,7 +30,14 @@ import { semanticTotal } from "@/lib/semantic";
 import { copyToClipboard } from "@/lib/utils";
 import { cmd } from "@/lib/tauri";
 import { useSettingsStore } from "@/stores/settings";
-import type { GitCommitFile, GitCommitFileDiff, GitGraphCommit, SemanticDiffResult } from "@/types";
+import type {
+  GitCommitFile,
+  GitCommitFileDiff,
+  GitGraphCommit,
+  SemanticChange,
+  SemanticDiffResult,
+  SemanticEntityRef,
+} from "@/types";
 
 const props = defineProps<{
   commit: GitGraphCommit;
@@ -174,6 +182,35 @@ watch(
   },
   { immediate: true },
 );
+
+// --- 影响分析(实体视图入口):sem impact 基于当前工作树/HEAD,非 HEAD 提交需提示 ---
+const impactOpen = ref(false);
+const impactEntity = ref<SemanticEntityRef | null>(null);
+
+function openImpact(change: SemanticChange) {
+  impactEntity.value = {
+    entityId: change.entityId || null,
+    name: change.entityName,
+    entityType: change.entityType,
+    filePath: change.filePath,
+    startLine: change.startLine,
+    endLine: change.endLine,
+  };
+  impactOpen.value = true;
+}
+
+/** 影响分析跳到源码:GitGraph 上下文用默认编辑器打开对应文件 */
+async function openImpactTarget(entity: SemanticEntityRef) {
+  const option = sortOpenWithOptions(settings.openWithOrder, settings.customOpenWith).find(
+    (candidate) => candidate.id === settings.defaultOpenWith,
+  );
+  if (!option) return;
+  try {
+    await openPathWith(option, `${props.projectPath}/${entity.filePath}`);
+  } catch (e) {
+    toast.error(String(e));
+  }
+}
 
 function selectSemanticFile(filePath: string, oldFilePath: string | null) {
   const file = files.value.find(
@@ -535,6 +572,7 @@ onBeforeUnmount(() => {
             :selected-path="selectedPath"
             @select="selectSemanticFile"
             @retry="loadSemantic(true)"
+            @impact="openImpact"
           />
           <template v-else>
             <div v-if="filesLoading" class="flex h-full items-center justify-center">
@@ -641,5 +679,14 @@ onBeforeUnmount(() => {
         @open-ide="selectedFile && openFile(selectedFile)"
       />
     </div>
+
+    <!-- 影响分析:sem 基于当前工作树/HEAD 的实体图,查看历史提交时提示 -->
+    <SemanticImpactPanel
+      v-model:open="impactOpen"
+      :root="projectPath"
+      :entity="impactEntity"
+      :show-current-code-notice="!commit.is_head"
+      @open="openImpactTarget"
+    />
   </div>
 </template>
