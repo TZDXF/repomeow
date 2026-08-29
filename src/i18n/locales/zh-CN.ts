@@ -454,7 +454,6 @@ export default {
     stash: {
       manage: "Stash",
       title: "Stash 管理",
-      description: "创建或查看当前仓库的 Stash；弹出会应用到当前工作区，清理只删除所选记录。",
       count: "{count} 条",
       empty: "当前仓库没有 Stash",
       loadFailed: "加载 Stash 失败",

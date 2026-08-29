@@ -469,8 +469,6 @@ export default {
     stash: {
       manage: "Stash",
       title: "Manage Stashes",
-      description:
-        "Create or view this repository's stashes. Pop applies one to the current worktree; clean up only removes the selected entry.",
       count: "{count}",
       empty: "This repository has no stashes",
       loadFailed: "Failed to load stashes",

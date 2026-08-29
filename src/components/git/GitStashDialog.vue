@@ -242,13 +242,10 @@ async function confirmAction() {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent class="sm:max-w-2xl">
-      <DialogHeader>
-        <div class="flex items-start justify-between gap-3 pr-8">
-          <div class="space-y-1.5">
-            <DialogTitle>{{ t("git.stash.title") }}</DialogTitle>
-            <DialogDescription>{{ t("git.stash.description") }}</DialogDescription>
-          </div>
+    <DialogContent class="gap-0 overflow-hidden p-0 sm:max-w-2xl">
+      <DialogHeader class="border-b px-5 py-4 pr-14">
+        <div class="flex items-center justify-between gap-4">
+          <DialogTitle>{{ t("git.stash.title") }}</DialogTitle>
           <div class="flex shrink-0 items-center gap-1">
             <Button
               variant="outline"
@@ -259,31 +256,21 @@ async function confirmAction() {
               <Plus class="h-3.5 w-3.5" />
               {{ t("git.stash.create") }}
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              class="h-8 w-8"
-              :title="t('common.refresh')"
-              :disabled="loading || !!busyKey || creating"
-              @click="loadStashes"
-            >
-              <RefreshCw class="h-4 w-4" :class="loading && 'animate-spin'" />
-            </Button>
           </div>
         </div>
       </DialogHeader>
 
-      <div class="min-h-44">
+      <div class="min-h-52 p-4">
         <div
           v-if="loading && !stashes.length"
-          class="flex h-44 items-center justify-center text-sm text-muted-foreground"
+          class="flex h-52 items-center justify-center rounded-lg border border-dashed bg-muted/15 text-sm text-muted-foreground"
         >
           <Loader2 class="mr-2 h-4 w-4 animate-spin" />
           {{ t("common.loading") }}
         </div>
         <div
           v-else-if="loadError"
-          class="flex h-44 flex-col items-center justify-center gap-3 text-sm text-muted-foreground"
+          class="flex h-52 flex-col items-center justify-center gap-3 rounded-lg border border-dashed bg-muted/15 px-6 text-center text-sm text-muted-foreground"
         >
           <p>{{ t("git.stash.loadFailed") }}</p>
           <p class="max-w-full break-all text-xs">{{ loadError }}</p>
@@ -294,20 +281,22 @@ async function confirmAction() {
         </div>
         <div
           v-else-if="!stashes.length"
-          class="flex h-44 flex-col items-center justify-center gap-2 text-sm text-muted-foreground"
+          class="flex h-52 flex-col items-center justify-center gap-3 rounded-lg border border-dashed bg-muted/15 text-sm text-muted-foreground"
         >
-          <ArchiveRestore class="h-8 w-8 opacity-40" />
+          <span class="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+            <ArchiveRestore class="h-6 w-6 opacity-55" />
+          </span>
           {{ t("git.stash.empty") }}
         </div>
-        <div v-else class="space-y-2">
-          <p class="text-xs text-muted-foreground">
+        <div v-else>
+          <p class="px-1 pb-2 text-xs font-medium text-muted-foreground">
             {{ t("git.stash.count", { count: stashes.length }) }}
           </p>
-          <ul class="max-h-[min(56vh,30rem)] space-y-2 overflow-y-auto pr-1">
+          <ul class="max-h-[min(56vh,30rem)] divide-y overflow-y-auto rounded-lg border">
             <li
               v-for="stash in stashes"
               :key="stash.oid"
-              class="flex items-center gap-3 rounded-lg border p-3"
+              class="flex items-center gap-3 px-3 py-3 transition-colors hover:bg-muted/25"
             >
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-2">
