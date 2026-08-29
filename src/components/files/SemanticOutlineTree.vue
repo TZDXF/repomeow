@@ -18,6 +18,8 @@ const props = defineProps<{
   selectedId: string | null;
   /** 负责人/最后修改(blame)标注,key 为 `${name}:${startLine}` */
   blame?: Map<string, SemanticBlameEntry>;
+  /** 强制全部可见:展开的聚合组内部使用,避免成员被再次聚合而永远无法展开 */
+  forceVisible?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -34,12 +36,15 @@ function blameOf(node: SemanticOutlineNode): SemanticBlameEntry | undefined {
 }
 
 const visible = computed(() =>
-  props.nodes.filter((node) => !COLLAPSED_ENTITY_TYPES.has(node.entity.entityType)),
+  props.forceVisible
+    ? props.nodes
+    : props.nodes.filter((node) => !COLLAPSED_ENTITY_TYPES.has(node.entity.entityType)),
 );
 
-/** 高密度实体按类型聚合 */
+/** 高密度实体按类型聚合(forceVisible 时不聚合) */
 const collapsedGroups = computed(() => {
   const groups = new Map<string, SemanticOutlineNode[]>();
+  if (props.forceVisible) return [];
   for (const node of props.nodes) {
     if (COLLAPSED_ENTITY_TYPES.has(node.entity.entityType)) {
       const list = groups.get(node.entity.entityType);
@@ -164,6 +169,7 @@ function nodeKey(node: SemanticOutlineNode): string {
         :depth="depth + 1"
         :selected-id="selectedId"
         :blame="blame"
+        force-visible
         @select="(entity) => emit('select', entity)"
         @impact="(entity) => emit('impact', entity)"
         @history="(entity) => emit('history', entity)"

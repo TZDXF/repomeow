@@ -9,7 +9,7 @@ use super::models::{
     SemanticEntityRef, SemanticFileEntitiesResult, SemanticFileEntity, SemanticFindResult,
     SemanticRelationGroup, SemanticRelationResult,
 };
-use super::parse::{build_entity_id, entity_ref, parse_stdout, truncate_to};
+use super::parse::{build_entity_id, detects_path_scheme, entity_ref, parse_stdout, truncate_to};
 use super::process::{run_sem, SemRunPolicy};
 use super::{
     detect_version, output_error, resolve_workdir, validate_entity_token, validate_query,
@@ -153,10 +153,19 @@ pub(super) async fn file_entities_impl(
         return Err(output_error(output.code, &output.stderr));
     }
     let raw: Vec<RawFileEntity> = parse_stdout(&output.stdout)?;
+    // JSON/YAML 等数据文件的 parent_id 是 `<file>::/<path>` 路径寻址,与代码文件的
+    // `<file>::<type>::<name>` 方案不同,先按整个列表探测再构造 ID,父子才能对上
+    let path_scheme = detects_path_scheme(&file, raw.iter().map(|e| e.parent_id.as_deref()));
     let mut entities: Vec<SemanticFileEntity> = raw
         .into_iter()
         .map(|item| {
-            let id = build_entity_id(&file, &item.entity_type, &item.name, item.parent_id.as_deref());
+            let id = build_entity_id(
+                &file,
+                &item.entity_type,
+                &item.name,
+                item.parent_id.as_deref(),
+                path_scheme,
+            );
             SemanticFileEntity {
                 entity: entity_ref(
                     Some(id),
@@ -293,10 +302,39 @@ mod tests {
             &nested.entity_type,
             &nested.name,
             nested.parent_id.as_deref(),
+            false,
         );
         assert_eq!(id, "src/lib/utils.ts::function::debounce::run");
-        let root_id = build_entity_id("src/lib/utils.ts", "function", "cn", None);
+        let root_id = build_entity_id("src/lib/utils.ts", "function", "cn", None, false);
         assert_eq!(root_id, "src/lib/utils.ts::function::cn");
+    }
+
+    #[test]
+    fn file_entities_json_path_scheme_ids_link_parent_child() {
+        // 契约来自 sem 0.23.1 `entities .oxlintrc.json --json` 的真实输出(缩写):
+        // 无 id 字段,parent_id 为路径寻址;构造出的子级 parent 链必须能回指根实体 ID
+        let raw = br#"[
+          {"name":"categories","type":"object","start_line":4,"end_line":9,"parent_id":null},
+          {"name":"correctness","type":"property","start_line":5,"end_line":5,"parent_id":".oxlintrc.json::/categories"}
+        ]"#;
+        let parsed: Vec<RawFileEntity> = parse_stdout(raw).unwrap();
+        let file = ".oxlintrc.json";
+        let path_scheme = detects_path_scheme(file, parsed.iter().map(|e| e.parent_id.as_deref()));
+        assert!(path_scheme);
+        let root = &parsed[0];
+        let root_id = build_entity_id(file, &root.entity_type, &root.name, None, path_scheme);
+        assert_eq!(root_id, ".oxlintrc.json::/categories");
+        let child = &parsed[1];
+        // 子级的 parent_id 与根实体构造 ID 一致,前端树才能挂上父子关系
+        assert_eq!(child.parent_id.as_deref(), Some(root_id.as_str()));
+        let child_id = build_entity_id(
+            file,
+            &child.entity_type,
+            &child.name,
+            child.parent_id.as_deref(),
+            path_scheme,
+        );
+        assert_eq!(child_id, ".oxlintrc.json::/categories/correctness");
     }
 
     #[test]

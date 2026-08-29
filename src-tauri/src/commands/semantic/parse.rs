@@ -21,17 +21,37 @@ pub(super) fn truncate_to<T>(items: &mut Vec<T>, limit: usize) -> bool {
 }
 
 /// 按 sem 0.23.1 的 ID 规则构造实体 ID(已用真实 CLI 契约验证):
-/// 根实体为 `<file>::<type>::<name>`,嵌套实体为 `<parent_id>::<name>`。
+/// - 代码文件:根实体 `<file>::<type>::<name>`,嵌套 `<parent_id>::<name>`;
+/// - 数据文件(JSON 等,parent_id 为 `<file>::/<path>` 路径寻址):
+///   根实体 `<file>::/<name>`,嵌套 `<parent_id>/<name>`。
+/// `path_scheme` 由调用方按整个实体列表探测(见 [`detects_path_scheme`])。
 pub(super) fn build_entity_id(
     file_path: &str,
     entity_type: &str,
     name: &str,
     parent_id: Option<&str>,
+    path_scheme: bool,
 ) -> String {
+    if path_scheme {
+        return match parent_id {
+            Some(parent) if !parent.is_empty() => format!("{parent}/{name}"),
+            _ => format!("{file_path}::/{name}"),
+        };
+    }
     match parent_id {
         Some(parent) if !parent.is_empty() => format!("{parent}::{name}"),
         _ => format!("{file_path}::{entity_type}::{name}"),
     }
+}
+
+/// 探测文件是否使用路径寻址 ID(JSON/YAML 等数据文件):
+/// 任一实体的 parent_id 以 `<file>::/` 开头即整个文件都是该方案。
+pub(super) fn detects_path_scheme<'a>(
+    file_path: &str,
+    parent_ids: impl Iterator<Item = Option<&'a str>>,
+) -> bool {
+    let prefix = format!("{file_path}::/");
+    parent_ids.into_iter().flatten().any(|p| p.starts_with(&prefix))
 }
 
 pub(super) fn entity_ref(
@@ -68,16 +88,43 @@ mod tests {
     #[test]
     fn entity_id_uses_parent_chain_when_nested() {
         assert_eq!(
-            build_entity_id("src/a.ts", "function", "run", None),
+            build_entity_id("src/a.ts", "function", "run", None, false),
             "src/a.ts::function::run"
         );
         assert_eq!(
-            build_entity_id("src/a.ts", "function", "inner", Some("src/a.ts::function::run")),
+            build_entity_id("src/a.ts", "function", "inner", Some("src/a.ts::function::run"), false),
             "src/a.ts::function::run::inner"
         );
         assert_eq!(
-            build_entity_id("src/a.ts", "function", "run", Some("")),
+            build_entity_id("src/a.ts", "function", "run", Some(""), false),
             "src/a.ts::function::run"
+        );
+    }
+
+    #[test]
+    fn entity_id_path_scheme_matches_parent_addressing() {
+        // 契约来自 sem 0.23.1 对 JSON 的真实输出:parent_id 为 `<file>::/<path>` 路径寻址
+        assert!(detects_path_scheme(
+            ".oxlintrc.json",
+            [None, Some(".oxlintrc.json::/categories")].into_iter()
+        ));
+        assert!(!detects_path_scheme(
+            "src/a.ts",
+            [None, Some("src/a.ts::function::run")].into_iter()
+        ));
+        assert_eq!(
+            build_entity_id(".oxlintrc.json", "object", "categories", None, true),
+            ".oxlintrc.json::/categories"
+        );
+        assert_eq!(
+            build_entity_id(
+                ".oxlintrc.json",
+                "property",
+                "correctness",
+                Some(".oxlintrc.json::/categories"),
+                true,
+            ),
+            ".oxlintrc.json::/categories/correctness"
         );
     }
 }
