@@ -9,6 +9,7 @@ import { Toaster } from "@/components/ui/sonner";
 import TitleBar from "@/components/TitleBar.vue";
 import BatchProgressFloat from "@/components/report/BatchProgressFloat.vue";
 import { onListen } from "@/lib/tauri";
+import { useStreamMarkdownWheelZoom } from "@/composables/useStreamMarkdownWheelZoom";
 import { usePinsStore } from "@/stores/pins";
 import { useBackgroundTasksStore } from "@/stores/background-tasks";
 import { useProjectsStore } from "@/stores/projects";
@@ -34,6 +35,9 @@ const backgroundTasksStore = useBackgroundTasksStore();
 
 // 托盘迷你弹窗窗口:仅加载主题/语言与项目列表,跳过标题栏、更新检查等主窗口专属逻辑
 const isTrayPopup = getCurrentWindow().label === "tray-popup";
+
+// markdown 全屏弹窗(teleport 到 body)内直接滚轮缩放 mermaid/图片,无需 ctrl
+useStreamMarkdownWheelZoom();
 
 let unlistenGit: UnlistenFn | undefined;
 let unlistenBackgroundTasks: UnlistenFn | undefined;

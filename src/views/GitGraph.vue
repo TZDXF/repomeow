@@ -52,10 +52,10 @@ const selectedBranch = ref("");
 // 搜索:匹配提交信息 / hash / 作者
 const searchQuery = ref("");
 
-// 视图切换:graph = 提交图谱;analysis = 数据分析(全量历史统计面板),选择持久化
-const viewMode = useLocalStorage<"graph" | "analysis">("repomeow:graph-view", "graph");
+// 视图切换:graph = 提交图谱;analysis = 数据分析(全量历史统计面板),每次进入默认图谱,不持久化
+const viewMode = ref<"graph" | "analysis">("graph");
 // 分析面板懒激活:首次切入才挂载,之后保持存活,避免来回切换反复全量统计
-const analysisActivated = ref(viewMode.value === "analysis");
+const analysisActivated = ref(false);
 const analysisPanel = ref<InstanceType<typeof GitAnalysisPanel> | null>(null);
 
 watch(viewMode, (v) => {

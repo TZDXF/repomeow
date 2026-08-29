@@ -338,10 +338,10 @@ function toggleChanges() {
   }
 }
 
-// 每次打开时重置为初始状态(清空预览清单与取消记录,避免上次的勾选状态影响提交计数)
+// 每次打开时重置为初始状态(清空预览清单与取消记录,避免上次的勾选状态影响提交计数);
+// message 不在此清空:AI 生成或手动输入的提交信息在关闭再打开后保留,仅提交成功后清空
 watch(open, (v) => {
   if (v) {
-    message.value = "";
     includeUntracked.value = true;
     showChanges.value = false;
     files.value = [];
@@ -361,6 +361,7 @@ async function submit() {
       checkedPayload.value,
     );
     toast.success(t("git.commit.success"));
+    message.value = "";
     open.value = false;
   } catch (e) {
     toast.error(String(e));
@@ -382,6 +383,7 @@ async function submitAndPush() {
     );
     await store.pushRepository(props.project);
     toast.success(t("git.commit.submitAndPushSuccess"));
+    message.value = "";
     open.value = false;
   } catch (e) {
     toast.error(String(e));
