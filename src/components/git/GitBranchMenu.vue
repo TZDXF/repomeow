@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import {
+  ArchiveRestore,
   ArrowDownToLine,
   ArrowUpToLine,
   Check,
@@ -52,6 +53,7 @@ type Op = "pull" | "push" | "";
 
 const { t } = useI18n();
 const props = defineProps<{ project: Project }>();
+const emit = defineEmits<{ openStash: [] }>();
 const store = useProjectsStore();
 
 const git = computed(() => props.project.git);
@@ -439,7 +441,7 @@ function onOpsChanged() {
       <slot :op="triggerOp" />
     </DropdownMenuTrigger>
     <DropdownMenuContent align="start" class="max-h-96 w-60 overflow-y-auto">
-      <!-- 当前分支操作组:提交 / 拉取 / 推送 -->
+      <!-- 当前分支操作组:提交 / Stash / 拉取 / 推送 -->
       <template v-if="git?.is_repo">
         <DropdownMenuItem
           class="gap-2 text-xs"
@@ -489,6 +491,10 @@ function onOpsChanged() {
             class="ml-auto text-[10px] font-medium leading-none text-emerald-600"
             >{{ ahead }}</span
           >
+        </DropdownMenuItem>
+        <DropdownMenuItem class="gap-2 text-xs" :disabled="opsLocked" @click="emit('openStash')">
+          <ArchiveRestore class="h-3.5 w-3.5" />
+          {{ t("git.stash.manage") }}
         </DropdownMenuItem>
         <!-- 跟踪更新:按项目维度生效(worktree 视图隐藏,避免误以为只跟踪当前工作区) -->
         <DropdownMenuItem

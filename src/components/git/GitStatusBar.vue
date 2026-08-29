@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { ArchiveRestore, ChevronDown, FolderGit2, GitBranch, Loader2 } from "@lucide/vue";
+import { ChevronDown, FolderGit2, GitBranch, Loader2 } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import GitBranchMenu from "@/components/git/GitBranchMenu.vue";
@@ -40,7 +40,7 @@ const changesTitle = computed(
     </Button>
     <GitInitDialog v-if="git && !git.is_repo" v-model:open="initDialogOpen" :project="project" />
     <template v-else-if="git">
-      <GitBranchMenu :project="project">
+      <GitBranchMenu :project="project" @open-stash="stashDialogOpen = true">
         <!-- 拉取/推送进行中:菜单点击后已关闭,loading 展示在触发徽标上 -->
         <template #default="{ op }">
           <Badge
@@ -68,10 +68,6 @@ const changesTitle = computed(
           </Badge>
         </template>
       </GitBranchMenu>
-      <Button variant="outline" size="xs" @click="stashDialogOpen = true">
-        <ArchiveRestore class="h-3.5 w-3.5" />
-        {{ t("git.stash.manage") }}
-      </Button>
       <GitStashDialog v-model:open="stashDialogOpen" :project="project" />
     </template>
   </div>
