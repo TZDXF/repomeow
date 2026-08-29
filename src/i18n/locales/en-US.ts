@@ -967,6 +967,7 @@ export default {
     rendered: "Rendered",
     source: "Source",
     wrap: "Word wrap",
+    openInIde: "Open in Editor",
     matchCase: "Match Case",
     wholeWord: "Match Whole Word",
     useRegex: "Use Regular Expression",

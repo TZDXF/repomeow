@@ -159,6 +159,32 @@ function taskStatTitle(stat: AiUsageTaskStat): string {
   });
 }
 
+/** 分布条占比基准:优先按合计 tokens 相对最大值,全为 0(均未上报)时退化为按次数 */
+const taskBarBase = computed(() => {
+  const stats = summary.value?.byTask ?? [];
+  const maxTokens = Math.max(0, ...stats.map((s) => s.totalTokens));
+  if (maxTokens > 0) return { key: "totalTokens" as const, max: maxTokens };
+  return { key: "calls" as const, max: Math.max(1, ...stats.map((s) => s.calls)) };
+});
+
+function taskBarWidth(stat: AiUsageTaskStat): string {
+  const value = taskBarBase.value.key === "totalTokens" ? stat.totalTokens : stat.calls;
+  if (value <= 0) return "0%";
+  // 最小 4% 保证小占比条目仍可见
+  return `${Math.max(4, Math.round((value / taskBarBase.value.max) * 100))}%`;
+}
+
+/** 类型固定配色(chart 色板,亮暗主题/皮肤自适应) */
+const TASK_BAR_CLASSES: Record<string, string> = {
+  wiki: "bg-chart-2",
+  commit: "bg-chart-3",
+  report: "bg-chart-4",
+};
+
+function taskBarClass(taskType: string): string {
+  return TASK_BAR_CLASSES[taskType] ?? "bg-primary/70";
+}
+
 function fmtExact(n: number | null | undefined): string {
   return n == null ? "—" : n.toLocaleString();
 }
@@ -288,24 +314,33 @@ function ioTitle(entry: AiUsageEntry): string {
         </div>
       </div>
 
-      <!-- 任务类型分布(列表:类型 · 次数 · 合计 tokens) -->
+      <!-- 任务类型分布(条形图:类型 · 占比条 · 次数 · 合计 tokens) -->
       <div class="mt-1 border-t pt-4">
         <label class="text-sm font-medium">{{ t("settings.usage.distribution") }}</label>
         <div v-if="summary.byTask.length" class="mt-2 flex flex-col gap-0.5">
           <div
             v-for="stat in summary.byTask"
             :key="stat.taskType"
-            class="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent"
+            class="flex items-center gap-3 rounded-md px-2 py-1.5 text-xs hover:bg-accent"
             :title="taskStatTitle(stat)"
           >
             <Badge variant="secondary" class="w-20 shrink-0 justify-center">
               {{ taskLabel(stat.taskType) }}
             </Badge>
-            <span class="shrink-0 tabular-nums text-muted-foreground">
+            <div class="flex h-4 min-w-0 flex-1 items-center">
+              <div
+                class="h-1.5 rounded-full transition-[width]"
+                :class="taskBarClass(stat.taskType)"
+                :style="{ width: taskBarWidth(stat) }"
+              />
+            </div>
+            <span class="w-16 shrink-0 text-right tabular-nums text-muted-foreground">
               {{ t("settings.usage.callsCount", { count: fmtExact(stat.calls) }) }}
             </span>
-            <span class="min-w-0 flex-1" />
-            <span class="shrink-0 font-medium tabular-nums" :title="fmtExact(stat.totalTokens)">
+            <span
+              class="w-16 shrink-0 text-right font-medium tabular-nums"
+              :title="fmtExact(stat.totalTokens)"
+            >
               {{ stat.totalTokens > 0 ? fmtTokens(stat.totalTokens) : "—" }}
             </span>
           </div>

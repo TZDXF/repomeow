@@ -4,7 +4,8 @@ import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
-import { ArrowLeft, Code, Eye, FileQuestion, FolderTree, WrapText } from "@lucide/vue";
+import { toast } from "vue-sonner";
+import { ArrowLeft, Code, ExternalLink, Eye, FileQuestion, FolderTree, WrapText } from "@lucide/vue";
 import { useLocalStorage } from "@vueuse/core";
 import { Markdown, type ControlsConfig, type NodeRenderers } from "vue-stream-markdown";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ import ImageViewer from "@/components/files/ImageViewer.vue";
 import { cmd } from "@/lib/tauri";
 import { extOf, IMAGE_EXTS } from "@/lib/file-kind";
 import { hasScheme, resolvePath } from "@/lib/markdown";
+import { openPathWith, sortOpenWithOptions } from "@/lib/open-with";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
 import type { FindQuery } from "@/lib/text-search";
 import { useFileFind } from "@/composables/files/useFileFind";
@@ -146,6 +148,22 @@ const codeWrap = useLocalStorage("repomeow:files-code-wrap", false);
 const codeVisible = computed(
   () => previewText.value !== null && !(isMarkdown.value && mdMode.value === "rendered"),
 );
+
+// ── 在编辑器中打开当前文件(用设置里的默认打开方式,与提交详情面板同一逻辑) ──
+async function openSelectedInIde() {
+  const path = selected.value;
+  if (!path) return;
+  const option = sortOpenWithOptions(
+    settingsStore.openWithOrder,
+    settingsStore.customOpenWith,
+  ).find((candidate) => candidate.id === settingsStore.defaultOpenWith);
+  if (!option) return;
+  try {
+    await openPathWith(option, resolvePath(rootPath.value, path));
+  } catch (e) {
+    toast.error(String(e));
+  }
+}
 
 /** Markdown 渲染分支可否使用当前内容:残留内容须本身来自 md 文件——
  *  代码文件的旧文本以 MD 渲染会闪现错内容,等待新内容期间显示空白(md→md 仍保留旧文防闪) */
@@ -409,6 +427,16 @@ function startTreeResize(e: PointerEvent) {
             @click="codeWrap = !codeWrap"
           >
             <WrapText class="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            v-if="selected"
+            variant="ghost"
+            size="icon"
+            class="h-7 w-7 shrink-0"
+            :title="t('files.openInIde')"
+            @click="openSelectedInIde"
+          >
+            <ExternalLink class="h-3.5 w-3.5" />
           </Button>
         </div>
 

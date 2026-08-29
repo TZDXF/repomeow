@@ -933,6 +933,7 @@ export default {
     rendered: "渲染",
     source: "源码",
     wrap: "自动换行",
+    openInIde: "在编辑器中打开",
     matchCase: "区分大小写",
     wholeWord: "全字匹配",
     useRegex: "正则表达式",
