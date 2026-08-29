@@ -170,7 +170,7 @@ const tabs = computed(() => {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent class="flex max-h-[85vh] flex-col sm:max-w-2xl">
+    <DialogContent class="flex h-[85vh] flex-col overflow-hidden sm:max-w-2xl">
       <DialogHeader class="shrink-0">
         <DialogTitle class="flex items-center gap-2 pr-8 text-sm">
           <span class="min-w-0 flex-1 truncate font-mono" :title="entity?.entityId ?? undefined">
@@ -254,10 +254,7 @@ const tabs = computed(() => {
             <X class="h-3.5 w-3.5" />
           </button>
         </div>
-        <p
-          v-if="contextRequest.loading.value"
-          class="text-xs text-muted-foreground"
-        >
+        <p v-if="contextRequest.loading.value" class="text-xs text-muted-foreground">
           {{ t("common.loading") }}
         </p>
         <p v-else-if="contextRequest.error.value" class="text-xs text-destructive">

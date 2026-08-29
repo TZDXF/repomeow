@@ -214,49 +214,6 @@ export interface GitCommitFileDiff {
   truncated: boolean;
 }
 
-/** sem CLI 的实体级提交差异；仅保留定位/分类字段，不经 IPC 传输实体全文。 */
-export interface SemanticChange {
-  entityId: string;
-  changeType: string;
-  entityType: string;
-  entityName: string;
-  startLine: number;
-  endLine: number;
-  oldStartLine: number | null;
-  oldEndLine: number | null;
-  oldEntityName: string | null;
-  filePath: string;
-  oldFilePath: string | null;
-  structuralChange: boolean | null;
-}
-
-export interface SemanticBinaryChange {
-  changeType: string;
-  filePath: string;
-  oldFilePath: string | null;
-  fileStatus: string;
-}
-
-export interface SemanticDiffSummary {
-  fileCount: number;
-  added: number;
-  modified: number;
-  deleted: number;
-  moved: number;
-  renamed: number;
-  reordered: number;
-  binary: number;
-  orphan: number;
-  total: number;
-}
-
-export interface SemanticDiffResult {
-  engineVersion: string;
-  summary: SemanticDiffSummary;
-  changes: SemanticChange[];
-  binaryChanges: SemanticBinaryChange[];
-}
-
 /** 语义实体引用(sem 各命令统一后的稳定 DTO;entityId 无法可靠构造时为 null,
  * 此时用 name + filePath 回退查询)。 */
 export interface SemanticEntityRef {

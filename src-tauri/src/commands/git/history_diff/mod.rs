@@ -5,12 +5,13 @@ mod commit_context;
 mod history;
 mod worktree_changes;
 
-pub(crate) use history::run_git_log;
-pub(crate) use history::build_graph_revwalk;
 #[cfg(test)]
 pub(crate) use commit_changes::{commit_file_diff_blocking, commit_files_blocking};
+pub(crate) use commit_context::{ai_commit_context, AiCommitFileContext};
 #[cfg(test)]
-pub(crate) use commit_context::commit_context_blocking;
+pub(crate) use commit_context::{ai_commit_context_blocking, commit_context_blocking};
+pub(crate) use history::build_graph_revwalk;
+pub(crate) use history::run_git_log;
 #[cfg(test)]
 pub(crate) use history::GraphDeco;
 #[cfg(test)]

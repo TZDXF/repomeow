@@ -550,10 +550,6 @@ export default {
         imageNew: "New version",
       },
       semantic: {
-        entities: "Entities ({count})",
-        empty: "No recognizable entity changes in this commit",
-        cosmetic: "Cosmetic",
-        binaryFiles: "Binary files",
         change: {
           added: "Added",
           modified: "Modified",
@@ -999,6 +995,7 @@ export default {
     unread: "Unread",
     sources: "Source files",
     relatedPages: "Related pages",
+    toc: "Page contents",
     waitingFirstChunk: "Waiting for the first chunk from the model...",
     importance: {
       high: "Page importance: high",

@@ -71,6 +71,7 @@ async-process = "2"
 futures = "0.3"
 # agent CLI 安装探测(Windows 正确处理 PATHEXT/.cmd)
 which = "7"
+similar = "2"
 
 [dev-dependencies]
 urlpattern = "0.3"

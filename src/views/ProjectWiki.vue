@@ -11,9 +11,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import WikiGenerateDialog from "@/components/wiki/WikiGenerateDialog.vue";
 import WikiHeader from "@/components/wiki/WikiHeader.vue";
 import WikiPageNavigation from "@/components/wiki/WikiPageNavigation.vue";
+import WikiPageToc from "@/components/wiki/WikiPageToc.vue";
 import WikiStaticContent from "@/components/wiki/WikiStaticContent.vue";
 import WikiWritingAnimation from "@/components/wiki/WikiWritingAnimation.vue";
 import type { WikiNavItem } from "@/components/wiki/wiki-navigation";
+import { pickAutoPreviewPage, useWikiAutoPreview } from "@/composables/wiki/useWikiAutoPreview";
 import { useWikiPreviewScroll } from "@/composables/wiki/useWikiPreviewScroll";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
 import { openWikiDir } from "@/lib/wiki";
@@ -21,7 +23,7 @@ import type { WikiGenPhase } from "@/lib/wiki-generator";
 import { parseWikiSources } from "@/lib/wiki-parse";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
-import { useWikiStore, type WikiGenPageItem } from "@/stores/wiki";
+import { useWikiStore } from "@/stores/wiki";
 import type { Project, WikiPageData } from "@/types";
 
 const { t } = useI18n();
@@ -119,8 +121,9 @@ const elapsedText = computed(() => {
   return hours > 0 ? `${String(hours).padStart(2, "0")}:${pair}` : pair;
 });
 
-/** 手动选中的预览页;未选或选中页不可预览时自动跟随最近有输出的生成中页面 */
+/** 手动选中的预览页;未选或选中页不可预览时按粘性规则自动跟随生成中的页 */
 const previewId = ref<string | null>(null);
+const autoPreviewId = useWikiAutoPreview(generation);
 const previewItem = computed(() => {
   const state = generation.value;
   const list = state?.pages ?? [];
@@ -128,20 +131,9 @@ const previewItem = computed(() => {
   if (manual && (state?.streamContents[manual.page.id] || manual.status === "running")) {
     return manual;
   }
-  // 并行生成时跟随最近一次收到 chunk 的页,避免停在一个迟迟不输出的页上;
-  // 都还没产出时按大纲顺序取第一个
-  let active: WikiGenPageItem | undefined;
-  for (const item of list) {
-    if (item.status !== "running") continue;
-    if (!active) {
-      active = item;
-      continue;
-    }
-    const at = state?.lastChunkAt[item.page.id] ?? 0;
-    const activeAt = state?.lastChunkAt[active.page.id] ?? 0;
-    if (at > activeAt) active = item;
-  }
-  return active ?? null;
+  if (!state) return null;
+  const picked = pickAutoPreviewPage(autoPreviewId.value, list, state.streamContents);
+  return list.find((i) => i.page.id === picked) ?? null;
 });
 const previewContent = computed(() =>
   previewItem.value ? (generation.value?.streamContents[previewItem.value.page.id] ?? "") : "",
@@ -358,69 +350,82 @@ const beforeDownload = createBeforeDownload(t);
         @cancel="wiki.cancel(project.path)"
       />
 
-      <ScrollArea class="min-w-0 flex-1">
-        <div ref="previewHost" class="mx-auto max-w-3xl px-6 py-5 text-sm">
-          <!-- 生成中:流式预览 -->
-          <template v-if="generatingHere">
-            <div v-if="previewItem" class="mb-3 flex items-center gap-2 border-b pb-3">
-              <LoaderCircle class="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-              <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-                {{ t("wiki.writing") }} · {{ previewItem.page.title }}
-              </span>
-              <span
-                v-if="totalPageCount"
-                class="shrink-0 text-xs tabular-nums text-muted-foreground"
+      <!-- 相对定位容器承载正文滚动区;目录浮窗挂在视口层,滚动时保持可见 -->
+      <div class="relative min-w-0 flex-1">
+        <ScrollArea class="h-full">
+          <div ref="previewHost" class="mx-auto max-w-3xl px-6 py-5 text-sm">
+            <!-- 生成中:流式预览 -->
+            <template v-if="generatingHere">
+              <div v-if="previewItem" class="mb-3 flex items-center gap-2 border-b pb-3">
+                <LoaderCircle class="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+                <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                  {{ t("wiki.writing") }} · {{ previewItem.page.title }}
+                </span>
+                <span
+                  v-if="totalPageCount"
+                  class="shrink-0 text-xs tabular-nums text-muted-foreground"
+                >
+                  {{ processedPageCount }} / {{ totalPageCount }}
+                </span>
+              </div>
+              <div
+                v-if="retryStatus"
+                class="mb-3 flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+                role="status"
+                aria-live="polite"
               >
-                {{ processedPageCount }} / {{ totalPageCount }}
-              </span>
-            </div>
-            <div
-              v-if="retryStatus"
-              class="mb-3 flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
-              role="status"
-              aria-live="polite"
-            >
-              <RefreshCw class="h-3.5 w-3.5 shrink-0 animate-spin" />
-              <span>{{ retryText }}</span>
-            </div>
-            <Markdown
-              v-if="previewDisplay"
-              mode="streaming"
-              :content="previewDisplay"
-              :controls="controls"
-              :theme-element="themeElement"
-              :locale="settings.language"
-              :before-download="beforeDownload"
-            />
-            <div v-else class="flex min-h-[22rem] flex-col items-center justify-center text-center">
-              <WikiWritingAnimation :tool-calls="writingToolCalls" />
-              <p class="mt-6 text-sm font-medium">
-                {{ previewItem ? t("wiki.waitingFirstChunk") : phaseText }}
-              </p>
-              <p
-                v-if="contextSummaryText"
-                class="mt-3 max-w-md text-xs leading-5 text-muted-foreground"
+                <RefreshCw class="h-3.5 w-3.5 shrink-0 animate-spin" />
+                <span>{{ retryText }}</span>
+              </div>
+              <Markdown
+                v-if="previewDisplay"
+                mode="streaming"
+                :content="previewDisplay"
+                :controls="controls"
+                :theme-element="themeElement"
+                :locale="settings.language"
+                :before-download="beforeDownload"
+              />
+              <div
+                v-else
+                class="flex min-h-[22rem] flex-col items-center justify-center text-center"
               >
-                {{ contextSummaryText }}
-              </p>
-              <p class="mt-4 max-w-sm text-xs leading-5 text-muted-foreground">
-                {{ t("wiki.progress.leaveHint") }}
-              </p>
-            </div>
-          </template>
+                <WikiWritingAnimation :tool-calls="writingToolCalls" />
+                <p class="mt-6 text-sm font-medium">
+                  {{ previewItem ? t("wiki.waitingFirstChunk") : phaseText }}
+                </p>
+                <p
+                  v-if="contextSummaryText"
+                  class="mt-3 max-w-md text-xs leading-5 text-muted-foreground"
+                >
+                  {{ contextSummaryText }}
+                </p>
+                <p class="mt-4 max-w-sm text-xs leading-5 text-muted-foreground">
+                  {{ t("wiki.progress.leaveHint") }}
+                </p>
+              </div>
+            </template>
 
-          <WikiStaticContent
-            v-else-if="current"
-            :page="current"
-            :pages="pages"
-            :project-root="project.path"
-            :language="settings.language"
-            :regenerating="wiki.regeneratingPage === current.id"
-            @regenerate="regeneratePage"
-            @select-related="selectRelatedPage"
-          />
-        </div>
-      </ScrollArea>
+            <WikiStaticContent
+              v-else-if="current"
+              :page="current"
+              :pages="pages"
+              :project-root="project.path"
+              :language="settings.language"
+              :regenerating="wiki.regeneratingPage === current.id"
+              @regenerate="regeneratePage"
+              @select-related="selectRelatedPage"
+            />
+          </div>
+        </ScrollArea>
+
+        <WikiPageToc
+          v-if="!generatingHere && current"
+          :root="previewHost"
+          :content="current.content"
+          :page-id="current.id"
+        />
+      </div>
     </div>
 
     <!-- 空态 -->

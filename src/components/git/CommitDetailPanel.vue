@@ -19,25 +19,15 @@ import { Button } from "@/components/ui/button";
 import FileTreeList from "@/components/common/FileTreeList.vue";
 import DiffViewer from "@/components/git/DiffViewer.vue";
 import ImageDiffPreview from "@/components/git/ImageDiffPreview.vue";
-import SemanticChangeList from "@/components/git/SemanticChangeList.vue";
-import SemanticImpactPanel from "@/components/semantic/SemanticImpactPanel.vue";
 import { statusClass } from "@/lib/git-status";
 import { buildFileTree, flatFileRows, flattenVisibleTree } from "@/lib/file-tree";
 import { extOf, imageMimeOf, isImagePath } from "@/lib/file-kind";
 import { openPathWith, sortOpenWithOptions } from "@/lib/open-with";
 import { baseName } from "@/lib/path";
-import { semanticTotal } from "@/lib/semantic";
 import { copyToClipboard } from "@/lib/utils";
 import { cmd } from "@/lib/tauri";
 import { useSettingsStore } from "@/stores/settings";
-import type {
-  GitCommitFile,
-  GitCommitFileDiff,
-  GitGraphCommit,
-  SemanticChange,
-  SemanticDiffResult,
-  SemanticEntityRef,
-} from "@/types";
+import type { GitCommitFile, GitCommitFileDiff, GitGraphCommit } from "@/types";
 
 const props = defineProps<{
   commit: GitGraphCommit;
@@ -60,13 +50,6 @@ const filesError = ref("");
 /** 平铺 / 树形切换(持久化) */
 const treeMode = useLocalStorage("repomeow:commit-files-tree", false);
 const collapsedFolders = ref(new Set<string>());
-
-// --- sem 实体级差异:仅切到“实体”列表时懒加载；结果按 commit hash 防止串位 ---
-const listMode = ref<"files" | "semantic">("files");
-const semanticResult = ref<SemanticDiffResult | null>(null);
-const semanticLoading = ref(false);
-const semanticError = ref("");
-const semanticLoadedForHash = ref("");
 
 // --- 单文件 diff:本组件只负责取数,解析/着色/折叠/并排渲染全部在 DiffViewer ---
 const selectedPath = ref<string | null>(null);
@@ -126,113 +109,13 @@ async function loadFiles() {
   }
 }
 
-async function loadSemantic(force = false) {
-  const hash = props.commit.hash;
-  if (isMerge.value || semanticLoading.value) {
-    return;
-  }
-  if (!force && semanticLoadedForHash.value === hash && semanticResult.value) {
-    return;
-  }
-  semanticLoading.value = true;
-  semanticError.value = "";
-  try {
-    const result = await cmd<SemanticDiffResult>("semantic_commit_diff", {
-      path: props.projectPath,
-      hash,
-    });
-    if (props.commit.hash !== hash) {
-      return;
-    }
-    semanticResult.value = result;
-    semanticLoadedForHash.value = hash;
-  } catch (e) {
-    if (props.commit.hash !== hash) {
-      return;
-    }
-    semanticError.value = String(e);
-  } finally {
-    if (props.commit.hash === hash) {
-      semanticLoading.value = false;
-    }
-  }
-}
-
-function setListMode(mode: "files" | "semantic") {
-  listMode.value = mode;
-  if (mode === "semantic") {
-    void loadSemantic();
-  }
-}
-
 watch(
   () => props.commit.hash,
-  () => {
-    semanticResult.value = null;
-    semanticError.value = "";
-    semanticLoadedForHash.value = "";
-    semanticLoading.value = false;
-    if (isMerge.value) {
-      listMode.value = "files";
-    }
-    void loadFiles();
-    if (listMode.value === "semantic") {
-      void loadSemantic();
-    }
-  },
+  () => void loadFiles(),
   { immediate: true },
 );
 
-// --- 影响分析(实体视图入口):sem impact 基于当前工作树/HEAD,非 HEAD 提交需提示 ---
-const impactOpen = ref(false);
-const impactEntity = ref<SemanticEntityRef | null>(null);
-
-function openImpact(change: SemanticChange) {
-  impactEntity.value = {
-    entityId: change.entityId || null,
-    name: change.entityName,
-    entityType: change.entityType,
-    filePath: change.filePath,
-    startLine: change.startLine,
-    endLine: change.endLine,
-  };
-  impactOpen.value = true;
-}
-
-/** 影响分析跳到源码:GitGraph 上下文用默认编辑器打开对应文件 */
-async function openImpactTarget(entity: SemanticEntityRef) {
-  const option = sortOpenWithOptions(settings.openWithOrder, settings.customOpenWith).find(
-    (candidate) => candidate.id === settings.defaultOpenWith,
-  );
-  if (!option) return;
-  try {
-    await openPathWith(option, `${props.projectPath}/${entity.filePath}`);
-  } catch (e) {
-    toast.error(String(e));
-  }
-}
-
-/** 语义变更点击的行定位请求:seq 递增保证同一行重复点击也触发 */
-const diffReveal = ref<{ line: number; seq: number } | null>(null);
-let diffRevealSeq = 0;
-
-function selectSemanticFile(filePath: string, oldFilePath: string | null, line: number | null) {
-  const file = files.value.find(
-    (candidate) =>
-      candidate.path === filePath ||
-      candidate.old_path === filePath ||
-      (oldFilePath !== null &&
-        (candidate.path === oldFilePath || candidate.old_path === oldFilePath)),
-  );
-  if (file) {
-    void selectFile(file, false, line);
-  }
-}
-
-async function selectFile(file: GitCommitFile, force = false, revealLine: number | null = null) {
-  // 定位请求先于早退判断下发:同文件重复点击时 diff 不重取,但 DiffViewer 仍按新 seq 滚动
-  diffReveal.value =
-    revealLine != null && revealLine > 0 ? { line: revealLine, seq: ++diffRevealSeq } : null;
+async function selectFile(file: GitCommitFile, force = false) {
   if (!force && selectedPath.value === file.path && (diff.value || imagePanes.value.length)) {
     return;
   }
@@ -516,33 +399,9 @@ onBeforeUnmount(() => {
         "
       >
         <div class="flex shrink-0 items-center justify-between border-b px-3 py-1.5">
-          <div class="flex items-center rounded-md bg-muted p-0.5 text-[10px]">
-            <button
-              type="button"
-              class="rounded px-2 py-0.5 transition-colors"
-              :class="
-                listMode === 'files'
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground'
-              "
-              @click="setListMode('files')"
-            >
-              {{ t("git.graph.detail.filesCount", { count: files.length }) }}
-            </button>
-            <button
-              v-if="!isMerge"
-              type="button"
-              class="rounded px-2 py-0.5 transition-colors"
-              :class="
-                listMode === 'semantic'
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground'
-              "
-              @click="setListMode('semantic')"
-            >
-              {{ t("git.graph.semantic.entities", { count: semanticTotal(semanticResult) }) }}
-            </button>
-          </div>
+          <span class="text-[10px] text-muted-foreground">
+            {{ t("git.graph.detail.filesCount", { count: files.length }) }}
+          </span>
           <div class="flex items-center">
             <button
               class="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -559,7 +418,6 @@ onBeforeUnmount(() => {
               <Columns2 v-else class="h-3.5 w-3.5" />
             </button>
             <button
-              v-if="listMode === 'files'"
               class="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               :title="t(treeMode ? 'git.graph.detail.showFlat' : 'git.graph.detail.showTree')"
               @click="treeMode = !treeMode"
@@ -571,90 +429,72 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="min-h-0 flex-1 overflow-auto py-1">
-          <SemanticChangeList
-            v-if="listMode === 'semantic'"
-            :result="semanticResult"
-            :loading="semanticLoading"
-            :error="semanticError"
-            :selected-path="selectedPath"
-            @select="selectSemanticFile"
-            @retry="loadSemantic(true)"
-            @impact="openImpact"
-          />
-          <template v-else>
-            <div v-if="filesLoading" class="flex h-full items-center justify-center">
-              <Loader2 class="h-4 w-4 animate-spin text-muted-foreground" />
-            </div>
-            <p v-else-if="filesError" class="px-3 py-2 text-xs text-destructive">
-              {{ t("git.graph.detail.filesLoadFailed") }}:{{ filesError }}
-            </p>
-            <p v-else-if="!files.length" class="px-3 py-2 text-xs text-muted-foreground">
-              {{ t(isMerge ? "git.graph.detail.mergeCommit" : "git.graph.detail.emptyFiles") }}
-            </p>
+          <div v-if="filesLoading" class="flex h-full items-center justify-center">
+            <Loader2 class="h-4 w-4 animate-spin text-muted-foreground" />
+          </div>
+          <p v-else-if="filesError" class="px-3 py-2 text-xs text-destructive">
+            {{ t("git.graph.detail.filesLoadFailed") }}:{{ filesError }}
+          </p>
+          <p v-else-if="!files.length" class="px-3 py-2 text-xs text-muted-foreground">
+            {{ t(isMerge ? "git.graph.detail.mergeCommit" : "git.graph.detail.emptyFiles") }}
+          </p>
 
-            <!-- 平铺:只显示文件名,完整路径放 title -->
-            <FileTreeList
-              v-else-if="!treeMode"
-              size="sm"
-              flat
-              :rows="flatRows"
-              :selected="selectedPath"
-              @select="(row) => selectFile(row.data!)"
-            >
-              <template #leading="{ row }">
-                <span
-                  class="w-3 shrink-0 font-mono font-semibold"
-                  :class="statusClass(row.data!.status)"
-                >
-                  {{ row.data!.status }}
-                </span>
-              </template>
-              <template #trailing="{ row }">
-                <span
-                  v-if="row.data!.additions"
-                  class="shrink-0 text-green-600 dark:text-green-400"
-                >
-                  +{{ row.data!.additions }}
-                </span>
-                <span v-if="row.data!.deletions" class="shrink-0 text-red-600 dark:text-red-400">
-                  -{{ row.data!.deletions }}
-                </span>
-              </template>
-            </FileTreeList>
+          <!-- 平铺:只显示文件名,完整路径放 title -->
+          <FileTreeList
+            v-else-if="!treeMode"
+            size="sm"
+            flat
+            :rows="flatRows"
+            :selected="selectedPath"
+            @select="(row) => selectFile(row.data!)"
+          >
+            <template #leading="{ row }">
+              <span
+                class="w-3 shrink-0 font-mono font-semibold"
+                :class="statusClass(row.data!.status)"
+              >
+                {{ row.data!.status }}
+              </span>
+            </template>
+            <template #trailing="{ row }">
+              <span v-if="row.data!.additions" class="shrink-0 text-green-600 dark:text-green-400">
+                +{{ row.data!.additions }}
+              </span>
+              <span v-if="row.data!.deletions" class="shrink-0 text-red-600 dark:text-red-400">
+                -{{ row.data!.deletions }}
+              </span>
+            </template>
+          </FileTreeList>
 
-            <!-- 树形:按目录层级聚合 -->
-            <FileTreeList
-              v-else
-              size="sm"
-              :rows="treeRows"
-              :selected="selectedPath"
-              @select="(row) => selectFile(row.data!)"
-              @toggle="(row) => toggleFolder(row.fullPath)"
-            >
-              <template #leading="{ row }">
-                <span
-                  v-if="row.data"
-                  class="w-3 shrink-0 font-mono font-semibold"
-                  :class="statusClass(row.data.status)"
-                >
-                  {{ row.data.status }}
+          <!-- 树形:按目录层级聚合 -->
+          <FileTreeList
+            v-else
+            size="sm"
+            :rows="treeRows"
+            :selected="selectedPath"
+            @select="(row) => selectFile(row.data!)"
+            @toggle="(row) => toggleFolder(row.fullPath)"
+          >
+            <template #leading="{ row }">
+              <span
+                v-if="row.data"
+                class="w-3 shrink-0 font-mono font-semibold"
+                :class="statusClass(row.data.status)"
+              >
+                {{ row.data.status }}
+              </span>
+            </template>
+            <template #trailing="{ row }">
+              <template v-if="row.data">
+                <span v-if="row.data.additions" class="shrink-0 text-green-600 dark:text-green-400">
+                  +{{ row.data.additions }}
+                </span>
+                <span v-if="row.data.deletions" class="shrink-0 text-red-600 dark:text-red-400">
+                  -{{ row.data.deletions }}
                 </span>
               </template>
-              <template #trailing="{ row }">
-                <template v-if="row.data">
-                  <span
-                    v-if="row.data.additions"
-                    class="shrink-0 text-green-600 dark:text-green-400"
-                  >
-                    +{{ row.data.additions }}
-                  </span>
-                  <span v-if="row.data.deletions" class="shrink-0 text-red-600 dark:text-red-400">
-                    -{{ row.data.deletions }}
-                  </span>
-                </template>
-              </template>
-            </FileTreeList>
-          </template>
+            </template>
+          </FileTreeList>
         </div>
       </div>
 
@@ -683,18 +523,8 @@ onBeforeUnmount(() => {
         :error="diffError"
         :split-applicable="splitApplicable"
         :can-open-ide="canOpenInIde"
-        :reveal="diffReveal"
         @open-ide="selectedFile && openFile(selectedFile)"
       />
     </div>
-
-    <!-- 影响分析:sem 基于当前工作树/HEAD 的实体图,查看历史提交时提示 -->
-    <SemanticImpactPanel
-      v-model:open="impactOpen"
-      :root="projectPath"
-      :entity="impactEntity"
-      :show-current-code-notice="!commit.is_head"
-      @open="openImpactTarget"
-    />
   </div>
 </template>

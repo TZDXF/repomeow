@@ -291,9 +291,9 @@ pub(super) struct SemCliChange {
     #[serde(default)]
     pub structural_change: Option<bool>,
     #[serde(default, rename = "beforeContent")]
-    _before_content: Option<String>,
+    pub(super) before_content: Option<String>,
     #[serde(default, rename = "afterContent")]
-    _after_content: Option<String>,
+    pub(super) after_content: Option<String>,
 }
 
 impl From<SemCliChange> for SemanticChange {

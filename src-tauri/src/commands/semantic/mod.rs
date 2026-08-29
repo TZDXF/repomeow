@@ -15,6 +15,7 @@ use crate::commands::git::open_repo;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::path_util::{clean_str, to_forward_slash_str};
 
+#[cfg(test)]
 use models::SemCliEnvelope;
 pub use models::{
     SemanticContextResult, SemanticDiffResult, SemanticEntityLogResult, SemanticFileBlameResult,
@@ -74,26 +75,6 @@ pub(super) async fn detect_version(app: &AppHandle) -> AppResult<String> {
     }
     let _ = SEM_VERSION.set(version.clone());
     Ok(version)
-}
-
-fn resolve_commit_root(path: &str, hash: &str) -> AppResult<(PathBuf, String)> {
-    let normalized = clean_str(path);
-    let Some(repo) = open_repo(&normalized)? else {
-        return Err(AppError::coded(ErrorCode::NotGitRepository, normalized));
-    };
-    let commit = repo
-        .revparse_single(hash.trim())
-        .and_then(|object| object.peel_to_commit())
-        .map_err(|error| {
-            AppError::coded(
-                ErrorCode::SemanticToolFailed,
-                format!("commit={} detail={error}", hash.trim()),
-            )
-        })?;
-    let root = repo
-        .workdir()
-        .ok_or_else(|| AppError::coded(ErrorCode::SemanticToolFailed, "bare repository"))?;
-    Ok((root.to_path_buf(), commit.id().to_string()))
 }
 
 /// 解析项目路径为 sem 的工作目录(实际仓库 workdir)。
@@ -178,34 +159,6 @@ pub(super) fn validate_entity_token(value: &str) -> AppResult<String> {
 pub async fn semantic_status(app: AppHandle) -> AppResult<SemanticStatus> {
     Ok(SemanticStatus {
         version: detect_version(&app).await?,
-    })
-}
-
-#[tauri::command]
-pub async fn semantic_commit_diff(
-    app: AppHandle,
-    path: String,
-    hash: String,
-) -> AppResult<SemanticDiffResult> {
-    let (root, oid) = resolve_commit_root(&path, &hash)?;
-    let version = detect_version(&app).await?;
-    let args = vec![
-        "diff".to_string(),
-        "--commit".to_string(),
-        oid,
-        "--format".to_string(),
-        "json".to_string(),
-    ];
-    let output = run_sem(&app, Some(&root), &args, SemRunPolicy::DEFAULT, None).await?;
-    if output.code != Some(0) {
-        return Err(output_error(output.code, &output.stderr));
-    }
-    let envelope: SemCliEnvelope = parse::parse_stdout(&output.stdout)?;
-    Ok(SemanticDiffResult {
-        engine_version: version,
-        summary: envelope.summary,
-        changes: envelope.changes.into_iter().map(Into::into).collect(),
-        binary_changes: envelope.binary_changes,
     })
 }
 
@@ -349,7 +302,7 @@ pub async fn semantic_entity_context(
 }
 
 pub use process::cleanup_on_exit;
-pub(crate) use context::worktree_diff_summary;
+pub(crate) use context::commit_input_analysis;
 
 #[cfg(test)]
 mod tests {

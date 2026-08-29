@@ -1237,6 +1237,62 @@ fn commit_context_excludes_nested_repo() {
 }
 
 #[test]
+fn ai_commit_context_follows_untracked_and_path_selection() {
+    let dir = temp_dir("ai-ctx-scope");
+    init_repo(&dir);
+    fs::write(dir.join("a.txt"), "a\n").unwrap();
+    fs::write(dir.join("b.txt"), "b\n").unwrap();
+    git(&dir, &["add", "."]);
+    git(&dir, &["commit", "-m", "init"]);
+    fs::write(dir.join("a.txt"), "a changed\n").unwrap();
+    fs::write(dir.join("b.txt"), "b changed\n").unwrap();
+    fs::write(dir.join("new.txt"), "new content\n").unwrap();
+
+    let without_untracked = ai_commit_context_blocking(dir.to_str().unwrap(), false, None).unwrap();
+    assert_eq!(without_untracked.files.len(), 2);
+    assert!(!without_untracked.semantic_input.contains("new content"));
+
+    let with_untracked = ai_commit_context_blocking(dir.to_str().unwrap(), true, None).unwrap();
+    assert_eq!(with_untracked.files.len(), 3);
+    assert!(with_untracked
+        .files
+        .iter()
+        .any(|file| file.path == "new.txt"));
+    assert!(with_untracked.semantic_input.contains("new content"));
+
+    let selected = vec!["b.txt".to_string()];
+    let partial = ai_commit_context_blocking(dir.to_str().unwrap(), true, Some(&selected)).unwrap();
+    assert_eq!(partial.files.len(), 1);
+    assert_eq!(partial.files[0].path, "b.txt");
+    assert!(!partial.semantic_input.contains("a changed"));
+    assert!(!partial.semantic_input.contains("new content"));
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn ai_commit_context_keeps_untracked_binary_metadata() {
+    let dir = temp_dir("ai-ctx-binary");
+    init_repo(&dir);
+    fs::write(dir.join("base.txt"), "base").unwrap();
+    git(&dir, &["add", "."]);
+    git(&dir, &["commit", "-m", "init"]);
+    fs::write(dir.join("asset.bin"), [0_u8, 1, 2, 0, 255]).unwrap();
+
+    let context = ai_commit_context_blocking(dir.to_str().unwrap(), true, None).unwrap();
+    let binary = context
+        .files
+        .iter()
+        .find(|file| file.path == "asset.bin")
+        .unwrap();
+    assert!(binary.binary);
+    assert!(context.semantic_input.contains("asset.bin"));
+    assert!(context.semantic_input.contains("\"beforeContent\":null"));
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn commit_context_includes_untracked_text_and_skips_binary() {
     let dir = temp_dir("ctx-untracked-content");
     init_repo(&dir);

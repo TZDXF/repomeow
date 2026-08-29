@@ -3,7 +3,7 @@ use super::{super::*, apply_display_opts, truncate_chars, COMMIT_DIFF_MAX_CHARS}
 /// 构建工作区相对 HEAD 的 diff(覆盖已暂存 + 已跟踪未暂存修改 + 未跟踪文件,与 git_commit 语义一致);
 /// 仓库尚无提交(无 HEAD)时回退到暂存区 diff(相对空树);
 /// include_untracked 使未跟踪文件以 Added delta 出现,补丁内容直接读工作区
-fn worktree_diff<'r>(
+pub(super) fn worktree_diff<'r>(
     repo: &'r Repository,
     configure: impl FnOnce(&mut DiffOptions),
 ) -> AppResult<git2::Diff<'r>> {

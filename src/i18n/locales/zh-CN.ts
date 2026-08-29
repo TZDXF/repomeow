@@ -533,10 +533,6 @@ export default {
         imageNew: "新版本",
       },
       semantic: {
-        entities: "实体({count})",
-        empty: "该提交没有可识别的实体变化",
-        cosmetic: "外观",
-        binaryFiles: "二进制文件",
         change: {
           added: "新增",
           modified: "修改",
@@ -965,6 +961,7 @@ export default {
     unread: "未读",
     sources: "来源文件",
     relatedPages: "相关页面",
+    toc: "页面目录",
     waitingFirstChunk: "等待模型输出第一段内容…",
     importance: {
       high: "页面重要性：高",

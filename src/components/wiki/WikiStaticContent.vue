@@ -80,7 +80,8 @@ function sourceRangeLabel(path: string): string {
 </script>
 
 <template>
-  <div class="mb-3 flex items-center gap-2">
+  <!-- pr-9 给右上角悬浮的页面目录按钮让位,避免窄窗口下与重新生成按钮重叠 -->
+  <div class="mb-3 flex items-center gap-2 pr-9">
     <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
       {{ page.file }}
     </span>

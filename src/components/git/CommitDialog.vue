@@ -393,12 +393,17 @@ async function submitAndPush() {
   }
 }
 
-/** AI 生成提交信息:取暂存+已跟踪修改的 diff 上下文,交给模型后填入输入框 */
+/** AI 生成提交信息:严格跟随本次提交的未跟踪开关与文件勾选范围 */
 async function generate() {
   if (generating.value || committable.value === 0) return;
   generating.value = true;
   try {
-    message.value = await generateCommitMessage(props.project, settings.language);
+    message.value = await generateCommitMessage(
+      props.project,
+      settings.language,
+      includeUntracked.value,
+      checkedPayload.value,
+    );
   } catch (e) {
     toast.error(e instanceof Error ? e.message : String(e));
   } finally {

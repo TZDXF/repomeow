@@ -1,6 +1,9 @@
 //! AI 语义上下文:工作区 diff 摘要 / 单实体 context(第 4B 期)。
 
+use std::collections::{BTreeMap, HashSet};
+
 use serde::Deserialize;
+use similar::TextDiff;
 use tauri::AppHandle;
 
 use crate::commands::git::open_repo;
@@ -11,8 +14,10 @@ use super::models::{
     SemanticContextEntry, SemanticContextOmitted, SemanticContextResult, SemanticDiffResult,
 };
 use super::parse::parse_stdout;
-use super::process::{run_sem, SemRunPolicy};
-use super::{detect_version, output_error, resolve_workdir, validate_entity_token, validate_rel_file_path};
+use super::process::{run_sem, run_sem_with_input, SemRunPolicy};
+use super::{
+    detect_version, output_error, resolve_workdir, validate_entity_token, validate_rel_file_path,
+};
 
 /// context token 预算:缺省 2000,clamp 500..=4000
 const CONTEXT_DEFAULT_BUDGET: usize = 2_000;
@@ -128,7 +133,7 @@ pub(super) async fn worktree_diff(
     if output.code != Some(0) {
         return Err(output_error(output.code, &output.stderr));
     }
-    // SemCliEnvelope 解析即丢弃 beforeContent/afterContent,实体全文不进 IPC
+    // 转为公开 DTO 时丢弃 beforeContent/afterContent,实体全文不进 IPC
     let envelope: SemCliEnvelope = parse_stdout(&output.stdout)?;
     Ok(SemanticDiffResult {
         engine_version: version,
@@ -233,71 +238,220 @@ pub(super) async fn entity_context_impl(
     })
 }
 
-/// 提交信息的紧凑语义摘要预算(字符)
-const DIFF_SUMMARY_BUDGET: usize = 6_000;
-/// 摘要中的实体条数上限(防御;预算通常先触顶)
-const DIFF_SUMMARY_MAX_ITEMS: usize = 200;
+/// AI 提交信息使用的 sem 主数据源。covered_paths 只包含 sem 确实返回实体或二进制记录的文件。
+pub(crate) struct SemanticCommitAnalysis {
+    pub text: String,
+    pub covered_paths: HashSet<String>,
+}
 
-/// 把工作区语义 diff 压成紧凑摘要(每行:路径 + changeType + 实体类型/名称 +
-/// structural/cosmetic 标记),结构变化优先、cosmetic 后置,按字符预算截断。
-/// 摘要是 AI 提示词的结构线索,raw diff 仍是最终事实证据。
-pub(super) fn build_diff_summary(result: &SemanticDiffResult, budget: usize) -> String {
-    let mut structural: Vec<String> = Vec::new();
-    let mut cosmetic: Vec<String> = Vec::new();
-    for change in &result.changes {
-        let is_cosmetic = change.structural_change == Some(false);
-        let mark = if is_cosmetic { "cosmetic" } else { "structural" };
-        let line = format!(
-            "{}: {} {} {} ({mark})",
-            change.file_path, change.change_type, change.entity_type, change.entity_name
-        );
-        if is_cosmetic {
-            cosmetic.push(line);
-        } else {
-            structural.push(line);
-        }
+/// 从 RepoMeow 按本次提交范围构造的 FileChange JSON 分析变更。使用 --stdin 是因为 sem
+/// 原生 worktree diff 与 git 一样排除未跟踪文件，且不能表达提交对话框的文件子集。
+pub(crate) async fn commit_input_analysis(
+    app: &AppHandle,
+    path: &str,
+    input: &str,
+) -> AppResult<SemanticCommitAnalysis> {
+    let root = resolve_workdir(path)?;
+    let args = vec![
+        "diff".to_string(),
+        "--stdin".to_string(),
+        "--format".to_string(),
+        "json".to_string(),
+    ];
+    let output = run_sem_with_input(
+        app,
+        Some(&root),
+        &args,
+        SemRunPolicy::CONTEXT,
+        None,
+        input.as_bytes(),
+    )
+    .await?;
+    if output.code != Some(0) {
+        return Err(output_error(output.code, &output.stderr));
     }
-    for binary in &result.binary_changes {
-        structural.push(format!(
-            "{}: binary {} ({})",
-            binary.file_path, binary.file_status, binary.change_type
-        ));
+    let envelope: SemCliEnvelope = parse_stdout(&output.stdout)?;
+    Ok(render_commit_analysis(&envelope))
+}
+
+fn normalized_sem_path(path: &str) -> String {
+    crate::path_util::to_forward_slash_str(path)
+}
+
+const UNIFIED_DIFF_CONTEXT_LINES: usize = 2;
+
+fn change_range(change: &super::models::SemCliChange) -> Option<(usize, usize)> {
+    if change.start_line > 0 && change.end_line >= change.start_line {
+        Some((change.start_line, change.end_line))
+    } else {
+        change
+            .old_start_line
+            .zip(change.old_end_line)
+            .filter(|(start, end)| *start > 0 && end >= start)
     }
-    let mut out = String::new();
-    let mut count = 0usize;
-    let mut truncated = false;
-    for line in structural.into_iter().chain(cosmetic) {
-        if count >= DIFF_SUMMARY_MAX_ITEMS || out.len() + line.len() + 1 > budget {
-            truncated = true;
-            break;
-        }
-        if !out.is_empty() {
-            out.push('\n');
-        }
-        out.push_str(&line);
-        count += 1;
+}
+
+fn has_modified_content(change: &super::models::SemCliChange) -> bool {
+    matches!(
+        (&change.before_content, &change.after_content),
+        (Some(before), Some(after)) if before != after
+    )
+}
+
+fn entity_unified_diff(change: &super::models::SemCliChange) -> Option<String> {
+    let (Some(before), Some(after)) = (&change.before_content, &change.after_content) else {
+        return None;
+    };
+    if before == after {
+        return None;
     }
-    if truncated {
-        out.push_str("\n... (semantic summary truncated)");
+    let diff = TextDiff::from_lines(before, after);
+    let mut unified = diff.unified_diff();
+    unified
+        .context_radius(UNIFIED_DIFF_CONTEXT_LINES)
+        .header("before", "after")
+        .missing_newline_hint(true);
+    let rendered = unified.to_string();
+    rendered.contains("@@").then_some(rendered)
+}
+
+fn range_label(change: &super::models::SemCliChange) -> String {
+    let current = format!("{}-{}", change.start_line, change.end_line);
+    match (change.old_start_line, change.old_end_line) {
+        (Some(old_start), Some(old_end))
+            if old_start != change.start_line || old_end != change.end_line =>
+        {
+            format!("old {old_start}-{old_end} -> {current}")
+        }
+        _ => current,
+    }
+}
+
+fn render_change(change: &super::models::SemCliChange, path: &str, include_diff: bool) -> String {
+    let structural = match change.structural_change {
+        Some(true) => "structural",
+        Some(false) => "cosmetic",
+        None => "semantic",
+    };
+    let mut out = format!(
+        "- `{path}:{}` {} {} `{}` ({structural})",
+        range_label(change),
+        change.change_type,
+        change.entity_type,
+        change.entity_name,
+    );
+    if include_diff {
+        if let Some(diff) = entity_unified_diff(change) {
+            out.push_str("\n```diff\n");
+            out.push_str(diff.trim_end());
+            out.push_str("\n```");
+        }
     }
     out
 }
 
-/// AI 提交信息的语义摘要入口:sem 失败/超时/无实体时静默回退(None),
-/// 调用方保持原有 prompt,不让「生成提交信息」失败。
-pub(crate) async fn worktree_diff_summary(app: &AppHandle, path: &str) -> Option<String> {
-    let result = worktree_diff(app, path, None).await.ok()?;
-    if result.changes.is_empty() && result.binary_changes.is_empty() {
-        return None;
-    }
-    let summary = build_diff_summary(&result, DIFF_SUMMARY_BUDGET);
-    if summary.is_empty() {
-        None
-    } else {
-        Some(summary)
-    }
+fn duplicate_key(change: &super::models::SemCliChange, path: &str) -> String {
+    format!(
+        "{path}\0{}\0{}\0{}\0{}\0{}\0{}\0{:?}\0{:?}",
+        change.entity_id,
+        change.change_type,
+        change.entity_type,
+        change.entity_name,
+        change.start_line,
+        change.end_line,
+        change.old_start_line,
+        change.old_end_line,
+    )
 }
 
+/// 所有唯一实体都保留元数据；同范围重复内容或嵌套实体只在最外层输出一次 diff，
+/// 避免 class/impl 与其中 method/function 重复发送相同修改。
+fn should_include_entity_diff(index: usize, changes: &[&super::models::SemCliChange]) -> bool {
+    let current = changes[index];
+    if !has_modified_content(current) {
+        return false;
+    }
+    let Some((current_start, current_end)) = change_range(current) else {
+        return true;
+    };
+    for (other_index, other) in changes.iter().enumerate() {
+        if other_index == index || !has_modified_content(other) {
+            continue;
+        }
+        let Some((other_start, other_end)) = change_range(other) else {
+            continue;
+        };
+        let same_content = current.before_content == other.before_content
+            && current.after_content == other.after_content;
+        if same_content
+            && other_start == current_start
+            && other_end == current_end
+            && other_index < index
+        {
+            return false;
+        }
+        let strictly_contains = other_start <= current_start
+            && other_end >= current_end
+            && (other_start < current_start || other_end > current_end);
+        if strictly_contains {
+            return false;
+        }
+    }
+    true
+}
+
+fn render_commit_analysis(envelope: &SemCliEnvelope) -> SemanticCommitAnalysis {
+    let mut covered_paths = HashSet::new();
+    let mut seen = HashSet::new();
+    let mut by_file: BTreeMap<String, Vec<&super::models::SemCliChange>> = BTreeMap::new();
+    for change in &envelope.changes {
+        let path = normalized_sem_path(&change.file_path);
+        covered_paths.insert(path.clone());
+        if let Some(old_path) = &change.old_file_path {
+            covered_paths.insert(normalized_sem_path(old_path));
+        }
+        if seen.insert(duplicate_key(change, &path)) {
+            by_file.entry(path).or_default().push(change);
+        }
+    }
+
+    let mut sections = Vec::new();
+    for (path, changes) in by_file {
+        let entries = changes
+            .iter()
+            .enumerate()
+            .map(|(index, change)| {
+                render_change(change, &path, should_include_entity_diff(index, &changes))
+            })
+            .collect::<Vec<_>>();
+        sections.push(format!("### {path}\n{}", entries.join("\n")));
+    }
+
+    let mut binary_by_file: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for binary in &envelope.binary_changes {
+        let path = normalized_sem_path(&binary.file_path);
+        covered_paths.insert(path.clone());
+        if let Some(old_path) = &binary.old_file_path {
+            covered_paths.insert(normalized_sem_path(old_path));
+        }
+        binary_by_file
+            .entry(path.clone())
+            .or_default()
+            .push(format!(
+                "- `{path}` binary {} ({})",
+                binary.file_status, binary.change_type
+            ));
+    }
+    for (path, entries) in binary_by_file {
+        sections.push(format!("### {path}\n{}", entries.join("\n")));
+    }
+    sections.sort();
+
+    SemanticCommitAnalysis {
+        text: sections.join("\n\n"),
+        covered_paths,
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -363,58 +517,55 @@ mod tests {
         assert!(!is_entity_not_found(b"error: other"));
     }
 
-    fn change(structural: Option<bool>, name: &str) -> SemanticChange {
-        SemanticChange {
-            entity_id: format!("f.rs::function::{name}"),
+    fn raw_change(name: &str, path: &str, entity_type: &str) -> super::super::models::SemCliChange {
+        super::super::models::SemCliChange {
+            entity_id: format!("{path}::function::{name}"),
             change_type: "modified".into(),
-            entity_type: "function".into(),
+            entity_type: entity_type.into(),
             entity_name: name.into(),
             start_line: 1,
             end_line: 2,
-            old_start_line: None,
-            old_end_line: None,
+            old_start_line: Some(1),
+            old_end_line: Some(2),
             old_entity_name: None,
-            file_path: "f.rs".into(),
+            file_path: path.into(),
             old_file_path: None,
-            structural_change: structural,
+            structural_change: Some(true),
+            before_content: Some("fn x() { old(); }".into()),
+            after_content: Some("fn x() { new(); }".into()),
         }
     }
 
-    fn diff_result(changes: Vec<SemanticChange>) -> SemanticDiffResult {
-        SemanticDiffResult {
-            engine_version: "0.23.1".into(),
+    #[test]
+    fn commit_analysis_has_no_entity_count_limit() {
+        let envelope = SemCliEnvelope {
             summary: Default::default(),
-            changes,
-            binary_changes: vec![],
-        }
-    }
-
-    #[test]
-    fn summary_prioritizes_structural_over_cosmetic() {
-        let result = diff_result(vec![change(Some(false), "fmt_only"), change(Some(true), "logic")]);
-        let summary = build_diff_summary(&result, DIFF_SUMMARY_BUDGET);
-        let logic_pos = summary.find("logic").unwrap();
-        let fmt_pos = summary.find("fmt_only").unwrap();
-        assert!(logic_pos < fmt_pos);
-        assert!(summary.contains("(structural)"));
-        assert!(summary.contains("(cosmetic)"));
-        assert!(summary.contains("f.rs: modified function logic"));
-    }
-
-    #[test]
-    fn summary_respects_char_budget_and_marks_truncation() {
-        let result = diff_result(
-            (0..50)
-                .map(|i| change(Some(true), &format!("entity_with_a_long_name_{i}")))
+            changes: (0..250)
+                .map(|index| raw_change(&format!("entity_{index}"), "src/main.rs", "function"))
                 .collect(),
-        );
-        let summary = build_diff_summary(&result, 200);
-        assert!(summary.len() <= 240);
-        assert!(summary.contains("semantic summary truncated"));
+            binary_changes: vec![],
+        };
+        let analysis = render_commit_analysis(&envelope);
+        assert!(analysis.text.contains("entity_249"));
+        assert!(!analysis.text.contains("semantic summary truncated"));
+        assert!(analysis.covered_paths.contains("src/main.rs"));
     }
 
     #[test]
-    fn summary_empty_for_empty_diff() {
-        assert_eq!(build_diff_summary(&diff_result(vec![]), 6000), "");
+    fn chunk_and_binary_results_count_as_covered() {
+        let envelope = SemCliEnvelope {
+            summary: Default::default(),
+            changes: vec![raw_change("lines 1-2", "notes.txt", "chunk")],
+            binary_changes: vec![super::super::models::SemanticBinaryChange {
+                change_type: "binary".into(),
+                file_path: "assets/logo.png".into(),
+                old_file_path: None,
+                file_status: "added".into(),
+            }],
+        };
+        let analysis = render_commit_analysis(&envelope);
+        assert!(analysis.covered_paths.contains("notes.txt"));
+        assert!(analysis.covered_paths.contains("assets/logo.png"));
+        assert!(analysis.text.contains("binary added"));
     }
 }

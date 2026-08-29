@@ -58,6 +58,8 @@ function bindCancellation(id: string, signal?: AbortSignal): () => void {
 export function generateCommitMessage(
   project: { path: string; name: string; description: string },
   language: SupportedLocale,
+  includeUntracked: boolean,
+  paths?: string[] | null,
 ): Promise<string> {
   return cmd<string>("ai_generate_commit_message", {
     request: {
@@ -65,6 +67,8 @@ export function generateCommitMessage(
       projectName: project.name,
       projectDescription: project.description,
       language,
+      includeUntracked,
+      paths: paths ?? null,
     },
   });
 }

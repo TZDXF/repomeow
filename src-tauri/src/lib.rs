@@ -188,7 +188,6 @@ pub fn run() {
             commands::git::git_rebase,
             commands::git::git_rebase_abort,
             commands::semantic::semantic_status,
-            commands::semantic::semantic_commit_diff,
             commands::semantic::semantic_cancel,
             commands::semantic::semantic_file_entities,
             commands::semantic::semantic_find_entities,

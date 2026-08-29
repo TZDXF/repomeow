@@ -7,7 +7,7 @@ use std::time::Duration;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use tauri::AppHandle;
-use tauri_plugin_shell::process::CommandEvent;
+use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 use tokio::sync::Semaphore;
 
@@ -219,6 +219,37 @@ pub(super) async fn run_sem(
     policy: SemRunPolicy,
     request_id: Option<&str>,
 ) -> AppResult<SemOutput> {
+    run_sem_inner(app, current_dir, args, policy, request_id, None).await
+}
+
+/// 运行需要 stdin 的 sem 命令。写完立即丢弃 CommandChild 以关闭管道，
+/// 否则 `sem diff --stdin` 等读取标准输入的命令会一直等待 EOF。
+pub(super) async fn run_sem_with_input(
+    app: &AppHandle,
+    current_dir: Option<&Path>,
+    args: &[String],
+    policy: SemRunPolicy,
+    request_id: Option<&str>,
+    input: &[u8],
+) -> AppResult<SemOutput> {
+    run_sem_inner(app, current_dir, args, policy, request_id, Some(input)).await
+}
+
+fn terminate_child(child: &mut Option<CommandChild>, pid: u32) {
+    if let Some(child) = child.take() {
+        let _ = child.kill();
+    }
+    kill_pid(pid);
+}
+
+async fn run_sem_inner(
+    app: &AppHandle,
+    current_dir: Option<&Path>,
+    args: &[String],
+    policy: SemRunPolicy,
+    request_id: Option<&str>,
+    input: Option<&[u8]>,
+) -> AppResult<SemOutput> {
     if let Some(id) = request_id {
         // 请求槽在 SemPidGuard 中按 PID 登记,这里仅保证槽位存在,便于等待
         // 信号量期间也能被 semantic_cancel 标记。
@@ -258,54 +289,69 @@ pub(super) async fn run_sem(
     if let Some(path) = current_dir {
         command = command.current_dir(path);
     }
-    let (receiver, child) = command
+    let (receiver, spawned) = command
         .spawn()
         .map_err(|error| AppError::coded(ErrorCode::SemanticToolMissing, error.to_string()))?;
-    let pid = child.pid();
+    let pid = spawned.pid();
     let guard = SemPidGuard::new(pid, request_id);
+    let mut child = Some(spawned);
 
     // spawn 与登记之间可能已收到取消:立即补杀。
     if let Some(id) = request_id {
         if is_request_canceled(id) {
-            let _ = child.kill();
-            kill_pid(pid);
+            terminate_child(&mut child, pid);
             drop(guard);
             return Err(canceled_error(id));
         }
     }
 
-    let result = tokio::time::timeout(policy.timeout, collect_output(receiver, policy.stdout_limit)).await;
+    if let Some(bytes) = input {
+        let write_result = child.as_mut().expect("spawned child missing").write(bytes);
+        if let Err(error) = write_result {
+            terminate_child(&mut child, pid);
+            drop(guard);
+            return Err(AppError::coded(
+                ErrorCode::SemanticToolFailed,
+                format!("stdin write failed: {error}"),
+            ));
+        }
+        // CommandChild 持有 stdin_writer；drop 后 sem 才能读到 EOF。
+        drop(child.take());
+    }
+
+    let result = tokio::time::timeout(
+        policy.timeout,
+        collect_output(receiver, policy.stdout_limit),
+    )
+    .await;
     let canceled = request_id.is_some_and(is_request_canceled);
     drop(guard);
     match result {
         Err(_) => {
-            let _ = child.kill();
-            kill_pid(pid);
+            terminate_child(&mut child, pid);
             Err(AppError::coded(
                 ErrorCode::SemanticAnalysisTimeout,
                 format!("pid={pid}"),
             ))
         }
         Ok(_) if canceled => {
-            let _ = child.kill();
-            kill_pid(pid);
+            terminate_child(&mut child, pid);
             Err(canceled_error(request_id.unwrap_or_default()))
         }
         Ok(Err(CollectError::OutputTooLarge)) => {
-            let _ = child.kill();
+            terminate_child(&mut child, pid);
             Err(AppError::coded(
                 ErrorCode::SemanticOutputTooLarge,
                 format!("limit={}", policy.stdout_limit),
             ))
         }
         Ok(Err(CollectError::Process(error))) => {
-            let _ = child.kill();
+            terminate_child(&mut child, pid);
             Err(AppError::coded(ErrorCode::SemanticToolFailed, error))
         }
         Ok(Ok(output)) => Ok(output),
     }
 }
-
 #[cfg(windows)]
 fn kill_pid(pid: u32) {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -337,10 +383,7 @@ pub fn cleanup_on_exit() {
     for pid in all {
         kill_pid(pid);
     }
-    requests()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clear();
+    requests().lock().unwrap_or_else(|e| e.into_inner()).clear();
 }
 
 #[cfg(test)]

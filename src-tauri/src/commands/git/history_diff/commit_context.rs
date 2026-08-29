@@ -161,7 +161,19 @@ pub(crate) fn commit_context_blocking(path: &str) -> AppResult<GitCommitContext>
     }
 
     // 最近若干条提交 subject(无合并),供模型对齐仓库提交风格
-    let recent_commits = (|| -> Option<Vec<String>> {
+    let recent_commits = recent_commit_messages(&repo);
+
+    Ok(GitCommitContext {
+        stat,
+        diff: diff_text,
+        truncated,
+        untracked,
+        untracked_files,
+        recent_commits,
+    })
+}
+fn recent_commit_messages(repo: &Repository) -> Vec<String> {
+    (|| -> Option<Vec<String>> {
         let mut walk = repo.revwalk().ok()?;
         walk.push_head().ok()?;
         walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME).ok()?;
@@ -173,8 +185,8 @@ pub(crate) fn commit_context_blocking(path: &str) -> AppResult<GitCommitContext>
             if commit.parent_count() >= 2 {
                 continue;
             }
-            if let Some(s) = commit.summary() {
-                out.push(s.to_string());
+            if let Some(summary) = commit.summary() {
+                out.push(summary.to_string());
             }
             if out.len() >= RECENT_COMMITS_COUNT {
                 break;
@@ -182,14 +194,218 @@ pub(crate) fn commit_context_blocking(path: &str) -> AppResult<GitCommitContext>
         }
         Some(out)
     })()
-    .unwrap_or_default();
+    .unwrap_or_default()
+}
 
-    Ok(GitCommitContext {
+/// AI 提交信息使用的单文件上下文。raw_patch 只会在 sem 未覆盖该文件或 sem 失败时进入提示词。
+#[derive(Debug, Clone)]
+pub(crate) struct AiCommitFileContext {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub status: String,
+    pub raw_patch: String,
+    pub binary: bool,
+    pub raw_excluded: bool,
+}
+
+/// 与本次真实提交范围一致的 AI 上下文；semantic_input 仅在本地交给 sem，不直接发送给模型。
+#[derive(Debug)]
+pub(crate) struct AiCommitContext {
+    pub stat: String,
+    pub semantic_input: String,
+    pub files: Vec<AiCommitFileContext>,
+    pub recent_commits: Vec<String>,
+}
+
+pub(crate) async fn ai_commit_context(
+    path: String,
+    include_untracked: bool,
+    paths: Option<Vec<String>>,
+) -> AppResult<AiCommitContext> {
+    run_blocking(move || ai_commit_context_blocking(&path, include_untracked, paths.as_deref()))
+        .await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SemFileChangeInput {
+    file_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    old_file_path: Option<String>,
+    status: String,
+    before_content: Option<String>,
+    after_content: Option<String>,
+}
+
+fn blob_text(repo: &Repository, oid: git2::Oid) -> Option<String> {
+    let blob = repo.find_blob(oid).ok()?;
+    if blob.content().contains(&0) {
+        return None;
+    }
+    std::str::from_utf8(blob.content()).ok().map(str::to_string)
+}
+
+fn workdir_text(workdir: &str, path: &str) -> Option<String> {
+    let bytes = std::fs::read(Path::new(workdir).join(path)).ok()?;
+    if bytes.contains(&0) {
+        return None;
+    }
+    String::from_utf8(bytes).ok()
+}
+fn binary_patch(path: &str, old_path: Option<&str>, status: &str) -> String {
+    let old = old_path.unwrap_or(path);
+    match status {
+        "A" => format!(
+            "diff --git a/{path} b/{path}\nnew file mode 100644\nBinary files /dev/null and b/{path} differ\n"
+        ),
+        "D" => format!(
+            "diff --git a/{path} b/{path}\ndeleted file mode 100644\nBinary files a/{path} and /dev/null differ\n"
+        ),
+        _ => format!(
+            "diff --git a/{old} b/{path}\nBinary files a/{old} and b/{path} differ\n"
+        ),
+    }
+}
+pub(crate) fn ai_commit_context_blocking(
+    path: &str,
+    include_untracked: bool,
+    paths: Option<&[String]>,
+) -> AppResult<AiCommitContext> {
+    let Some(repo) = open_repo(path)? else {
+        return Err(not_a_repo());
+    };
+    if paths.is_some_and(<[String]>::is_empty) {
+        return Err(AppError::coded(ErrorCode::GitPathsRequired, ""));
+    }
+
+    let normalized_paths = paths.map(|items| {
+        items
+            .iter()
+            .map(|item| crate::path_util::to_forward_slash_str(item))
+            .filter(|item| !item.is_empty())
+            .collect::<Vec<_>>()
+    });
+    let diff = super::worktree_changes::worktree_diff(&repo, |opts| {
+        opts.include_untracked(include_untracked)
+            .recurse_untracked_dirs(include_untracked)
+            .show_untracked_content(include_untracked);
+        if let Some(items) = &normalized_paths {
+            for item in items {
+                opts.pathspec(item);
+            }
+        }
+    })?;
+    let workdir = repo
+        .workdir()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string());
+    let mut nested_cache = HashSet::new();
+    let mut semantic_inputs = Vec::new();
+    let mut files = Vec::new();
+
+    for (idx, delta) in diff.deltas().enumerate() {
+        let status = match delta.status() {
+            Delta::Added | Delta::Untracked => "A",
+            Delta::Copied => "C",
+            Delta::Deleted => "D",
+            Delta::Modified => "M",
+            Delta::Renamed => "R",
+            Delta::Typechange => "T",
+            _ => continue,
+        };
+        let path = delta
+            .new_file()
+            .path()
+            .or_else(|| delta.old_file().path())
+            .map(|value| crate::path_util::to_forward_slash_str(&value.to_string_lossy()))
+            .unwrap_or_default();
+        if path.is_empty() || is_nested_repo_cached(&workdir, &path, &mut nested_cache) {
+            continue;
+        }
+        let old_path = if matches!(delta.status(), Delta::Renamed | Delta::Copied) {
+            delta
+                .old_file()
+                .path()
+                .map(|value| crate::path_util::to_forward_slash_str(&value.to_string_lossy()))
+        } else {
+            None
+        };
+        let patch = Patch::from_diff(&diff, idx).ok().flatten();
+        let binary = diff
+            .get_delta(idx)
+            .map(|value| value.flags().is_binary())
+            .unwrap_or(false);
+        let mut raw_patch = if binary {
+            binary_patch(&path, old_path.as_deref(), status)
+        } else {
+            patch
+                .and_then(|mut value| value.to_buf().ok())
+                .map(|value| String::from_utf8_lossy(&value).into_owned())
+                .unwrap_or_default()
+        };
+        if raw_patch.trim().is_empty() {
+            let old_label = old_path.as_deref().unwrap_or(&path);
+            raw_patch = format!("diff --git a/{old_label} b/{path}\n{status} {path}\n");
+        }
+        let sem_status = match status {
+            "A" | "C" => "added",
+            "D" => "deleted",
+            "R" => "renamed",
+            _ => "modified",
+        };
+        let before_content = if binary || matches!(status, "A" | "C") {
+            None
+        } else {
+            blob_text(&repo, delta.old_file().id())
+        };
+        let after_content = if binary || status == "D" {
+            None
+        } else {
+            workdir_text(&workdir, &path)
+        };
+        semantic_inputs.push(SemFileChangeInput {
+            file_path: path.clone(),
+            old_file_path: if status == "R" {
+                old_path.clone()
+            } else {
+                None
+            },
+            status: sem_status.to_string(),
+            before_content,
+            after_content,
+        });
+        files.push(AiCommitFileContext {
+            path: path.clone(),
+            old_path,
+            status: status.to_string(),
+            raw_patch,
+            binary,
+            raw_excluded: is_diff_excluded(&path),
+        });
+    }
+
+    let stat = if files.is_empty() {
+        String::new()
+    } else {
+        files
+            .iter()
+            .map(|file| {
+                let kind = if file.binary {
+                    "binary"
+                } else {
+                    file.status.as_str()
+                };
+                format!("{} | {kind}", file.path)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let semantic_input = serde_json::to_string(&semantic_inputs)
+        .map_err(|error| AppError::coded(ErrorCode::SemanticToolFailed, error.to_string()))?;
+    Ok(AiCommitContext {
         stat,
-        diff: diff_text,
-        truncated,
-        untracked,
-        untracked_files,
-        recent_commits,
+        semantic_input,
+        files,
+        recent_commits: recent_commit_messages(&repo),
     })
 }
