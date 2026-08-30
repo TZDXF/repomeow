@@ -25,6 +25,8 @@ export interface ChatSessionState {
   busy: boolean;
   /** 最近一次整轮完成的用量(done 时由 chat_send 返回值回填) */
   lastUsage: ChatUsageSummary | null;
+  /** 当前上下文占用(turnEnd 逐轮更新;null = 暂无统计) */
+  contextTokens: number | null;
 }
 
 interface ChatProject {
@@ -42,6 +44,7 @@ function defaultSession(): ChatSessionState {
     error: null,
     busy: false,
     lastUsage: null,
+    contextTokens: null,
   };
 }
 
@@ -143,6 +146,9 @@ export const useChatStore = defineStore("chat", () => {
         }
         session.streamingText = "";
         session.pendingToolRunIds = [];
+        if (event.contextTokens != null) {
+          session.contextTokens = event.contextTokens;
+        }
         break;
       }
       case "error":
@@ -214,12 +220,13 @@ export const useChatStore = defineStore("chat", () => {
       }
     })();
 
-    activeRuns.set(
-      path,
-      run.finally(() => {
-        if (activeRuns.get(path) === run) activeRuns.delete(path);
-      }),
-    );
+    activeRuns.set(path, run);
+    // run 内部已 try/catch,不会 reject;finally 里按原 run 引用清理,
+    // 若用 run.finally() 的返回值入表,则永远不等于 run,条目无法删除,
+    // 该项目的后续发送会被 busy 守卫永久拒绝。
+    void run.finally(() => {
+      if (activeRuns.get(path) === run) activeRuns.delete(path);
+    });
     return run.then(() => true);
   }
 

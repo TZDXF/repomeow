@@ -621,7 +621,9 @@ pub enum InputKind {
 }
 
 impl Model {
-    /// 从应用 AI 配置构造模型(api 固定 openai-completions,成本未知置 0)。
+    /// 从应用 AI 配置构造最小模型(api 固定 openai-completions,成本未知置 0)。
+    /// 现仅测试用;正式路径经 `ai::catalog::resolve_model` 填全元数据。
+    #[cfg(test)]
     pub fn from_settings(id: impl Into<String>, base_url: impl Into<String>) -> Self {
         let id: String = id.into();
         Self {

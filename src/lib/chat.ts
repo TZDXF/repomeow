@@ -13,6 +13,8 @@ export interface ChatUsageSummary {
   totalTokens: number;
   cachedTokens: number | null;
   costTotal: number | null;
+  /** 当前上下文占用(最近 assistant 消息的 total_tokens;null = 暂无统计) */
+  contextTokens: number | null;
 }
 
 /** chat_send 过程中经 Channel 推送的事件(与 Rust ChatEvent 一一对应) */
@@ -20,7 +22,7 @@ export type ChatEvent =
   | { kind: "textDelta"; delta: string }
   | { kind: "toolCall"; id: string; name: string; args: unknown }
   | { kind: "toolResult"; id: string; ok: boolean; summary: string }
-  | { kind: "turnEnd" }
+  | { kind: "turnEnd"; contextTokens: number | null }
   | { kind: "done"; usage: ChatUsageSummary | null }
   | { kind: "error"; code: string; message: string };
 
@@ -48,6 +50,18 @@ export interface ChatToolRun {
 
 function chatRunId(): string {
   return `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+/** token 数紧凑格式:999 → "999"、1234 → "1.2k"、1048576 → "1M"(上下文占用展示用) */
+export function formatTokenCount(tokens: number): string {
+  if (!Number.isFinite(tokens) || tokens <= 0) return "0";
+  if (tokens >= 1_000_000) {
+    return `${(tokens / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  }
+  if (tokens >= 1_000) {
+    return `${(tokens / 1_000).toFixed(1).replace(/\.0$/, "")}k`;
+  }
+  return String(Math.round(tokens));
 }
 
 /** AbortSignal → chat_abort 的取消绑定,参照 lib/ai.ts 的 bindCancellation 模式 */

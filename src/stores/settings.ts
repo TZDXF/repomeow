@@ -51,8 +51,8 @@ function persistLocalJson(key: string, value: unknown) {
   }
 }
 
-// AI 接入参数(OpenAI Chat Completions 兼容):baseUrl/apiKey/model 均无默认值,
-// 由用户在设置页填写;任一缺失时调用方需先校验。
+// AI 接入配置(多厂商/模型/问答偏好)已迁移到独立文件 ai-config.json,
+// 经 stores/ai-config.ts 读写;此处仅保留与厂商无关的并发上限。
 
 export const useSettingsStore = defineStore("settings", () => {
   const theme = ref<ThemeMode>("system");
@@ -64,9 +64,6 @@ export const useSettingsStore = defineStore("settings", () => {
   const defaultOpenWith = ref<OpenWithId>("explorer");
   /** 打开方式列表顺序(设置页可拖拽调整,下拉菜单同步遵循) */
   const openWithOrder = ref<OpenWithId[]>(normalizeOpenWithOrder([], customOpenWith.value));
-  const aiBaseUrl = ref("");
-  const aiApiKey = ref("");
-  const aiModel = ref("");
   /** AI 调用并发上限(1-5),适用于批量生成报告等所有 AI 请求场景 */
   const aiConcurrency = ref(2);
   /** 项目列表视图模式(grid / table) */
@@ -362,9 +359,6 @@ export const useSettingsStore = defineStore("settings", () => {
         language: "zh-CN",
         defaultOpenWith: "explorer",
         customOpenWith: "[]",
-        aiBaseUrl: "",
-        aiApiKey: "",
-        aiModel: "",
         aiConcurrency: "2",
         projectsViewMode: "grid",
         projectsSortKey: "name",
@@ -408,19 +402,6 @@ export const useSettingsStore = defineStore("settings", () => {
     }
     // 打开方式排序:localStorage 里的 JSON 数组,过滤已删除项并补齐新增项,非法值回退默认顺序
     reloadOpenWithOrderCache();
-    // AI 配置为自由文本:trim 后非空才赋值,空值保持初始空(无默认值可回退)
-    const savedAiBaseUrl = await fileStore.get<string>("aiBaseUrl");
-    if (typeof savedAiBaseUrl === "string" && savedAiBaseUrl.trim()) {
-      aiBaseUrl.value = savedAiBaseUrl.trim();
-    }
-    const savedAiApiKey = await fileStore.get<string>("aiApiKey");
-    if (typeof savedAiApiKey === "string") {
-      aiApiKey.value = savedAiApiKey;
-    }
-    const savedAiModel = await fileStore.get<string>("aiModel");
-    if (typeof savedAiModel === "string" && savedAiModel.trim()) {
-      aiModel.value = savedAiModel.trim();
-    }
     // 并发上限存为字符串,解析后限制在 1-5,非法值回退默认 2
     const savedConcurrency = await fileStore.get<string>("aiConcurrency");
     if (typeof savedConcurrency === "string") {
@@ -599,21 +580,6 @@ export const useSettingsStore = defineStore("settings", () => {
     await emitOpenWithChanged();
   }
 
-  async function setAiBaseUrl(value: string) {
-    aiBaseUrl.value = value.trim();
-    await persist("aiBaseUrl", aiBaseUrl.value);
-  }
-
-  async function setAiApiKey(value: string) {
-    aiApiKey.value = value.trim();
-    await persist("aiApiKey", aiApiKey.value);
-  }
-
-  async function setAiModel(value: string) {
-    aiModel.value = value.trim();
-    await persist("aiModel", aiModel.value);
-  }
-
   async function setAiConcurrency(value: number) {
     const n = Math.min(5, Math.max(1, Math.round(value)));
     aiConcurrency.value = n;
@@ -766,9 +732,6 @@ export const useSettingsStore = defineStore("settings", () => {
     customOpenWith,
     defaultOpenWith,
     openWithOrder,
-    aiBaseUrl,
-    aiApiKey,
-    aiModel,
     aiConcurrency,
     projectsViewMode,
     projectsSortKey,
@@ -798,9 +761,6 @@ export const useSettingsStore = defineStore("settings", () => {
     setOpenWithOrder,
     saveCustomOpenWith,
     removeCustomOpenWith,
-    setAiBaseUrl,
-    setAiApiKey,
-    setAiModel,
     setAiConcurrency,
     setProjectsViewMode,
     setProjectsSortKey,

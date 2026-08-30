@@ -35,6 +35,7 @@ const USAGE: ChatUsageSummary = {
   totalTokens: 120,
   cachedTokens: 10,
   costTotal: null,
+  contextTokens: 120,
 };
 
 function emit(path: string, event: ChatEvent) {
@@ -93,7 +94,7 @@ describe("chat store", () => {
     emit(PATH, { kind: "toolCall", id: "t1", name: "list_files", args: {} });
     emit(PATH, { kind: "toolResult", id: "t1", ok: true, summary: "ok" });
     emit(PATH, { kind: "textDelta", delta: " + Rust" });
-    emit(PATH, { kind: "turnEnd" });
+    emit(PATH, { kind: "turnEnd", contextTokens: 120 });
 
     const session = store.sessions[PATH];
     expect(session.streamingText).toBe("");
@@ -124,6 +125,25 @@ describe("chat store", () => {
 
     finish(PATH);
     await first;
+  });
+
+  it("上一轮结束后清理在途记录,后续发送不被永久拒绝", async () => {
+    const store = useChatStore();
+    const first = store.send(PATH, PROJECT, "第一条");
+    finish(PATH);
+    await first;
+
+    const second = store.send(PATH, PROJECT, "第二条");
+    expect(second).not.toBeNull();
+    emit(PATH, { kind: "textDelta", delta: "第二条的回答" });
+    finish(PATH);
+    await expect(second).resolves.toBe(true);
+
+    const session = store.sessions[PATH];
+    // 第一轮无 turnEnd/残余文本,只固化 user 消息;第二轮补齐 user + assistant
+    expect(session.messages).toHaveLength(3);
+    expect(session.messages[1]).toMatchObject({ role: "user", content: "第二条" });
+    expect(session.messages[2]).toMatchObject({ role: "assistant", content: "第二条的回答" });
   });
 
   it("error 事件映射 chat_busy 前缀并进入 error 阶段", async () => {
@@ -179,7 +199,7 @@ describe("chat store", () => {
     const store = useChatStore();
     const run = store.send(PATH, PROJECT, "第一条");
     emit(PATH, { kind: "textDelta", delta: "回答" });
-    emit(PATH, { kind: "turnEnd" });
+    emit(PATH, { kind: "turnEnd", contextTokens: 120 });
     finish(PATH);
     await run;
 

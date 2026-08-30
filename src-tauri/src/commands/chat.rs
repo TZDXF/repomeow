@@ -6,18 +6,10 @@
 //! `chat_new_session` 丢弃会话上下文。每次 `chat_send` 结束后把聚合的
 //! token 用量写入 `ai_usage_log`(task_type = "chat")。
 //!
-//! 对 pi 运行时(并行实现中)的对齐假设,最终由主智能体核对:
-//! 1. `crate::agent::Agent`(在 `agent/mod.rs` 根 re-export,蓝本
-//!    packages/agent/src/agent.ts):
-//!    - `Agent::new(state: AgentState, config: AgentLoopConfig, stream_fn: StreamFn) -> Agent`
-//!      (TS 里 streamFn 与 initialState/config 同为构造选项)
-//!    - `fn subscribe(&self, listener: AgentListener)`(会话内订阅一次,随会话存活)
-//!    - `async fn prompt(&self, message: AgentMessage) -> Result<T, E>`(E: Display;
-//!      运行期失败走事件/最终消息的 stopReason,本返回值只承载致命错误)
-//!    - `fn abort(&self)`(取消当前运行;无运行时为空操作)
-//! 2. `crate::agent::llm::openai_completions::stream_openai_completions(model, context,
-//!    options: Option<SimpleStreamOptions>, signal: Option<CancellationToken>)
-//!    -> AssistantMessageEventStream`(失败编码进流)。
+//! 模型/思考强度/工具权限来自 `ai-config.json` 的 `chat` 段(缺省回退
+//! defaultModel),每次 `chat_send` 前重读:思考与权限变化经 `Agent` 的
+//! 状态热切换方法就地生效(会话历史保留),模型与密钥由 StreamFn 每次
+//! LLM 调用时重读。
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -35,14 +27,15 @@ use crate::agent::llm::event_stream::event_stream;
 use crate::agent::llm::openai_completions::stream_openai_completions;
 use crate::agent::llm::{
     AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, Model,
-    ModelThinkingLevel, SimpleStreamOptions, StopReason, Usage, API_OPENAI_COMPLETIONS,
+    SimpleStreamOptions, StopReason, Usage, API_OPENAI_COMPLETIONS,
 };
 use crate::agent::types::{
-    AgentEvent, AgentListener, AgentLoopConfig, AgentMessage, AgentState, AgentToolResult,
-    ConvertToLlmFn, Message, StreamFn, TextOrImageContent, ToolExecutionMode, TypedMessage,
+    AgentEvent, AgentListener, AgentLoopConfig, AgentMessage, AgentState, AgentTool,
+    AgentToolResult, ConvertToLlmFn, Message, StreamFn, TextOrImageContent, ToolExecutionMode,
+    TypedMessage,
 };
 use crate::agent::Agent;
-use crate::ai::sdk;
+use crate::ai::catalog::{self, ChatPermission, ModelRef};
 use crate::commands::usage::insert_usage_row;
 use crate::db::Db;
 use crate::error::{AppError, AppResult, ErrorCode};
@@ -70,8 +63,9 @@ pub enum ChatEvent {
         ok: bool,
         summary: String,
     },
-    /// 一个回合(一次 LLM 调用 + 工具执行)结束。
-    TurnEnd,
+    /// 一个回合(一次 LLM 调用 + 工具执行)结束,携带当前上下文占用
+    /// (最近一条 assistant 消息的 usage.total_tokens,无数据为 null)。
+    TurnEnd { context_tokens: Option<i64> },
     /// 回合正常结束,携带整个 prompt 的聚合用量。
     Done {
         usage: Option<ChatUsageSummary>,
@@ -89,6 +83,8 @@ pub struct ChatUsageSummary {
     pub total_tokens: i64,
     pub cached_tokens: Option<i64>,
     pub cost_total: Option<f64>,
+    /// 当前上下文占用(最近 assistant 消息的 total_tokens)。
+    pub context_tokens: Option<i64>,
 }
 
 // ── 会话与运行注册表 ─────────────────────────────────────────────────
@@ -147,8 +143,14 @@ struct ChatSession {
     sink: EventSink,
     /// 监听器累计的本次回合用量(回合开始时清零)。
     usage: Arc<Mutex<Usage>>,
+    /// 最近一条 assistant 消息的 total_tokens(上下文占用口径)。
+    context_tokens: Arc<Mutex<i64>>,
     busy: Arc<AtomicBool>,
     run_id: Arc<Mutex<String>>,
+    /// 工具构建上下文(权限变化时重建工具集)。
+    tool_context: ChatToolContext,
+    /// 已解析的 chat 偏好快照(思考/权限/模型引用变化时热切换)。
+    prefs: Arc<Mutex<Option<ResolvedPrefs>>>,
 }
 
 /// chat_send 期间注册在 CHAT_RUNS 的守卫,Drop 时移除。
@@ -214,6 +216,12 @@ pub async fn chat_send(
         ));
     }
 
+    // 热应用最新 chat 偏好(思考/权限/模型元数据),配置被清空则本条拒绝。
+    if let Err(error) = apply_prefs(&app, &session) {
+        session.busy.store(false, Ordering::SeqCst);
+        return Err(error);
+    }
+
     let started = Instant::now();
     let run = RegisteredChatRun::new(run_id.clone(), session_key);
     session.cancel_cell.set(run.token.clone());
@@ -229,6 +237,7 @@ pub async fn chat_send(
         ))
         .await;
     let usage_snapshot = session.usage.lock().unwrap().clone();
+    let context_tokens = *session.context_tokens.lock().unwrap();
     let duration_ms = started.elapsed().as_millis() as i64;
     let cancelled = run.token.is_cancelled();
     drop(run);
@@ -237,7 +246,7 @@ pub async fn chat_send(
     session.busy.store(false, Ordering::SeqCst);
 
     record_chat_usage(&db, &app, &usage_snapshot, duration_ms);
-    let summary = usage_to_summary(&usage_snapshot);
+    let summary = usage_to_summary(&usage_snapshot, context_tokens);
 
     match (outcome, cancelled) {
         (Ok(_), false) => {
@@ -302,26 +311,119 @@ pub async fn chat_new_session(project_path: String) -> AppResult<()> {
 
 // ── 会话构建 ─────────────────────────────────────────────────────────
 
+/// 只读工具名单(权限 = readOnly 时保留的子集)。
+const READ_ONLY_TOOLS: [&str; 8] = [
+    "sem_find",
+    "sem_context",
+    "sem_relations",
+    "sem_diff",
+    "read_wiki",
+    "list_custom_commands",
+    "list_reports",
+    "read_project_file",
+];
+
+/// 按权限过滤工具集。
+fn tools_for_permission(tools: Vec<AgentTool>, permission: ChatPermission) -> Vec<AgentTool> {
+    match permission {
+        ChatPermission::All => tools,
+        ChatPermission::ReadOnly => tools
+            .into_iter()
+            .filter(|tool| READ_ONLY_TOOLS.contains(&tool.name.as_str()))
+            .collect(),
+    }
+}
+
+/// 已解析的 chat 偏好快照(会话内缓存,变化才热切换)。
+#[derive(Clone, Debug, PartialEq)]
+struct ResolvedPrefs {
+    model_ref: ModelRef,
+    thinking: String,
+    permission: ChatPermission,
+}
+
+/// 解析当前 chat 偏好 → (模型元数据, 快照, 厂商 api_key)。
+/// 未配置/引用失效时返回 AiNotConfigured。
+fn resolve_prefs(config_file: &catalog::AiConfigFile) -> AppResult<(Model, ResolvedPrefs, String)> {
+    let Some((reference, prefs)) = catalog::resolve_chat_prefs(config_file) else {
+        return Err(AppError::coded(ErrorCode::AiNotConfigured, ""));
+    };
+    let model =
+        catalog::resolve_model(config_file, &reference.provider_id, &reference.model_id)?;
+    let api_key = config_file
+        .providers
+        .get(&reference.provider_id)
+        .map(|provider| provider.api_key.trim().to_string())
+        .unwrap_or_default();
+    if api_key.is_empty() {
+        return Err(AppError::coded(ErrorCode::AiNotConfigured, ""));
+    }
+    Ok((
+        model,
+        ResolvedPrefs {
+            model_ref: reference,
+            thinking: prefs.thinking.clone(),
+            permission: prefs.permission,
+        },
+        api_key,
+    ))
+}
+
+/// 把最新 chat 偏好热应用到会话:思考/权限变化就地换 AgentState(历史保留),
+/// 模型元数据始终刷新;StreamFn 每次调用另行重读模型与密钥。
+fn apply_prefs(app: &AppHandle, session: &ChatSession) -> AppResult<()> {
+    let config_file = catalog::load_ai_config_file(app);
+    let (model, resolved, _api_key) = resolve_prefs(&config_file)?;
+    let previous = session.prefs.lock().unwrap().clone();
+    if previous.as_ref() == Some(&resolved) {
+        return Ok(());
+    }
+    if previous
+        .as_ref()
+        .is_none_or(|old| old.thinking != resolved.thinking)
+    {
+        session
+            .agent
+            .set_thinking_level(catalog::parse_thinking_level(&resolved.thinking));
+    }
+    if previous
+        .as_ref()
+        .is_none_or(|old| old.permission != resolved.permission)
+    {
+        let tools = tools_for_permission(
+            chat_tools(app.clone(), session.tool_context.clone()),
+            resolved.permission,
+        );
+        session.agent.set_tools(tools);
+    }
+    session.agent.set_model(model);
+    *session.prefs.lock().unwrap() = Some(resolved);
+    Ok(())
+}
+
 fn build_session(
     app: &AppHandle,
     db: &Db,
     project_path: &str,
     project_name: &str,
 ) -> AppResult<ChatSession> {
-    let config = sdk::load_config(app);
-    config.validate(true)?;
-    let model = Model::from_settings(config.ai_model.clone(), config.ai_base_url.clone());
+    let config_file = catalog::load_ai_config_file(app);
+    let (model, resolved, api_key) = resolve_prefs(&config_file)?;
     let context = ChatToolContext {
         project_path: project_path.to_string(),
         project_name: project_name.to_string(),
         project_id: lookup_project_id(db, project_path),
         worktree_path: None,
     };
+    let tools = tools_for_permission(
+        chat_tools(app.clone(), context.clone()),
+        resolved.permission,
+    );
     let state = AgentState {
         system_prompt: build_system_prompt(project_name, project_path),
         model: model.clone(),
-        thinking_level: ModelThinkingLevel::Off,
-        tools: chat_tools(app.clone(), context),
+        thinking_level: catalog::parse_thinking_level(&resolved.thinking),
+        tools,
         messages: Vec::new(),
         is_streaming: false,
         streaming_message: None,
@@ -331,7 +433,7 @@ fn build_session(
     let loop_config = AgentLoopConfig {
         model: model.clone(),
         stream: SimpleStreamOptions {
-            api_key: Some(config.ai_api_key.clone()),
+            api_key: Some(api_key),
             ..Default::default()
         },
         convert_to_llm: default_convert_to_llm(),
@@ -356,13 +458,18 @@ fn build_session(
         cancel_cell,
         sink: Arc::new(Mutex::new(None)),
         usage: Arc::new(Mutex::new(Usage::zero())),
+        context_tokens: Arc::new(Mutex::new(0)),
         busy: Arc::new(AtomicBool::new(false)),
         run_id: Arc::new(Mutex::new(String::new())),
+        tool_context: context,
+        prefs: Arc::new(Mutex::new(Some(resolved))),
     };
     // 订阅一次,随会话存活;事件经 sink 槽转发给当前 chat_send 的 Channel。
-    session
-        .agent
-        .subscribe(chat_event_listener(session.usage.clone(), session.sink.clone()));
+    session.agent.subscribe(chat_event_listener(
+        session.usage.clone(),
+        session.context_tokens.clone(),
+        session.sink.clone(),
+    ));
     Ok(session)
 }
 
@@ -403,7 +510,7 @@ fn default_convert_to_llm() -> ConvertToLlmFn {
     })
 }
 
-/// StreamFn 包装:每次 LLM 调用时重读应用 AI 配置(模型/密钥可热更新),
+/// StreamFn 包装:每次 LLM 调用时重读 AI 配置(模型/密钥可热更新),
 /// 配置缺失时按流契约把失败编码进事件流,绝不 panic。
 fn chat_stream_fn(app: AppHandle, cancel_cell: CancelCell) -> StreamFn {
     Arc::new(move |model, context, options| {
@@ -427,14 +534,11 @@ fn chat_stream_fn(app: AppHandle, cancel_cell: CancelCell) -> StreamFn {
     })
 }
 
-/// 读取应用 AI 配置并构造模型;要求已配置模型。
+/// 读取 AI 配置并解析 chat 偏好指向的模型;要求已配置。
 fn load_stream_model(app: &AppHandle) -> AppResult<(Model, String)> {
-    let config = sdk::load_config(app);
-    config.validate(true)?;
-    Ok((
-        Model::from_settings(config.ai_model.clone(), config.ai_base_url.clone()),
-        config.ai_api_key,
-    ))
+    let config_file = catalog::load_ai_config_file(app);
+    let (model, _resolved, api_key) = resolve_prefs(&config_file)?;
+    Ok((model, api_key))
 }
 
 /// 配置不可用时的合成错误流(先 start 后 error,终值为错误消息)。
@@ -457,7 +561,7 @@ fn error_assistant_message(model: &Model, message: &str) -> AssistantMessage {
         role: "assistant".to_string(),
         content: Vec::new(),
         api: API_OPENAI_COMPLETIONS.to_string(),
-        provider: "custom".to_string(),
+        provider: model.provider.clone(),
         model: model.id.clone(),
         response_model: None,
         response_id: None,
@@ -475,12 +579,17 @@ fn error_assistant_message(model: &Model, message: &str) -> AssistantMessage {
 /// AgentEvent → ChatEvent 映射监听器:
 /// - TextDelta → TextDelta(thinking/toolcall 增量不透传,由 tool_execution_* 表达)
 /// - tool_execution_start/end → ToolCall / ToolResult
-/// - TurnEnd → TurnEnd
-/// - MessageEnd(assistant)→ 累计 usage;stopReason=error 时发 Error 事件
-fn chat_event_listener(usage: Arc<Mutex<Usage>>, sink: EventSink) -> AgentListener {
+/// - MessageEnd(assistant)→ 累计 usage 并记录上下文占用;error 时发 Error 事件
+/// - TurnEnd → TurnEnd(携带当前上下文占用)
+fn chat_event_listener(
+    usage: Arc<Mutex<Usage>>,
+    context_tokens: Arc<Mutex<i64>>,
+    sink: EventSink,
+) -> AgentListener {
     Arc::new(move |event: AgentEvent, _signal: CancellationToken| {
         // 闭包是 Fn(可能被多次调用),Arc 按次克隆进 async 块
         let usage = usage.clone();
+        let context_tokens = context_tokens.clone();
         let sink = sink.clone();
         Box::pin(async move {
             match event {
@@ -523,10 +632,12 @@ fn chat_event_listener(usage: Arc<Mutex<Usage>>, sink: EventSink) -> AgentListen
                         },
                     );
                 }
-                AgentEvent::TurnEnd { .. } => sink_send(&sink, ChatEvent::TurnEnd),
                 AgentEvent::MessageEnd { message } => {
                     if let AgentMessage::Message(TypedMessage::Assistant(assistant)) = message {
                         usage.lock().unwrap().add(&assistant.usage);
+                        if assistant.usage.total_tokens > 0 {
+                            *context_tokens.lock().unwrap() = assistant.usage.total_tokens;
+                        }
                         if assistant.stop_reason == StopReason::Error {
                             let detail = assistant
                                 .error_message
@@ -541,6 +652,15 @@ fn chat_event_listener(usage: Arc<Mutex<Usage>>, sink: EventSink) -> AgentListen
                             );
                         }
                     }
+                }
+                AgentEvent::TurnEnd { .. } => {
+                    let current = *context_tokens.lock().unwrap();
+                    sink_send(
+                        &sink,
+                        ChatEvent::TurnEnd {
+                            context_tokens: (current > 0).then_some(current),
+                        },
+                    );
                 }
                 _ => {}
             }
@@ -568,7 +688,7 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
     format!("{cut}…")
 }
 
-fn usage_to_summary(usage: &Usage) -> ChatUsageSummary {
+fn usage_to_summary(usage: &Usage, context_tokens: i64) -> ChatUsageSummary {
     let total = if usage.total_tokens > 0 {
         usage.total_tokens
     } else {
@@ -580,14 +700,18 @@ fn usage_to_summary(usage: &Usage) -> ChatUsageSummary {
         total_tokens: total,
         cached_tokens: (usage.cache_read > 0).then_some(usage.cache_read),
         cost_total: (usage.cost.total > 0.0).then_some(usage.cost.total),
+        context_tokens: (context_tokens > 0).then_some(context_tokens),
     }
 }
 
 /// 聚合用量落库(task_type = "chat");token 列可空(计入调用次数)。
 fn record_chat_usage(db: &Db, app: &AppHandle, usage: &Usage, duration_ms: i64) {
+    let model_id = catalog::resolve_chat_prefs(&catalog::load_ai_config_file(app))
+        .map(|(reference, _)| reference.model_id)
+        .unwrap_or_default();
     let record = AiUsageRecord {
         task_type: "chat".to_string(),
-        model: sdk::load_config(app).ai_model,
+        model: model_id,
         input_tokens: (usage.input > 0).then_some(usage.input),
         output_tokens: (usage.output > 0).then_some(usage.output),
         total_tokens: (usage.total_tokens > 0).then_some(usage.total_tokens),

@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::fs;
 use std::pin::Pin;
 
 use async_openai::config::OpenAIConfig;
@@ -14,7 +13,6 @@ use serde_json::{json, Map, Value};
 use tauri::AppHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::app_data_dir;
 use crate::error::{AppError, AppResult, ErrorCode};
 
 type OpenAiClient = Client<OpenAIConfig>;
@@ -62,30 +60,11 @@ pub struct ChatOutput {
     pub usage: Option<TokenUsage>,
 }
 
+/// 读取 AI 接入配置(多厂商 `ai-config.json` 的 defaultModel 投影;
+/// 每次调用重读文件,配置可热更新)。commit/report/wiki/测试连接共用。
 pub fn load_config(app: &AppHandle) -> AiConfig {
-    let value = app_data_dir(app)
-        .ok()
-        .and_then(|dir| fs::read_to_string(dir.join("settings.json")).ok())
-        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
-        .unwrap_or_default();
-    AiConfig {
-        ai_base_url: value
-            .get("aiBaseUrl")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
-        ai_api_key: value
-            .get("aiApiKey")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
-        ai_model: value
-            .get("aiModel")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
-    }
-    .normalized()
+    let file = crate::ai::catalog::load_ai_config_file(app);
+    crate::ai::catalog::legacy_ai_config(&file).normalized()
 }
 
 pub(crate) fn client(config: &AiConfig, require_model: bool) -> AppResult<OpenAiClient> {

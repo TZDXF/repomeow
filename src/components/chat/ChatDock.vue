@@ -1,29 +1,45 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
-import { Bot, MessageCircleMore, RotateCcw, Square, TriangleAlert, X } from "@lucide/vue";
-import { useEventListener } from "@vueuse/core";
+import { toast } from "vue-sonner";
 import {
-  Conversation,
-  ConversationContent,
-  ConversationEmptyState,
-  ConversationScrollButton,
-} from "@/components/ai-elements/conversation";
-import { Loader } from "@/components/ai-elements/loader";
-import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
+  Bot,
+  Brain,
+  Eye,
+  Maximize2,
+  MessageCircleMore,
+  Minimize2,
+  RotateCcw,
+  Square,
+  TriangleAlert,
+  Wrench,
+  X,
+} from "@lucide/vue";
+import { useEventListener } from "@vueuse/core";
+import { Context } from "@/components/ai-elements/context";
+import { ModelSelector, type ModelSelectorGroup } from "@/components/ai-elements/model-selector";
 import {
   PromptInput,
+  PromptInputButton,
   PromptInputFooter,
   PromptInputSubmit,
   PromptInputTextarea,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import ChatToolCard from "@/components/chat/ChatToolCard.vue";
+import { CHAT_THINKING_LEVELS, type ChatThinkingLevel } from "@/lib/ai-config";
 import type { ChatMessage } from "@/lib/chat";
+import { useAiConfigStore } from "@/stores/ai-config";
 import { useChatStore } from "@/stores/chat";
-import { useSettingsStore } from "@/stores/settings";
 import type { Project } from "@/types";
 
 const props = defineProps<{ project: Project }>();
@@ -31,12 +47,13 @@ const props = defineProps<{ project: Project }>();
 const { t } = useI18n();
 const router = useRouter();
 const chat = useChatStore();
-const settings = useSettingsStore();
+const aiConfig = useAiConfigStore();
 
-// --- AI 配置校验(baseUrl/apiKey/model 任一为空都视为未配置) ---
-const aiReady = computed(() =>
-  Boolean(settings.aiBaseUrl && settings.aiApiKey && settings.aiModel),
-);
+// --- AI 配置就绪(多厂商配置 ai-config.json;chat 模型有效且厂商 baseUrl/apiKey 齐) ---
+onMounted(() => {
+  void aiConfig.ensureLoaded();
+});
+const aiReady = computed(() => aiConfig.chatReady);
 
 // --- 会话状态(按项目路径隔离,离开页面不清空) ---
 const session = computed(() => chat.ensureSession(props.project.path));
@@ -63,6 +80,21 @@ function toggleOpen() {
   open.value = !open.value;
 }
 
+// --- 放大/还原:放大时面板扩展为大尺寸(接近全高、加宽) ---
+const expanded = ref(false);
+
+function toggleExpanded() {
+  expanded.value = !expanded.value;
+}
+
+// 高度让出自绘标题栏(TitleBar.vue h-9 = 2.25rem,z-60 盖在浮层 z-50 之上,
+// 约定同 lib/popper.ts):底部边距 1rem + 标题栏下间隙 1rem + 标题栏 2.25rem
+const panelSizeClass = computed(() =>
+  expanded.value
+    ? "h-[calc(100vh-2rem-2.25rem)] w-[720px] max-w-[calc(100vw-2rem)]"
+    : "h-[640px] max-h-[calc(100vh-2rem-2.25rem)] w-[420px] max-w-[calc(100vw-2rem)]",
+);
+
 // --- 发送 / 停止 / 新会话 ---
 function onSubmit(message: PromptInputMessage) {
   sendText(message.text);
@@ -83,11 +115,64 @@ function startNewSession() {
   void chat.newSession(props.project.path);
 }
 
-// --- 用量摘要(done 后显示在输入区左侧) ---
-const usageText = computed(() => {
+// ── 底栏控制区:模型 / 思考强度 / 权限 / 上下文占用 ──────────────────
+// 偏好写入 ai-config.json 后 Rust 侧每次 chat_send 前热读;回答回合进行中
+// 一律禁用切换,避免在途 LLM 调用与界面状态不一致。
+
+const modelGroups = computed<ModelSelectorGroup[]>(() => {
+  const config = aiConfig.config;
+  if (!config) return [];
+  return Object.entries(config.providers).map(([providerId, provider]) => ({
+    providerId,
+    providerName: provider.name || providerId,
+    models: provider.models,
+  }));
+});
+
+const thinkingDisabled = computed(() => !aiConfig.chatModel?.model.reasoning);
+const thinkingTitle = computed(() =>
+  thinkingDisabled.value ? t("chat.thinkingUnsupported") : t("chat.thinking"),
+);
+
+const permissionTitle = computed(() =>
+  aiConfig.chatPermission === "all" ? t("chat.permission.all") : t("chat.permission.readOnly"),
+);
+
+/** 偏好写入失败统一 toast(落盘失败时 store 已回读后端真实状态) */
+function applyPref(action: () => Promise<void>) {
+  return action().catch((error: unknown) => {
+    toast.error(error instanceof Error ? error.message : String(error));
+  });
+}
+
+function onModelChange(value: string) {
+  void applyPref(() => aiConfig.setChatModelValue(value));
+}
+
+function onThinkingChange(level: unknown) {
+  if (typeof level !== "string") return;
+  void applyPref(() => aiConfig.setChatThinking(level as ChatThinkingLevel));
+}
+
+function togglePermission() {
+  const next = aiConfig.chatPermission === "all" ? "readOnly" : "all";
+  void applyPref(() => aiConfig.setChatPermission(next));
+}
+
+// 上下文占用:窗口来自所选模型元数据;明细来自最近一次整轮用量
+const contextWindow = computed(() => {
+  const window = aiConfig.chatModel?.model.contextWindow;
+  return window && window > 0 ? window : null;
+});
+
+const lastUsageDetail = computed(() => {
   const usage = session.value.lastUsage;
-  if (!usage || session.value.busy) return "";
-  return t("chat.usageHint", { input: usage.inputTokens, output: usage.outputTokens });
+  if (!usage) return null;
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cachedTokens: usage.cachedTokens,
+  };
 });
 
 // --- 消息渲染辅助 ---
@@ -123,7 +208,8 @@ const pendingToolRuns = computed(() =>
     <Transition name="chat-dock">
       <div
         v-if="open"
-        class="pointer-events-auto flex h-[640px] max-h-[calc(100vh-2rem)] w-[420px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border bg-background shadow-lg"
+        class="pointer-events-auto flex flex-col overflow-hidden rounded-xl border bg-background shadow-lg"
+        :class="panelSizeClass"
       >
         <!-- 头部:标题 + 项目名 + 新会话 + 关闭 -->
         <div class="flex shrink-0 items-center justify-between gap-2 border-b px-3 py-2">
@@ -141,6 +227,16 @@ const pendingToolRuns = computed(() =>
               @click="startNewSession"
             >
               <RotateCcw class="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              class="h-7 w-7"
+              :title="expanded ? t('chat.restore') : t('chat.expand')"
+              @click="toggleExpanded"
+            >
+              <Minimize2 v-if="expanded" class="h-3.5 w-3.5" />
+              <Maximize2 v-else class="h-3.5 w-3.5" />
             </Button>
             <Button
               variant="ghost"
@@ -257,11 +353,64 @@ const pendingToolRuns = computed(() =>
               :disabled="!aiReady"
             />
             <PromptInputFooter class="px-2 pb-2">
-              <span class="min-w-0 truncate text-muted-foreground text-xs">
-                <template v-if="!aiReady">{{ t("chat.notConfigured") }}</template>
-                <template v-else-if="session.busy">{{ t("chat.busyHint") }}</template>
-                <template v-else-if="usageText">{{ usageText }}</template>
-              </span>
+              <div class="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+                <ModelSelector
+                  :model-value="aiConfig.chatModelValue"
+                  :groups="modelGroups"
+                  :disabled="!aiReady || session.busy"
+                  :placeholder="t('chat.modelPlaceholder')"
+                  @update:model-value="onModelChange"
+                />
+                <Select
+                  :model-value="aiConfig.chatThinking"
+                  :disabled="!aiReady || thinkingDisabled || session.busy"
+                  @update:model-value="onThinkingChange"
+                >
+                  <SelectTrigger
+                    size="sm"
+                    class="text-muted-foreground h-7 gap-1 px-2 text-xs"
+                    :title="thinkingTitle"
+                  >
+                    <Brain class="size-3.5 shrink-0" />
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem
+                      v-for="level in CHAT_THINKING_LEVELS"
+                      :key="level"
+                      :value="level"
+                      class="text-xs"
+                    >
+                      {{ t(`chat.thinkingLevels.${level}`) }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <PromptInputButton
+                  class="text-muted-foreground hover:text-foreground size-7"
+                  :title="permissionTitle"
+                  :disabled="session.busy"
+                  @click="togglePermission"
+                >
+                  <Eye v-if="aiConfig.chatPermission === 'readOnly'" class="size-3.5" />
+                  <Wrench v-else class="size-3.5" />
+                </PromptInputButton>
+                <Context
+                  :used-tokens="session.contextTokens"
+                  :context-window="contextWindow"
+                  :last-usage="lastUsageDetail"
+                />
+                <p v-if="!aiReady" class="text-muted-foreground w-full text-xs">
+                  {{ t("chat.notConfigured") }}
+                  <Button
+                    variant="link"
+                    size="sm"
+                    class="h-auto p-0 text-xs"
+                    @click="router.push('/settings')"
+                  >
+                    {{ t("chat.goSettings") }}
+                  </Button>
+                </p>
+              </div>
               <div class="flex shrink-0 items-center gap-1.5">
                 <Button
                   v-if="session.busy"

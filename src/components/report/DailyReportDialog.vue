@@ -21,6 +21,7 @@ import { planBatchItems, type BatchItem } from "@/lib/batch-report";
 import { formatDate, parseDateStr } from "@/lib/format";
 import { copyToClipboard } from "@/lib/utils";
 import { cmd } from "@/lib/tauri";
+import { useAiConfigStore } from "@/stores/ai-config";
 import { useBatchReportStore } from "@/stores/batch-report";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
@@ -40,6 +41,7 @@ const open = defineModel<boolean>("open", { required: true });
 
 const store = useProjectsStore();
 const settings = useSettingsStore();
+const aiConfig = useAiConfigStore();
 const tagsStore = useTagsStore();
 
 const activeProjects = computed(() => store.projects.filter((p) => !p.archived_at));
@@ -320,7 +322,9 @@ async function startBatch() {
     toast.error(t("report.pickRange"));
     return;
   }
-  if (!settings.aiBaseUrl.trim() || !settings.aiApiKey.trim() || !settings.aiModel.trim()) {
+  // 默认模型(厂商 baseUrl/apiKey 齐)就绪才允许批量生成
+  await aiConfig.ensureLoaded();
+  if (!aiConfig.defaultReady) {
     toast.error(t("ai.notConfigured"));
     return;
   }

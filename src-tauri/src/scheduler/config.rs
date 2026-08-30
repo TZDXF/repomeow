@@ -10,28 +10,7 @@ use crate::models::GitCommitInfo;
 pub(crate) type AiConfig = sdk::AiConfig;
 
 pub(crate) fn load_ai_config(data_dir: &PathBuf) -> AiConfig {
-    let path = data_dir.join("settings.json");
-    fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-        .map(|v| AiConfig {
-            ai_base_url: v
-                .get("aiBaseUrl")
-                .and_then(|x| x.as_str())
-                .map(|s| s.trim().to_string())
-                .unwrap_or_default(),
-            ai_api_key: v
-                .get("aiApiKey")
-                .and_then(|x| x.as_str())
-                .map(|s| s.trim().to_string())
-                .unwrap_or_default(),
-            ai_model: v
-                .get("aiModel")
-                .and_then(|x| x.as_str())
-                .map(|s| s.trim().to_string())
-                .unwrap_or_default(),
-        })
-        .unwrap_or_default()
+    crate::ai::catalog::legacy_ai_config(&crate::ai::catalog::load_ai_config_file_at(data_dir))
         .normalized()
 }
 
