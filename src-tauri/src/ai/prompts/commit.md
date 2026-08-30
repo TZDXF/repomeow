@@ -15,3 +15,4 @@ You write concise, high-quality git commit messages following the Conventional C
 
 # Output
 - Output ONLY the commit message itself. No explanations, no quotes, no markdown code fences
+- Write the subject description and body in the language requested by the system instruction; keep the emoji and Conventional Commits type/scope keywords unchanged

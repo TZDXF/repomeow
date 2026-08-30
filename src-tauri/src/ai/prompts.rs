@@ -22,7 +22,7 @@ pub fn language_name(language: &str) -> &'static str {
 
 pub fn fixed_system_prompt(template: &str, language: &str) -> String {
     format!(
-        "{}\n\nRespond in {}.",
+        "{}\n\n# Output language (mandatory)\n- Write the response in {}.\n- Keep code identifiers, file paths, URLs, and conventional keywords unchanged.",
         template.trim(),
         language_name(language)
     )
@@ -56,11 +56,11 @@ mod tests {
     fn language_instruction_is_appended_once() {
         assert_eq!(
             fixed_system_prompt("system", "zh-CN"),
-            "system\n\nRespond in 中文."
+            "system\n\n# Output language (mandatory)\n- Write the response in 中文.\n- Keep code identifiers, file paths, URLs, and conventional keywords unchanged."
         );
         assert_eq!(
             fixed_system_prompt("system\n", "en-US"),
-            "system\n\nRespond in English."
+            "system\n\n# Output language (mandatory)\n- Write the response in English.\n- Keep code identifiers, file paths, URLs, and conventional keywords unchanged."
         );
     }
 

@@ -410,7 +410,7 @@ export default {
       submitAndPushSuccess: "提交并推送成功",
       success: "提交成功",
       generate: "AI 生成",
-      generating: "生成中...",
+      cancelGenerate: "取消生成",
       showChanges: "查看变更",
       hideChanges: "收起变更",
       selectAll: "全选",

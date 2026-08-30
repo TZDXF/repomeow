@@ -229,6 +229,8 @@ pub(crate) struct AiCommitFileContext {
 #[derive(Debug)]
 pub(crate) struct AiCommitContext {
     pub stat: String,
+    /// 当前分支名(unborn HEAD 或 detached 时为空)
+    pub branch: String,
     pub semantic_input: String,
     pub semantic_paths: HashSet<String>,
     pub files: Vec<AiCommitFileContext>,
@@ -268,6 +270,12 @@ pub(crate) fn ai_commit_context_blocking(
     if paths.is_some_and(<[String]>::is_empty) {
         return Err(AppError::coded(ErrorCode::GitPathsRequired, ""));
     }
+    let branch = repo
+        .head()
+        .ok()
+        .filter(|head| head.is_branch())
+        .and_then(|head| head.shorthand().map(str::to_string))
+        .unwrap_or_default();
 
     let normalized_paths = paths.map(|items| {
         items
@@ -378,6 +386,7 @@ pub(crate) fn ai_commit_context_blocking(
     let semantic_input = semantic_patches.join("\n");
     Ok(AiCommitContext {
         stat,
+        branch,
         semantic_input,
         semantic_paths,
         files,

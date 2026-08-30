@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { useLocalStorage } from "@vueuse/core";
-import { ChevronDown, FileDiff, FolderTree, List, Loader2, Sparkles } from "@lucide/vue";
+import { ChevronDown, FileDiff, FolderTree, List, Loader2, Sparkles, Square } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -40,6 +40,7 @@ const message = ref("");
 const submitting = ref(false);
 const submittingAndPushing = ref(false);
 const generating = ref(false);
+let generateController: AbortController | null = null;
 // 未跟踪文件默认勾选纳入本次提交
 const includeUntracked = ref(true);
 
@@ -393,22 +394,33 @@ async function submitAndPush() {
   }
 }
 
-/** AI 生成提交信息:严格跟随本次提交的未跟踪开关与文件勾选范围 */
+/** AI 生成提交信息:严格跟随本次提交的未跟踪开关与文件勾选范围;生成中再次点击即取消 */
 async function generate() {
   if (generating.value || committable.value === 0) return;
   generating.value = true;
+  const controller = new AbortController();
+  generateController = controller;
   try {
-    message.value = await generateCommitMessage(
+    const result = await generateCommitMessage(
       props.project,
       settings.language,
       includeUntracked.value,
       checkedPayload.value,
+      controller.signal,
     );
+    if (result != null) message.value = result;
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : String(e));
+    if (!controller.signal.aborted) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
   } finally {
     generating.value = false;
+    generateController = null;
   }
+}
+
+function cancelGenerate() {
+  generateController?.abort();
 }
 </script>
 
@@ -616,11 +628,11 @@ async function generate() {
               variant="ghost"
               size="icon"
               class="h-7 w-7 text-muted-foreground hover:text-foreground"
-              :title="generating ? t('git.commit.generating') : t('git.commit.generate')"
-              :disabled="generating || committable === 0"
-              @click="generate"
+              :title="generating ? t('git.commit.cancelGenerate') : t('git.commit.generate')"
+              :disabled="committable === 0"
+              @click="generating ? cancelGenerate() : generate()"
             >
-              <Loader2 v-if="generating" class="h-3.5 w-3.5 animate-spin" />
+              <Square v-if="generating" class="h-3 w-3 fill-current" />
               <Sparkles v-else class="h-3.5 w-3.5" />
             </Button>
           </div>

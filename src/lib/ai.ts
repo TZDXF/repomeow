@@ -54,23 +54,31 @@ function bindCancellation(id: string, signal?: AbortSignal): () => void {
   return () => signal.removeEventListener("abort", cancel);
 }
 
-/** 提交上下文、提示词、模型请求和用量统计均由后端完成。 */
-export function generateCommitMessage(
+/** 提交上下文、提示词、模型请求和用量统计均由后端完成。取消后返回 null。 */
+export async function generateCommitMessage(
   project: { path: string; name: string; description: string },
   language: SupportedLocale,
   includeUntracked: boolean,
   paths?: string[] | null,
-): Promise<string> {
-  return cmd<string>("ai_generate_commit_message", {
-    request: {
-      projectPath: project.path,
-      projectName: project.name,
-      projectDescription: project.description,
-      language,
-      includeUntracked,
-      paths: paths ?? null,
-    },
-  });
+  signal?: AbortSignal,
+): Promise<string | null> {
+  const id = runId("commit");
+  const unbind = bindCancellation(id, signal);
+  try {
+    return await cmd<string | null>("ai_generate_commit_message", {
+      request: {
+        projectPath: project.path,
+        projectName: project.name,
+        projectDescription: project.description,
+        language,
+        runId: id,
+        includeUntracked,
+        paths: paths ?? null,
+      },
+    });
+  } finally {
+    unbind();
+  }
 }
 
 /** Git 提交收集、AI 生成与历史保存作为一个后端操作完成。 */

@@ -3,14 +3,14 @@ use std::time::Instant;
 use serde::Deserialize;
 use tauri::{AppHandle, State};
 
-use crate::ai::prompts::{effective_system_prompt, DEFAULT_COMMIT_PROMPT};
+use crate::ai::prompts::{effective_system_prompt, language_name, DEFAULT_COMMIT_PROMPT};
 use crate::ai::sdk;
 use crate::commands::git::{self, AiCommitFileContext};
 use crate::commands::semantic;
 use crate::db::Db;
 use crate::error::AppResult;
 
-use super::run::record_usage;
+use super::run::{record_usage, RegisteredRun};
 
 /// raw 只在 sem 覆盖缺口或失败时进入模型；仍保留总预算防止极端 diff 撑爆上下文。
 const RAW_FALLBACK_MAX_CHARS: usize = 30_000;
@@ -27,6 +27,9 @@ pub struct GenerateCommitMessageRequest {
     #[serde(default)]
     project_description: String,
     language: String,
+    /// 取消句柄:前端生成独立 runId,取消时经 ai_cancel_run 置位;缺省表示不可取消。
+    #[serde(default)]
+    run_id: Option<String>,
     #[serde(default = "default_true")]
     include_untracked: bool,
     #[serde(default)]
@@ -93,8 +96,9 @@ pub async fn ai_generate_commit_message(
     app: AppHandle,
     db: State<'_, Db>,
     request: GenerateCommitMessageRequest,
-) -> AppResult<String> {
+) -> AppResult<Option<String>> {
     let project_path = request.project_path.clone();
+    let run = request.run_id.as_deref().map(|id| RegisteredRun::new(id.to_string()));
     let context = git::ai_commit_context(
         request.project_path,
         request.include_untracked,
@@ -151,35 +155,41 @@ pub async fn ai_generate_commit_message(
     };
 
     let description = request.project_description.trim();
-    let project_section = if description.is_empty() {
-        format!("Project: {}", request.project_name)
-    } else {
-        format!(
-            "Project: {}\nDescription: {description}",
-            request.project_name
-        )
-    };
+    let mut project_section = format!("Project: {}", request.project_name);
+    if !description.is_empty() {
+        project_section.push_str(&format!("\nDescription: {description}"));
+    }
+    if !context.branch.is_empty() {
+        project_section.push_str(&format!("\nBranch: {}", context.branch));
+    }
     let user_prompt = format!(
-        "{project_section}\n\nChange summary:\n{}{semantic_section}{raw_section}",
+        "{project_section}\n\nChange summary:\n{}{semantic_section}{raw_section}\n\nWrite the commit message in {}.",
         if context.stat.is_empty() {
             "(none)"
         } else {
             &context.stat
         },
+        language_name(&request.language),
     );
     let system_prompt =
         effective_system_prompt(&app, "commit.md", DEFAULT_COMMIT_PROMPT, &request.language);
     let config = sdk::load_config(&app);
     let started = Instant::now();
-    let output = sdk::chat(
+    let output = match sdk::chat(
         &config,
         Some(&system_prompt),
         &user_prompt,
         false,
         None,
-        None,
+        run.as_ref().map(|run| &run.token),
     )
-    .await?;
+    .await
+    {
+        Ok(output) => output,
+        // 取消不算错误:与 report 一致返回 None,前端静默收场
+        Err(error) if run.as_ref().is_some_and(|run| run.token.is_cancelled()) => return Ok(None),
+        Err(error) => return Err(error),
+    };
     record_usage(
         &db,
         "commit",
@@ -187,7 +197,7 @@ pub async fn ai_generate_commit_message(
         &output,
         started.elapsed().as_millis() as i64,
     );
-    Ok(output.text)
+    Ok(Some(output.text))
 }
 
 #[cfg(test)]

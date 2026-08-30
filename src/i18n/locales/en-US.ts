@@ -424,7 +424,7 @@ export default {
       submitAndPushSuccess: "Committed and pushed successfully",
       success: "Committed successfully",
       generate: "Generate with AI",
-      generating: "Generating...",
+      cancelGenerate: "Cancel generation",
       showChanges: "Show changes",
       hideChanges: "Hide changes",
       selectAll: "Select all",
