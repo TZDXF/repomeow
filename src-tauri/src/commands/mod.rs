@@ -7,6 +7,7 @@ pub mod files;
 pub mod git;
 pub mod hidden;
 pub mod java;
+pub mod mcp;
 pub mod open;
 pub mod overview;
 pub mod pin;

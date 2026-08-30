@@ -98,7 +98,10 @@ pub async fn ai_generate_commit_message(
     request: GenerateCommitMessageRequest,
 ) -> AppResult<Option<String>> {
     let project_path = request.project_path.clone();
-    let run = request.run_id.as_deref().map(|id| RegisteredRun::new(id.to_string()));
+    let run = request
+        .run_id
+        .as_deref()
+        .map(|id| RegisteredRun::new(id.to_string()));
     let context = git::ai_commit_context(
         request.project_path,
         request.include_untracked,

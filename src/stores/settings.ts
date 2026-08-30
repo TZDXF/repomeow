@@ -87,6 +87,10 @@ export const useSettingsStore = defineStore("settings", () => {
   const terminal = ref<TerminalKind>("cmd");
   /** 启用 GitHub CLI(gh)作为「账号仓库」的虚拟账号来源(默认关闭,opt-in) */
   const enableGhCli = ref(false);
+  /** MCP Git 提交工具组(默认关闭,外部客户端仅在显式授权后可见) */
+  const mcpGitCommitEnabled = ref(false);
+  /** MCP Wiki 查询工具组(默认关闭,避免默认暴露本地项目元数据) */
+  const mcpWikiEnabled = ref(false);
   /** 新建 worktree 的默认目录模板:支持 {branch} 占位符与相对路径(相对主工作区根解析) */
   const worktreeDirTemplate = ref(".worktrees/{branch}");
   /** 用户登记的 JDK 列表(开发环境配置,Spring Boot 运行按项目选用) */
@@ -369,6 +373,8 @@ export const useSettingsStore = defineStore("settings", () => {
         closeAction: "tray",
         terminal: "cmd",
         enableGhCli: "false",
+        mcpGitCommitEnabled: "false",
+        mcpWikiEnabled: "false",
         worktreeDirTemplate: ".worktrees/{branch}",
       },
     });
@@ -457,6 +463,15 @@ export const useSettingsStore = defineStore("settings", () => {
     const savedEnableGhCli = await fileStore.get<string>("enableGhCli");
     if (savedEnableGhCli === "true" || savedEnableGhCli === "false") {
       enableGhCli.value = savedEnableGhCli === "true";
+    }
+    // MCP 工具组均为显式 opt-in；Rust MCP 进程从同一 settings.json 读取这两个字符串键
+    const savedMcpGitCommit = await fileStore.get<string>("mcpGitCommitEnabled");
+    if (savedMcpGitCommit === "true" || savedMcpGitCommit === "false") {
+      mcpGitCommitEnabled.value = savedMcpGitCommit === "true";
+    }
+    const savedMcpWiki = await fileStore.get<string>("mcpWikiEnabled");
+    if (savedMcpWiki === "true" || savedMcpWiki === "false") {
+      mcpWikiEnabled.value = savedMcpWiki === "true";
     }
     // worktree 默认目录模板:自由文本,trim 后非空才采用
     const savedWorktreeDir = await fileStore.get<string>("worktreeDirTemplate");
@@ -644,6 +659,16 @@ export const useSettingsStore = defineStore("settings", () => {
     await persist("enableGhCli", String(value));
   }
 
+  async function setMcpGitCommitEnabled(value: boolean) {
+    mcpGitCommitEnabled.value = value;
+    await persist("mcpGitCommitEnabled", String(value));
+  }
+
+  async function setMcpWikiEnabled(value: boolean) {
+    mcpWikiEnabled.value = value;
+    await persist("mcpWikiEnabled", String(value));
+  }
+
   async function setWorktreeDirTemplate(value: string) {
     const v = value.trim();
     if (!v) return;
@@ -752,6 +777,8 @@ export const useSettingsStore = defineStore("settings", () => {
     closeAction,
     terminal,
     enableGhCli,
+    mcpGitCommitEnabled,
+    mcpWikiEnabled,
     worktreeDirTemplate,
     jdkList,
     defaultJdkId,
@@ -782,6 +809,8 @@ export const useSettingsStore = defineStore("settings", () => {
     setCloseAction,
     setTerminal,
     setEnableGhCli,
+    setMcpGitCommitEnabled,
+    setMcpWikiEnabled,
     setWorktreeDirTemplate,
     saveJdk,
     addJdks,

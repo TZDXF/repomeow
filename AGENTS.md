@@ -51,14 +51,15 @@ src/                  Vue 3 前端(<script setup> SFC)
   styles/markdown/    base.css + index.css + themes/{default,github,notion,serif}.css
 src-tauri/src/
   lib.rs              插件注册、Db 初始化、invoke_handler 命令清单
-  main.rs             二进制入口(实际逻辑在 lib.rs 的 run())
+  main.rs             二进制入口(--mcp 进入内置 stdio MCP,否则逻辑在 lib.rs 的 run())
   commands/           Tauri 命令,按域拆分:project / git / script / docker / files
                       / open / tag / walk / scan / report / overview / pin / account
                       / java / toolchain / editor_icon / hidden / prompt / wiki
-                      / agent(ACP 客户端,本地 coding agent 会话)/ window / usage
+                      / agent(ACP 客户端,本地 coding agent 会话)/ window / usage / mcp
                       (AI 用量统计与日志)/ mod
                       大域为目录模块(<域>/mod.rs 作命令门面,re-export 保持
                       commands::<域>::* 路径稳定;仅测试引用的 re-export 须 #[cfg(test)] 门控)
+  mcp/                 内置 stdio MCP Server(--mcp 模式),按 settings.json 工具组开关过滤工具
   db/                 rusqlite 连接(全局 Mutex 单连接) + migrations.rs 迁移执行器
   models.rs           serde 数据结构(命令/项目/扫描/报告等)
   path_util.rs        clean_str / to_forward_slash 等路径归一化辅助
@@ -74,7 +75,7 @@ src-tauri/migrations/ SQL 迁移,NNN_name.sql(当前 001~010)
 
 关键规则:
 
-1. **新增 Rust 命令**:在 `commands/*.rs` 实现(返回 `AppResult<T>`)后,必须在 `lib.rs` 的 `invoke_handler!` 里注册,前端经 `cmd<T>("snake_case 名", { camelCase 参数 })` 调用(Tauri 自动做参数名映射)。当前命令域:`project / git / script / docker / files / open / tag / walk / scan / report / overview / pin / account / java / toolchain / editor_icon / hidden / prompt / wiki / agent / window / usage / semantic`。
+1. **新增 Rust 命令**:在 `commands/*.rs` 实现(返回 `AppResult<T>`)后,必须在 `lib.rs` 的 `invoke_handler!` 里注册,前端经 `cmd<T>("snake_case 名", { camelCase 参数 })` 调用(Tauri 自动做参数名映射)。当前命令域:`project / git / script / docker / files / open / tag / walk / scan / report / overview / pin / account / java / toolchain / editor_icon / hidden / prompt / wiki / agent / window / usage / semantic / mcp`。
 2. **Tauri 插件与特性**(`src-tauri/Cargo.toml` + `lib.rs`):`tauri` 启用 `protocol-asset` / `tray-icon` / `image-png` 三个 feature;插件依次注册 `single-instance`(必须最先注册,二次启动聚焦已有窗口并退出新进程)、`opener` / `dialog` / `shell` / `store` / `http` / `updater` / `process` / `autostart`(自启时附 `--autostart` 参数,用于静默驻留托盘)。新增插件后请同步在这里登记。
 3. **数据库与持久化迁移**:SQLite 文件在 `~/.repomeow/projects.db`(Windows: `C:\Users\<user>\.repomeow\`)。以版本是否已正式发布或对外分发作为迁移边界:当前版本尚未发布时,同一开发版本内的 SQL、设置、配置及其他持久化格式变更可直接更新该版本的定义,无需为开发快照之间新增迁移;这不保证已有本地开发数据自动升级,必要时可重建开发数据库或配置。版本发布后,不得修改该版本已经使用的迁移文件;数据库结构变更需新增 `migrations/00N_xxx.sql` 并在 `db/migrations.rs` 中按 `PRAGMA user_version` 顺序应用、保证幂等,配置键名/类型/语义等变更也必须提供迁移或兼容处理。每个 SQL 迁移文件顶部必须用 `-- App version: x.y.z` 标明对应应用版本,并用 `-- Status: in development` 标记正在开发的版本;正式发布后改为 `-- Status: released`。当前已应用 001_init / 002_favorite / 003_pinned_commands / 004_git_account_token_invalid / 005_auto_pull / 006_schedule_tag_ids / 007_daily_previous_day / 008_wiki_auto_update / 009_ai_usage_log / 010_ai_usage_cached_tokens。
 4. **应用数据目录名 `.repomeow`** 在 Rust(`lib.rs` 的 `APP_DATA_DIR_NAME`)和前端(`stores/settings.ts`)各有一份常量,改动需同步。设置持久化走 `tauri-plugin-store` → `~/.repomeow/settings.json`。AI 提示词不走 store/SQLite,存 `~/.repomeow/prompts/*.md`(`commands/prompt.rs` 读写,文件缺失/为空 = 前端 `lib/ai-prompts.ts` 的内置默认模板);仅 commit/日报/周报三类开放自定义,wiki 大纲/单页提示词因输出格式与解析管线(JSON 大纲、sources 引用块)强耦合而固定为内置模板,不进提示词管理。项目 wiki 同样不进 SQLite:落盘 `~/.repomeow/wiki/<basename>-<8位fnv1a哈希>/` 下的 `meta.json`(大纲+headSha+generatedAt,最后写入,status=completed 才有效)与 `pages/NN-slug.md`(tmp+rename 原子写),目录名由 `commands/wiki/` 按 clean_str 路径派生,前端一律经命令拿路径,不自算。可再生运行期缓存则放在**安装目录** `<exe 所在目录>/data/` 下(`lib.rs` 的 `runtime_data_root()`,dev 模式落在 `target/debug/data/`):编辑器真实图标缓存为 `data/icons/<kind>.png`(`commands/editor_icon.rs` 从本机 exe / .app 提取,settings 表 `editor_icon_cache` 记录源文件 mtime,变化才重提),chinese-days 节假日缓存为 `data/chinese-days.json`(`workday.rs`,TTL 30 天,缺失/过期自动重拉 CDN)。安装目录不可写时两者按既有语义静默降级(图标回退 lucide 通用图标,节假日数据不缓存)。
@@ -84,6 +85,7 @@ src-tauri/migrations/ SQL 迁移,NNN_name.sql(当前 001~010)
 8. **路径风格统一**:禁止各处 ad-hoc `replace('\\', "/")` / `split("/")`,一律走统一辅助——Rust 侧 `path_util.rs`(`clean_str` 落库/缓存 key 用平台分隔符、`to_forward_slash` IPC/git pathspec 用 `/`)、前端 `src/lib/path.ts`(`cleanPath` / `toForwardSlash` / `baseName` / `splitDirName` / `displayRelativeTo`)。项目路径入库前必须 `clean_str`;IPC 输出的仓库内路径恒为 `/` 分隔;各类 HashMap/缓存 key 必须经归一化后再做读写与 invalidate。
 
 9. **sem 语义分析 Sidecar**:官方 sem CLI 以 Tauri xternalBin 内置,固定版本/平台资产/SHA-256 在 scripts/sem/manifest.json,运行 pnpm sem:prepare 下载到被忽略的 src-tauri/binaries/sem-<target>;升级版本须同步 src-tauri/third-party/sem/NOTICE 并做安装包冒烟测试。应用只从 Rust commands/semantic/ 暴露固定操作,禁止前端传任意 CLI 参数,子进程固定设置 DO_NOT_TRACK / SEM_NO_NETWORK 等环境变量,不得调用 sem update/login/mcp;Sidecar 只随 RepoMeow 版本更新。cargo check 前若二进制尚未准备,先运行 pnpm sem:prepare。
+10. **内置 MCP Server**:`main.rs` 在普通 Tauri 初始化前识别 `--mcp`,命中后复用主程序二进制运行 `src-tauri/src/mcp/` 的 stdio 服务,不得恢复独立 MCP 二进制或 Sidecar。工具组开关 `mcpGitCommitEnabled` / `mcpWikiEnabled` 由前端设置页写入 `~/.repomeow/settings.json`,MCP 进程启动时读取并过滤工具,默认均关闭;配置变更在客户端重连后生效。
 
 ## wiki 生成管线(commands/wiki/ + lib/wiki-generator.ts)
 

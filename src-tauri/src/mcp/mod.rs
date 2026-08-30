@@ -20,6 +20,9 @@ use crate::APP_DATA_DIR_NAME;
 const WIKI_DIR_NAME: &str = "wiki";
 const WIKI_META_FILE: &str = "meta.json";
 const DATA_DIR_ENV: &str = "REPOMEOW_DATA_DIR";
+const SETTINGS_FILE: &str = "settings.json";
+const GIT_COMMIT_ENABLED_KEY: &str = "mcpGitCommitEnabled";
+const WIKI_ENABLED_KEY: &str = "mcpWikiEnabled";
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -96,6 +99,12 @@ impl ToolFailure {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct McpToolGroups {
+    git_commit: bool,
+    wiki: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct RepoMeowMcpServer {
     tool_router: ToolRouter<Self>,
@@ -103,16 +112,21 @@ pub struct RepoMeowMcpServer {
 
 impl Default for RepoMeowMcpServer {
     fn default() -> Self {
-        Self::new()
+        Self::new(McpToolGroups::default())
     }
 }
 
 #[tool_router(router = tool_router)]
 impl RepoMeowMcpServer {
-    pub fn new() -> Self {
-        Self {
-            tool_router: Self::tool_router(),
+    fn new(groups: McpToolGroups) -> Self {
+        let mut tool_router = Self::tool_router();
+        if !groups.git_commit {
+            tool_router.disable_route("commit_code");
         }
+        if !groups.wiki {
+            tool_router.disable_route("get_wiki_directory");
+        }
+        Self { tool_router }
     }
 
     #[tool(
@@ -177,10 +191,44 @@ impl ServerHandler for RepoMeowMcpServer {
     }
 }
 
-pub async fn serve_stdio() -> anyhow::Result<()> {
-    let service = RepoMeowMcpServer::new().serve(stdio()).await?;
+pub fn is_mcp_mode() -> bool {
+    env::args_os().skip(1).any(|arg| arg == "--mcp")
+}
+
+pub fn serve_stdio_blocking() -> anyhow::Result<()> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(serve_stdio())
+}
+
+async fn serve_stdio() -> anyhow::Result<()> {
+    let data_root = repomeow_data_root().map_err(|error| anyhow::anyhow!(error.message))?;
+    let groups = load_tool_groups(&data_root);
+    let service = RepoMeowMcpServer::new(groups).serve(stdio()).await?;
     service.waiting().await?;
     Ok(())
+}
+
+fn load_tool_groups(data_root: &Path) -> McpToolGroups {
+    let Ok(raw) = fs::read_to_string(data_root.join(SETTINGS_FILE)) else {
+        return McpToolGroups::default();
+    };
+    let Ok(settings) = serde_json::from_str::<Value>(&raw) else {
+        return McpToolGroups::default();
+    };
+    McpToolGroups {
+        git_commit: setting_bool(&settings, GIT_COMMIT_ENABLED_KEY),
+        wiki: setting_bool(&settings, WIKI_ENABLED_KEY),
+    }
+}
+
+fn setting_bool(settings: &Value, key: &str) -> bool {
+    match settings.get(key) {
+        Some(Value::Bool(value)) => *value,
+        Some(Value::String(value)) => value == "true",
+        _ => false,
+    }
 }
 
 fn commit_code_impl(input: CommitCodeInput) -> Result<CommitCodeOutput, ToolFailure> {
@@ -406,6 +454,31 @@ mod tests {
         assert!(normalize_commit_paths(Some(vec!["../secret".into()])).is_err());
         assert!(normalize_commit_paths(Some(vec!["C:/secret".into()])).is_err());
         assert!(normalize_commit_paths(Some(Vec::new())).is_err());
+    }
+
+    #[test]
+    fn tool_groups_are_opt_in_and_filter_visible_routes() {
+        let disabled = RepoMeowMcpServer::new(McpToolGroups::default());
+        assert!(!disabled.tool_router.has_route("commit_code"));
+        assert!(!disabled.tool_router.has_route("get_wiki_directory"));
+
+        let enabled = RepoMeowMcpServer::new(McpToolGroups {
+            git_commit: true,
+            wiki: true,
+        });
+        assert!(enabled.tool_router.has_route("commit_code"));
+        assert!(enabled.tool_router.has_route("get_wiki_directory"));
+    }
+
+    #[test]
+    fn tool_group_settings_accept_store_strings_and_json_booleans() {
+        let settings = json!({
+            "mcpGitCommitEnabled": "true",
+            "mcpWikiEnabled": true,
+        });
+        assert!(setting_bool(&settings, GIT_COMMIT_ENABLED_KEY));
+        assert!(setting_bool(&settings, WIKI_ENABLED_KEY));
+        assert!(!setting_bool(&settings, "missing"));
     }
 
     #[test]

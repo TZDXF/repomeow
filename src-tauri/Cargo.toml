@@ -1,6 +1,5 @@
 [package]
 name = "repomeow"
-default-run = "repomeow"
 version = "0.1.16"
 description = "A Tauri App"
 authors = ["you"]

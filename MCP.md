@@ -1,55 +1,40 @@
 # RepoMeow MCP
 
-RepoMeow 通过独立的 stdio MCP Server 对外提供能力。首版只包含代码提交和 Wiki 目录查询。
+RepoMeow 的 MCP Server 内置在主程序中，不单独生成或发布 MCP 可执行文件。MCP 客户端通过启动 RepoMeow 主程序并附加 `--mcp` 参数建立 stdio 连接。
 
-## 构建和运行
+## 在应用中开启工具
 
-```powershell
-pnpm mcp:build
+打开 RepoMeow 的“设置 → MCP”，按需开启工具组。工具组默认全部关闭：
+
+- **Git 提交**：提供 `commit_code`。
+- **Wiki 查询**：提供 `get_wiki_directory`。
+
+工具组配置保存在 `~/.repomeow/settings.json`。MCP 进程在连接启动时读取设置，因此修改开关后需要在 MCP 客户端断开并重新连接。
+
+## 配置 MCP 客户端
+
+“设置 → MCP”页面会读取当前运行的 RepoMeow 主程序绝对路径，并生成可直接复制的配置：
+
+```json
+{
+  "mcpServers": {
+    "repomeow": {
+      "command": "C:\\path\\to\\RepoMeow.exe",
+      "args": ["--mcp"]
+    }
+  }
+}
 ```
 
-产物位置：
+将配置粘贴到 Codex、Claude Desktop 或其他兼容 MCP 客户端的服务器配置中，然后重启或重新连接客户端。
 
-```text
-src-tauri/target/release/repomeow-mcp.exe
-```
-
-本地开发运行：
+开发环境可以执行：
 
 ```powershell
 pnpm mcp:dev
 ```
 
-stdio 是 MCP 协议通道，服务运行时不要向 stdout 输出普通日志；错误日志只写入 stderr。
-
-## MCP 客户端配置示例
-
-请将 `command` 替换为本机实际的绝对路径：
-
-```json
-{
-  "mcpServers": {
-    "repomeow": {
-      "command": "D:\\code\\project-dev\\src-tauri\\target\\release\\repomeow-mcp.exe"
-    }
-  }
-}
-```
-
-如果需要使用非默认数据目录，可设置 `REPOMEOW_DATA_DIR`。它必须直接指向包含 `wiki/` 的 RepoMeow 数据目录；不设置时使用 `~/.repomeow`。
-
-```json
-{
-  "mcpServers": {
-    "repomeow": {
-      "command": "D:\\path\\to\\repomeow-mcp.exe",
-      "env": {
-        "REPOMEOW_DATA_DIR": "D:\\repomeow-data"
-      }
-    }
-  }
-}
-```
+该命令实际运行 RepoMeow 主程序的 `--mcp` 模式，不会启动桌面窗口。
 
 ## 工具
 

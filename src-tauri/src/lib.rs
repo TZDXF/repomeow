@@ -213,6 +213,7 @@ pub fn run() {
             commands::editor_icon::get_editor_icons,
             commands::window::show_main_window,
             commands::window::hide_tray_popup,
+            commands::mcp::get_mcp_server_info,
             commands::prompt::get_ai_prompts,
             commands::prompt::get_default_ai_prompts,
             commands::prompt::set_ai_prompts,

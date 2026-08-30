@@ -1212,12 +1212,40 @@ export default {
       tracking: "Update tracking",
       devEnv: "Dev environment",
       archive: "Archived projects",
+      mcp: "MCP",
       ai: "AI",
       aiUsage: "AI Usage",
       accounts: "Accounts",
       prompts: "Prompts",
       schedule: "Schedules",
       about: "About",
+    },
+    mcp: {
+      title: "MCP",
+      description:
+        "Expose built-in RepoMeow capabilities to MCP clients such as Codex and Claude Desktop",
+      toolGroups: "Tool groups",
+      toolGroupsHint:
+        "Only enabled tool groups are visible externally; all groups are disabled by default",
+      reconnectHint:
+        "Changes apply to new MCP connections. Disconnect and reconnect your MCP client after changing a switch.",
+      git: {
+        title: "Git commits",
+        description: "Allow MCP clients to commit all changes or selected files in a repository",
+      },
+      wiki: {
+        title: "Wiki lookup",
+        description: "Allow MCP clients to get the directory and meta.json of a completed Wiki",
+      },
+      configuration: "How to configure",
+      stepEnable: "Enable the tool groups you want to use.",
+      stepCopy: "Copy the configuration below into your MCP client's server configuration.",
+      stepReconnect: "Restart or reconnect the MCP client after saving the configuration.",
+      copyConfig: "Copy config",
+      loadingConfig: "Reading the RepoMeow executable path...",
+      configUnavailable: "Unable to read the MCP configuration. Reopen Settings and try again.",
+      builtinHint:
+        "The MCP server is built into the main RepoMeow executable. Clients start it with --mcp; no separate MCP executable needs to be downloaded or distributed.",
     },
     devEnv: {
       detect: "Auto detect",
