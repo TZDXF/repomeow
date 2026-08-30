@@ -8,29 +8,74 @@ const UNTRACKED_FILE_MAX_CHARS: usize = 4_000;
 const UNTRACKED_TOTAL_MAX_CHARS: usize = 12_000;
 /// 二进制嗅探的前缀长度(含 NUL 即视为二进制)
 const BINARY_SNIFF_BYTES: usize = 8_000;
-/// 风格锚定用的最近提交条数
-const RECENT_COMMITS_COUNT: usize = 10;
 
-/// diff 噪声文件:内容对撰写提交信息无意义,排除以节省 token 预算。
-/// pathspec 的 `*` 可跨目录匹配,无需逐层列举;stat 仍保留这些文件(摘要成本低且"锁文件变了"本身有价值)
+/// diff 噪声文件:内容对撰写提交信息无意义,排除正文以节省 token 预算。
+/// 这里只列各生态明确由工具生成的锁定/校验文件，避免用 `*.lock`、`dist/**` 等宽泛规则误伤源码。
+/// stat 仍保留这些文件，因“依赖锁文件变了”本身对提交信息有价值。
 const DIFF_EXCLUDES: &[&str] = &[
-    ":(exclude)*pnpm-lock.yaml",
-    ":(exclude)*package-lock.json",
-    ":(exclude)*yarn.lock",
-    ":(exclude)*bun.lockb",
-    ":(exclude)*Cargo.lock",
-    ":(exclude)*.min.js",
-    ":(exclude)*.min.css",
-    ":(exclude)*.map",
+    // JavaScript / Node.js
+    "pnpm-lock.yaml",
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "yarn.lock",
+    "bun.lock",
+    "bun.lockb",
+    // Rust / Go
+    "Cargo.lock",
+    "go.sum",
+    "go.work.sum",
+    // Python
+    "uv.lock",
+    "poetry.lock",
+    "Pipfile.lock",
+    "pdm.lock",
+    "pixi.lock",
+    // JVM / .NET
+    "gradle.lockfile",
+    "packages.lock.json",
+    "paket.lock",
+    // PHP / Ruby / Elixir
+    "composer.lock",
+    "Gemfile.lock",
+    "mix.lock",
+    // Apple / Dart / Nix / Terraform / 其他包管理器
+    "Package.resolved",
+    "Podfile.lock",
+    "Cartfile.resolved",
+    "pubspec.lock",
+    "flake.lock",
+    ".terraform.lock.hcl",
+    "Chart.lock",
+    "conan.lock",
+    "deno.lock",
+    "Gopkg.lock",
+    "glide.lock",
 ];
 
-/// diff 噪声文件判断:pathspec `*` 可跨目录匹配,等价于按后缀匹配文件名。
-/// stat 仍保留这些文件(摘要成本低且"锁文件变了"本身有价值)
+/// 明确由构建工具生成、正文通常不可读的产物后缀。仅匹配文件名，目录名不参与判断。
+const DIFF_EXCLUDE_SUFFIXES: &[&str] = &[
+    ".min.js",
+    ".min.mjs",
+    ".min.cjs",
+    ".min.css",
+    ".map",
+    ".map.gz",
+    ".map.br",
+    ".lockfile",
+];
+
+fn diff_file_name(path: &str) -> &str {
+    path.rsplit(['/', '\\']).next().unwrap_or(path)
+}
+
+/// 判断是否只保留 stat、不把正文交给 sem/LLM。匹配精确 basename 或保守的生成物后缀；
+/// 普通 `.lock`、源码目录下的 `dist`、快照与声明文件仍保留正文。
 fn is_diff_excluded(path: &str) -> bool {
-    DIFF_EXCLUDES.iter().any(|p| {
-        p.strip_prefix(":(exclude)*")
-            .is_some_and(|suffix| path.ends_with(suffix))
-    })
+    let file_name = diff_file_name(path);
+    DIFF_EXCLUDES.contains(&file_name)
+        || DIFF_EXCLUDE_SUFFIXES
+            .iter()
+            .any(|suffix| file_name.ends_with(suffix))
 }
 
 /// 读取未跟踪新文件的文本内容;非常规文件/二进制/读失败返回 None(由调用方回退到仅列文件名)
@@ -65,8 +110,7 @@ fn read_untracked_file(repo: &str, rel: &str) -> Option<GitUntrackedFile> {
 /// 仓库尚无提交(无 HEAD)时回退到暂存区 diff;
 /// diff 排除锁文件/min/map 等噪声文件(stat 保留);
 /// 未跟踪清单剔除嵌套 git 仓库目录(子仓库是独立项目,不算本仓库内容),
-/// 其中可读的文本文件附带内容(预算受限,二进制跳过);
-/// 附最近若干条提交 subject 供模型对齐仓库提交风格
+/// 其中可读的文本文件附带内容(预算受限,二进制跳过)
 pub(crate) async fn git_commit_context(path: String) -> AppResult<GitCommitContext> {
     run_blocking(move || commit_context_blocking(&path)).await
 }
@@ -160,41 +204,13 @@ pub(crate) fn commit_context_blocking(path: &str) -> AppResult<GitCommitContext>
         }
     }
 
-    // 最近若干条提交 subject(无合并),供模型对齐仓库提交风格
-    let recent_commits = recent_commit_messages(&repo);
-
     Ok(GitCommitContext {
         stat,
         diff: diff_text,
         truncated,
         untracked,
         untracked_files,
-        recent_commits,
     })
-}
-fn recent_commit_messages(repo: &Repository) -> Vec<String> {
-    (|| -> Option<Vec<String>> {
-        let mut walk = repo.revwalk().ok()?;
-        walk.push_head().ok()?;
-        walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME).ok()?;
-        let mut out = Vec::new();
-        for oid in walk.flatten() {
-            let Ok(commit) = repo.find_commit(oid) else {
-                continue;
-            };
-            if commit.parent_count() >= 2 {
-                continue;
-            }
-            if let Some(summary) = commit.summary() {
-                out.push(summary.to_string());
-            }
-            if out.len() >= RECENT_COMMITS_COUNT {
-                break;
-            }
-        }
-        Some(out)
-    })()
-    .unwrap_or_default()
 }
 
 /// AI 提交信息使用的单文件上下文。raw_patch 只会在 sem 未覆盖该文件或 sem 失败时进入提示词。
@@ -208,13 +224,14 @@ pub(crate) struct AiCommitFileContext {
     pub raw_excluded: bool,
 }
 
-/// 与本次真实提交范围一致的 AI 上下文；semantic_input 仅在本地交给 sem，不直接发送给模型。
+/// 与本次真实提交范围一致的 AI 上下文；semantic_input 是过滤噪声后的 unified patch，
+/// 仅在本地交给 sem，不直接发送给模型。
 #[derive(Debug)]
 pub(crate) struct AiCommitContext {
     pub stat: String,
     pub semantic_input: String,
+    pub semantic_paths: HashSet<String>,
     pub files: Vec<AiCommitFileContext>,
-    pub recent_commits: Vec<String>,
 }
 
 pub(crate) async fn ai_commit_context(
@@ -226,32 +243,6 @@ pub(crate) async fn ai_commit_context(
         .await
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SemFileChangeInput {
-    file_path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    old_file_path: Option<String>,
-    status: String,
-    before_content: Option<String>,
-    after_content: Option<String>,
-}
-
-fn blob_text(repo: &Repository, oid: git2::Oid) -> Option<String> {
-    let blob = repo.find_blob(oid).ok()?;
-    if blob.content().contains(&0) {
-        return None;
-    }
-    std::str::from_utf8(blob.content()).ok().map(str::to_string)
-}
-
-fn workdir_text(workdir: &str, path: &str) -> Option<String> {
-    let bytes = std::fs::read(Path::new(workdir).join(path)).ok()?;
-    if bytes.contains(&0) {
-        return None;
-    }
-    String::from_utf8(bytes).ok()
-}
 fn binary_patch(path: &str, old_path: Option<&str>, status: &str) -> String {
     let old = old_path.unwrap_or(path);
     match status {
@@ -300,7 +291,8 @@ pub(crate) fn ai_commit_context_blocking(
         .map(|value| value.to_string_lossy().to_string())
         .unwrap_or_else(|| path.to_string());
     let mut nested_cache = HashSet::new();
-    let mut semantic_inputs = Vec::new();
+    let mut semantic_patches = Vec::new();
+    let mut semantic_paths = HashSet::new();
     let mut files = Vec::new();
 
     for (idx, delta) in diff.deltas().enumerate() {
@@ -347,40 +339,23 @@ pub(crate) fn ai_commit_context_blocking(
             let old_label = old_path.as_deref().unwrap_or(&path);
             raw_patch = format!("diff --git a/{old_label} b/{path}\n{status} {path}\n");
         }
-        let sem_status = match status {
-            "A" | "C" => "added",
-            "D" => "deleted",
-            "R" => "renamed",
-            _ => "modified",
-        };
-        let before_content = if binary || matches!(status, "A" | "C") {
-            None
-        } else {
-            blob_text(&repo, delta.old_file().id())
-        };
-        let after_content = if binary || status == "D" {
-            None
-        } else {
-            workdir_text(&workdir, &path)
-        };
-        semantic_inputs.push(SemFileChangeInput {
-            file_path: path.clone(),
-            old_file_path: if status == "R" {
-                old_path.clone()
-            } else {
-                None
-            },
-            status: sem_status.to_string(),
-            before_content,
-            after_content,
-        });
+        let raw_excluded = is_diff_excluded(&path);
+        // sem --patch 能从仓库和 patch 恢复实体上下文，无需为每个文件复制完整 before/after。
+        // 锁文件、生成物和二进制只保留低成本 stat/fallback 元数据，避免 chunk 边界漂移放大上下文。
+        if !binary && !raw_excluded {
+            semantic_patches.push(raw_patch.clone());
+            semantic_paths.insert(path.clone());
+            if let Some(old_path) = &old_path {
+                semantic_paths.insert(old_path.clone());
+            }
+        }
         files.push(AiCommitFileContext {
             path: path.clone(),
             old_path,
             status: status.to_string(),
             raw_patch,
             binary,
-            raw_excluded: is_diff_excluded(&path),
+            raw_excluded,
         });
     }
 
@@ -400,12 +375,50 @@ pub(crate) fn ai_commit_context_blocking(
             .collect::<Vec<_>>()
             .join("\n")
     };
-    let semantic_input = serde_json::to_string(&semantic_inputs)
-        .map_err(|error| AppError::coded(ErrorCode::SemanticToolFailed, error.to_string()))?;
+    let semantic_input = semantic_patches.join("\n");
     Ok(AiCommitContext {
         stat,
         semantic_input,
+        semantic_paths,
         files,
-        recent_commits: recent_commit_messages(&repo),
     })
+}
+
+#[cfg(test)]
+mod noise_file_tests {
+    use super::*;
+
+    #[test]
+    fn excludes_cross_ecosystem_lockfiles_and_generated_assets() {
+        for path in [
+            "web/pnpm-lock.yaml",
+            r"python\uv.lock",
+            "ios/Package.resolved",
+            "go.sum",
+            "infra/.terraform.lock.hcl",
+            "gradle/dependency-locks/runtime.lockfile",
+            "public/app.min.mjs",
+            "public/app.js.map.gz",
+        ] {
+            assert!(is_diff_excluded(path), "应排除 {path}");
+        }
+    }
+
+    #[test]
+    fn keeps_source_and_ambiguous_lock_named_files() {
+        for path in [
+            "package.json",
+            "Cargo.toml",
+            "requirements.txt",
+            "src/lock.rs",
+            "config/app.lock",
+            "docs/yarn.lock.md",
+            "dist/source.ts",
+            "types/api.generated.d.ts",
+            "tests/output.snap",
+            "some-package-lock.json",
+        ] {
+            assert!(!is_diff_excluded(path), "不应排除 {path}");
+        }
+    }
 }

@@ -1286,8 +1286,38 @@ fn ai_commit_context_keeps_untracked_binary_metadata() {
         .find(|file| file.path == "asset.bin")
         .unwrap();
     assert!(binary.binary);
-    assert!(context.semantic_input.contains("asset.bin"));
-    assert!(context.semantic_input.contains("\"beforeContent\":null"));
+    assert!(context.stat.contains("asset.bin | binary"));
+    assert!(!context.semantic_input.contains("asset.bin"));
+    assert!(!context.semantic_paths.contains("asset.bin"));
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn ai_commit_context_excludes_lockfile_from_semantic_patch_but_keeps_summary() {
+    let dir = temp_dir("ai-ctx-lockfile");
+    init_repo(&dir);
+    fs::write(dir.join("Cargo.lock"), "version = 3\n").unwrap();
+    fs::write(dir.join("main.rs"), "fn main() {}\n").unwrap();
+    git(&dir, &["add", "."]);
+    git(&dir, &["commit", "-m", "init"]);
+    fs::write(
+        dir.join("Cargo.lock"),
+        "version = 3\n[[package]]\nname = \"probe\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("main.rs"), "fn main() { println!(\"probe\"); }\n").unwrap();
+
+    let context = ai_commit_context_blocking(dir.to_str().unwrap(), false, None).unwrap();
+    assert!(context.stat.contains("Cargo.lock | M"));
+    assert!(context.stat.contains("main.rs | M"));
+    assert!(!context.semantic_input.contains("Cargo.lock"));
+    assert!(!context.semantic_input.contains("name = \"probe\""));
+    assert!(context
+        .semantic_input
+        .contains("diff --git a/main.rs b/main.rs"));
+    assert!(!context.semantic_paths.contains("Cargo.lock"));
+    assert!(context.semantic_paths.contains("main.rs"));
 
     let _ = fs::remove_dir_all(&dir);
 }
@@ -1333,26 +1363,6 @@ fn commit_context_excludes_lockfile_from_diff_but_keeps_stat() {
     assert!(ctx.diff.contains("changed"));
     assert!(!ctx.diff.contains("pnpm-lock"));
     assert!(ctx.stat.contains("pnpm-lock.yaml"));
-
-    let _ = fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn commit_context_includes_recent_commits() {
-    let dir = temp_dir("ctx-recent");
-    init_repo(&dir);
-    fs::write(dir.join("a.txt"), "a").unwrap();
-    git(&dir, &["add", "a.txt"]);
-    git(&dir, &["commit", "-m", "feat: init"]);
-    fs::write(dir.join("a.txt"), "b").unwrap();
-    git(&dir, &["commit", "-am", "fix: second"]);
-
-    // 新提交在前,供模型对齐提交风格
-    let ctx = commit_context_blocking(dir.to_str().unwrap()).unwrap();
-    assert_eq!(
-        ctx.recent_commits,
-        vec!["fix: second".to_string(), "feat: init".to_string()]
-    );
 
     let _ = fs::remove_dir_all(&dir);
 }

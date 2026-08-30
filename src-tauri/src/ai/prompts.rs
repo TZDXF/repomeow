@@ -93,7 +93,9 @@ mod tests {
             assert!(prompt.contains("\"relevantFiles\""));
             assert!(!prompt.contains("<wiki_structure>"));
         }
-        assert!(AGENT_WIKI_OUTLINE_PROMPT.contains("Explore the repository and use tools silently."));
+        assert!(
+            AGENT_WIKI_OUTLINE_PROMPT.contains("Explore the repository and use tools silently.")
+        );
         assert!(AGENT_WIKI_OUTLINE_PROMPT.contains("at most 20 additional files"));
         assert!(AGENT_WIKI_OUTLINE_PROMPT.contains("The first non-whitespace character is"));
         // 页面生成是混合模式:相关文件全文已喂入,只允许少量补充读取

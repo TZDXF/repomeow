@@ -3,6 +3,7 @@ mod background_task;
 mod commands;
 mod db;
 mod error;
+pub mod mcp;
 mod models;
 mod path_util;
 mod scheduler;

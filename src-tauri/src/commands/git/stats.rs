@@ -187,7 +187,11 @@ impl StatsAccumulator {
             email.to_lowercase()
         };
         let author_acc = self.authors.entry(key).or_insert_with(|| AuthorAcc {
-            name: if name.is_empty() { email.to_string() } else { name.to_string() },
+            name: if name.is_empty() {
+                email.to_string()
+            } else {
+                name.to_string()
+            },
             email: email.to_string(),
             first_at: ts,
             last_at: ts,
@@ -263,11 +267,7 @@ impl StatsAccumulator {
                 last_commit_at: a.last_at,
             })
             .collect();
-        authors.sort_by(|a, b| {
-            b.commits
-                .cmp(&a.commits)
-                .then_with(|| a.name.cmp(&b.name))
-        });
+        authors.sort_by(|a, b| b.commits.cmp(&a.commits).then_with(|| a.name.cmp(&b.name)));
 
         let mut file_types: Vec<GitFileTypeStat> = self
             .file_types

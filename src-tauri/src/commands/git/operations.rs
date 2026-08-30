@@ -171,7 +171,7 @@ pub async fn git_commit(
     Ok(status)
 }
 
-pub(super) fn commit_blocking(
+pub(crate) fn commit_blocking(
     path: &str,
     message: &str,
     include_untracked: bool,

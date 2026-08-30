@@ -15,6 +15,7 @@ use tauri::AppHandle;
 use crate::error::AppResult;
 
 pub(crate) use context::{collect_wiki_context, read_wiki_files_in};
+pub(crate) use paths::wiki_dir_in;
 pub(crate) use snapshot::wiki_changed_files;
 pub(crate) use storage::{
     begin_wiki, commit_wiki, load_wiki_config_internal, save_wiki_meta, save_wiki_page_internal,

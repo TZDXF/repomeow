@@ -8,7 +8,9 @@ use crate::error::{AppError, AppResult, ErrorCode};
 use super::models::{SemanticEntityRef, SemanticImpactResult, SemanticImpactedEntity};
 use super::parse::{entity_ref, parse_stdout, truncate_to};
 use super::process::{run_sem, SemRunPolicy};
-use super::{detect_version, output_error, resolve_workdir, validate_entity_token, validate_rel_file_path};
+use super::{
+    detect_version, output_error, resolve_workdir, validate_entity_token, validate_rel_file_path,
+};
 
 /// dependencies / dependents / tests 每类硬上限
 const IMPACT_GROUP_LIMIT: usize = 1_000;
@@ -232,10 +234,10 @@ mod tests {
         assert!(parsed.impact.entities.is_empty());
         assert_eq!(parsed.impact.total, 0);
         // entity 缺 entityId 视为契约破坏
-        assert!(
-            parse_stdout::<RawImpactOutput>(br#"{"entity":{"file":"f","name":"a","type":"function"}}"#)
-                .is_err()
-        );
+        assert!(parse_stdout::<RawImpactOutput>(
+            br#"{"entity":{"file":"f","name":"a","type":"function"}}"#
+        )
+        .is_err());
     }
 
     #[test]
@@ -258,7 +260,14 @@ mod tests {
     fn total_beyond_returned_entities_marks_truncated() {
         // affected 只有 1 条而 total=66 时必须标记截断
         let mut affected: Vec<SemanticImpactedEntity> = vec![SemanticImpactedEntity {
-            entity: entity_ref(Some("f::function::a".into()), "a".into(), "function".into(), "f".into(), 1, 2),
+            entity: entity_ref(
+                Some("f::function::a".into()),
+                "a".into(),
+                "function".into(),
+                "f".into(),
+                1,
+                2,
+            ),
             depth: 1,
         }];
         let mut truncated = truncate_to(&mut affected, IMPACT_AFFECTED_LIMIT);

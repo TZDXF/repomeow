@@ -44,6 +44,21 @@ fn file_is_covered(
             .is_some_and(|old_path| covered.contains(old_path))
 }
 
+fn raw_fallback_files<'a>(
+    files: &'a [AiCommitFileContext],
+    semantic_paths: &std::collections::HashSet<String>,
+    covered_paths: &std::collections::HashSet<String>,
+) -> Vec<&'a AiCommitFileContext> {
+    files
+        .iter()
+        // semantic_paths 表示 patch 已成功交给 sem；即使 --no-cosmetics 令结果为空，
+        // 也不能把原始 cosmetic diff 重新补回模型。
+        .filter(|file| {
+            !semantic_paths.contains(&file.path) && !file_is_covered(file, covered_paths)
+        })
+        .collect()
+}
+
 fn raw_fallback(files: &[&AiCommitFileContext]) -> (String, bool) {
     let mut out = String::new();
     let mut truncated = false;
@@ -87,29 +102,33 @@ pub async fn ai_generate_commit_message(
     )
     .await?;
 
-    // sem 是主数据源。它成功但只覆盖部分文件时仅补缺口；失败/空结果才全量 raw 降级。
+    // sem 是主数据源。成功但被 --no-cosmetics 过滤为空仍视为已分析，避免重新补回 cosmetic raw diff；
+    // 只有 sidecar 失败时才全量 raw 降级。
     let semantic_result = if context.semantic_input.trim().is_empty() {
         None
     } else {
         semantic::commit_input_analysis(&app, &project_path, &context.semantic_input)
             .await
             .ok()
-            .filter(|analysis| !analysis.text.trim().is_empty())
     };
     let (semantic_section, fallback_files, sem_failed) = match &semantic_result {
         Some(analysis) => (
-            format!("\n\nSemantic changes (primary source):\n{}", analysis.text),
-            context
-                .files
-                .iter()
-                .filter(|file| !file_is_covered(file, &analysis.covered_paths))
-                .collect::<Vec<_>>(),
+            if analysis.text.trim().is_empty() {
+                String::new()
+            } else {
+                format!("\n\nSemantic changes (primary source):\n{}", analysis.text)
+            },
+            raw_fallback_files(
+                &context.files,
+                &context.semantic_paths,
+                &analysis.covered_paths,
+            ),
             false,
         ),
         None => (
             String::new(),
             context.files.iter().collect::<Vec<_>>(),
-            !context.files.is_empty(),
+            !context.files.is_empty() && !context.semantic_input.trim().is_empty(),
         ),
     };
     let (raw, raw_truncated) = raw_fallback(&fallback_files);
@@ -140,21 +159,8 @@ pub async fn ai_generate_commit_message(
             request.project_name
         )
     };
-    let recent_section = if context.recent_commits.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "\n\nRecent commit messages (match their style and language):\n{}",
-            context
-                .recent_commits
-                .iter()
-                .map(|message| format!("- {message}"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        )
-    };
     let user_prompt = format!(
-        "{project_section}{recent_section}\n\nChange summary:\n{}{semantic_section}{raw_section}",
+        "{project_section}\n\nChange summary:\n{}{semantic_section}{raw_section}",
         if context.stat.is_empty() {
             "(none)"
         } else {
@@ -207,6 +213,21 @@ mod tests {
         assert!(!raw.contains(&covered.raw_patch));
         assert!(raw.contains(&missing.raw_patch));
         assert!(!truncated);
+    }
+
+    #[test]
+    fn successful_sem_does_not_restore_cosmetic_raw_diff() {
+        let code = file("src/main.rs", "cosmetic raw", false);
+        let lock = AiCommitFileContext {
+            raw_excluded: true,
+            ..file("Cargo.lock", "lock raw", false)
+        };
+        let semantic_paths = std::collections::HashSet::from(["src/main.rs".to_string()]);
+        let covered_paths = std::collections::HashSet::new();
+        let files = [code, lock];
+        let fallback = raw_fallback_files(&files, &semantic_paths, &covered_paths);
+        assert_eq!(fallback.len(), 1);
+        assert_eq!(fallback[0].path, "Cargo.lock");
     }
 
     #[test]

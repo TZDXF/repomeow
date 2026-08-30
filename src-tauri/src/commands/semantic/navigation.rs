@@ -136,11 +136,7 @@ pub(super) async fn file_entities_impl(
     let root = resolve_workdir(&path)?;
     let file = validate_rel_file_path(&root, &file_path)?;
     let version = detect_version(&app).await?;
-    let args = vec![
-        "entities".to_string(),
-        file.clone(),
-        "--json".to_string(),
-    ];
+    let args = vec!["entities".to_string(), file.clone(), "--json".to_string()];
     let output = run_sem(
         &app,
         Some(&root),
@@ -352,7 +348,10 @@ mod tests {
         let parsed: Vec<RawFoundEntity> = parse_stdout(raw).unwrap();
         assert_eq!(parsed[0].id, "src/lib/utils.ts::function::debounce");
         // 缺 id 视为契约破坏
-        assert!(parse_stdout::<Vec<RawFoundEntity>>(br#"[{"name":"x","type":"function","file":"f"}]"#).is_err());
+        assert!(parse_stdout::<Vec<RawFoundEntity>>(
+            br#"[{"name":"x","type":"function","file":"f"}]"#
+        )
+        .is_err());
     }
 
     #[test]
@@ -371,7 +370,16 @@ mod tests {
     #[test]
     fn relation_truncation_marks_result() {
         let mut related: Vec<SemanticEntityRef> = (0..=RELATION_LIMIT)
-            .map(|i| entity_ref(Some(format!("id-{i}")), "n".into(), "function".into(), "f".into(), 1, 1))
+            .map(|i| {
+                entity_ref(
+                    Some(format!("id-{i}")),
+                    "n".into(),
+                    "function".into(),
+                    "f".into(),
+                    1,
+                    1,
+                )
+            })
             .collect();
         assert!(truncate_to(&mut related, RELATION_LIMIT));
         assert_eq!(related.len(), RELATION_LIMIT);

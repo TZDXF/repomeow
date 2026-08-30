@@ -123,8 +123,6 @@ pub struct GitCommitContext {
     pub untracked: Vec<String>,
     /// 未跟踪文件中可读取的文本内容(跳过二进制与超限文件)
     pub untracked_files: Vec<GitUntrackedFile>,
-    /// 最近提交信息 subject(风格锚定用,新仓库为空)
-    pub recent_commits: Vec<String>,
 }
 
 /// 一条 git 提交记录(日报生成用)

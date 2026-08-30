@@ -102,9 +102,7 @@ pub(super) fn validate_rel_file_path(root: &Path, file_path: &str) -> AppResult<
     let candidate = Path::new(&normalized);
     // 显式拒绝 Windows 盘符(在非 Windows 上 components 不会拆出 Prefix)。
     let bytes = normalized.as_bytes();
-    let has_drive_letter = bytes.len() >= 2
-        && bytes[1] == b':'
-        && bytes[0].is_ascii_alphabetic();
+    let has_drive_letter = bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic();
     if candidate.is_absolute() || normalized.starts_with('/') || has_drive_letter {
         return Err(invalid());
     }
@@ -245,8 +243,16 @@ pub async fn semantic_entity_impact(
     depth: Option<usize>,
     request_id: Option<String>,
 ) -> AppResult<SemanticImpactResult> {
-    impact::entity_impact_impl(app, path, entity_id, entity_name, file_path, depth, request_id)
-        .await
+    impact::entity_impact_impl(
+        app,
+        path,
+        entity_id,
+        entity_name,
+        file_path,
+        depth,
+        request_id,
+    )
+    .await
 }
 
 // ── 第 4A 期:实体历史 ───────────────────────────────────────────────
@@ -296,13 +302,20 @@ pub async fn semantic_entity_context(
     request_id: Option<String>,
 ) -> AppResult<SemanticContextResult> {
     context::entity_context_impl(
-        app, path, entity_id, entity_name, file_path, budget, hops, request_id,
+        app,
+        path,
+        entity_id,
+        entity_name,
+        file_path,
+        budget,
+        hops,
+        request_id,
     )
     .await
 }
 
-pub use process::cleanup_on_exit;
 pub(crate) use context::commit_input_analysis;
+pub use process::cleanup_on_exit;
 
 #[cfg(test)]
 mod tests {

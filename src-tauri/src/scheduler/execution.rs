@@ -13,8 +13,8 @@ use crate::workday;
 
 use super::calendar::{daily_report_date, work_week_start};
 use super::config::{
-    build_report_prompt, call_ai, default_prompt, default_schedule_name, load_ai_config, load_language,
-    load_report_prompt,
+    build_report_prompt, call_ai, default_prompt, default_schedule_name, load_ai_config,
+    load_language, load_report_prompt,
 };
 /// 复用 AppHandle 托管的 Db 连接,与主线程共享同一把锁,避免独立连接同文件
 /// 的毫秒级竞争窗口。
@@ -243,7 +243,11 @@ pub(crate) async fn fire_schedule(
     // 6. 组装 prompt
     let prompt_data: Vec<(String, String, Vec<GitCommitInfo>)> = commits_by_project
         .iter()
-        .map(|(_, name, desc, commits): &(i64, String, String, Vec<GitCommitInfo>)| (name.clone(), desc.clone(), commits.clone()))
+        .map(
+            |(_, name, desc, commits): &(i64, String, String, Vec<GitCommitInfo>)| {
+                (name.clone(), desc.clone(), commits.clone())
+            },
+        )
         .collect();
     let user_prompt = build_report_prompt(&prompt_data, &range_label, &language);
 

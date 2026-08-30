@@ -158,8 +158,6 @@ export interface GitCommitContext {
   untracked: string[];
   /** 未跟踪文件中可读取的文本内容(跳过二进制与超限文件) */
   untracked_files: GitUntrackedFile[];
-  /** 最近提交信息 subject(风格锚定用,新仓库为空) */
-  recent_commits: string[];
 }
 
 /** 一条 git 提交记录(日报生成用) */

@@ -51,7 +51,10 @@ pub(super) fn detects_path_scheme<'a>(
     parent_ids: impl Iterator<Item = Option<&'a str>>,
 ) -> bool {
     let prefix = format!("{file_path}::/");
-    parent_ids.into_iter().flatten().any(|p| p.starts_with(&prefix))
+    parent_ids
+        .into_iter()
+        .flatten()
+        .any(|p| p.starts_with(&prefix))
 }
 
 pub(super) fn entity_ref(
@@ -92,7 +95,13 @@ mod tests {
             "src/a.ts::function::run"
         );
         assert_eq!(
-            build_entity_id("src/a.ts", "function", "inner", Some("src/a.ts::function::run"), false),
+            build_entity_id(
+                "src/a.ts",
+                "function",
+                "inner",
+                Some("src/a.ts::function::run"),
+                false
+            ),
             "src/a.ts::function::run::inner"
         );
         assert_eq!(

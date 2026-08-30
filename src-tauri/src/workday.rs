@@ -388,7 +388,10 @@ mod tests {
         );
         assert_eq!(parsed.workdays, HashSet::from(["2026-09-27".to_string()]));
         assert_eq!(
-            parsed.holiday_names.get("2026-10-02").map(|n| n.zh.as_str()),
+            parsed
+                .holiday_names
+                .get("2026-10-02")
+                .map(|n| n.zh.as_str()),
             Some("国庆节")
         );
 
@@ -439,12 +442,14 @@ mod tests {
     #[test]
     fn parse_data_handles_missing_optional_sections() {
         // holidays 缺失 → 空集合;workdays 缺失 → 空集合
-        let no_holidays = serde_json::json!({"workdays": { "2026-09-27": "National Day,国庆节,3" }}).to_string();
+        let no_holidays =
+            serde_json::json!({"workdays": { "2026-09-27": "National Day,国庆节,3" }}).to_string();
         let d = parse_data(&no_holidays).unwrap();
         assert!(d.holidays.is_empty());
         assert_eq!(d.workdays, HashSet::from(["2026-09-27".to_string()]));
 
-        let no_workdays = serde_json::json!({"holidays": { "2026-10-01": "National Day,国庆节,3" }}).to_string();
+        let no_workdays =
+            serde_json::json!({"holidays": { "2026-10-01": "National Day,国庆节,3" }}).to_string();
         let d = parse_data(&no_workdays).unwrap();
         assert_eq!(d.holidays, HashSet::from(["2026-10-01".to_string()]));
         assert!(d.workdays.is_empty());

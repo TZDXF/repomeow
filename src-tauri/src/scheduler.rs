@@ -7,9 +7,7 @@ mod config;
 mod execution;
 mod runtime;
 
-pub(crate) use calendar::{
-    is_work_week_last_day_with, work_week_start,
-};
+pub(crate) use calendar::{is_work_week_last_day_with, work_week_start};
 pub(crate) use execution::fire_schedule;
 pub use runtime::run;
 

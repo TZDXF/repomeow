@@ -26,6 +26,11 @@ const CONTEXT_MAX_BUDGET: usize = 4_000;
 /// context 关系跳数:缺省 1,clamp 0..=3
 const CONTEXT_DEFAULT_HOPS: usize = 1;
 const CONTEXT_MAX_HOPS: usize = 3;
+/// AI 提交信息中的 sem 语义段硬上限；另有 raw fallback 独立预算。
+const COMMIT_SEMANTIC_MAX_CHARS: usize = 30_000;
+/// 为截断说明预留空间，确保最终输出始终不超过硬上限。
+const COMMIT_SEMANTIC_FOOTER_RESERVE: usize = 240;
+const COMMIT_DIFF_ARGS: &[&str] = &["diff", "--patch", "--format", "json", "--no-cosmetics"];
 
 // ── sem 0.23.1 原始 JSON(未知字段默认忽略)────────────────────────────
 
@@ -244,20 +249,19 @@ pub(crate) struct SemanticCommitAnalysis {
     pub covered_paths: HashSet<String>,
 }
 
-/// 从 RepoMeow 按本次提交范围构造的 FileChange JSON 分析变更。使用 --stdin 是因为 sem
-/// 原生 worktree diff 与 git 一样排除未跟踪文件，且不能表达提交对话框的文件子集。
+/// 分析 RepoMeow 按本次提交范围构造的 unified patch。使用 --patch 是因为 sem 原生
+/// worktree diff 与 git 一样排除未跟踪文件，且不能表达提交对话框的文件子集；同时避免
+/// FileChange JSON 为每个文件重复携带完整 before/after 内容。
 pub(crate) async fn commit_input_analysis(
     app: &AppHandle,
     path: &str,
     input: &str,
 ) -> AppResult<SemanticCommitAnalysis> {
     let root = resolve_workdir(path)?;
-    let args = vec![
-        "diff".to_string(),
-        "--stdin".to_string(),
-        "--format".to_string(),
-        "json".to_string(),
-    ];
+    let args = COMMIT_DIFF_ARGS
+        .iter()
+        .map(|value| (*value).to_string())
+        .collect::<Vec<_>>();
     let output = run_sem_with_input(
         app,
         Some(&root),
@@ -327,27 +331,23 @@ fn range_label(change: &super::models::SemCliChange) -> String {
     }
 }
 
-fn render_change(change: &super::models::SemCliChange, path: &str, include_diff: bool) -> String {
-    let structural = match change.structural_change {
+fn structural_label(change: &super::models::SemCliChange) -> &'static str {
+    match change.structural_change {
         Some(true) => "structural",
         Some(false) => "cosmetic",
         None => "semantic",
-    };
-    let mut out = format!(
-        "- `{path}:{}` {} {} `{}` ({structural})",
+    }
+}
+
+fn render_change_metadata(change: &super::models::SemCliChange, path: &str) -> String {
+    format!(
+        "- `{path}:{}` {} {} `{}` ({})",
         range_label(change),
         change.change_type,
         change.entity_type,
         change.entity_name,
-    );
-    if include_diff {
-        if let Some(diff) = entity_unified_diff(change) {
-            out.push_str("\n```diff\n");
-            out.push_str(diff.trim_end());
-            out.push_str("\n```");
-        }
-    }
-    out
+        structural_label(change),
+    )
 }
 
 fn duplicate_key(change: &super::models::SemCliChange, path: &str) -> String {
@@ -400,6 +400,113 @@ fn should_include_entity_diff(index: usize, changes: &[&super::models::SemCliCha
     true
 }
 
+#[derive(Debug)]
+struct CommitMetadataEntry {
+    text: String,
+    entity_count: usize,
+}
+
+fn chunk_ranges_are_contiguous(
+    previous: &super::models::SemCliChange,
+    next: &super::models::SemCliChange,
+) -> bool {
+    let current_contiguous = previous.end_line > 0
+        && next.start_line > 0
+        && next.start_line <= previous.end_line.saturating_add(1);
+    let old_contiguous = match (
+        previous.old_end_line,
+        next.old_start_line,
+        previous.old_start_line,
+        next.old_end_line,
+    ) {
+        (Some(previous_end), Some(next_start), Some(_), Some(_)) => {
+            next_start <= previous_end.saturating_add(1)
+        }
+        (None, None, None, None) => true,
+        _ => false,
+    };
+    current_contiguous && old_contiguous
+}
+
+fn render_chunk_group(path: &str, changes: &[&super::models::SemCliChange]) -> CommitMetadataEntry {
+    if changes.len() == 1 {
+        return CommitMetadataEntry {
+            text: render_change_metadata(changes[0], path),
+            entity_count: 1,
+        };
+    }
+    let first = changes[0];
+    let last = changes[changes.len() - 1];
+    let current = format!("{}-{}", first.start_line, last.end_line);
+    let range = match (first.old_start_line, last.old_end_line) {
+        (Some(old_start), Some(old_end))
+            if old_start != first.start_line || old_end != last.end_line =>
+        {
+            format!("old {old_start}-{old_end} -> {current}")
+        }
+        _ => current,
+    };
+    CommitMetadataEntry {
+        text: format!(
+            "- `{path}:{range}` {} {} chunks `{}` ({})",
+            first.change_type,
+            changes.len(),
+            format!("lines {}-{}", first.start_line, last.end_line),
+            structural_label(first),
+        ),
+        entity_count: changes.len(),
+    }
+}
+
+fn metadata_entries_for_file(
+    path: &str,
+    changes: &[&super::models::SemCliChange],
+) -> Vec<CommitMetadataEntry> {
+    let mut entries = Vec::new();
+    let mut index = 0;
+    while index < changes.len() {
+        let current = changes[index];
+        if current.entity_type != "chunk" {
+            entries.push(CommitMetadataEntry {
+                text: render_change_metadata(current, path),
+                entity_count: 1,
+            });
+            index += 1;
+            continue;
+        }
+        let mut end = index + 1;
+        while end < changes.len() {
+            let previous = changes[end - 1];
+            let next = changes[end];
+            if next.entity_type != "chunk"
+                || next.change_type != current.change_type
+                || next.structural_change != current.structural_change
+                || !chunk_ranges_are_contiguous(previous, next)
+            {
+                break;
+            }
+            end += 1;
+        }
+        entries.push(render_chunk_group(path, &changes[index..end]));
+        index = end;
+    }
+    entries
+}
+
+fn char_len(value: &str) -> usize {
+    value.chars().count()
+}
+
+fn append_bounded(out: &mut String, separator: &str, piece: &str) -> bool {
+    let limit = COMMIT_SEMANTIC_MAX_CHARS - COMMIT_SEMANTIC_FOOTER_RESERVE;
+    if char_len(out) + char_len(separator) + char_len(piece) > limit {
+        return false;
+    }
+    out.push_str(separator);
+    out.push_str(piece);
+    true
+}
+
 fn render_commit_analysis(envelope: &SemCliEnvelope) -> SemanticCommitAnalysis {
     let mut covered_paths = HashSet::new();
     let mut seen = HashSet::new();
@@ -415,40 +522,120 @@ fn render_commit_analysis(envelope: &SemCliEnvelope) -> SemanticCommitAnalysis {
         }
     }
 
-    let mut sections = Vec::new();
-    for (path, changes) in by_file {
-        let entries = changes
-            .iter()
-            .enumerate()
-            .map(|(index, change)| {
-                render_change(change, &path, should_include_entity_diff(index, &changes))
-            })
-            .collect::<Vec<_>>();
-        sections.push(format!("### {path}\n{}", entries.join("\n")));
+    let mut metadata_by_file: BTreeMap<String, Vec<CommitMetadataEntry>> = BTreeMap::new();
+    for (path, changes) in &by_file {
+        metadata_by_file.insert(path.clone(), metadata_entries_for_file(path, changes));
     }
-
-    let mut binary_by_file: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for binary in &envelope.binary_changes {
         let path = normalized_sem_path(&binary.file_path);
         covered_paths.insert(path.clone());
         if let Some(old_path) = &binary.old_file_path {
             covered_paths.insert(normalized_sem_path(old_path));
         }
-        binary_by_file
+        metadata_by_file
             .entry(path.clone())
             .or_default()
-            .push(format!(
-                "- `{path}` binary {} ({})",
-                binary.file_status, binary.change_type
+            .push(CommitMetadataEntry {
+                text: format!(
+                    "- `{path}` binary {} ({})",
+                    binary.file_status, binary.change_type
+                ),
+                entity_count: 1,
+            });
+    }
+
+    let total_entities = metadata_by_file
+        .values()
+        .flatten()
+        .map(|entry| entry.entity_count)
+        .sum::<usize>();
+    let total_by_file = metadata_by_file
+        .iter()
+        .map(|(path, entries)| {
+            (
+                path.clone(),
+                entries
+                    .iter()
+                    .map(|entry| entry.entity_count)
+                    .sum::<usize>(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut included_by_file: BTreeMap<String, usize> = BTreeMap::new();
+    let mut started_files = HashSet::new();
+    let mut text = String::new();
+
+    for (path, entries) in &metadata_by_file {
+        for entry in entries {
+            let first_for_file = !started_files.contains(path);
+            let piece = if first_for_file {
+                format!("### {path}\n{}", entry.text)
+            } else {
+                entry.text.clone()
+            };
+            let separator = if text.is_empty() {
+                ""
+            } else if first_for_file {
+                "\n\n"
+            } else {
+                "\n"
+            };
+            if append_bounded(&mut text, separator, &piece) {
+                started_files.insert(path.clone());
+                *included_by_file.entry(path.clone()).or_default() += entry.entity_count;
+            }
+        }
+    }
+
+    let included_entities = included_by_file.values().sum::<usize>();
+    let omitted_entities = total_entities.saturating_sub(included_entities);
+    if omitted_entities > 0 {
+        let affected_files = total_by_file
+            .iter()
+            .filter(|(path, total)| included_by_file.get(*path).copied().unwrap_or(0) < **total)
+            .count();
+        text.push_str(&format!(
+            "\n\n[Semantic summary truncated: omitted {omitted_entities} of {total_entities} entities across {affected_files} files; {COMMIT_SEMANTIC_MAX_CHARS}-character budget.]"
+        ));
+    } else {
+        // 元数据完整后，再按预算加入最外层实体的具体 diff。多 chunk 文件只保留上面的聚合元数据，
+        // 避免固定窗口因少量插入发生整体位移时把整份锁文件/数据文件展开。
+        let mut omitted_diffs = 0usize;
+        for (path, changes) in &by_file {
+            let chunk_count = changes
+                .iter()
+                .filter(|change| change.entity_type == "chunk")
+                .count();
+            for (index, change) in changes.iter().enumerate() {
+                if (change.entity_type == "chunk" && chunk_count > 1)
+                    || !should_include_entity_diff(index, changes)
+                {
+                    continue;
+                }
+                let Some(diff) = entity_unified_diff(change) else {
+                    continue;
+                };
+                let detail = format!(
+                    "#### {path}: {} `{}`\n```diff\n{}\n```",
+                    change.entity_type,
+                    change.entity_name,
+                    diff.trim_end(),
+                );
+                if !append_bounded(&mut text, "\n\n", &detail) {
+                    omitted_diffs += 1;
+                }
+            }
+        }
+        if omitted_diffs > 0 {
+            text.push_str(&format!(
+                "\n\n[Detailed semantic diffs omitted for {omitted_diffs} entities due to the {COMMIT_SEMANTIC_MAX_CHARS}-character budget; metadata above is complete.]"
             ));
+        }
     }
-    for (path, entries) in binary_by_file {
-        sections.push(format!("### {path}\n{}", entries.join("\n")));
-    }
-    sections.sort();
+    debug_assert!(char_len(&text) <= COMMIT_SEMANTIC_MAX_CHARS);
 
     SemanticCommitAnalysis {
-        text: sections.join("\n\n"),
+        text,
         covered_paths,
     }
 }
@@ -537,18 +724,55 @@ mod tests {
     }
 
     #[test]
-    fn commit_analysis_has_no_entity_count_limit() {
+    fn commit_analysis_caps_large_entity_sets_with_explicit_omission() {
         let envelope = SemCliEnvelope {
             summary: Default::default(),
-            changes: (0..250)
+            changes: (0..1_000)
                 .map(|index| raw_change(&format!("entity_{index}"), "src/main.rs", "function"))
                 .collect(),
             binary_changes: vec![],
         };
         let analysis = render_commit_analysis(&envelope);
-        assert!(analysis.text.contains("entity_249"));
-        assert!(!analysis.text.contains("semantic summary truncated"));
+        assert!(char_len(&analysis.text) <= COMMIT_SEMANTIC_MAX_CHARS);
+        assert!(analysis.text.contains("Semantic summary truncated"));
+        assert!(analysis.text.contains("omitted"));
+        assert!(!analysis.text.contains("entity_999"));
         assert!(analysis.covered_paths.contains("src/main.rs"));
+    }
+
+    #[test]
+    fn commit_analysis_groups_contiguous_chunks() {
+        let mut changes = (0..3)
+            .map(|index| {
+                raw_change(
+                    &format!("lines {}-{}", index * 20 + 1, index * 20 + 20),
+                    "data.txt",
+                    "chunk",
+                )
+            })
+            .collect::<Vec<_>>();
+        for (index, change) in changes.iter_mut().enumerate() {
+            change.start_line = index * 20 + 1;
+            change.end_line = index * 20 + 20;
+            change.old_start_line = Some(change.start_line);
+            change.old_end_line = Some(change.end_line);
+        }
+        let envelope = SemCliEnvelope {
+            summary: Default::default(),
+            changes,
+            binary_changes: vec![],
+        };
+        let analysis = render_commit_analysis(&envelope);
+        assert!(analysis.text.contains("modified 3 chunks `lines 1-60`"));
+        assert!(!analysis.text.contains("lines 21-40` ("));
+    }
+
+    #[test]
+    fn commit_analysis_uses_patch_and_filters_cosmetics() {
+        assert_eq!(
+            COMMIT_DIFF_ARGS,
+            &["diff", "--patch", "--format", "json", "--no-cosmetics"]
+        );
     }
 
     #[test]

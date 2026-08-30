@@ -32,7 +32,7 @@ pub(super) fn folder_name(project_path: &str) -> String {
     format!("{base}-{:08x}", fnv1a64(&clean) as u32)
 }
 
-pub(super) fn wiki_dir_in(root: &Path, project_path: &str) -> PathBuf {
+pub(crate) fn wiki_dir_in(root: &Path, project_path: &str) -> PathBuf {
     root.join(folder_name(project_path))
 }
 

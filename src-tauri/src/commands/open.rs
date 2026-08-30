@@ -509,7 +509,12 @@ fn find_git_bash() -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
-pub fn spawn_terminal(path: &str, _title: &str, command: Option<&str>, _shell: ShellKind) -> AppResult<()> {
+pub fn spawn_terminal(
+    path: &str,
+    _title: &str,
+    command: Option<&str>,
+    _shell: ShellKind,
+) -> AppResult<()> {
     let command = flatten_multiline(command, "; ");
     let command = command.as_deref();
     let inner = match command {
@@ -652,7 +657,12 @@ pub fn open_with(app: AppHandle, path: String, kind: EditorKind) -> AppResult<()
 /// 与 open_with 的区别:允许文件路径;行号语法按各编辑器 CLI 约定构造,
 /// 不支持行号的编辑器降级为仅打开文件;explorer 选中文件、terminal 在父目录开终端
 #[tauri::command]
-pub fn open_in_editor(app: AppHandle, path: String, kind: EditorKind, line: Option<u32>) -> AppResult<()> {
+pub fn open_in_editor(
+    app: AppHandle,
+    path: String,
+    kind: EditorKind,
+    line: Option<u32>,
+) -> AppResult<()> {
     let p = std::path::Path::new(&path);
     if !p.exists() {
         return Err(AppError::coded(ErrorCode::InvalidPath, path));
@@ -898,7 +908,13 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn start_cmdline_without_command() {
-        let s = build_start_cmdline(r"D:\code\foo bar", "Terminal", None, ShellKind::Cmd, cmd_tools());
+        let s = build_start_cmdline(
+            r"D:\code\foo bar",
+            "Terminal",
+            None,
+            ShellKind::Cmd,
+            cmd_tools(),
+        );
         assert_eq!(s, r#"/C start "Terminal" cmd /K "cd /d "D:\code\foo bar"""#);
     }
 
@@ -931,7 +947,13 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn wt_args_without_command() {
-        let args = build_wt_args(r"D:\code\foo bar", "Terminal", None, ShellKind::Cmd, cmd_tools());
+        let args = build_wt_args(
+            r"D:\code\foo bar",
+            "Terminal",
+            None,
+            ShellKind::Cmd,
+            cmd_tools(),
+        );
         assert_eq!(args, ["--title", "Terminal", "-d", r"D:\code\foo bar"]);
     }
 
@@ -1025,7 +1047,10 @@ mod tests {
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(b64)
             .unwrap();
-        assert_eq!(String::from_utf8(decoded).unwrap(), "npm run dev; exec bash");
+        assert_eq!(
+            String::from_utf8(decoded).unwrap(),
+            "npm run dev; exec bash"
+        );
         // 不带命令时仅开交互式 bash,无需编码
         let args = build_wt_args(r"D:\p", "t", None, ShellKind::GitBash, tools);
         assert_eq!(args[4..], [bash, "--login", "-i"]);
@@ -1183,10 +1208,7 @@ mod tests {
         );
         assert_eq!(ShellKind::from_setting(Some("cmd".into())), ShellKind::Cmd);
         assert_eq!(ShellKind::from_setting(None), ShellKind::Cmd);
-        assert_eq!(
-            ShellKind::from_setting(Some("zsh".into())),
-            ShellKind::Cmd
-        );
+        assert_eq!(ShellKind::from_setting(Some("zsh".into())), ShellKind::Cmd);
     }
 
     #[cfg(windows)]

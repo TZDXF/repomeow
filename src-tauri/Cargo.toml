@@ -1,5 +1,6 @@
 [package]
 name = "repomeow"
+default-run = "repomeow"
 version = "0.1.16"
 description = "A Tauri App"
 authors = ["you"]
@@ -72,6 +73,8 @@ futures = "0.3"
 # agent CLI 安装探测(Windows 正确处理 PATHEXT/.cmd)
 which = "7"
 similar = "2"
+# MCP 对外服务：首版通过 stdio 提供代码提交与 Wiki 目录查询。
+rmcp = { version = "3.1.4", features = ["server", "transport-io"] }
 
 [dev-dependencies]
 urlpattern = "0.3"
