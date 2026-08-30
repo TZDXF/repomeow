@@ -29,19 +29,19 @@ pub enum WikiGenerationBackend {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateWikiRequest {
-    pub(super) run_id: String,
-    pub(super) project_path: String,
-    pub(super) project_name: String,
-    pub(super) language: String,
-    pub(super) concurrency: usize,
+    pub(crate) run_id: String,
+    pub(crate) project_path: String,
+    pub(crate) project_name: String,
+    pub(crate) language: String,
+    pub(crate) concurrency: usize,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegenerateWikiPageRequest {
-    pub(super) run_id: String,
-    pub(super) project_path: String,
-    pub(super) language: String,
+    pub(crate) run_id: String,
+    pub(crate) project_path: String,
+    pub(crate) language: String,
     pub(super) page: wiki::WikiOutlinePage,
     #[serde(default)]
     pub(super) changed_files: Vec<String>,
@@ -50,11 +50,11 @@ pub struct RegenerateWikiPageRequest {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateWikiRequest {
-    pub(super) run_id: String,
-    pub(super) project_path: String,
-    pub(super) language: String,
+    pub(crate) run_id: String,
+    pub(crate) project_path: String,
+    pub(crate) language: String,
     #[serde(default)]
-    pub(super) automatic: bool,
+    pub(crate) automatic: bool,
 }
 
 #[derive(Serialize)]
@@ -74,7 +74,7 @@ pub struct WikiUpdateEvent {
 #[derive(Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WikiUpdateResult {
-    pub(super) updated_page_ids: Vec<String>,
+    pub(crate) updated_page_ids: Vec<String>,
 }
 
 #[derive(Clone, Serialize)]

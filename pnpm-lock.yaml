@@ -113,6 +113,9 @@ importers:
       echarts:
         specifier: ^6.1.0
         version: 6.1.0
+      nanoid:
+        specifier: ^6.0.1
+        version: 6.0.1
       pinia:
         specifier: ^4.0.2
         version: 4.0.2(@vue/devtools-api@8.1.5)(typescript@5.9.3)(vue@3.5.40(typescript@5.9.3))
@@ -149,6 +152,9 @@ importers:
       vue-sonner:
         specifier: ^2.0.9
         version: 2.0.9
+      vue-stick-to-bottom:
+        specifier: ^1.0.1
+        version: 1.0.1(vue@3.5.40(typescript@5.9.3))
       vue-stream-markdown:
         specifier: ^1.0.1
         version: 1.0.1(beautiful-mermaid@1.1.3)(katex@0.16.47)(mermaid@11.16.0)(micromark@4.0.0)(shiki@4.3.1)(vue@3.5.40(typescript@5.9.3))
@@ -742,8 +748,8 @@ packages:
   '@jridgewell/sourcemap-codec@1.5.0':
     resolution: {integrity: sha512-gv3ZRaISU3fjPAgNsriBRqGWQL6quFx04YMPW/zD8XMLsU32mhCCbfbO6KZFLjvYpCZ8zyDEgqsgf+PwPaM7GQ==}
 
-  '@jridgewell/sourcemap-codec@1.5.5':
-    resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
+  '@jridgewell/sourcemap-codec@1.6.0':
+    resolution: {integrity: sha512-T7jf+5zgsZHwNJ4lvQ7/aezbyk0nNX+zJVWpmHA7VYsEx7a7qr5Rg5IbtJFqkgze5Y2sruq1RUY8Q837Od7iFw==}
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
@@ -3355,6 +3361,11 @@ packages:
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
+  nanoid@6.0.1:
+    resolution: {integrity: sha512-3wVS3i51pE2pi1k5FFL/95BGfVS0kSsvDVuGXHOtxox/TywUmtgq+3qiTOTbs9J7KfHaXPiN171k/A6dBnaXFw==}
+    engines: {node: ^22 || ^24 || >=26}
+    hasBin: true
+
   natural-compare@1.4.0:
     resolution: {integrity: sha512-OWND8ei3VtNC9h7V60qff3SVobHr996CTwgxubgyQYEpg290h9J0buyECNNJexkFm5sOajh5G116RYA1c8ZMSw==}
 
@@ -4273,6 +4284,12 @@ packages:
       nuxt:
         optional: true
 
+  vue-stick-to-bottom@1.0.1:
+    resolution: {integrity: sha512-RuT83MqGsQuBwCYq3KOlsXIz9u2ITE5iToJyM6iOOT17gvxaCjgU6lvOCjbRNVwejy7KxSy5EZG9UOuR+WkEVA==}
+    engines: {node: '>=22.22.0', pnpm: '>=11.15.1'}
+    peerDependencies:
+      vue: '>=3.3.0'
+
   vue-stream-markdown@1.0.1:
     resolution: {integrity: sha512-aQvxvimdqjLz0czk2eh3XeDYIQNTuJf7eTntbVJEihwNQ9rECjKtucsoKnIQOpK+cuouRubYkCzW1zpzsoF3Ew==}
     peerDependencies:
@@ -4992,7 +5009,7 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.0': {}
 
-  '@jridgewell/sourcemap-codec@1.5.5': {}
+  '@jridgewell/sourcemap-codec@1.6.0': {}
 
   '@jridgewell/trace-mapping@0.3.31':
     dependencies:
@@ -7221,7 +7238,7 @@ snapshots:
 
   magic-string@0.30.21:
     dependencies:
-      '@jridgewell/sourcemap-codec': 1.5.5
+      '@jridgewell/sourcemap-codec': 1.6.0
 
   make-asynchronous@1.1.0:
     dependencies:
@@ -7702,6 +7719,8 @@ snapshots:
   muggle-string@0.4.1: {}
 
   nanoid@3.3.16: {}
+
+  nanoid@6.0.1: {}
 
   natural-compare@1.4.0: {}
 
@@ -8719,6 +8738,10 @@ snapshots:
       - webpack
 
   vue-sonner@2.0.9: {}
+
+  vue-stick-to-bottom@1.0.1(vue@3.5.40(typescript@5.9.3)):
+    dependencies:
+      vue: 3.5.40(typescript@5.9.3)
 
   vue-stream-markdown@1.0.1(beautiful-mermaid@1.1.3)(katex@0.16.47)(mermaid@11.16.0)(micromark@4.0.0)(shiki@4.3.1)(vue@3.5.40(typescript@5.9.3)):
     dependencies:

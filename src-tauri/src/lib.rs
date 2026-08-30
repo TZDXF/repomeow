@@ -1,3 +1,4 @@
+mod agent;
 mod ai;
 mod background_task;
 mod commands;
@@ -286,6 +287,9 @@ pub fn run() {
             commands::usage::get_ai_usage_summary,
             commands::usage::list_ai_usage_log,
             commands::usage::clear_ai_usage_log,
+            commands::chat::chat_send,
+            commands::chat::chat_abort,
+            commands::chat::chat_new_session,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

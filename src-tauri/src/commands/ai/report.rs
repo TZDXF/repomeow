@@ -32,22 +32,22 @@ pub struct ReportProjectCommits {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateAndSaveReportRequest {
-    run_id: String,
-    project_ids: Vec<i64>,
-    date_from: String,
-    date_to: String,
-    range_label: String,
-    author_mode: String,
-    language: String,
-    period_type: String,
+    pub(crate) run_id: String,
+    pub(crate) project_ids: Vec<i64>,
+    pub(crate) date_from: String,
+    pub(crate) date_to: String,
+    pub(crate) range_label: String,
+    pub(crate) author_mode: String,
+    pub(crate) language: String,
+    pub(crate) period_type: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GeneratedReport {
-    history_id: i64,
-    result: String,
-    commit_data: Vec<ReportProjectCommits>,
+    pub(crate) history_id: i64,
+    pub(crate) result: String,
+    pub(crate) commit_data: Vec<ReportProjectCommits>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]

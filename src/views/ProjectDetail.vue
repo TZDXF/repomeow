@@ -21,6 +21,7 @@ import GitStatusBar from "@/components/git/GitStatusBar.vue";
 import GitRemoteLink from "@/components/git/GitRemoteLink.vue";
 import WorktreePanel from "@/components/git/WorktreePanel.vue";
 import WorktreeSwitcher from "@/components/git/WorktreeSwitcher.vue";
+import ChatDock from "@/components/chat/ChatDock.vue";
 import OpenWithMenu from "@/components/open/OpenWithMenu.vue";
 import DockerCompose from "@/components/project/DockerCompose.vue";
 import SpringBootCard from "@/components/java/SpringBootCard.vue";
@@ -384,6 +385,7 @@ async function saveDesc() {
       :active-path="activeWorktreePath"
       @changed="onWorktreeChanged"
     />
+    <ChatDock v-if="project.path_exists" :project="worktreeProject ?? project" />
   </div>
 
   <div

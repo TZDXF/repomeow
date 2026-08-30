@@ -88,7 +88,7 @@ pub fn load_config(app: &AppHandle) -> AiConfig {
     .normalized()
 }
 
-fn client(config: &AiConfig, require_model: bool) -> AppResult<OpenAiClient> {
+pub(crate) fn client(config: &AiConfig, require_model: bool) -> AppResult<OpenAiClient> {
     config.validate(require_model)?;
     let sdk_config = OpenAIConfig::new()
         .with_api_base(config.ai_base_url.clone())

@@ -1,0 +1,602 @@
+//! 项目问答(chat)Tauri 命令层。
+//!
+//! 前端经 `chat_send` 发送消息,Rust 侧用 pi Agent(OpenAI 兼容流 + RepoMeow
+//! 工具集)跑完整个对话回合,经 `Channel<ChatEvent>` 回推增量事件;会话按
+//! 项目路径隔离,跨消息保留上下文。`chat_abort` 取消进行中的回合,
+//! `chat_new_session` 丢弃会话上下文。每次 `chat_send` 结束后把聚合的
+//! token 用量写入 `ai_usage_log`(task_type = "chat")。
+//!
+//! 对 pi 运行时(并行实现中)的对齐假设,最终由主智能体核对:
+//! 1. `crate::agent::Agent`(在 `agent/mod.rs` 根 re-export,蓝本
+//!    packages/agent/src/agent.ts):
+//!    - `Agent::new(state: AgentState, config: AgentLoopConfig, stream_fn: StreamFn) -> Agent`
+//!      (TS 里 streamFn 与 initialState/config 同为构造选项)
+//!    - `fn subscribe(&self, listener: AgentListener)`(会话内订阅一次,随会话存活)
+//!    - `async fn prompt(&self, message: AgentMessage) -> Result<T, E>`(E: Display;
+//!      运行期失败走事件/最终消息的 stopReason,本返回值只承载致命错误)
+//!    - `fn abort(&self)`(取消当前运行;无运行时为空操作)
+//! 2. `crate::agent::llm::openai_completions::stream_openai_completions(model, context,
+//!    options: Option<SimpleStreamOptions>, signal: Option<CancellationToken>)
+//!    -> AssistantMessageEventStream`(失败编码进流)。
+
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Instant;
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use tauri::ipc::Channel;
+use tauri::{AppHandle, State};
+use tokio_util::sync::CancellationToken;
+
+use crate::agent::chat_tools::{chat_tools, ChatToolContext};
+use crate::agent::llm::event_stream::event_stream;
+use crate::agent::llm::openai_completions::stream_openai_completions;
+use crate::agent::llm::{
+    AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, Model,
+    ModelThinkingLevel, SimpleStreamOptions, StopReason, Usage, API_OPENAI_COMPLETIONS,
+};
+use crate::agent::types::{
+    AgentEvent, AgentListener, AgentLoopConfig, AgentMessage, AgentState, AgentToolResult,
+    ConvertToLlmFn, Message, StreamFn, TextOrImageContent, ToolExecutionMode, TypedMessage,
+};
+use crate::agent::Agent;
+use crate::ai::sdk;
+use crate::commands::usage::insert_usage_row;
+use crate::db::Db;
+use crate::error::{AppError, AppResult, ErrorCode};
+use crate::models::AiUsageRecord;
+use crate::path_util::clean_str;
+use crate::time_util::{now_ts, now_ts_nanos};
+
+// ── 前端事件契约 ─────────────────────────────────────────────────────
+
+/// 问答回合事件流(tag = "kind",字段 camelCase,与前端 chat 面板对齐)。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum ChatEvent {
+    /// assistant 正文增量(思考增量第一版不透传)。
+    TextDelta { delta: String },
+    /// 工具开始执行。
+    ToolCall {
+        id: String,
+        name: String,
+        args: Value,
+    },
+    /// 工具执行结束(summary 为结果文本摘要,截 300 字符)。
+    ToolResult {
+        id: String,
+        ok: bool,
+        summary: String,
+    },
+    /// 一个回合(一次 LLM 调用 + 工具执行)结束。
+    TurnEnd,
+    /// 回合正常结束,携带整个 prompt 的聚合用量。
+    Done {
+        usage: Option<ChatUsageSummary>,
+    },
+    /// 失败/取消;code 取既有 ErrorCode 字符串。
+    Error { code: String, message: String },
+}
+
+/// 一次 chat_send 的聚合 token 用量。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatUsageSummary {
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub total_tokens: i64,
+    pub cached_tokens: Option<i64>,
+    pub cost_total: Option<f64>,
+}
+
+// ── 会话与运行注册表 ─────────────────────────────────────────────────
+
+/// 会话注册表:按 clean_str 后的项目路径隔离,一次只保留一份对话上下文。
+static CHAT_SESSIONS: OnceLock<Mutex<HashMap<String, ChatSession>>> = OnceLock::new();
+
+/// 运行注册表:run_id → (取消令牌, 会话键),供 chat_abort / chat_new_session
+/// 取消进行中的回合。注意:commands/ai/run.rs 的 RegisteredRun 是 pub(super),
+/// chat 模块无法复用,故本地等价实现;若主智能体把它提升为 pub(crate),
+/// 可改为共用 AI_RUNS 让 ai_cancel_run 一并取消 chat 运行。
+static CHAT_RUNS: OnceLock<Mutex<HashMap<String, (CancellationToken, String)>>> = OnceLock::new();
+
+fn chat_sessions() -> &'static Mutex<HashMap<String, ChatSession>> {
+    CHAT_SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn chat_runs() -> &'static Mutex<HashMap<String, (CancellationToken, String)>> {
+    CHAT_RUNS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 每回合取消令牌的槽位:streamFn 在会话构建时捕获本槽,回合开始时写入
+/// 新令牌(令牌不可重置,必须每回合换新),结束时清空。
+#[derive(Clone, Default)]
+struct CancelCell(Arc<Mutex<Option<CancellationToken>>>);
+
+impl CancelCell {
+    fn set(&self, token: CancellationToken) {
+        *self.0.lock().unwrap() = Some(token);
+    }
+
+    fn clear(&self) {
+        *self.0.lock().unwrap() = None;
+    }
+
+    fn get(&self) -> Option<CancellationToken> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+/// 事件汇:监听器在会话构建时捕获本槽,回合开始时放入本次 chat_send 的
+/// Channel,结束时取出,保证事件始终发给当前调用方。
+type EventSink = Arc<Mutex<Option<Channel<ChatEvent>>>>;
+
+fn sink_send(sink: &EventSink, event: ChatEvent) {
+    if let Some(channel) = sink.lock().unwrap().as_ref() {
+        let _ = channel.send(event);
+    }
+}
+
+/// 一个项目的问答会话(全部字段 Arc 化,可整体 Clone 快照)。
+#[derive(Clone)]
+struct ChatSession {
+    agent: Arc<Agent>,
+    cancel_cell: CancelCell,
+    sink: EventSink,
+    /// 监听器累计的本次回合用量(回合开始时清零)。
+    usage: Arc<Mutex<Usage>>,
+    busy: Arc<AtomicBool>,
+    run_id: Arc<Mutex<String>>,
+}
+
+/// chat_send 期间注册在 CHAT_RUNS 的守卫,Drop 时移除。
+struct RegisteredChatRun {
+    id: String,
+    token: CancellationToken,
+}
+
+impl RegisteredChatRun {
+    fn new(id: String, session_key: String) -> Self {
+        let token = CancellationToken::new();
+        chat_runs()
+            .lock()
+            .unwrap()
+            .insert(id.clone(), (token.clone(), session_key));
+        Self { id, token }
+    }
+}
+
+impl Drop for RegisteredChatRun {
+    fn drop(&mut self) {
+        chat_runs().lock().unwrap().remove(&self.id);
+    }
+}
+
+// ── Tauri 命令 ───────────────────────────────────────────────────────
+
+/// 发送一条用户消息并跑完整个 agent 回合(可能多轮 LLM 调用 + 工具执行)。
+/// 返回聚合用量;增量事件经 on_event 推送。
+#[tauri::command]
+pub async fn chat_send(
+    app: AppHandle,
+    db: State<'_, Db>,
+    run_id: String,
+    project_path: String,
+    project_name: String,
+    message: String,
+    on_event: Channel<ChatEvent>,
+) -> AppResult<Option<ChatUsageSummary>> {
+    let session_key = clean_str(&project_path);
+    let existing = chat_sessions().lock().unwrap().get(&session_key).cloned();
+    let session = match existing {
+        Some(session) => session,
+        None => {
+            let session = build_session(&app, &db, &project_path, &project_name)?;
+            chat_sessions()
+                .lock()
+                .unwrap()
+                .entry(session_key.clone())
+                .or_insert(session)
+                .clone()
+        }
+    };
+
+    if session
+        .busy
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return Err(AppError::coded(
+            ErrorCode::AiRequestFailed,
+            "chat_busy: agent is already processing",
+        ));
+    }
+
+    let started = Instant::now();
+    let run = RegisteredChatRun::new(run_id.clone(), session_key);
+    session.cancel_cell.set(run.token.clone());
+    session.sink.lock().unwrap().replace(on_event.clone());
+    *session.run_id.lock().unwrap() = run_id;
+    *session.usage.lock().unwrap() = Usage::zero();
+
+    let outcome = session
+        .agent
+        .prompt(AgentMessage::user_text(
+            message,
+            now_ts_nanos() / 1_000_000,
+        ))
+        .await;
+    let usage_snapshot = session.usage.lock().unwrap().clone();
+    let duration_ms = started.elapsed().as_millis() as i64;
+    let cancelled = run.token.is_cancelled();
+    drop(run);
+    session.cancel_cell.clear();
+    session.sink.lock().unwrap().take();
+    session.busy.store(false, Ordering::SeqCst);
+
+    record_chat_usage(&db, &app, &usage_snapshot, duration_ms);
+    let summary = usage_to_summary(&usage_snapshot);
+
+    match (outcome, cancelled) {
+        (Ok(_), false) => {
+            let _ = on_event.send(ChatEvent::Done {
+                usage: Some(summary.clone()),
+            });
+            Ok(Some(summary))
+        }
+        (_, true) => {
+            // 中止:用量照常返回/落库(token 已消耗),前端以 Error 事件收尾。
+            let _ = on_event.send(ChatEvent::Error {
+                code: ErrorCode::AgentCanceled.as_str().to_string(),
+                message: "chat aborted".to_string(),
+            });
+            Ok(Some(summary))
+        }
+        (Err(error), false) => {
+            let detail = error.to_string();
+            let _ = on_event.send(ChatEvent::Error {
+                code: ErrorCode::AiRequestFailed.as_str().to_string(),
+                message: detail.clone(),
+            });
+            Err(AppError::coded(ErrorCode::AiRequestFailed, detail))
+        }
+    }
+}
+
+/// 取消一次进行中的问答回合(run_id 为 chat_send 的入参)。幂等。
+#[tauri::command]
+pub async fn chat_abort(run_id: String) -> AppResult<()> {
+    let registered = chat_runs().lock().unwrap().get(&run_id).cloned();
+    if let Some((token, session_key)) = registered {
+        token.cancel();
+        let session = chat_sessions().lock().unwrap().get(&session_key).cloned();
+        if let Some(session) = session {
+            session.agent.abort();
+        }
+    }
+    Ok(())
+}
+
+/// 丢弃某项目的会话上下文(下一条消息从零开始)。若该会话回合仍在跑,
+/// 先取消再移除。
+#[tauri::command]
+pub async fn chat_new_session(project_path: String) -> AppResult<()> {
+    let session_key = clean_str(&project_path);
+    let removed = chat_sessions().lock().unwrap().remove(&session_key);
+    if let Some(session) = removed {
+        let run_id = session.run_id.lock().unwrap().clone();
+        let token = chat_runs()
+            .lock()
+            .unwrap()
+            .get(&run_id)
+            .map(|(token, _)| token.clone());
+        if let Some(token) = token {
+            token.cancel();
+        }
+        session.agent.abort();
+    }
+    Ok(())
+}
+
+// ── 会话构建 ─────────────────────────────────────────────────────────
+
+fn build_session(
+    app: &AppHandle,
+    db: &Db,
+    project_path: &str,
+    project_name: &str,
+) -> AppResult<ChatSession> {
+    let config = sdk::load_config(app);
+    config.validate(true)?;
+    let model = Model::from_settings(config.ai_model.clone(), config.ai_base_url.clone());
+    let context = ChatToolContext {
+        project_path: project_path.to_string(),
+        project_name: project_name.to_string(),
+        project_id: lookup_project_id(db, project_path),
+        worktree_path: None,
+    };
+    let state = AgentState {
+        system_prompt: build_system_prompt(project_name, project_path),
+        model: model.clone(),
+        thinking_level: ModelThinkingLevel::Off,
+        tools: chat_tools(app.clone(), context),
+        messages: Vec::new(),
+        is_streaming: false,
+        streaming_message: None,
+        pending_tool_calls: HashSet::new(),
+        error_message: None,
+    };
+    let loop_config = AgentLoopConfig {
+        model: model.clone(),
+        stream: SimpleStreamOptions {
+            api_key: Some(config.ai_api_key.clone()),
+            ..Default::default()
+        },
+        convert_to_llm: default_convert_to_llm(),
+        transform_context: None,
+        get_api_key: None,
+        should_stop_after_turn: None,
+        prepare_next_turn: None,
+        get_steering_messages: None,
+        get_follow_up_messages: None,
+        tool_execution: ToolExecutionMode::Parallel,
+        before_tool_call: None,
+        after_tool_call: None,
+    };
+    let cancel_cell = CancelCell::default();
+    let agent = Arc::new(Agent::new(
+        state,
+        loop_config,
+        chat_stream_fn(app.clone(), cancel_cell.clone()),
+    ));
+    let session = ChatSession {
+        agent,
+        cancel_cell,
+        sink: Arc::new(Mutex::new(None)),
+        usage: Arc::new(Mutex::new(Usage::zero())),
+        busy: Arc::new(AtomicBool::new(false)),
+        run_id: Arc::new(Mutex::new(String::new())),
+    };
+    // 订阅一次,随会话存活;事件经 sink 槽转发给当前 chat_send 的 Channel。
+    session
+        .agent
+        .subscribe(chat_event_listener(session.usage.clone(), session.sink.clone()));
+    Ok(session)
+}
+
+/// 系统提示:内置模板 + 项目上下文占位替换。
+fn build_system_prompt(project_name: &str, project_path: &str) -> String {
+    include_str!("../ai/prompts/chat-system.md")
+        .replace("{{PROJECT_NAME}}", project_name)
+        .replace("{{PROJECT_PATH}}", project_path)
+}
+
+/// projects 表按 path 查主键(未登记返回 None;路径按 clean_str 归一化)。
+fn lookup_project_id(db: &Db, project_path: &str) -> Option<i64> {
+    let conn = db.0.lock().ok()?;
+    conn.query_row(
+        "SELECT id FROM projects WHERE path = ?1",
+        [clean_str(project_path)],
+        |row| row.get::<_, i64>(0),
+    )
+    .ok()
+}
+
+/// 对齐 agent.ts defaultConvertToLlm:已知 role 原样转换,Custom 全滤。
+fn default_convert_to_llm() -> ConvertToLlmFn {
+    Arc::new(|messages: Vec<AgentMessage>| {
+        Box::pin(async move {
+            messages
+                .into_iter()
+                .filter_map(|message| match message {
+                    AgentMessage::Message(typed) => Some(match typed {
+                        TypedMessage::User(user) => Message::User(user),
+                        TypedMessage::Assistant(assistant) => Message::Assistant(assistant),
+                        TypedMessage::ToolResult(result) => Message::ToolResult(result),
+                    }),
+                    AgentMessage::Custom(_) => None,
+                })
+                .collect::<Vec<_>>()
+        })
+    })
+}
+
+/// StreamFn 包装:每次 LLM 调用时重读应用 AI 配置(模型/密钥可热更新),
+/// 配置缺失时按流契约把失败编码进事件流,绝不 panic。
+fn chat_stream_fn(app: AppHandle, cancel_cell: CancelCell) -> StreamFn {
+    Arc::new(move |model, context, options| {
+        let app = app.clone();
+        let cancel_cell = cancel_cell.clone();
+        let fallback_model = model;
+        Box::pin(async move {
+            let signal = cancel_cell.get();
+            match load_stream_model(&app) {
+                Ok((model, api_key)) => {
+                    let base = options.unwrap_or_default();
+                    let options = SimpleStreamOptions {
+                        api_key: Some(api_key),
+                        ..base
+                    };
+                    stream_openai_completions(model, context, Some(options), signal)
+                }
+                Err(error) => error_event_stream(&fallback_model, &error.to_string()),
+            }
+        })
+    })
+}
+
+/// 读取应用 AI 配置并构造模型;要求已配置模型。
+fn load_stream_model(app: &AppHandle) -> AppResult<(Model, String)> {
+    let config = sdk::load_config(app);
+    config.validate(true)?;
+    Ok((
+        Model::from_settings(config.ai_model.clone(), config.ai_base_url.clone()),
+        config.ai_api_key,
+    ))
+}
+
+/// 配置不可用时的合成错误流(先 start 后 error,终值为错误消息)。
+fn error_event_stream(model: &Model, message: &str) -> AssistantMessageEventStream {
+    let (stream, writer) = event_stream::<AssistantMessageEvent, AssistantMessage>();
+    let error = error_assistant_message(model, message);
+    writer.push(AssistantMessageEvent::Start {
+        partial: error.clone(),
+    });
+    writer.push(AssistantMessageEvent::Error {
+        reason: StopReason::Error,
+        error: error.clone(),
+    });
+    writer.end(error);
+    stream
+}
+
+fn error_assistant_message(model: &Model, message: &str) -> AssistantMessage {
+    AssistantMessage {
+        role: "assistant".to_string(),
+        content: Vec::new(),
+        api: API_OPENAI_COMPLETIONS.to_string(),
+        provider: "custom".to_string(),
+        model: model.id.clone(),
+        response_model: None,
+        response_id: None,
+        usage: Usage::zero(),
+        stop_reason: StopReason::Error,
+        error_message: Some(message.to_string()),
+        raw_stop_reason: None,
+        end_turn: None,
+        timestamp: now_ts_nanos() / 1_000_000,
+    }
+}
+
+// ── 事件监听与用量聚合 ───────────────────────────────────────────────
+
+/// AgentEvent → ChatEvent 映射监听器:
+/// - TextDelta → TextDelta(thinking/toolcall 增量不透传,由 tool_execution_* 表达)
+/// - tool_execution_start/end → ToolCall / ToolResult
+/// - TurnEnd → TurnEnd
+/// - MessageEnd(assistant)→ 累计 usage;stopReason=error 时发 Error 事件
+fn chat_event_listener(usage: Arc<Mutex<Usage>>, sink: EventSink) -> AgentListener {
+    Arc::new(move |event: AgentEvent, _signal: CancellationToken| {
+        // 闭包是 Fn(可能被多次调用),Arc 按次克隆进 async 块
+        let usage = usage.clone();
+        let sink = sink.clone();
+        Box::pin(async move {
+            match event {
+                AgentEvent::MessageUpdate {
+                    assistant_message_event,
+                    ..
+                } => match assistant_message_event {
+                    AssistantMessageEvent::TextDelta { delta, .. } => {
+                        sink_send(&sink, ChatEvent::TextDelta { delta });
+                    }
+                    // ThinkingDelta 第一版不透传;toolcall_* 由工具执行事件表达
+                    _ => {}
+                },
+                AgentEvent::ToolExecutionStart {
+                    tool_call_id,
+                    tool_name,
+                    args,
+                } => {
+                    sink_send(
+                        &sink,
+                        ChatEvent::ToolCall {
+                            id: tool_call_id,
+                            name: tool_name,
+                            args,
+                        },
+                    );
+                }
+                AgentEvent::ToolExecutionEnd {
+                    tool_call_id,
+                    result,
+                    is_error,
+                    ..
+                } => {
+                    sink_send(
+                        &sink,
+                        ChatEvent::ToolResult {
+                            id: tool_call_id,
+                            ok: !is_error,
+                            summary: truncate_chars(&tool_result_text(&result), 300),
+                        },
+                    );
+                }
+                AgentEvent::TurnEnd { .. } => sink_send(&sink, ChatEvent::TurnEnd),
+                AgentEvent::MessageEnd { message } => {
+                    if let AgentMessage::Message(TypedMessage::Assistant(assistant)) = message {
+                        usage.lock().unwrap().add(&assistant.usage);
+                        if assistant.stop_reason == StopReason::Error {
+                            let detail = assistant
+                                .error_message
+                                .clone()
+                                .unwrap_or_else(|| "unknown error".to_string());
+                            sink_send(
+                                &sink,
+                                ChatEvent::Error {
+                                    code: ErrorCode::AiRequestFailed.as_str().to_string(),
+                                    message: detail,
+                                },
+                            );
+                        }
+                    }
+                }
+                _ => {}
+            }
+        })
+    })
+}
+
+fn tool_result_text(result: &AgentToolResult) -> String {
+    result
+        .content
+        .iter()
+        .filter_map(|block| match block {
+            TextOrImageContent::Text { text, .. } => Some(text.as_str()),
+            TextOrImageContent::Image { .. } => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let cut: String = text.chars().take(max_chars).collect();
+    format!("{cut}…")
+}
+
+fn usage_to_summary(usage: &Usage) -> ChatUsageSummary {
+    let total = if usage.total_tokens > 0 {
+        usage.total_tokens
+    } else {
+        usage.input + usage.output
+    };
+    ChatUsageSummary {
+        input_tokens: usage.input,
+        output_tokens: usage.output,
+        total_tokens: total,
+        cached_tokens: (usage.cache_read > 0).then_some(usage.cache_read),
+        cost_total: (usage.cost.total > 0.0).then_some(usage.cost.total),
+    }
+}
+
+/// 聚合用量落库(task_type = "chat");token 列可空(计入调用次数)。
+fn record_chat_usage(db: &Db, app: &AppHandle, usage: &Usage, duration_ms: i64) {
+    let record = AiUsageRecord {
+        task_type: "chat".to_string(),
+        model: sdk::load_config(app).ai_model,
+        input_tokens: (usage.input > 0).then_some(usage.input),
+        output_tokens: (usage.output > 0).then_some(usage.output),
+        total_tokens: (usage.total_tokens > 0).then_some(usage.total_tokens),
+        duration_ms: Some(duration_ms),
+        cached_tokens: (usage.cache_read > 0).then_some(usage.cache_read),
+    };
+    if let Ok(conn) = db.0.lock() {
+        if let Err(error) = insert_usage_row(&conn, &record, now_ts()) {
+            eprintln!("[chat] 记录 AI 用量失败: {error}");
+        }
+    }
+}
