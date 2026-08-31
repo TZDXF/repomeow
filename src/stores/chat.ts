@@ -4,6 +4,7 @@ import { i18n } from "@/i18n";
 import {
   newChatSession,
   sendChatMessage,
+  type ChatContextBreakdown,
   type ChatEvent,
   type ChatMessage,
   type ChatToolRun,
@@ -26,6 +27,8 @@ export interface ChatSessionState {
   phase: ChatPhase;
   /** 当前回复的流式增量累积(turnEnd 时固化为 assistant 消息) */
   streamingText: string;
+  /** 当前回复的思考流式增量累积(turnEnd 时随消息固化;retryScheduled 时丢弃) */
+  streamingThinking: string;
   /** 本轮尚待固化的工具调用 id(与 messages 里固化的 toolRunIds 区分) */
   pendingToolRunIds: string[];
   toolRuns: Record<string, ChatToolRun>;
@@ -35,6 +38,11 @@ export interface ChatSessionState {
   lastUsage: ChatUsageSummary | null;
   /** 当前上下文占用(turnEnd 逐轮更新;null = 暂无统计) */
   contextTokens: number | null;
+  /** 最近一次请求的上下文构成估算(turnEnd 逐轮更新) */
+  contextBreakdown: ChatContextBreakdown | null;
+  /** 缓存命中率累计基数:各轮聚合 input 与其中缓存命中部分 */
+  cacheHitInputTokens: number;
+  cacheHitCachedTokens: number;
   /** 瞬态错误后的退避等待状态；下一 attempt 开始后清空 */
   retry: ChatRetryState | null;
 }
@@ -49,12 +57,16 @@ function defaultSession(): ChatSessionState {
     messages: [],
     phase: "idle",
     streamingText: "",
+    streamingThinking: "",
     pendingToolRunIds: [],
     toolRuns: {},
     error: null,
     busy: false,
     lastUsage: null,
     contextTokens: null,
+    contextBreakdown: null,
+    cacheHitInputTokens: 0,
+    cacheHitCachedTokens: 0,
     retry: null,
   };
 }
@@ -125,6 +137,9 @@ export const useChatStore = defineStore("chat", () => {
       case "textDelta":
         session.streamingText += event.delta;
         break;
+      case "thinkingDelta":
+        session.streamingThinking += event.delta;
+        break;
       case "toolCall":
         session.toolRuns = {
           ...session.toolRuns,
@@ -144,26 +159,33 @@ export const useChatStore = defineStore("chat", () => {
       }
       case "turnEnd": {
         const content = session.streamingText;
+        const thinking = session.streamingThinking;
         const toolRunIds = [...session.pendingToolRunIds];
         // 纯工具轮(模型只调工具没说话)也固化,保留时间线
-        if (content || toolRunIds.length > 0) {
+        if (content || thinking || toolRunIds.length > 0) {
           const message: ChatMessage = {
             id: messageId(),
             role: "assistant",
             content,
+            thinking: thinking || undefined,
             toolRunIds,
           };
           session.messages = [...session.messages, message];
         }
         session.streamingText = "";
+        session.streamingThinking = "";
         session.pendingToolRunIds = [];
         if (event.contextTokens != null) {
           session.contextTokens = event.contextTokens;
+        }
+        if (event.breakdown) {
+          session.contextBreakdown = event.breakdown;
         }
         break;
       }
       case "retryScheduled":
         session.streamingText = "";
+        session.streamingThinking = "";
         session.pendingToolRunIds = [];
         session.retry = {
           attempt: event.attempt,
@@ -203,6 +225,7 @@ export const useChatStore = defineStore("chat", () => {
     session.busy = true;
     session.phase = "streaming";
     session.streamingText = "";
+    session.streamingThinking = "";
     session.pendingToolRunIds = [];
     session.retry = null;
     session.lastUsage = null;
@@ -221,6 +244,11 @@ export const useChatStore = defineStore("chat", () => {
             signal: controller.signal,
           },
         );
+        // 累计缓存命中率基数(加权平均:Σcached / Σinput)
+        if (session.lastUsage) {
+          session.cacheHitInputTokens += session.lastUsage.inputTokens;
+          session.cacheHitCachedTokens += session.lastUsage.cachedTokens ?? 0;
+        }
       } catch (error) {
         const { code, message } = extractChatError(error);
         session.error = friendlyChatError(code, message);
@@ -232,6 +260,7 @@ export const useChatStore = defineStore("chat", () => {
             id: messageId(),
             role: "assistant",
             content: session.streamingText,
+            thinking: session.streamingThinking || undefined,
             toolRunIds: [...session.pendingToolRunIds],
             partial: true,
           };
@@ -239,6 +268,7 @@ export const useChatStore = defineStore("chat", () => {
         }
         session.pendingToolRunIds = [];
         session.streamingText = "";
+        session.streamingThinking = "";
         session.retry = null;
         session.busy = false;
         controllers.delete(path);

@@ -30,7 +30,7 @@ use crate::agent::llm::retry::{
     DEFAULT_MAX_RETRIES,
 };
 use crate::agent::llm::{
-    AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, Model,
+    AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, Context, Model,
     SimpleStreamOptions, StopReason, Usage, API_OPENAI_COMPLETIONS,
 };
 use crate::agent::types::{
@@ -40,7 +40,7 @@ use crate::agent::types::{
 };
 use crate::agent::Agent;
 use crate::ai::catalog::{self, ChatPermission, ModelRef};
-use crate::commands::usage::insert_usage_row;
+use crate::commands::usage::{estimate_text_tokens, insert_usage_row};
 use crate::db::Db;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::AiUsageRecord;
@@ -57,8 +57,10 @@ use crate::time_util::{now_ts, now_ts_nanos};
     rename_all_fields = "camelCase"
 )]
 pub enum ChatEvent {
-    /// assistant 正文增量(思考增量第一版不透传)。
+    /// assistant 正文增量。
     TextDelta { delta: String },
+    /// assistant 思考增量(reasoning 模型;仅作展示,不进上下文统计)。
+    ThinkingDelta { delta: String },
     /// 工具开始执行。
     ToolCall {
         id: String,
@@ -72,8 +74,12 @@ pub enum ChatEvent {
         summary: String,
     },
     /// 一个回合(一次 LLM 调用 + 工具执行)结束,携带当前上下文占用
-    /// (最近一条 assistant 消息的 usage.total_tokens,无数据为 null)。
-    TurnEnd { context_tokens: Option<i64> },
+    /// (最近一条 assistant 消息的 usage.total_tokens,无数据为 null)
+    /// 与最近一次请求的上下文构成估算。
+    TurnEnd {
+        context_tokens: Option<i64>,
+        breakdown: Option<ChatContextBreakdown>,
+    },
     /// 瞬态错误已进入退避等待(attempt 为 1-based 重试序号)。
     RetryScheduled {
         attempt: u32,
@@ -100,6 +106,16 @@ pub struct ChatUsageSummary {
     pub cost_total: Option<f64>,
     /// 当前上下文占用(最近 assistant 消息的 total_tokens)。
     pub context_tokens: Option<i64>,
+}
+
+/// 上下文构成估算(最近一次成功发起的 LLM 请求,按 system prompt / 工具定义 /
+/// 消息三部分以 tiktoken 计量;本地估算口径,与 provider 实际计数存在出入)。
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatContextBreakdown {
+    pub system_prompt: i64,
+    pub tools: i64,
+    pub messages: i64,
 }
 
 // ── 会话与运行注册表 ─────────────────────────────────────────────────
@@ -160,6 +176,8 @@ struct ChatSession {
     usage: Arc<Mutex<Usage>>,
     /// 最近一条 assistant 消息的 total_tokens(上下文占用口径)。
     context_tokens: Arc<Mutex<i64>>,
+    /// 最近一次 LLM 调用的上下文构成估算(streamFn 每次调用时刷新)。
+    breakdown: Arc<Mutex<Option<ChatContextBreakdown>>>,
     busy: Arc<AtomicBool>,
     run_id: Arc<Mutex<String>>,
     /// 工具构建上下文(权限变化时重建工具集)。
@@ -804,10 +822,11 @@ fn build_session(
         after_tool_call: None,
     };
     let cancel_cell = CancelCell::default();
+    let breakdown_cell = Arc::new(Mutex::new(None));
     let agent = Arc::new(Agent::new(
         state,
         loop_config,
-        chat_stream_fn(app.clone(), cancel_cell.clone()),
+        chat_stream_fn(app.clone(), cancel_cell.clone(), breakdown_cell.clone()),
     ));
     let session = ChatSession {
         agent,
@@ -815,6 +834,7 @@ fn build_session(
         sink: Arc::new(Mutex::new(None)),
         usage: Arc::new(Mutex::new(Usage::zero())),
         context_tokens: Arc::new(Mutex::new(0)),
+        breakdown: breakdown_cell,
         busy: Arc::new(AtomicBool::new(false)),
         run_id: Arc::new(Mutex::new(String::new())),
         tool_context: context,
@@ -824,6 +844,7 @@ fn build_session(
     session.agent.subscribe(chat_event_listener(
         session.usage.clone(),
         session.context_tokens.clone(),
+        session.breakdown.clone(),
         session.sink.clone(),
     ));
     Ok(session)
@@ -867,16 +888,24 @@ fn default_convert_to_llm() -> ConvertToLlmFn {
 }
 
 /// StreamFn 包装:每次 LLM 调用时重读 AI 配置(模型/密钥可热更新),
-/// 配置缺失时按流契约把失败编码进事件流,绝不 panic。
-fn chat_stream_fn(app: AppHandle, cancel_cell: CancelCell) -> StreamFn {
+/// 并在发起请求前把上下文构成估算写入会话槽;配置缺失时按流契约把失败
+/// 编码进事件流,绝不 panic。
+fn chat_stream_fn(
+    app: AppHandle,
+    cancel_cell: CancelCell,
+    breakdown: Arc<Mutex<Option<ChatContextBreakdown>>>,
+) -> StreamFn {
     Arc::new(move |model, context, options| {
         let app = app.clone();
         let cancel_cell = cancel_cell.clone();
+        let breakdown = breakdown.clone();
         let fallback_model = model;
         Box::pin(async move {
             let signal = cancel_cell.get();
             match load_stream_model(&app) {
                 Ok((model, api_key)) => {
+                    *breakdown.lock().unwrap() =
+                        Some(estimate_context_breakdown(&model.id, &context));
                     let base = options.unwrap_or_default();
                     let options = SimpleStreamOptions {
                         api_key: Some(api_key),
@@ -888,6 +917,36 @@ fn chat_stream_fn(app: AppHandle, cancel_cell: CancelCell) -> StreamFn {
             }
         })
     })
+}
+
+/// 上下文构成估算:system prompt 按原文、工具定义与消息按 JSON 序列化文本
+/// 计量(复用 ACP 用量兜底的 tiktoken 口径:已知模型选对应编码器,其余
+/// 回退 o200k_base)。是占比展示用的近似值,不用于计费。
+fn estimate_context_breakdown(model_id: &str, context: &Context) -> ChatContextBreakdown {
+    let system_prompt = context
+        .system_prompt
+        .as_deref()
+        .map(|text| estimate_text_tokens(model_id, text))
+        .unwrap_or(0);
+    let tools = context
+        .tools
+        .iter()
+        .map(|tool| {
+            estimate_text_tokens(model_id, &serde_json::to_string(tool).unwrap_or_default())
+        })
+        .sum();
+    let messages = context
+        .messages
+        .iter()
+        .map(|message| {
+            estimate_text_tokens(model_id, &serde_json::to_string(message).unwrap_or_default())
+        })
+        .sum();
+    ChatContextBreakdown {
+        system_prompt,
+        tools,
+        messages,
+    }
 }
 
 /// 读取 AI 配置并解析 chat 偏好指向的模型;要求已配置。
@@ -933,19 +992,21 @@ fn error_assistant_message(model: &Model, message: &str) -> AssistantMessage {
 // ── 事件监听与用量聚合 ───────────────────────────────────────────────
 
 /// AgentEvent → ChatEvent 映射监听器:
-/// - TextDelta → TextDelta(thinking/toolcall 增量不透传,由 tool_execution_* 表达)
+/// - TextDelta → TextDelta;ThinkingDelta → ThinkingDelta(思考过程展示用)
 /// - tool_execution_start/end → ToolCall / ToolResult
 /// - MessageEnd(assistant)→ 累计 usage 并记录上下文占用
-/// - 成功 TurnEnd → TurnEnd(错误 attempt 由重试编排层处理,不向前端固化)
+/// - 成功 TurnEnd → TurnEnd(附上下文构成估算;错误 attempt 由重试编排层处理,不向前端固化)
 fn chat_event_listener(
     usage: Arc<Mutex<Usage>>,
     context_tokens: Arc<Mutex<i64>>,
+    breakdown: Arc<Mutex<Option<ChatContextBreakdown>>>,
     sink: EventSink,
 ) -> AgentListener {
     Arc::new(move |event: AgentEvent, _signal: CancellationToken| {
         // 闭包是 Fn(可能被多次调用),Arc 按次克隆进 async 块
         let usage = usage.clone();
         let context_tokens = context_tokens.clone();
+        let breakdown = breakdown.clone();
         let sink = sink.clone();
         Box::pin(async move {
             match event {
@@ -956,7 +1017,10 @@ fn chat_event_listener(
                     AssistantMessageEvent::TextDelta { delta, .. } => {
                         sink_send(&sink, ChatEvent::TextDelta { delta });
                     }
-                    // ThinkingDelta 第一版不透传;toolcall_* 由工具执行事件表达
+                    AssistantMessageEvent::ThinkingDelta { delta, .. } => {
+                        sink_send(&sink, ChatEvent::ThinkingDelta { delta });
+                    }
+                    // toolcall_* 增量由工具执行事件表达,不透传
                     _ => {}
                 },
                 AgentEvent::ToolExecutionStart {
@@ -1006,10 +1070,12 @@ fn chat_event_listener(
                     );
                     if !failed {
                         let current = *context_tokens.lock().unwrap();
+                        let breakdown = *breakdown.lock().unwrap();
                         sink_send(
                             &sink,
                             ChatEvent::TurnEnd {
                                 context_tokens: (current > 0).then_some(current),
+                                breakdown,
                             },
                         );
                     }

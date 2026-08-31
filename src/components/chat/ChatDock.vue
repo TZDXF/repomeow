@@ -17,7 +17,17 @@ import {
   X,
 } from "@lucide/vue";
 import { useEventListener, useNow } from "@vueuse/core";
-import { Context } from "@/components/ai-elements/context";
+import {
+  Context,
+  ContextBreakdownUsage,
+  ContextCacheHitRate,
+  ContextContent,
+  ContextContentBody,
+  ContextContentFooter,
+  ContextContentHeader,
+  ContextTrigger,
+  type ContextUsage,
+} from "@/components/ai-elements/context";
 import {
   Conversation,
   ConversationContent,
@@ -27,6 +37,7 @@ import {
 import { Loader } from "@/components/ai-elements/loader";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
 import { ModelSelector, type ModelSelectorGroup } from "@/components/ai-elements/model-selector";
+import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
 import {
   PromptInput,
   PromptInputBody,
@@ -46,7 +57,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import ChatToolCard from "@/components/chat/ChatToolCard.vue";
+import ChatToolGroup from "@/components/chat/ChatToolGroup.vue";
 import { CHAT_THINKING_LEVELS, type ChatThinkingLevel } from "@/lib/ai-config";
 import type { ChatMessage } from "@/lib/chat";
 import { useAiConfigStore } from "@/stores/ai-config";
@@ -184,14 +195,24 @@ const contextWindow = computed(() => {
   return window && window > 0 ? window : null;
 });
 
-const lastUsageDetail = computed(() => {
+// 上一轮用量明细(context 弹层的 Input/Output/Cache 行);成本费率取自模型元数据
+const contextUsage = computed<ContextUsage | undefined>(() => {
   const usage = session.value.lastUsage;
-  if (!usage) return null;
+  if (!usage) return undefined;
   return {
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
-    cachedTokens: usage.cachedTokens,
+    cachedInputTokens: usage.cachedTokens ?? undefined,
   };
+});
+
+const contextCost = computed(() => aiConfig.chatModel?.model.cost ?? null);
+
+// 平均缓存命中率:各轮加权(Σcached / Σinput);尚无样本时不展示
+const cacheHitRate = computed(() => {
+  const input = session.value.cacheHitInputTokens;
+  if (input <= 0) return null;
+  return session.value.cacheHitCachedTokens / input;
 });
 
 // --- 消息渲染辅助 ---
@@ -205,6 +226,11 @@ const pendingToolRuns = computed(() =>
     .filter((run) => run != null),
 );
 
+// 思考流式中 = 忙且正文/工具都还没开始(思考增量结束、正文或工具开始后自动收起)
+const reasoningStreaming = computed(
+  () => session.value.busy && !session.value.streamingText && pendingToolRuns.value.length === 0,
+);
+
 const retryClock = useNow({ interval: 250 });
 const retrySeconds = computed(() => {
   const retry = session.value.retry;
@@ -215,27 +241,12 @@ const retrySeconds = computed(() => {
 </script>
 
 <template>
-  <div class="pointer-events-none fixed right-4 bottom-4 z-50 flex flex-col items-end">
-    <!-- 收起态:圆形入口;回答中叠加脉冲状态点 -->
-    <button
-      v-if="!open"
-      type="button"
-      class="pointer-events-auto relative flex h-12 w-12 items-center justify-center rounded-full border bg-card shadow-lg transition-shadow hover:shadow-xl"
-      :title="t('chat.entry')"
-      @click="toggleOpen"
-    >
-      <MessageCircleMore class="h-5 w-5 text-foreground" />
-      <span
-        v-if="session.busy"
-        class="absolute top-0 right-0 size-2.5 animate-pulse rounded-full bg-green-500 ring-2 ring-background"
-      />
-    </button>
-
-    <!-- 展开态:右下角固定面板 -->
+  <div class="pointer-events-none fixed right-4 bottom-4 z-50">
+    <!-- 展开态:右下角固定面板(宽度/高度过渡驱动放大还原动画) -->
     <Transition name="chat-dock">
       <div
         v-if="open"
-        class="pointer-events-auto flex flex-col overflow-hidden rounded-xl border bg-background shadow-lg"
+        class="chat-panel pointer-events-auto flex origin-bottom-right flex-col overflow-hidden rounded-xl border bg-background shadow-lg"
         :class="panelSizeClass"
       >
         <!-- 头部:标题 + 项目名 + 新会话 + 关闭 -->
@@ -320,18 +331,12 @@ const retrySeconds = computed(() => {
                 :from="message.role"
                 class="max-w-[90%]"
               >
-                <div
-                  v-if="message.role === 'assistant'"
-                  class="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border bg-muted"
-                >
-                  <Bot class="size-4 text-muted-foreground" />
-                </div>
                 <MessageContent>
-                  <ChatToolCard
-                    v-for="(run, index) in toolRunsOf(message)"
-                    :key="`${message.id}-${index}`"
-                    :run="run"
-                  />
+                  <Reasoning v-if="message.thinking" :default-open="false" class="w-full">
+                    <ReasoningTrigger />
+                    <ReasoningContent :content="message.thinking" />
+                  </Reasoning>
+                  <ChatToolGroup v-if="message.toolRunIds.length > 0" :runs="toolRunsOf(message)" />
                   <MessageResponse
                     v-if="message.role === 'assistant' && message.content"
                     :content="message.content"
@@ -340,20 +345,23 @@ const retrySeconds = computed(() => {
                 </MessageContent>
               </Message>
 
-              <!-- 流式中的回复:pending 工具卡片 + 累积文本 / Loader -->
+              <!-- 流式中的回复:思考折叠面板 + pending 工具分组 + 累积文本 / Loader -->
               <Message v-if="session.busy" from="assistant" class="max-w-[90%]">
-                <div
-                  class="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border bg-muted"
-                >
-                  <Bot class="size-4 text-muted-foreground" />
-                </div>
                 <MessageContent>
-                  <ChatToolCard
-                    v-for="(run, index) in pendingToolRuns"
-                    :key="`pending-${index}`"
-                    :run="run"
+                  <Reasoning
+                    v-if="session.streamingThinking"
+                    :is-streaming="reasoningStreaming"
+                    class="w-full"
+                  >
+                    <ReasoningTrigger />
+                    <ReasoningContent :content="session.streamingThinking" mode="streaming" />
+                  </Reasoning>
+                  <ChatToolGroup v-if="pendingToolRuns.length > 0" :runs="pendingToolRuns" />
+                  <MessageResponse
+                    v-if="session.streamingText"
+                    :content="session.streamingText"
+                    mode="streaming"
                   />
-                  <MessageResponse v-if="session.streamingText" :content="session.streamingText" />
                   <div
                     v-else-if="session.retry"
                     class="flex items-center gap-2 text-xs text-muted-foreground"
@@ -441,9 +449,22 @@ const retrySeconds = computed(() => {
                 </PromptInputButton>
                 <Context
                   :used-tokens="session.contextTokens"
-                  :context-window="contextWindow"
-                  :last-usage="lastUsageDetail"
-                />
+                  :max-tokens="contextWindow"
+                  :usage="contextUsage"
+                  :cost="contextCost"
+                  :breakdown="session.contextBreakdown"
+                  :cache-hit-rate="cacheHitRate"
+                >
+                  <ContextTrigger />
+                  <ContextContent side="top" align="end">
+                    <ContextContentHeader />
+                    <ContextContentBody class="space-y-2">
+                      <ContextBreakdownUsage />
+                      <ContextCacheHitRate />
+                    </ContextContentBody>
+                    <ContextContentFooter />
+                  </ContextContent>
+                </Context>
                 <p v-if="!aiReady" class="text-muted-foreground w-full text-xs">
                   {{ t("chat.notConfigured") }}
                   <Button
@@ -478,20 +499,67 @@ const retrySeconds = computed(() => {
         </div>
       </div>
     </Transition>
+
+    <!-- 收起态:圆形入口,锚定容器右下角(回答中叠加脉冲状态点)。
+         绝对定位脱离面板布局,关闭动画期间即落在最终位置,不再先出现在面板上方 -->
+    <Transition name="chat-entry">
+      <button
+        v-if="!open"
+        type="button"
+        class="pointer-events-auto absolute right-0 bottom-0 flex h-12 w-12 items-center justify-center rounded-full border bg-card shadow-lg transition-shadow hover:shadow-xl"
+        :title="t('chat.entry')"
+        @click="toggleOpen"
+      >
+        <MessageCircleMore class="h-5 w-5 text-foreground" />
+        <span
+          v-if="session.busy"
+          class="absolute top-0 right-0 size-2.5 animate-pulse rounded-full bg-green-500 ring-2 ring-background"
+        />
+      </button>
+    </Transition>
   </div>
 </template>
 
 <style scoped>
+/* 放大/还原:尺寸类切换时平滑过渡(开合期间由下方 enter/leave 规则接管,避免冲突) */
+.chat-panel {
+  transition:
+    width 0.25s ease,
+    height 0.25s ease,
+    max-width 0.25s ease,
+    max-height 0.25s ease;
+}
+
+/* 打开/关闭:面板朝右下角缩放淡出,与入口按钮位置呼应 */
 .chat-dock-enter-active,
 .chat-dock-leave-active {
   transition:
-    opacity 0.15s ease,
-    transform 0.15s ease;
+    opacity 0.2s ease,
+    transform 0.2s ease;
 }
 
 .chat-dock-enter-from,
 .chat-dock-leave-to {
   opacity: 0;
-  transform: translateY(8px) scale(0.98);
+  transform: translateY(12px) scale(0.95);
+}
+
+/* 入口按钮:打开时快速淡出;关闭时延迟淡入,等面板收拢后再出现 */
+.chat-entry-enter-active {
+  transition:
+    opacity 0.18s ease 0.12s,
+    transform 0.18s ease 0.12s;
+}
+
+.chat-entry-leave-active {
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+}
+
+.chat-entry-enter-from,
+.chat-entry-leave-to {
+  opacity: 0;
+  transform: scale(0.75);
 }
 </style>

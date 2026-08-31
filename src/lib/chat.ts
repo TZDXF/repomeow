@@ -17,12 +17,24 @@ export interface ChatUsageSummary {
   contextTokens: number | null;
 }
 
+/** 上下文构成估算(最近一次 LLM 请求,按系统提示词/工具定义/消息三部分 tiktoken 计量) */
+export interface ChatContextBreakdown {
+  systemPrompt: number;
+  tools: number;
+  messages: number;
+}
+
 /** chat_send 过程中经 Channel 推送的事件(与 Rust ChatEvent 一一对应) */
 export type ChatEvent =
   | { kind: "textDelta"; delta: string }
+  | { kind: "thinkingDelta"; delta: string }
   | { kind: "toolCall"; id: string; name: string; args: unknown }
   | { kind: "toolResult"; id: string; ok: boolean; summary: string }
-  | { kind: "turnEnd"; contextTokens: number | null }
+  | {
+      kind: "turnEnd";
+      contextTokens: number | null;
+      breakdown?: ChatContextBreakdown | null;
+    }
   | {
       kind: "retryScheduled";
       attempt: number;
@@ -41,6 +53,8 @@ export interface ChatMessage {
   id: string;
   role: ChatRole;
   content: string;
+  /** 该条消息的思考过程原文(reasoning 模型;无思考输出时缺省) */
+  thinking?: string;
   /** 该条消息期间发生的工具调用 id 列表(按发生顺序) */
   toolRunIds: string[];
   /** 该条消息是中止/异常时的残缺回复(仅展示标记) */

@@ -150,6 +150,76 @@ describe("chat store", () => {
     expect(session.phase).toBe("idle");
   });
 
+  it("thinkingDelta 累积思考流,turnEnd 随消息固化并清空", async () => {
+    const store = useChatStore();
+    const run = store.send(PATH, PROJECT, "分析一下");
+    emit(PATH, { kind: "thinkingDelta", delta: "先想" });
+    emit(PATH, { kind: "thinkingDelta", delta: "一想" });
+    emit(PATH, { kind: "textDelta", delta: "结论" });
+
+    const session = store.sessions[PATH];
+    expect(session.streamingThinking).toBe("先想一想");
+
+    emit(PATH, { kind: "turnEnd", contextTokens: 100 });
+    expect(session.streamingThinking).toBe("");
+    expect(session.messages[1]).toMatchObject({
+      role: "assistant",
+      content: "结论",
+      thinking: "先想一想",
+    });
+
+    finish(PATH, USAGE);
+    await run;
+  });
+
+  it("纯思考+工具轮(无正文)也固化消息保留思考内容", async () => {
+    const store = useChatStore();
+    const run = store.send(PATH, PROJECT, "查一下");
+    emit(PATH, { kind: "thinkingDelta", delta: "需要读文件" });
+    emit(PATH, { kind: "toolCall", id: "t1", name: "read_file", args: {} });
+    emit(PATH, { kind: "toolResult", id: "t1", ok: true, summary: "ok" });
+    emit(PATH, { kind: "turnEnd", contextTokens: 100 });
+
+    const session = store.sessions[PATH];
+    expect(session.messages).toHaveLength(2);
+    expect(session.messages[1]).toMatchObject({
+      role: "assistant",
+      content: "",
+      thinking: "需要读文件",
+      toolRunIds: ["t1"],
+    });
+
+    finish(PATH, USAGE);
+    await run;
+  });
+
+  it("retryScheduled 一并丢弃失败 attempt 的思考残片", async () => {
+    const store = useChatStore();
+    const run = store.send(PATH, PROJECT, "重试一下");
+    emit(PATH, { kind: "thinkingDelta", delta: "失败前的思考" });
+    emit(PATH, { kind: "textDelta", delta: "失败前的部分内容" });
+    emit(PATH, {
+      kind: "retryScheduled",
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 2_000,
+      message: "429: rate limited",
+    });
+
+    const session = store.sessions[PATH];
+    expect(session.streamingThinking).toBe("");
+    expect(session.streamingText).toBe("");
+
+    emit(PATH, { kind: "retryStarted", attempt: 1, maxAttempts: 3 });
+    emit(PATH, { kind: "textDelta", delta: "重试成功" });
+    emit(PATH, { kind: "turnEnd", contextTokens: 130 });
+    finish(PATH, USAGE);
+    await run;
+
+    expect(session.messages[1]).toMatchObject({ role: "assistant", content: "重试成功" });
+    expect(session.messages[1].thinking).toBeUndefined();
+  });
+
   it("最终 error 会清理 retry 状态", async () => {
     const store = useChatStore();
     const run = store.send(PATH, PROJECT, "持续失败");
