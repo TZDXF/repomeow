@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { Ban, Plus, TerminalSquare } from "@lucide/vue";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,7 +19,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import CommandEditor from "@/components/scripts/CommandEditor.vue";
 import ScriptItem from "@/components/scripts/ScriptItem.vue";
 import { COMMAND_ICONS } from "@/lib/command-icons";
-import { cmd, runInTerminal } from "@/lib/tauri";
+import { cmd, onListen, runInTerminal } from "@/lib/tauri";
 import { usePinsStore } from "@/stores/pins";
 import { useProjectOverviewStore } from "@/stores/project-overview";
 import type { CustomCommand, Project } from "@/types";
@@ -47,6 +48,18 @@ async function load() {
 
 watch(() => props.project.id, load, { immediate: true });
 pinsStore.ensureLoaded();
+
+// 问答的 add_custom_command 工具与本组件的增删改都会广播该事件,收到即重载列表,
+// 保证问答里新建的命令不用离开页面就能在卡片中出现
+let unlistenCommandsChanged: UnlistenFn | undefined;
+onMounted(async () => {
+  unlistenCommandsChanged = await onListen("projects://custom-commands-changed", () => {
+    void load();
+  });
+});
+onUnmounted(() => {
+  unlistenCommandsChanged?.();
+});
 
 function openCreate() {
   editingId.value = null;

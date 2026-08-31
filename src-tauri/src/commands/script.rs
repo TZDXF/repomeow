@@ -196,8 +196,15 @@ pub fn delete_command(conn: &Connection, id: i64) -> AppResult<()> {
 // ---- Tauri 命令包装 ----
 // (列表查询已并入 commands::overview::get_project_overview,详情页一次 IPC 取全)
 
+/// 自定义命令增删改后广播,详情页 CustomCommands 卡片与问答 add_custom_command
+/// 工具共用同一事件刷新列表(新命令不会被 pin,无需联动 pins-changed)
+pub(crate) fn emit_custom_commands_changed(app: &AppHandle) {
+    let _ = app.emit("projects://custom-commands-changed", serde_json::json!({}));
+}
+
 #[tauri::command]
 pub fn create_custom_command(
+    app: AppHandle,
     db: State<'_, Db>,
     project_id: i64,
     name: String,
@@ -205,8 +212,12 @@ pub fn create_custom_command(
     description: String,
     icon: String,
 ) -> AppResult<CustomCommand> {
-    let conn = db.0.lock().unwrap();
-    create_command(&conn, project_id, &name, &command, &description, &icon)
+    let result = {
+        let conn = db.0.lock().unwrap();
+        create_command(&conn, project_id, &name, &command, &description, &icon)?
+    };
+    emit_custom_commands_changed(&app);
+    Ok(result)
 }
 
 #[tauri::command]
@@ -225,6 +236,7 @@ pub fn update_custom_command(
     };
     // 编辑可能同步了「常用命令」标记快照,广播让另一窗口刷新
     let _ = app.emit("projects://pins-changed", serde_json::json!({}));
+    emit_custom_commands_changed(&app);
     Ok(result)
 }
 
@@ -236,6 +248,7 @@ pub fn delete_custom_command(app: AppHandle, db: State<'_, Db>, id: i64) -> AppR
     }
     // 删除会连带移除「常用命令」标记,广播让另一窗口刷新
     let _ = app.emit("projects://pins-changed", serde_json::json!({}));
+    emit_custom_commands_changed(&app);
     Ok(())
 }
 

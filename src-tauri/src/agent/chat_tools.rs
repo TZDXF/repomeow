@@ -676,6 +676,8 @@ fn add_custom_command_tool(app: &AppHandle, ctx: &ChatToolContext) -> AgentTool 
                         script::create_command(&conn, project_id, &name, &command, &description, "")
                             .map_err(tool_err)?
                     };
+                    // 通知详情页 CustomCommands 卡片刷新,新建命令立即可见
+                    script::emit_custom_commands_changed(&app);
                     text_result(format!(
                         "已创建自定义命令「{}」:`{}`",
                         created.name, created.command
