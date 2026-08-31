@@ -3,9 +3,11 @@
 //! 前端设置页与问答面板经这两个命令读写完整配置;Rust 侧各消费方
 //! (chat/commit/report/wiki)每次调用时重读文件,配置可热更新。
 
+use std::collections::BTreeMap;
+
 use tauri::AppHandle;
 
-use crate::ai::catalog::{self, AiConfigFile};
+use crate::ai::catalog::{self, AiConfigFile, AiProvider};
 use crate::commands::open;
 use crate::error::{AppError, AppResult, ErrorCode};
 
@@ -21,13 +23,19 @@ pub fn ai_config_save(app: AppHandle, config: AiConfigFile) -> AppResult<()> {
     catalog::save_ai_config_file(&app, &config)
 }
 
+/// 内置厂商目录(添加厂商对话框的候选清单;含各厂商预置模型,apiKey 恒为空)。
+#[tauri::command]
+pub fn ai_config_builtin_providers() -> AppResult<BTreeMap<String, AiProvider>> {
+    Ok(catalog::builtin_config().providers)
+}
+
 /// 在系统文件管理器中打开配置文件所在目录(先确保配置已播种落盘)。
 #[tauri::command]
 pub fn ai_config_reveal(app: AppHandle) -> AppResult<()> {
     let path = catalog::config_path(&app)?;
     catalog::load_ai_config_file(&app);
-    let dir = path.parent().ok_or_else(|| {
-        AppError::coded(ErrorCode::InvalidPath, path.display().to_string())
-    })?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| AppError::coded(ErrorCode::InvalidPath, path.display().to_string()))?;
     open::open_explorer(&dir.to_string_lossy())
 }

@@ -278,6 +278,7 @@ pub fn run() {
             commands::ai::ai_config_get,
             commands::ai::ai_config_save,
             commands::ai::ai_config_reveal,
+            commands::ai::ai_config_builtin_providers,
             commands::ai::ai_list_models,
             commands::ai::ai_test_connection,
             commands::ai::ai_generate_commit_message,

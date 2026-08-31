@@ -100,3 +100,8 @@ export function saveAiConfig(config: AiConfigFile): Promise<void> {
 export function revealAiConfigDir(): Promise<void> {
   return cmd<void>("ai_config_reveal");
 }
+
+/** 内置厂商目录(添加厂商对话框的候选清单;含各厂商预置模型,apiKey 恒为空) */
+export function getBuiltinAiProviders(): Promise<Record<string, AiProvider>> {
+  return cmd<Record<string, AiProvider>>("ai_config_builtin_providers");
+}

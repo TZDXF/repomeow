@@ -743,6 +743,7 @@ export default {
     toolRunning: "Running",
     toolDone: "Done",
     toolFailed: "Failed",
+    retryScheduled: "Request failed temporarily. Retry {attempt}/{max} starts in {seconds}s",
     notConfigured: "AI is not configured",
     goSettings: "Go to Settings",
     errors: {
@@ -1465,6 +1466,12 @@ export default {
         "Used by commit messages, daily/weekly reports, Wiki and the connection test; the Q&A panel can pick its own model",
       providers: "AI providers",
       addProvider: "Add provider",
+      addProviderTitle: "Add provider",
+      addProviderDesc:
+        "Pick a provider from the built-in catalog to prefill the endpoint and preset models, or choose Custom to fill everything manually",
+      providerSelect: "Provider",
+      customProvider: "Custom",
+      seededModelsHint: "{count} preset models will be included; you can edit them afterwards",
       emptyProviders: "No providers yet",
       unnamedProvider: "Unnamed provider",
       providerId: "ID",

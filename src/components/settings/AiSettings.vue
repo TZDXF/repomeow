@@ -11,11 +11,28 @@ import {
 } from "@/components/ai-elements/model-selector";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { fetchAiModels, testAiConnection } from "@/lib/ai";
 import {
   emptyChatPrefs,
+  getBuiltinAiProviders,
   revealAiConfigDir,
   type AiModelDef,
   type AiModelRef,
@@ -101,22 +118,90 @@ onMounted(async () => {
   } finally {
     loading.value = false;
   }
+  // 内置厂商目录仅供添加对话框使用,拉取失败不阻断设置页
+  try {
+    builtinCatalog.value = await getBuiltinAiProviders();
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : String(error));
+  }
 });
 
-// ── 厂商增删 ─────────────────────────────────────────────────────────
+// ── 添加厂商对话框 ───────────────────────────────────────────────────
 
-function addProvider() {
+/** 厂商选择中「自定义」选项的固定值 */
+const CUSTOM_CHOICE = "custom";
+
+const addDialogOpen = ref(false);
+const builtinCatalog = ref<Record<string, AiProvider>>({});
+const addChoice = ref(CUSTOM_CHOICE);
+const addForm = reactive({ id: "", name: "", baseUrl: "", apiKey: "" });
+
+/** 内置目录中尚未添加的厂商(已存在的 id 不再提供,避免重复) */
+const addOptions = computed(() => {
+  const used = new Set(drafts.value.map((draft) => draft.id.trim()));
+  return Object.entries(builtinCatalog.value)
+    .filter(([id]) => !used.has(id))
+    .map(([id, provider]) => ({ id, name: provider.name.trim() || id }));
+});
+
+/** 选中内置厂商时带入的预置模型数(对话框提示用) */
+const seededModelCount = computed(() =>
+  addChoice.value === CUSTOM_CHOICE
+    ? 0
+    : (builtinCatalog.value[addChoice.value]?.models.length ?? 0),
+);
+
+function openAddDialog() {
+  addChoice.value = CUSTOM_CHOICE;
+  addForm.id = "";
+  addForm.name = "";
+  addForm.baseUrl = "";
+  addForm.apiKey = "";
+  addDialogOpen.value = true;
+}
+
+function onAddChoiceChange(value: unknown) {
+  const choice = String(value);
+  addChoice.value = choice;
+  if (choice === CUSTOM_CHOICE) {
+    addForm.id = "";
+    addForm.name = "";
+    addForm.baseUrl = "";
+    return;
+  }
+  const provider = builtinCatalog.value[choice];
+  if (!provider) return;
+  addForm.id = choice;
+  addForm.name = provider.name;
+  addForm.baseUrl = provider.baseUrl;
+}
+
+function confirmAddProvider() {
+  const id = addForm.id.trim();
+  if (!id) {
+    toast.error(t("settings.ai.missingProviderId"));
+    return;
+  }
+  if (drafts.value.some((draft) => draft.id.trim() === id)) {
+    toast.error(t("settings.ai.duplicateProviderId", { id }));
+    return;
+  }
+  const catalogModels =
+    addChoice.value === CUSTOM_CHOICE ? [] : (builtinCatalog.value[addChoice.value]?.models ?? []);
   const draft: ProviderDraft = {
     key: nextKey(),
-    id: "",
-    name: "",
-    baseUrl: "",
-    apiKey: "",
-    models: [],
+    id,
+    name: addForm.name.trim(),
+    baseUrl: addForm.baseUrl.trim(),
+    apiKey: addForm.apiKey.trim(),
+    models: catalogModels.map((model) => draftModel(model)),
   };
   drafts.value = [...drafts.value, draft];
   openMap[draft.key] = true;
+  addDialogOpen.value = false;
 }
+
+// ── 厂商删除 ─────────────────────────────────────────────────────────
 
 function removeProvider(draft: ProviderDraft) {
   // 两段式删除:第一次点击进入确认态,3 秒内再次点击才真正删除
@@ -340,7 +425,7 @@ const CONCURRENCY_OPTIONS = [1, 2, 3, 4, 5];
       <div class="flex flex-col gap-1.5">
         <div class="flex items-center justify-between">
           <label class="text-sm font-medium">{{ t("settings.ai.providers") }}</label>
-          <Button variant="outline" size="sm" class="h-7 gap-1" @click="addProvider">
+          <Button variant="outline" size="sm" class="h-7 gap-1" @click="openAddDialog">
             <Plus class="h-3.5 w-3.5" />
             {{ t("settings.ai.addProvider") }}
           </Button>
@@ -597,5 +682,89 @@ const CONCURRENCY_OPTIONS = [1, 2, 3, 4, 5];
         </Button>
       </div>
     </div>
+
+    <!-- 添加厂商对话框:先选内置厂商(带入地址与预置模型)或自定义,再补 API Key -->
+    <Dialog v-model:open="addDialogOpen">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{{ t("settings.ai.addProviderTitle") }}</DialogTitle>
+          <DialogDescription>{{ t("settings.ai.addProviderDesc") }}</DialogDescription>
+        </DialogHeader>
+
+        <div class="flex flex-col gap-3 py-1">
+          <div class="flex flex-col gap-1">
+            <label class="text-muted-foreground text-xs">{{
+              t("settings.ai.providerSelect")
+            }}</label>
+            <Select :model-value="addChoice" @update:model-value="onAddChoiceChange">
+              <SelectTrigger class="h-8 w-full text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem :value="CUSTOM_CHOICE">
+                    {{ t("settings.ai.customProvider") }}
+                  </SelectItem>
+                  <SelectItem v-for="option in addOptions" :key="option.id" :value="option.id">
+                    {{ option.name }}
+                  </SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div class="flex flex-col gap-1">
+              <label class="text-muted-foreground text-xs">{{ t("settings.ai.providerId") }}</label>
+              <Input
+                v-model="addForm.id"
+                class="h-8 text-xs"
+                :placeholder="t('settings.ai.providerIdPlaceholder')"
+                spellcheck="false"
+              />
+            </div>
+            <div class="flex flex-col gap-1">
+              <label class="text-muted-foreground text-xs">{{
+                t("settings.ai.providerName")
+              }}</label>
+              <Input
+                v-model="addForm.name"
+                class="h-8 text-xs"
+                :placeholder="t('settings.ai.providerNamePlaceholder')"
+                spellcheck="false"
+              />
+            </div>
+          </div>
+          <div class="flex flex-col gap-1">
+            <label class="text-muted-foreground text-xs">{{ t("settings.ai.baseUrl") }}</label>
+            <Input
+              v-model="addForm.baseUrl"
+              class="h-8 text-xs"
+              :placeholder="t('settings.ai.baseUrlPlaceholder')"
+              spellcheck="false"
+            />
+          </div>
+          <div class="flex flex-col gap-1">
+            <label class="text-muted-foreground text-xs">{{ t("settings.ai.apiKey") }}</label>
+            <Input
+              v-model="addForm.apiKey"
+              type="password"
+              class="h-8 text-xs"
+              :placeholder="t('settings.ai.apiKeyPlaceholder')"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+          <p v-if="seededModelCount > 0" class="text-muted-foreground text-xs">
+            {{ t("settings.ai.seededModelsHint", { count: seededModelCount }) }}
+          </p>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" @click="addDialogOpen = false">{{ t("common.cancel") }}</Button>
+          <Button @click="confirmAddProvider">{{ t("common.add") }}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </section>
 </template>
