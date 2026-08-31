@@ -25,6 +25,10 @@ use tokio_util::sync::CancellationToken;
 use crate::agent::chat_tools::{chat_tools, ChatToolContext};
 use crate::agent::llm::event_stream::event_stream;
 use crate::agent::llm::openai_completions::stream_openai_completions;
+use crate::agent::llm::retry::{
+    is_retryable_assistant_error, retry_delay_ms, sleep_with_cancel, DEFAULT_BASE_DELAY_MS,
+    DEFAULT_MAX_RETRIES,
+};
 use crate::agent::llm::{
     AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, Model,
     SimpleStreamOptions, StopReason, Usage, API_OPENAI_COMPLETIONS,
@@ -47,7 +51,11 @@ use crate::time_util::{now_ts, now_ts_nanos};
 
 /// 问答回合事件流(tag = "kind",字段 camelCase,与前端 chat 面板对齐)。
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ChatEvent {
     /// assistant 正文增量(思考增量第一版不透传)。
     TextDelta { delta: String },
@@ -66,10 +74,17 @@ pub enum ChatEvent {
     /// 一个回合(一次 LLM 调用 + 工具执行)结束,携带当前上下文占用
     /// (最近一条 assistant 消息的 usage.total_tokens,无数据为 null)。
     TurnEnd { context_tokens: Option<i64> },
-    /// 回合正常结束,携带整个 prompt 的聚合用量。
-    Done {
-        usage: Option<ChatUsageSummary>,
+    /// 瞬态错误已进入退避等待(attempt 为 1-based 重试序号)。
+    RetryScheduled {
+        attempt: u32,
+        max_attempts: u32,
+        delay_ms: u64,
+        message: String,
     },
+    /// 退避结束,即将开始下一次 assistant 调用。
+    RetryStarted { attempt: u32, max_attempts: u32 },
+    /// 回合正常结束,携带整个 prompt 的聚合用量。
+    Done { usage: Option<ChatUsageSummary> },
     /// 失败/取消;code 取既有 ErrorCode 字符串。
     Error { code: String, message: String },
 }
@@ -176,6 +191,348 @@ impl Drop for RegisteredChatRun {
     }
 }
 
+/// 对齐 pi coding-agent 的普通 assistant 自动重试编排。
+async fn run_chat_prompt_with_retries(
+    agent: &Agent,
+    prompt: AgentMessage,
+    signal: &CancellationToken,
+    on_event: &Channel<ChatEvent>,
+) -> Result<(), String> {
+    run_chat_prompt_with_policy(
+        agent,
+        prompt,
+        signal,
+        DEFAULT_MAX_RETRIES,
+        DEFAULT_BASE_DELAY_MS,
+        |event| {
+            let _ = on_event.send(event);
+        },
+    )
+    .await
+}
+
+async fn run_chat_prompt_with_policy(
+    agent: &Agent,
+    prompt: AgentMessage,
+    signal: &CancellationToken,
+    max_retries: u32,
+    base_delay_ms: u64,
+    emit: impl Fn(ChatEvent),
+) -> Result<(), String> {
+    let mut retry_attempt = 0;
+    agent.prompt(prompt).await?;
+
+    loop {
+        let Some(last_assistant) = last_assistant_message(agent) else {
+            return Err("chat agent completed without an assistant message".to_string());
+        };
+        match last_assistant.stop_reason {
+            StopReason::Aborted => return Ok(()),
+            StopReason::Error => {}
+            _ => return Ok(()),
+        }
+
+        let detail = last_assistant
+            .error_message
+            .clone()
+            .unwrap_or_else(|| "unknown error".to_string());
+        if retry_attempt >= max_retries || !is_retryable_assistant_error(&last_assistant) {
+            return Err(detail);
+        }
+
+        retry_attempt += 1;
+        remove_last_failed_assistant(agent);
+        let delay_ms = retry_delay_ms(base_delay_ms, retry_attempt);
+        emit(ChatEvent::RetryScheduled {
+            attempt: retry_attempt,
+            max_attempts: max_retries,
+            delay_ms,
+            message: detail,
+        });
+        if !sleep_with_cancel(delay_ms, signal).await {
+            return Ok(());
+        }
+        emit(ChatEvent::RetryStarted {
+            attempt: retry_attempt,
+            max_attempts: max_retries,
+        });
+        agent.continue_run().await?;
+    }
+}
+
+fn last_assistant_message(agent: &Agent) -> Option<AssistantMessage> {
+    match agent.messages().last() {
+        Some(AgentMessage::Message(TypedMessage::Assistant(message))) => Some(message.clone()),
+        _ => None,
+    }
+}
+
+fn remove_last_failed_assistant(agent: &Agent) {
+    let mut messages = agent.messages();
+    if matches!(
+        messages.last(),
+        Some(AgentMessage::Message(TypedMessage::Assistant(message)))
+            if message.stop_reason == StopReason::Error
+    ) {
+        messages.pop();
+        agent.set_messages(messages);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+    use crate::agent::llm::AssistantContent;
+    use crate::agent::llm::ModelThinkingLevel;
+    use crate::agent::Agent;
+
+    type EventLog = Arc<Mutex<Vec<ChatEvent>>>;
+
+    fn ok_message(model: &Model, text: &str) -> AssistantMessage {
+        AssistantMessage {
+            role: "assistant".to_string(),
+            content: vec![AssistantContent::text(text)],
+            api: API_OPENAI_COMPLETIONS.to_string(),
+            provider: model.provider.clone(),
+            model: model.id.clone(),
+            response_model: None,
+            response_id: None,
+            usage: Usage::zero(),
+            stop_reason: StopReason::Stop,
+            error_message: None,
+            raw_stop_reason: None,
+            end_turn: None,
+            timestamp: 0,
+        }
+    }
+
+    /// 按脚本逐次返回最终消息的 StreamFn:错误编码为 Error 事件,
+    /// 成功编码为 Done 事件(与真实 provider 的流终态一致)。
+    fn scripted_stream_fn(script: Arc<Mutex<Vec<AssistantMessage>>>) -> StreamFn {
+        Arc::new(move |_model, _context, _options| {
+            let script = script.clone();
+            Box::pin(async move {
+                let final_message = script.lock().unwrap().remove(0);
+                let (stream, writer) = event_stream::<AssistantMessageEvent, AssistantMessage>();
+                writer.push(AssistantMessageEvent::Start {
+                    partial: AssistantMessage {
+                        stop_reason: StopReason::Pending,
+                        ..final_message.clone()
+                    },
+                });
+                writer.push(if final_message.stop_reason == StopReason::Error {
+                    AssistantMessageEvent::Error {
+                        reason: final_message.stop_reason.clone(),
+                        error: final_message.clone(),
+                    }
+                } else {
+                    AssistantMessageEvent::Done {
+                        reason: final_message.stop_reason.clone(),
+                        message: final_message.clone(),
+                    }
+                });
+                writer.end(final_message);
+                stream
+            })
+        })
+    }
+
+    fn test_agent(script: Arc<Mutex<Vec<AssistantMessage>>>) -> Agent {
+        let model = Model::from_settings("gpt-test", "http://localhost");
+        let state = AgentState {
+            system_prompt: String::new(),
+            model: model.clone(),
+            thinking_level: ModelThinkingLevel::Off,
+            tools: Vec::new(),
+            messages: Vec::new(),
+            is_streaming: false,
+            streaming_message: None,
+            pending_tool_calls: HashSet::new(),
+            error_message: None,
+        };
+        let loop_config = AgentLoopConfig {
+            model,
+            stream: SimpleStreamOptions::default(),
+            convert_to_llm: default_convert_to_llm(),
+            transform_context: None,
+            get_api_key: None,
+            should_stop_after_turn: None,
+            prepare_next_turn: None,
+            get_steering_messages: None,
+            get_follow_up_messages: None,
+            tool_execution: ToolExecutionMode::Parallel,
+            before_tool_call: None,
+            after_tool_call: None,
+        };
+        Agent::new(state, loop_config, scripted_stream_fn(script))
+    }
+
+    fn event_log() -> EventLog {
+        Arc::new(Mutex::new(Vec::new()))
+    }
+
+    fn assert_last_stop(agent: &Agent, reason: StopReason) {
+        match agent.messages().last() {
+            Some(AgentMessage::Message(TypedMessage::Assistant(message))) => {
+                assert_eq!(message.stop_reason, reason);
+            }
+            other => panic!("expected trailing assistant message, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn retries_transient_error_then_succeeds() {
+        let model = Model::from_settings("gpt-test", "http://localhost");
+        let script = Arc::new(Mutex::new(vec![
+            error_assistant_message(&model, "429: rate limited"),
+            ok_message(&model, "recovered"),
+        ]));
+        let agent = test_agent(script);
+        let events = event_log();
+        let signal = CancellationToken::new();
+
+        let result = run_chat_prompt_with_policy(
+            &agent,
+            AgentMessage::user_text("hi", 0),
+            &signal,
+            3,
+            1,
+            {
+                let events = events.clone();
+                move |event: ChatEvent| events.lock().unwrap().push(event)
+            },
+        )
+        .await;
+
+        assert!(result.is_ok());
+        let log = events.lock().unwrap();
+        assert_eq!(log.len(), 2);
+        assert!(
+            matches!(&log[0], ChatEvent::RetryScheduled { attempt: 1, max_attempts: 3, delay_ms: 1, .. }),
+            "unexpected first event: {log:?}"
+        );
+        assert!(
+            matches!(&log[1], ChatEvent::RetryStarted { attempt: 1, max_attempts: 3 }),
+            "unexpected second event: {log:?}"
+        );
+        // 失败 attempt 已从上下文剔除:只剩 user + 恢复后的 assistant。
+        assert_eq!(agent.messages().len(), 2);
+        assert_last_stop(&agent, StopReason::Stop);
+    }
+
+    #[tokio::test]
+    async fn gives_up_after_max_retries_and_keeps_failed_attempt() {
+        let model = Model::from_settings("gpt-test", "http://localhost");
+        let script = Arc::new(Mutex::new(vec![
+            error_assistant_message(&model, "503 service unavailable"),
+            error_assistant_message(&model, "503 service unavailable"),
+            error_assistant_message(&model, "503 service unavailable"),
+        ]));
+        let agent = test_agent(script);
+        let events = event_log();
+        let signal = CancellationToken::new();
+
+        let result = run_chat_prompt_with_policy(
+            &agent,
+            AgentMessage::user_text("hi", 0),
+            &signal,
+            2,
+            1,
+            {
+                let events = events.clone();
+                move |event: ChatEvent| events.lock().unwrap().push(event)
+            },
+        )
+        .await;
+
+        assert_eq!(result.err().as_deref(), Some("503 service unavailable"));
+        let log = events.lock().unwrap();
+        assert_eq!(log.len(), 4);
+        assert!(matches!(
+            &log[0],
+            ChatEvent::RetryScheduled { attempt: 1, .. }
+        ));
+        assert!(matches!(
+            &log[3],
+            ChatEvent::RetryStarted { attempt: 2, max_attempts: 2 }
+        ));
+        // 最终失败 attempt 留在会话历史(对齐 pi:keep in session for history)。
+        assert_eq!(agent.messages().len(), 2);
+        assert_last_stop(&agent, StopReason::Error);
+    }
+
+    #[tokio::test]
+    async fn non_retryable_error_fails_fast_without_events() {
+        let model = Model::from_settings("gpt-test", "http://localhost");
+        let script = Arc::new(Mutex::new(vec![error_assistant_message(
+            &model,
+            "429 insufficient_quota",
+        )]));
+        let agent = test_agent(script);
+        let events = event_log();
+        let signal = CancellationToken::new();
+
+        let result = run_chat_prompt_with_policy(
+            &agent,
+            AgentMessage::user_text("hi", 0),
+            &signal,
+            3,
+            1,
+            {
+                let events = events.clone();
+                move |event: ChatEvent| events.lock().unwrap().push(event)
+            },
+        )
+        .await;
+
+        assert_eq!(result.err().as_deref(), Some("429 insufficient_quota"));
+        assert!(events.lock().unwrap().is_empty());
+        assert_eq!(agent.messages().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn cancel_during_backoff_skips_next_request() {
+        let model = Model::from_settings("gpt-test", "http://localhost");
+        let script = Arc::new(Mutex::new(vec![
+            error_assistant_message(&model, "502 bad gateway"),
+            ok_message(&model, "never reached"),
+        ]));
+        let agent = test_agent(script.clone());
+        let events = event_log();
+        let signal = CancellationToken::new();
+
+        // RetryScheduled 到达即取消:模拟用户在退避等待中点「停止」。
+        let result = run_chat_prompt_with_policy(
+            &agent,
+            AgentMessage::user_text("hi", 0),
+            &signal,
+            3,
+            60_000,
+            {
+                let events = events.clone();
+                let signal = signal.clone();
+                move |event: ChatEvent| {
+                    if matches!(event, ChatEvent::RetryScheduled { .. }) {
+                        signal.cancel();
+                    }
+                    events.lock().unwrap().push(event);
+                }
+            },
+        )
+        .await;
+
+        assert!(result.is_ok());
+        let log = events.lock().unwrap();
+        assert_eq!(log.len(), 1);
+        assert!(matches!(&log[0], ChatEvent::RetryScheduled { attempt: 1, .. }));
+        // 退避被中断后不再发起下一次请求:成功响应仍未从脚本消费,失败 attempt 已剔除。
+        assert_eq!(script.lock().unwrap().len(), 1);
+        assert_eq!(agent.messages().len(), 1);
+    }
+}
+
 // ── Tauri 命令 ───────────────────────────────────────────────────────
 
 /// 发送一条用户消息并跑完整个 agent 回合(可能多轮 LLM 调用 + 工具执行)。
@@ -229,13 +586,13 @@ pub async fn chat_send(
     *session.run_id.lock().unwrap() = run_id;
     *session.usage.lock().unwrap() = Usage::zero();
 
-    let outcome = session
-        .agent
-        .prompt(AgentMessage::user_text(
-            message,
-            now_ts_nanos() / 1_000_000,
-        ))
-        .await;
+    let outcome = run_chat_prompt_with_retries(
+        &session.agent,
+        AgentMessage::user_text(message, now_ts_nanos() / 1_000_000),
+        &run.token,
+        &on_event,
+    )
+    .await;
     let usage_snapshot = session.usage.lock().unwrap().clone();
     let context_tokens = *session.context_tokens.lock().unwrap();
     let duration_ms = started.elapsed().as_millis() as i64;
@@ -348,8 +705,7 @@ fn resolve_prefs(config_file: &catalog::AiConfigFile) -> AppResult<(Model, Resol
     let Some((reference, prefs)) = catalog::resolve_chat_prefs(config_file) else {
         return Err(AppError::coded(ErrorCode::AiNotConfigured, ""));
     };
-    let model =
-        catalog::resolve_model(config_file, &reference.provider_id, &reference.model_id)?;
+    let model = catalog::resolve_model(config_file, &reference.provider_id, &reference.model_id)?;
     let api_key = config_file
         .providers
         .get(&reference.provider_id)
@@ -579,8 +935,8 @@ fn error_assistant_message(model: &Model, message: &str) -> AssistantMessage {
 /// AgentEvent → ChatEvent 映射监听器:
 /// - TextDelta → TextDelta(thinking/toolcall 增量不透传,由 tool_execution_* 表达)
 /// - tool_execution_start/end → ToolCall / ToolResult
-/// - MessageEnd(assistant)→ 累计 usage 并记录上下文占用;error 时发 Error 事件
-/// - TurnEnd → TurnEnd(携带当前上下文占用)
+/// - MessageEnd(assistant)→ 累计 usage 并记录上下文占用
+/// - 成功 TurnEnd → TurnEnd(错误 attempt 由重试编排层处理,不向前端固化)
 fn chat_event_listener(
     usage: Arc<Mutex<Usage>>,
     context_tokens: Arc<Mutex<i64>>,
@@ -638,29 +994,25 @@ fn chat_event_listener(
                         if assistant.usage.total_tokens > 0 {
                             *context_tokens.lock().unwrap() = assistant.usage.total_tokens;
                         }
-                        if assistant.stop_reason == StopReason::Error {
-                            let detail = assistant
-                                .error_message
-                                .clone()
-                                .unwrap_or_else(|| "unknown error".to_string());
-                            sink_send(
-                                &sink,
-                                ChatEvent::Error {
-                                    code: ErrorCode::AiRequestFailed.as_str().to_string(),
-                                    message: detail,
-                                },
-                            );
-                        }
                     }
                 }
-                AgentEvent::TurnEnd { .. } => {
-                    let current = *context_tokens.lock().unwrap();
-                    sink_send(
-                        &sink,
-                        ChatEvent::TurnEnd {
-                            context_tokens: (current > 0).then_some(current),
-                        },
+                AgentEvent::TurnEnd { message, .. } => {
+                    let failed = matches!(
+                        message,
+                        AgentMessage::Message(TypedMessage::Assistant(AssistantMessage {
+                            stop_reason: StopReason::Error | StopReason::Aborted,
+                            ..
+                        }))
                     );
+                    if !failed {
+                        let current = *context_tokens.lock().unwrap();
+                        sink_send(
+                            &sink,
+                            ChatEvent::TurnEnd {
+                                context_tokens: (current > 0).then_some(current),
+                            },
+                        );
+                    }
                 }
                 _ => {}
             }

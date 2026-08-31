@@ -6,6 +6,7 @@
 
 pub mod event_stream;
 pub mod openai_completions;
+pub mod retry;
 pub mod types;
 pub mod validate;
 

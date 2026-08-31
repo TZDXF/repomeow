@@ -12,6 +12,14 @@ import {
 
 export type ChatPhase = "idle" | "streaming" | "error";
 
+export interface ChatRetryState {
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+  scheduledAt: number;
+  message: string;
+}
+
 /** 单个项目的会话状态(离开页面不清空,内存会话随应用退出丢弃) */
 export interface ChatSessionState {
   messages: ChatMessage[];
@@ -27,6 +35,8 @@ export interface ChatSessionState {
   lastUsage: ChatUsageSummary | null;
   /** 当前上下文占用(turnEnd 逐轮更新;null = 暂无统计) */
   contextTokens: number | null;
+  /** 瞬态错误后的退避等待状态；下一 attempt 开始后清空 */
+  retry: ChatRetryState | null;
 }
 
 interface ChatProject {
@@ -45,6 +55,7 @@ function defaultSession(): ChatSessionState {
     busy: false,
     lastUsage: null,
     contextTokens: null,
+    retry: null,
   };
 }
 
@@ -151,12 +162,27 @@ export const useChatStore = defineStore("chat", () => {
         }
         break;
       }
+      case "retryScheduled":
+        session.streamingText = "";
+        session.pendingToolRunIds = [];
+        session.retry = {
+          attempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          delayMs: event.delayMs,
+          scheduledAt: Date.now(),
+          message: event.message,
+        };
+        break;
+      case "retryStarted":
+        session.retry = null;
+        break;
       case "error":
+        session.retry = null;
         session.error = friendlyChatError(event.code, event.message);
         session.phase = "error";
         break;
       case "done":
-        // 用量由 chat_send 的返回值回填;最终失败以先行到达的 error 事件为准
+        session.retry = null;
         break;
     }
   }
@@ -178,6 +204,7 @@ export const useChatStore = defineStore("chat", () => {
     session.phase = "streaming";
     session.streamingText = "";
     session.pendingToolRunIds = [];
+    session.retry = null;
     session.lastUsage = null;
     session.messages = [
       ...session.messages,
@@ -212,6 +239,7 @@ export const useChatStore = defineStore("chat", () => {
         }
         session.pendingToolRunIds = [];
         session.streamingText = "";
+        session.retry = null;
         session.busy = false;
         controllers.delete(path);
         if (session.phase === "streaming") {

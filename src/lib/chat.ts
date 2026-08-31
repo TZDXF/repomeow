@@ -23,6 +23,14 @@ export type ChatEvent =
   | { kind: "toolCall"; id: string; name: string; args: unknown }
   | { kind: "toolResult"; id: string; ok: boolean; summary: string }
   | { kind: "turnEnd"; contextTokens: number | null }
+  | {
+      kind: "retryScheduled";
+      attempt: number;
+      maxAttempts: number;
+      delayMs: number;
+      message: string;
+    }
+  | { kind: "retryStarted"; attempt: number; maxAttempts: number }
   | { kind: "done"; usage: ChatUsageSummary | null }
   | { kind: "error"; code: string; message: string };
 

@@ -114,6 +114,62 @@ describe("chat store", () => {
     expect(session.lastUsage).toEqual(USAGE);
   });
 
+  it("retryScheduled 丢弃失败 attempt 残片并在下一 attempt 开始时清理状态", async () => {
+    const store = useChatStore();
+    const run = store.send(PATH, PROJECT, "重试一下");
+    emit(PATH, { kind: "textDelta", delta: "失败前的部分内容" });
+    emit(PATH, { kind: "toolCall", id: "failed-tool", name: "read_file", args: {} });
+    emit(PATH, {
+      kind: "retryScheduled",
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 2_000,
+      message: "429: rate limited",
+    });
+
+    const session = store.sessions[PATH];
+    expect(session.streamingText).toBe("");
+    expect(session.pendingToolRunIds).toEqual([]);
+    expect(session.retry).toMatchObject({
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 2_000,
+      message: "429: rate limited",
+    });
+
+    emit(PATH, { kind: "retryStarted", attempt: 1, maxAttempts: 3 });
+    expect(session.retry).toBeNull();
+    emit(PATH, { kind: "textDelta", delta: "重试成功" });
+    emit(PATH, { kind: "turnEnd", contextTokens: 130 });
+    emit(PATH, { kind: "done", usage: USAGE });
+    finish(PATH, USAGE);
+    await run;
+
+    expect(session.messages).toHaveLength(2);
+    expect(session.messages[1]).toMatchObject({ role: "assistant", content: "重试成功" });
+    expect(session.phase).toBe("idle");
+  });
+
+  it("最终 error 会清理 retry 状态", async () => {
+    const store = useChatStore();
+    const run = store.send(PATH, PROJECT, "持续失败");
+    emit(PATH, {
+      kind: "retryScheduled",
+      attempt: 3,
+      maxAttempts: 3,
+      delayMs: 8_000,
+      message: "503",
+    });
+    emit(PATH, { kind: "error", code: "ai_request_failed", message: "503 service unavailable" });
+    finish(PATH, null);
+    await run;
+
+    const session = store.sessions[PATH];
+    expect(session.retry).toBeNull();
+    expect(session.phase).toBe("error");
+    expect(session.messages).toHaveLength(1);
+  });
+
   it("忙时拒绝再次发送,不重复调用后端", async () => {
     const store = useChatStore();
     const first = store.send(PATH, PROJECT, "第一条");

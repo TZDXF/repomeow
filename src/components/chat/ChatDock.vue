@@ -16,15 +16,26 @@ import {
   Wrench,
   X,
 } from "@lucide/vue";
-import { useEventListener } from "@vueuse/core";
+import { useEventListener, useNow } from "@vueuse/core";
 import { Context } from "@/components/ai-elements/context";
+import {
+  Conversation,
+  ConversationContent,
+  ConversationEmptyState,
+  ConversationScrollButton,
+} from "@/components/ai-elements/conversation";
+import { Loader } from "@/components/ai-elements/loader";
+import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
 import { ModelSelector, type ModelSelectorGroup } from "@/components/ai-elements/model-selector";
 import {
   PromptInput,
+  PromptInputBody,
   PromptInputButton,
   PromptInputFooter,
   PromptInputSubmit,
   PromptInputTextarea,
+  PromptInputTools,
+  type ChatStatus,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import {
@@ -110,6 +121,14 @@ function abort() {
   chat.abort(props.project.path);
 }
 
+// 发送/停止共用一个位置(参照 ai-elements chatbot 示例):状态驱动提交按钮图标,
+// 等待首个 token 转圈、流式中显示方块;忙时提交钮隐藏但保留在 DOM 且 disabled,
+// 使输入框 Enter 守卫(button[type=submit] disabled 则不提交)继续生效、不误清已输入文本
+const submitStatus = computed<ChatStatus>(() => {
+  if (session.value.busy) return session.value.streamingText ? "streaming" : "submitted";
+  return session.value.error ? "error" : "ready";
+});
+
 function startNewSession() {
   // 忙时直接清:store 内部先中止在途请求,等待落地后重置前后端会话
   void chat.newSession(props.project.path);
@@ -185,6 +204,14 @@ const pendingToolRuns = computed(() =>
     .map((id) => session.value.toolRuns[id])
     .filter((run) => run != null),
 );
+
+const retryClock = useNow({ interval: 250 });
+const retrySeconds = computed(() => {
+  const retry = session.value.retry;
+  if (!retry) return 0;
+  const elapsed = retryClock.value.getTime() - retry.scheduledAt;
+  return Math.max(0, Math.ceil((retry.delayMs - elapsed) / 1000));
+});
 </script>
 
 <template>
@@ -327,6 +354,22 @@ const pendingToolRuns = computed(() =>
                     :run="run"
                   />
                   <MessageResponse v-if="session.streamingText" :content="session.streamingText" />
+                  <div
+                    v-else-if="session.retry"
+                    class="flex items-center gap-2 text-xs text-muted-foreground"
+                    :title="session.retry.message"
+                  >
+                    <Loader />
+                    <span>
+                      {{
+                        t("chat.retryScheduled", {
+                          attempt: session.retry.attempt,
+                          max: session.retry.maxAttempts,
+                          seconds: retrySeconds,
+                        })
+                      }}
+                    </span>
+                  </div>
                   <Loader v-else class="text-muted-foreground" />
                 </MessageContent>
               </Message>
@@ -347,13 +390,15 @@ const pendingToolRuns = computed(() =>
         <!-- 输入区 -->
         <div class="shrink-0 p-3">
           <PromptInput class="rounded-lg" @submit="onSubmit">
-            <PromptInputTextarea
-              class="min-h-9"
-              :placeholder="t('chat.composer.placeholder')"
-              :disabled="!aiReady"
-            />
+            <PromptInputBody>
+              <PromptInputTextarea
+                class="min-h-9"
+                :placeholder="t('chat.composer.placeholder')"
+                :disabled="!aiReady"
+              />
+            </PromptInputBody>
             <PromptInputFooter class="px-2 pb-2">
-              <div class="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+              <PromptInputTools class="min-w-0 flex-1 flex-wrap">
                 <ModelSelector
                   :model-value="aiConfig.chatModelValue"
                   :groups="modelGroups"
@@ -410,19 +455,23 @@ const pendingToolRuns = computed(() =>
                     {{ t("chat.goSettings") }}
                   </Button>
                 </p>
-              </div>
-              <div class="flex shrink-0 items-center gap-1.5">
-                <Button
+              </PromptInputTools>
+              <!-- 发送/停止共用槽位:忙时提交钮隐藏(disabled 保留在 DOM 供 Enter 守卫),同位显示方形停止钮 -->
+              <div class="relative size-8 shrink-0">
+                <PromptInputSubmit
+                  v-show="!session.busy"
+                  :status="submitStatus"
+                  :disabled="!aiReady || session.busy"
+                />
+                <PromptInputButton
                   v-if="session.busy"
-                  size="sm"
                   variant="destructive"
-                  class="h-8 gap-1 px-2"
+                  class="absolute inset-0"
+                  :title="t('chat.stop')"
                   @click="abort"
                 >
-                  <Square class="h-3 w-3 fill-current" />
-                  {{ t("chat.stop") }}
-                </Button>
-                <PromptInputSubmit :disabled="!aiReady || session.busy" />
+                  <Square class="size-3.5 fill-current" />
+                </PromptInputButton>
               </div>
             </PromptInputFooter>
           </PromptInput>
