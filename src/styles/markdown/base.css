@@ -32,3 +32,12 @@
   max-width: 100%;
   border-radius: 4px;
 }
+
+/* 表格单元格:撤销全局 break-word(word-break: break-word 在 Chromium 里等同
+ * overflow-wrap: anywhere,会把列的 min-content 缩到单字符,窄容器(如问答面板)
+ * 里列被压碎成逐字竖排);并给单元格一个可读最小宽度,过宽时由
+ * table-inner-wrapper(overflow-x-auto)横向滚动而不是压缩列。 */
+.stream-markdown.stream-markdown [data-stream-markdown="table"] :is(th, td) {
+  word-break: normal;
+  min-width: 4em;
+}

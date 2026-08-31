@@ -133,7 +133,11 @@ function onSubmit(e: Event) {
       @dragover.prevent="handleDragOver"
       @drop.prevent.stop="handleDrop"
     >
-      <InputGroup class="overflow-hidden">
+      <!-- 抵消 InputGroup 的 has-disabled 整组变灰:组内任一控件禁用(回答中锁定工具栏、
+           模型不支持思考等)不应让仍可输入的文本框一起半透明,禁用态由各控件自身表达 -->
+      <InputGroup
+        class="overflow-hidden has-disabled:bg-transparent! has-disabled:opacity-100! dark:has-disabled:bg-input/30!"
+      >
         <slot />
       </InputGroup>
     </form>
