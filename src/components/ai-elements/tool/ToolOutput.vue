@@ -2,6 +2,7 @@
 import type { HTMLAttributes } from "vue";
 import { cn } from "@/lib/utils";
 import { computed, isVNode } from "vue";
+import { useI18n } from "vue-i18n";
 import { CodeBlock } from "../code-block";
 
 interface Props extends /* @vue-ignore */ HTMLAttributes {
@@ -11,6 +12,8 @@ interface Props extends /* @vue-ignore */ HTMLAttributes {
 }
 
 const props = defineProps<Props>();
+
+const { t } = useI18n();
 
 const showOutput = computed(
   () => (props.output !== undefined && props.output !== null) || props.errorText,
@@ -30,9 +33,9 @@ const formattedOutput = computed(() => {
 </script>
 
 <template>
-  <div v-if="showOutput" :class="cn('space-y-2 p-4', props.class)" v-bind="$attrs">
+  <div v-if="showOutput" :class="cn('space-y-1.5 p-2', props.class)" v-bind="$attrs">
     <h4 class="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-      {{ props.errorText ? "Error" : "Result" }}
+      {{ props.errorText ? t("chat.toolError") : t("chat.toolOutput") }}
     </h4>
     <div
       :class="
