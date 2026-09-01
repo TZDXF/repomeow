@@ -3,7 +3,7 @@
 //! NFD 变体(蓝本 `resolved.normalize("NFD")`)依赖 unicode-normalization crate,
 //! 本仓库依赖树未提供,跳过该变体(其余变体保留,见报告偏差)。
 
-use crate::agent::harness::types::{get_or_throw, ExecutionEnv};
+use crate::agent::harness::types::{ExecutionEnv, FileError};
 use crate::agent::types::AbortSignal;
 
 /// Unicode 空白字符(对齐 TS `UNICODE_SPACES`)。
@@ -35,13 +35,13 @@ pub fn normalize_tool_path(path: &str) -> String {
     normalized
 }
 
-/// 绝对化工具路径(对齐 TS `resolveToolPath`)。
+/// 绝对化工具路径(对齐 TS `resolveToolPath`;env 失败时返回 FileError 而非 panic)。
 pub async fn resolve_tool_path(
     env: &dyn ExecutionEnv,
     path: &str,
     signal: Option<AbortSignal>,
-) -> String {
-    get_or_throw(env.absolute_path(normalize_tool_path(path), signal).await)
+) -> Result<String, FileError> {
+    env.absolute_path(normalize_tool_path(path), signal).await
 }
 
 /// 读工具路径:依次尝试字面路径与 macOS 截图风格的变体
@@ -50,8 +50,8 @@ pub async fn resolve_read_tool_path(
     env: &dyn ExecutionEnv,
     path: &str,
     signal: Option<AbortSignal>,
-) -> String {
-    let resolved = resolve_tool_path(env, path, signal.clone()).await;
+) -> Result<String, FileError> {
+    let resolved = resolve_tool_path(env, path, signal.clone()).await?;
     // " (AM|PM)." → 窄不换行空格(macOS 截图 "Screenshot 2024-01-01 at 10.00.00 AM.png")。
     let am_pm_replaced = replace_am_pm(&resolved);
     let smart_quote_replaced = resolved.replace('\'', "\u{2019}");
@@ -65,10 +65,10 @@ pub async fn resolve_read_tool_path(
 
     for variant in variants {
         if let Ok(true) = env.exists(variant.clone(), signal.clone()).await {
-            return variant;
+            return Ok(variant);
         }
     }
-    resolved
+    Ok(resolved)
 }
 
 fn replace_am_pm(path: &str) -> String {

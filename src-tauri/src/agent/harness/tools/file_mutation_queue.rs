@@ -28,9 +28,7 @@ fn env_key(env: &Arc<dyn ExecutionEnv>) -> usize {
 /// 计算变更队列键:目标存在的规范化路径,或缺失/不支持时的绝对路径
 /// (对齐 TS `getMutationQueueKey`)。
 async fn mutation_queue_key(env: &Arc<dyn ExecutionEnv>, path: &str) -> Result<String, crate::agent::harness::types::FileError> {
-    let absolute_path: String = crate::agent::harness::types::get_or_throw(
-        env.absolute_path(path.to_string(), None).await,
-    );
+    let absolute_path: String = env.absolute_path(path.to_string(), None).await?;
     match env.canonical_path(absolute_path.clone(), None).await {
         Ok(canonical) => Ok(canonical),
         Err(error) => {

@@ -76,11 +76,17 @@ pub fn create_read_tool(env: Arc<dyn ExecutionEnv>, options: Option<ReadToolOpti
             Box::pin(async move {
                 let input: ReadToolInput = serde_json::from_value(params)
                     .map_err(|error| ToolExecutionError::from(SimpleError::new(error.to_string())))?;
-                let absolute_path =
-                    resolve_read_tool_path(env.as_ref(), &input.path, signal.clone()).await;
-                let bytes = crate::agent::harness::types::get_or_throw(
-                    env.read_binary_file(absolute_path.clone(), signal.clone()).await,
-                );
+                let absolute_path = resolve_read_tool_path(env.as_ref(), &input.path, signal.clone())
+                    .await
+                    .map_err(|error| {
+                        ToolExecutionError::from(SimpleError::new(error.to_string()))
+                    })?;
+                let bytes = env
+                    .read_binary_file(absolute_path.clone(), signal.clone())
+                    .await
+                    .map_err(|error| {
+                        ToolExecutionError::from(SimpleError::new(error.to_string()))
+                    })?;
                 if let Some(mime_type) = detect_supported_image_mime_type(&bytes) {
                     if mime_type == "image/bmp" {
                         return Ok(crate::agent::types::AgentToolResult {

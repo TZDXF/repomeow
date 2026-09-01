@@ -20,7 +20,8 @@
 //! - `tools/`      ← harness/tools/**
 //! - `utils/`      ← harness/utils/**(truncate/shell-output)
 //! - `env.rs`      ← harness/env/nodejs.ts(TokioEnv,tokio::fs + tokio::process)
-//! - `agent_harness.rs` ← harness/agent-harness.ts(WIP 骨架)
+//! - `agent_harness.rs` ← harness/agent-harness.ts(公开契约;运行方法已接线)
+//! - `runtime.rs`   ← 本仓库扩展:AgentHarness 运行时(prompt/abort/队列/事件)
 //! - `uuid.rs`     ← 蓝本 `@earendil-works/pi-ai` 的 uuidv7(蓝本依赖,本地补实现)
 
 // 说明:`agent` 模块当前是 crate 内部消费(harness 的公开 API 面尚未被上层
@@ -41,6 +42,8 @@ pub mod messages;
 pub mod prompt_templates;
 #[allow(dead_code)]
 pub mod reducer;
+#[allow(dead_code)]
+pub mod runtime;
 #[allow(dead_code)]
 pub mod result;
 #[allow(dead_code)]

@@ -179,11 +179,74 @@ async fn path_exists(path: &Path) -> bool {
     tokio::fs::metadata(path).await.is_ok()
 }
 
+/// shell 种类:蓝本 harness 只有平台默认 shell(bash);coding-agent 另有
+/// powershell 工具(复用 bash 管线、仅 Windows)。本仓库按其 `getPowerShellConfig`
+/// 语义扩展 env,使同一执行管线可跑 PowerShell。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ShellKind {
+    /// 平台默认 shell:Git Bash(Windows)/ bash → sh(unix)。
+    #[default]
+    Bash,
+    /// Windows PowerShell:pwsh.exe 优先,回退 powershell.exe;非 Windows 不可用。
+    PowerShell,
+}
+
+/// PowerShell 固定参数(对齐 coding-agent `POWERSHELL_ARGS`)。
+const POWERSHELL_ARGS: [&str; 5] = [
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-Command",
+];
+
 struct ShellConfig {
     shell: String,
     args: Vec<String>,
     /// stdin 传输(老式 WSL bash)。
     command_transport_stdin: bool,
+}
+
+fn get_powershell_shell_config(shell: &str) -> ShellConfig {
+    ShellConfig {
+        shell: shell.to_string(),
+        args: POWERSHELL_ARGS.iter().map(|arg| arg.to_string()).collect(),
+        command_transport_stdin: false,
+    }
+}
+
+/// PATH 上查找 PowerShell 可执行文件:pwsh.exe 优先,回退 powershell.exe
+/// (对齐 coding-agent `getPowerShellConfig`)。
+#[cfg(windows)]
+async fn find_powershell_on_path() -> Option<String> {
+    for program in ["pwsh.exe", "powershell.exe"] {
+        let output = match tokio::process::Command::new("where")
+            .arg(program)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .stdin(Stdio::null())
+            .kill_on_drop(true)
+            .output()
+            .await
+        {
+            Ok(output) => output,
+            Err(_) => continue,
+        };
+        if !output.status.success() || output.stdout.is_empty() {
+            continue;
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            let candidate = line.trim();
+            if candidate.is_empty() {
+                continue;
+            }
+            if path_exists(Path::new(candidate)).await {
+                return Some(candidate.to_string());
+            }
+        }
+    }
+    None
 }
 
 fn is_legacy_wsl_bash_path(path: &str) -> bool {
@@ -238,7 +301,26 @@ async fn find_bash_on_path() -> Option<String> {
     }
 }
 
-async fn get_shell_config(custom_shell_path: Option<&str>) -> Result<ShellConfig, ExecutionError> {
+async fn get_shell_config(
+    shell_kind: ShellKind,
+    custom_shell_path: Option<&str>,
+) -> Result<ShellConfig, ExecutionError> {
+    if shell_kind == ShellKind::PowerShell {
+        // 对齐 coding-agent:powershell 仅 Windows 可用;shellPath 设置只作用于 bash。
+        if !cfg!(windows) {
+            return err(ExecutionError::new(
+                ExecutionErrorCode::ShellUnavailable,
+                "The powershell tool is only available on Windows.",
+            ));
+        }
+        if let Some(powershell) = find_powershell_on_path().await {
+            return ok(get_powershell_shell_config(&powershell));
+        }
+        return err(ExecutionError::new(
+            ExecutionErrorCode::ShellUnavailable,
+            "No PowerShell executable found. Install PowerShell or add powershell.exe/pwsh.exe to PATH.",
+        ));
+    }
     if let Some(custom_shell_path) = custom_shell_path {
         if path_exists(Path::new(custom_shell_path)).await {
             return ok(get_bash_shell_config(custom_shell_path));
@@ -338,6 +420,7 @@ pub struct TokioEnv {
     cwd: PathBuf,
     /// cwd 的字符串缓存(cwd() 返回 &str 需要)。
     cwd_text: String,
+    shell_kind: ShellKind,
     shell_path: Option<String>,
     shell_env: Option<HashMap<String, String>>,
     active_child_pids: Arc<Mutex<std::collections::HashSet<u32>>>,
@@ -347,6 +430,7 @@ pub struct TokioEnv {
 /// TokioEnv 构造选项(对齐 NodeExecutionEnv 构造参数)。
 pub struct TokioEnvOptions {
     pub cwd: PathBuf,
+    pub shell_kind: ShellKind,
     pub shell_path: Option<String>,
     pub shell_env: Option<HashMap<String, String>>,
 }
@@ -355,6 +439,7 @@ impl TokioEnv {
     pub fn new(cwd: impl Into<PathBuf>) -> Self {
         Self::with_options(TokioEnvOptions {
             cwd: cwd.into(),
+            shell_kind: ShellKind::Bash,
             shell_path: None,
             shell_env: None,
         })
@@ -366,6 +451,7 @@ impl TokioEnv {
         Self {
             cwd: normalized,
             cwd_text,
+            shell_kind: options.shell_kind,
             shell_path: options.shell_path,
             shell_env: options.shell_env,
             active_child_pids: Arc::new(Mutex::new(std::collections::HashSet::new())),
@@ -823,12 +909,17 @@ impl Shell for TokioEnv {
                 Some(cwd) => resolve_path(&self.cwd_text, cwd),
                 None => self.cwd.clone(),
             };
-            let shell_config = get_shell_config(self.shell_path.as_deref()).await?;
+            let shell_config = get_shell_config(self.shell_kind, self.shell_path.as_deref()).await?;
             if !path_exists(&cwd).await {
+                let shell_label = if self.shell_kind == ShellKind::PowerShell {
+                    "PowerShell"
+                } else {
+                    "bash"
+                };
                 return err(ExecutionError::new(
                     ExecutionErrorCode::SpawnError,
                     format!(
-                        "Working directory does not exist: {}\nCannot execute bash commands.",
+                        "Working directory does not exist: {}\nCannot execute {shell_label} commands.",
                         cwd.to_string_lossy()
                     ),
                 ));
@@ -1241,6 +1332,37 @@ mod tests {
             .expect("exec must finish after cancel")
             .unwrap();
         assert_eq!(result.unwrap_err().code, ExecutionErrorCode::Aborted);
+    }
+
+    #[test]
+    fn powershell_shell_config_uses_fixed_args() {
+        let config = get_powershell_shell_config("C:\\Program Files\\PowerShell\\7\\pwsh.exe");
+        assert_eq!(config.shell, "C:\\Program Files\\PowerShell\\7\\pwsh.exe");
+        assert_eq!(
+            config.args,
+            vec![
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command"
+            ]
+        );
+        assert!(!config.command_transport_stdin);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn powershell_found_on_windows_path() {
+        // Windows 环境必有 powershell.exe;pwsh 存在时优先返回 pwsh。
+        let found = find_powershell_on_path()
+            .await
+            .expect("powershell must exist on Windows");
+        let lower = found.to_lowercase();
+        assert!(
+            lower.ends_with("pwsh.exe") || lower.ends_with("powershell.exe"),
+            "{found}"
+        );
     }
 
     #[tokio::test]

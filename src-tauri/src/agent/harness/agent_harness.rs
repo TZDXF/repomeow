@@ -1,31 +1,49 @@
 //! AgentHarness 组合层:对齐 `packages/agent/src/harness/agent-harness.ts`。
 //!
-//! 与蓝本一致,`AgentHarness` 在上游即为 WIP:运行方法(prompt/skill/compact/
-//! navigate/resume/abort/steer/followUp/nextRun/watch 等)全部返回
-//! [`HarnessNotImplemented`](关闭后返回 [`HarnessClosed`]);getter/setter 可用。
-//! 错误族定义在 `errors.rs`,结果类型别名与蓝本一一对应。
+//! 蓝本在 0.84.4 为显式 scaffold;本仓库在保持其公开契约(类型/错误/结果形状)
+//! 的前提下接入了运行时(runtime.rs):prompt/abort/steer/followUp/nextRun/
+//! cancelQueued/recordUsage/waitForIdle/runWhenIdle/runToCompletion/watch/
+//! watchSession/lane/lanes/compact 可用;resume 在 create 恢复后无挂起 operation
+//! 可续(崩溃 operation 已归约 aborted),返回 `NothingToResume`。
+//! 仍按蓝本 NotImplemented 的:skill/promptFromTemplate(资源未接线)、
+//! navigateTree、peekAction/executeAction(manual drive)、createLane(单 lane)。
 
-use crate::agent::harness::compaction::compaction::CompactionSettings;
+use crate::agent::agent::{default_convert_to_llm_fn, Agent};
+use crate::agent::agent_loop::now_ms;
+use crate::agent::harness::compaction::compaction::{self as compaction_mod, CompactionSettings};
 use crate::agent::harness::errors::{
     Closed, HarnessClosed, HarnessNotImplemented, HarnessUnavailable, InvalidLane, InvalidMessage,
     LaneBusy, LaneExists, MissingIdentities, NoActiveOperation, NoActiveRun, NothingToCompact,
     NothingToResume, OperationError, UnknownQueueItem, UnknownSkill, UnknownTarget, UnknownTemplate,
 };
-use crate::agent::harness::events::{HarnessEventBus, HarnessEvent, HarnessEventType, WatchHandle};
-use crate::agent::harness::events::HarnessEventListener;
-use crate::agent::harness::types::Result as ResultValue;
+use crate::agent::harness::events::{
+    HarnessEvent, HarnessEventBus, HarnessEventListener, HarnessEventType, RunEndEvent,
+    RunEndOutcome, RunStartEvent, WatchHandle,
+};
+use crate::agent::harness::runtime::{
+    branch_entries, build_history, make_mirroring_listener, make_queue_getter, operation_error,
+    stream_options_to_simple, EngineHandle, EmptyToolContext, QueuedEntry, QueueSet, RuntimeShared,
+};
 use crate::agent::harness::session::session::Session;
 use crate::agent::harness::session::types::{
-    BranchSummaryEntry, CompactionEntry, Entry, ProvisionedEntry, RecordQuery, SessionError,
-    SessionTree,
+    BranchSummaryEntry, CompactionEntry, CompactionReason, Entry, LaneRecord, OperationIntent,
+    OperationOutcome, OperationStartedRecord, ProvisionedEntry, ProvisionedMessageEntry,
+    QueueCancelledRecord, QueueEnqueuedRecord, QueueKind, RecordQuery, SessionError, SessionTree,
+    StepAttemptRecord, StepKind, UsageCauseKind, UsageRecord,
 };
 use crate::agent::harness::telemetry::TelemetryContext;
 use crate::agent::harness::types::{
-    AgentHarnessResources, AgentHarnessStreamOptions, AgentHarnessStreamOptionsPatch,
+    AgentHarnessResources, AgentHarnessStreamOptions, AgentHarnessStreamOptionsPatch, ToolContext,
+    Result as ResultValue,
 };
-use crate::agent::llm::types::{AssistantMessage, Model, ModelThinkingLevel, Usage};
-use crate::agent::types::{AgentMessage, QueueMode, ToolExecutionMode};
-use std::sync::Mutex;
+use crate::agent::harness::uuid::uuid_v7;
+use crate::agent::llm::retry::{is_retryable_assistant_error, retry_delay_ms, sleep_with_cancel};
+use crate::agent::llm::types::{AssistantMessage, Model, ModelThinkingLevel, StopReason, Usage};
+use crate::agent::types::{
+    AgentLoopConfig, AgentMessage, AgentState, QueueMode, ToolExecutionMode, TypedMessage,
+};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 // ---------------------------------------------------------------------------
 // 结果类型(对齐 TS RunOutcome/... 与各 Rejected 联合)
@@ -402,8 +420,8 @@ pub struct AgentHarnessOptions {
 // AgentHarness(WIP 骨架)
 // ---------------------------------------------------------------------------
 
-/// AgentHarness:与蓝本相同的 WIP 形态 —— 字段访问器可用,运行方法返回
-/// `HarnessNotImplemented`(关闭后 `HarnessClosed`)。
+/// AgentHarness:与蓝本相同的公开契约;运行方法经 runtime.rs 接线
+/// (蓝本 scaffold 未提供实现,运行语义见 runtime.rs 模块注释)。
 pub struct AgentHarness {
     name: &'static str,
     session: Session,
@@ -423,26 +441,27 @@ struct HarnessState {
     steering_mode: QueueMode,
     follow_up_mode: QueueMode,
     closed: bool,
+    // ---- 运行期接线(蓝本构造时仅存档,本仓库实际使用) ----
+    stream_fn: Option<crate::agent::types::StreamFn>,
+    system_prompt: Option<String>,
+    tool_context: Option<Arc<dyn ToolContext>>,
+    tool_execution: ToolExecutionMode,
+    telemetry_context: Option<Arc<dyn TelemetryContext>>,
+    queues: Arc<Mutex<QueueSet>>,
+    engine: Arc<Mutex<Option<EngineHandle>>>,
+    busy: Arc<tokio::sync::watch::Sender<bool>>,
 }
 
 impl AgentHarness {
-    /// 创建 harness(对齐 TS `create`;存在任何历史记录时抛 NotImplemented)。
+    /// 创建 harness(对齐 TS `create`)。存在历史记录时经 reducer 重建状态:
+    /// 未完结的 operation 合成 aborted 收尾并以 [`SuspendedOperation`] 返回
+    /// (蓝本抛 `create.restore`;本仓库为实现恢复语义的扩展,原因见 runtime.rs)。
     pub async fn create(
         options: AgentHarnessOptions,
     ) -> Result<(Self, Vec<SuspendedOperation>), HarnessNotImplemented> {
-        let record = options
-            .session
-            .find_records(RecordQuery {
-                limit: Some(1),
-                ..Default::default()
-            })
+        let suspended = Self::restore_open_operations(&options.session)
             .await
-            .map_err(|error: SessionError| {
-                HarnessNotImplemented::new(format!("create.restore({})", error.code))
-            })?;
-        if !record.is_empty() {
-            return Err(HarnessNotImplemented::new("create.restore"));
-        }
+            .map_err(|error| HarnessNotImplemented::new(format!("create.restore({error})")))?;
         let AgentHarnessOptions {
             session,
             stream_fn,
@@ -461,14 +480,10 @@ impl AgentHarness {
             tool_execution,
             telemetry_context,
         } = options;
-        // WIP:运行期字段尚未接入驱动循环,与蓝本构造器一样仅存档。
-        let _ = (
-            stream_fn,
-            tool_context,
-            system_prompt,
-            tool_execution,
-            telemetry_context,
-        );
+        let (queues, engine, busy) = {
+            let shared = RuntimeShared::new(session.clone());
+            (shared.queues.clone(), shared.engine.clone(), shared.busy.clone())
+        };
         let active_tool_names = active_tool_names
             .unwrap_or_else(|| tools.iter().map(|tool| tool.name.clone()).collect());
         Ok((
@@ -492,10 +507,65 @@ impl AgentHarness {
                     steering_mode,
                     follow_up_mode,
                     closed: false,
+                    stream_fn: Some(stream_fn),
+                    system_prompt,
+                    tool_context,
+                    tool_execution,
+                    telemetry_context,
+                    queues,
+                    engine,
+                    busy,
                 }),
             },
-            Vec::new(),
+            suspended,
         ))
+    }
+
+    /// 恢复辅助:把未完结 operation 归约为 aborted 并返回挂起概要。
+    async fn restore_open_operations(
+        session: &Session,
+    ) -> Result<Vec<SuspendedOperation>, SessionError> {
+        let open = session.find_open_operations("main", None).await?;
+        let mut suspended = Vec::new();
+        for record in open {
+            let kind = match &record.intent {
+                OperationIntent::Run { .. } => OperationKind::Run,
+                OperationIntent::Compaction { .. } => OperationKind::Compaction,
+                OperationIntent::Navigation { .. } => OperationKind::Navigation,
+            };
+            let prompt = match &record.intent {
+                OperationIntent::Run { original_prompt, .. } => Some(original_prompt.clone()),
+                _ => None,
+            };
+            session
+                .append_record(LaneRecord::OperationFinished(
+                    crate::agent::harness::session::types::OperationFinishedRecord {
+                        id: uuid_v7(),
+                        seq: 0,
+                        lane: "main".to_string(),
+                        timestamp: now_ms(),
+                        run_id: record.id.clone(),
+                        outcome: OperationOutcome::Aborted,
+                        error: Some(OperationError {
+                            code: "crash_restored".to_string(),
+                            message: "Operation was interrupted before completion and was restored as aborted."
+                                .to_string(),
+                        }),
+                    },
+                ))
+                .await?;
+            suspended.push(SuspendedOperation {
+                lane: "main".to_string(),
+                kind,
+                id: record.id.clone(),
+                started_at: record.timestamp,
+                reason: SuspensionReason::Crash,
+                prompt,
+                aborting: None,
+                missing: (Vec::new(), Vec::new()),
+            });
+        }
+        Ok(suspended)
     }
 
     fn unavailable<T>(&self, operation: &str) -> Result<T, HarnessUnavailable> {
@@ -540,11 +610,423 @@ impl AgentHarness {
         self.session.get_leaf_id().await
     }
 
-    pub async fn prompt(&self, _text: String) -> Result<RunOutcome, HarnessUnavailable> {
-        self.unavailable("prompt")
+    // ----- 运行方法(runtime.rs 接线) -----
+
+    /// 当前运行期共享依赖(从既有字段拼装)。
+    fn shared(&self) -> RuntimeShared {
+        let state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        RuntimeShared {
+            session: self.session.clone(),
+            bus: self.events.clone(),
+            queues: state.queues.clone(),
+            engine: state.engine.clone(),
+            busy: state.busy.clone(),
+        }
     }
 
-    pub async fn skill(&self, _name: String, _additional_instructions: Option<String>) -> Result<RunOutcome, HarnessUnavailable> {
+    fn lock_state(&self) -> std::sync::MutexGuard<'_, HarnessState> {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn closed_error() -> RunRejected {
+        RunRejected::Closed(Closed::new("AgentHarness was closed"))
+    }
+
+    async fn leaf_id(&self) -> String {
+        self.session
+            .get_leaf_id()
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// main lane 的在途 operation 概要(当前仅 run 一种)。
+    async fn main_lane_operation(&self) -> Option<LaneOperationInfo> {
+        let state = self.lock_state();
+        let engine = state
+            .engine
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        engine
+            .as_ref()
+            .map(|engine| LaneOperationInfo {
+                id: engine.run_id.clone(),
+                kind: OperationKind::Run,
+                status: OperationStatus::Running,
+            })
+    }
+
+    async fn main_lane(&self) -> Lane {
+        Lane {
+            name: "main".to_string(),
+            leaf_id: Some(self.leaf_id().await),
+            operation: self.main_lane_operation().await,
+        }
+    }
+
+    /// 落 operation_finished、清引擎槽位、解除 busy。
+    async fn finish_run(
+        &self,
+        shared: &RuntimeShared,
+        run_id: &str,
+        outcome: OperationOutcome,
+        error: Option<OperationError>,
+    ) {
+        let _ = self
+            .session
+            .append_record(LaneRecord::OperationFinished(
+                crate::agent::harness::session::types::OperationFinishedRecord {
+                    id: uuid_v7(),
+                    seq: 0,
+                    lane: "main".to_string(),
+                    timestamp: now_ms(),
+                    run_id: run_id.to_string(),
+                    outcome,
+                    error,
+                },
+            ))
+            .await;
+        *shared.engine.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        let _ = shared.busy.send(false);
+    }
+
+    pub async fn prompt(&self, text: String) -> RunResult {
+        self.prompt_input(QueueInput::Text(text)).await
+    }
+
+    async fn prompt_input(&self, input: QueueInput) -> RunResult {
+        // 1. 守卫 + 配置快照(短临界区,不跨 await)。
+        let snapshot = {
+            let state = self.lock_state();
+            if state.closed {
+                return Err(Self::closed_error());
+            }
+            let engine = state.engine.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(engine) = engine.as_ref() {
+                return Err(RunRejected::LaneBusy(LaneBusy::new(
+                    format!("Lane main is busy with operation {}", engine.run_id),
+                    "main".to_string(),
+                    engine.run_id.clone(),
+                    "run".to_string(),
+                )));
+            }
+            PromptSnapshot {
+                model: state.model.clone(),
+                thinking_level: state.thinking_level,
+                active_tool_names: state.active_tool_names.clone(),
+                tools: state.tools.clone(),
+                tool_context: state.tool_context.clone(),
+                system_prompt: state.system_prompt.clone(),
+                tool_execution: state.tool_execution,
+                stream_options: state.stream_options.clone(),
+                retry_policy: state.retry_policy,
+                stream_fn: state
+                    .stream_fn
+                    .clone()
+                    .expect("stream_fn is set at create time"),
+            }
+        };
+
+        // 2. 输入归一化。
+        let prompt_messages: Vec<AgentMessage> = match input {
+            QueueInput::Text(text) => vec![AgentMessage::user_text(text, now_ms())],
+            QueueInput::Message(message) => vec![*message],
+            QueueInput::Messages(messages) => messages,
+        };
+        if prompt_messages.is_empty() {
+            return Err(RunRejected::InvalidMessage(InvalidMessage::new(
+                "Prompt must contain at least one message",
+                "main".to_string(),
+                "empty prompt".to_string(),
+            )));
+        }
+
+        let shared = self.shared();
+        let run_id = uuid_v7();
+
+        // 3. nextRun 捕获项 + durable intent 落库。
+        let initial: Vec<QueuedEntry> = {
+            let mut queues = shared.queues.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            QueueSet::drain(&mut queues.next_run, QueueMode::All)
+        };
+        let accept = self
+            .session
+            .append_record(LaneRecord::OperationStarted(OperationStartedRecord {
+                id: run_id.clone(),
+                seq: 0,
+                lane: "main".to_string(),
+                timestamp: now_ms(),
+                source_leaf_id: self.session.get_leaf_id().await.unwrap_or(None),
+                intent: OperationIntent::Run {
+                    original_prompt: prompt_messages.clone(),
+                    initial_messages: initial
+                        .iter()
+                        .map(|item| {
+                            ProvisionedEntry::Message(ProvisionedMessageEntry {
+                                id: item.entry_id.clone(),
+                                message: item.message.clone(),
+                                terminate: None,
+                            })
+                        })
+                        .collect(),
+                    system_prompt_override: None,
+                    resume_data: None,
+                },
+            }))
+            .await;
+        if let Err(error) = accept {
+            return Ok(RunOutcome::Failed {
+                leaf_id: self.leaf_id().await,
+                error: operation_error(error),
+                final_entry_id: None,
+                final_message: None,
+            });
+        }
+        // 4. nextRun 前置条目物化。
+        for item in &initial {
+            let _ = self
+                .session
+                .append_entry(
+                    ProvisionedEntry::Message(ProvisionedMessageEntry {
+                        id: item.entry_id.clone(),
+                        message: item.message.clone(),
+                        terminate: None,
+                    }),
+                    "main".to_string(),
+                )
+                .await;
+        }
+
+        // 5. 历史(不含本次 prompt;prompt 由引擎经事件循环落库)。
+        let history = match build_history(&self.session).await {
+            Ok(history) => history.messages,
+            Err(error) => {
+                return Ok(RunOutcome::Failed {
+                    leaf_id: self.leaf_id().await,
+                    error: operation_error(error),
+                    final_entry_id: None,
+                    final_message: None,
+                });
+            }
+        };
+
+        // 6. 组装引擎 Agent。
+        let (steering_mode, follow_up_mode) = {
+            let state = self.lock_state();
+            (state.steering_mode, state.follow_up_mode)
+        };
+        let active: std::collections::HashSet<String> =
+            snapshot.active_tool_names.iter().cloned().collect();
+        let context_source = crate::agent::harness::types::AgentHarnessToolContextSource::Static(
+            snapshot
+                .tool_context
+                .clone()
+                .unwrap_or_else(|| Arc::new(EmptyToolContext)),
+        );
+        let tools: Vec<crate::agent::types::AgentTool> = snapshot
+            .tools
+            .iter()
+            .filter(|tool| active.contains(&tool.name))
+            .map(|tool| {
+                crate::agent::harness::types::bind_harness_tool(tool.clone(), context_source.clone())
+            })
+            .collect();
+        let loop_config = AgentLoopConfig {
+            model: snapshot.model.clone(),
+            stream: stream_options_to_simple(&snapshot.stream_options),
+            convert_to_llm: default_convert_to_llm_fn(),
+            transform_context: None,
+            get_api_key: None,
+            should_stop_after_turn: None,
+            prepare_next_turn: None,
+            get_steering_messages: Some(make_queue_getter(
+                shared.clone(),
+                run_id.clone(),
+                QueueKind::Steer,
+                steering_mode,
+            )),
+            get_follow_up_messages: Some(make_queue_getter(
+                shared.clone(),
+                run_id.clone(),
+                QueueKind::FollowUp,
+                follow_up_mode,
+            )),
+            tool_execution: snapshot.tool_execution,
+            before_tool_call: None,
+            after_tool_call: None,
+        };
+        let agent_state = AgentState {
+            system_prompt: snapshot.system_prompt.clone().unwrap_or_default(),
+            model: snapshot.model.clone(),
+            thinking_level: snapshot.thinking_level,
+            tools,
+            messages: history,
+            is_streaming: false,
+            streaming_message: None,
+            pending_tool_calls: Default::default(),
+            error_message: None,
+        };
+        let signal = tokio_util::sync::CancellationToken::new();
+        let agent = Arc::new(Agent::new(agent_state, loop_config, snapshot.stream_fn.clone()));
+        let listener_id = agent.subscribe(make_mirroring_listener(shared.clone(), run_id.clone()));
+        {
+            let mut engine = shared.engine.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            *engine = Some(EngineHandle {
+                run_id: run_id.clone(),
+                signal: signal.clone(),
+                agent: agent.clone(),
+            });
+        }
+        let _ = shared.busy.send(true);
+        self.events.emit(&HarnessEvent::RunStart(RunStartEvent {
+            lane: "main".to_string(),
+            run_id: run_id.clone(),
+        }));
+
+        // 7. 运行 + 会话级重试链(对齐 AgentSession._prepareRetry)。
+        if let Err(error) = agent.prompt(prompt_messages).await {
+            let message = error.clone();
+            self.finish_run(
+                &shared,
+                &run_id,
+                OperationOutcome::Failed,
+                Some(OperationError {
+                    code: "engine_error".to_string(),
+                    message: message.clone(),
+                }),
+            )
+            .await;
+            let leaf_id = self.leaf_id().await;
+            self.events.emit(&HarnessEvent::RunEnd(RunEndEvent {
+                lane: "main".to_string(),
+                run_id: run_id.clone(),
+                outcome: RunEndOutcome::Failed,
+                leaf_id: leaf_id.clone(),
+            }));
+            return Ok(RunOutcome::Failed {
+                leaf_id,
+                error: OperationError {
+                    code: "engine_error".to_string(),
+                    message,
+                },
+                final_entry_id: None,
+                final_message: None,
+            });
+        }
+        let mut retry_attempt: u32 = 0;
+        loop {
+            if signal.is_cancelled() {
+                break;
+            }
+            let last = agent.messages().last().cloned();
+            let Some(AgentMessage::Message(TypedMessage::Assistant(assistant))) = last else {
+                break;
+            };
+            if assistant.stop_reason != StopReason::Error {
+                break;
+            }
+            let retry = snapshot.retry_policy;
+            if !retry.enabled
+                || retry_attempt >= retry.max_retries
+                || !is_retryable_assistant_error(&assistant)
+            {
+                break;
+            }
+            retry_attempt += 1;
+            // 失败 assistant 留在 session 历史,从引擎移除后续跑。
+            let mut messages = agent.messages();
+            if matches!(
+                messages.last(),
+                Some(AgentMessage::Message(TypedMessage::Assistant(_)))
+            ) {
+                messages.pop();
+            }
+            agent.set_messages(messages);
+            if !sleep_with_cancel(retry_delay_ms(retry.base_delay_ms, retry_attempt), &signal).await
+            {
+                break;
+            }
+            if agent.continue_run().await.is_err() {
+                break;
+            }
+        }
+
+        // 8. 结果归约 + 收尾。
+        let cancelled = signal.is_cancelled();
+        let final_assistant = agent.messages().iter().rev().find_map(|message| match message {
+            AgentMessage::Message(TypedMessage::Assistant(assistant)) => Some(assistant.clone()),
+            _ => None,
+        });
+        agent.unsubscribe(listener_id);
+
+        let leaf_id = self.leaf_id().await;
+        let (record_outcome, run_outcome, end_outcome) = if cancelled {
+            let assistant = final_assistant.unwrap_or_else(|| {
+                synthetic_assistant(&snapshot.model, StopReason::Aborted, None)
+            });
+            (
+                OperationOutcome::Aborted,
+                RunOutcome::Aborted {
+                    leaf_id: leaf_id.clone(),
+                    final_entry_id: leaf_id.clone(),
+                    final_message: assistant,
+                },
+                RunEndOutcome::Aborted,
+            )
+        } else if matches!(&final_assistant, Some(assistant) if assistant.stop_reason == StopReason::Error)
+        {
+            let assistant = final_assistant.unwrap_or_else(|| {
+                synthetic_assistant(&snapshot.model, StopReason::Error, None)
+            });
+            let error = OperationError {
+                code: "provider_error".to_string(),
+                message: assistant
+                    .error_message
+                    .clone()
+                    .unwrap_or_else(|| "Unknown provider error".to_string()),
+            };
+            (
+                OperationOutcome::Failed,
+                RunOutcome::Failed {
+                    leaf_id: leaf_id.clone(),
+                    error,
+                    final_entry_id: Some(leaf_id.clone()),
+                    final_message: Some(assistant),
+                },
+                RunEndOutcome::Failed,
+            )
+        } else {
+            let assistant = final_assistant.unwrap_or_else(|| {
+                synthetic_assistant(&snapshot.model, StopReason::Stop, None)
+            });
+            (
+                OperationOutcome::Completed,
+                RunOutcome::Completed {
+                    leaf_id: leaf_id.clone(),
+                    final_entry_id: leaf_id.clone(),
+                    final_message: assistant,
+                },
+                RunEndOutcome::Completed,
+            )
+        };
+        self.finish_run(&shared, &run_id, record_outcome, None).await;
+        self.events.emit(&HarnessEvent::RunEnd(RunEndEvent {
+            lane: "main".to_string(),
+            run_id: run_id.clone(),
+            outcome: end_outcome,
+            leaf_id,
+        }));
+        Ok(run_outcome)
+    }
+
+    pub async fn skill(
+        &self,
+        _name: String,
+        _additional_instructions: Option<String>,
+    ) -> Result<RunOutcome, HarnessUnavailable> {
         self.unavailable("skill")
     }
 
@@ -556,8 +1038,213 @@ impl AgentHarness {
         self.unavailable("promptFromTemplate")
     }
 
-    pub async fn compact(&self, _options: Option<CompactOptions>) -> Result<CompactionOutcome, HarnessUnavailable> {
-        self.unavailable("compact")
+    /// 手动 compaction:接 compaction 模块(prepare → 摘要 → compaction 条目)。
+    pub async fn compact(
+        &self,
+        options: Option<CompactOptions>,
+    ) -> Result<CompactionOutcome, HarnessUnavailable> {
+        let shared = self.shared();
+        let (settings, model, thinking_level, stream_fn) = {
+            let state = self.lock_state();
+            if state.closed {
+                return Err(HarnessClosed.into());
+            }
+            if state.engine.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).is_some() {
+                return Err(HarnessUnavailable::from(HarnessNotImplemented::new(
+                    "compact.busy",
+                )));
+            }
+            (
+                state.compaction_settings,
+                state.model.clone(),
+                crate::agent::agent_loop::reasoning_from_thinking_level(state.thinking_level),
+                state
+                    .stream_fn
+                    .clone()
+                    .expect("stream_fn is set at create time"),
+            )
+        };
+        let run_id = uuid_v7();
+        let result_entry_id = uuid_v7();
+        let custom_instructions = options.and_then(|options| options.custom_instructions);
+
+        // intent 落库。
+        if let Err(error) = self
+            .session
+            .append_record(LaneRecord::OperationStarted(OperationStartedRecord {
+                id: run_id.clone(),
+                seq: 0,
+                lane: "main".to_string(),
+                timestamp: now_ms(),
+                source_leaf_id: self.session.get_leaf_id().await.unwrap_or(None),
+                intent: OperationIntent::Compaction {
+                    custom_instructions: custom_instructions.clone(),
+                    result_entry_id: result_entry_id.clone(),
+                },
+            }))
+            .await
+        {
+            return Ok(CompactionOutcome::Failed {
+                leaf_id: self.leaf_id().await,
+                error: operation_error(error),
+            });
+        }
+        let _ = shared.busy.send(true);
+
+        // 准备 + 摘要。
+        let entries = match branch_entries(&self.session).await {
+            Ok(entries) => entries,
+            Err(error) => {
+                self.finish_run(&shared, &run_id, OperationOutcome::Failed, Some(operation_error(error)))
+                    .await;
+                return Ok(CompactionOutcome::Failed {
+                    leaf_id: self.leaf_id().await,
+                    error: OperationError {
+                        code: "session_error".to_string(),
+                        message: "failed to read session branch".to_string(),
+                    },
+                });
+            }
+        };
+        let preparation = match compaction_mod::prepare_compaction(&entries, settings) {
+            Ok(Some(preparation)) => preparation,
+            Ok(None) => {
+                self.finish_run(&shared, &run_id, OperationOutcome::Declined, None)
+                    .await;
+                return Ok(CompactionOutcome::DeclinedOrAborted {
+                    leaf_id: self.leaf_id().await,
+                });
+            }
+            Err(error) => {
+                self.finish_run(&shared, &run_id, OperationOutcome::Failed, Some(OperationError {
+                    code: format!("compaction_{}", error.code),
+                    message: error.message.clone(),
+                }))
+                .await;
+                return Ok(CompactionOutcome::Failed {
+                    leaf_id: self.leaf_id().await,
+                    error: OperationError {
+                        code: "compaction_prepare".to_string(),
+                        message: error.to_string(),
+                    },
+                });
+            }
+        };
+        match compaction_mod::compact(
+            preparation,
+            &stream_fn,
+            &model,
+            custom_instructions.as_deref(),
+            thinking_level,
+        )
+        .await
+        {
+            Ok(result) => {
+                let entry = self
+                    .session
+                    .append_entry(
+                        ProvisionedEntry::Compaction(
+                            crate::agent::harness::session::types::ProvisionedCompactionEntry {
+                                id: result_entry_id.clone(),
+                                summary: result.summary,
+                                retained_tail: result.retained_tail,
+                                tokens_before: result.tokens_before,
+                                details: Some(result.details),
+                                usage: Some(result.usage.clone()),
+                            },
+                        ),
+                        "main".to_string(),
+                    )
+                    .await;
+                let entry = match entry {
+                    Ok(Entry::Compaction(entry)) => entry,
+                    Ok(_) => unreachable!("compaction entry round-trips"),
+                    Err(error) => {
+                        self.finish_run(
+                            &shared,
+                            &run_id,
+                            OperationOutcome::Failed,
+                            Some(operation_error(error)),
+                        )
+                        .await;
+                        return Ok(CompactionOutcome::Failed {
+                            leaf_id: self.leaf_id().await,
+                            error: OperationError {
+                                code: "session_error".to_string(),
+                                message: "failed to append compaction entry".to_string(),
+                            },
+                        });
+                    }
+                };
+                let _ = self
+                    .session
+                    .append_record(LaneRecord::StepAttempt(StepAttemptRecord {
+                        id: uuid_v7(),
+                        seq: 0,
+                        lane: "main".to_string(),
+                        timestamp: now_ms(),
+                        run_id: run_id.clone(),
+                        step: StepKind::Compaction,
+                        attempt: 1,
+                        result_entry_id: entry.id.clone(),
+                        compaction_reason: Some(CompactionReason::Manual),
+                    }))
+                    .await;
+                let _ = self
+                    .session
+                    .append_record(LaneRecord::Usage(UsageRecord {
+                        id: uuid_v7(),
+                        seq: 0,
+                        lane: "main".to_string(),
+                        timestamp: now_ms(),
+                        usage: result.usage,
+                        cause: UsageCauseKind::Compaction,
+                        run_id: Some(run_id.clone()),
+                        entry_id: Some(entry.id.clone()),
+                        attempt: Some(1),
+                        stop_reason: None,
+                        tool_call_id: None,
+                        details: None,
+                    }))
+                    .await;
+                self.finish_run(&shared, &run_id, OperationOutcome::Completed, None)
+                    .await;
+                Ok(CompactionOutcome::Completed {
+                    leaf_id: self.leaf_id().await,
+                    entry: Box::new(entry),
+                })
+            }
+            Err(error) => {
+                let aborted = error.code == crate::agent::harness::types::CompactionErrorCode::Aborted;
+                self.finish_run(
+                    &shared,
+                    &run_id,
+                    if aborted {
+                        OperationOutcome::Aborted
+                    } else {
+                        OperationOutcome::Failed
+                    },
+                    Some(OperationError {
+                        code: format!("compaction_{}", error.code),
+                        message: error.message.clone(),
+                    }),
+                )
+                .await;
+                if aborted {
+                    Ok(CompactionOutcome::DeclinedOrAborted {
+                        leaf_id: self.leaf_id().await,
+                    })
+                } else {
+                    Ok(CompactionOutcome::Failed {
+                        leaf_id: self.leaf_id().await,
+                        error: OperationError {
+                            code: "compaction_failed".to_string(),
+                            message: error.to_string(),
+                        },
+                    })
+                }
+            }
+        }
     }
 
     pub async fn navigate_tree(
@@ -568,47 +1255,332 @@ impl AgentHarness {
         self.unavailable("navigateTree")
     }
 
-    pub async fn resume(&self) -> Result<ResumeOutcome, HarnessUnavailable> {
-        self.unavailable("resume")
+    /// 恢复:create 已把崩溃 operation 归约 aborted,正常运行后无挂起可续。
+    pub async fn resume(&self) -> ResumeResult {
+        if self.is_closed() {
+            return Err(ResumeRejected::Closed(Closed::new("AgentHarness was closed")));
+        }
+        Err(ResumeRejected::NothingToResume(NothingToResume::new(
+            "No suspended operation to resume; interrupted operations are restored as aborted by create().",
+            "main".to_string(),
+        )))
     }
 
-    pub async fn abort(&self) -> Result<AbortOutcome, HarnessUnavailable> {
-        self.unavailable("abort")
+    /// 中止当前 operation:先落 durable abort 标记,再拉 abort signal
+    /// (对齐蓝本 durable abort 顺序);返回被清空队列的载荷。
+    pub async fn abort(&self) -> AbortResult {
+        let shared = self.shared();
+        let handle = {
+            let state = self.lock_state();
+            if state.closed {
+                return Err(AbortRejected::Closed(Closed::new("AgentHarness was closed")));
+            }
+            let engine = state
+                .engine
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            engine
+                .as_ref()
+                .map(|engine| (engine.run_id.clone(), engine.signal.clone()))
+        };
+        let Some((run_id, signal)) = handle else {
+            return Err(AbortRejected::NoActiveOperation(NoActiveOperation::new(
+                "No active operation on lane main",
+                "main".to_string(),
+            )));
+        };
+        // 队列载荷收集 + 清空(abort 语义:返回给调用方自行处置)。
+        let (steer, follow_up) = {
+            let mut queues = shared.queues.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            (
+                std::mem::take(&mut queues.steer),
+                std::mem::take(&mut queues.follow_up),
+            )
+        };
+        let _ = self
+            .session
+            .append_record(LaneRecord::AbortRequested(
+                crate::agent::harness::session::types::AbortRequestedRecord {
+                    id: uuid_v7(),
+                    seq: 0,
+                    lane: "main".to_string(),
+                    timestamp: now_ms(),
+                    run_id: run_id.clone(),
+                },
+            ))
+            .await;
+        signal.cancel();
+        Ok(AbortOutcome {
+            run_id,
+            steer: steer.into_iter().map(|item| item.message).collect(),
+            follow_up: follow_up.into_iter().map(|item| item.message).collect(),
+        })
     }
 
-    pub async fn steer(&self, _input: QueueInput) -> Result<String, HarnessUnavailable> {
-        self.unavailable("steer")
+    /// 入队公共实现:要求运行中,逐条消息写 QueueEnqueued 记录并进内存队列。
+    async fn enqueue_to(&self, queue_kind: QueueKind, input: QueueInput) -> QueueResult {
+        let shared = self.shared();
+        let run_id = {
+            let state = self.lock_state();
+            if state.closed {
+                return Err(QueueRejected::Closed(Closed::new("AgentHarness was closed")));
+            }
+            let engine = state
+                .engine
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            engine.as_ref().map(|engine| engine.run_id.clone())
+        };
+        let Some(run_id) = run_id else {
+            return Err(QueueRejected::NoActiveRun(NoActiveRun::new(
+                "No active run; use prompt() to start one",
+                "main".to_string(),
+            )));
+        };
+        let messages: Vec<AgentMessage> = match input {
+            QueueInput::Text(text) => vec![AgentMessage::user_text(text, now_ms())],
+            QueueInput::Message(message) => vec![*message],
+            QueueInput::Messages(messages) => messages,
+        };
+        if messages.is_empty() {
+            return Err(QueueRejected::InvalidMessage(InvalidMessage::new(
+                "Queue input must contain at least one message",
+                "main".to_string(),
+                "empty input".to_string(),
+            )));
+        }
+        let mut last_id = String::new();
+        for message in messages {
+            let entry_id = uuid_v7();
+            let record = QueueEnqueuedRecord {
+                id: uuid_v7(),
+                seq: 0,
+                lane: "main".to_string(),
+                timestamp: now_ms(),
+                queue: queue_kind,
+                run_id: Some(run_id.clone()),
+                target: ProvisionedEntry::Message(ProvisionedMessageEntry {
+                    id: entry_id.clone(),
+                    message: message.clone(),
+                    terminate: None,
+                }),
+            };
+            self.session
+                .append_record(LaneRecord::QueueEnqueued(record))
+                .await
+                .map_err(|error| {
+                    QueueRejected::InvalidMessage(InvalidMessage::new(
+                        error.to_string(),
+                        "main".to_string(),
+                        format!("record({})", error.code),
+                    ))
+                })?;
+            {
+                let mut queues = shared
+                    .queues
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let target = match queue_kind {
+                    QueueKind::Steer => &mut queues.steer,
+                    QueueKind::FollowUp => &mut queues.follow_up,
+                    QueueKind::NextRun => &mut queues.next_run,
+                };
+                target.push(QueuedEntry {
+                    entry_id: entry_id.clone(),
+                    message,
+                });
+            }
+            last_id = entry_id;
+        }
+        Ok(last_id)
     }
 
-    pub async fn follow_up(&self, _input: QueueInput) -> Result<String, HarnessUnavailable> {
-        self.unavailable("followUp")
+    pub async fn steer(&self, input: QueueInput) -> QueueResult {
+        self.enqueue_to(QueueKind::Steer, input).await
     }
 
-    pub async fn next_run(&self, _input: QueueInput) -> Result<String, HarnessUnavailable> {
-        self.unavailable("nextRun")
+    pub async fn follow_up(&self, input: QueueInput) -> QueueResult {
+        self.enqueue_to(QueueKind::FollowUp, input).await
     }
 
-    pub async fn cancel_queued(&self, _entry_id: String) -> Result<CancelQueuedOutcome, HarnessUnavailable> {
-        self.unavailable("cancelQueued")
+    pub async fn next_run(&self, input: QueueInput) -> QueueResult {
+        self.enqueue_to(QueueKind::NextRun, input).await
+    }
+
+    pub async fn cancel_queued(&self, entry_id: String) -> CancelQueuedResult {
+        let shared = self.shared();
+        if self.is_closed() {
+            return Err(CancelQueuedRejected::Closed(Closed::new(
+                "AgentHarness was closed",
+            )));
+        }
+        // 先从内存队列移除。
+        let removed = {
+            let mut queues = shared.queues.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut removed = false;
+            if let Some(position) = queues.steer.iter().position(|item| item.entry_id == entry_id) {
+                queues.steer.remove(position);
+                removed = true;
+            } else if let Some(position) =
+                queues.follow_up.iter().position(|item| item.entry_id == entry_id)
+            {
+                queues.follow_up.remove(position);
+                removed = true;
+            } else if let Some(position) =
+                queues.next_run.iter().position(|item| item.entry_id == entry_id)
+            {
+                queues.next_run.remove(position);
+                removed = true;
+            }
+            removed
+        };
+        if removed {
+            let run_id = {
+                self.lock_state()
+                    .engine
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .as_ref()
+                    .map(|engine| engine.run_id.clone())
+            };
+            let _ = self
+                .session
+                .append_record(LaneRecord::QueueCancelled(QueueCancelledRecord {
+                    id: uuid_v7(),
+                    seq: 0,
+                    lane: "main".to_string(),
+                    timestamp: now_ms(),
+                    run_id,
+                    entry_id: entry_id.clone(),
+                }))
+                .await;
+            return Ok(CancelQueuedOutcome::Cancelled);
+        }
+        // 队列无此条目:查 enqueued 记录判定 consumed/cleared。
+        let records = self
+            .session
+            .find_records(RecordQuery {
+                record_type: Some("queue_enqueued".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap_or_default();
+        let Some(record) = records.into_iter().find(|record| {
+            matches!(record,
+                LaneRecord::QueueEnqueued(enqueued)
+                    if enqueued.target.id() == entry_id)
+        }) else {
+            return Err(CancelQueuedRejected::UnknownQueueItem(UnknownQueueItem::new(
+                format!("Unknown queue item: {entry_id}"),
+                "main".to_string(),
+                entry_id,
+            )));
+        };
+        let record_run_id = match &record {
+            LaneRecord::QueueEnqueued(enqueued) => enqueued.run_id.clone(),
+            _ => None,
+        };
+        let run_finished = match &record_run_id {
+            Some(record_run_id) => self
+                .session
+                .find_records(RecordQuery {
+                    record_type: Some("operation_finished".to_string()),
+                    run_id: Some(record_run_id.clone()),
+                    limit: Some(1),
+                    ..Default::default()
+                })
+                .await
+                .map(|records| !records.is_empty())
+                .unwrap_or(false),
+            None => false,
+        };
+        Ok(if run_finished {
+            CancelQueuedOutcome::AlreadyCleared
+        } else {
+            CancelQueuedOutcome::AlreadyConsumed
+        })
     }
 
     pub async fn record_usage(
         &self,
-        _usage: Usage,
-        _options: Option<RecordUsageOptions>,
+        usage: Usage,
+        options: Option<RecordUsageOptions>,
     ) -> Result<(), HarnessUnavailable> {
-        self.unavailable("recordUsage")
+        if self.is_closed() {
+            return Err(HarnessClosed.into());
+        }
+        let options = options.unwrap_or_default();
+        let run_id = {
+            self.lock_state()
+                .engine
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .as_ref()
+                .map(|engine| engine.run_id.clone())
+        };
+        self.session
+            .append_record(LaneRecord::Usage(UsageRecord {
+                id: uuid_v7(),
+                seq: 0,
+                lane: "main".to_string(),
+                timestamp: now_ms(),
+                usage,
+                cause: UsageCauseKind::Adjustment,
+                run_id,
+                entry_id: options.entry_id,
+                attempt: None,
+                stop_reason: None,
+                tool_call_id: None,
+                details: options.details,
+            }))
+            .await
+            .map(|_| ())
+            .map_err(|error| {
+                HarnessNotImplemented::new(format!("recordUsage({})", error.code)).into()
+            })
     }
 
     pub async fn wait_for_idle(&self) -> Result<(), HarnessUnavailable> {
-        self.unavailable("waitForIdle")
+        if self.is_closed() {
+            return Err(HarnessClosed.into());
+        }
+        let mut receiver = {
+            let state = self.lock_state();
+            state.busy.subscribe()
+        };
+        while *receiver.borrow_and_update() {
+            if receiver.changed().await.is_err() {
+                break;
+            }
+        }
+        Ok(())
     }
 
     pub async fn run_when_idle(
         &self,
-        _callback: Box<dyn FnOnce() + Send>,
+        callback: Box<dyn FnOnce() + Send>,
     ) -> Result<(), HarnessUnavailable> {
-        self.unavailable("runWhenIdle")
+        if self.is_closed() {
+            return Err(HarnessClosed.into());
+        }
+        let mut harness_busy = {
+            let state = self.lock_state();
+            state.busy.subscribe()
+        };
+        if !*harness_busy.borrow_and_update() {
+            callback();
+            return Ok(());
+        }
+        tokio::spawn(async move {
+            let mut receiver = harness_busy;
+            while *receiver.borrow_and_update() {
+                if receiver.changed().await.is_err() {
+                    break;
+                }
+            }
+            callback();
+        });
+        Ok(())
     }
 
     pub async fn peek_action(&self) -> Result<Option<ActionInfo>, HarnessUnavailable> {
@@ -620,27 +1592,69 @@ impl AgentHarness {
     }
 
     pub async fn run_to_completion(&self) -> Result<(), HarnessUnavailable> {
-        self.unavailable("runToCompletion")
+        self.wait_for_idle().await
     }
 
     pub async fn watch(&self) -> Result<WatchHandle<LaneSnapshot>, HarnessUnavailable> {
-        self.unavailable("watch")
+        if self.is_closed() {
+            return Err(HarnessClosed.into());
+        }
+        // 快照同步捕获:先异步取 transcript,再进 bus.watch 的同步闭包。
+        let transcript = branch_entries(&self.session).await.unwrap_or_default();
+        let snapshot = LaneSnapshot {
+            lane: "main".to_string(),
+            transcript,
+            leaf_id: Some(self.leaf_id().await),
+            operation: self.main_lane_operation().await,
+            queues: {
+                let state = self.lock_state();
+                let queues = state
+                    .queues
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                snapshot_queues(&queues)
+            },
+            pending_writes: Vec::new(),
+            faulted: false,
+        };
+        Ok(self.events.watch(move || snapshot))
     }
 
     pub async fn watch_session(&self) -> Result<WatchHandle<SessionSnapshot>, HarnessUnavailable> {
-        self.unavailable("watchSession")
+        if self.is_closed() {
+            return Err(HarnessClosed.into());
+        }
+        let lane_snapshot = self.main_lane().await;
+        let snapshot = SessionSnapshot {
+            lanes: vec![(lane_snapshot, None)],
+            faulted: false,
+        };
+        Ok(self.events.watch(move || snapshot))
     }
 
-    pub async fn lane(&self, _name: String) -> Result<Option<Lane>, HarnessUnavailable> {
-        self.unavailable("lane")
+    pub async fn lane(&self, name: String) -> Result<Option<Lane>, HarnessUnavailable> {
+        if self.is_closed() {
+            return Err(HarnessClosed.into());
+        }
+        if name != "main" {
+            return Ok(None);
+        }
+        Ok(Some(self.main_lane().await))
     }
 
-    pub async fn create_lane(&self, _name: String, _at: Option<String>) -> Result<Lane, HarnessUnavailable> {
+    pub async fn create_lane(
+        &self,
+        _name: String,
+        _at: Option<String>,
+    ) -> Result<Lane, HarnessUnavailable> {
         self.unavailable("createLane")
     }
 
     pub async fn lanes(&self) -> Result<Vec<Lane>, HarnessUnavailable> {
-        self.unavailable("lanes")
+        if self.is_closed() {
+            return Err(HarnessClosed.into());
+        }
+        Ok(vec![self.main_lane().await])
     }
 
     // ----- getter/setter(可用) -----
@@ -744,12 +1758,67 @@ impl AgentHarness {
             .stream_options = options;
     }
 
-    pub async fn patch_stream_options(&self, _patch: AgentHarnessStreamOptionsPatch) {
-        // WIP:补丁应用语义与蓝本一致,但 harness 运行方法未实现,先保持无操作。
-        let _ = &self
+    /// 应用流选项补丁:标量字段 Some 即覆盖;headers/metadata 的内层键值为
+    /// None 表示删除该键,外层 None 表示清空全部(对齐蓝本 patch 语义)。
+    pub async fn patch_stream_options(&self, patch: AgentHarnessStreamOptionsPatch) {
+        let mut state = self
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let options = &mut state.stream_options;
+        if patch.transport.is_some() {
+            options.transport = patch.transport.clone();
+        }
+        if patch.timeout_ms.is_some() {
+            options.timeout_ms = patch.timeout_ms;
+        }
+        if patch.max_retries.is_some() {
+            options.max_retries = patch.max_retries;
+        }
+        if patch.max_retry_delay_ms.is_some() {
+            options.max_retry_delay_ms = patch.max_retry_delay_ms;
+        }
+        if patch.cache_retention.is_some() {
+            options.cache_retention = patch.cache_retention;
+        }
+        match patch.headers {
+            Some(Some(map)) => {
+                let target = options.headers.get_or_insert_with(HashMap::new);
+                for (key, value) in map {
+                    match value {
+                        Some(value) => {
+                            target.insert(key, value);
+                        }
+                        None => {
+                            target.remove(&key);
+                        }
+                    }
+                }
+            }
+            Some(None) => {
+                options.headers = None;
+            }
+            None => {}
+        }
+        match patch.metadata {
+            Some(Some(map)) => {
+                let target = options.metadata.get_or_insert_with(HashMap::new);
+                for (key, value) in map {
+                    match value {
+                        Some(value) => {
+                            target.insert(key, value);
+                        }
+                        None => {
+                            target.remove(&key);
+                        }
+                    }
+                }
+            }
+            Some(None) => {
+                options.metadata = None;
+            }
+            None => {}
+        }
     }
 
     pub async fn get_retry_policy(&self) -> RetryPolicy {
@@ -808,12 +1877,75 @@ impl AgentHarness {
             .follow_up_mode = mode;
     }
 
-    /// 关闭 harness;关闭后运行方法返回 HarnessClosed。
+    /// 关闭 harness;关闭后运行方法返回 HarnessClosed。活跃 run 的 abort
+    /// signal 同步拉起,在途引擎尽快收尾。
     pub async fn close(&self) {
-        self.state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .closed = true;
+        let signal = {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            state.closed = true;
+            let engine = state
+                .engine
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            engine.as_ref().map(|engine| engine.signal.clone())
+        };
+        if let Some(signal) = signal {
+            signal.cancel();
+        }
+    }
+}
+
+/// prompt 启动时的配置快照(短临界区内克隆,不跨 await 持锁)。
+struct PromptSnapshot {
+    model: Model,
+    thinking_level: ModelThinkingLevel,
+    active_tool_names: Vec<String>,
+    tools: Vec<crate::agent::harness::types::AgentHarnessTool>,
+    tool_context: Option<Arc<dyn ToolContext>>,
+    system_prompt: Option<String>,
+    tool_execution: ToolExecutionMode,
+    stream_options: AgentHarnessStreamOptions,
+    retry_policy: RetryPolicy,
+    stream_fn: crate::agent::types::StreamFn,
+}
+
+/// 无真实 assistant 消息时(如首响应前中止)的结果占位消息。
+fn synthetic_assistant(model: &Model, stop_reason: StopReason, error: Option<String>) -> AssistantMessage {
+    AssistantMessage {
+        role: "assistant".to_string(),
+        content: Vec::new(),
+        api: model.api.clone(),
+        provider: model.provider.clone(),
+        model: model.id.clone(),
+        response_model: None,
+        response_id: None,
+        usage: Usage::default(),
+        stop_reason,
+        error_message: error,
+        raw_stop_reason: None,
+        end_turn: None,
+        timestamp: now_ms(),
+    }
+}
+
+/// 队列快照(排队条目连同消息)。
+fn snapshot_queues(queues: &QueueSet) -> QueuesSnapshot {
+    fn map(items: &[QueuedEntry]) -> Vec<QueuedItem> {
+        items
+            .iter()
+            .map(|item| QueuedItem {
+                entry_id: item.entry_id.clone(),
+                message: item.message.clone(),
+            })
+            .collect()
+    }
+    QueuesSnapshot {
+        steer: map(&queues.steer),
+        follow_up: map(&queues.follow_up),
+        next_run: map(&queues.next_run),
     }
 }
 

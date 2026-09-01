@@ -162,8 +162,11 @@ pub fn create_edit_tool(env: Arc<dyn ExecutionEnv>) -> AgentTool {
                 let input: EditToolInput = serde_json::from_value(params)
                     .map_err(|error| ToolExecutionError::from(SimpleError::new(error.to_string())))?;
                 let edits = validate_edit_input(&input)?;
-                let absolute_path =
-                    resolve_tool_path(env.as_ref(), &input.path, signal.clone()).await;
+                let absolute_path = resolve_tool_path(env.as_ref(), &input.path, signal.clone())
+                    .await
+                    .map_err(|error| {
+                        ToolExecutionError::from(SimpleError::new(error.to_string()))
+                    })?;
                 let queue_key = absolute_path.clone();
                 let closure_path = absolute_path.clone();
                 let result = with_file_mutation_queue(&env, &queue_key, {

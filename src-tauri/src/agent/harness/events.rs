@@ -42,14 +42,71 @@ pub enum RunEndOutcome {
     Failed,
 }
 
-/// harness 事件(对齐 TS `HarnessEvent`,tag 值一致)。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// 消息条目落库事件(本仓库运行时扩展:TS scaffold 未定义;wiki 等消费方
+/// 需要正文流式与最终消息,run_start/run_end 不足以表达)。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageEvent {
+    pub lane: String,
+    pub run_id: String,
+    pub entry_id: String,
+    pub message: crate::agent::types::AgentMessage,
+}
+
+/// 工具执行事件(本仓库运行时扩展;phase 对齐 loop 的 start/update/end)。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolEvent {
+    pub lane: String,
+    pub run_id: String,
+    pub phase: ToolEventPhase,
+    pub tool_call_id: String,
+    pub tool_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub args: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partial_result: Option<crate::agent::types::AgentToolResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<crate::agent::types::AgentToolResult>,
+    #[serde(default)]
+    pub is_error: bool,
+}
+
+/// 工具事件阶段。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ToolEventPhase {
+    Start,
+    Update,
+    End,
+}
+
+/// 用量事件(本仓库运行时扩展;usage 落库后发出)。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageEvent {
+    pub lane: String,
+    pub run_id: String,
+    pub usage: crate::agent::llm::types::Usage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry_id: Option<String>,
+}
+
+/// harness 事件(对齐 TS `HarnessEvent`,tag 值一致;message/tool/usage 为
+/// 本仓库运行时扩展,TS scaffold 未定义)。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all_fields = "camelCase")]
 pub enum HarnessEvent {
     #[serde(rename = "run_start")]
     RunStart(RunStartEvent),
     #[serde(rename = "run_end")]
     RunEnd(RunEndEvent),
+    #[serde(rename = "message")]
+    Message(MessageEvent),
+    #[serde(rename = "tool")]
+    Tool(ToolEvent),
+    #[serde(rename = "usage")]
+    Usage(UsageEvent),
 }
 
 impl HarnessEvent {
@@ -58,15 +115,21 @@ impl HarnessEvent {
         match self {
             HarnessEvent::RunStart(_) => HarnessEventType::RunStart,
             HarnessEvent::RunEnd(_) => HarnessEventType::RunEnd,
+            HarnessEvent::Message(_) => HarnessEventType::Message,
+            HarnessEvent::Tool(_) => HarnessEventType::Tool,
+            HarnessEvent::Usage(_) => HarnessEventType::Usage,
         }
     }
 }
 
-/// 事件类型名(对齐 TS `HarnessEventType` 字面量)。
+/// 事件类型名(对齐 TS `HarnessEventType` 字面量;扩展项为运行时新增)。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum HarnessEventType {
     RunStart,
     RunEnd,
+    Message,
+    Tool,
+    Usage,
 }
 
 impl HarnessEventType {
@@ -74,6 +137,9 @@ impl HarnessEventType {
         match self {
             HarnessEventType::RunStart => "run_start",
             HarnessEventType::RunEnd => "run_end",
+            HarnessEventType::Message => "message",
+            HarnessEventType::Tool => "tool",
+            HarnessEventType::Usage => "usage",
         }
     }
 }
@@ -85,6 +151,10 @@ struct WatchShared {
     listener: Mutex<Option<HarnessEventListener>>,
     buffered: Mutex<Vec<HarnessEvent>>,
     receiving: std::sync::atomic::AtomicBool,
+    /// 所属总线(弱引用避免环);unsubscribe 时从 watchers map 摘除,
+    /// 防长生命周期进程累积失效 watcher。
+    bus: std::sync::Weak<Mutex<BusState>>,
+    watcher_id: u64,
 }
 
 impl WatchShared {
@@ -138,7 +208,8 @@ impl<TSnapshot> WatchHandle<TSnapshot> {
         }
     }
 
-    /// 退订 watcher 并清空缓冲(对齐 TS `unsubscribe`)。
+    /// 退订 watcher 并清空缓冲(对齐 TS `unsubscribe`);同时从总线 watchers
+    /// map 摘除本 watcher(本仓库补强:TS 侧 Map.delete,先前复刻遗漏导致泄漏)。
     pub fn unsubscribe(&self) {
         self.shared.receiving.store(false, Ordering::SeqCst);
         {
@@ -149,12 +220,18 @@ impl<TSnapshot> WatchHandle<TSnapshot> {
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             buffered.clear();
         }
-        let mut listener = self
-            .shared
-            .listener
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        *listener = None;
+        {
+            let mut listener = self
+                .shared
+                .listener
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            *listener = None;
+        }
+        if let Some(bus) = self.shared.bus.upgrade() {
+            let mut state = bus.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            state.watchers.remove(&self.shared.watcher_id);
+        }
     }
 }
 
@@ -236,6 +313,8 @@ impl HarnessEventBus {
             listener: Mutex::new(None),
             buffered: Mutex::new(Vec::new()),
             receiving: std::sync::atomic::AtomicBool::new(true),
+            bus: Arc::downgrade(&self.state),
+            watcher_id: id,
         });
         {
             let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -327,6 +406,28 @@ mod tests {
         handle.unsubscribe();
         bus.emit(&run_start("main"));
         assert_eq!(seen.lock().unwrap().len(), 3, "no delivery after unsubscribe");
+    }
+
+    #[test]
+    fn unsubscribe_removes_watcher_from_bus() {
+        let bus = HarnessEventBus::new();
+        let handle = bus.watch(|| ());
+        {
+            let state = bus
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            assert_eq!(state.watchers.len(), 1);
+        }
+        handle.unsubscribe();
+        let state = bus
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert!(
+            state.watchers.is_empty(),
+            "unsubscribed watcher must be removed from the bus map"
+        );
     }
 
     #[test]
