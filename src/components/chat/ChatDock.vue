@@ -37,7 +37,6 @@ import {
 import { Loader } from "@/components/ai-elements/loader";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
 import { ModelSelector, type ModelSelectorGroup } from "@/components/ai-elements/model-selector";
-import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
 import {
   PromptInput,
   PromptInputBody,
@@ -57,11 +56,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import ChatToolGroup from "@/components/chat/ChatToolGroup.vue";
+import ChatTurnProcess from "@/components/chat/ChatTurnProcess.vue";
 import { CHAT_THINKING_LEVELS, type ChatThinkingLevel } from "@/lib/ai-config";
-import type { ChatMessage } from "@/lib/chat";
+import type { ChatProcessGroup, ChatToolRun } from "@/lib/chat";
 import { useAiConfigStore } from "@/stores/ai-config";
-import { useChatStore } from "@/stores/chat";
+import { useChatStore, type ChatRetryState } from "@/stores/chat";
 import type { Project } from "@/types";
 
 const props = defineProps<{ project: Project }>();
@@ -215,21 +214,86 @@ const cacheHitRate = computed(() => {
   return session.value.cacheHitCachedTokens / input;
 });
 
-// --- 消息渲染辅助 ---
-function toolRunsOf(message: ChatMessage) {
-  return message.toolRunIds.map((id) => session.value.toolRuns[id]).filter((run) => run != null);
+// --- 消息渲染:按「用户消息 / assistant 回合」归组 ---
+// 一个回合 = 连续的 assistant 消息(一轮问答的多轮工具循环),各轮次的思考
+// 与工具调用统一收进 ChatTurnProcess 折叠块;忙时流式过程/正文并入末尾回合,
+// 最终正文开始输出后过程块随 active 翻转整体自动收起,回答之上只留一行摘要。
+
+interface TurnView {
+  kind: "turn";
+  key: string;
+  groups: ChatProcessGroup[];
+  contents: string[];
+  /** 过程仍在产出(本轮正文尚未开始):驱动折叠块保持展开跟随流式 */
+  active: boolean;
+  /** 回合仍在流式产出:附流式正文 / 重试等待 / Loader */
+  live: boolean;
+  streamingText: string;
+  retry: ChatRetryState | null;
 }
 
-const pendingToolRuns = computed(() =>
-  session.value.pendingToolRunIds
-    .map((id) => session.value.toolRuns[id])
-    .filter((run) => run != null),
-);
+type TimelineView = { kind: "user"; key: string; content: string } | TurnView;
 
-// 思考流式中 = 忙且正文/工具都还没开始(思考增量结束、正文或工具开始后自动收起)
-const reasoningStreaming = computed(
-  () => session.value.busy && !session.value.streamingText && pendingToolRuns.value.length === 0,
-);
+function resolveRuns(runIds: string[], toolRuns: Record<string, ChatToolRun>) {
+  return runIds.map((id) => toolRuns[id]).filter((run) => run != null);
+}
+
+function emptyTurn(key: string): TurnView {
+  return {
+    kind: "turn",
+    key,
+    groups: [],
+    contents: [],
+    active: false,
+    live: false,
+    streamingText: "",
+    retry: null,
+  };
+}
+
+const timeline = computed<TimelineView[]>(() => {
+  const s = session.value;
+  const views: TimelineView[] = [];
+  let turn: TurnView | null = null;
+  for (const message of s.messages) {
+    if (message.role === "user") {
+      turn = null;
+      views.push({ kind: "user", key: message.id, content: message.content });
+      continue;
+    }
+    if (!turn) {
+      turn = emptyTurn(message.id);
+      views.push(turn);
+    }
+    const runs = resolveRuns(message.toolRunIds, s.toolRuns);
+    if (message.thinking || runs.length > 0) {
+      turn.groups.push({ thinking: message.thinking, runs });
+    }
+    // 纯空白的正文(工具调用轮常夹带 "\n\n")不进渲染列表,否则空段落
+    // 逐个叠加 flex gap,折叠块与正文之间会出现大段空白
+    if (message.content.trim()) turn.contents.push(message.content);
+  }
+  // 忙时:流式状态并入末尾回合(没有则新建),整轮共用同一个折叠块
+  if (s.busy) {
+    if (!turn) {
+      turn = emptyTurn(`${s.messages.length}:live`);
+      views.push(turn);
+    }
+    turn.live = true;
+    turn.streamingText = s.streamingText;
+    turn.retry = s.retry;
+    turn.active = s.pendingToolRunIds.length > 0 || !s.streamingText.trim();
+    const runs = resolveRuns(s.pendingToolRunIds, s.toolRuns);
+    if (s.streamingThinking || runs.length > 0) {
+      turn.groups.push({
+        thinking: s.streamingThinking || undefined,
+        thinkingStreaming: true,
+        runs,
+      });
+    }
+  }
+  return views;
+});
 
 const retryClock = useNow({ interval: 250 });
 const retrySeconds = computed(() => {
@@ -325,62 +389,52 @@ const retrySeconds = computed(() => {
             </ConversationEmptyState>
 
             <template v-else>
-              <Message
-                v-for="message in session.messages"
-                :key="message.id"
-                :from="message.role"
-                class="max-w-[90%]"
-              >
-                <MessageContent>
-                  <Reasoning v-if="message.thinking" :default-open="false" class="w-full">
-                    <ReasoningTrigger />
-                    <ReasoningContent :content="message.thinking" />
-                  </Reasoning>
-                  <ChatToolGroup v-if="message.toolRunIds.length > 0" :runs="toolRunsOf(message)" />
-                  <MessageResponse
-                    v-if="message.role === 'assistant' && message.content"
-                    :content="message.content"
-                  />
-                  <span v-else class="whitespace-pre-wrap">{{ message.content }}</span>
-                </MessageContent>
-              </Message>
-
-              <!-- 流式中的回复:思考折叠面板 + pending 工具分组 + 累积文本 / Loader -->
-              <Message v-if="session.busy" from="assistant" class="max-w-[90%]">
-                <MessageContent>
-                  <Reasoning
-                    v-if="session.streamingThinking"
-                    :is-streaming="reasoningStreaming"
-                    class="w-full"
-                  >
-                    <ReasoningTrigger />
-                    <ReasoningContent :content="session.streamingThinking" mode="streaming" />
-                  </Reasoning>
-                  <ChatToolGroup v-if="pendingToolRuns.length > 0" :runs="pendingToolRuns" />
-                  <MessageResponse
-                    v-if="session.streamingText"
-                    :content="session.streamingText"
-                    mode="streaming"
-                  />
-                  <div
-                    v-else-if="session.retry"
-                    class="flex items-center gap-2 text-xs text-muted-foreground"
-                    :title="session.retry.message"
-                  >
-                    <Loader />
-                    <span>
-                      {{
-                        t("chat.retryScheduled", {
-                          attempt: session.retry.attempt,
-                          max: session.retry.maxAttempts,
-                          seconds: retrySeconds,
-                        })
-                      }}
-                    </span>
-                  </div>
-                  <Loader v-else class="text-muted-foreground" />
-                </MessageContent>
-              </Message>
+              <template v-for="view in timeline" :key="view.key">
+                <Message v-if="view.kind === 'user'" from="user" class="max-w-[90%]">
+                  <MessageContent>
+                    <span class="whitespace-pre-wrap">{{ view.content }}</span>
+                  </MessageContent>
+                </Message>
+                <!-- assistant 回合:思考与工具的统一折叠块 + 各段正文 -->
+                <Message v-else from="assistant" class="max-w-[90%]">
+                  <MessageContent>
+                    <ChatTurnProcess
+                      v-if="view.groups.length > 0"
+                      :groups="view.groups"
+                      :active="view.active"
+                    />
+                    <MessageResponse
+                      v-for="(content, ci) in view.contents"
+                      :key="ci"
+                      :content="content"
+                    />
+                    <template v-if="view.live">
+                      <MessageResponse
+                        v-if="view.streamingText.trim()"
+                        :content="view.streamingText"
+                        mode="streaming"
+                      />
+                      <div
+                        v-else-if="view.retry"
+                        class="flex items-center gap-2 text-muted-foreground text-xs"
+                        :title="view.retry.message"
+                      >
+                        <Loader />
+                        <span>
+                          {{
+                            t("chat.retryScheduled", {
+                              attempt: view.retry.attempt,
+                              max: view.retry.maxAttempts,
+                              seconds: retrySeconds,
+                            })
+                          }}
+                        </span>
+                      </div>
+                      <Loader v-else class="text-muted-foreground" />
+                    </template>
+                  </MessageContent>
+                </Message>
+              </template>
             </template>
           </ConversationContent>
           <ConversationScrollButton />

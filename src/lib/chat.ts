@@ -70,6 +70,14 @@ export interface ChatToolRun {
   summary: string;
 }
 
+/** 回答过程折叠块里的单个轮次段:该轮思考原文与工具调用(按发生顺序) */
+export interface ChatProcessGroup {
+  thinking?: string;
+  /** 思考仍在流式累积(仅进行中的轮次为 true,正文用 streaming 模式渲染) */
+  thinkingStreaming?: boolean;
+  runs: ChatToolRun[];
+}
+
 function chatRunId(): string {
   return `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }

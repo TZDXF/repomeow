@@ -2,13 +2,12 @@
 import type { HTMLAttributes } from "vue";
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
-import { formatTokenCount } from "@/lib/chat";
 import { cn } from "@/lib/utils";
 import { formatContextPercent, useContextValue } from "./context";
 
 /**
- * 上下文构成占比行(系统提示词/工具定义/消息):各部分 token 数 +
- * 占当前已用上下文的比例;breakdown 缺失或全零时不渲染。
+ * 上下文构成占比行(系统提示词/工具定义/消息):各部分占当前已用上下文的比例;
+ * breakdown 缺失或全零时不渲染。
  */
 const props = defineProps<{
   class?: HTMLAttributes["class"];
@@ -44,10 +43,8 @@ function share(tokens: number): string | null {
     >
       <span class="text-muted-foreground">{{ part.label }}</span>
       <span class="tabular-nums">
-        {{ formatTokenCount(part.tokens)
-        }}<span v-if="share(part.tokens)" class="text-muted-foreground">
-          · {{ share(part.tokens) }}</span
-        >
+        <span v-if="share(part.tokens)">{{ share(part.tokens) }}</span>
+        <span v-else class="text-muted-foreground">—</span>
       </span>
     </div>
   </template>

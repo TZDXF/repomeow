@@ -19,6 +19,8 @@ import type { ToolState } from "./types";
 // 单行紧凑排列,连续调用时不占视觉空间。
 const props = defineProps<{
   title?: string;
+  /** 标题后的行内摘要(主参数值),截断展示 */
+  subtitle?: string;
   state: ToolState;
   class?: HTMLAttributes["class"];
 }>();
@@ -66,7 +68,10 @@ const statusText = computed(() => {
   >
     <div class="flex min-w-0 items-center gap-1.5">
       <WrenchIcon class="size-3.5 shrink-0 text-muted-foreground" />
-      <span class="truncate font-medium text-xs">{{ label }}</span>
+      <span class="shrink-0 font-medium text-xs">{{ label }}</span>
+      <span v-if="props.subtitle" class="min-w-0 truncate text-muted-foreground text-xs">
+        {{ props.subtitle }}
+      </span>
       <component :is="statusIcon" class="size-3.5 shrink-0" :class="statusClass" />
     </div>
     <ChevronDownIcon
