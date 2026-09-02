@@ -57,7 +57,7 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import ChatTurnProcess from "@/components/chat/ChatTurnProcess.vue";
-import { CHAT_THINKING_LEVELS, type ChatThinkingLevel } from "@/lib/ai-config";
+import { CHAT_THINKING_LEVELS, type ChatPermission, type ChatThinkingLevel } from "@/lib/ai-config";
 import type { ChatProcessGroup, ChatToolRun } from "@/lib/chat";
 import { useAiConfigStore } from "@/stores/ai-config";
 import { useChatStore, type ChatRetryState } from "@/stores/chat";
@@ -101,20 +101,80 @@ function toggleOpen() {
   open.value = !open.value;
 }
 
-// --- 放大/还原:放大时面板扩展为大尺寸(接近全高、加宽) ---
+// --- 放大/还原与边缘拖拽:面板尺寸由响应式宽高驱动;默认 500x640,放大铺满高度 ---
+// 高度让出自绘标题栏(TitleBar.vue h-9 = 2.25rem,z-60 盖在浮层 z-50 之上,
+// 约定同 lib/popper.ts):底部边距 1rem + 标题栏下间隙 1rem + 标题栏 2.25rem
+const PANEL_DEFAULT_WIDTH = 500;
+const PANEL_DEFAULT_HEIGHT = 640;
+const PANEL_EXPANDED_WIDTH = 720;
+const PANEL_MIN_WIDTH = 360;
+const PANEL_MIN_HEIGHT = 320;
+const PANEL_MARGIN = 68; // 2rem + 2.25rem
+
 const expanded = ref(false);
+const panelWidth = ref(PANEL_DEFAULT_WIDTH);
+const panelHeight = ref(PANEL_DEFAULT_HEIGHT);
+
+const maxPanelWidth = () => window.innerWidth - 32;
+const maxPanelHeight = () => window.innerHeight - PANEL_MARGIN;
 
 function toggleExpanded() {
   expanded.value = !expanded.value;
+  if (expanded.value) {
+    panelWidth.value = Math.min(PANEL_EXPANDED_WIDTH, maxPanelWidth());
+    panelHeight.value = maxPanelHeight();
+  } else {
+    panelWidth.value = PANEL_DEFAULT_WIDTH;
+    panelHeight.value = PANEL_DEFAULT_HEIGHT;
+  }
 }
 
-// 高度让出自绘标题栏(TitleBar.vue h-9 = 2.25rem,z-60 盖在浮层 z-50 之上,
-// 约定同 lib/popper.ts):底部边距 1rem + 标题栏下间隙 1rem + 标题栏 2.25rem
-const panelSizeClass = computed(() =>
-  expanded.value
-    ? "h-[calc(100vh-2rem-2.25rem)] w-[720px] max-w-[calc(100vw-2rem)]"
-    : "h-[640px] max-h-[calc(100vh-2rem-2.25rem)] w-[420px] max-w-[calc(100vw-2rem)]",
-);
+const panelStyle = computed(() => ({
+  width: `${panelWidth.value}px`,
+  height: `${panelHeight.value}px`,
+  maxWidth: "calc(100vw - 2rem)",
+  maxHeight: "calc(100vh - 2rem - 2.25rem)",
+}));
+
+// 上边/左边/左上角拖拽:面板锚定右下角,拖左边加宽、拖上边加高;
+// 拖拽中禁用尺寸过渡,避免 0.25s 过渡滞后于指针
+const resizing = ref(false);
+
+function startResize(axis: "x" | "y" | "both", event: PointerEvent) {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  const handle = event.currentTarget as HTMLElement;
+  const startX = event.clientX;
+  const startY = event.clientY;
+  const startWidth = panelWidth.value;
+  const startHeight = panelHeight.value;
+  resizing.value = true;
+  handle.setPointerCapture(event.pointerId);
+  const onMove = (e: PointerEvent) => {
+    expanded.value = false;
+    if (axis !== "y") {
+      panelWidth.value = Math.min(
+        Math.max(startWidth + (startX - e.clientX), PANEL_MIN_WIDTH),
+        maxPanelWidth(),
+      );
+    }
+    if (axis !== "x") {
+      panelHeight.value = Math.min(
+        Math.max(startHeight + (startY - e.clientY), PANEL_MIN_HEIGHT),
+        maxPanelHeight(),
+      );
+    }
+  };
+  const onUp = () => {
+    resizing.value = false;
+    handle.removeEventListener("pointermove", onMove);
+    handle.removeEventListener("pointerup", onUp);
+    handle.removeEventListener("pointercancel", onUp);
+  };
+  handle.addEventListener("pointermove", onMove);
+  handle.addEventListener("pointerup", onUp);
+  handle.addEventListener("pointercancel", onUp);
+}
 
 // --- 发送 / 停止 / 新会话 ---
 function onSubmit(message: PromptInputMessage) {
@@ -183,9 +243,9 @@ function onThinkingChange(level: unknown) {
   void applyPref(() => aiConfig.setChatThinking(level as ChatThinkingLevel));
 }
 
-function togglePermission() {
-  const next = aiConfig.chatPermission === "all" ? "readOnly" : "all";
-  void applyPref(() => aiConfig.setChatPermission(next));
+function onPermissionChange(value: unknown) {
+  if (value !== "all" && value !== "readOnly") return;
+  void applyPref(() => aiConfig.setChatPermission(value as ChatPermission));
 }
 
 // 上下文占用:窗口来自所选模型元数据;明细来自最近一次整轮用量
@@ -310,8 +370,9 @@ const retrySeconds = computed(() => {
     <Transition name="chat-dock">
       <div
         v-if="open"
-        class="chat-panel pointer-events-auto flex origin-bottom-right flex-col overflow-hidden rounded-xl border bg-background shadow-lg"
-        :class="panelSizeClass"
+        class="chat-panel pointer-events-auto relative flex origin-bottom-right flex-col overflow-hidden rounded-xl border bg-background shadow-lg"
+        :class="{ 'chat-panel-resizing': resizing }"
+        :style="panelStyle"
       >
         <!-- 头部:标题 + 项目名 + 新会话 + 关闭 -->
         <div class="flex shrink-0 items-center justify-between gap-2 border-b px-3 py-2">
@@ -430,7 +491,9 @@ const retrySeconds = computed(() => {
                           }}
                         </span>
                       </div>
-                      <Loader v-else class="text-muted-foreground" />
+                      <!-- 过程折叠块头部已带「正在思考与执行…」旋转图标,仅在尚未
+                           产出任何过程(无思考、无工具)时才需要独立的 Loader -->
+                      <Loader v-else-if="view.groups.length === 0" class="text-muted-foreground" />
                     </template>
                   </MessageContent>
                 </Message>
@@ -461,6 +524,39 @@ const retrySeconds = computed(() => {
             </PromptInputBody>
             <PromptInputFooter class="px-2 pb-2">
               <PromptInputTools class="min-w-0 flex-1 flex-wrap">
+                <Select
+                  :model-value="aiConfig.chatPermission"
+                  :disabled="session.busy"
+                  @update:model-value="onPermissionChange"
+                >
+                  <SelectTrigger
+                    size="sm"
+                    class="text-muted-foreground h-7 gap-1 px-2 text-xs"
+                    :title="permissionTitle"
+                  >
+                    <Eye v-if="aiConfig.chatPermission === 'readOnly'" class="size-3.5 shrink-0" />
+                    <Wrench v-else class="size-3.5 shrink-0" />
+                    <span>
+                      {{
+                        aiConfig.chatPermission === "all"
+                          ? t("chat.permission.allShort")
+                          : t("chat.permission.readOnlyShort")
+                      }}
+                    </span>
+                  </SelectTrigger>
+                  <SelectContent :disable-outside-pointer-events="false">
+                    <SelectItem
+                      value="readOnly"
+                      class="text-xs"
+                      :title="t('chat.permission.readOnly')"
+                    >
+                      {{ t("chat.permission.readOnlyShort") }}
+                    </SelectItem>
+                    <SelectItem value="all" class="text-xs" :title="t('chat.permission.all')">
+                      {{ t("chat.permission.allShort") }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
                 <ModelSelector
                   :model-value="aiConfig.chatModelValue"
                   :groups="modelGroups"
@@ -481,7 +577,7 @@ const retrySeconds = computed(() => {
                     <Brain class="size-3.5 shrink-0" />
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent :disable-outside-pointer-events="false">
                     <SelectItem
                       v-for="level in CHAT_THINKING_LEVELS"
                       :key="level"
@@ -492,33 +588,6 @@ const retrySeconds = computed(() => {
                     </SelectItem>
                   </SelectContent>
                 </Select>
-                <PromptInputButton
-                  class="text-muted-foreground hover:text-foreground size-7"
-                  :title="permissionTitle"
-                  :disabled="session.busy"
-                  @click="togglePermission"
-                >
-                  <Eye v-if="aiConfig.chatPermission === 'readOnly'" class="size-3.5" />
-                  <Wrench v-else class="size-3.5" />
-                </PromptInputButton>
-                <Context
-                  :used-tokens="session.contextTokens"
-                  :max-tokens="contextWindow"
-                  :usage="contextUsage"
-                  :cost="contextCost"
-                  :breakdown="session.contextBreakdown"
-                  :cache-hit-rate="cacheHitRate"
-                >
-                  <ContextTrigger />
-                  <ContextContent side="top" align="end">
-                    <ContextContentHeader />
-                    <ContextContentBody class="space-y-2">
-                      <ContextBreakdownUsage />
-                      <ContextCacheHitRate />
-                    </ContextContentBody>
-                    <ContextContentFooter />
-                  </ContextContent>
-                </Context>
                 <p v-if="!aiReady" class="text-muted-foreground w-full text-xs">
                   {{ t("chat.notConfigured") }}
                   <Button
@@ -531,6 +600,26 @@ const retrySeconds = computed(() => {
                   </Button>
                 </p>
               </PromptInputTools>
+              <!-- 上下文占用:首个回答产出用量数据前不显示 -->
+              <Context
+                v-if="session.contextTokens != null"
+                :used-tokens="session.contextTokens"
+                :max-tokens="contextWindow"
+                :usage="contextUsage"
+                :cost="contextCost"
+                :breakdown="session.contextBreakdown"
+                :cache-hit-rate="cacheHitRate"
+              >
+                <ContextTrigger />
+                <ContextContent side="top" align="end">
+                  <ContextContentHeader />
+                  <ContextContentBody class="space-y-2">
+                    <ContextBreakdownUsage />
+                    <ContextCacheHitRate />
+                  </ContextContentBody>
+                  <ContextContentFooter />
+                </ContextContent>
+              </Context>
               <!-- 发送/停止共用槽位:忙时提交钮隐藏(disabled 保留在 DOM 供 Enter 守卫),同位显示方形停止钮 -->
               <div class="relative size-8 shrink-0">
                 <PromptInputSubmit
@@ -551,6 +640,20 @@ const retrySeconds = computed(() => {
             </PromptInputFooter>
           </PromptInput>
         </div>
+
+        <!-- 边缘拖拽手柄:左缘加宽、上缘加高、左上角同时调整(面板锚定右下角) -->
+        <div
+          class="absolute top-0 bottom-0 left-0 w-1.5 cursor-ew-resize touch-none"
+          @pointerdown="startResize('x', $event)"
+        />
+        <div
+          class="absolute top-0 right-0 left-0 h-1.5 cursor-ns-resize touch-none"
+          @pointerdown="startResize('y', $event)"
+        />
+        <div
+          class="absolute top-0 left-0 size-3 cursor-nwse-resize touch-none"
+          @pointerdown="startResize('both', $event)"
+        />
       </div>
     </Transition>
 
@@ -582,6 +685,11 @@ const retrySeconds = computed(() => {
     height 0.25s ease,
     max-width 0.25s ease,
     max-height 0.25s ease;
+}
+
+/* 拖拽改尺寸时禁用过渡,面板紧随指针 */
+.chat-panel-resizing {
+  transition: none;
 }
 
 /* 打开/关闭:面板朝右下角缩放淡出,与入口按钮位置呼应 */

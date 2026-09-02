@@ -20,6 +20,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -28,7 +29,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { fetchAiModels, testAiConnection } from "@/lib/ai";
 import {
   emptyChatPrefs,
@@ -53,7 +53,6 @@ interface ModelDraft {
   name: string;
   contextWindow: string;
   maxTokens: string;
-  reasoning: boolean;
   /** 建控件之外的原始定义(cost/compat/input 等透传保存,避免 UI 字段丢元数据) */
   source: AiModelDef;
 }
@@ -98,7 +97,6 @@ function draftModel(model: AiModelDef): ModelDraft {
     name: model.name,
     contextWindow: model.contextWindow > 0 ? String(model.contextWindow) : "",
     maxTokens: model.maxTokens > 0 ? String(model.maxTokens) : "",
-    reasoning: model.reasoning,
     source: model,
   };
 }
@@ -225,7 +223,7 @@ function addModel(draft: ProviderDraft) {
     draftModel({
       id: "",
       name: "",
-      reasoning: false,
+      reasoning: true,
       input: ["text"],
       contextWindow: 0,
       maxTokens: 0,
@@ -237,28 +235,21 @@ function removeModel(draft: ProviderDraft, model: ModelDraft) {
   draft.models = draft.models.filter((item) => item !== model);
 }
 
-/** 拉取厂商模型列表并与本地行合并(已存在的 id 保留本地编辑) */
+// ── 模型 ID 下拉候选(「获取模型列表」的结果,供填写时挑选,不直接落行) ──
+
+/** 各厂商最近一次拉取到的模型 ID 列表(按厂商本地 key 存放) */
+const fetchedModels = reactive<Record<string, string[]>>({});
+/** 各模型行 ID 输入框的候选弹层开关 */
+const suggestionOpen = reactive<Record<string, boolean>>({});
+const SUGGESTION_LIMIT = 50;
+
+/** 拉取厂商模型列表,作为模型 ID 输入框的下拉候选 */
 async function fetchModels(draft: ProviderDraft) {
   if (fetchingKey.value) return;
   fetchingKey.value = draft.key;
   try {
     const list = await fetchAiModels(draft.baseUrl.trim(), draft.apiKey.trim());
-    const existing = new Set(draft.models.map((model) => model.id.trim()));
-    for (const id of list) {
-      if (!id || existing.has(id)) continue;
-      existing.add(id);
-      draft.models = [
-        ...draft.models,
-        draftModel({
-          id,
-          name: "",
-          reasoning: false,
-          input: ["text"],
-          contextWindow: 0,
-          maxTokens: 0,
-        }),
-      ];
-    }
+    fetchedModels[draft.key] = list.filter((id) => id.trim());
     toast.success(t("settings.ai.fetchModelsSuccess", { count: list.length }));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -266,6 +257,31 @@ async function fetchModels(draft: ProviderDraft) {
   } finally {
     fetchingKey.value = null;
   }
+}
+
+/** 当前行的下拉候选:按输入过滤、排除其他行已占用的 ID */
+function modelSuggestions(draft: ProviderDraft, model: ModelDraft): string[] {
+  const list = fetchedModels[draft.key];
+  if (!list?.length) return [];
+  const used = new Set(draft.models.filter((item) => item !== model).map((item) => item.id.trim()));
+  const keyword = model.id.trim().toLowerCase();
+  return list
+    .filter((id) => !used.has(id) && (!keyword || id.toLowerCase().includes(keyword)))
+    .slice(0, SUGGESTION_LIMIT);
+}
+
+function openSuggestions(draft: ProviderDraft, model: ModelDraft) {
+  suggestionOpen[model.key] = modelSuggestions(draft, model).length > 0;
+}
+
+function onModelIdInput(draft: ProviderDraft, model: ModelDraft, value: string) {
+  model.id = value;
+  openSuggestions(draft, model);
+}
+
+function pickModelId(model: ModelDraft, id: string) {
+  model.id = id;
+  suggestionOpen[model.key] = false;
 }
 
 // ── 默认模型 ─────────────────────────────────────────────────────────
@@ -282,7 +298,7 @@ const modelGroups = computed<ModelSelectorGroup[]>(() =>
           ...model.source,
           id: model.id.trim(),
           name: model.name.trim(),
-          reasoning: model.reasoning,
+          reasoning: true,
         })),
     })),
 );
@@ -334,7 +350,7 @@ function buildProviders(): Record<string, AiProvider> | null {
           ...model.source,
           id: model.id.trim(),
           name: model.name.trim(),
-          reasoning: model.reasoning,
+          reasoning: true,
           contextWindow: parseTokenCount(model.contextWindow),
           maxTokens: parseTokenCount(model.maxTokens),
         })),
@@ -571,45 +587,88 @@ const CONCURRENCY_OPTIONS = [1, 2, 3, 4, 5];
                     <div
                       v-for="model in draft.models"
                       :key="model.key"
-                      class="flex flex-wrap items-center gap-1.5 rounded-md border p-1.5"
+                      class="flex flex-col gap-2 rounded-md border p-2"
                     >
-                      <Input
-                        v-model="model.id"
-                        class="h-7 min-w-36 flex-1 text-xs"
-                        :placeholder="t('settings.ai.modelIdPlaceholder')"
-                        spellcheck="false"
-                      />
-                      <Input
-                        v-model="model.name"
-                        class="h-7 w-28 text-xs"
-                        :placeholder="t('settings.ai.modelNamePlaceholder')"
-                        spellcheck="false"
-                      />
-                      <Input
-                        v-model="model.contextWindow"
-                        class="h-7 w-24 text-xs tabular-nums"
-                        :placeholder="t('settings.ai.contextWindow')"
-                        :title="t('settings.ai.contextWindow')"
-                      />
-                      <Input
-                        v-model="model.maxTokens"
-                        class="h-7 w-20 text-xs tabular-nums"
-                        :placeholder="t('settings.ai.maxTokens')"
-                        :title="t('settings.ai.maxTokens')"
-                      />
-                      <label class="text-muted-foreground flex items-center gap-1 text-xs">
-                        <Switch v-model="model.reasoning" />
-                        <span>{{ t("settings.ai.reasoning") }}</span>
-                      </label>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        class="text-muted-foreground hover:text-destructive h-7 w-7"
-                        :title="t('settings.ai.removeModel')"
-                        @click="removeModel(draft, model)"
-                      >
-                        <Trash2 class="h-3.5 w-3.5" />
-                      </Button>
+                      <div class="flex items-end gap-1.5">
+                        <div class="flex min-w-0 flex-1 flex-col gap-1">
+                          <label class="text-muted-foreground text-xs">{{
+                            t("settings.ai.modelId")
+                          }}</label>
+                          <Popover
+                            :open="suggestionOpen[model.key] ?? false"
+                            @update:open="suggestionOpen[model.key] = $event"
+                          >
+                            <PopoverAnchor as-child>
+                              <Input
+                                :model-value="model.id"
+                                class="h-7 text-xs"
+                                :placeholder="t('settings.ai.modelIdPlaceholder')"
+                                spellcheck="false"
+                                @update:model-value="onModelIdInput(draft, model, String($event))"
+                                @focus="openSuggestions(draft, model)"
+                              />
+                            </PopoverAnchor>
+                            <PopoverContent
+                              class="w-(--reka-popper-anchor-width) max-h-56 gap-0 overflow-y-auto p-1"
+                              align="start"
+                              @open-auto-focus.prevent
+                              @close-auto-focus.prevent
+                            >
+                              <button
+                                v-for="option in modelSuggestions(draft, model)"
+                                :key="option"
+                                type="button"
+                                class="hover:bg-accent w-full truncate rounded-sm px-2 py-1 text-left text-xs"
+                                @click="pickModelId(model, option)"
+                              >
+                                {{ option }}
+                              </button>
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          class="text-muted-foreground hover:text-destructive h-7 w-7 shrink-0"
+                          :title="t('settings.ai.removeModel')"
+                          @click="removeModel(draft, model)"
+                        >
+                          <Trash2 class="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                      <div class="grid grid-cols-3 gap-1.5">
+                        <div class="flex flex-col gap-1">
+                          <label class="text-muted-foreground text-xs">{{
+                            t("settings.ai.modelName")
+                          }}</label>
+                          <Input
+                            v-model="model.name"
+                            class="h-7 text-xs"
+                            :placeholder="t('settings.ai.modelNamePlaceholder')"
+                            spellcheck="false"
+                          />
+                        </div>
+                        <div class="flex flex-col gap-1">
+                          <label class="text-muted-foreground text-xs">{{
+                            t("settings.ai.contextWindow")
+                          }}</label>
+                          <Input
+                            v-model="model.contextWindow"
+                            class="h-7 text-xs tabular-nums"
+                            :placeholder="t('settings.ai.contextWindowPlaceholder')"
+                          />
+                        </div>
+                        <div class="flex flex-col gap-1">
+                          <label class="text-muted-foreground text-xs">{{
+                            t("settings.ai.maxTokens")
+                          }}</label>
+                          <Input
+                            v-model="model.maxTokens"
+                            class="h-7 text-xs tabular-nums"
+                            :placeholder="t('settings.ai.maxTokensPlaceholder')"
+                          />
+                        </div>
+                      </div>
                     </div>
                     <Button
                       variant="outline"

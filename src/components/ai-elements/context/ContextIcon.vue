@@ -5,7 +5,8 @@ import { useContextValue } from "./context";
 const ICON_RADIUS = 10;
 const ICON_VIEWBOX = 24;
 const ICON_CENTER = 12;
-const ICON_STROKE_WIDTH = 2;
+const ICON_STROKE_WIDTH = 3.5;
+const ICON_SIZE = 16;
 
 const { usedTokens, maxTokens } = useContextValue();
 
@@ -27,11 +28,11 @@ const svgStyle = {
 <template>
   <svg
     aria-label="Model context usage"
-    height="20"
+    :height="ICON_SIZE"
     role="img"
     style="color: currentcolor"
     :viewBox="`0 0 ${ICON_VIEWBOX} ${ICON_VIEWBOX}`"
-    width="20"
+    :width="ICON_SIZE"
   >
     <circle
       :cx="ICON_CENTER"

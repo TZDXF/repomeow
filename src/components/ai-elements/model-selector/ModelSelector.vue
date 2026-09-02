@@ -43,7 +43,10 @@ const hasAnyModel = computed(() => props.groups.some((group) => group.models.len
     <SelectTrigger :size="size" :class="triggerClass">
       <SelectValue :placeholder="placeholder" />
     </SelectTrigger>
-    <SelectContent class="max-h-80">
+    <!-- disableOutsidePointerEvents=false:浮层场景(如 ChatDock 面板 pointer-events-auto)
+         下 reka 默认的 body pointer-events:none 拦截不到面板内其他触发器,
+         会导致两个下拉同时打开;关闭后点另一个下拉即可正常收起到前一个 -->
+    <SelectContent class="max-h-80" :disable-outside-pointer-events="false">
       <template v-for="group in groups" :key="group.providerId">
         <SelectGroup v-if="group.models.length">
           <SelectLabel>{{ group.providerName }}</SelectLabel>

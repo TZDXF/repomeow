@@ -199,10 +199,9 @@ watch(current, (page) => {
   }
 });
 
-/** 从正文底部跳转相关页面后回到正文顶部,与 deepwiki-open 的页面导航行为一致 */
+/** 从正文底部跳转相关页面,与普通切换共用同一条选中路径 */
 function selectRelatedPage(id: string) {
   selectPage(id);
-  void scrollPreviewToTop();
 }
 
 // ── 流式预览自动跟随滚动(用户上翻阅读时暂停,回到底部自动恢复) ─────────────
@@ -214,6 +213,12 @@ const { scrollPreviewToTop } = useWikiPreviewScroll({
   activePreviewId,
   previewContent,
   previewHost,
+});
+
+// 静态查看切换页面(含列表变化后的自动重选)时回到正文顶部;
+// 生成中的流式预览滚动由 useWikiPreviewScroll 自行管理
+watch(selectedId, () => {
+  if (!generatingHere.value) void scrollPreviewToTop();
 });
 
 // ── 生成 / 操作 ───────────────────────────────────────────────────────────

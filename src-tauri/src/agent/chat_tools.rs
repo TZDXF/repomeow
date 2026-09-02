@@ -443,15 +443,22 @@ fn read_wiki_tool(app: &AppHandle, ctx: &ChatToolContext) -> AgentTool {
                         .map_err(tool_err)?;
                     let Some(data) = data else {
                         return text_result(
-                            "该项目尚未生成 Wiki。可调用 regenerate_wiki 生成整本(后台执行,耗时较长)。",
+                            "该项目尚未生成 Wiki。不要擅自生成;可告知用户并能用 regenerate_wiki 生成整本(后台执行,耗时较长),征得用户同意后再调用。",
                         );
                     };
                     match arg_str(&args, "page_id") {
                         Some(page_id) => match data.pages.iter().find(|page| page.id == page_id) {
-                            Some(page) => text_result(truncate_bytes(
-                                format!("## {}\n\n{}", page.title, page.content),
-                                WIKI_PAGE_MAX_BYTES,
-                            )),
+                            Some(page) => {
+                                let stale_prefix = if data.stale {
+                                    "(注意:本 Wiki 已落后于最新代码,以下内容可能过时。)\n\n"
+                                } else {
+                                    ""
+                                };
+                                text_result(truncate_bytes(
+                                    format!("{stale_prefix}## {}\n\n{}", page.title, page.content),
+                                    WIKI_PAGE_MAX_BYTES,
+                                ))
+                            }
                             None => text_result(format!(
                                 "未找到页面 id「{page_id}」。当前页面清单:\n{}",
                                 page_list(&data.meta.outline)
@@ -459,7 +466,7 @@ fn read_wiki_tool(app: &AppHandle, ctx: &ChatToolContext) -> AgentTool {
                         },
                         None => {
                             let stale_note = if data.stale {
-                                "是(代码已更新,Wiki 可能过时,可调用 update_wiki 增量更新)"
+                                "是(代码已更新,Wiki 可能过时。不要自行更新:先基于现有内容回答,在回答中告知用户 Wiki 可能过时并询问是否更新,用户明确同意后才调用 update_wiki)"
                             } else {
                                 "否"
                             };
@@ -480,7 +487,7 @@ fn update_wiki_tool(app: &AppHandle, ctx: &ChatToolContext) -> AgentTool {
     tool(
         "update_wiki",
         "增量更新 Wiki",
-        "对已有 Wiki 做增量更新:检测自上次生成以来的代码变更,仅重新生成受影响页面(同步等待完成,通常几秒到一两分钟)。Wiki 过时(read_wiki 返回「过时:是」)时调用。项目还没有 Wiki 或历史被改写时本工具会报错,此时改用 regenerate_wiki。无参数。",
+        "对已有 Wiki 做增量更新:检测自上次生成以来的代码变更,仅重新生成受影响页面(同步等待完成,通常几秒到一两分钟)。**仅当 Wiki 过时(read_wiki 返回「过时:是」)且用户明确同意更新后才调用**;发现过时时应先基于现有内容回答并询问用户,不要自动触发。项目还没有 Wiki 或历史被改写时本工具会报错,此时改用 regenerate_wiki。无参数。",
         json!({
             "type": "object",
             "properties": {},
