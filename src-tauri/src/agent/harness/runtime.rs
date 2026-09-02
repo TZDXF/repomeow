@@ -21,7 +21,8 @@ use std::sync::{Arc, Mutex};
 use crate::agent::agent_loop::now_ms;
 use crate::agent::harness::errors::OperationError;
 use crate::agent::harness::events::{
-    HarnessEvent, HarnessEventBus, MessageEvent, ToolEvent, ToolEventPhase, UsageEvent,
+    HarnessEvent, HarnessEventBus, MessageEvent, MessageUpdateEvent, ToolEvent, ToolEventPhase,
+    UsageEvent,
 };
 use crate::agent::harness::session::context::build_session_context;
 use crate::agent::harness::session::session::Session;
@@ -226,6 +227,8 @@ pub(crate) fn make_mirroring_listener(shared: RuntimeShared, run_id: String) -> 
     let last_assistant_entry: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     // tool_call_id → (result entry id, index)
     let tool_registry: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
+    // 当前 assistant 请求的 start 时间戳(MessageStart 记取,MessageEnd 消费)。
+    let assistant_started_at: Arc<Mutex<Option<i64>>> = Arc::new(Mutex::new(None));
 
     Arc::new(move |event, _signal| {
         let shared = shared.clone();
@@ -234,6 +237,7 @@ pub(crate) fn make_mirroring_listener(shared: RuntimeShared, run_id: String) -> 
         let tool_counter = tool_counter.clone();
         let last_assistant_entry = last_assistant_entry.clone();
         let tool_registry = tool_registry.clone();
+        let assistant_started_at = assistant_started_at.clone();
         Box::pin(async move {
             match event {
                 AgentEvent::MessageEnd { message } => {
@@ -273,6 +277,11 @@ pub(crate) fn make_mirroring_listener(shared: RuntimeShared, run_id: String) -> 
                     *last_assistant_entry
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(entry_id.clone());
+                    let elapsed_ms = assistant_started_at
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .take()
+                        .map(|started| (now_ms() - started).max(0));
                     let attempt = attempt_counter.fetch_add(1, Ordering::SeqCst) + 1;
                     let _ = shared
                         .session
@@ -311,6 +320,30 @@ pub(crate) fn make_mirroring_listener(shared: RuntimeShared, run_id: String) -> 
                         run_id,
                         usage: assistant.usage.clone(),
                         entry_id: Some(entry_id),
+                        elapsed_ms,
+                    }));
+                }
+                AgentEvent::MessageStart { message } => {
+                    // 仅 assistant 请求计时;steering 注入的 user 消息不走流式。
+                    if matches!(
+                        message,
+                        AgentMessage::Message(TypedMessage::Assistant(_))
+                    ) {
+                        *assistant_started_at
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(now_ms());
+                    }
+                }
+                AgentEvent::MessageUpdate {
+                    message,
+                    assistant_message_event,
+                } => {
+                    // 增量透传:不落 session,仅供实时监听方(流式预览/逐请求用量)消费。
+                    shared.bus.emit(&HarnessEvent::MessageUpdate(MessageUpdateEvent {
+                        lane: "main".to_string(),
+                        run_id,
+                        message: message.clone(),
+                        assistant_message_event: assistant_message_event.clone(),
                     }));
                 }
                 AgentEvent::ToolExecutionStart {
@@ -394,14 +427,13 @@ pub(crate) fn make_mirroring_listener(shared: RuntimeShared, run_id: String) -> 
                         is_error,
                     }));
                 }
-                // 工具结果已在 MessageEnd 落库;AgentStart/TurnStart/MessageStart/
-                // MessageUpdate/AgentEnd 无落库语义。
+                // 工具结果已在 MessageEnd 落库;AgentStart/TurnStart/TurnEnd/
+                // AgentEnd 无落库语义(MessageStart 仅计时、MessageUpdate 仅增量
+                // 透传,均不落 session)。
                 AgentEvent::AgentStart
                 | AgentEvent::AgentEnd { .. }
                 | AgentEvent::TurnStart
-                | AgentEvent::TurnEnd { .. }
-                | AgentEvent::MessageStart { .. }
-                | AgentEvent::MessageUpdate { .. } => {}
+                | AgentEvent::TurnEnd { .. } => {}
             }
         })
     })
@@ -428,7 +460,7 @@ mod runtime_tests {
         SessionMetadata,
     };
     use crate::agent::llm::types::{AssistantContent, ModelThinkingLevel, StopReason, ToolCall};
-    use crate::agent::types::{AgentState, AgentTool, AgentToolResult, ToolExecutionMode};
+    use crate::agent::types::{AgentTool, AgentToolResult, ToolExecutionMode};
     use std::collections::HashMap as StdHashMap;
     use std::time::Duration;
 
@@ -593,7 +625,7 @@ mod runtime_tests {
             crate::agent::harness::events::HarnessEventType::Usage,
         ] {
             let seen = seen.clone();
-            harness
+            let _ = harness
                 .events()
                 .on(event_type, Arc::new(move |event| {
                     seen.lock()
@@ -638,6 +670,86 @@ mod runtime_tests {
             &usage[0],
             LaneRecord::Usage(record) if record.cause == UsageCauseKind::Assistant
         ));
+    }
+
+    #[tokio::test]
+    async fn message_update_events_stream_incrementally_and_skip_session() {
+        let session = memory_session();
+        let (stream_fn, _calls) = scripted_stream_fn(vec![text_script("hello world")]);
+        let (harness, _suspended) =
+            AgentHarness::create(options(session.clone(), stream_fn, Vec::new(), None))
+                .await
+                .unwrap();
+        let harness = Arc::new(harness);
+
+        // 按 HarnessEventType 订阅:on_event 只投递对应类型,增量事件实时可见。
+        let updates: Arc<Mutex<Vec<MessageUpdateEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let update_sink = updates.clone();
+        let _unsubscribe_updates = harness.on_event(
+            crate::agent::harness::events::HarnessEventType::MessageUpdate,
+            Arc::new(move |event| {
+                if let HarnessEvent::MessageUpdate(update) = event {
+                    update_sink.lock().unwrap().push(update.clone());
+                }
+            }),
+        );
+        let messages_seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let message_sink = messages_seen.clone();
+        let _unsubscribe_messages = harness.on_event(
+            crate::agent::harness::events::HarnessEventType::Message,
+            Arc::new(move |event| {
+                message_sink
+                    .lock()
+                    .unwrap()
+                    .push(event.event_type().as_str().to_string());
+            }),
+        );
+        let usages: Arc<Mutex<Vec<(Option<i64>, Option<String>)>>> = Arc::new(Mutex::new(Vec::new()));
+        let usage_sink = usages.clone();
+        let _unsubscribe_usage = harness.on_event(
+            crate::agent::harness::events::HarnessEventType::Usage,
+            Arc::new(move |event| {
+                if let HarnessEvent::Usage(usage) = event {
+                    usage_sink
+                        .lock()
+                        .unwrap()
+                        .push((usage.elapsed_ms, usage.entry_id.clone()));
+                }
+            }),
+        );
+
+        let outcome = harness.prompt("hi".to_string()).await.unwrap();
+        assert!(matches!(outcome, RunOutcome::Completed { .. }));
+        harness.wait_for_idle().await.unwrap();
+
+        // 增量透传:text_script 的唯一 TextDelta → 恰一条 message_update,
+        // 携带完整 assistant_message_event 与流式中的 assistant 消息。
+        let updates = updates.lock().unwrap().clone();
+        assert_eq!(updates.len(), 1);
+        let update = &updates[0];
+        assert_eq!(update.lane, "main");
+        assert_eq!(update.message.role_name(), "assistant");
+        assert!(matches!(
+            &update.assistant_message_event,
+            crate::agent::llm::types::AssistantMessageEvent::TextDelta { delta, .. }
+                if delta == "hello world"
+        ));
+
+        // 订阅按类型隔离:message 订阅只收到两条 MessageEnd(user prompt 与
+        // 最终 assistant 各一条),增量 message_update 未串线(串线则为 3)。
+        assert_eq!(messages_seen.lock().unwrap().len(), 2);
+
+        // 增量不落 session:仍只有 user + assistant 两条消息条目,usage 记录
+        // 仅 MessageEnd 落库的一条。
+        assert_eq!(message_roles(&session).await, vec!["user", "assistant"]);
+        assert_eq!(records_of(&session, "usage").await.len(), 1);
+
+        // 逐 assistant 请求用量:usage 事件带 entry_id 与 start 计得的 elapsed_ms。
+        let usages = usages.lock().unwrap().clone();
+        assert_eq!(usages.len(), 1);
+        assert!(usages[0].1.is_some(), "usage event must carry entry_id");
+        assert!(usages[0].0.is_some(), "usage event must carry elapsed_ms");
+        assert!(usages[0].0.unwrap() >= 0);
     }
 
     #[tokio::test]

@@ -432,19 +432,6 @@ impl AppError {
     pub fn is_code(&self, expected: ErrorCode) -> bool {
         self.code_enum() == expected
     }
-
-    /// Wiki 生成可安全重试的临时 AI 错误。参数、鉴权与响应格式错误不应重试。
-    pub fn is_retryable_ai_error(&self) -> bool {
-        matches!(
-            self,
-            Self::Coded {
-                code: ErrorCode::AiRequestFailed
-                    | ErrorCode::AiRateLimited
-                    | ErrorCode::AiServiceUnavailable,
-                ..
-            }
-        )
-    }
 }
 
 // Tauri 命令错误序列化为 `{"code": "...", "message": "..."}` 对象。

@@ -7,7 +7,7 @@ export function getWikiDir(projectPath: string): Promise<string> {
   return cmd<string>("get_wiki_dir", { projectPath });
 }
 
-/** 读取项目 Wiki 目录中的独立生成配置；未配置时后端返回内置 API 默认值。 */
+/** 读取项目 Wiki 目录中的独立生成配置；未配置时后端返回内置 Agent 默认值。 */
 export function loadWikiConfig(projectPath: string): Promise<WikiGenerationConfig> {
   return cmd<WikiGenerationConfig>("load_wiki_config", { projectPath });
 }

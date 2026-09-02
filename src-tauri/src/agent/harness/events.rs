@@ -53,6 +53,18 @@ pub struct MessageEvent {
     pub message: crate::agent::types::AgentMessage,
 }
 
+/// 消息增量事件(本仓库运行时扩展:assistant 流式期间 core
+/// `AgentEvent::MessageUpdate` 的透传,含完整的 `assistant_message_event`;
+/// 只经事件总线分发,不落 session,供实时 UI/用量监听方消费)。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageUpdateEvent {
+    pub lane: String,
+    pub run_id: String,
+    pub message: crate::agent::types::AgentMessage,
+    pub assistant_message_event: crate::agent::llm::types::AssistantMessageEvent,
+}
+
 /// 工具执行事件(本仓库运行时扩展;phase 对齐 loop 的 start/update/end)。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -90,10 +102,14 @@ pub struct UsageEvent {
     pub usage: crate::agent::llm::types::Usage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entry_id: Option<String>,
+    /// 本次 assistant 请求耗时毫秒(message start → message end;
+    /// 无 start 计时(如流未按契约先发 start)时缺省)。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elapsed_ms: Option<i64>,
 }
 
-/// harness 事件(对齐 TS `HarnessEvent`,tag 值一致;message/tool/usage 为
-/// 本仓库运行时扩展,TS scaffold 未定义)。
+/// harness 事件(对齐 TS `HarnessEvent`,tag 值一致;message/message_update/
+/// tool/usage 为本仓库运行时扩展,TS scaffold 未定义)。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all_fields = "camelCase")]
 pub enum HarnessEvent {
@@ -103,6 +119,8 @@ pub enum HarnessEvent {
     RunEnd(RunEndEvent),
     #[serde(rename = "message")]
     Message(MessageEvent),
+    #[serde(rename = "message_update")]
+    MessageUpdate(MessageUpdateEvent),
     #[serde(rename = "tool")]
     Tool(ToolEvent),
     #[serde(rename = "usage")]
@@ -116,6 +134,7 @@ impl HarnessEvent {
             HarnessEvent::RunStart(_) => HarnessEventType::RunStart,
             HarnessEvent::RunEnd(_) => HarnessEventType::RunEnd,
             HarnessEvent::Message(_) => HarnessEventType::Message,
+            HarnessEvent::MessageUpdate(_) => HarnessEventType::MessageUpdate,
             HarnessEvent::Tool(_) => HarnessEventType::Tool,
             HarnessEvent::Usage(_) => HarnessEventType::Usage,
         }
@@ -128,6 +147,7 @@ pub enum HarnessEventType {
     RunStart,
     RunEnd,
     Message,
+    MessageUpdate,
     Tool,
     Usage,
 }
@@ -138,6 +158,7 @@ impl HarnessEventType {
             HarnessEventType::RunStart => "run_start",
             HarnessEventType::RunEnd => "run_end",
             HarnessEventType::Message => "message",
+            HarnessEventType::MessageUpdate => "message_update",
             HarnessEventType::Tool => "tool",
             HarnessEventType::Usage => "usage",
         }
@@ -343,14 +364,14 @@ mod tests {
         let starts = Arc::new(AtomicUsize::new(0));
         let ends = Arc::new(AtomicUsize::new(0));
         let s = starts.clone();
-        bus.on(
+        let _ = bus.on(
             HarnessEventType::RunStart,
             Arc::new(move |_| {
                 s.fetch_add(1, Ordering::SeqCst);
             }),
         );
         let e = ends.clone();
-        bus.on(
+        let _ = bus.on(
             HarnessEventType::RunEnd,
             Arc::new(move |_| {
                 e.fetch_add(1, Ordering::SeqCst);
@@ -438,5 +459,81 @@ mod tests {
         assert_eq!(value["runId"], "run-1");
         let parsed: HarnessEvent = serde_json::from_value(value).unwrap();
         assert_eq!(parsed, run_start("main"));
+    }
+
+    fn message_update_event() -> HarnessEvent {
+        HarnessEvent::MessageUpdate(MessageUpdateEvent {
+            lane: "main".to_string(),
+            run_id: "run-1".to_string(),
+            message: crate::agent::types::AgentMessage::user_text("hi", 1),
+            assistant_message_event: crate::agent::llm::types::AssistantMessageEvent::TextDelta {
+                content_index: 0,
+                delta: "hel".to_string(),
+                partial: crate::agent::llm::types::AssistantMessage {
+                    role: "assistant".to_string(),
+                    content: Vec::new(),
+                    api: String::new(),
+                    provider: String::new(),
+                    model: String::new(),
+                    response_model: None,
+                    response_id: None,
+                    usage: crate::agent::llm::types::Usage::default(),
+                    stop_reason: crate::agent::llm::types::StopReason::Pending,
+                    error_message: None,
+                    raw_stop_reason: None,
+                    end_turn: None,
+                    timestamp: 1,
+                },
+            },
+        })
+    }
+
+    #[test]
+    fn message_update_json_shape_matches_ts() {
+        let value = serde_json::to_value(message_update_event()).unwrap();
+        assert_eq!(value["type"], "message_update");
+        assert_eq!(value["runId"], "run-1");
+        assert_eq!(value["message"]["role"], "user");
+        assert_eq!(value["assistantMessageEvent"]["type"], "text_delta");
+        assert_eq!(value["assistantMessageEvent"]["delta"], "hel");
+        assert_eq!(
+            message_update_event().event_type(),
+            HarnessEventType::MessageUpdate
+        );
+        // 注:与 HarnessEvent::Message 相同,internally-tagged 枚举内嵌套的
+        // untagged AgentMessage 反序列化会落入 Custom 回退(TypedMessage 的
+        // role tag 与消息结构体自身的 role 字段冲突,types.rs 既有形状)。
+        // 事件总线消费方使用类型化 Rust 枚举,不依赖 JSON 回读,此处仅校验
+        // 线上形状(与 run_start 用例同口径)。
+    }
+
+    #[test]
+    fn usage_elapsed_ms_is_optional_on_wire() {
+        let with_elapsed = HarnessEvent::Usage(UsageEvent {
+            lane: "main".to_string(),
+            run_id: "run-1".to_string(),
+            usage: crate::agent::llm::types::Usage::default(),
+            entry_id: Some("entry-1".to_string()),
+            elapsed_ms: Some(42),
+        });
+        let value = serde_json::to_value(&with_elapsed).unwrap();
+        assert_eq!(value["type"], "usage");
+        assert_eq!(value["elapsedMs"], 42);
+        let parsed: HarnessEvent = serde_json::from_value(value).unwrap();
+        assert_eq!(parsed, with_elapsed);
+
+        // 旧消费者写入的无 elapsed_ms 事件仍可解析(serde default 兼容)。
+        let legacy = serde_json::json!({
+            "type": "usage",
+            "lane": "main",
+            "runId": "run-1",
+            "usage": {},
+        });
+        let parsed: HarnessEvent = serde_json::from_value(legacy).unwrap();
+        let HarnessEvent::Usage(usage) = parsed else {
+            panic!("expected usage event");
+        };
+        assert_eq!(usage.elapsed_ms, None);
+        assert_eq!(usage.entry_id, None);
     }
 }

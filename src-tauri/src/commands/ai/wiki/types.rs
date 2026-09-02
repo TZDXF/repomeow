@@ -2,15 +2,24 @@ use serde::{Deserialize, Serialize};
 
 use crate::commands::wiki;
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
 pub enum WikiGenerationBackend {
-    #[default]
-    Builtin,
+    Builtin {
+        /// 模型引用(复合值 "providerId/modelId";None = 设置页默认模型)
+        #[serde(default)]
+        model: Option<String>,
+        /// 思考强度(pi 七档 off..max;None = 模型默认:reasoning 中档 / 否则关闭)
+        #[serde(default)]
+        thinking: Option<String>,
+        /// 页面并发数(None/0 = 沿用设置页全局 AI 并发,上限 8)
+        #[serde(default)]
+        concurrency: Option<usize>,
+    },
     Agent {
         #[serde(default)]
         agent_id: Option<String>,
@@ -24,6 +33,16 @@ pub enum WikiGenerationBackend {
         #[serde(default)]
         concurrency: Option<usize>,
     },
+}
+
+impl Default for WikiGenerationBackend {
+    fn default() -> Self {
+        Self::Builtin {
+            model: None,
+            thinking: None,
+            concurrency: None,
+        }
+    }
 }
 
 #[derive(Deserialize)]

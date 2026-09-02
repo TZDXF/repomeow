@@ -1036,15 +1036,20 @@ export default {
       "Choose the backend and model for this project; the config is stored independently in its Wiki folder",
     genConfigError: "Failed to read or save the Wiki generation config: {error}",
     genBackend: "Backend",
-    genBuiltin: "Built-in API (model configured in Settings)",
+    genBuiltin: "Built-in Agent",
     genConfirm: "Start generating",
     agentModel: "Model",
     agentModelDefault: "Default (use the agent's own config)",
+    builtinModelDefault: "Default (settings default model)",
     agentThinking: "Thinking effort",
     agentThinkingDefault: "Default",
     agentConcurrency: "Concurrency",
     agentConcurrencyHint:
       "Pages generated in parallel (1-8, default 2). Higher is faster but uses more agent quota",
+    builtinThinkingDefault: "Model default (medium for reasoning models, off otherwise)",
+    builtinConcurrencyHint:
+      "Pages generated in parallel (1-8). Falls back to the global AI concurrency in Settings when unset",
+    builtinConcurrencyPlaceholder: "Empty = use global",
     agentFetchingModels: "Fetching model list from the agent...",
     agentFetchModelsFailed: "Failed to fetch the model list: {error}",
     agentNoModelOptions:

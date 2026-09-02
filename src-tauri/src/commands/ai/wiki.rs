@@ -8,8 +8,8 @@ use tauri::{AppHandle, State};
 use tokio_util::sync::CancellationToken;
 
 use crate::ai::prompts::{
-    fixed_system_prompt, language_name, AGENT_WIKI_OUTLINE_PROMPT, AGENT_WIKI_PAGE_PROMPT,
-    DEFAULT_WIKI_OUTLINE_PROMPT, DEFAULT_WIKI_PAGE_PROMPT,
+    language_name, AGENT_WIKI_OUTLINE_PROMPT, AGENT_WIKI_PAGE_PROMPT,
+    BUILTIN_AGENT_WIKI_PAGE_PROMPT,
 };
 use crate::ai::sdk;
 use crate::commands::usage::insert_usage_row;
@@ -19,10 +19,12 @@ use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::AiUsageRecord;
 use crate::time_util::now_ts;
 
-use super::run::{record_usage, RegisteredRun};
+use super::run::RegisteredRun;
 
 mod agent_backend;
 mod builtin_backend;
+#[cfg(test)]
+mod builtin_backend_tests;
 mod generation;
 mod types;
 mod update;
@@ -168,15 +170,6 @@ fn wiki_files_section(files: &[wiki::WikiFileContent]) -> String {
     )
 }
 
-fn wiki_page_user_prompt(page: &wiki::WikiOutlinePage, files: &[wiki::WikiFileContent]) -> String {
-    format!(
-        "Wiki page: {}\nCoverage: {}\n\n{}",
-        page.title,
-        page.description,
-        wiki_files_section(files)
-    )
-}
-
 fn agent_wiki_outline_prompt(
     context: &wiki::WikiContext,
     project_name: &str,
@@ -202,6 +195,44 @@ fn outline_retry_prompt(original: &str, validation_error: &str) -> String {
 
 /// agent 页面 prompt(混合模式):相关文件全文直接喂入(与内置后端同预算同行号前缀),
 /// agent 仅在不足时少量补读,不再逐文件工具调用
+fn builtin_agent_wiki_page_prompt(
+    page: &wiki::WikiOutlinePage,
+    files: &[wiki::WikiFileContent],
+    changed_files: &[String],
+    language: &str,
+    draft_path: &str,
+    has_existing_draft: bool,
+) -> String {
+    let changed = if changed_files.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n\nRecently changed files (this page is being refreshed after these changes):\n{}",
+            changed_files
+                .iter()
+                .map(|path| format!("- {path}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    };
+    let draft_state = if has_existing_draft {
+        "The writable draft starts with the current published page. Update it to match the supplied sources and changed files."
+    } else {
+        "The writable draft is empty. Create the complete page in it."
+    };
+    format!(
+        "{}\n\nWritable draft path (the only path you may modify):\n{}\n\n{}\n\nRespond in {}.\n\nWiki page: {}\nCoverage: {}{}\n\n{}",
+        BUILTIN_AGENT_WIKI_PAGE_PROMPT.trim(),
+        draft_path,
+        draft_state,
+        language_name(language),
+        page.title,
+        page.description,
+        changed,
+        wiki_files_section(files),
+    )
+}
+
 fn agent_wiki_page_prompt(
     page: &wiki::WikiOutlinePage,
     files: &[wiki::WikiFileContent],
@@ -296,7 +327,7 @@ fn fail_wiki_generation(
 
 fn wiki_backend_id(backend: &WikiGenerationBackend) -> String {
     match backend {
-        WikiGenerationBackend::Builtin => "builtin".into(),
+        WikiGenerationBackend::Builtin { .. } => "builtin".into(),
         WikiGenerationBackend::Agent { agent_id, .. } => {
             format!("acp:{}", agent_id.as_deref().unwrap_or("custom"))
         }
@@ -311,7 +342,7 @@ fn should_reject_wiki_backend_change(
     !automatic && previous_backend.unwrap_or("builtin") != current_backend
 }
 
-/// 单页/增量 Wiki 生成入口。内置 API 与 ACP 会话生命周期都封装在 Rust。
+/// 单页 Wiki 重生成入口。内置 Harness 与 ACP 会话生命周期都封装在 Rust。
 #[tauri::command]
 pub async fn ai_regenerate_wiki_page(
     app: AppHandle,
@@ -324,22 +355,27 @@ pub async fn ai_regenerate_wiki_page(
     let page_title = request.page.title.clone();
     let project_path = request.project_path.clone();
     let generated = match backend {
-        WikiGenerationBackend::Builtin => {
-            generate_builtin_page_to_disk(
+        WikiGenerationBackend::Builtin { model, thinking, .. } => {
+            let model_name = generate_builtin_page_to_disk(
                 &app,
                 &db,
+                &run.id,
                 &request.project_path,
                 &request.page,
                 &request.language,
+                &request.changed_files,
+                model.as_deref(),
+                thinking.as_deref(),
                 &run.token,
-                |content| {
-                    let _ = on_progress.send(content.to_string());
-                },
-                |_| {},
+                Arc::new(move |content| {
+                    let _ = on_progress.send(content);
+                }),
+                Arc::new(|_| {}),
+                Arc::new(|_| {}),
             )
             .await?;
             RegeneratedWikiPage {
-                model: sdk::load_config(&app).ai_model,
+                model: model_name,
                 generator: "builtin".into(),
             }
         }
@@ -485,142 +521,5 @@ mod tests {
             sanitize_agent_retry_notices("# 已生成\nRetrying (attempt 2/3, waiting 4s)...");
         assert_eq!(partial, "# 已生成\n");
         assert_eq!(retry.unwrap().delay_seconds, 4);
-    }
-}
-
-/// 垂直冒烟:wiki 页面 prompt 经内置 AgentHarness 生成一页(脚本化流,零生产改动),
-/// 证明后续 wiki 生成可切换到该运行时。
-#[cfg(test)]
-mod rust_agent_backend_smoke {
-    use std::sync::Arc;
-
-    use super::agent_wiki_page_prompt;
-    use crate::agent::agent_loop::testing::{scripted_stream_fn, test_assistant};
-    use crate::agent::harness::agent_harness::AgentHarness;
-    use crate::agent::harness::session::memory::InMemorySessionStorage;
-    use crate::agent::harness::session::session::Session;
-    use crate::agent::harness::session::types::{
-        Entry, EntryOrder, EntryQuery, SessionMetadata, SessionTree,
-    };
-    use crate::agent::harness::uuid::uuid_v7;
-    use crate::agent::llm::types::{AssistantContent, StopReason};
-    use crate::commands::wiki::{WikiFileContent, WikiOutlinePage};
-
-    fn wiki_page_script(markdown: &str) -> crate::agent::agent_loop::testing::Script {
-        let final_message = test_assistant(
-            vec![AssistantContent::text(markdown)],
-            StopReason::Stop,
-        );
-        crate::agent::agent_loop::testing::Script {
-            events: vec![],
-            result: final_message,
-        }
-    }
-
-    #[tokio::test]
-    async fn harness_generates_wiki_page_markdown_with_sources() {
-        let page = WikiOutlinePage {
-            id: "01-overview".to_string(),
-            file: "01-overview.md".to_string(),
-            title: "Overview".to_string(),
-            description: "High level architecture".to_string(),
-            section: None,
-            importance: "high".to_string(),
-            relevant_files: vec!["src/main.rs".to_string()],
-            related_pages: Vec::new(),
-        };
-        let files = vec![WikiFileContent {
-            path: "src/main.rs".to_string(),
-            content: "fn main() {}\nfn helper() {}\n".to_string(),
-            truncated: false,
-        }];
-        let markdown = "# Overview\n\nRepoMeow manages local projects.\n\n<!-- sources -->\n- src/main.rs:1-2\n";
-
-        // 脚本流:校验请求侧(prompt 注入页面与带行号源文件),返回页面正文。
-        let prompt = agent_wiki_page_prompt(&page, &files, &[], "zh-CN");
-        let prompt_for_assert = prompt.clone();
-        let (stream_fn, calls) = scripted_stream_fn(vec![wiki_page_script(markdown)]);
-        // scripted_stream_fn 不回放请求内容到脚本,改经 CapturedCall 断言(见下)。
-
-        let session = Session::new(Arc::new(InMemorySessionStorage::new(SessionMetadata {
-            id: uuid_v7(),
-            created_at: 0,
-            parent_session_id: None,
-        })));
-        let (harness, suspended) = AgentHarness::create(crate::agent::harness::agent_harness::AgentHarnessOptions {
-            session,
-            stream_fn,
-            model: crate::agent::agent_loop::testing::test_model(),
-            thinking_level: Some(crate::agent::llm::types::ModelThinkingLevel::Off),
-            active_tool_names: Some(Vec::new()),
-            tools: Vec::new(),
-            tool_context: None,
-            system_prompt: Some("You are a documentation writer.".to_string()),
-            resources: Default::default(),
-            stream_options: Default::default(),
-            retry: None,
-            compaction: None,
-            steering_mode: crate::agent::types::QueueMode::OneAtATime,
-            follow_up_mode: crate::agent::types::QueueMode::OneAtATime,
-            tool_execution: crate::agent::types::ToolExecutionMode::Parallel,
-            telemetry_context: None,
-        })
-        .await
-        .unwrap();
-        assert!(suspended.is_empty());
-
-        let outcome = harness.prompt(prompt).await.unwrap();
-        let crate::agent::harness::agent_harness::RunOutcome::Completed { final_message, .. } =
-            outcome
-        else {
-            panic!("expected completed run");
-        };
-        let assistant = final_message;
-        let text = assistant
-            .content
-            .iter()
-            .map(|content| match content {
-                AssistantContent::Text { text, .. } => text.clone(),
-                _ => String::new(),
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(text.contains("# Overview"), "{text}");
-        assert!(text.contains("<!-- sources -->"), "{text}");
-        assert!(text.contains("src/main.rs:1-2"), "{text}");
-
-        // 请求侧:LLM context 末条 user 消息包含页面标题与 `N: ` 行号前缀源文件。
-        let captured = calls.lock().unwrap();
-        let last_user = captured[0]
-            .context
-            .messages
-            .last()
-            .unwrap()
-            .clone();
-        let user_text = match &last_user {
-            crate::agent::llm::types::Message::User(user) => user.content.to_plain_text(),
-            _ => String::new(),
-        };
-        assert!(user_text.contains("Wiki page: Overview"), "{user_text}");
-        assert!(user_text.contains("1: fn main() {}"), "{user_text}");
-        let _ = prompt_for_assert;
-
-        // 会话侧:prompt 与正文均已持久化(后续可经 JSONL 复盘/恢复)。
-        let session = harness.session().clone();
-        let entries = session
-            .find_entries(EntryQuery {
-                order: Some(EntryOrder::OldestFirst),
-                ..Default::default()
-            })
-            .await
-            .unwrap();
-        let roles: Vec<&str> = entries
-            .iter()
-            .filter_map(|entry| match entry {
-                Entry::Message(message) => Some(message.message.role_name()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(roles, vec!["user", "assistant"]);
     }
 }

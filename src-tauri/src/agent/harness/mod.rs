@@ -45,6 +45,8 @@ pub mod reducer;
 #[allow(dead_code)]
 pub mod runtime;
 #[allow(dead_code)]
+pub mod restricted_env;
+#[allow(dead_code)]
 pub mod result;
 #[allow(dead_code)]
 pub mod session;

@@ -36,7 +36,7 @@ pub(crate) fn wiki_dir_in(root: &Path, project_path: &str) -> PathBuf {
     root.join(folder_name(project_path))
 }
 
-pub(super) fn wiki_dir(app: &AppHandle, project_path: &str) -> AppResult<PathBuf> {
+pub(crate) fn wiki_dir(app: &AppHandle, project_path: &str) -> AppResult<PathBuf> {
     let home = app
         .path()
         .home_dir()

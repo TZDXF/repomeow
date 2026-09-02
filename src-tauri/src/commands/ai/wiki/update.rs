@@ -62,18 +62,22 @@ pub async fn ai_update_wiki(
     if !affected.is_empty() {
         generated_generator = Some(backend_id.clone());
         match &backend {
-            WikiGenerationBackend::Builtin => {
-                generated_model = sdk::load_config(&app).ai_model;
+            WikiGenerationBackend::Builtin { model, thinking, .. } => {
                 for (index, page) in affected.iter().enumerate() {
-                    generate_builtin_page_to_disk(
+                    generated_model = generate_builtin_page_to_disk(
                         &app,
                         &db,
+                        &run.id,
                         &request.project_path,
                         page,
                         &request.language,
+                        &changed.files,
+                        model.as_deref(),
+                        thinking.as_deref(),
                         &run.token,
-                        |_| {},
-                        |_| {},
+                        Arc::new(|_| {}),
+                        Arc::new(|_| {}),
+                        Arc::new(|_| {}),
                     )
                     .await?;
                     let _ = on_event.send(WikiUpdateEvent {

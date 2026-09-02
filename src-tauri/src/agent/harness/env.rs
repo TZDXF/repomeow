@@ -95,9 +95,9 @@ fn normalize_absolute(path: &Path) -> PathBuf {
 
     let mut result = PathBuf::new();
     if prefix.is_some() {
-        for part in &stack {
-            result.push(part);
-        }
+        // 盘符后必须补根分隔符:裸 `C:` push 组件会得到盘符相对路径 `C:Users`
+        // (仅当该盘符当前目录恰为根时才碰巧等价)。
+        result = PathBuf::from(format!("{}\\{}", stack[0], stack[1..].join("\\")));
     } else {
         result.push("/");
         for part in stack {
@@ -1154,8 +1154,18 @@ impl Shell for TokioEnv {
 mod tests {
     use super::*;
     use crate::agent::harness::types::ExecutionEnv;
-    use futures::future::BoxFuture;
+    use std::path::PathBuf;
     use std::sync::atomic::AtomicUsize;
+
+    #[cfg(windows)]
+    #[test]
+    fn normalize_absolute_keeps_drive_root_separator() {
+        assert_eq!(
+            normalize_absolute(Path::new("C:\\Users\\demo\\.\\repo\\..\\src")),
+            PathBuf::from("C:\\Users\\demo\\src")
+        );
+        assert_eq!(normalize_absolute(Path::new("C:")), PathBuf::from("C:\\"));
+    }
 
     #[tokio::test]
     async fn file_system_round_trip() {

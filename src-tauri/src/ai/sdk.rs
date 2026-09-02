@@ -1,13 +1,9 @@
 use std::collections::HashSet;
-use std::pin::Pin;
 
 use async_openai::config::OpenAIConfig;
 use async_openai::error::OpenAIError;
-use async_openai::types::chat::{
-    CompletionUsage, CreateChatCompletionResponse, CreateChatCompletionStreamResponse,
-};
+use async_openai::types::chat::{CompletionUsage, CreateChatCompletionResponse};
 use async_openai::Client;
-use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use tauri::AppHandle;
@@ -16,8 +12,6 @@ use tokio_util::sync::CancellationToken;
 use crate::error::{AppError, AppResult, ErrorCode};
 
 type OpenAiClient = Client<OpenAIConfig>;
-type CompatibleStream =
-    Pin<Box<dyn Stream<Item = Result<CreateChatCompletionStreamResponse, OpenAIError>> + Send>>;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -213,57 +207,6 @@ pub async fn chat(
     })
 }
 
-pub async fn stream_chat<F>(
-    config: &AiConfig,
-    system_prompt: &str,
-    user_prompt: &str,
-    thinking_enabled: bool,
-    cancel: &CancellationToken,
-    mut on_text: F,
-) -> AppResult<ChatOutput>
-where
-    F: FnMut(&str),
-{
-    let sdk = client(config, true)?;
-    let request = request_body(
-        config,
-        Some(system_prompt),
-        user_prompt,
-        thinking_enabled,
-        true,
-        None,
-    );
-    let mut stream: CompatibleStream = sdk
-        .chat()
-        .create_stream_byot(request)
-        .await
-        .map_err(map_sdk_error)?;
-    let mut accumulated = String::new();
-    let mut usage = None;
-    loop {
-        let item = tokio::select! {
-            item = stream.next() => item,
-            _ = cancel.cancelled() => return Err(AppError::coded(ErrorCode::AiRequestFailed, "canceled")),
-        };
-        let Some(item) = item else { break };
-        let chunk = item.map_err(map_sdk_error)?;
-        for choice in chunk.choices {
-            if let Some(content) = choice.delta.content {
-                accumulated.push_str(&content);
-                on_text(&strip_thinking(&accumulated));
-            }
-        }
-        if let Some(value) = chunk.usage {
-            usage = Some(usage_of(value));
-        }
-    }
-    let text = strip_thinking(&accumulated);
-    if text.is_empty() {
-        return Err(AppError::coded(ErrorCode::AiEmptyResponse, ""));
-    }
-    Ok(ChatOutput { text, usage })
-}
-
 pub async fn list_models(config: &AiConfig) -> AppResult<Vec<String>> {
     let sdk = client(config, false)?;
     let response = sdk.models().list().await.map_err(map_sdk_error)?;
@@ -359,11 +302,9 @@ mod tests {
         };
         let rate_limited = provider_error(reqwest::StatusCode::TOO_MANY_REQUESTS);
         assert!(rate_limited.is_code(ErrorCode::AiRateLimited));
-        assert!(rate_limited.is_retryable_ai_error());
 
         let unavailable = provider_error(reqwest::StatusCode::SERVICE_UNAVAILABLE);
         assert!(unavailable.is_code(ErrorCode::AiServiceUnavailable));
-        assert!(unavailable.is_retryable_ai_error());
     }
 
     #[test]

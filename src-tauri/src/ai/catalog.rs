@@ -352,6 +352,24 @@ fn model_exists(config: &AiConfigFile, provider_id: &str, model_id: &str) -> boo
 
 // ── 解析 ─────────────────────────────────────────────────────────────
 
+/// 解析 defaultModel 指向的完整模型与厂商密钥。
+pub fn resolve_default_model(config: &AiConfigFile) -> AppResult<(Model, String)> {
+    let reference = config
+        .default_model
+        .as_ref()
+        .ok_or_else(|| AppError::coded(ErrorCode::AiNotConfigured, ""))?;
+    let model = resolve_model(config, &reference.provider_id, &reference.model_id)?;
+    let api_key = config
+        .providers
+        .get(&reference.provider_id)
+        .map(|provider| provider.api_key.trim().to_string())
+        .unwrap_or_default();
+    if api_key.is_empty() {
+        return Err(AppError::coded(ErrorCode::AiNotConfigured, ""));
+    }
+    Ok((model, api_key))
+}
+
 /// 解析 chat 偏好指向的模型:chat 未设置/失效时回退 defaultModel;
 /// 都无效时返回 None(等价于「AI 尚未配置」)。
 pub fn resolve_chat_prefs(config: &AiConfigFile) -> Option<(ModelRef, ChatPrefs)> {
@@ -489,6 +507,30 @@ mod tests {
         let fallback = builtin_config();
         let unnamed = resolve_model(&fallback, "ollama", "missing-model");
         assert!(unnamed.is_err());
+    }
+
+    #[test]
+    fn default_model_resolves_full_model_and_api_key() {
+        let mut config = builtin_config();
+        config.default_model = Some(ModelRef {
+            provider_id: "deepseek".to_string(),
+            model_id: "deepseek-v4-pro".to_string(),
+        });
+        let reference = config.default_model.as_ref().unwrap();
+        let expected_base_url = config.providers[&reference.provider_id].base_url.clone();
+        config
+            .providers
+            .get_mut(&reference.provider_id)
+            .unwrap()
+            .api_key = " sk-test ".to_string();
+        let (model, api_key) = resolve_default_model(&config).unwrap();
+        assert_eq!(model.id, reference.model_id);
+        assert_eq!(model.base_url, expected_base_url);
+        assert_eq!(api_key, "sk-test");
+        // 未配置 defaultModel 时明确报 AiNotConfigured
+        let mut unset = builtin_config();
+        unset.default_model = None;
+        assert!(resolve_default_model(&unset).is_err());
     }
 
     #[test]

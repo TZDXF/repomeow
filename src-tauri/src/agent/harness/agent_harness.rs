@@ -591,15 +591,20 @@ impl AgentHarness {
         &self.session
     }
 
-    /// 事件总线(hooks.on / events.on 在蓝本同样抛 NotImplemented;事件经
-    /// run_start/run_end 预留,见 events.rs)。
+    /// 事件总线(事件经 emit 分发到当前 run 的监听方;类型见 events.rs 的
+    /// `HarnessEventType`,hooks 仍按蓝本未接线)。
     pub fn events(&self) -> &HarnessEventBus {
         &self.events
     }
 
-    /// 注册 run_start 事件监听(WIP:事件不会发出,但注册本身可用)。
-    pub fn on_event(&self, listener: HarnessEventListener) -> Box<dyn FnOnce() + Send> {
-        self.events.on(HarnessEventType::RunStart, listener)
+    /// 按事件类型注册监听(对齐 TS `events.on(type, listener)`),返回退订
+    /// 闭包;只投递注册之后发出的事件,不回放历史。
+    pub fn on_event(
+        &self,
+        event_type: HarnessEventType,
+        listener: HarnessEventListener,
+    ) -> Box<dyn FnOnce() + Send> {
+        self.events.on(event_type, listener)
     }
 
     pub fn emit_event(&self, event: &HarnessEvent) {

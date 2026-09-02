@@ -1,6 +1,6 @@
 //! AI 模型用量统计与日志(ai_usage_log 表)。
 //!
-//! * 内置 API、ACP agent 与定时报告均在 Rust 侧复用 `insert_usage_row`
+//! * 内置调用、Agent Harness、ACP agent 与定时报告均在 Rust 侧复用 `insert_usage_row`
 //! * token 列可空:provider 未返回 usage 时行仍在,但不计入 SUM 汇总
 
 use rusqlite::{params, Connection, Row};

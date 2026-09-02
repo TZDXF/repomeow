@@ -60,9 +60,17 @@ export interface WikiRetryStatus {
   reason: "rateLimited" | "temporary";
 }
 
-/** 生成后端选择:内置 API 或本地 agent(经 ACP 会话) */
+/** 生成后端选择:内置 Agent 或本地 agent(经 ACP 会话) */
 export type WikiGenBackend =
-  | { kind: "builtin" }
+  | {
+      kind: "builtin";
+      /** 模型引用("providerId/modelId";空 = 设置页默认模型) */
+      model?: string;
+      /** 思考强度(chat 七档 off..max;空 = 模型默认:推理模型中档,其余关闭) */
+      thinking?: string;
+      /** 页面并发数(1-8;空/0 = 设置页全局 AI 并发) */
+      concurrency?: number;
+    }
   | {
       kind: "agent";
       agentId?: string;
@@ -82,7 +90,7 @@ export interface WikiGenerationConfig {
 
 export interface WikiGenOptions {
   language: SupportedLocale;
-  /** 并发生成的页数(内置后端用;agent 后端用项目生成配置里的 concurrency,忽略此值) */
+  /** 并发生成的页数(内置后端未在项目配置里设置并发时的回退;agent 后端忽略此值) */
   concurrency: number;
 }
 

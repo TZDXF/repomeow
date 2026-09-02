@@ -56,31 +56,45 @@ pub async fn ai_generate_wiki(
         },
     );
     let backend_id;
-    let meta_model;
+    let mut meta_model = String::new();
     let mut agent_params = None;
     let mut agent_slot = None;
     let mut agent_cancel_watch = None;
 
     let pages_result = match &backend {
-        WikiGenerationBackend::Builtin => {
+        WikiGenerationBackend::Builtin { model, thinking, .. } => {
             backend_id = "builtin".to_string();
-            meta_model = sdk::load_config(&app).ai_model;
             send_wiki_event(
                 &on_event,
                 WikiGenerationEvent::Phase {
                     phase: "outlining".into(),
                 },
             );
-            generate_builtin_outline_pages(
+            let result = generate_builtin_outline_pages(
                 &app,
                 &db,
                 &context,
+                &request.project_path,
                 &request.project_name,
                 &request.language,
+                model.as_deref(),
+                thinking.as_deref(),
                 &run.token,
                 {
                     let channel = on_event.clone();
-                    move |notice| {
+                    Arc::new(move |text| {
+                        send_wiki_event(
+                            &channel,
+                            WikiGenerationEvent::ActivityBatch {
+                                activity_type: "tool".into(),
+                                items: vec![text],
+                            },
+                        );
+                    })
+                },
+                {
+                    let channel = on_event.clone();
+                    Arc::new(move |notice| {
                         send_wiki_event(
                             &channel,
                             WikiGenerationEvent::Retry {
@@ -91,10 +105,17 @@ pub async fn ai_generate_wiki(
                                 reason: notice.reason,
                             },
                         );
-                    }
+                    })
                 },
             )
-            .await
+            .await;
+            match result {
+                Ok((pages, model)) => {
+                    meta_model = model;
+                    Ok(pages)
+                }
+                Err(error) => Err(error),
+            }
         }
         WikiGenerationBackend::Agent { .. } => {
             let params = AgentSessionParams::from_backend(&backend, &request.project_path)
@@ -231,14 +252,21 @@ pub async fn ai_generate_wiki(
 
     let page_errors = Arc::new(Mutex::new(Vec::<AppError>::new()));
     match &backend {
-        WikiGenerationBackend::Builtin => {
+        WikiGenerationBackend::Builtin { model, thinking, concurrency } => {
+            let run_id = run.id.clone();
+            // 页面并发:项目配置优先,未配置沿用设置页全局 AI 并发
+            let page_concurrency = concurrency
+                .filter(|value| *value > 0)
+                .unwrap_or(request.concurrency)
+                .clamp(1, 8);
             stream::iter(pages.clone())
-                .for_each_concurrent(request.concurrency.clamp(1, 8), |page| {
+                .for_each_concurrent(page_concurrency, |page| {
                     let app = app.clone();
                     let db = &db;
                     let project_path = request.project_path.clone();
                     let language = request.language.clone();
                     let token = run.token.clone();
+                    let run_id = run_id.clone();
                     let channel = on_event.clone();
                     let page_errors = page_errors.clone();
                     async move {
@@ -263,23 +291,37 @@ pub async fn ai_generate_wiki(
                                 items: page.relevant_files.clone(),
                             },
                         );
+                        let activity_channel = channel.clone();
                         let result = generate_builtin_page_to_disk(
                             &app,
                             db,
+                            &run_id,
                             &project_path,
                             &page,
                             &language,
+                            &[],
+                            model.as_deref(),
+                            thinking.as_deref(),
                             &token,
-                            move |content| {
+                            Arc::new(move |content| {
                                 send_wiki_event(
                                     &progress_channel,
                                     WikiGenerationEvent::Progress {
                                         page_id: progress_page_id.clone(),
-                                        content: content.to_string(),
+                                        content,
                                     },
                                 );
-                            },
-                            move |notice| {
+                            }),
+                            Arc::new(move |text| {
+                                send_wiki_event(
+                                    &activity_channel,
+                                    WikiGenerationEvent::ActivityBatch {
+                                        activity_type: "tool".into(),
+                                        items: vec![text],
+                                    },
+                                );
+                            }),
+                            Arc::new(move |notice| {
                                 send_wiki_event(
                                     &retry_channel,
                                     WikiGenerationEvent::Retry {
@@ -290,14 +332,14 @@ pub async fn ai_generate_wiki(
                                         reason: notice.reason,
                                     },
                                 );
-                            },
+                            }),
                         )
                         .await;
                         let (status, error) = if token.is_cancelled() {
                             ("cancelled", None)
                         } else {
                             match result {
-                                Ok(()) => ("done", None),
+                                Ok(_) => ("done", None),
                                 Err(error) => {
                                     let message = error.to_string();
                                     page_errors.lock().unwrap().push(error);

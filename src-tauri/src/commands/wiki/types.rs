@@ -76,7 +76,11 @@ impl Default for WikiGenerationConfig {
     fn default() -> Self {
         Self {
             version: CONFIG_VERSION,
-            backend: crate::commands::ai::WikiGenerationBackend::Builtin,
+            backend: crate::commands::ai::WikiGenerationBackend::Builtin {
+                model: None,
+                thinking: None,
+                concurrency: None,
+            },
         }
     }
 }
