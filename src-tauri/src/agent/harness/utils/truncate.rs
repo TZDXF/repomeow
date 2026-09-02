@@ -311,7 +311,10 @@ mod tests {
 
     #[test]
     fn head_truncates_by_lines() {
-        let content = (0..10).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n");
+        let content = (0..10)
+            .map(|i| format!("line{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         let result = truncate_head(
             &content,
             TruncationOptions {
@@ -386,7 +389,10 @@ mod tests {
             );
             let expected = tail_by_bytes(input, max_bytes);
             assert_eq!(result.content, expected, "mismatch at maxBytes={max_bytes}");
-            assert!(result.output_bytes <= max_bytes, "exceeded at maxBytes={max_bytes}");
+            assert!(
+                result.output_bytes <= max_bytes,
+                "exceeded at maxBytes={max_bytes}"
+            );
         }
     }
 

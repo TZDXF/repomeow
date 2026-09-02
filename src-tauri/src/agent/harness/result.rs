@@ -19,7 +19,10 @@ pub trait TaggedErrorValue: std::error::Error + Serialize {
     fn to_error_json(&self) -> serde_json::Value {
         let mut value = serde_json::to_value(self).unwrap_or_else(|_| serde_json::Value::Null);
         if let serde_json::Value::Object(map) = &mut value {
-            map.insert("_tag".to_string(), serde_json::Value::String(self.tag().to_string()));
+            map.insert(
+                "_tag".to_string(),
+                serde_json::Value::String(self.tag().to_string()),
+            );
         }
         value
     }

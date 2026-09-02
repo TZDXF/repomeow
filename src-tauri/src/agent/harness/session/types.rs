@@ -245,13 +245,15 @@ impl Entry {
                 details: e.details.clone(),
                 usage: e.usage.clone(),
             }),
-            Entry::BranchSummary(e) => ProvisionedEntry::BranchSummary(ProvisionedBranchSummaryEntry {
-                id: e.id.clone(),
-                from_id: e.from_id.clone(),
-                summary: e.summary.clone(),
-                details: e.details.clone(),
-                usage: e.usage.clone(),
-            }),
+            Entry::BranchSummary(e) => {
+                ProvisionedEntry::BranchSummary(ProvisionedBranchSummaryEntry {
+                    id: e.id.clone(),
+                    from_id: e.from_id.clone(),
+                    summary: e.summary.clone(),
+                    details: e.details.clone(),
+                    usage: e.usage.clone(),
+                })
+            }
             Entry::Custom(e) => ProvisionedEntry::Custom(ProvisionedCustomEntry {
                 id: e.id.clone(),
                 custom_type: e.custom_type.clone(),
@@ -920,10 +922,16 @@ pub trait SessionStorage: Send + Sync {
 
     // Lanes
     fn get_lanes<'a>(&'a self) -> BoxFuture<'a, Result<Vec<LanePointer>, SessionError>>;
-    fn create_lane<'a>(&'a self, lane: String, at: Option<String>)
-        -> BoxFuture<'a, Result<(), SessionError>>;
-    fn move_lane<'a>(&'a self, lane: String, to: Option<String>)
-        -> BoxFuture<'a, Result<(), SessionError>>;
+    fn create_lane<'a>(
+        &'a self,
+        lane: String,
+        at: Option<String>,
+    ) -> BoxFuture<'a, Result<(), SessionError>>;
+    fn move_lane<'a>(
+        &'a self,
+        lane: String,
+        to: Option<String>,
+    ) -> BoxFuture<'a, Result<(), SessionError>>;
 
     // Entries and Records
     fn append_entry<'a>(
@@ -931,13 +939,17 @@ pub trait SessionStorage: Send + Sync {
         entry: ProvisionedEntry,
         lane: String,
     ) -> BoxFuture<'a, Result<Entry, SessionError>>;
-    fn append_record<'a>(&'a self, record: LaneRecord)
-        -> BoxFuture<'a, Result<LaneRecord, SessionError>>;
+    fn append_record<'a>(
+        &'a self,
+        record: LaneRecord,
+    ) -> BoxFuture<'a, Result<LaneRecord, SessionError>>;
 
     // Reads
     fn get_entry<'a>(&'a self, id: String) -> BoxFuture<'a, Option<Entry>>;
-    fn find_entries<'a>(&'a self, query: EntryQuery)
-        -> BoxFuture<'a, Result<Vec<Entry>, SessionError>>;
+    fn find_entries<'a>(
+        &'a self,
+        query: EntryQuery,
+    ) -> BoxFuture<'a, Result<Vec<Entry>, SessionError>>;
     /// start 在存储层必填(视图层的 lane 叶缺省属于 SessionTree 糖)。
     fn find_entries_on_branch<'a>(
         &'a self,
@@ -953,8 +965,10 @@ pub trait SessionStorage: Send + Sync {
         lane: String,
         limit: Option<usize>,
     ) -> BoxFuture<'a, Result<Vec<OperationStartedRecord>, SessionError>>;
-    fn get_log<'a>(&'a self, options: LogOptions)
-        -> BoxFuture<'a, Result<Vec<LogItem>, SessionError>>;
+    fn get_log<'a>(
+        &'a self,
+        options: LogOptions,
+    ) -> BoxFuture<'a, Result<Vec<LogItem>, SessionError>>;
 
     // Global facts
     fn get_name<'a>(&'a self) -> BoxFuture<'a, Option<String>>;
@@ -985,10 +999,14 @@ pub trait SessionTree: Send + Sync {
     ) -> BoxFuture<'a, Result<(), SessionError>>;
 
     /// 会话级、全分支、序列序。
-    fn find_entries<'a>(&'a self, query: EntryQuery)
-        -> BoxFuture<'a, Result<Vec<Entry>, SessionError>>;
-    fn find_entry<'a>(&'a self, query: EntryQuery)
-        -> BoxFuture<'a, Result<Option<Entry>, SessionError>>;
+    fn find_entries<'a>(
+        &'a self,
+        query: EntryQuery,
+    ) -> BoxFuture<'a, Result<Vec<Entry>, SessionError>>;
+    fn find_entry<'a>(
+        &'a self,
+        query: EntryQuery,
+    ) -> BoxFuture<'a, Result<Option<Entry>, SessionError>>;
 
     /// 分支域:从 start 向根的路径。
     fn find_entries_on_branch<'a>(
@@ -1001,8 +1019,10 @@ pub trait SessionTree: Send + Sync {
     ) -> BoxFuture<'a, Result<Option<Entry>, SessionError>>;
 
     // Writes;返回条目 id(写入延迟时为 provisioned id)。
-    fn append_message<'a>(&'a self, message: AgentMessage)
-        -> BoxFuture<'a, Result<String, SessionError>>;
+    fn append_message<'a>(
+        &'a self,
+        message: AgentMessage,
+    ) -> BoxFuture<'a, Result<String, SessionError>>;
     fn append_custom_entry<'a>(
         &'a self,
         custom_type: String,

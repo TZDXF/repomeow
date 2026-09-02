@@ -43,7 +43,10 @@ pub struct PromptTemplatesLoadResult {
 
 /// 从一个或多个路径加载模板:目录取直接 `.md` 子项(非递归),文件显式加载;
 /// 缺失路径与非 markdown 文件跳过(对齐 TS `loadPromptTemplates`)。
-pub async fn load_prompt_templates(env: &dyn ExecutionEnv, paths: &[&str]) -> PromptTemplatesLoadResult {
+pub async fn load_prompt_templates(
+    env: &dyn ExecutionEnv,
+    paths: &[&str],
+) -> PromptTemplatesLoadResult {
     let mut prompt_templates: Vec<PromptTemplate> = Vec::new();
     let mut diagnostics: Vec<PromptTemplateDiagnostic> = Vec::new();
     for path in paths {
@@ -82,10 +85,7 @@ pub async fn load_prompt_templates(env: &dyn ExecutionEnv, paths: &[&str]) -> Pr
     }
 }
 
-async fn load_templates_from_dir(
-    env: &dyn ExecutionEnv,
-    dir: &str,
-) -> PromptTemplatesLoadResult {
+async fn load_templates_from_dir(env: &dyn ExecutionEnv, dir: &str) -> PromptTemplatesLoadResult {
     let mut prompt_templates: Vec<PromptTemplate> = Vec::new();
     let mut diagnostics: Vec<PromptTemplateDiagnostic> = Vec::new();
     let entries = env.list_dir(dir.to_string(), None).await;
@@ -240,7 +240,9 @@ async fn resolve_kind(
 }
 
 /// frontmatter 解析(与 skills.rs 同一约定;独立实现保持模块对齐)。
-pub fn parse_frontmatter(content: &str) -> Result<(serde_json::Map<String, Value>, String), SimpleTemplateError> {
+pub fn parse_frontmatter(
+    content: &str,
+) -> Result<(serde_json::Map<String, Value>, String), SimpleTemplateError> {
     let normalized = content.replace("\r\n", "\n").replace('\r', "\n");
     if !normalized.starts_with("---") {
         return ok((serde_json::Map::new(), normalized));
@@ -254,8 +256,8 @@ pub fn parse_frontmatter(content: &str) -> Result<(serde_json::Map<String, Value
         ""
     };
     let body = normalized[end_index + 4..].trim().to_string();
-    let parsed: serde_json::Value = serde_yaml_ng::from_str(yaml_string)
-        .map_err(|error| SimpleTemplateError {
+    let parsed: serde_json::Value =
+        serde_yaml_ng::from_str(yaml_string).map_err(|error| SimpleTemplateError {
             message: error.to_string(),
         })?;
     let object = match parsed {
@@ -322,7 +324,10 @@ pub fn substitute_args(content: &str, args: &[String]) -> String {
         .replace_all(&result, |captures: &regex::Captures| {
             let start: usize = captures[1].parse().unwrap_or(0);
             let start = start.saturating_sub(1);
-            match captures.get(2).and_then(|m| m.as_str().parse::<usize>().ok()) {
+            match captures
+                .get(2)
+                .and_then(|m| m.as_str().parse::<usize>().ok())
+            {
                 Some(length) => args
                     .iter()
                     .skip(start)
@@ -330,7 +335,12 @@ pub fn substitute_args(content: &str, args: &[String]) -> String {
                     .cloned()
                     .collect::<Vec<_>>()
                     .join(" "),
-                None => args.iter().skip(start).cloned().collect::<Vec<_>>().join(" "),
+                None => args
+                    .iter()
+                    .skip(start)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(" "),
             }
         })
         .to_string();
@@ -359,10 +369,7 @@ mod tests {
             vec!["single quoted", "double"]
         );
         assert_eq!(parse_command_args("   "), Vec::<String>::new());
-        assert_eq!(
-            parse_command_args("trim\t tabs"),
-            vec!["trim", "tabs"]
-        );
+        assert_eq!(parse_command_args("trim\t tabs"), vec!["trim", "tabs"]);
     }
 
     #[test]
@@ -379,10 +386,17 @@ mod tests {
 
     #[test]
     fn parses_template_frontmatter() {
-        let content = "---\ndescription: Runs the build\nargument-hint: \"[target]\"\n---\nBuild it.";
+        let content =
+            "---\ndescription: Runs the build\nargument-hint: \"[target]\"\n---\nBuild it.";
         let (frontmatter, body) = parse_frontmatter(content).unwrap();
-        assert_eq!(frontmatter.get("description").and_then(Value::as_str), Some("Runs the build"));
-        assert_eq!(frontmatter.get("argument-hint").and_then(Value::as_str), Some("[target]"));
+        assert_eq!(
+            frontmatter.get("description").and_then(Value::as_str),
+            Some("Runs the build")
+        );
+        assert_eq!(
+            frontmatter.get("argument-hint").and_then(Value::as_str),
+            Some("[target]")
+        );
         assert_eq!(body, "Build it.");
     }
 

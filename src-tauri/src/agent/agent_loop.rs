@@ -31,7 +31,7 @@ use crate::agent::llm::event_stream::{event_stream, EventStream, EventStreamWrit
 use crate::agent::llm::validate::validate_tool_arguments;
 use crate::agent::llm::{
     AssistantContent, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream,
-    Context as LlmContext, ModelThinkingLevel, StopReason, ThinkingLevel, TextOrImageContent,
+    Context as LlmContext, ModelThinkingLevel, StopReason, TextOrImageContent, ThinkingLevel,
     ToolCall, ToolResultMessage,
 };
 use crate::agent::types::{
@@ -277,10 +277,7 @@ async fn run_loop(
             .await;
             new_messages.push(assistant_message_of(message.clone()));
 
-            if matches!(
-                message.stop_reason,
-                StopReason::Error | StopReason::Aborted
-            ) {
+            if matches!(message.stop_reason, StopReason::Error | StopReason::Aborted) {
                 emit_event(
                     emit,
                     AgentEvent::TurnEnd {
@@ -454,7 +451,11 @@ async fn stream_assistant_response(
     let llm_context = LlmContext {
         system_prompt: Some(context.system_prompt.clone()),
         messages: llm_messages,
-        tools: context.tools.iter().map(|tool| tool.as_llm_tool()).collect(),
+        tools: context
+            .tools
+            .iter()
+            .map(|tool| tool.as_llm_tool())
+            .collect(),
     };
 
     // 动态解析 API key(短时 OAuth token 场景);空串视为未解析(对齐 TS `||` 语义)。
@@ -475,9 +476,7 @@ async fn stream_assistant_response(
         match &event {
             AssistantMessageEvent::Start { partial } => {
                 let partial = partial.clone();
-                context
-                    .messages
-                    .push(assistant_message_of(partial.clone()));
+                context.messages.push(assistant_message_of(partial.clone()));
                 added_partial = true;
                 emit_event(
                     emit,
@@ -530,9 +529,11 @@ async fn finalize_stream_message(
 ) -> AssistantMessage {
     let final_message = response.result().await;
     if added_partial {
-        *context.messages.last_mut().expect(
-            "partial was added by start event; final message must replace it",
-        ) = assistant_message_of(final_message.clone());
+        *context
+            .messages
+            .last_mut()
+            .expect("partial was added by start event; final message must replace it") =
+            assistant_message_of(final_message.clone());
     } else {
         context
             .messages
@@ -582,8 +583,14 @@ struct PreparedToolCall {
 }
 
 enum Preparation {
-    Prepared { tool: AgentTool, args: Value },
-    Immediate { result: AgentToolResult, is_error: bool },
+    Prepared {
+        tool: AgentTool,
+        args: Value,
+    },
+    Immediate {
+        result: AgentToolResult,
+        is_error: bool,
+    },
 }
 
 /// stopReason "length":全部 toolCall 按截断错误失败。
@@ -642,11 +649,25 @@ async fn execute_tool_calls(
             == Some(ToolExecutionMode::Sequential)
     });
     if config.tool_execution == ToolExecutionMode::Sequential || has_sequential_tool_call {
-        execute_tool_calls_sequential(current_context, assistant_message, &tool_calls, config, signal, emit)
-            .await
+        execute_tool_calls_sequential(
+            current_context,
+            assistant_message,
+            &tool_calls,
+            config,
+            signal,
+            emit,
+        )
+        .await
     } else {
-        execute_tool_calls_parallel(current_context, assistant_message, &tool_calls, config, signal, emit)
-            .await
+        execute_tool_calls_parallel(
+            current_context,
+            assistant_message,
+            &tool_calls,
+            config,
+            signal,
+            emit,
+        )
+        .await
     }
 }
 
@@ -672,8 +693,14 @@ async fn execute_tool_calls_sequential(
         )
         .await;
 
-        let preparation =
-            prepare_tool_call(current_context, assistant_message, tool_call, config, signal).await;
+        let preparation = prepare_tool_call(
+            current_context,
+            assistant_message,
+            tool_call,
+            config,
+            signal,
+        )
+        .await;
         let finalized = match preparation {
             Preparation::Immediate { result, is_error } => FinalizedToolCallOutcome {
                 tool_call: tool_call.clone(),
@@ -743,8 +770,14 @@ async fn execute_tool_calls_parallel(
         )
         .await;
 
-        let preparation =
-            prepare_tool_call(current_context, assistant_message, tool_call, config, signal).await;
+        let preparation = prepare_tool_call(
+            current_context,
+            assistant_message,
+            tool_call,
+            config,
+            signal,
+        )
+        .await;
         match preparation {
             Preparation::Immediate { result, is_error } => {
                 let finalized = FinalizedToolCallOutcome {
@@ -792,15 +825,14 @@ async fn execute_tool_calls_parallel(
     }
 
     // 全部完成后按 assistant 源顺序发出 toolResult 消息事件。
-    let ordered_finalized_calls: Vec<FinalizedToolCallOutcome> = join_all(entries.into_iter().map(
-        |entry| async move {
+    let ordered_finalized_calls: Vec<FinalizedToolCallOutcome> =
+        join_all(entries.into_iter().map(|entry| async move {
             match entry {
                 FinalizedEntry::Done(outcome) => outcome,
                 FinalizedEntry::Pending(future) => future.await,
             }
-        },
-    ))
-    .await;
+        }))
+        .await;
 
     let mut messages: Vec<ToolResultMessage> = Vec::new();
     for finalized in &ordered_finalized_calls {
@@ -934,12 +966,15 @@ async fn execute_prepared_tool_call(
             if !accepting.load(std::sync::atomic::Ordering::SeqCst) {
                 return;
             }
-            updates.lock().unwrap().push(AgentEvent::ToolExecutionUpdate {
-                tool_call_id: tool_call.id.clone(),
-                tool_name: tool_call.name.clone(),
-                args: Value::Object(tool_call.arguments.clone()),
-                partial_result,
-            });
+            updates
+                .lock()
+                .unwrap()
+                .push(AgentEvent::ToolExecutionUpdate {
+                    tool_call_id: tool_call.id.clone(),
+                    tool_name: tool_call.name.clone(),
+                    args: Value::Object(tool_call.arguments.clone()),
+                    partial_result,
+                });
         })
     };
 
@@ -1133,7 +1168,10 @@ pub(crate) mod testing {
     use crate::agent::llm::SimpleStreamOptions;
 
     /// 助手消息构造器(测试用最小字段)。
-    pub fn test_assistant(content: Vec<AssistantContent>, stop_reason: StopReason) -> AssistantMessage {
+    pub fn test_assistant(
+        content: Vec<AssistantContent>,
+        stop_reason: StopReason,
+    ) -> AssistantMessage {
         AssistantMessage {
             role: "assistant".to_string(),
             content,
@@ -1192,16 +1230,15 @@ pub(crate) mod testing {
         pub context: LlmContext,
         pub api_key: Option<String>,
         pub reasoning: Option<ThinkingLevel>,
-    }    /// 一段脚本化 LLM 响应:事件序列 + result() 终值。
+    }
+    /// 一段脚本化 LLM 响应:事件序列 + result() 终值。
     pub struct Script {
         pub events: Vec<AssistantMessageEvent>,
         pub result: AssistantMessage,
     }
 
     /// 脚本化 mock StreamFn:每次调用弹一段脚本,并捕获 (context, options) 供断言。
-    pub fn scripted_stream_fn(
-        scripts: Vec<Script>,
-    ) -> (StreamFn, Arc<Mutex<Vec<CapturedCall>>>) {
+    pub fn scripted_stream_fn(scripts: Vec<Script>) -> (StreamFn, Arc<Mutex<Vec<CapturedCall>>>) {
         let queue = Arc::new(Mutex::new(VecDeque::from(scripts)));
         let calls = Arc::new(Mutex::new(Vec::new()));
         let sink = calls.clone();
@@ -1251,7 +1288,10 @@ pub(crate) mod testing {
                 message: final_message.clone(),
             },
         ];
-        Script { events, result: final_message }
+        Script {
+            events,
+            result: final_message,
+        }
     }
 
     /// 工具调用回复脚本:Start → ToolcallEnd* → Done(toolUse)。
@@ -1294,7 +1334,10 @@ pub(crate) mod testing {
             reason: stop_reason,
             message: final_message.clone(),
         });
-        Script { events, result: final_message }
+        Script {
+            events,
+            result: final_message,
+        }
     }
 
     /// 错误/中止回复脚本:Start → Error(终值为带 errorMessage 的 assistant 消息)。
@@ -1310,7 +1353,10 @@ pub(crate) mod testing {
                 error: error.clone(),
             },
         ];
-        Script { events, result: error }
+        Script {
+            events,
+            result: error,
+        }
     }
 
     /// 工具行为脚本。
@@ -1333,7 +1379,10 @@ pub(crate) mod testing {
     }
 
     /// 构造记录型 mock 工具,返回 (工具定义, 调用记录)。
-    pub fn make_tool(name: &str, behavior: ToolBehavior) -> (AgentTool, Arc<Mutex<Vec<ToolCallRecord>>>) {
+    pub fn make_tool(
+        name: &str,
+        behavior: ToolBehavior,
+    ) -> (AgentTool, Arc<Mutex<Vec<ToolCallRecord>>>) {
         let calls = Arc::new(Mutex::new(Vec::new()));
         let tool = AgentTool {
             name: name.to_string(),
@@ -1424,7 +1473,9 @@ pub(crate) mod testing {
             .iter()
             .filter_map(|event| match event {
                 AgentEvent::ToolExecutionEnd {
-                    tool_call_id, is_error, ..
+                    tool_call_id,
+                    is_error,
+                    ..
                 } => Some((tool_call_id.clone(), *is_error)),
                 _ => None,
             })
@@ -1564,7 +1615,10 @@ mod tests {
         };
         assert_eq!(tool_result.tool_call_id, "call_1");
         assert_eq!(tool_result.tool_name, "echo");
-        assert_eq!(tool_result.content, vec![TextOrImageContent::text("echo:x")]);
+        assert_eq!(
+            tool_result.content,
+            vec![TextOrImageContent::text("echo:x")]
+        );
         assert!(!tool_result.is_error);
 
         assert_eq!(
@@ -1709,7 +1763,10 @@ mod tests {
             other => panic!("expected toolResult message, got {other:?}"),
         };
         assert!(tool_result.is_error);
-        assert_eq!(tool_result.content, vec![TextOrImageContent::text("denied")]);
+        assert_eq!(
+            tool_result.content,
+            vec![TextOrImageContent::text("denied")]
+        );
         let ends = tool_exec_ends(&events.lock().unwrap());
         assert_eq!(ends, vec![("call_1".to_string(), true)]);
     }
@@ -2033,9 +2090,7 @@ mod tests {
             let polls = polls.clone();
             config.get_steering_messages = Some(Arc::new(move || {
                 let polls = polls.clone();
-                Box::pin(async move {
-                    polls.lock().unwrap().pop_front().unwrap_or_default()
-                })
+                Box::pin(async move { polls.lock().unwrap().pop_front().unwrap_or_default() })
             }));
             config
         };
@@ -2099,7 +2154,8 @@ mod tests {
 
     #[tokio::test]
     async fn follow_up_messages_trigger_outer_loop() {
-        let (stream_fn, calls) = scripted_stream_fn(vec![text_script("first"), text_script("second")]);
+        let (stream_fn, calls) =
+            scripted_stream_fn(vec![text_script("first"), text_script("second")]);
         // follow-up 仅在 agent 本应停止时 poll:第一次 poll(第一回合后)即返回消息。
         let follow_ups = Arc::new(Mutex::new(VecDeque::from(vec![
             vec![user_message("follow-up", 2_000)],
@@ -2110,9 +2166,7 @@ mod tests {
             let follow_ups = follow_ups.clone();
             config.get_follow_up_messages = Some(Arc::new(move || {
                 let follow_ups = follow_ups.clone();
-                Box::pin(async move {
-                    follow_ups.lock().unwrap().pop_front().unwrap_or_default()
-                })
+                Box::pin(async move { follow_ups.lock().unwrap().pop_front().unwrap_or_default() })
             }));
             config
         };
@@ -2176,7 +2230,8 @@ mod tests {
 
     #[tokio::test]
     async fn aborted_stream_ends_run_immediately() {
-        let (stream_fn, calls) = scripted_stream_fn(vec![error_script(StopReason::Aborted, "canceled")]);
+        let (stream_fn, calls) =
+            scripted_stream_fn(vec![error_script(StopReason::Aborted, "canceled")]);
         let (emit, events) = collecting_sink();
         let context = AgentContext {
             system_prompt: String::new(),
@@ -2266,7 +2321,10 @@ mod tests {
             tool_call_script(vec![slow_call, fast_call], ""),
             text_script("ok"),
         ]);
-        let (slow, _slow_log) = make_tool("slow", ToolBehavior::DelayedOk(50, "slow-result".to_string()));
+        let (slow, _slow_log) = make_tool(
+            "slow",
+            ToolBehavior::DelayedOk(50, "slow-result".to_string()),
+        );
         let (fast, _fast_log) = make_tool("fast", ToolBehavior::Ok("fast-result".to_string()));
         let (emit, events) = collecting_sink();
         let context = AgentContext {
@@ -2326,7 +2384,10 @@ mod tests {
             tool_call_script(vec![first, second], ""),
             text_script("ok"),
         ]);
-        let (slow, _slow_log) = make_tool("slow", ToolBehavior::DelayedOk(20, "slow-result".to_string()));
+        let (slow, _slow_log) = make_tool(
+            "slow",
+            ToolBehavior::DelayedOk(20, "slow-result".to_string()),
+        );
         let (fast, _fast_log) = make_tool("fast", ToolBehavior::Ok("fast-result".to_string()));
         let mut config = test_loop_config(test_model());
         config.tool_execution = ToolExecutionMode::Sequential;
@@ -2484,9 +2545,7 @@ mod tests {
         let (stream_fn, calls) = scripted_stream_fn(vec![text_script("one")]);
         let mut config = test_loop_config(test_model());
         config.stream.api_key = Some("base".to_string());
-        config.get_api_key = Some(Arc::new(|_provider| {
-            Box::pin(async { None::<String> })
-        }));
+        config.get_api_key = Some(Arc::new(|_provider| Box::pin(async { None::<String> })));
         let (emit, _events) = collecting_sink();
         let context = AgentContext {
             system_prompt: String::new(),
@@ -2593,10 +2652,8 @@ mod tests {
 
     #[tokio::test]
     async fn should_stop_after_turn_stops_before_next_llm_call() {
-        let (stream_fn, calls) = scripted_stream_fn(vec![
-            text_script("one"),
-            text_script("never reached"),
-        ]);
+        let (stream_fn, calls) =
+            scripted_stream_fn(vec![text_script("one"), text_script("never reached")]);
         let mut config = test_loop_config(test_model());
         config.should_stop_after_turn = Some(Arc::new(|_context| Box::pin(async { true })));
         let (emit, events) = collecting_sink();

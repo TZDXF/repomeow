@@ -66,12 +66,16 @@ mod tests {
     #[test]
     fn empty_when_no_visible_skills() {
         assert_eq!(format_skills_for_system_prompt(&[]), "");
-        assert_eq!(format_skills_for_system_prompt(&[skill("x", "d", true)]), "");
+        assert_eq!(
+            format_skills_for_system_prompt(&[skill("x", "d", true)]),
+            ""
+        );
     }
 
     #[test]
     fn escapes_and_lists_skills() {
-        let output = format_skills_for_system_prompt(&[skill("com<mit>", "uses \"quotes\"", false)]);
+        let output =
+            format_skills_for_system_prompt(&[skill("com<mit>", "uses \"quotes\"", false)]);
         assert!(output.contains("<name>com&lt;mit&gt;</name>"));
         assert!(output.contains("<description>uses &quot;quotes&quot;</description>"));
         assert!(output.starts_with("The following skills provide specialized instructions"));

@@ -13,7 +13,7 @@ use tokio_util::sync::CancellationToken;
 
 pub use crate::agent::llm::{
     AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, Context, Message, Model,
-    ModelThinkingLevel, Tool, ToolCall, ToolResultMessage, TextOrImageContent, Usage, UserContent,
+    ModelThinkingLevel, TextOrImageContent, Tool, ToolCall, ToolResultMessage, Usage, UserContent,
     UserMessage,
 };
 
@@ -29,7 +29,15 @@ pub type ThinkingLevelWithOff = ModelThinkingLevel;
 /// - 绝不 panic / 返回 rejected future(请求/模型/运行时失败都必须编码进流);
 /// - 返回 `AssistantMessageEventStream`;
 /// - 失败经协议事件与 stopReason "error"/"aborted" 的最终 AssistantMessage 表达。
-pub type StreamFn = Arc<dyn Fn(Model, Context, Option<SimpleStreamOptions>) -> BoxFuture<'static, AssistantMessageEventStream> + Send + Sync>;
+pub type StreamFn = Arc<
+    dyn Fn(
+            Model,
+            Context,
+            Option<SimpleStreamOptions>,
+        ) -> BoxFuture<'static, AssistantMessageEventStream>
+        + Send
+        + Sync,
+>;
 
 use crate::agent::llm::SimpleStreamOptions;
 
@@ -179,10 +187,9 @@ impl AgentMessage {
             AgentMessage::Message(TypedMessage::User(_)) => "user",
             AgentMessage::Message(TypedMessage::Assistant(_)) => "assistant",
             AgentMessage::Message(TypedMessage::ToolResult(_)) => "toolResult",
-            AgentMessage::Custom(map) => map
-                .get("role")
-                .and_then(Value::as_str)
-                .unwrap_or("custom"),
+            AgentMessage::Custom(map) => {
+                map.get("role").and_then(Value::as_str).unwrap_or("custom")
+            }
         }
     }
 
@@ -286,8 +293,11 @@ pub type AgentEventSink = Arc<dyn Fn(AgentEvent) -> BoxFuture<'static, ()> + Sen
 pub type ConvertToLlmFn =
     Arc<dyn Fn(Vec<AgentMessage>) -> BoxFuture<'static, Vec<Message>> + Send + Sync>;
 
-pub type TransformContextFn =
-    Arc<dyn Fn(Vec<AgentMessage>, Option<AbortSignal>) -> BoxFuture<'static, Vec<AgentMessage>> + Send + Sync>;
+pub type TransformContextFn = Arc<
+    dyn Fn(Vec<AgentMessage>, Option<AbortSignal>) -> BoxFuture<'static, Vec<AgentMessage>>
+        + Send
+        + Sync,
+>;
 
 pub type GetApiKeyFn = Arc<dyn Fn(String) -> BoxFuture<'static, Option<String>> + Send + Sync>;
 
@@ -298,17 +308,22 @@ pub type PrepareNextTurnFn = Arc<
     dyn Fn(PrepareNextTurnContext) -> BoxFuture<'static, Option<AgentLoopTurnUpdate>> + Send + Sync,
 >;
 
-pub type GetQueuedMessagesFn =
-    Arc<dyn Fn() -> BoxFuture<'static, Vec<AgentMessage>> + Send + Sync>;
+pub type GetQueuedMessagesFn = Arc<dyn Fn() -> BoxFuture<'static, Vec<AgentMessage>> + Send + Sync>;
 
 pub type BeforeToolCallHookFn = Arc<
-    dyn Fn(BeforeToolCallContext, Option<AbortSignal>) -> BoxFuture<'static, Option<BeforeToolCallResult>>
+    dyn Fn(
+            BeforeToolCallContext,
+            Option<AbortSignal>,
+        ) -> BoxFuture<'static, Option<BeforeToolCallResult>>
         + Send
         + Sync,
 >;
 
 pub type AfterToolCallHookFn = Arc<
-    dyn Fn(AfterToolCallContext, Option<AbortSignal>) -> BoxFuture<'static, Option<AfterToolCallResult>>
+    dyn Fn(
+            AfterToolCallContext,
+            Option<AbortSignal>,
+        ) -> BoxFuture<'static, Option<AfterToolCallResult>>
         + Send
         + Sync,
 >;

@@ -40,10 +40,7 @@ impl Xoshiro256 {
     }
 
     fn next_u64(&mut self) -> u64 {
-        let result = self.state[1]
-            .wrapping_mul(5)
-            .rotate_left(7)
-            .wrapping_mul(9);
+        let result = self.state[1].wrapping_mul(5).rotate_left(7).wrapping_mul(9);
         let t = self.state[1] << 17;
         self.state[2] ^= self.state[0];
         self.state[3] ^= self.state[1];
@@ -107,7 +104,16 @@ mod tests {
             assert_eq!(id.len(), 36);
             let parts: Vec<&str> = id.split('-').collect();
             assert_eq!(parts.len(), 5);
-            assert_eq!((parts[0].len(), parts[1].len(), parts[2].len(), parts[3].len(), parts[4].len()), (8, 4, 4, 4, 12));
+            assert_eq!(
+                (
+                    parts[0].len(),
+                    parts[1].len(),
+                    parts[2].len(),
+                    parts[3].len(),
+                    parts[4].len()
+                ),
+                (8, 4, 4, 4, 12)
+            );
             assert!(parts[2].starts_with('7'), "version nibble must be 7: {id}");
             let variant = u8::from_str_radix(&parts[3][0..1], 16).unwrap();
             assert!((0x8..=0xB).contains(&variant), "variant must be 10xx: {id}");

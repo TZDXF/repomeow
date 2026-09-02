@@ -62,7 +62,9 @@ pub async fn ai_update_wiki(
     if !affected.is_empty() {
         generated_generator = Some(backend_id.clone());
         match &backend {
-            WikiGenerationBackend::Builtin { model, thinking, .. } => {
+            WikiGenerationBackend::Builtin {
+                model, thinking, ..
+            } => {
                 for (index, page) in affected.iter().enumerate() {
                     generated_model = generate_builtin_page_to_disk(
                         &app,

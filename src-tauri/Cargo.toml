@@ -34,6 +34,8 @@ ignore = "0.4"
 # walk 缓存的失效监听:项目内 package.json / yaml 变更时即时让目录遍历缓存失效
 notify = "8"
 rusqlite = { version = "0.31", features = ["bundled"] }
+# codex/grokbuild 的 cc-switch settings_config 内嵌 TOML 文本
+toml = "0.8"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 chrono = { version = "0.4", features = ["serde"] }

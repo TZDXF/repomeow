@@ -2,9 +2,12 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::agent::llm::types::{Model, StopReason, TextOrImageContent, Usage, UserContent, UserMessage};
+use crate::agent::llm::types::{
+    Model, StopReason, TextOrImageContent, Usage, UserContent, UserMessage,
+};
 use crate::agent::types::{AgentMessage, StreamFn};
 
+use crate::agent::agent_loop::now_ms;
 use crate::agent::harness::compaction::compaction::{
     complete_simple_with_retries, estimate_tokens, SUMMARIZATION_SYSTEM_PROMPT,
 };
@@ -17,10 +20,7 @@ use crate::agent::harness::session::session::Session;
 use crate::agent::harness::session::types::{
     BranchBounds, BranchQuery, Entry, SessionError, SessionErrorCode, SessionTree,
 };
-use crate::agent::harness::types::{
-    err, ok, BranchSummaryError, BranchSummaryErrorCode, Result,
-};
-use crate::agent::agent_loop::now_ms;
+use crate::agent::harness::types::{err, ok, BranchSummaryError, BranchSummaryErrorCode, Result};
 
 /// 生成的分支摘要数据(对齐 TS `BranchSummaryResult`)。
 #[derive(Clone, Debug)]
@@ -119,15 +119,12 @@ pub async fn collect_entries_for_branch_summary(
         if Some(&current_id) == common_ancestor_id.as_ref() {
             break;
         }
-        let entry = session
-            .get_entry(current_id.clone())
-            .await
-            .ok_or_else(|| {
-                SessionError::new(
-                    SessionErrorCode::InvalidEntry,
-                    format!("Entry {current_id} not found"),
-                )
-            })?;
+        let entry = session.get_entry(current_id.clone()).await.ok_or_else(|| {
+            SessionError::new(
+                SessionErrorCode::InvalidEntry,
+                format!("Entry {current_id} not found"),
+            )
+        })?;
         current = entry.parent_id().map(str::to_string);
         entries.push(entry);
     }
@@ -175,7 +172,8 @@ pub fn prepare_branch_entries(entries: &[Entry], token_budget: i64) -> BranchPre
     for entry in entries {
         if let Entry::BranchSummary(branch) = entry {
             if let Some(details) = &branch.details {
-                if let Ok(parsed) = serde_json::from_value::<BranchSummaryDetails>(details.clone()) {
+                if let Ok(parsed) = serde_json::from_value::<BranchSummaryDetails>(details.clone())
+                {
                     for file in parsed.read_files {
                         file_ops.read.insert(file);
                     }
@@ -214,9 +212,7 @@ pub fn prepare_branch_entries(entries: &[Entry], token_budget: i64) -> BranchPre
     }
 }
 
-fn content_text_of_assistant(
-    message: &crate::agent::llm::types::AssistantMessage,
-) -> String {
+fn content_text_of_assistant(message: &crate::agent::llm::types::AssistantMessage) -> String {
     message
         .content
         .iter()
@@ -266,9 +262,8 @@ pub async fn generate_branch_summary(
     } else {
         BRANCH_SUMMARY_PROMPT.to_string()
     };
-    let prompt_text = format!(
-        "<conversation>\n{conversation_text}\n</conversation>\n\n{instructions}"
-    );
+    let prompt_text =
+        format!("<conversation>\n{conversation_text}\n</conversation>\n\n{instructions}");
 
     let summarization_messages = vec![crate::agent::llm::types::Message::User(UserMessage {
         role: "user".to_string(),
@@ -305,7 +300,9 @@ pub async fn generate_branch_summary(
             BranchSummaryErrorCode::SummarizationFailed,
             format!(
                 "Branch summary failed: {}",
-                response.error_message.unwrap_or_else(|| "Unknown error".to_string())
+                response
+                    .error_message
+                    .unwrap_or_else(|| "Unknown error".to_string())
             ),
         ));
     }
@@ -331,8 +328,8 @@ pub async fn generate_branch_summary(
 mod tests {
     use super::*;
     use crate::agent::agent_loop::testing::{test_assistant, test_model};
-    use crate::agent::llm::types::{AssistantContent, StopReason};
     use crate::agent::harness::session::types::MessageEntry;
+    use crate::agent::llm::types::{AssistantContent, StopReason};
     use std::sync::{Arc, Mutex};
 
     fn message_entry(seq: i64, parent: Option<&str>, message: AgentMessage) -> Entry {
@@ -353,10 +350,8 @@ mod tests {
             let sink = sink.clone();
             Box::pin(async move {
                 let text = sink.lock().unwrap().first().cloned().unwrap_or_default();
-                let final_message = test_assistant(
-                    vec![AssistantContent::text(text)],
-                    StopReason::Stop,
-                );
+                let final_message =
+                    test_assistant(vec![AssistantContent::text(text)], StopReason::Stop);
                 let (stream, writer) = crate::agent::llm::event_stream::event_stream();
                 writer.push(crate::agent::llm::types::AssistantMessageEvent::Start {
                     partial: test_assistant(vec![], StopReason::Pending),
@@ -426,7 +421,9 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(result.summary.starts_with("The user explored a different conversation branch"));
+        assert!(result
+            .summary
+            .starts_with("The user explored a different conversation branch"));
         assert!(result.summary.contains("branch findings"));
         assert!(result.usage.is_some());
     }

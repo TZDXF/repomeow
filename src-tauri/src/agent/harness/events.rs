@@ -184,17 +184,26 @@ impl WatchShared {
             return;
         }
         let has_listener = {
-            let listener = self.listener.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let listener = self
+                .listener
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             listener.is_some()
         };
         if has_listener {
-            let listener = self.listener.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let listener = self
+                .listener
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             if let Some(listener) = listener.as_ref() {
                 listener(event);
             }
             return;
         }
-        let mut buffered = self.buffered.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut buffered = self
+            .buffered
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         buffered.push(event.clone());
     }
 }
@@ -285,15 +294,28 @@ impl HarnessEventBus {
     /// 注册某类型未来事件的被动监听,返回退订闭包(对齐 TS `on`)。
     ///
     /// 闭包只应调用一次;不调用则监听保持注册(与 TS 一致)。
-    pub fn on(&self, event_type: HarnessEventType, listener: HarnessEventListener) -> Box<dyn FnOnce() + Send> {
+    pub fn on(
+        &self,
+        event_type: HarnessEventType,
+        listener: HarnessEventListener,
+    ) -> Box<dyn FnOnce() + Send> {
         let id = self.id_counter.fetch_add(1, Ordering::SeqCst);
         {
-            let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-            state.listeners.entry(event_type).or_default().insert(id, listener);
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            state
+                .listeners
+                .entry(event_type)
+                .or_default()
+                .insert(id, listener);
         }
         let state = self.state.clone();
         Box::new(move || {
-            let mut state = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut state = state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             if let Some(listeners) = state.listeners.get_mut(&event_type) {
                 listeners.remove(&id);
                 if listeners.is_empty() {
@@ -309,7 +331,10 @@ impl HarnessEventBus {
         let targets: Vec<HarnessEventListener>;
         let watchers: Vec<Arc<WatchShared>>;
         {
-            let state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             targets = state
                 .listeners
                 .get(&event_type)
@@ -328,7 +353,10 @@ impl HarnessEventBus {
     }
 
     /// 创建带快照与缓冲的 watch 句柄(对齐 TS `watch`)。
-    pub fn watch<TSnapshot>(&self, capture_snapshot: impl FnOnce() -> TSnapshot) -> WatchHandle<TSnapshot> {
+    pub fn watch<TSnapshot>(
+        &self,
+        capture_snapshot: impl FnOnce() -> TSnapshot,
+    ) -> WatchHandle<TSnapshot> {
         let id = self.id_counter.fetch_add(1, Ordering::SeqCst);
         let shared = Arc::new(WatchShared {
             listener: Mutex::new(None),
@@ -338,7 +366,10 @@ impl HarnessEventBus {
             watcher_id: id,
         });
         {
-            let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             state.watchers.insert(id, shared.clone());
         }
         let snapshot = capture_snapshot();
@@ -419,14 +450,22 @@ mod tests {
         handle.start(Arc::new(move |event| {
             sink.lock().unwrap().push(event.event_type());
         }));
-        assert_eq!(seen.lock().unwrap().len(), 2, "buffered events flush on start");
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            2,
+            "buffered events flush on start"
+        );
         bus.emit(&run_start("main"));
         assert_eq!(seen.lock().unwrap().len(), 3);
         assert_eq!(handle.snapshot, "snapshot");
 
         handle.unsubscribe();
         bus.emit(&run_start("main"));
-        assert_eq!(seen.lock().unwrap().len(), 3, "no delivery after unsubscribe");
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            3,
+            "no delivery after unsubscribe"
+        );
     }
 
     #[test]

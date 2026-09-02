@@ -18,10 +18,8 @@ use super::types::{
 };
 use crate::agent::agent_loop::now_ms;
 use crate::agent::harness::session::session::Session;
-use crate::agent::harness::session::types::{
-    ForkOptions, SessionError, SessionErrorCode,
-};
-use crate::agent::harness::types::{CreateDirOptions, FileSystem, FileKind};
+use crate::agent::harness::session::types::{ForkOptions, SessionError, SessionErrorCode};
+use crate::agent::harness::types::{CreateDirOptions, FileKind, FileSystem};
 use crate::agent::harness::uuid::uuid_v7;
 
 /// 会话 id 模式:非空,仅字母数字/-/_/.,首尾为字母数字。
@@ -55,7 +53,10 @@ pub fn jsonl_session_directory_name(cwd: &str) -> String {
 
 async fn jsonl_sessions_root(options: &JsonlSessionRepoOptions) -> Result<String, SessionError> {
     file_result(
-        options.fs.absolute_path(options.sessions_root.clone(), None).await,
+        options
+            .fs
+            .absolute_path(options.sessions_root.clone(), None)
+            .await,
         &format!("Failed to resolve sessions root {}", options.sessions_root),
     )
 }
@@ -85,7 +86,8 @@ async fn jsonl_session_directories(
             options.fs.absolute_path(cwd.to_string(), None).await,
             &format!("Failed to resolve session cwd {cwd}"),
         )?;
-        let directory = jsonl_session_directory(options.fs.as_ref(), &sessions_root, &resolved_cwd).await?;
+        let directory =
+            jsonl_session_directory(options.fs.as_ref(), &sessions_root, &resolved_cwd).await?;
         let exists = file_result(
             options.fs.exists(directory.clone(), None).await,
             &format!("Failed to check sessions directory {directory}"),
@@ -146,11 +148,7 @@ pub async fn list_jsonl_session_metadata(
             let Ok(header) = parse_header(first_line) else {
                 continue;
             };
-            metadata.push(metadata_from_header(
-                &header,
-                &file.path,
-                file.mtime_ms,
-            ));
+            metadata.push(metadata_from_header(&header, &file.path, file.mtime_ms));
         }
     }
     metadata.sort_by(|left, right| {
@@ -413,7 +411,10 @@ impl JsonlSessionRepo {
     async fn session_directory(&self, cwd: &str) -> Result<String, SessionError> {
         file_result(
             self.fs
-                .join_path(vec![self.root().await?, jsonl_session_directory_name(cwd)], None)
+                .join_path(
+                    vec![self.root().await?, jsonl_session_directory_name(cwd)],
+                    None,
+                )
                 .await,
             &format!("Failed to resolve sessions directory for {cwd}"),
         )
@@ -424,7 +425,10 @@ impl JsonlSessionRepo {
             self.fs
                 .absolute_path(self.sessions_root_input.clone(), None)
                 .await,
-            &format!("Failed to resolve sessions root {}", self.sessions_root_input),
+            &format!(
+                "Failed to resolve sessions root {}",
+                self.sessions_root_input
+            ),
         )
     }
 }

@@ -40,7 +40,9 @@ pub struct SessionContextBuildOptions {
     pub entry_projectors: HashMap<String, CustomEntryContextMessageProjector>,
 }
 
-fn derive_session_context_state(path_entries: &[Entry]) -> (String, Option<SessionModelRef>, Option<Vec<String>>) {
+fn derive_session_context_state(
+    path_entries: &[Entry],
+) -> (String, Option<SessionModelRef>, Option<Vec<String>>) {
     let mut thinking_level = "off".to_string();
     let mut model: Option<SessionModelRef> = None;
     let mut active_tool_names: Option<Vec<String>> = None;
@@ -165,12 +167,16 @@ pub fn build_session_context(
     path_entries: &[Entry],
     options: &SessionContextBuildOptions,
 ) -> SessionContext {
-    let (thinking_level, model, active_tool_names) =
-        derive_session_context_state(path_entries);
+    let (thinking_level, model, active_tool_names) = derive_session_context_state(path_entries);
     let context_entries = build_context_entries(path_entries, options);
     let mut messages = Vec::new();
     for (index, entry) in context_entries.iter().enumerate() {
-        messages.extend(session_entry_to_context_messages(entry, index, &context_entries, options));
+        messages.extend(session_entry_to_context_messages(
+            entry,
+            index,
+            &context_entries,
+            options,
+        ));
     }
     SessionContext {
         messages,

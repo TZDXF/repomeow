@@ -10,7 +10,15 @@ use crate::agent::harness::types::{ExecutionEnv, FileErrorCode};
 
 struct QueueRegistry {
     /// env 指针 → (弱引用, path → 队列锁)。
-    entries: Mutex<HashMap<usize, (Weak<dyn ExecutionEnv>, HashMap<String, Arc<tokio::sync::Mutex<()>>>)>>,
+    entries: Mutex<
+        HashMap<
+            usize,
+            (
+                Weak<dyn ExecutionEnv>,
+                HashMap<String, Arc<tokio::sync::Mutex<()>>>,
+            ),
+        >,
+    >,
 }
 
 static REGISTRY: std::sync::OnceLock<QueueRegistry> = std::sync::OnceLock::new();
@@ -27,7 +35,10 @@ fn env_key(env: &Arc<dyn ExecutionEnv>) -> usize {
 
 /// 计算变更队列键:目标存在的规范化路径,或缺失/不支持时的绝对路径
 /// (对齐 TS `getMutationQueueKey`)。
-async fn mutation_queue_key(env: &Arc<dyn ExecutionEnv>, path: &str) -> Result<String, crate::agent::harness::types::FileError> {
+async fn mutation_queue_key(
+    env: &Arc<dyn ExecutionEnv>,
+    path: &str,
+) -> Result<String, crate::agent::harness::types::FileError> {
     let absolute_path: String = env.absolute_path(path.to_string(), None).await?;
     match env.canonical_path(absolute_path.clone(), None).await {
         Ok(canonical) => Ok(canonical),
@@ -181,7 +192,13 @@ mod tests {
             &'a self,
             _command: String,
             _options: crate::agent::harness::types::ShellExecOptions,
-        ) -> BoxFuture<'a, Result<crate::agent::harness::types::ExecOutcome, crate::agent::harness::types::ExecutionError>> {
+        ) -> BoxFuture<
+            'a,
+            Result<
+                crate::agent::harness::types::ExecOutcome,
+                crate::agent::harness::types::ExecutionError,
+            >,
+        > {
             Box::pin(async move {
                 Ok(crate::agent::harness::types::ExecOutcome {
                     stdout: String::new(),
@@ -210,14 +227,16 @@ mod tests {
             let active = active.clone();
             let overlaps = overlaps.clone();
             handles.push(tokio::spawn(async move {
-                with_file_mutation_queue(&env, "/shared.txt", || Box::pin(async move {
-                    if active.fetch_add(1, Ordering::SeqCst) > 0 {
-                        overlaps.fetch_add(1, Ordering::SeqCst);
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-                    order.lock().unwrap().push(id);
-                    active.fetch_sub(1, Ordering::SeqCst);
-                }))
+                with_file_mutation_queue(&env, "/shared.txt", || {
+                    Box::pin(async move {
+                        if active.fetch_add(1, Ordering::SeqCst) > 0 {
+                            overlaps.fetch_add(1, Ordering::SeqCst);
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                        order.lock().unwrap().push(id);
+                        active.fetch_sub(1, Ordering::SeqCst);
+                    })
+                })
                 .await
                 .unwrap();
             }));
@@ -225,7 +244,11 @@ mod tests {
         for handle in handles {
             handle.await.unwrap();
         }
-        assert_eq!(overlaps.load(Ordering::SeqCst), 0, "operations must not overlap");
+        assert_eq!(
+            overlaps.load(Ordering::SeqCst),
+            0,
+            "operations must not overlap"
+        );
         assert_eq!(order.lock().unwrap().len(), 6);
     }
 
@@ -259,6 +282,9 @@ mod tests {
         for handle in handles {
             handle.await.unwrap();
         }
-        assert!(overlaps.load(Ordering::SeqCst) > 0, "different paths should overlap");
+        assert!(
+            overlaps.load(Ordering::SeqCst) > 0,
+            "different paths should overlap"
+        );
     }
 }

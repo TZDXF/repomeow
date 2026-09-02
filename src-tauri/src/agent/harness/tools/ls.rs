@@ -229,15 +229,23 @@ mod tests {
         std::fs::create_dir_all(dir.root.join("Alpha")).unwrap();
         std::fs::write(dir.root.join("Alpha").join("inner.txt"), "").unwrap();
         let tool = create_ls_tool(dir.env());
-        let result = (tool.execute)("call-1".to_string(), json!({}), None, None).await.unwrap();
+        let result = (tool.execute)("call-1".to_string(), json!({}), None, None)
+            .await
+            .unwrap();
         let text = text_of(&result);
         assert!(text.contains(".dotfile"), "{text}");
         assert!(text.contains("Alpha/"), "{text}");
         assert!(text.contains("zeta.txt"), "{text}");
         let lines: Vec<&str> = text.lines().collect();
         let alpha_pos = lines.iter().position(|l| l.starts_with("Alpha")).unwrap();
-        let dot_pos = lines.iter().position(|l| l.starts_with(".dotfile")).unwrap();
-        let zeta_pos = lines.iter().position(|l| l.starts_with("zeta.txt")).unwrap();
+        let dot_pos = lines
+            .iter()
+            .position(|l| l.starts_with(".dotfile"))
+            .unwrap();
+        let zeta_pos = lines
+            .iter()
+            .position(|l| l.starts_with("zeta.txt"))
+            .unwrap();
         // 大小写不敏感排序:.dotfile < Alpha < zeta。
         assert!(dot_pos < alpha_pos && alpha_pos < zeta_pos, "{text}");
     }
@@ -247,14 +255,9 @@ mod tests {
         let dir = TempDir::new();
         std::fs::create_dir_all(dir.root.join("empty")).unwrap();
         let tool = create_ls_tool(dir.env());
-        let result = (tool.execute)(
-            "call-1".to_string(),
-            json!({ "path": "empty" }),
-            None,
-            None,
-        )
-        .await
-        .unwrap();
+        let result = (tool.execute)("call-1".to_string(), json!({ "path": "empty" }), None, None)
+            .await
+            .unwrap();
         assert_eq!(text_of(&result), "(empty directory)");
     }
 
@@ -265,14 +268,9 @@ mod tests {
             std::fs::write(dir.root.join(format!("{name}.txt")), "").unwrap();
         }
         let tool = create_ls_tool(dir.env());
-        let result = (tool.execute)(
-            "call-1".to_string(),
-            json!({ "limit": 2 }),
-            None,
-            None,
-        )
-        .await
-        .unwrap();
+        let result = (tool.execute)("call-1".to_string(), json!({ "limit": 2 }), None, None)
+            .await
+            .unwrap();
         assert_eq!(result.details["entryLimitReached"], 2);
         assert!(text_of(&result).contains("2 entries limit reached"));
     }

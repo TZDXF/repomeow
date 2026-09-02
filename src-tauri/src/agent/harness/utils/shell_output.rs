@@ -11,11 +11,11 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
 use super::truncate::{
-    truncate_tail, TruncatedBy, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, TruncationResult,
+    truncate_tail, TruncatedBy, TruncationResult, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES,
 };
 use crate::agent::harness::types::{
-    err, ok, CreateTempFileOptions, ExecutionError, ExecutionErrorCode, ExecutionEnv,
-    FileContent, Result, ShellExecOptions,
+    err, ok, CreateTempFileOptions, ExecutionEnv, ExecutionError, ExecutionErrorCode, FileContent,
+    Result, ShellExecOptions,
 };
 
 /// 单个输出块的捕获进度(对齐 TS `ShellCaptureProgress`)。
@@ -129,17 +129,24 @@ struct CaptureState {
 
 impl CaptureState {
     fn create_progress(&self) -> ShellCaptureProgress {
-        let tail_truncation = truncate_tail(&self.tail_output, super::truncate::TruncationOptions::default());
+        let tail_truncation = truncate_tail(
+            &self.tail_output,
+            super::truncate::TruncationOptions::default(),
+        );
         let total_lines = self.completed_lines + usize::from(self.has_open_line);
         let truncated = total_lines > DEFAULT_MAX_LINES || self.total_bytes > DEFAULT_MAX_BYTES;
         let mut truncation = tail_truncation;
         truncation.truncated = truncated;
         truncation.truncated_by = if truncated {
-            Some(truncation.truncated_by.unwrap_or(if self.total_bytes > DEFAULT_MAX_BYTES {
-                TruncatedBy::Bytes
-            } else {
-                TruncatedBy::Lines
-            }))
+            Some(
+                truncation
+                    .truncated_by
+                    .unwrap_or(if self.total_bytes > DEFAULT_MAX_BYTES {
+                        TruncatedBy::Bytes
+                    } else {
+                        TruncatedBy::Lines
+                    }),
+            )
         } else {
             None
         };
@@ -234,11 +241,7 @@ pub async fn execute_shell_with_capture(
     let accepting_output = Arc::new(AtomicBool::new(true));
     let (writer_tx, writer_rx) = mpsc::unbounded_channel::<WriterCommand>();
 
-    let writer_task = tokio::spawn(run_writer(
-        env.clone(),
-        state.clone(),
-        writer_rx,
-    ));
+    let writer_task = tokio::spawn(run_writer(env.clone(), state.clone(), writer_rx));
 
     let on_chunk: Arc<dyn Fn(String) + Send + Sync> = {
         let state = state.clone();
@@ -252,7 +255,9 @@ pub async fn execute_shell_with_capture(
             let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
                 let text = sanitize_binary_output(&chunk).replace('\r', "");
                 let text_bytes = text.len();
-                let mut st = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                let mut st = state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
                 if st.capture_error.is_some() {
                     return;
                 }
@@ -284,14 +289,17 @@ pub async fn execute_shell_with_capture(
                 } else if st.full_output_requested {
                     let _ = writer_tx.send(WriterCommand::Append { text: text.clone() });
                 }
-                st.tail_output = trim_to_last_utf8_bytes(&st.tail_output.clone(), DEFAULT_MAX_BYTES * 2);
+                st.tail_output =
+                    trim_to_last_utf8_bytes(&st.tail_output.clone(), DEFAULT_MAX_BYTES * 2);
                 if let Some(on_chunk_cb) = &on_chunk_cb {
                     let progress = st.create_progress();
                     on_chunk_cb(&text, progress);
                 }
             }));
             if result.is_err() {
-                let mut st = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                let mut st = state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
                 st.capture_error = Some(ExecutionError::new(
                     ExecutionErrorCode::Unknown,
                     "output capture callback panicked",
@@ -315,9 +323,12 @@ pub async fn execute_shell_with_capture(
 
     // 终止后的兜底:若发生截断但未建立全量文件,现在补建(TS ensureFullOutputFile)。
     {
-        let st = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let st = state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let progress = st.create_progress();
-        if progress.truncation.truncated && !st.full_output_requested && st.capture_error.is_none() {
+        if progress.truncation.truncated && !st.full_output_requested && st.capture_error.is_none()
+        {
             let initial = st.tail_output.clone();
             let _ = writer_tx.send(WriterCommand::EnsureFullOutput {
                 initial_content: initial,
@@ -333,7 +344,9 @@ pub async fn execute_shell_with_capture(
         return err(error);
     }
     {
-        let st = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let st = state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(error) = &st.capture_error {
             return err(error.clone());
         }
@@ -352,7 +365,9 @@ pub async fn execute_shell_with_capture(
                     .map(|signal| signal.is_cancelled())
                     .unwrap_or(false);
             if aborted {
-                return ok(ShellCaptureResult::from_progress(progress, None, true, None));
+                return ok(ShellCaptureResult::from_progress(
+                    progress, None, true, None,
+                ));
             }
             if options.return_execution_errors {
                 return ok(ShellCaptureResult::from_progress(
@@ -372,7 +387,11 @@ pub async fn execute_shell_with_capture(
                 .unwrap_or(false);
             ok(ShellCaptureResult::from_progress(
                 progress,
-                if cancelled { None } else { Some(outcome.exit_code) },
+                if cancelled {
+                    None
+                } else {
+                    Some(outcome.exit_code)
+                },
                 cancelled,
                 None,
             ))
@@ -392,7 +411,10 @@ mod tests {
     #[test]
     fn sanitize_filters_control_and_interlinear_chars() {
         assert_eq!(sanitize_binary_output("a\u{0}b\u{1}c"), "abc");
-        assert_eq!(sanitize_binary_output("keep\ttab\nnl\rcr"), "keep\ttab\nnl\rcr");
+        assert_eq!(
+            sanitize_binary_output("keep\ttab\nnl\rcr"),
+            "keep\ttab\nnl\rcr"
+        );
         assert_eq!(sanitize_binary_output("a\u{FFF9}b\u{FFFB}c"), "abc");
         assert_eq!(sanitize_binary_output("é中\u{7F}"), "é中\u{7F}");
     }
@@ -403,7 +425,10 @@ mod tests {
         // 🙂 = 4 字节;é = 2 字节。
         assert_eq!(trim_to_last_utf8_bytes(text, 100), text);
         let trimmed = trim_to_last_utf8_bytes(text, 5);
-        assert!(trimmed.chars().eq("bc".chars()) || trimmed.ends_with("bc"), "got {trimmed}");
+        assert!(
+            trimmed.chars().eq("bc".chars()) || trimmed.ends_with("bc"),
+            "got {trimmed}"
+        );
         assert!(trimmed.len() <= 5);
     }
 
@@ -415,39 +440,89 @@ mod tests {
             "/"
         }
 
-        fn absolute_path<'a>(&'a self, path: String, _abort: Option<crate::agent::types::AbortSignal>) -> futures::future::BoxFuture<'a, Result<String, crate::agent::harness::types::FileError>> {
+        fn absolute_path<'a>(
+            &'a self,
+            path: String,
+            _abort: Option<crate::agent::types::AbortSignal>,
+        ) -> futures::future::BoxFuture<'a, Result<String, crate::agent::harness::types::FileError>>
+        {
             Box::pin(async move { Ok(path) })
         }
 
-        fn join_path<'a>(&'a self, parts: Vec<String>, _abort: Option<crate::agent::types::AbortSignal>) -> futures::future::BoxFuture<'a, Result<String, crate::agent::harness::types::FileError>> {
+        fn join_path<'a>(
+            &'a self,
+            parts: Vec<String>,
+            _abort: Option<crate::agent::types::AbortSignal>,
+        ) -> futures::future::BoxFuture<'a, Result<String, crate::agent::harness::types::FileError>>
+        {
             Box::pin(async move { Ok(parts.join("/")) })
         }
 
-        fn read_text_file<'a>(&'a self, path: String, _abort: Option<crate::agent::types::AbortSignal>) -> futures::future::BoxFuture<'a, Result<String, crate::agent::harness::types::FileError>> {
+        fn read_text_file<'a>(
+            &'a self,
+            path: String,
+            _abort: Option<crate::agent::types::AbortSignal>,
+        ) -> futures::future::BoxFuture<'a, Result<String, crate::agent::harness::types::FileError>>
+        {
             Box::pin(async move { Ok(path) })
         }
 
-        fn read_text_lines<'a>(&'a self, path: String, _options: crate::agent::harness::types::ReadTextLinesOptions) -> futures::future::BoxFuture<'a, Result<Vec<String>, crate::agent::harness::types::FileError>> {
+        fn read_text_lines<'a>(
+            &'a self,
+            path: String,
+            _options: crate::agent::harness::types::ReadTextLinesOptions,
+        ) -> futures::future::BoxFuture<
+            'a,
+            Result<Vec<String>, crate::agent::harness::types::FileError>,
+        > {
             Box::pin(async move { Ok(vec![path]) })
         }
 
-        fn read_binary_file<'a>(&'a self, path: String, _abort: Option<crate::agent::types::AbortSignal>) -> futures::future::BoxFuture<'a, Result<Vec<u8>, crate::agent::harness::types::FileError>> {
+        fn read_binary_file<'a>(
+            &'a self,
+            path: String,
+            _abort: Option<crate::agent::types::AbortSignal>,
+        ) -> futures::future::BoxFuture<'a, Result<Vec<u8>, crate::agent::harness::types::FileError>>
+        {
             Box::pin(async move { Ok(path.into_bytes()) })
         }
 
-        fn write_file<'a>(&'a self, _path: String, _content: FileContent, _abort: Option<crate::agent::types::AbortSignal>) -> futures::future::BoxFuture<'a, Result<(), crate::agent::harness::types::FileError>> {
+        fn write_file<'a>(
+            &'a self,
+            _path: String,
+            _content: FileContent,
+            _abort: Option<crate::agent::types::AbortSignal>,
+        ) -> futures::future::BoxFuture<'a, Result<(), crate::agent::harness::types::FileError>>
+        {
             Box::pin(async move { Ok(()) })
         }
 
-        fn append_file<'a>(&'a self, _path: String, _content: FileContent) -> futures::future::BoxFuture<'a, Result<(), crate::agent::harness::types::FileError>> {
+        fn append_file<'a>(
+            &'a self,
+            _path: String,
+            _content: FileContent,
+        ) -> futures::future::BoxFuture<'a, Result<(), crate::agent::harness::types::FileError>>
+        {
             Box::pin(async move { Ok(()) })
         }
 
-        fn rename_file<'a>(&'a self, _source: String, _destination: String, _abort: Option<crate::agent::types::AbortSignal>) -> futures::future::BoxFuture<'a, Result<(), crate::agent::harness::types::FileError>> {
+        fn rename_file<'a>(
+            &'a self,
+            _source: String,
+            _destination: String,
+            _abort: Option<crate::agent::types::AbortSignal>,
+        ) -> futures::future::BoxFuture<'a, Result<(), crate::agent::harness::types::FileError>>
+        {
             Box::pin(async move { Ok(()) })
         }
 
-        fn file_info<'a>(&'a self, path: String) -> futures::future::BoxFuture<'a, Result<crate::agent::harness::types::FileInfo, crate::agent::harness::types::FileError>> {
+        fn file_info<'a>(
+            &'a self,
+            path: String,
+        ) -> futures::future::BoxFuture<
+            'a,
+            Result<crate::agent::harness::types::FileInfo, crate::agent::harness::types::FileError>,
+        > {
             Box::pin(async move {
                 Ok(crate::agent::harness::types::FileInfo {
                     name: path,
@@ -459,31 +534,70 @@ mod tests {
             })
         }
 
-        fn list_dir<'a>(&'a self, _path: String, _abort: Option<crate::agent::types::AbortSignal>) -> futures::future::BoxFuture<'a, Result<Vec<crate::agent::harness::types::FileInfo>, crate::agent::harness::types::FileError>> {
+        fn list_dir<'a>(
+            &'a self,
+            _path: String,
+            _abort: Option<crate::agent::types::AbortSignal>,
+        ) -> futures::future::BoxFuture<
+            'a,
+            Result<
+                Vec<crate::agent::harness::types::FileInfo>,
+                crate::agent::harness::types::FileError,
+            >,
+        > {
             Box::pin(async move { Ok(Vec::new()) })
         }
 
-        fn canonical_path<'a>(&'a self, path: String, _abort: Option<crate::agent::types::AbortSignal>) -> futures::future::BoxFuture<'a, Result<String, crate::agent::harness::types::FileError>> {
+        fn canonical_path<'a>(
+            &'a self,
+            path: String,
+            _abort: Option<crate::agent::types::AbortSignal>,
+        ) -> futures::future::BoxFuture<'a, Result<String, crate::agent::harness::types::FileError>>
+        {
             Box::pin(async move { Ok(path) })
         }
 
-        fn exists<'a>(&'a self, _path: String, _abort: Option<crate::agent::types::AbortSignal>) -> futures::future::BoxFuture<'a, Result<bool, crate::agent::harness::types::FileError>> {
+        fn exists<'a>(
+            &'a self,
+            _path: String,
+            _abort: Option<crate::agent::types::AbortSignal>,
+        ) -> futures::future::BoxFuture<'a, Result<bool, crate::agent::harness::types::FileError>>
+        {
             Box::pin(async move { Ok(true) })
         }
 
-        fn create_dir<'a>(&'a self, _path: String, _options: crate::agent::harness::types::CreateDirOptions) -> futures::future::BoxFuture<'a, Result<(), crate::agent::harness::types::FileError>> {
+        fn create_dir<'a>(
+            &'a self,
+            _path: String,
+            _options: crate::agent::harness::types::CreateDirOptions,
+        ) -> futures::future::BoxFuture<'a, Result<(), crate::agent::harness::types::FileError>>
+        {
             Box::pin(async move { Ok(()) })
         }
 
-        fn remove<'a>(&'a self, _path: String, _options: crate::agent::harness::types::RemoveOptions) -> futures::future::BoxFuture<'a, Result<(), crate::agent::harness::types::FileError>> {
+        fn remove<'a>(
+            &'a self,
+            _path: String,
+            _options: crate::agent::harness::types::RemoveOptions,
+        ) -> futures::future::BoxFuture<'a, Result<(), crate::agent::harness::types::FileError>>
+        {
             Box::pin(async move { Ok(()) })
         }
 
-        fn create_temp_dir<'a>(&'a self, _prefix: Option<String>, _abort: Option<crate::agent::types::AbortSignal>) -> futures::future::BoxFuture<'a, Result<String, crate::agent::harness::types::FileError>> {
+        fn create_temp_dir<'a>(
+            &'a self,
+            _prefix: Option<String>,
+            _abort: Option<crate::agent::types::AbortSignal>,
+        ) -> futures::future::BoxFuture<'a, Result<String, crate::agent::harness::types::FileError>>
+        {
             Box::pin(async move { Ok("/tmp/echo-env".to_string()) })
         }
 
-        fn create_temp_file<'a>(&'a self, _options: CreateTempFileOptions) -> futures::future::BoxFuture<'a, Result<String, crate::agent::harness::types::FileError>> {
+        fn create_temp_file<'a>(
+            &'a self,
+            _options: CreateTempFileOptions,
+        ) -> futures::future::BoxFuture<'a, Result<String, crate::agent::harness::types::FileError>>
+        {
             Box::pin(async move { Ok("/tmp/echo-env/out.log".to_string()) })
         }
 
@@ -497,7 +611,10 @@ mod tests {
             &'a self,
             _command: String,
             options: ShellExecOptions,
-        ) -> futures::future::BoxFuture<'a, Result<crate::agent::harness::types::ExecOutcome, ExecutionError>> {
+        ) -> futures::future::BoxFuture<
+            'a,
+            Result<crate::agent::harness::types::ExecOutcome, ExecutionError>,
+        > {
             Box::pin(async move {
                 if let Some(on_stdout) = &options.on_stdout {
                     on_stdout("hello\nworld\n".to_string());

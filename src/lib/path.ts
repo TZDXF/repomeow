@@ -41,6 +41,16 @@ export function splitDirName(p: string): { parent: string; name: string } {
   return { parent: segments.join(sep) || sep, name };
 }
 
+/** 拼接父目录与子段,分隔符跟随父路径的写法;父路径为根(`C:\`、`/`)时不再补分隔符 */
+export function joinPath(parent: string, name: string): string {
+  const base = cleanPath(parent);
+  if (base.endsWith("\\") || base.endsWith("/")) {
+    return base + name;
+  }
+  const sep = parent.includes("\\") ? "\\" : "/";
+  return `${base}${sep}${name}`;
+}
+
 /** 展示用路径:p 位于 root 内时显示相对路径,否则原样返回(分隔符归一后比较) */
 export function displayRelativeTo(root: string, p: string): string {
   const r = toForwardSlash(root);

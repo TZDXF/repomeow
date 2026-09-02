@@ -37,7 +37,7 @@ import {
 import { formatIsoDate } from "@/lib/format";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
-import { baseName, cleanPath } from "@/lib/path";
+import { baseName, cleanPath, joinPath, splitDirName } from "@/lib/path";
 
 const { t } = useI18n();
 const store = useProjectsStore();
@@ -57,9 +57,9 @@ function saveLastLocation(dir: string) {
 
 /** 取路径的父目录(本地目录模式下项目路径本身即选中文件夹,记录其父目录作为存放位置) */
 function parentPathOf(p: string): string {
-  const trimmed = cleanPath(p);
-  const idx = Math.max(trimmed.lastIndexOf("\\"), trimmed.lastIndexOf("/"));
-  return idx > 0 ? trimmed.slice(0, idx) : "";
+  const { parent } = splitDirName(cleanPath(p));
+  // splitDirName 对无父目录的输入返回根分隔符本身,这里按「无父目录」处理
+  return parent === "\\" || parent === "/" ? "" : parent;
 }
 
 const visible = ref(false);
@@ -225,9 +225,9 @@ watch(dirName, (value) => {
 
 /** 存放位置与目录名拼出的完整目标路径(分隔符跟随存放位置的写法) */
 const targetPath = computed(() => {
-  if (!parentDir.value || !dirName.value.trim()) return "";
-  const sep = parentDir.value.includes("\\") ? "\\" : "/";
-  return parentDir.value.replace(/[\\/]+$/, "") + sep + dirName.value.trim();
+  const dirNameTrimmed = dirName.value.trim();
+  if (!parentDir.value || !dirNameTrimmed) return "";
+  return joinPath(parentDir.value, dirNameTrimmed);
 });
 
 const cloneReady = computed(

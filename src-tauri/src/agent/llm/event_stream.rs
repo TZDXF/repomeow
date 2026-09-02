@@ -60,10 +60,7 @@ pub fn event_stream<E, R>() -> (EventStream<E, R>, EventStreamWriter<E, R>) {
     let (tx, rx) = mpsc::unbounded_channel();
     let (done_tx, done_rx) = oneshot::channel();
     (
-        EventStream {
-            rx,
-            done: done_rx,
-        },
+        EventStream { rx, done: done_rx },
         EventStreamWriter {
             tx,
             done: Some(done_tx),

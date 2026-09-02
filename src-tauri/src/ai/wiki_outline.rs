@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use serde::Deserialize;
 
 use crate::commands::wiki::WikiOutlinePage;
+use crate::path_util::repo_relative_str;
 
 /// 严格形态:未知字段直接报错,驱动上层「带错误反馈」的纠错重试
 #[derive(Deserialize)]
@@ -132,14 +133,6 @@ fn valid_id(value: &str) -> bool {
                     .chars()
                     .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
         })
-}
-
-fn normalize_path(value: &str) -> String {
-    value
-        .replace('\\', "/")
-        .trim_start_matches("./")
-        .trim_start_matches('/')
-        .to_string()
 }
 
 fn validation_error(errors: Vec<String>) -> Result<Vec<WikiOutlinePage>, String> {
@@ -288,7 +281,7 @@ pub fn parse_outline(
         let mut seen_files = HashSet::new();
         let mut files = Vec::new();
         for raw_path in &page.relevant_files {
-            let path = normalize_path(raw_path);
+            let path = repo_relative_str(raw_path);
             if path.is_empty() {
                 errors.push(format!("page `{}` contains an empty file path", page.id));
             } else if !valid_files.contains(&path) {

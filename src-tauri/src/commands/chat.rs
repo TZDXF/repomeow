@@ -10,16 +10,24 @@
 //! defaultModel),每次 `chat_send` 前重读:思考与权限变化经 `Agent` 的
 //! 状态热切换方法就地生效(会话历史保留),模型与密钥由 StreamFn 每次
 //! LLM 调用时重读。
+//!
+//! ask 权限(硬确认):工具集与 all 相同,但四个有副作用工具
+//! (`update_wiki` / `regenerate_wiki` / `add_custom_command` /
+//! `generate_report`)执行前经 `AgentLoopConfig.before_tool_call` 钩子拦截,
+//! 推 `ToolPermissionRequest` 事件并等待 `chat_tool_permission_respond`
+//! 决策(允许继续 / 拒绝或 2 分钟超时则 block);这些工具均带 sequential
+//! 标记,含它们的批次整体顺序执行,确认一次最多挂起一个。
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
+use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::chat_tools::{chat_tools, ChatToolContext};
@@ -34,9 +42,9 @@ use crate::agent::llm::{
     SimpleStreamOptions, StopReason, Usage, API_OPENAI_COMPLETIONS,
 };
 use crate::agent::types::{
-    AgentEvent, AgentListener, AgentLoopConfig, AgentMessage, AgentState, AgentTool,
-    AgentToolResult, ConvertToLlmFn, Message, StreamFn, TextOrImageContent, ToolExecutionMode,
-    TypedMessage,
+    AgentEvent, AgentListener, AgentLoopConfig, AgentMessage, AgentState, AgentToolResult,
+    BeforeToolCallHookFn, BeforeToolCallResult, ConvertToLlmFn, Message, StreamFn,
+    TextOrImageContent, ToolExecutionMode, TypedMessage,
 };
 use crate::agent::Agent;
 use crate::ai::catalog::{self, ChatPermission, ModelRef};
@@ -72,6 +80,13 @@ pub enum ChatEvent {
         id: String,
         ok: bool,
         summary: String,
+    },
+    /// ask 权限下,有副作用工具执行前等待用户确认(id 经
+    /// `chat_tool_permission_respond` 回传决策;args 为校验后的参数)。
+    ToolPermissionRequest {
+        id: String,
+        name: String,
+        args: Value,
     },
     /// 一个回合(一次 LLM 调用 + 工具执行)结束,携带当前上下文占用
     /// (最近一条 assistant 消息的 usage.total_tokens,无数据为 null)
@@ -180,10 +195,10 @@ struct ChatSession {
     breakdown: Arc<Mutex<Option<ChatContextBreakdown>>>,
     busy: Arc<AtomicBool>,
     run_id: Arc<Mutex<String>>,
-    /// 工具构建上下文(权限变化时重建工具集)。
-    tool_context: ChatToolContext,
     /// 已解析的 chat 偏好快照(思考/权限/模型引用变化时热切换)。
     prefs: Arc<Mutex<Option<ResolvedPrefs>>>,
+    /// ask 权限下待确认工具调用的一次性决策通道(tool_call_id → 发送端)。
+    pending: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
 }
 
 /// chat_send 期间注册在 CHAT_RUNS 的守卫,Drop 时移除。
@@ -304,6 +319,7 @@ mod tests {
     use super::*;
     use crate::agent::llm::AssistantContent;
     use crate::agent::llm::ModelThinkingLevel;
+    use crate::agent::types::BeforeToolCallContext;
     use crate::agent::Agent;
 
     type EventLog = Arc<Mutex<Vec<ChatEvent>>>;
@@ -411,28 +427,36 @@ mod tests {
         let events = event_log();
         let signal = CancellationToken::new();
 
-        let result = run_chat_prompt_with_policy(
-            &agent,
-            AgentMessage::user_text("hi", 0),
-            &signal,
-            3,
-            1,
-            {
+        let result =
+            run_chat_prompt_with_policy(&agent, AgentMessage::user_text("hi", 0), &signal, 3, 1, {
                 let events = events.clone();
                 move |event: ChatEvent| events.lock().unwrap().push(event)
-            },
-        )
-        .await;
+            })
+            .await;
 
         assert!(result.is_ok());
         let log = events.lock().unwrap();
         assert_eq!(log.len(), 2);
         assert!(
-            matches!(&log[0], ChatEvent::RetryScheduled { attempt: 1, max_attempts: 3, delay_ms: 1, .. }),
+            matches!(
+                &log[0],
+                ChatEvent::RetryScheduled {
+                    attempt: 1,
+                    max_attempts: 3,
+                    delay_ms: 1,
+                    ..
+                }
+            ),
             "unexpected first event: {log:?}"
         );
         assert!(
-            matches!(&log[1], ChatEvent::RetryStarted { attempt: 1, max_attempts: 3 }),
+            matches!(
+                &log[1],
+                ChatEvent::RetryStarted {
+                    attempt: 1,
+                    max_attempts: 3
+                }
+            ),
             "unexpected second event: {log:?}"
         );
         // 失败 attempt 已从上下文剔除:只剩 user + 恢复后的 assistant。
@@ -452,18 +476,12 @@ mod tests {
         let events = event_log();
         let signal = CancellationToken::new();
 
-        let result = run_chat_prompt_with_policy(
-            &agent,
-            AgentMessage::user_text("hi", 0),
-            &signal,
-            2,
-            1,
-            {
+        let result =
+            run_chat_prompt_with_policy(&agent, AgentMessage::user_text("hi", 0), &signal, 2, 1, {
                 let events = events.clone();
                 move |event: ChatEvent| events.lock().unwrap().push(event)
-            },
-        )
-        .await;
+            })
+            .await;
 
         assert_eq!(result.err().as_deref(), Some("503 service unavailable"));
         let log = events.lock().unwrap();
@@ -474,7 +492,10 @@ mod tests {
         ));
         assert!(matches!(
             &log[3],
-            ChatEvent::RetryStarted { attempt: 2, max_attempts: 2 }
+            ChatEvent::RetryStarted {
+                attempt: 2,
+                max_attempts: 2
+            }
         ));
         // 最终失败 attempt 留在会话历史(对齐 pi:keep in session for history)。
         assert_eq!(agent.messages().len(), 2);
@@ -492,18 +513,12 @@ mod tests {
         let events = event_log();
         let signal = CancellationToken::new();
 
-        let result = run_chat_prompt_with_policy(
-            &agent,
-            AgentMessage::user_text("hi", 0),
-            &signal,
-            3,
-            1,
-            {
+        let result =
+            run_chat_prompt_with_policy(&agent, AgentMessage::user_text("hi", 0), &signal, 3, 1, {
                 let events = events.clone();
                 move |event: ChatEvent| events.lock().unwrap().push(event)
-            },
-        )
-        .await;
+            })
+            .await;
 
         assert_eq!(result.err().as_deref(), Some("429 insufficient_quota"));
         assert!(events.lock().unwrap().is_empty());
@@ -544,10 +559,259 @@ mod tests {
         assert!(result.is_ok());
         let log = events.lock().unwrap();
         assert_eq!(log.len(), 1);
-        assert!(matches!(&log[0], ChatEvent::RetryScheduled { attempt: 1, .. }));
+        assert!(matches!(
+            &log[0],
+            ChatEvent::RetryScheduled { attempt: 1, .. }
+        ));
         // 退避被中断后不再发起下一次请求:成功响应仍未从脚本消费,失败 attempt 已剔除。
         assert_eq!(script.lock().unwrap().len(), 1);
         assert_eq!(agent.messages().len(), 1);
+    }
+
+    // ── ask 权限工具硬确认 ─────────────────────────────────────────────
+
+    #[test]
+    fn gated_tool_list_is_exactly_the_four_side_effect_tools() {
+        let mut tools = CONFIRM_REQUIRED_TOOLS.to_vec();
+        tools.sort_unstable();
+        assert_eq!(
+            tools,
+            vec![
+                "add_custom_command",
+                "generate_report",
+                "regenerate_wiki",
+                "update_wiki"
+            ]
+        );
+        for name in [
+            "read_wiki",
+            "list_custom_commands",
+            "list_reports",
+            "sem_find",
+            "sem_context",
+            "sem_relations",
+            "sem_diff",
+            "read_project_file",
+        ] {
+            assert!(
+                !CONFIRM_REQUIRED_TOOLS.contains(&name),
+                "{name} 不应在确认名单中"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn permission_decision_covers_allow_deny_cancel_timeout_and_sender_drop() {
+        // 允许
+        let (sender, receiver) = oneshot::channel();
+        sender.send(true).unwrap();
+        assert_eq!(
+            await_permission_decision(receiver, None, Duration::from_secs(5)).await,
+            PermissionDecision::Allow
+        );
+
+        // 拒绝
+        let (sender, receiver) = oneshot::channel();
+        sender.send(false).unwrap();
+        assert_eq!(
+            await_permission_decision(receiver, None, Duration::from_secs(5)).await,
+            PermissionDecision::Block(PERMISSION_DENIED_REASON)
+        );
+
+        // 取消:等待期间 abort 信号触发
+        let signal = CancellationToken::new();
+        let task_signal = signal.clone();
+        let (_sender, receiver) = oneshot::channel();
+        let waiter = tokio::spawn(async move {
+            await_permission_decision(receiver, Some(&task_signal), Duration::from_secs(5)).await
+        });
+        signal.cancel();
+        assert_eq!(
+            waiter.await.unwrap(),
+            PermissionDecision::Block(PERMISSION_CANCELLED_REASON)
+        );
+
+        // 发送端被丢弃(会话清理/登记被替换)→ 按取消处理,不死锁
+        let (sender, receiver) = oneshot::channel();
+        drop(sender);
+        assert_eq!(
+            await_permission_decision(receiver, None, Duration::from_secs(5)).await,
+            PermissionDecision::Block(PERMISSION_CANCELLED_REASON)
+        );
+
+        // 超时(短超时,不真等 2 分钟)
+        let (_sender, receiver) = oneshot::channel();
+        let started = Instant::now();
+        assert_eq!(
+            await_permission_decision(receiver, None, Duration::from_millis(30)).await,
+            PermissionDecision::Block(PERMISSION_TIMEOUT_REASON)
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[tokio::test]
+    async fn deliver_permission_decision_is_idempotent_and_never_re_executes() {
+        let pending: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+
+        // 未知 id:无副作用
+        assert!(!deliver_permission_decision(&pending, "ghost", true));
+
+        // 登记后首次响应消费通道;重复响应幂等失败,不会二次触发执行。
+        let (sender, receiver) = oneshot::channel();
+        pending.lock().unwrap().insert("call_1".to_string(), sender);
+        assert!(deliver_permission_decision(&pending, "call_1", true));
+        assert!(!deliver_permission_decision(&pending, "call_1", true));
+        assert_eq!(receiver.await, Ok(true));
+        assert!(pending.lock().unwrap().is_empty());
+
+        // 决策已定(登记被钩子清除)后的迟到响应:无发送端,无副作用。
+        assert!(!deliver_permission_decision(&pending, "call_1", false));
+    }
+
+    fn ask_prefs(permission: ChatPermission) -> Arc<Mutex<Option<ResolvedPrefs>>> {
+        Arc::new(Mutex::new(Some(ResolvedPrefs {
+            model_ref: ModelRef {
+                provider_id: "test-provider".to_string(),
+                model_id: "test-model".to_string(),
+            },
+            thinking: "off".to_string(),
+            permission,
+        })))
+    }
+
+    fn permission_context(id: &str, tool_name: &str) -> BeforeToolCallContext {
+        let model = Model::from_settings("gpt-test", "http://localhost");
+        BeforeToolCallContext {
+            assistant_message: ok_message(&model, ""),
+            tool_call: crate::agent::llm::ToolCall {
+                id: id.to_string(),
+                name: tool_name.to_string(),
+                arguments: serde_json::Map::new(),
+                thought_signature: None,
+                namespace: None,
+            },
+            args: serde_json::json!({}),
+            context: crate::agent::types::AgentContext::default(),
+        }
+    }
+
+    async fn wait_for_pending(
+        pending: &Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
+        id: &str,
+    ) {
+        for _ in 0..200 {
+            if pending.lock().unwrap().contains_key(id) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("permission request {id} was never registered");
+    }
+
+    #[tokio::test]
+    async fn permission_hook_skips_non_ask_and_non_gated_tools() {
+        // 权限 All:受控工具直接放行,不登记。
+        let pending: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let hook = build_permission_hook(
+            pending.clone(),
+            ask_prefs(ChatPermission::All),
+            Arc::new(Mutex::new(None)),
+        );
+        assert!(hook(permission_context("call_1", "update_wiki"), None)
+            .await
+            .is_none());
+        assert!(hook(permission_context("call_2", "generate_report"), None)
+            .await
+            .is_none());
+        assert!(pending.lock().unwrap().is_empty());
+
+        // 权限 Ask:非受控工具直接放行。
+        let hook = build_permission_hook(
+            pending.clone(),
+            ask_prefs(ChatPermission::Ask),
+            Arc::new(Mutex::new(None)),
+        );
+        for name in [
+            "read_wiki",
+            "sem_find",
+            "list_custom_commands",
+            "read_project_file",
+        ] {
+            assert!(
+                hook(permission_context("call_3", name), None)
+                    .await
+                    .is_none(),
+                "{name} 不应被拦截"
+            );
+        }
+        assert!(pending.lock().unwrap().is_empty());
+
+        // 偏好快照缺失(异常兜底)同样直接放行。
+        let hook = build_permission_hook(
+            pending.clone(),
+            Arc::new(Mutex::new(None)),
+            Arc::new(Mutex::new(None)),
+        );
+        assert!(hook(permission_context("call_4", "update_wiki"), None)
+            .await
+            .is_none());
+        assert!(pending.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn permission_hook_allows_and_denies_gated_tools() {
+        let pending: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let hook = build_permission_hook(
+            pending.clone(),
+            ask_prefs(ChatPermission::Ask),
+            Arc::new(Mutex::new(None)),
+        );
+
+        // 放行:决策 allow=true → 钩子返回 None(工具继续执行)。
+        let allow_task = tokio::spawn({
+            let hook = hook.clone();
+            async move { hook(permission_context("call_1", "update_wiki"), None).await }
+        });
+        wait_for_pending(&pending, "call_1").await;
+        assert!(deliver_permission_decision(&pending, "call_1", true));
+        assert!(allow_task.await.unwrap().is_none());
+        assert!(pending.lock().unwrap().is_empty());
+
+        // 拒绝:决策 allow=false → block + 稳定英文理由。
+        let deny_task = tokio::spawn({
+            let hook = hook.clone();
+            async move { hook(permission_context("call_2", "regenerate_wiki"), None).await }
+        });
+        wait_for_pending(&pending, "call_2").await;
+        assert!(deliver_permission_decision(&pending, "call_2", false));
+        let blocked = deny_task.await.unwrap().expect("拒绝应返回 block 结果");
+        assert!(blocked.block);
+        assert_eq!(blocked.reason.as_deref(), Some(PERMISSION_DENIED_REASON));
+        assert!(!blocked.terminate);
+        assert!(pending.lock().unwrap().is_empty());
+
+        // 取消:abort 信号已取消 → block(cancelled),登记清理。
+        let signal = CancellationToken::new();
+        signal.cancel();
+        let blocked = hook(
+            permission_context("call_3", "add_custom_command"),
+            Some(signal),
+        )
+        .await
+        .expect("取消应返回 block 结果");
+        assert!(blocked.block);
+        assert_eq!(blocked.reason.as_deref(), Some(PERMISSION_CANCELLED_REASON));
+        assert!(pending.lock().unwrap().is_empty());
+
+        // 超时后迟到响应幂等:模拟超时路径清除登记后再响应,无执行。
+        let (_sender, receiver) = oneshot::channel();
+        assert_eq!(
+            await_permission_decision(receiver, None, Duration::from_millis(20)).await,
+            PermissionDecision::Block(PERMISSION_TIMEOUT_REASON)
+        );
     }
 }
 
@@ -618,6 +882,8 @@ pub async fn chat_send(
     drop(run);
     session.cancel_cell.clear();
     session.sink.lock().unwrap().take();
+    // 回合结束:清空未决确认(正常路径钩子已自清,这里是兜底,杜绝迟到响应)。
+    session.pending.lock().unwrap().clear();
     session.busy.store(false, Ordering::SeqCst);
 
     record_chat_usage(&db, &app, &usage_snapshot, duration_ms);
@@ -658,9 +924,26 @@ pub async fn chat_abort(run_id: String) -> AppResult<()> {
         let session = chat_sessions().lock().unwrap().get(&session_key).cloned();
         if let Some(session) = session {
             session.agent.abort();
+            // 清空未决确认:等待中的钩子经 receiver Err 立即按取消收尾,不死锁。
+            session.pending.lock().unwrap().clear();
         }
     }
     Ok(())
+}
+
+/// 回应 ask 权限下的工具执行确认(tool_call_id 来自 ToolPermissionRequest
+/// 事件;allow=true 放行、false 拒绝)。未知 / 重复 / 已解决的请求幂等忽略,
+/// 不会导致工具执行。
+#[tauri::command]
+pub async fn chat_tool_permission_respond(
+    project_path: String,
+    tool_call_id: String,
+    allow: bool,
+) -> AppResult<bool> {
+    let session_key = clean_str(&project_path);
+    let session = chat_sessions().lock().unwrap().get(&session_key).cloned();
+    Ok(session
+        .is_some_and(|session| deliver_permission_decision(&session.pending, &tool_call_id, allow)))
 }
 
 /// 丢弃某项目的会话上下文(下一条消息从零开始)。若该会话回合仍在跑,
@@ -680,33 +963,129 @@ pub async fn chat_new_session(project_path: String) -> AppResult<()> {
             token.cancel();
         }
         session.agent.abort();
+        // 清空未决确认,避免钩子等待悬空。
+        session.pending.lock().unwrap().clear();
     }
     Ok(())
 }
 
 // ── 会话构建 ─────────────────────────────────────────────────────────
 
-/// 只读工具名单(权限 = readOnly 时保留的子集)。
-const READ_ONLY_TOOLS: [&str; 8] = [
-    "sem_find",
-    "sem_context",
-    "sem_relations",
-    "sem_diff",
-    "read_wiki",
-    "list_custom_commands",
-    "list_reports",
-    "read_project_file",
+/// ask 权限下执行前需用户硬确认的工具(有副作用:写入 wiki / 自定义命令 /
+/// 生成报告)。
+const CONFIRM_REQUIRED_TOOLS: [&str; 4] = [
+    "update_wiki",
+    "regenerate_wiki",
+    "add_custom_command",
+    "generate_report",
 ];
 
-/// 按权限过滤工具集。
-fn tools_for_permission(tools: Vec<AgentTool>, permission: ChatPermission) -> Vec<AgentTool> {
-    match permission {
-        ChatPermission::All => tools,
-        ChatPermission::ReadOnly => tools
-            .into_iter()
-            .filter(|tool| READ_ONLY_TOOLS.contains(&tool.name.as_str()))
-            .collect(),
+/// 确认等待的安全超时:超时按拒绝处理,避免会话永久挂起。
+const PERMISSION_WAIT_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// 拒绝/超时/取消的稳定英文内部结果(作为 error 工具结果回传模型;
+/// 前端用户文案走 i18n)。
+const PERMISSION_DENIED_REASON: &str = "Tool execution was denied by the user";
+const PERMISSION_TIMEOUT_REASON: &str = "Tool permission request timed out";
+const PERMISSION_CANCELLED_REASON: &str = "Tool permission request was cancelled";
+
+/// 一次工具确认的终局。
+#[derive(Debug, PartialEq)]
+enum PermissionDecision {
+    /// 放行,继续执行工具。
+    Allow,
+    /// 拦截(block),携带稳定英文理由。
+    Block(&'static str),
+}
+
+/// 等待工具确认决策:允许 / 拒绝 / 取消 / 超时(超时按拒绝)。一次性消费
+/// receiver;决策到达前 sender 被丢弃(会话清理)视为取消。
+async fn await_permission_decision(
+    receiver: oneshot::Receiver<bool>,
+    signal: Option<&CancellationToken>,
+    timeout: Duration,
+) -> PermissionDecision {
+    let cancelled = async {
+        match signal {
+            Some(signal) => signal.cancelled().await,
+            None => std::future::pending::<()>().await,
+        }
+    };
+    tokio::select! {
+        result = receiver => match result {
+            Ok(true) => PermissionDecision::Allow,
+            Ok(false) => PermissionDecision::Block(PERMISSION_DENIED_REASON),
+            Err(_) => PermissionDecision::Block(PERMISSION_CANCELLED_REASON),
+        },
+        _ = cancelled => PermissionDecision::Block(PERMISSION_CANCELLED_REASON),
+        _ = tokio::time::sleep(timeout) => PermissionDecision::Block(PERMISSION_TIMEOUT_REASON),
     }
+}
+
+/// 投递一次工具确认决策。幂等:未知 id / 已解决 / 重复响应返回 false 且无
+/// 任何副作用(绝不触发工具执行)。
+fn deliver_permission_decision(
+    pending: &Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
+    tool_call_id: &str,
+    allow: bool,
+) -> bool {
+    let sender = pending.lock().unwrap().remove(tool_call_id);
+    match sender {
+        Some(sender) => sender.send(allow).is_ok(),
+        None => false,
+    }
+}
+
+/// ask 权限下的 before_tool_call 门禁:命中确认名单时登记一次性决策通道、
+/// 推送 `ToolPermissionRequest` 并等待 `chat_tool_permission_respond` 决策。
+/// 权限非 Ask 或工具不在名单时直接放行(返回 None)。通用 agent core 不改动。
+fn build_permission_hook(
+    pending: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
+    prefs: Arc<Mutex<Option<ResolvedPrefs>>>,
+    sink: EventSink,
+) -> BeforeToolCallHookFn {
+    Arc::new(move |context, signal| {
+        let pending = pending.clone();
+        let prefs = prefs.clone();
+        let sink = sink.clone();
+        Box::pin(async move {
+            let tool_name = context.tool_call.name.as_str();
+            let permission = prefs.lock().unwrap().as_ref().map(|prefs| prefs.permission);
+            if permission != Some(ChatPermission::Ask)
+                || !CONFIRM_REQUIRED_TOOLS.contains(&tool_name)
+            {
+                return None;
+            }
+            let id = context.tool_call.id.clone();
+            let args = context.args.clone();
+            let (sender, receiver) = oneshot::channel();
+            {
+                let mut map = pending.lock().unwrap();
+                // 同 id 重复登记(异常场景):替换旧发送端,旧决策立即失效。
+                map.insert(id.clone(), sender);
+            }
+            sink_send(
+                &sink,
+                ChatEvent::ToolPermissionRequest {
+                    id: id.clone(),
+                    name: tool_name.to_string(),
+                    args,
+                },
+            );
+            let decision =
+                await_permission_decision(receiver, signal.as_ref(), PERMISSION_WAIT_TIMEOUT).await;
+            // 决策已定:清除登记,迟到/重复响应幂等失效,绝不导致执行。
+            pending.lock().unwrap().remove(&id);
+            match decision {
+                PermissionDecision::Allow => None,
+                PermissionDecision::Block(reason) => Some(BeforeToolCallResult {
+                    block: true,
+                    reason: Some(reason.to_string()),
+                    terminate: false,
+                }),
+            }
+        })
+    })
 }
 
 /// 已解析的 chat 偏好快照(会话内缓存,变化才热切换)。
@@ -743,8 +1122,10 @@ fn resolve_prefs(config_file: &catalog::AiConfigFile) -> AppResult<(Model, Resol
     ))
 }
 
-/// 把最新 chat 偏好热应用到会话:思考/权限变化就地换 AgentState(历史保留),
-/// 模型元数据始终刷新;StreamFn 每次调用另行重读模型与密钥。
+/// 把最新 chat 偏好热应用到会话:思考变化就地换 AgentState(历史保留),
+/// 模型元数据始终刷新;工具集与权限无关(All 与 Ask 均暴露全部工具,Ask 的
+/// 确认在 before_tool_call 门禁层完成),故不再随权限重建。StreamFn 每次调用
+/// 另行重读模型与密钥。
 fn apply_prefs(app: &AppHandle, session: &ChatSession) -> AppResult<()> {
     let config_file = catalog::load_ai_config_file(app);
     let (model, resolved, _api_key) = resolve_prefs(&config_file)?;
@@ -759,16 +1140,6 @@ fn apply_prefs(app: &AppHandle, session: &ChatSession) -> AppResult<()> {
         session
             .agent
             .set_thinking_level(catalog::parse_thinking_level(&resolved.thinking));
-    }
-    if previous
-        .as_ref()
-        .is_none_or(|old| old.permission != resolved.permission)
-    {
-        let tools = tools_for_permission(
-            chat_tools(app.clone(), session.tool_context.clone()),
-            resolved.permission,
-        );
-        session.agent.set_tools(tools);
     }
     session.agent.set_model(model);
     *session.prefs.lock().unwrap() = Some(resolved);
@@ -789,21 +1160,22 @@ fn build_session(
         project_id: lookup_project_id(db, project_path),
         worktree_path: None,
     };
-    let tools = tools_for_permission(
-        chat_tools(app.clone(), context.clone()),
-        resolved.permission,
-    );
     let state = AgentState {
         system_prompt: build_system_prompt(project_name, project_path),
         model: model.clone(),
         thinking_level: catalog::parse_thinking_level(&resolved.thinking),
-        tools,
+        // All 与 Ask 均暴露全部工具;Ask 的确认在 before_tool_call 门禁完成。
+        tools: chat_tools(app.clone(), context.clone()),
         messages: Vec::new(),
         is_streaming: false,
         streaming_message: None,
         pending_tool_calls: HashSet::new(),
         error_message: None,
     };
+    let prefs_cell: Arc<Mutex<Option<ResolvedPrefs>>> = Arc::new(Mutex::new(Some(resolved)));
+    let pending_cell: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+    let sink_cell: EventSink = Arc::new(Mutex::new(None));
     let loop_config = AgentLoopConfig {
         model: model.clone(),
         stream: SimpleStreamOptions {
@@ -818,7 +1190,12 @@ fn build_session(
         get_steering_messages: None,
         get_follow_up_messages: None,
         tool_execution: ToolExecutionMode::Parallel,
-        before_tool_call: None,
+        // ask 权限下拦截四个有副作用工具的硬确认门禁(通用 agent core 不动)。
+        before_tool_call: Some(build_permission_hook(
+            pending_cell.clone(),
+            prefs_cell.clone(),
+            sink_cell.clone(),
+        )),
         after_tool_call: None,
     };
     let cancel_cell = CancelCell::default();
@@ -831,14 +1208,14 @@ fn build_session(
     let session = ChatSession {
         agent,
         cancel_cell,
-        sink: Arc::new(Mutex::new(None)),
+        sink: sink_cell,
         usage: Arc::new(Mutex::new(Usage::zero())),
         context_tokens: Arc::new(Mutex::new(0)),
         breakdown: breakdown_cell,
         busy: Arc::new(AtomicBool::new(false)),
         run_id: Arc::new(Mutex::new(String::new())),
-        tool_context: context,
-        prefs: Arc::new(Mutex::new(Some(resolved))),
+        prefs: prefs_cell,
+        pending: pending_cell,
     };
     // 订阅一次,随会话存活;事件经 sink 槽转发给当前 chat_send 的 Channel。
     session.agent.subscribe(chat_event_listener(
@@ -939,7 +1316,10 @@ fn estimate_context_breakdown(model_id: &str, context: &Context) -> ChatContextB
         .messages
         .iter()
         .map(|message| {
-            estimate_text_tokens(model_id, &serde_json::to_string(message).unwrap_or_default())
+            estimate_text_tokens(
+                model_id,
+                &serde_json::to_string(message).unwrap_or_default(),
+            )
         })
         .sum();
     ChatContextBreakdown {

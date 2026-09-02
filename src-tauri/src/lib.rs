@@ -279,6 +279,7 @@ pub fn run() {
             commands::ai::ai_config_save,
             commands::ai::ai_config_reveal,
             commands::ai::ai_config_builtin_providers,
+            commands::ai::ai_cc_switch_providers,
             commands::ai::ai_list_models,
             commands::ai::ai_test_connection,
             commands::ai::ai_generate_commit_message,
@@ -294,6 +295,7 @@ pub fn run() {
             commands::chat::chat_send,
             commands::chat::chat_abort,
             commands::chat::chat_new_session,
+            commands::chat::chat_tool_permission_respond,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

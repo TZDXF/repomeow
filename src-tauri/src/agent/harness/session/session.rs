@@ -56,7 +56,9 @@ fn assert_valid_limit(limit: Option<usize>) -> Result<(), SessionError> {
 fn assert_valid_cursor(after_seq: Option<i64>) -> Result<(), SessionError> {
     if let Some(after_seq) = after_seq {
         if after_seq < 0 {
-            return Err(invalid_query("cursor sequence must be a non-negative integer"));
+            return Err(invalid_query(
+                "cursor sequence must be a non-negative integer",
+            ));
         }
     }
     Ok(())
@@ -74,7 +76,10 @@ impl Session {
         Self::with_id_generator(storage, Arc::new(UuidIdGenerator))
     }
 
-    pub fn with_id_generator(storage: Arc<dyn SessionStorage>, id_generator: Arc<dyn IdGenerator>) -> Self {
+    pub fn with_id_generator(
+        storage: Arc<dyn SessionStorage>,
+        id_generator: Arc<dyn IdGenerator>,
+    ) -> Self {
         Self {
             storage,
             id_generator,
@@ -141,7 +146,8 @@ impl Session {
         &self,
         lane: &str,
         limit: Option<usize>,
-    ) -> Result<Vec<crate::agent::harness::session::types::OperationStartedRecord>, SessionError> {
+    ) -> Result<Vec<crate::agent::harness::session::types::OperationStartedRecord>, SessionError>
+    {
         assert_valid_limit(limit)?;
         self.storage
             .find_open_operations(lane.to_string(), limit)
@@ -228,7 +234,9 @@ impl Session {
     ) -> Result<Vec<crate::agent::harness::session::types::LaneRecord>, SessionError> {
         assert_valid_limit(query.limit)?;
         assert_valid_cursor(query.after_seq)?;
-        if query.operation_kind.is_some() && query.record_type.as_deref() != Some("operation_started") {
+        if query.operation_kind.is_some()
+            && query.record_type.as_deref() != Some("operation_started")
+        {
             return Err(invalid_query(
                 "operationKind requires type \"operation_started\"",
             ));
@@ -464,9 +472,7 @@ impl SessionTree for LaneView {
         query: BranchQuery,
     ) -> BoxFuture<'a, Result<Vec<Entry>, SessionError>> {
         let lane = self.lane.clone();
-        Box::pin(async move {
-            self.session.query_branch_entries(&lane, query, None).await
-        })
+        Box::pin(async move { self.session.query_branch_entries(&lane, query, None).await })
     }
 
     fn find_entry_on_branch<'a>(
@@ -489,9 +495,7 @@ impl SessionTree for LaneView {
         message: AgentMessage,
     ) -> BoxFuture<'a, Result<String, SessionError>> {
         let lane = self.lane.clone();
-        Box::pin(async move {
-            self.session.append_message_to_lane(&lane, message).await
-        })
+        Box::pin(async move { self.session.append_message_to_lane(&lane, message).await })
     }
 
     fn append_custom_entry<'a>(

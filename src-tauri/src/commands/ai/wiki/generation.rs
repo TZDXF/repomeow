@@ -62,7 +62,9 @@ pub async fn ai_generate_wiki(
     let mut agent_cancel_watch = None;
 
     let pages_result = match &backend {
-        WikiGenerationBackend::Builtin { model, thinking, .. } => {
+        WikiGenerationBackend::Builtin {
+            model, thinking, ..
+        } => {
             backend_id = "builtin".to_string();
             send_wiki_event(
                 &on_event,
@@ -252,7 +254,11 @@ pub async fn ai_generate_wiki(
 
     let page_errors = Arc::new(Mutex::new(Vec::<AppError>::new()));
     match &backend {
-        WikiGenerationBackend::Builtin { model, thinking, concurrency } => {
+        WikiGenerationBackend::Builtin {
+            model,
+            thinking,
+            concurrency,
+        } => {
             let run_id = run.id.clone();
             // 页面并发:项目配置优先,未配置沿用设置页全局 AI 并发
             let page_concurrency = concurrency

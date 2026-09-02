@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
+import { respondToolPermission } from "@/lib/chat";
 import type { ChatEvent, ChatUsageSummary } from "@/lib/chat";
 import { useChatStore } from "@/stores/chat";
 
@@ -27,6 +28,7 @@ vi.mock("@/lib/chat", () => ({
   ),
   abortChat: vi.fn(async () => {}),
   newChatSession: vi.fn(async () => {}),
+  respondToolPermission: vi.fn(async () => true),
 }));
 
 const USAGE: ChatUsageSummary = {
@@ -73,10 +75,12 @@ describe("chat store", () => {
     expect(session.busy).toBe(true);
     expect(session.phase).toBe("streaming");
     expect(session.toolRuns.t1).toEqual({
+      id: "t1",
       name: "read_file",
       args: { path: "a.rs" },
       ok: null,
       summary: "",
+      permission: null,
     });
     expect(session.pendingToolRunIds).toEqual(["t1"]);
 
@@ -338,5 +342,176 @@ describe("chat store", () => {
     expect(session.error).toBeNull();
     const { newChatSession } = await import("@/lib/chat");
     expect(vi.mocked(newChatSession)).toHaveBeenCalledWith(PATH);
+  });
+
+  it("toolPermissionRequest 在 toolCall 之后到达:更新已有 run 且不重复 pendingToolRunIds", async () => {
+    const store = useChatStore();
+    const run = store.send(PATH, PROJECT, "帮我加命令");
+    emit(PATH, { kind: "toolCall", id: "t1", name: "add_custom_command", args: { name: "start" } });
+    emit(PATH, {
+      kind: "toolPermissionRequest",
+      id: "t1",
+      name: "add_custom_command",
+      args: { name: "start" },
+    });
+
+    const session = store.sessions[PATH];
+    expect(session.pendingToolRunIds).toEqual(["t1"]);
+    expect(session.toolRuns.t1).toMatchObject({
+      id: "t1",
+      name: "add_custom_command",
+      ok: null,
+      permission: "pending",
+    });
+
+    finish(PATH, null);
+    await run;
+  });
+
+  it("toolPermissionRequest 先于 toolCall 到达:创建 run 并登记 pendingToolRunIds", async () => {
+    const store = useChatStore();
+    const run = store.send(PATH, PROJECT, "帮我加命令");
+    emit(PATH, {
+      kind: "toolPermissionRequest",
+      id: "t9",
+      name: "add_custom_command",
+      args: {},
+    });
+
+    const session = store.sessions[PATH];
+    expect(session.pendingToolRunIds).toEqual(["t9"]);
+    expect(session.toolRuns.t9).toEqual({
+      id: "t9",
+      name: "add_custom_command",
+      args: {},
+      ok: null,
+      summary: "",
+      permission: "pending",
+    });
+
+    finish(PATH, null);
+    await run;
+  });
+
+  it("respondToolPermission allow:pending → responding → allowed,命令参数正确", async () => {
+    const store = useChatStore();
+    const run = store.send(PATH, PROJECT, "帮我加命令");
+    emit(PATH, { kind: "toolCall", id: "t1", name: "add_custom_command", args: {} });
+    emit(PATH, { kind: "toolPermissionRequest", id: "t1", name: "add_custom_command", args: {} });
+
+    let release!: () => void;
+    vi.mocked(respondToolPermission).mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          release = () => resolve(true);
+        }),
+    );
+    const response = store.respondToolPermission(PATH, "t1", true);
+    expect(store.sessions[PATH].toolRuns.t1.permission).toBe("responding");
+
+    release();
+    await expect(response).resolves.toBe(true);
+    expect(store.sessions[PATH].toolRuns.t1.permission).toBe("allowed");
+    expect(vi.mocked(respondToolPermission)).toHaveBeenCalledWith(PATH, "t1", true);
+
+    finish(PATH, null);
+    await run;
+  });
+
+  it("respondToolPermission deny:置 denied 并等待后端 toolResult 收尾", async () => {
+    const store = useChatStore();
+    const run = store.send(PATH, PROJECT, "帮我加命令");
+    emit(PATH, { kind: "toolCall", id: "t1", name: "add_custom_command", args: {} });
+    emit(PATH, { kind: "toolPermissionRequest", id: "t1", name: "add_custom_command", args: {} });
+
+    await expect(store.respondToolPermission(PATH, "t1", false)).resolves.toBe(true);
+    const session = store.sessions[PATH];
+    expect(session.toolRuns.t1.permission).toBe("denied");
+    expect(session.toolRuns.t1.ok).toBeNull();
+
+    // 拒绝后仍等 toolResult 收尾(后端以失败结果结束本次调用)
+    emit(PATH, { kind: "toolResult", id: "t1", ok: false, summary: "已拒绝执行" });
+    expect(session.toolRuns.t1).toMatchObject({ ok: false, summary: "已拒绝执行" });
+
+    finish(PATH, null);
+    await run;
+  });
+
+  it("respondToolPermission 对过期请求返回 false 并停止等待", async () => {
+    const store = useChatStore();
+    const run = store.send(PATH, PROJECT, "帮我加命令");
+    emit(PATH, { kind: "toolCall", id: "t1", name: "add_custom_command", args: {} });
+    emit(PATH, { kind: "toolPermissionRequest", id: "t1", name: "add_custom_command", args: {} });
+
+    vi.mocked(respondToolPermission).mockResolvedValueOnce(false);
+    await expect(store.respondToolPermission(PATH, "t1", true)).resolves.toBe(false);
+    expect(store.sessions[PATH].toolRuns.t1.permission).toBe("denied");
+
+    finish(PATH, null);
+    await run;
+  });
+
+  it("respondToolPermission 命令失败恢复 pending 可重试", async () => {
+    const store = useChatStore();
+    const run = store.send(PATH, PROJECT, "帮我加命令");
+    emit(PATH, { kind: "toolCall", id: "t1", name: "add_custom_command", args: {} });
+    emit(PATH, { kind: "toolPermissionRequest", id: "t1", name: "add_custom_command", args: {} });
+
+    vi.mocked(respondToolPermission).mockRejectedValueOnce(new Error("command failed"));
+    await expect(store.respondToolPermission(PATH, "t1", true)).resolves.toBe(false);
+    expect(store.sessions[PATH].toolRuns.t1.permission).toBe("pending");
+
+    vi.mocked(respondToolPermission).mockResolvedValueOnce(true);
+    await expect(store.respondToolPermission(PATH, "t1", true)).resolves.toBe(true);
+    expect(store.sessions[PATH].toolRuns.t1.permission).toBe("allowed");
+
+    finish(PATH, null);
+    await run;
+  });
+
+  it("respondToolPermission 对非 pending 的 run 直接拒绝且不调用命令", async () => {
+    const store = useChatStore();
+    const run = store.send(PATH, PROJECT, "读文件");
+    emit(PATH, { kind: "toolCall", id: "t1", name: "read_file", args: {} });
+
+    await expect(store.respondToolPermission(PATH, "t1", true)).resolves.toBe(false);
+    await expect(store.respondToolPermission(PATH, "missing", true)).resolves.toBe(false);
+    expect(vi.mocked(respondToolPermission)).not.toHaveBeenCalled();
+
+    finish(PATH, null);
+    await run;
+  });
+
+  it("回合结束(中止)清理未决审批状态", async () => {
+    const store = useChatStore();
+    const run = store.send(PATH, PROJECT, "帮我加命令");
+    emit(PATH, { kind: "toolCall", id: "t1", name: "add_custom_command", args: {} });
+    emit(PATH, { kind: "toolPermissionRequest", id: "t1", name: "add_custom_command", args: {} });
+    expect(store.sessions[PATH].toolRuns.t1.permission).toBe("pending");
+
+    store.abort(PATH);
+    finish(PATH, null);
+    await run;
+
+    expect(store.sessions[PATH].toolRuns.t1.permission).toBeNull();
+  });
+
+  it("retryScheduled 清理未决审批状态", async () => {
+    const store = useChatStore();
+    const run = store.send(PATH, PROJECT, "帮我加命令");
+    emit(PATH, { kind: "toolCall", id: "t1", name: "add_custom_command", args: {} });
+    emit(PATH, { kind: "toolPermissionRequest", id: "t1", name: "add_custom_command", args: {} });
+    emit(PATH, {
+      kind: "retryScheduled",
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 2_000,
+      message: "429: rate limited",
+    });
+
+    expect(store.sessions[PATH].toolRuns.t1.permission).toBeNull();
+
+    finish(PATH, null);
+    await run;
   });
 });

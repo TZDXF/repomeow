@@ -164,7 +164,11 @@ pub fn bash_execution_to_text(msg: &BashExecutionMessage) -> String {
 }
 
 /// 构造 branchSummary 自定义消息(时间戳为 Unix 毫秒;蓝本另接受日期串,见报告偏差)。
-pub fn create_branch_summary_message(summary: impl Into<String>, from_id: impl Into<String>, timestamp: i64) -> AgentMessage {
+pub fn create_branch_summary_message(
+    summary: impl Into<String>,
+    from_id: impl Into<String>,
+    timestamp: i64,
+) -> AgentMessage {
     custom_message_to_agent_message(&BranchSummaryMessage {
         role: BranchSummaryMessage::ROLE.to_string(),
         summary: summary.into(),
@@ -174,7 +178,11 @@ pub fn create_branch_summary_message(summary: impl Into<String>, from_id: impl I
 }
 
 /// 构造 compactionSummary 自定义消息。
-pub fn create_compaction_summary_message(summary: impl Into<String>, tokens_before: i64, timestamp: i64) -> AgentMessage {
+pub fn create_compaction_summary_message(
+    summary: impl Into<String>,
+    tokens_before: i64,
+    timestamp: i64,
+) -> AgentMessage {
     custom_message_to_agent_message(&CompactionSummaryMessage {
         role: CompactionSummaryMessage::ROLE.to_string(),
         summary: summary.into(),
@@ -374,7 +382,13 @@ mod tests {
 
     #[test]
     fn custom_message_content_supports_string_and_blocks() {
-        let as_string = create_custom_message("note", CustomMessageContent::Text("plain".into()), true, None, 3);
+        let as_string = create_custom_message(
+            "note",
+            CustomMessageContent::Text("plain".into()),
+            true,
+            None,
+            3,
+        );
         let as_blocks = create_custom_message(
             "note",
             CustomMessageContent::Blocks(vec![TextOrImageContent::text("rich")]),
@@ -428,7 +442,10 @@ mod tests {
             timestamp: 0,
             exclude_from_context: None,
         };
-        assert_eq!(bash_execution_to_text(&no_output), "Ran `echo`\n(no output)");
+        assert_eq!(
+            bash_execution_to_text(&no_output),
+            "Ran `echo`\n(no output)"
+        );
 
         let truncated = BashExecutionMessage {
             role: "bashExecution".into(),

@@ -145,7 +145,10 @@ mod tests {
 
     #[test]
     fn detects_png() {
-        assert_eq!(detect_supported_image_mime_type(&png_header()), Some("image/png"));
+        assert_eq!(
+            detect_supported_image_mime_type(&png_header()),
+            Some("image/png")
+        );
     }
 
     #[test]
@@ -166,12 +169,18 @@ mod tests {
             detect_supported_image_mime_type(&[0xFF, 0xD8, 0xFF, 0xE0]),
             Some("image/jpeg")
         );
-        assert_eq!(detect_supported_image_mime_type(&[0xFF, 0xD8, 0xFF, 0xF7]), None);
+        assert_eq!(
+            detect_supported_image_mime_type(&[0xFF, 0xD8, 0xFF, 0xF7]),
+            None
+        );
     }
 
     #[test]
     fn detects_gif_webp_bmp() {
-        assert_eq!(detect_supported_image_mime_type(b"GIF89a"), Some("image/gif"));
+        assert_eq!(
+            detect_supported_image_mime_type(b"GIF89a"),
+            Some("image/gif")
+        );
         let mut webp = b"RIFF".to_vec();
         webp.extend_from_slice(&[0, 0, 0, 0]);
         webp.extend_from_slice(b"WEBP");

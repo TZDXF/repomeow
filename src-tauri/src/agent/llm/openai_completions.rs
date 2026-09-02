@@ -25,10 +25,11 @@ use tokio_util::sync::CancellationToken;
 
 use super::event_stream::{event_stream, EventStreamWriter};
 use super::types::{
-    AssistantContent, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, CacheRetention,
-    Context, InputKind, MaxTokensField, Message, Model, ModelThinkingLevel, SimpleStreamOptions, StopReason,
-    TextOrImageContent, ThinkingBudgets, ThinkingFormat, ThinkingLevel, ThinkingTokenBudgetField, Tool,
-    ToolCall, ToolChoice, ToolResultMessage, Usage, UsageCost, UserContent,
+    AssistantContent, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream,
+    CacheRetention, Context, InputKind, MaxTokensField, Message, Model, ModelThinkingLevel,
+    SimpleStreamOptions, StopReason, TextOrImageContent, ThinkingBudgets, ThinkingFormat,
+    ThinkingLevel, ThinkingTokenBudgetField, Tool, ToolCall, ToolChoice, ToolResultMessage, Usage,
+    UsageCost, UserContent,
 };
 use crate::time_util::now_ts_nanos;
 
@@ -62,13 +63,18 @@ fn resolve_api_key(model: &Model, options: Option<&SimpleStreamOptions>) -> Resu
             })
         })
     };
-    if has_auth_header(model.headers.as_ref()) || has_auth_header(options.and_then(|o| o.headers.as_ref())) {
+    if has_auth_header(model.headers.as_ref())
+        || has_auth_header(options.and_then(|o| o.headers.as_ref()))
+    {
         return Ok("unused".to_string());
     }
     Err(format!("No API key for provider: {}", model.provider))
 }
 
-fn push_custom_headers(source: Option<&HashMap<String, String>>, headers: &mut reqwest::header::HeaderMap) {
+fn push_custom_headers(
+    source: Option<&HashMap<String, String>>,
+    headers: &mut reqwest::header::HeaderMap,
+) {
     let Some(source) = source else { return };
     for (key, value) in source {
         match (
@@ -96,7 +102,10 @@ fn build_client(
     let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(15));
     let mut headers = reqwest::header::HeaderMap::new();
     push_custom_headers(model.headers.as_ref(), &mut headers);
-    push_custom_headers(options.and_then(|options| options.headers.as_ref()), &mut headers);
+    push_custom_headers(
+        options.and_then(|options| options.headers.as_ref()),
+        &mut headers,
+    );
     if !headers.is_empty() {
         builder = builder.default_headers(headers);
     }
@@ -157,9 +166,12 @@ fn detect_compat(model: &Model) -> ResolvedCompat {
         || provider == "zai-coding-cn"
         || base_url.contains("api.z.ai")
         || base_url.contains("open.bigmodel.cn");
-    let is_together =
-        provider == "together" || base_url.contains("api.together.ai") || base_url.contains("api.together.xyz");
-    let is_moonshot = provider == "moonshotai" || provider == "moonshotai-cn" || base_url.contains("api.moonshot.");
+    let is_together = provider == "together"
+        || base_url.contains("api.together.ai")
+        || base_url.contains("api.together.xyz");
+    let is_moonshot = provider == "moonshotai"
+        || provider == "moonshotai-cn"
+        || base_url.contains("api.moonshot.");
     let is_openrouter = provider == "openrouter" || base_url.contains("openrouter.ai");
     let is_cloudflare_workers_ai =
         provider == "cloudflare-workers-ai" || base_url.contains("api.cloudflare.com");
@@ -203,7 +215,8 @@ fn detect_compat(model: &Model) -> ResolvedCompat {
 
     ResolvedCompat {
         supports_store: !is_non_standard,
-        supports_developer_role: is_openrouter_developer_role_model || (!is_non_standard && !is_openrouter && !is_qwen),
+        supports_developer_role: is_openrouter_developer_role_model
+            || (!is_non_standard && !is_openrouter && !is_qwen),
         supports_reasoning_effort: !is_grok
             && !is_zai
             && !is_moonshot
@@ -239,7 +252,10 @@ fn detect_compat(model: &Model) -> ResolvedCompat {
             ThinkingFormat::Openai
         },
         thinking_token_budget_field: None,
-        supports_strict_mode: !is_moonshot && !is_together && !is_cloudflare_ai_gateway && !is_nvidia,
+        supports_strict_mode: !is_moonshot
+            && !is_together
+            && !is_cloudflare_ai_gateway
+            && !is_nvidia,
     }
 }
 
@@ -250,14 +266,18 @@ fn get_compat(model: &Model) -> ResolvedCompat {
     };
     ResolvedCompat {
         supports_store: compat.supports_store.unwrap_or(detected.supports_store),
-        supports_developer_role: compat.supports_developer_role.unwrap_or(detected.supports_developer_role),
+        supports_developer_role: compat
+            .supports_developer_role
+            .unwrap_or(detected.supports_developer_role),
         supports_reasoning_effort: compat
             .supports_reasoning_effort
             .unwrap_or(detected.supports_reasoning_effort),
         supports_usage_in_streaming: compat
             .supports_usage_in_streaming
             .unwrap_or(detected.supports_usage_in_streaming),
-        supports_finish_reason: compat.supports_finish_reason.unwrap_or(detected.supports_finish_reason),
+        supports_finish_reason: compat
+            .supports_finish_reason
+            .unwrap_or(detected.supports_finish_reason),
         max_tokens_field: compat.max_tokens_field.unwrap_or(detected.max_tokens_field),
         requires_tool_result_name: compat
             .requires_tool_result_name
@@ -268,12 +288,15 @@ fn get_compat(model: &Model) -> ResolvedCompat {
         requires_thinking_as_text: compat
             .requires_thinking_as_text
             .unwrap_or(detected.requires_thinking_as_text),
-        requires_reasoning_content_on_assistant_messages: detected.requires_reasoning_content_on_assistant_messages,
+        requires_reasoning_content_on_assistant_messages: detected
+            .requires_reasoning_content_on_assistant_messages,
         thinking_format: compat.thinking_format.unwrap_or(detected.thinking_format),
         thinking_token_budget_field: compat
             .thinking_token_budget_field
             .or(detected.thinking_token_budget_field),
-        supports_strict_mode: compat.supports_strict_mode.unwrap_or(detected.supports_strict_mode),
+        supports_strict_mode: compat
+            .supports_strict_mode
+            .unwrap_or(detected.supports_strict_mode),
     }
 }
 
@@ -301,7 +324,10 @@ fn replace_images_with_placeholder(
                 }
                 previous_was_placeholder = true;
             }
-            TextOrImageContent::Text { text, text_signature } => {
+            TextOrImageContent::Text {
+                text,
+                text_signature,
+            } => {
                 result.push(TextOrImageContent::Text {
                     text: text.clone(),
                     text_signature: text_signature.clone(),
@@ -345,7 +371,13 @@ fn to_base36(mut value: u32) -> String {
 fn normalize_tool_call_id(id: &str, provider: &str) -> String {
     let sanitize = |text: &str| -> String {
         text.chars()
-            .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect()
     };
     if let Some(separator_index) = id.find('|') {
@@ -361,7 +393,10 @@ fn normalize_tool_call_id(id: &str, provider: &str) -> String {
             return combined;
         }
         let hash: String = short_hash(id).chars().take(8).collect();
-        let prefix_len = 40usize.saturating_sub(hash.chars().count()).saturating_sub(1).max(1);
+        let prefix_len = 40usize
+            .saturating_sub(hash.chars().count())
+            .saturating_sub(1)
+            .max(1);
         let prefix: String = call_id.chars().take(prefix_len).collect();
         return format!("{prefix}_{hash}");
     }
@@ -392,7 +427,8 @@ fn transform_messages(messages: &[Message], model: &Model) -> Vec<Message> {
             Message::ToolResult(result) => {
                 let mut result = result.clone();
                 if !supports_images {
-                    result.content = replace_images_with_placeholder(&result.content, TOOL_IMAGE_PLACEHOLDER);
+                    result.content =
+                        replace_images_with_placeholder(&result.content, TOOL_IMAGE_PLACEHOLDER);
                 }
                 if let Some(normalized) = tool_call_id_map.get(&result.tool_call_id) {
                     if *normalized != result.tool_call_id {
@@ -409,38 +445,66 @@ fn transform_messages(messages: &[Message], model: &Model) -> Vec<Message> {
                 let mut content = Vec::with_capacity(assistant.content.len());
                 for block in std::mem::take(&mut assistant.content) {
                     match block {
-                        AssistantContent::Thinking { thinking, thinking_signature, redacted } => {
+                        AssistantContent::Thinking {
+                            thinking,
+                            thinking_signature,
+                            redacted,
+                        } => {
                             // TS:签名以字符串真值判断("" 视为无签名)
-                            let has_signature =
-                                thinking_signature.as_ref().is_some_and(|signature| !signature.is_empty());
+                            let has_signature = thinking_signature
+                                .as_ref()
+                                .is_some_and(|signature| !signature.is_empty());
                             if redacted {
                                 if is_same_model {
-                                    content.push(AssistantContent::Thinking { thinking, thinking_signature, redacted });
+                                    content.push(AssistantContent::Thinking {
+                                        thinking,
+                                        thinking_signature,
+                                        redacted,
+                                    });
                                 }
                             } else if is_same_model && has_signature {
-                                content.push(AssistantContent::Thinking { thinking, thinking_signature, redacted });
+                                content.push(AssistantContent::Thinking {
+                                    thinking,
+                                    thinking_signature,
+                                    redacted,
+                                });
                             } else if thinking.trim().is_empty() {
                                 // 丢弃空 thinking
                             } else if is_same_model {
-                                content.push(AssistantContent::Thinking { thinking, thinking_signature, redacted });
+                                content.push(AssistantContent::Thinking {
+                                    thinking,
+                                    thinking_signature,
+                                    redacted,
+                                });
                             } else {
                                 // 跨模型:thinking 转纯文本
                                 content.push(AssistantContent::text(thinking));
                             }
                         }
-                        AssistantContent::Text { text, text_signature } => {
+                        AssistantContent::Text {
+                            text,
+                            text_signature,
+                        } => {
                             content.push(if is_same_model {
-                                AssistantContent::Text { text, text_signature }
+                                AssistantContent::Text {
+                                    text,
+                                    text_signature,
+                                }
                             } else {
-                                AssistantContent::Text { text, text_signature: None }
+                                AssistantContent::Text {
+                                    text,
+                                    text_signature: None,
+                                }
                             });
                         }
                         AssistantContent::ToolCall(mut tool_call) => {
                             if !is_same_model {
                                 tool_call.thought_signature = None;
-                                let normalized = normalize_tool_call_id(&tool_call.id, &model.provider);
+                                let normalized =
+                                    normalize_tool_call_id(&tool_call.id, &model.provider);
                                 if normalized != tool_call.id {
-                                    tool_call_id_map.insert(tool_call.id.clone(), normalized.clone());
+                                    tool_call_id_map
+                                        .insert(tool_call.id.clone(), normalized.clone());
                                     tool_call.id = normalized;
                                 }
                             }
@@ -484,7 +548,9 @@ fn transform_messages(messages: &[Message], model: &Model) -> Vec<Message> {
         match message {
             Message::Assistant(assistant) => {
                 flush_pending!();
-                if assistant.stop_reason == StopReason::Error || assistant.stop_reason == StopReason::Aborted {
+                if assistant.stop_reason == StopReason::Error
+                    || assistant.stop_reason == StopReason::Aborted
+                {
                     // 错误/中止的回合不回放
                     continue;
                 }
@@ -569,7 +635,9 @@ fn convert_messages(model: &Model, context: &Context, compat: &ResolvedCompat) -
                         let parts: Vec<Value> = blocks
                             .iter()
                             .map(|block| match block {
-                                TextOrImageContent::Text { text, .. } => json!({ "type": "text", "text": text }),
+                                TextOrImageContent::Text { text, .. } => {
+                                    json!({ "type": "text", "text": text })
+                                }
                                 TextOrImageContent::Image { data, mime_type } => {
                                     image_url_part(data, mime_type)
                                 }
@@ -642,7 +710,8 @@ fn convert_messages(model: &Model, context: &Context, compat: &ResolvedCompat) -
 
                 if !image_parts.is_empty() {
                     if compat.requires_assistant_after_tool_result {
-                        params.push(json!({ "role": "assistant", "content": ASSISTANT_BRIDGE_TEXT }));
+                        params
+                            .push(json!({ "role": "assistant", "content": ASSISTANT_BRIDGE_TEXT }));
                     }
                     let mut content = vec![json!({ "type": "text", "text": ATTACHED_IMAGES_TEXT })];
                     content.extend(image_parts);
@@ -692,9 +761,11 @@ fn serialize_assistant_message(
         .content
         .iter()
         .filter_map(|block| match block {
-            AssistantContent::Thinking { thinking, thinking_signature, .. } => {
-                Some((thinking.as_str(), thinking_signature.as_deref()))
-            }
+            AssistantContent::Thinking {
+                thinking,
+                thinking_signature,
+                ..
+            } => Some((thinking.as_str(), thinking_signature.as_deref())),
             _ => None,
         })
         .collect();
@@ -713,12 +784,18 @@ fn serialize_assistant_message(
         .find_map(|(_, signature)| parse_openai_reasoning_details(*signature));
     let legacy_details: Vec<Value> = tool_calls
         .iter()
-        .filter_map(|tool_call| parse_legacy_encrypted_reasoning_detail(tool_call.thought_signature.as_deref()))
+        .filter_map(|tool_call| {
+            parse_legacy_encrypted_reasoning_detail(tool_call.thought_signature.as_deref())
+        })
         .collect();
-    let preserved_details = signed_details.or_else(|| (!legacy_details.is_empty()).then_some(legacy_details));
+    let preserved_details =
+        signed_details.or_else(|| (!legacy_details.is_empty()).then_some(legacy_details));
 
-    let non_empty_thinking: Vec<(&str, Option<&str>)> =
-        thinking_blocks.iter().copied().filter(|(thinking, _)| !thinking.trim().is_empty()).collect();
+    let non_empty_thinking: Vec<(&str, Option<&str>)> = thinking_blocks
+        .iter()
+        .copied()
+        .filter(|(thinking, _)| !thinking.trim().is_empty())
+        .collect();
 
     if !non_empty_thinking.is_empty() {
         if compat.requires_thinking_as_text {
@@ -789,7 +866,10 @@ fn serialize_assistant_message(
         && model.reasoning
         && !message_obj.contains_key("reasoning_content")
     {
-        message_obj.insert("reasoning_content".to_string(), Value::String(String::new()));
+        message_obj.insert(
+            "reasoning_content".to_string(),
+            Value::String(String::new()),
+        );
     }
 
     let has_content = match message_obj.get("content") {
@@ -906,7 +986,9 @@ fn supported_thinking_levels(model: &Model) -> Vec<ModelThinkingLevel> {
         .filter(|level| match map_level(model, level_key(*level)) {
             MappedLevel::Null => false,
             MappedLevel::Value(_) => true,
-            MappedLevel::Missing => !matches!(level, ModelThinkingLevel::Xhigh | ModelThinkingLevel::Max),
+            MappedLevel::Missing => {
+                !matches!(level, ModelThinkingLevel::Xhigh | ModelThinkingLevel::Max)
+            }
         })
         .collect()
 }
@@ -1015,7 +1097,10 @@ fn resolve_clamped_thinking_budget(
     }
     let ceiling = ceiling.unwrap_or(model.max_tokens);
     let budget = clamp_thinking_budget_to_answer_room(
-        thinking_budget_for_level(effort, options.and_then(|options| options.thinking_budgets.as_ref())),
+        thinking_budget_for_level(
+            effort,
+            options.and_then(|options| options.thinking_budgets.as_ref()),
+        ),
         ceiling,
     );
     (budget > 0).then_some(budget)
@@ -1063,7 +1148,10 @@ fn apply_thinking_params(
             body.insert("enable_thinking".to_string(), json!(effort.is_some()));
             if effort.is_some() && compat.supports_reasoning_effort {
                 if let Some(key) = effort_key {
-                    body.insert("reasoning_effort".to_string(), json!(map_level_or_key(model, key)));
+                    body.insert(
+                        "reasoning_effort".to_string(),
+                        json!(map_level_or_key(model, key)),
+                    );
                 }
             }
         }
@@ -1097,13 +1185,19 @@ fn apply_thinking_params(
             }
             if effort.is_some() && compat.supports_reasoning_effort {
                 if let Some(key) = effort_key {
-                    body.insert("reasoning_effort".to_string(), json!(map_level_or_key(model, key)));
+                    body.insert(
+                        "reasoning_effort".to_string(),
+                        json!(map_level_or_key(model, key)),
+                    );
                 }
             }
         }
         ThinkingFormat::Openrouter => {
             if let Some(key) = effort_key {
-                body.insert("reasoning".to_string(), json!({ "effort": map_level_or_key(model, key) }));
+                body.insert(
+                    "reasoning".to_string(),
+                    json!({ "effort": map_level_or_key(model, key) }),
+                );
             } else if !matches!(map_level(model, "off"), MappedLevel::Null) {
                 let value = match map_level(model, "off") {
                     MappedLevel::Value(value) => value,
@@ -1120,10 +1214,16 @@ fn apply_thinking_params(
             }
         }
         ThinkingFormat::Together => {
-            body.insert("reasoning".to_string(), json!({ "enabled": effort.is_some() }));
+            body.insert(
+                "reasoning".to_string(),
+                json!({ "enabled": effort.is_some() }),
+            );
             if effort.is_some() && compat.supports_reasoning_effort {
                 if let Some(key) = effort_key {
-                    body.insert("reasoning_effort".to_string(), json!(map_level_or_key(model, key)));
+                    body.insert(
+                        "reasoning_effort".to_string(),
+                        json!(map_level_or_key(model, key)),
+                    );
                 }
             }
         }
@@ -1142,7 +1242,10 @@ fn apply_thinking_params(
             if effort.is_some() {
                 if compat.supports_reasoning_effort {
                     if let Some(key) = effort_key {
-                        body.insert("reasoning_effort".to_string(), json!(map_level_or_key(model, key)));
+                        body.insert(
+                            "reasoning_effort".to_string(),
+                            json!(map_level_or_key(model, key)),
+                        );
                     }
                 }
             } else if compat.supports_reasoning_effort {
@@ -1236,7 +1339,10 @@ fn estimate_context_tokens(context: &Context) -> i64 {
 
     match usage_info {
         Some((usage_tokens, index)) => {
-            let trailing: i64 = context.messages[index + 1..].iter().map(estimate_message_tokens).sum();
+            let trailing: i64 = context.messages[index + 1..]
+                .iter()
+                .map(estimate_message_tokens)
+                .sum();
             let mut added_names: HashSet<&str> = HashSet::new();
             for message in &context.messages[index + 1..] {
                 if let Message::ToolResult(result) = message {
@@ -1248,7 +1354,10 @@ fn estimate_context_tokens(context: &Context) -> i64 {
                 }
             }
             let added_tool_tokens = estimate_tools_tokens(
-                context.tools.iter().filter(|tool| added_names.contains(tool.name.as_str())),
+                context
+                    .tools
+                    .iter()
+                    .filter(|tool| added_names.contains(tool.name.as_str())),
             );
             usage_tokens + trailing + added_tool_tokens
         }
@@ -1308,15 +1417,23 @@ pub fn build_request_body(
     body.insert("stream".to_string(), json!(true));
 
     // OpenAI prompt cache key(官方端点 + 未禁用缓存时)
-    let cache_retention = options.and_then(|options| options.cache_retention).unwrap_or(CacheRetention::Short);
+    let cache_retention = options
+        .and_then(|options| options.cache_retention)
+        .unwrap_or(CacheRetention::Short);
     if model.base_url.contains(OPENAI_HOST_SUFFIX) && cache_retention != CacheRetention::None {
         if let Some(session_id) = options.and_then(|options| options.session_id.as_deref()) {
-            body.insert("prompt_cache_key".to_string(), json!(clamp_openai_prompt_cache_key(session_id)));
+            body.insert(
+                "prompt_cache_key".to_string(),
+                json!(clamp_openai_prompt_cache_key(session_id)),
+            );
         }
     }
 
     if compat.supports_usage_in_streaming {
-        body.insert("stream_options".to_string(), json!({ "include_usage": true }));
+        body.insert(
+            "stream_options".to_string(),
+            json!({ "include_usage": true }),
+        );
     }
     if compat.supports_store {
         body.insert("store".to_string(), json!(false));
@@ -1369,14 +1486,22 @@ pub fn build_request_body(
 
     // 顶层 thinking token 预算字段(独立于 thinkingFormat)
     if let Some(field) = compat.thinking_token_budget_field {
-        if let Some(budget) = resolve_clamped_thinking_budget(model, reasoning_effort, options, emitted_max_tokens) {
-            body.insert(thinking_token_budget_field_key(field).to_string(), json!(budget));
+        if let Some(budget) =
+            resolve_clamped_thinking_budget(model, reasoning_effort, options, emitted_max_tokens)
+        {
+            body.insert(
+                thinking_token_budget_field_key(field).to_string(),
+                json!(budget),
+            );
         }
     }
 
     // sampling_params:model 级先应用,options 级覆盖命名请求字段
     insert_sampling_params(&mut body, model.sampling_params.as_ref());
-    insert_sampling_params(&mut body, options.and_then(|options| options.sampling_params.as_ref()));
+    insert_sampling_params(
+        &mut body,
+        options.and_then(|options| options.sampling_params.as_ref()),
+    );
 
     Value::Object(body)
 }
@@ -1393,7 +1518,11 @@ fn parse_chunk_usage(raw_usage: &Value, model: &Model) -> Usage {
     let cache_read_tokens = details
         .and_then(|details| details.get("cached_tokens"))
         .and_then(Value::as_i64)
-        .or_else(|| raw_usage.get("prompt_cache_hit_tokens").and_then(Value::as_i64))
+        .or_else(|| {
+            raw_usage
+                .get("prompt_cache_hit_tokens")
+                .and_then(Value::as_i64)
+        })
         .or_else(|| raw_usage.get("cached_tokens").and_then(Value::as_i64))
         .unwrap_or(0);
     let cache_write_tokens = details
@@ -1429,7 +1558,8 @@ fn calculate_cost(model: &Model, usage: &mut Usage) {
     let mut matched_threshold = -1i64;
     if let Some(tiers) = &model.cost.tiers {
         for tier in tiers {
-            if input_tokens > tier.input_tokens_above && tier.input_tokens_above > matched_threshold {
+            if input_tokens > tier.input_tokens_above && tier.input_tokens_above > matched_threshold
+            {
                 rates = &tier.rates;
                 matched_threshold = tier.input_tokens_above;
             }
@@ -1441,9 +1571,11 @@ fn calculate_cost(model: &Model, usage: &mut Usage) {
     usage.cost.input = rates.input / per_million * usage.input as f64;
     usage.cost.output = rates.output / per_million * usage.output as f64;
     usage.cost.cache_read = rates.cache_read / per_million * usage.cache_read as f64;
-    usage.cost.cache_write =
-        (rates.cache_write * short_write as f64 + rates.input * 2.0 * long_write as f64) / per_million;
-    usage.cost.total = usage.cost.input + usage.cost.output + usage.cost.cache_read + usage.cost.cache_write;
+    usage.cost.cache_write = (rates.cache_write * short_write as f64
+        + rates.input * 2.0 * long_write as f64)
+        / per_million;
+    usage.cost.total =
+        usage.cost.input + usage.cost.output + usage.cost.cache_read + usage.cost.cache_write;
 }
 
 /// TS mapStopReason:finish_reason → 统一 StopReason;未知/内容过滤 → error。
@@ -1509,7 +1641,11 @@ fn repair_json(json_text: &str) -> String {
                     index += 1;
                 }
                 Some('u') => {
-                    let hex: String = chars.get(index + 2..index + 6).unwrap_or(&[]).iter().collect();
+                    let hex: String = chars
+                        .get(index + 2..index + 6)
+                        .unwrap_or(&[])
+                        .iter()
+                        .collect();
                     if hex.chars().count() == 4 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
                         repaired.push_str("\\u");
                         repaired.push_str(&hex);
@@ -1656,7 +1792,8 @@ fn close_candidate(mut text: String, stack: &[JsonFrame]) -> Option<String> {
                     }
                 }
             }
-            let opening_quote = opening_quote?;            text.truncate(opening_quote);
+            let opening_quote = opening_quote?;
+            text.truncate(opening_quote);
             continue;
         }
         break;
@@ -1678,7 +1815,9 @@ fn is_openai_reasoning_detail(detail: &Value) -> bool {
         return false;
     };
     let string_or_absent = |key: &str| {
-        object.get(key).is_none_or(|value| value.is_null() || value.is_string())
+        object
+            .get(key)
+            .is_none_or(|value| value.is_null() || value.is_string())
     };
     if !string_or_absent("id") || !string_or_absent("signature") {
         return false;
@@ -1735,7 +1874,11 @@ fn value_is_blank(value: Option<&Value>) -> bool {
 /// TS appendOpenAIReasoningDetail:相邻同类 text/summary 合并,其余追加;
 /// 公共字段按 ??=/||= 语义补齐。
 fn append_openai_reasoning_detail(details: &mut Vec<Value>, detail: Value) {
-    let kind = detail.get("type").and_then(Value::as_str).unwrap_or_default().to_string();
+    let kind = detail
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
     let is_text = kind == "reasoning.text";
     let is_summary = kind == "reasoning.summary";
     let mut merged = false;
@@ -1744,14 +1887,20 @@ fn append_openai_reasoning_detail(details: &mut Vec<Value>, detail: Value) {
         if let Some(last) = details.last_mut() {
             if last.get("type").and_then(Value::as_str) == Some(kind.as_str()) {
                 if let Some(last_object) = last.as_object_mut() {
-                    let delta_text =
-                        detail.get(text_key).and_then(Value::as_str).unwrap_or_default().to_string();
+                    let delta_text = detail
+                        .get(text_key)
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
                     let previous = last_object
                         .get(text_key)
                         .and_then(Value::as_str)
                         .unwrap_or_default()
                         .to_string();
-                    last_object.insert(text_key.to_string(), Value::String(format!("{previous}{delta_text}")));
+                    last_object.insert(
+                        text_key.to_string(),
+                        Value::String(format!("{previous}{delta_text}")),
+                    );
                     // signature ||= detail.signature(空串/null/缺失时覆盖)
                     if value_is_blank(last_object.get("signature")) {
                         if let Some(signature) = detail.get("signature") {
@@ -1770,7 +1919,8 @@ fn append_openai_reasoning_detail(details: &mut Vec<Value>, detail: Value) {
                         }
                     }
                     if value_is_null_or_absent(last_object.get("format")) {
-                        if let Some(format) = detail.get("format").filter(|value| !value.is_null()) {
+                        if let Some(format) = detail.get("format").filter(|value| !value.is_null())
+                        {
                             last_object.insert("format".to_string(), format.clone());
                         }
                     }
@@ -1837,9 +1987,10 @@ impl StreamAggregator {
         if let Some(index) = self.text_open {
             return (index, false);
         }
-        self.output
-            .content
-            .push(AssistantContent::Text { text: String::new(), text_signature: None });
+        self.output.content.push(AssistantContent::Text {
+            text: String::new(),
+            text_signature: None,
+        });
         let index = self.output.content.len() - 1;
         self.text_open = Some(index);
         (index, true)
@@ -1869,20 +2020,24 @@ impl StreamAggregator {
         }
         if let Some(index) = found {
             if let Some(stream_index) = stream_index {
-                self.tool_blocks_by_index.entry(stream_index).or_insert(index);
+                self.tool_blocks_by_index
+                    .entry(stream_index)
+                    .or_insert(index);
             }
             if !id.is_empty() {
                 self.tool_blocks_by_id.insert(id.to_string(), index);
             }
             return (index, false);
         }
-        self.output.content.push(AssistantContent::ToolCall(ToolCall {
-            id: id.to_string(),
-            name: String::new(),
-            arguments: Map::new(),
-            thought_signature: None,
-            namespace: None,
-        }));
+        self.output
+            .content
+            .push(AssistantContent::ToolCall(ToolCall {
+                id: id.to_string(),
+                name: String::new(),
+                arguments: Map::new(),
+                thought_signature: None,
+                namespace: None,
+            }));
         let index = self.output.content.len() - 1;
         if let Some(stream_index) = stream_index {
             self.tool_blocks_by_index.insert(stream_index, index);
@@ -1919,7 +2074,9 @@ impl StreamAggregator {
     }
 
     fn append_thinking(&mut self, index: usize, delta: &str) {
-        if let Some(AssistantContent::Thinking { thinking, .. }) = self.output.content.get_mut(index) {
+        if let Some(AssistantContent::Thinking { thinking, .. }) =
+            self.output.content.get_mut(index)
+        {
             thinking.push_str(delta);
         }
     }
@@ -1940,8 +2097,9 @@ impl StreamAggregator {
         if let Some(details) = self.streamed_reasoning_details.take() {
             let signature = Value::Array(details).to_string();
             if let Some(index) = self.thinking_open {
-                if let Some(AssistantContent::Thinking { thinking_signature, .. }) =
-                    self.output.content.get_mut(index)
+                if let Some(AssistantContent::Thinking {
+                    thinking_signature, ..
+                }) = self.output.content.get_mut(index)
                 {
                     *thinking_signature = Some(signature);
                 }
@@ -1978,7 +2136,11 @@ impl StreamAggregator {
             }
         }
         if !usage_taken {
-            if let Some(choice) = chunk_object.get("choices").and_then(Value::as_array).and_then(|c| c.first()) {
+            if let Some(choice) = chunk_object
+                .get("choices")
+                .and_then(Value::as_array)
+                .and_then(|c| c.first())
+            {
                 if let Some(usage) = choice.get("usage").filter(|usage| usage.is_object()) {
                     self.output.usage = parse_chunk_usage(usage, &self.model);
                 }
@@ -2013,7 +2175,11 @@ impl StreamAggregator {
         };
 
         // 正文增量
-        if let Some(content) = delta.get("content").and_then(Value::as_str).filter(|c| !c.is_empty()) {
+        if let Some(content) = delta
+            .get("content")
+            .and_then(Value::as_str)
+            .filter(|c| !c.is_empty())
+        {
             let (index, created) = self.ensure_text_block();
             if created {
                 events.push(AssistantMessageEvent::TextStart {
@@ -2032,7 +2198,11 @@ impl StreamAggregator {
         // 思考增量:reasoning_content(llama.cpp)/ reasoning / reasoning_text,
         // 取第一个非空字段避免重复(chutes.ai 两者同文)
         for field in ["reasoning_content", "reasoning", "reasoning_text"] {
-            if let Some(value) = delta.get(field).and_then(Value::as_str).filter(|v| !v.is_empty()) {
+            if let Some(value) = delta
+                .get(field)
+                .and_then(Value::as_str)
+                .filter(|v| !v.is_empty())
+            {
                 let signature = if self.model.provider == "opencode-go" && field == "reasoning" {
                     "reasoning_content"
                 } else {
@@ -2171,7 +2341,11 @@ impl StreamAggregator {
     }
 
     /// 请求未建立(取消/HTTP 失败)时的错误收尾;错误路径不补发块 end 事件。
-    fn error_final(mut self, reason: StopReason, message: String) -> (AssistantMessageEvent, AssistantMessage) {
+    fn error_final(
+        mut self,
+        reason: StopReason,
+        message: String,
+    ) -> (AssistantMessageEvent, AssistantMessage) {
         self.prepare_error(reason, message);
         let event = self.error_event(reason);
         (event, self.output)
@@ -2184,9 +2358,17 @@ impl StreamAggregator {
         mut self,
         aborted: bool,
         stream_error: Option<String>,
-    ) -> (Vec<AssistantMessageEvent>, AssistantMessage, AssistantMessageEvent) {
+    ) -> (
+        Vec<AssistantMessageEvent>,
+        AssistantMessage,
+        AssistantMessageEvent,
+    ) {
         if let Some(message) = stream_error {
-            let reason = if aborted { StopReason::Aborted } else { StopReason::Error };
+            let reason = if aborted {
+                StopReason::Aborted
+            } else {
+                StopReason::Error
+            };
             self.prepare_error(reason, message);
             let event = self.error_event(reason);
             return (Vec::new(), self.output, event);
@@ -2220,7 +2402,10 @@ impl StreamAggregator {
         if (self.compat.supports_finish_reason && !self.has_finish_reason)
             || self.output.stop_reason == StopReason::Pending
         {
-            self.prepare_error(StopReason::Error, "Stream ended without finish_reason".to_string());
+            self.prepare_error(
+                StopReason::Error,
+                "Stream ended without finish_reason".to_string(),
+            );
             let event = self.error_event(StopReason::Error);
             return (events, self.output, event);
         }
@@ -2305,7 +2490,8 @@ async fn run_stream(
     });
 
     if signal.as_ref().is_some_and(|token| token.is_cancelled()) {
-        let (event, message) = aggregator.error_final(StopReason::Aborted, "Request was aborted".to_string());
+        let (event, message) =
+            aggregator.error_final(StopReason::Aborted, "Request was aborted".to_string());
         writer.push(event);
         writer.end(message);
         return;
@@ -2313,15 +2499,20 @@ async fn run_stream(
 
     // 请求体构造 + onPayload 观测/改写
     let mut body = build_request_body(&model, &context, options.as_ref());
-    if let Some(on_payload) = options.as_ref().and_then(|options| options.on_payload.as_ref()) {
+    if let Some(on_payload) = options
+        .as_ref()
+        .and_then(|options| options.on_payload.as_ref())
+    {
         if let Some(next) = on_payload(body.clone()).await {
             body = next;
         }
     }
 
     let connect = async {
-        let api_key = resolve_api_key(&model, options.as_ref()).map_err(|message| (message, false))?;
-        let client = build_client(&model, options.as_ref(), api_key).map_err(|message| (message, false))?;
+        let api_key =
+            resolve_api_key(&model, options.as_ref()).map_err(|message| (message, false))?;
+        let client =
+            build_client(&model, options.as_ref(), api_key).map_err(|message| (message, false))?;
         let stream: SseStream = client
             .chat()
             .create_stream_byot(body)
@@ -2340,7 +2531,11 @@ async fn run_stream(
     let mut stream = match connected {
         Ok(stream) => stream,
         Err((message, aborted)) => {
-            let reason = if aborted { StopReason::Aborted } else { StopReason::Error };
+            let reason = if aborted {
+                StopReason::Aborted
+            } else {
+                StopReason::Error
+            };
             let (event, message) = aggregator.error_final(reason, message);
             writer.push(event);
             writer.end(message);
@@ -2376,7 +2571,10 @@ async fn run_stream(
         }
     }
     // 流正常结束但 signal 已中止(对齐 TS 循环后的 signal.aborted 检查)
-    if stream_error.is_none() && !aborted && signal.as_ref().is_some_and(|token| token.is_cancelled()) {
+    if stream_error.is_none()
+        && !aborted
+        && signal.as_ref().is_some_and(|token| token.is_cancelled())
+    {
         aborted = true;
     }
 
@@ -2453,7 +2651,7 @@ mod tests {
         })
     }
 
-    use super::super::types::{API_OPENAI_COMPLETIONS, OpenAICompletionsCompat, UserMessage};
+    use super::super::types::{OpenAICompletionsCompat, UserMessage, API_OPENAI_COMPLETIONS};
 
     fn context_of(messages: Vec<Message>) -> Context {
         Context {
@@ -2532,7 +2730,10 @@ mod tests {
         assert_eq!(msgs[1]["tool_calls"][0]["id"], "call_1");
         assert_eq!(msgs[1]["tool_calls"][0]["type"], "function");
         assert_eq!(msgs[1]["tool_calls"][0]["function"]["name"], "get_weather");
-        assert_eq!(msgs[1]["tool_calls"][0]["function"]["arguments"], r#"{"city":"Oslo"}"#);
+        assert_eq!(
+            msgs[1]["tool_calls"][0]["function"]["arguments"],
+            r#"{"city":"Oslo"}"#
+        );
         assert_eq!(msgs[2]["role"], "tool");
         assert_eq!(msgs[2]["tool_call_id"], "call_1");
         assert_eq!(msgs[2]["content"], "18C");
@@ -2908,7 +3109,9 @@ mod tests {
         let call_id = msgs[0]["tool_calls"][0]["id"].as_str().unwrap();
         let result_id = msgs[1]["tool_call_id"].as_str().unwrap();
         assert_eq!(call_id, result_id);
-        assert!(call_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'));
+        assert!(call_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'));
         assert!(call_id.chars().count() <= 40);
     }
 
@@ -2937,19 +3140,50 @@ mod tests {
     #[test]
     fn compat_detection_by_base_url() {
         let cases: &[(&str, ThinkingFormat, MaxTokensField)] = &[
-            ("https://openrouter.ai/api/v1", ThinkingFormat::Openrouter, MaxTokensField::MaxCompletionTokens),
-            ("https://api.deepseek.com/v1", ThinkingFormat::Deepseek, MaxTokensField::MaxTokens),
-            ("https://api.z.ai/api/paas/v4", ThinkingFormat::Zai, MaxTokensField::MaxTokens),
-            ("https://open.bigmodel.cn/api/paas/v4", ThinkingFormat::Zai, MaxTokensField::MaxTokens),
-            ("https://api.together.xyz/v1", ThinkingFormat::Together, MaxTokensField::MaxTokens),
-            ("https://dashscope.aliyuncs.com/compatible-mode/v1", ThinkingFormat::Qwen, MaxTokensField::MaxTokens),
-            ("https://api.openai.com/v1", ThinkingFormat::Openai, MaxTokensField::MaxCompletionTokens),
+            (
+                "https://openrouter.ai/api/v1",
+                ThinkingFormat::Openrouter,
+                MaxTokensField::MaxCompletionTokens,
+            ),
+            (
+                "https://api.deepseek.com/v1",
+                ThinkingFormat::Deepseek,
+                MaxTokensField::MaxTokens,
+            ),
+            (
+                "https://api.z.ai/api/paas/v4",
+                ThinkingFormat::Zai,
+                MaxTokensField::MaxTokens,
+            ),
+            (
+                "https://open.bigmodel.cn/api/paas/v4",
+                ThinkingFormat::Zai,
+                MaxTokensField::MaxTokens,
+            ),
+            (
+                "https://api.together.xyz/v1",
+                ThinkingFormat::Together,
+                MaxTokensField::MaxTokens,
+            ),
+            (
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                ThinkingFormat::Qwen,
+                MaxTokensField::MaxTokens,
+            ),
+            (
+                "https://api.openai.com/v1",
+                ThinkingFormat::Openai,
+                MaxTokensField::MaxCompletionTokens,
+            ),
         ];
         for (base_url, format, max_tokens_field) in cases {
             let model = test_model(base_url);
             let compat = get_compat(&model);
             assert_eq!(compat.thinking_format, *format, "format for {base_url}");
-            assert_eq!(compat.max_tokens_field, *max_tokens_field, "max tokens for {base_url}");
+            assert_eq!(
+                compat.max_tokens_field, *max_tokens_field,
+                "max tokens for {base_url}"
+            );
         }
         // 探测细节
         let compat = get_compat(&test_model("https://api.moonshot.cn/v1"));
@@ -3034,18 +3268,28 @@ mod tests {
             json!(null),
         )));
         events.extend(aggregator.apply_chunk(&chunk(json!({}), json!("tool_calls"))));
-        assert!(matches!(events[0], AssistantMessageEvent::ToolcallStart { .. }));
-        assert!(matches!(events[1], AssistantMessageEvent::ToolcallDelta { .. }));
+        assert!(matches!(
+            events[0],
+            AssistantMessageEvent::ToolcallStart { .. }
+        ));
+        assert!(matches!(
+            events[1],
+            AssistantMessageEvent::ToolcallDelta { .. }
+        ));
 
         let (end_events, _message, terminal) = aggregator.finalize(false, None);
-        let Some(AssistantMessageEvent::ToolcallEnd { tool_call, .. }) =
-            end_events.iter().find(|e| matches!(e, AssistantMessageEvent::ToolcallEnd { .. }))
+        let Some(AssistantMessageEvent::ToolcallEnd { tool_call, .. }) = end_events
+            .iter()
+            .find(|e| matches!(e, AssistantMessageEvent::ToolcallEnd { .. }))
         else {
             panic!("expected toolcall_end");
         };
         assert_eq!(tool_call.id, "call_1");
         assert_eq!(tool_call.name, "get_weather");
-        assert_eq!(tool_call.arguments.get("city").and_then(Value::as_str), Some("Oslo"));
+        assert_eq!(
+            tool_call.arguments.get("city").and_then(Value::as_str),
+            Some("Oslo")
+        );
         match terminal {
             AssistantMessageEvent::Done { reason, .. } => assert_eq!(reason, StopReason::ToolUse),
             other => unreachable!("{other:?}"),
@@ -3075,30 +3319,47 @@ mod tests {
         };
         assert_eq!(second.id, "call_b");
         assert_eq!(second.arguments.get("x").and_then(Value::as_i64), Some(1));
-        assert!(matches!(terminal, AssistantMessageEvent::Done { reason: StopReason::ToolUse, .. }));
+        assert!(matches!(
+            terminal,
+            AssistantMessageEvent::Done {
+                reason: StopReason::ToolUse,
+                ..
+            }
+        ));
     }
 
     #[test]
     fn reasoning_delta_creates_thinking_block() {
         let mut aggregator = aggregator_for("https://api.openai.com/v1");
-        let mut events = aggregator.apply_chunk(&chunk(json!({"reasoning_content": "hmm"}), json!(null)));
+        let mut events =
+            aggregator.apply_chunk(&chunk(json!({"reasoning_content": "hmm"}), json!(null)));
         events.extend(aggregator.apply_chunk(&chunk(json!({"content": "answer"}), json!(null))));
-        assert!(matches!(events[0], AssistantMessageEvent::ThinkingStart { .. }));
-        assert!(matches!(events[1], AssistantMessageEvent::ThinkingDelta { .. }));
+        assert!(matches!(
+            events[0],
+            AssistantMessageEvent::ThinkingStart { .. }
+        ));
+        assert!(matches!(
+            events[1],
+            AssistantMessageEvent::ThinkingDelta { .. }
+        ));
         assert!(matches!(events[2], AssistantMessageEvent::TextStart { .. }));
 
         let (end_events, message, _) = aggregator.finalize(false, None);
-        let Some(AssistantMessageEvent::ThinkingEnd { content, .. }) =
-            end_events.iter().find(|e| matches!(e, AssistantMessageEvent::ThinkingEnd { .. }))
+        let Some(AssistantMessageEvent::ThinkingEnd { content, .. }) = end_events
+            .iter()
+            .find(|e| matches!(e, AssistantMessageEvent::ThinkingEnd { .. }))
         else {
             panic!("expected thinking_end");
         };
         assert_eq!(content, "hmm");
-        assert_eq!(message.content[0], AssistantContent::Thinking {
-            thinking: "hmm".to_string(),
-            thinking_signature: Some("reasoning_content".to_string()),
-            redacted: false,
-        });
+        assert_eq!(
+            message.content[0],
+            AssistantContent::Thinking {
+                thinking: "hmm".to_string(),
+                thinking_signature: Some("reasoning_content".to_string()),
+                redacted: false,
+            }
+        );
         assert_eq!(message.content[1], AssistantContent::text("answer"));
     }
 
@@ -3139,7 +3400,13 @@ mod tests {
         assert_eq!(message.usage.output, 40);
         assert_eq!(message.usage.total_tokens, 140);
         assert_eq!(message.usage.reasoning, Some(10));
-        assert!(matches!(terminal, AssistantMessageEvent::Done { reason: StopReason::Stop, .. }));
+        assert!(matches!(
+            terminal,
+            AssistantMessageEvent::Done {
+                reason: StopReason::Stop,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -3164,7 +3431,13 @@ mod tests {
         let (_, message, terminal) = aggregator.finalize(false, None);
         assert_eq!(message.stop_reason, StopReason::Length);
         assert_eq!(message.raw_stop_reason.as_deref(), Some("length"));
-        assert!(matches!(terminal, AssistantMessageEvent::Done { reason: StopReason::Length, .. }));
+        assert!(matches!(
+            terminal,
+            AssistantMessageEvent::Done {
+                reason: StopReason::Length,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -3180,7 +3453,10 @@ mod tests {
         match terminal {
             AssistantMessageEvent::Error { reason, error } => {
                 assert_eq!(reason, StopReason::Error);
-                assert_eq!(error.error_message.as_deref(), Some("Provider finish_reason: content_filter"));
+                assert_eq!(
+                    error.error_message.as_deref(),
+                    Some("Provider finish_reason: content_filter")
+                );
             }
             other => unreachable!("{other:?}"),
         }
@@ -3210,11 +3486,18 @@ mod tests {
     fn stream_error_encoding_skips_block_ends() {
         let mut aggregator = aggregator_for("https://api.openai.com/v1");
         aggregator.apply_chunk(&chunk(json!({"content": "partial"}), json!(null)));
-        let (end_events, message, terminal) = aggregator.finalize(false, Some("500: boom".to_string()));
+        let (end_events, message, terminal) =
+            aggregator.finalize(false, Some("500: boom".to_string()));
         assert!(end_events.is_empty());
         assert_eq!(message.stop_reason, StopReason::Error);
         assert_eq!(message.error_message.as_deref(), Some("500: boom"));
-        assert!(matches!(terminal, AssistantMessageEvent::Error { reason: StopReason::Error, .. }));
+        assert!(matches!(
+            terminal,
+            AssistantMessageEvent::Error {
+                reason: StopReason::Error,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -3223,7 +3506,10 @@ mod tests {
         aggregator.apply_chunk(&chunk(json!({"content": "x"}), json!(null)));
         let (_, message, terminal) = aggregator.finalize(false, None);
         assert_eq!(message.stop_reason, StopReason::Error);
-        assert_eq!(message.error_message.as_deref(), Some("Stream ended without finish_reason"));
+        assert_eq!(
+            message.error_message.as_deref(),
+            Some("Stream ended without finish_reason")
+        );
         assert!(matches!(terminal, AssistantMessageEvent::Error { .. }));
     }
 
@@ -3259,7 +3545,10 @@ mod tests {
             "model": "gpt-test-real",
             "choices": [{ "index": 0, "delta": {"content": "hi"}, "finish_reason": "stop" }]
         }));
-        assert_eq!(aggregator.output().response_model.as_deref(), Some("gpt-test-real"));
+        assert_eq!(
+            aggregator.output().response_model.as_deref(),
+            Some("gpt-test-real")
+        );
         // 同名模型不记录
         let mut aggregator = aggregator_for("https://api.openai.com/v1");
         aggregator.apply_chunk(&json!({
@@ -3284,7 +3573,12 @@ mod tests {
         ));
         aggregator.apply_chunk(&chunk(json!({"content": "done"}), json!("stop")));
         let (_, message, _) = aggregator.finalize(false, None);
-        let AssistantContent::Thinking { thinking, thinking_signature, .. } = &message.content[0] else {
+        let AssistantContent::Thinking {
+            thinking,
+            thinking_signature,
+            ..
+        } = &message.content[0]
+        else {
             panic!()
         };
         assert_eq!(thinking, "");
@@ -3303,25 +3597,44 @@ mod tests {
             serde_json::from_value::<Map<String, Value>>(json!({"a": 1})).unwrap()
         );
         assert_eq!(
-            parse(r#"{"path": "src/ma"#).get("path").and_then(Value::as_str),
+            parse(r#"{"path": "src/ma"#)
+                .get("path")
+                .and_then(Value::as_str),
             Some("src/ma")
         );
-        assert_eq!(parse(r#"{"a": 1, "b"#).get("a").and_then(Value::as_i64), Some(1));
         assert_eq!(
-            parse(r#"{"a": [1, 2"#).get("a").and_then(|v| v.as_array()).map(|items| items.len()),
+            parse(r#"{"a": 1, "b"#).get("a").and_then(Value::as_i64),
+            Some(1)
+        );
+        assert_eq!(
+            parse(r#"{"a": [1, 2"#)
+                .get("a")
+                .and_then(|v| v.as_array())
+                .map(|items| items.len()),
             Some(2)
         );
         assert_eq!(
-            parse(r#"{"a": {"b": 1"#).get("a").and_then(|v| v.get("b")).and_then(Value::as_i64),
+            parse(r#"{"a": {"b": 1"#)
+                .get("a")
+                .and_then(|v| v.get("b"))
+                .and_then(Value::as_i64),
             Some(1)
         );
         assert!(parse(r#"{"a": tru"#).is_empty());
         assert!(parse(r#"{"na"#).is_empty());
         assert!(parse("").is_empty());
         // 转义残片("b\ 结尾):丢弃尾部反斜杠后闭合,不 panic
-        assert_eq!(parse(r#"{"a": "b\"#).get("a").and_then(Value::as_str), Some("b"));
+        assert_eq!(
+            parse(r#"{"a": "b\"#).get("a").and_then(Value::as_str),
+            Some("b")
+        );
         // 完整但带裸控制字符
-        assert_eq!(parse("{\"a\": \"li\nne\"}").get("a").and_then(Value::as_str), Some("li\nne"));
+        assert_eq!(
+            parse("{\"a\": \"li\nne\"}")
+                .get("a")
+                .and_then(Value::as_str),
+            Some("li\nne")
+        );
     }
 
     #[test]
@@ -3337,13 +3650,18 @@ mod tests {
         let first = short_hash("call|item");
         let second = short_hash("call|item");
         assert_eq!(first, second);
-        assert!(first.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
+        assert!(first
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
         assert!(!first.is_empty());
     }
 
     #[test]
     fn normalize_tool_call_id_handles_plain_and_openai_truncation() {
-        assert_eq!(normalize_tool_call_id("call_simple", "custom"), "call_simple");
+        assert_eq!(
+            normalize_tool_call_id("call_simple", "custom"),
+            "call_simple"
+        );
         let long = "a".repeat(50);
         assert_eq!(normalize_tool_call_id(&long, "openai"), "a".repeat(40));
         assert_eq!(normalize_tool_call_id(&long, "custom"), long);
@@ -3395,6 +3713,9 @@ mod tests {
             low: Some(4096),
             ..Default::default()
         };
-        assert_eq!(thinking_budget_for_level(ThinkingLevel::Low, Some(&custom)), 4096);
+        assert_eq!(
+            thinking_budget_for_level(ThinkingLevel::Low, Some(&custom)),
+            4096
+        );
     }
 }

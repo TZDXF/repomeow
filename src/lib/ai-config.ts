@@ -9,8 +9,8 @@ import { cmd } from "@/lib/tauri";
 /** AI API 类型;当前仅实现 OpenAI 兼容接口,其余值预留扩展 */
 export type AiApiType = "openai-completions";
 
-/** 问答工具权限档位:all = 全部工具;readOnly = 仅只读工具 */
-export type ChatPermission = "all" | "readOnly";
+/** 问答工具权限档位:all = 全部工具;ask = 写操作前询问确认 */
+export type ChatPermission = "all" | "ask";
 
 /** 思考强度:off 关闭,其余对齐 pi 的 ThinkingLevel */
 export type ChatThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -104,4 +104,30 @@ export function revealAiConfigDir(): Promise<void> {
 /** 内置厂商目录(添加厂商对话框的候选清单;含各厂商预置模型,apiKey 恒为空) */
 export function getBuiltinAiProviders(): Promise<Record<string, AiProvider>> {
   return cmd<Record<string, AiProvider>>("ai_config_builtin_providers");
+}
+
+/** 一个可导入的 CC Switch 供应商(已筛选为 OpenAI chat 兼容) */
+export interface CcSwitchProvider {
+  /** CC Switch 内的供应商 id(导入时去重后作为厂商 id 候选) */
+  id: string;
+  name: string;
+  /** 来源应用:codex / opencode / openclaw / pi / hermes / grokbuild */
+  app: string;
+  baseUrl: string;
+  /** 可能为空(如密钥走环境变量),导入后需用户补齐 */
+  apiKey: string;
+  models: AiModelDef[];
+  /** 在 CC Switch 中是否为该应用当前启用项 */
+  current: boolean;
+}
+
+/** CC Switch 扫描结果;found = false 表示本机未安装/未配置过 CC Switch */
+export interface CcSwitchScan {
+  found: boolean;
+  providers: CcSwitchProvider[];
+}
+
+/** 扫描本机 CC Switch(~/.cc-switch)中 OpenAI chat 兼容的供应商 */
+export function listCcSwitchProviders(): Promise<CcSwitchScan> {
+  return cmd<CcSwitchScan>("ai_cc_switch_providers");
 }

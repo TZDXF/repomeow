@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use tauri::AppHandle;
 
 use crate::ai::catalog::{self, AiConfigFile, AiProvider};
+use crate::ai::cc_switch::{self, CcSwitchScan};
 use crate::commands::open;
 use crate::error::{AppError, AppResult, ErrorCode};
 
@@ -38,4 +39,10 @@ pub fn ai_config_reveal(app: AppHandle) -> AppResult<()> {
         .parent()
         .ok_or_else(|| AppError::coded(ErrorCode::InvalidPath, path.display().to_string()))?;
     open::open_explorer(&dir.to_string_lossy())
+}
+
+/// 扫描本机 CC Switch(~/.cc-switch)中 OpenAI chat 兼容的供应商,供设置页选择导入。
+#[tauri::command]
+pub fn ai_cc_switch_providers(app: AppHandle) -> AppResult<CcSwitchScan> {
+    cc_switch::scan_cc_switch_providers(&app)
 }

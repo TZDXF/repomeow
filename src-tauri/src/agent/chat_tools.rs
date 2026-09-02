@@ -32,10 +32,10 @@ use crate::commands::semantic::{
     semantic_worktree_diff,
 };
 use crate::commands::wiki::{load_wiki, WikiOutlinePage};
+use crate::db::Db;
 use crate::error::{AppError, ErrorCode};
 use crate::path_util::to_forward_slash_str;
 use crate::time_util::now_ts_nanos;
-use crate::db::Db;
 
 /// 普通工具结果的字节上限。
 const TOOL_RESULT_MAX_BYTES: usize = 16 * 1024;
@@ -105,9 +105,7 @@ fn tool(
         parameters,
         execution_mode: sequential.then_some(ToolExecutionMode::Sequential),
         prepare_arguments: None,
-        execute: Arc::new(move |_tool_call_id, args, _signal, on_update| {
-            execute(args, on_update)
-        }),
+        execute: Arc::new(move |_tool_call_id, args, _signal, on_update| execute(args, on_update)),
     }
 }
 
@@ -166,11 +164,7 @@ fn truncate_bytes(text: String, max_bytes: usize) -> String {
     while end > 0 && !text.is_char_boundary(end) {
         end -= 1;
     }
-    format!(
-        "{}\n\n…(已截断,原文 {} 字节)",
-        &text[..end],
-        text.len()
-    )
+    format!("{}\n\n…(已截断,原文 {} 字节)", &text[..end], text.len())
 }
 
 fn pretty_json<T: Serialize>(value: &T) -> String {
@@ -443,7 +437,7 @@ fn read_wiki_tool(app: &AppHandle, ctx: &ChatToolContext) -> AgentTool {
                         .map_err(tool_err)?;
                     let Some(data) = data else {
                         return text_result(
-                            "该项目尚未生成 Wiki。不要擅自生成;可告知用户并能用 regenerate_wiki 生成整本(后台执行,耗时较长),征得用户同意后再调用。",
+                            "该项目尚未生成 Wiki。不要擅自生成;可告知用户,仅在用户明确要求时才用 regenerate_wiki 生成整本(后台执行,耗时较长;当前为「确认后执行」权限时,应用会在执行前弹出确认)。",
                         );
                     };
                     match arg_str(&args, "page_id") {
@@ -466,7 +460,7 @@ fn read_wiki_tool(app: &AppHandle, ctx: &ChatToolContext) -> AgentTool {
                         },
                         None => {
                             let stale_note = if data.stale {
-                                "是(代码已更新,Wiki 可能过时。不要自行更新:先基于现有内容回答,在回答中告知用户 Wiki 可能过时并询问是否更新,用户明确同意后才调用 update_wiki)"
+                                "是(代码已更新,Wiki 可能过时。不要自行更新:先基于现有内容回答并告知用户可能过时;确有更新必要时再调用 update_wiki,当前为「确认后执行」权限时,应用会在执行前弹出确认)"
                             } else {
                                 "否"
                             };
@@ -487,7 +481,7 @@ fn update_wiki_tool(app: &AppHandle, ctx: &ChatToolContext) -> AgentTool {
     tool(
         "update_wiki",
         "增量更新 Wiki",
-        "对已有 Wiki 做增量更新:检测自上次生成以来的代码变更,仅重新生成受影响页面(同步等待完成,通常几秒到一两分钟)。**仅当 Wiki 过时(read_wiki 返回「过时:是」)且用户明确同意更新后才调用**;发现过时时应先基于现有内容回答并询问用户,不要自动触发。项目还没有 Wiki 或历史被改写时本工具会报错,此时改用 regenerate_wiki。无参数。",
+        "对已有 Wiki 做增量更新:检测自上次生成以来的代码变更,仅重新生成受影响页面(同步等待完成,通常几秒到一两分钟)。仅在 Wiki 过时(read_wiki 返回「过时:是」)且确有更新必要时调用;当前为「确认后执行」权限时,应用会在执行前弹出确认,不必在正文中先征得同意,但不要自动触发。项目还没有 Wiki 或历史被改写时本工具会报错,此时改用 regenerate_wiki。无参数。",
         json!({
             "type": "object",
             "properties": {},
@@ -538,7 +532,7 @@ fn regenerate_wiki_tool(app: &AppHandle, ctx: &ChatToolContext) -> AgentTool {
     tool(
         "regenerate_wiki",
         "整本重生成 Wiki",
-        "在后台启动整本 Wiki 重新生成(立即返回,不等待完成;耗时几分钟到几十分钟)。用于首次生成,或 Wiki 结构过时/用户明确要求重写整本时。不要为了更新少数几页而使用它——那是 update_wiki 的职责。无参数。",
+        "在后台启动整本 Wiki 重新生成(立即返回,不等待完成;耗时几分钟到几十分钟)。**仅在用户明确要求整本重生成时使用**(首次生成或重写整本);当前为「确认后执行」权限时,应用会在执行前弹出确认,不必在正文中先征得同意。不要为了更新少数几页而使用它——那是 update_wiki 的职责。无参数。",
         json!({
             "type": "object",
             "properties": {},
@@ -638,7 +632,7 @@ fn add_custom_command_tool(app: &AppHandle, ctx: &ChatToolContext) -> AgentTool 
     tool(
         "add_custom_command",
         "新增自定义命令",
-        "为当前项目新增一条自定义命令(保存到 RepoMeow,用户可在界面一键在终端执行)。仅在用户明确要求「添加/保存命令」时使用;执行前必须在回答中说明将写入的内容。参数:name(必填)命令名称;command(必填)将在终端执行的命令文本;description(可选)用途说明。",
+        "为当前项目新增一条自定义命令(保存到 RepoMeow,用户可在界面一键在终端执行)。仅在用户明确要求「添加/保存命令」时使用;当前为「确认后执行」权限时,应用会在执行前弹出确认,不必在正文中先征得同意,但应说明将写入的内容。参数:name(必填)命令名称;command(必填)将在终端执行的命令文本;description(可选)用途说明。",
         json!({
             "type": "object",
             "properties": {
@@ -701,7 +695,7 @@ fn generate_report_tool(app: &AppHandle, ctx: &ChatToolContext) -> AgentTool {
     tool(
         "generate_report",
         "生成日报/周报",
-        "生成项目日报或周报:汇总指定时间范围的 git 提交,调用 AI 生成正文并保存到报告历史(同步等待,通常十几秒)。用户要求「日报/周报/总结这段时间的工作」时使用。参数:period_type(必填)\"daily\" 或 \"weekly\";date_from/date_to(可选)\"YYYY-MM-DD\",缺省 daily=今天、weekly=最近 7 天;author_mode(可选)\"all\" 统计所有人、\"me\" 仅当前 git 用户,缺省 \"all\"。返回报告正文(超长截断)。",
+        "生成项目日报或周报:汇总指定时间范围的 git 提交,调用 AI 生成正文并保存到报告历史(同步等待,通常十几秒)。仅在用户要求生成日报/周报时使用;当前为「确认后执行」权限时,应用会在执行前弹出确认,不必在正文中先征得同意。参数:period_type(必填)\"daily\" 或 \"weekly\";date_from/date_to(可选)\"YYYY-MM-DD\",缺省 daily=今天、weekly=最近 7 天;author_mode(可选)\"all\" 统计所有人、\"me\" 仅当前 git 用户,缺省 \"all\"。返回报告正文(超长截断)。",
         json!({
             "type": "object",
             "properties": {

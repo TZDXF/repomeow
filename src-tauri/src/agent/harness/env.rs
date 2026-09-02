@@ -25,8 +25,8 @@ use crate::agent::harness::types::{
     ExecutionErrorCode, FileContent, FileError, FileErrorCode, FileInfo, FileKind, FileSystem,
     ReadTextLinesOptions, RemoveOptions, Result, Shell, ShellExecOptions,
 };
-use crate::agent::types::AbortSignal;
 use crate::agent::harness::uuid::uuid_v7;
+use crate::agent::types::AbortSignal;
 
 const MAX_TIMEOUT_SECONDS: f64 = 2_147_483_647.0 / 1000.0;
 const EXIT_STDIO_GRACE_MS: u64 = 100;
@@ -113,7 +113,10 @@ fn home_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-fn file_info_from_metadata(path: &str, metadata: &std::fs::Metadata) -> Result<FileInfo, FileError> {
+fn file_info_from_metadata(
+    path: &str,
+    metadata: &std::fs::Metadata,
+) -> Result<FileInfo, FileError> {
     let kind = if metadata.is_symlink() {
         FileKind::Symlink
     } else if metadata.is_file() {
@@ -121,7 +124,9 @@ fn file_info_from_metadata(path: &str, metadata: &std::fs::Metadata) -> Result<F
     } else if metadata.is_dir() {
         FileKind::Directory
     } else {
-        return err(FileError::new(FileErrorCode::Invalid, "Unsupported file type").with_path(path));
+        return err(
+            FileError::new(FileErrorCode::Invalid, "Unsupported file type").with_path(path),
+        );
     };
     let mtime_ms = metadata
         .modified()
@@ -502,7 +507,9 @@ impl FileSystem for TokioEnv {
             let path_text = resolved.to_string_lossy().to_string();
             if let Some(signal) = &abort_signal {
                 if signal.is_cancelled() {
-                    return err(FileError::new(FileErrorCode::Aborted, "aborted").with_path(&path_text));
+                    return err(
+                        FileError::new(FileErrorCode::Aborted, "aborted").with_path(&path_text)
+                    );
                 }
             }
             match tokio::fs::read(&resolved).await {
@@ -522,7 +529,9 @@ impl FileSystem for TokioEnv {
             let path_text = resolved.to_string_lossy().to_string();
             if let Some(signal) = &options.abort_signal {
                 if signal.is_cancelled() {
-                    return err(FileError::new(FileErrorCode::Aborted, "aborted").with_path(&path_text));
+                    return err(
+                        FileError::new(FileErrorCode::Aborted, "aborted").with_path(&path_text)
+                    );
                 }
             }
             if options.max_lines == Some(0) {
@@ -561,7 +570,9 @@ impl FileSystem for TokioEnv {
             let path_text = resolved.to_string_lossy().to_string();
             if let Some(signal) = &abort_signal {
                 if signal.is_cancelled() {
-                    return err(FileError::new(FileErrorCode::Aborted, "aborted").with_path(&path_text));
+                    return err(
+                        FileError::new(FileErrorCode::Aborted, "aborted").with_path(&path_text)
+                    );
                 }
             }
             match tokio::fs::read(&resolved).await {
@@ -582,7 +593,9 @@ impl FileSystem for TokioEnv {
             let path_text = resolved.to_string_lossy().to_string();
             if let Some(signal) = &abort_signal {
                 if signal.is_cancelled() {
-                    return err(FileError::new(FileErrorCode::Aborted, "aborted").with_path(&path_text));
+                    return err(
+                        FileError::new(FileErrorCode::Aborted, "aborted").with_path(&path_text)
+                    );
                 }
             }
             if let Some(parent) = resolved.parent() {
@@ -592,7 +605,9 @@ impl FileSystem for TokioEnv {
             }
             if let Some(signal) = &abort_signal {
                 if signal.is_cancelled() {
-                    return err(FileError::new(FileErrorCode::Aborted, "aborted").with_path(&path_text));
+                    return err(
+                        FileError::new(FileErrorCode::Aborted, "aborted").with_path(&path_text)
+                    );
                 }
             }
             let bytes = match content {
@@ -652,9 +667,8 @@ impl FileSystem for TokioEnv {
             let destination_text = destination.to_string_lossy().to_string();
             if let Some(signal) = &abort_signal {
                 if signal.is_cancelled() {
-                    return err(
-                        FileError::new(FileErrorCode::Aborted, "aborted").with_path(&destination_text),
-                    );
+                    return err(FileError::new(FileErrorCode::Aborted, "aborted")
+                        .with_path(&destination_text));
                 }
             }
             match tokio::fs::rename(&source, &destination).await {
@@ -688,7 +702,9 @@ impl FileSystem for TokioEnv {
             let path_text = resolved.to_string_lossy().to_string();
             if let Some(signal) = &abort_signal {
                 if signal.is_cancelled() {
-                    return err(FileError::new(FileErrorCode::Aborted, "aborted").with_path(&path_text));
+                    return err(
+                        FileError::new(FileErrorCode::Aborted, "aborted").with_path(&path_text)
+                    );
                 }
             }
             let mut entries = match tokio::fs::read_dir(&resolved).await {
@@ -701,9 +717,8 @@ impl FileSystem for TokioEnv {
                     Ok(Some(entry)) => {
                         if let Some(signal) = &abort_signal {
                             if signal.is_cancelled() {
-                                return err(
-                                    FileError::new(FileErrorCode::Aborted, "aborted").with_path(&path_text),
-                                );
+                                return err(FileError::new(FileErrorCode::Aborted, "aborted")
+                                    .with_path(&path_text));
                             }
                         }
                         let entry_path = entry.path();
@@ -768,7 +783,9 @@ impl FileSystem for TokioEnv {
             let path_text = resolved.to_string_lossy().to_string();
             if let Some(signal) = &options.abort_signal {
                 if signal.is_cancelled() {
-                    return err(FileError::new(FileErrorCode::Aborted, "aborted").with_path(&path_text));
+                    return err(
+                        FileError::new(FileErrorCode::Aborted, "aborted").with_path(&path_text)
+                    );
                 }
             }
             let recursive = options.recursive.unwrap_or(true);
@@ -794,7 +811,9 @@ impl FileSystem for TokioEnv {
             let path_text = resolved.to_string_lossy().to_string();
             if let Some(signal) = &options.abort_signal {
                 if signal.is_cancelled() {
-                    return err(FileError::new(FileErrorCode::Aborted, "aborted").with_path(&path_text));
+                    return err(
+                        FileError::new(FileErrorCode::Aborted, "aborted").with_path(&path_text)
+                    );
                 }
             }
             let recursive = options.recursive.unwrap_or(false);
@@ -909,7 +928,8 @@ impl Shell for TokioEnv {
                 Some(cwd) => resolve_path(&self.cwd_text, cwd),
                 None => self.cwd.clone(),
             };
-            let shell_config = get_shell_config(self.shell_kind, self.shell_path.as_deref()).await?;
+            let shell_config =
+                get_shell_config(self.shell_kind, self.shell_path.as_deref()).await?;
             if !path_exists(&cwd).await {
                 let shell_label = if self.shell_kind == ShellKind::PowerShell {
                     "PowerShell"
@@ -1205,12 +1225,9 @@ mod tests {
         let entries = env.list_dir(temp_dir.clone(), None).await.unwrap();
         assert_eq!(entries.len(), 1);
 
-        env.append_file(
-            file_path.clone(),
-            FileContent::Text("gamma".to_string()),
-        )
-        .await
-        .unwrap();
+        env.append_file(file_path.clone(), FileContent::Text("gamma".to_string()))
+            .await
+            .unwrap();
         let text = env.read_text_file(file_path.clone(), None).await.unwrap();
         assert_eq!(text, "alpha\nbeta\ngamma");
 
@@ -1221,11 +1238,14 @@ mod tests {
             .await
             .unwrap();
         assert!(!env.exists(file_path, None).await.unwrap());
-        env.remove(temp_dir, RemoveOptions {
-            recursive: Some(true),
-            force: Some(true),
-            abort_signal: None,
-        })
+        env.remove(
+            temp_dir,
+            RemoveOptions {
+                recursive: Some(true),
+                force: Some(true),
+                abort_signal: None,
+            },
+        )
         .await
         .unwrap();
     }
@@ -1259,10 +1279,12 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(error.code, FileErrorCode::NotFound);
-        assert!(env
-            .exists("definitely-missing-file.txt".to_string(), None)
-            .await
-            .unwrap() == false);
+        assert!(
+            env.exists("definitely-missing-file.txt".to_string(), None)
+                .await
+                .unwrap()
+                == false
+        );
     }
 
     #[cfg(unix)]
@@ -1390,13 +1412,12 @@ mod tests {
             "got {absolute}, expected {expected:?}"
         );
         let joined = env
-            .join_path(
-                vec![base, "b".to_string(), "c.txt".to_string()],
-                None,
-            )
+            .join_path(vec![base, "b".to_string(), "c.txt".to_string()], None)
             .await
             .unwrap();
-        assert!(Path::new(&joined).ends_with(Path::new("b").join("c.txt")), "{joined}");
+        assert!(
+            Path::new(&joined).ends_with(Path::new("b").join("c.txt")),
+            "{joined}"
+        );
     }
 }
-

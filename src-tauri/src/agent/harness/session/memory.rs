@@ -10,11 +10,11 @@ use super::state::SessionState;
 use super::types::{
     ActiveToolsEntry, BranchEntryQuery, BranchSummaryEntry, CompactionEntry, CustomEntry, Entry,
     EntryQuery, ForkOptions, LanePointer, LaneRecord, LogItem, LogOptions, MessageEntry,
-    ModelChangeEntry, OperationStartedRecord, ProvisionedEntry, ProvisionedActiveToolsEntry,
+    ModelChangeEntry, OperationStartedRecord, ProvisionedActiveToolsEntry,
     ProvisionedBranchSummaryEntry, ProvisionedCompactionEntry, ProvisionedCustomEntry,
-    ProvisionedModelChangeEntry, ProvisionedThinkingLevelEntry, RecordQuery, SessionCreateOptions,
-    SessionError, SessionErrorCode, SessionFact, SessionMetadata, SessionStats, SessionStorage,
-    ThinkingLevelEntry,
+    ProvisionedEntry, ProvisionedModelChangeEntry, ProvisionedThinkingLevelEntry, RecordQuery,
+    SessionCreateOptions, SessionError, SessionErrorCode, SessionFact, SessionMetadata,
+    SessionStats, SessionStorage, ThinkingLevelEntry,
 };
 use crate::agent::agent_loop::now_ms;
 
@@ -38,12 +38,22 @@ impl InMemorySessionStorage {
     }
 
     /// fork:把源存储的 fork 变更序列应用到新存储。
-    pub fn fork(&self, metadata: SessionMetadata, options: &ForkOptions) -> Result<Self, SessionError> {
+    pub fn fork(
+        &self,
+        metadata: SessionMetadata,
+        options: &ForkOptions,
+    ) -> Result<Self, SessionError> {
         let storage = Self::new(metadata);
         {
-            let source = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let source = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             let mutations = source.create_fork_mutations(options)?;
-            let mut target = storage.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut target = storage
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             for mutation in mutations {
                 target.apply_mutation(&mutation)?;
             }
@@ -54,7 +64,9 @@ impl InMemorySessionStorage {
     /// 直接访问内部状态(测试与 fork 用)。
     #[doc(hidden)]
     pub fn state_lock(&self) -> std::sync::MutexGuard<'_, SessionState> {
-        self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
 
@@ -179,7 +191,11 @@ impl SessionStorage for InMemorySessionStorage {
     ) -> BoxFuture<'a, Result<Vec<Entry>, SessionError>> {
         Box::pin(async move {
             let state = self.state_lock();
-            Ok(cloned(state.find_entries_on_branch(&query.query, &query.bounds, &query.start)?))
+            Ok(cloned(state.find_entries_on_branch(
+                &query.query,
+                &query.bounds,
+                &query.start,
+            )?))
         })
     }
 
@@ -204,7 +220,10 @@ impl SessionStorage for InMemorySessionStorage {
         })
     }
 
-    fn get_log<'a>(&'a self, options: LogOptions) -> BoxFuture<'a, Result<Vec<LogItem>, SessionError>> {
+    fn get_log<'a>(
+        &'a self,
+        options: LogOptions,
+    ) -> BoxFuture<'a, Result<Vec<LogItem>, SessionError>> {
         Box::pin(async move {
             let state = self.state_lock();
             Ok(cloned(state.get_log(&options)?))
@@ -408,10 +427,7 @@ impl InMemorySessionRepo {
         Self::default()
     }
 
-    fn require_storage(
-        &self,
-        id: &str,
-    ) -> Result<Arc<InMemorySessionStorage>, SessionError> {
+    fn require_storage(&self, id: &str) -> Result<Arc<InMemorySessionStorage>, SessionError> {
         self.sessions
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -435,7 +451,10 @@ impl InMemorySessionRepo {
             .clone()
             .unwrap_or_else(crate::agent::harness::uuid::uuid_v7);
         {
-            let sessions = self.sessions.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let sessions = self
+                .sessions
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             if sessions.contains_key(&id) {
                 return Err(SessionError::new(
                     SessionErrorCode::AlreadyExists,
@@ -460,12 +479,17 @@ impl InMemorySessionRepo {
         &self,
         metadata: &SessionMetadata,
     ) -> Result<super::session::Session, SessionError> {
-        Ok(super::session::Session::new(self.require_storage(&metadata.id)?))
+        Ok(super::session::Session::new(
+            self.require_storage(&metadata.id)?,
+        ))
     }
 
     /// 列出会话元数据(对齐 TS `list`)。
     pub async fn list(&self) -> Vec<SessionMetadata> {
-        let sessions = self.sessions.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let sessions = self
+            .sessions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         sessions
             .values()
             .map(|storage| storage.metadata.clone())
@@ -493,7 +517,10 @@ impl InMemorySessionRepo {
             .clone()
             .unwrap_or_else(crate::agent::harness::uuid::uuid_v7);
         {
-            let sessions = self.sessions.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let sessions = self
+                .sessions
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             if sessions.contains_key(&id) {
                 return Err(SessionError::new(
                     SessionErrorCode::AlreadyExists,

@@ -114,7 +114,10 @@ mod tests {
 
     #[test]
     fn normalizes_tool_paths() {
-        assert_eq!(normalize_tool_path("@relative/file.txt"), "relative/file.txt");
+        assert_eq!(
+            normalize_tool_path("@relative/file.txt"),
+            "relative/file.txt"
+        );
         assert_eq!(normalize_tool_path("/a\u{00A0}b\u{2002}c"), "/a b c");
         assert_eq!(normalize_tool_path("/plain"), "/plain");
     }

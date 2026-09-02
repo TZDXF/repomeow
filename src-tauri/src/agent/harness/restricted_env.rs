@@ -257,7 +257,11 @@ impl RestrictedEnv {
         }
         let normalized_root = normalize_absolute(project_root);
         let inner = Arc::new(TokioEnv::new(normalized_root.clone()));
-        Ok(Arc::new(Self::new(inner, normalized_root, allowed_write_file)?))
+        Ok(Arc::new(Self::new(
+            inner,
+            normalized_root,
+            allowed_write_file,
+        )?))
     }
 
     pub fn project_root(&self) -> &Path {
@@ -418,7 +422,11 @@ impl FileSystem for RestrictedEnv {
             let resolved = self.resolve(&path).await?;
             self.ensure_writable_target(&resolved).await?;
             self.inner
-                .write_file(resolved.to_string_lossy().to_string(), content, abort_signal)
+                .write_file(
+                    resolved.to_string_lossy().to_string(),
+                    content,
+                    abort_signal,
+                )
                 .await
         })
     }
@@ -526,7 +534,11 @@ impl FileSystem for RestrictedEnv {
         })
     }
 
-    fn remove<'a>(&'a self, path: String, options: RemoveOptions) -> BoxFuture<'a, Result<(), FileError>> {
+    fn remove<'a>(
+        &'a self,
+        path: String,
+        options: RemoveOptions,
+    ) -> BoxFuture<'a, Result<(), FileError>> {
         Box::pin(async move {
             let resolved = self.resolve(&path).await?;
             self.ensure_writable_target(&resolved).await?;
@@ -656,18 +668,30 @@ mod tests {
         let tree = TestTree::new();
         let env = tree.env();
 
-        let text = env.read_text_file("src/main.rs".to_string(), None).await.unwrap();
+        let text = env
+            .read_text_file("src/main.rs".to_string(), None)
+            .await
+            .unwrap();
         assert_eq!(text, "fn main() {}\n");
 
         let absolute = env
-            .read_text_file(tree.project_root().join("src/main.rs").to_string_lossy().to_string(), None)
+            .read_text_file(
+                tree.project_root()
+                    .join("src/main.rs")
+                    .to_string_lossy()
+                    .to_string(),
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(absolute, "fn main() {}\n");
 
         let lines = env
             .read_text_lines(
-                tree.project_root().join("readme.md").to_string_lossy().to_string(),
+                tree.project_root()
+                    .join("readme.md")
+                    .to_string_lossy()
+                    .to_string(),
                 ReadTextLinesOptions::default(),
             )
             .await
@@ -700,16 +724,27 @@ mod tests {
         let tree = TestTree::new();
         let env = tree.env();
 
-        assert_denied(env.read_text_file("../outside.txt".to_string(), None).await.map(|_| ()));
+        assert_denied(
+            env.read_text_file("../outside.txt".to_string(), None)
+                .await
+                .map(|_| ()),
+        );
         assert_denied(
             env.read_text_file("src/../../outside.txt".to_string(), None)
                 .await
                 .map(|_| ()),
         );
-        assert_denied(env.absolute_path("../outside.txt".to_string(), None).await.map(|_| ()));
+        assert_denied(
+            env.absolute_path("../outside.txt".to_string(), None)
+                .await
+                .map(|_| ()),
+        );
 
         // `..` 不越界时正常解析。
-        let resolved = env.absolute_path("src/../src/main.rs".to_string(), None).await.unwrap();
+        let resolved = env
+            .absolute_path("src/../src/main.rs".to_string(), None)
+            .await
+            .unwrap();
         assert!(Path::new(&resolved).ends_with("src/main.rs"), "{resolved}");
     }
 
@@ -739,7 +774,11 @@ mod tests {
         assert_eq!(text, "# Page\n");
 
         // 但 allowed 文件所在目录(项目外)不允许列目录/读同级文件。
-        let sibling = tree.base.join("wiki/pages/other.md").to_string_lossy().to_string();
+        let sibling = tree
+            .base
+            .join("wiki/pages/other.md")
+            .to_string_lossy()
+            .to_string();
         assert_denied(env.read_text_file(sibling, None).await.map(|_| ()));
         let wiki_dir = tree.base.join("wiki/pages").to_string_lossy().to_string();
         assert_denied(env.list_dir(wiki_dir, None).await.map(|_| ()));
@@ -767,9 +806,13 @@ mod tests {
         let env = tree.env_with_allowed(&allowed);
 
         let allowed_text = allowed.to_string_lossy().to_string();
-        env.write_file(allowed_text.clone(), FileContent::Text("body".to_string()), None)
-            .await
-            .unwrap();
+        env.write_file(
+            allowed_text.clone(),
+            FileContent::Text("body".to_string()),
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(fs::read_to_string(&allowed).unwrap(), "body");
         env.append_file(allowed_text.clone(), FileContent::Text("+more".to_string()))
             .await
@@ -779,18 +822,32 @@ mod tests {
         // 项目内其他文件、wiki 同级文件:写一律拒绝。
         assert_denied(
             env.write_file(
-                tree.project_root().join("readme.md").to_string_lossy().to_string(),
+                tree.project_root()
+                    .join("readme.md")
+                    .to_string_lossy()
+                    .to_string(),
                 FileContent::Text("hack".to_string()),
                 None,
             )
             .await,
         );
         assert_denied(
-            env.write_file("relative-new-file.txt".to_string(), FileContent::Text("x".to_string()), None)
+            env.write_file(
+                "relative-new-file.txt".to_string(),
+                FileContent::Text("x".to_string()),
+                None,
+            )
+            .await,
+        );
+        let wiki_sibling = tree
+            .base
+            .join("wiki/pages/other.md")
+            .to_string_lossy()
+            .to_string();
+        assert_denied(
+            env.write_file(wiki_sibling, FileContent::Text("x".to_string()), None)
                 .await,
         );
-        let wiki_sibling = tree.base.join("wiki/pages/other.md").to_string_lossy().to_string();
-        assert_denied(env.write_file(wiki_sibling, FileContent::Text("x".to_string()), None).await);
     }
 
     #[tokio::test]
@@ -801,7 +858,10 @@ mod tests {
         // 其他路径(即使在项目内)不允许删除。
         assert_denied(
             env.remove(
-                tree.project_root().join("readme.md").to_string_lossy().to_string(),
+                tree.project_root()
+                    .join("readme.md")
+                    .to_string_lossy()
+                    .to_string(),
                 RemoveOptions::default(),
             )
             .await,
@@ -810,7 +870,9 @@ mod tests {
 
         // allowed 文件本身可删后重写。
         let allowed = tree.allowed().to_string_lossy().to_string();
-        env.remove(allowed.clone(), RemoveOptions::default()).await.unwrap();
+        env.remove(allowed.clone(), RemoveOptions::default())
+            .await
+            .unwrap();
         assert!(!tree.allowed().exists());
         env.write_file(allowed, FileContent::Text("# Page\n".to_string()), None)
             .await
@@ -827,7 +889,10 @@ mod tests {
         // 源不是 allowed:拒绝。
         assert_denied(
             env.rename_file(
-                tree.project_root().join("readme.md").to_string_lossy().to_string(),
+                tree.project_root()
+                    .join("readme.md")
+                    .to_string_lossy()
+                    .to_string(),
                 allowed.clone(),
                 None,
             )
@@ -837,13 +902,18 @@ mod tests {
         assert_denied(
             env.rename_file(
                 allowed.clone(),
-                tree.base.join("wiki/pages/renamed.md").to_string_lossy().to_string(),
+                tree.base
+                    .join("wiki/pages/renamed.md")
+                    .to_string_lossy()
+                    .to_string(),
                 None,
             )
             .await,
         );
         // 源与目标都是 allowed(自身):允许。
-        env.rename_file(allowed.clone(), allowed, None).await.unwrap();
+        env.rename_file(allowed.clone(), allowed, None)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -852,17 +922,36 @@ mod tests {
         // allowed 的父目录链允许创建。
         let allowed = tree.base.join("wiki/pages/extra/new.md");
         let env = tree.env_with_allowed(&allowed);
-        let parent = tree.base.join("wiki/pages/extra").to_string_lossy().to_string();
-        env.create_dir(parent, CreateDirOptions::default()).await.unwrap();
+        let parent = tree
+            .base
+            .join("wiki/pages/extra")
+            .to_string_lossy()
+            .to_string();
+        env.create_dir(parent, CreateDirOptions::default())
+            .await
+            .unwrap();
         assert!(tree.base.join("wiki/pages/extra").is_dir());
 
         // 项目内无关目录:拒绝。
         let env = tree.env();
-        let build_dir = tree.project_root().join("build").to_string_lossy().to_string();
+        let build_dir = tree
+            .project_root()
+            .join("build")
+            .to_string_lossy()
+            .to_string();
         assert_denied(env.create_dir(build_dir, CreateDirOptions::default()).await);
-        assert_denied(env.create_dir("sub/dir".to_string(), CreateDirOptions::default()).await);
+        assert_denied(
+            env.create_dir("sub/dir".to_string(), CreateDirOptions::default())
+                .await,
+        );
         // 在 allowed 文件路径本身建目录会遮蔽写目标:拒绝。
-        assert_denied(env.create_dir(tree.allowed().to_string_lossy().to_string(), CreateDirOptions::default()).await);
+        assert_denied(
+            env.create_dir(
+                tree.allowed().to_string_lossy().to_string(),
+                CreateDirOptions::default(),
+            )
+            .await,
+        );
     }
 
     #[tokio::test]
@@ -882,7 +971,11 @@ mod tests {
         let tree = TestTree::new();
         let env = tree.env();
         assert_denied(env.create_temp_dir(None, None).await.map(|_| ()));
-        assert_denied(env.create_temp_file(CreateTempFileOptions::default()).await.map(|_| ()));
+        assert_denied(
+            env.create_temp_file(CreateTempFileOptions::default())
+                .await
+                .map(|_| ()),
+        );
     }
 
     #[tokio::test]
@@ -891,15 +984,26 @@ mod tests {
         let allowed = tree.project_root().join("notes.md");
         let env = tree.env_with_allowed(&allowed);
 
-        env.write_file("notes.md".to_string(), FileContent::Text("note".to_string()), None)
-            .await
-            .unwrap();
+        env.write_file(
+            "notes.md".to_string(),
+            FileContent::Text("note".to_string()),
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(fs::read_to_string(&allowed).unwrap(), "note");
         // 同项目内其他文件仍然只读。
-        assert!(env.read_text_file("readme.md".to_string(), None).await.is_ok());
+        assert!(env
+            .read_text_file("readme.md".to_string(), None)
+            .await
+            .is_ok());
         assert_denied(
-            env.write_file("readme.md".to_string(), FileContent::Text("x".to_string()), None)
-                .await,
+            env.write_file(
+                "readme.md".to_string(),
+                FileContent::Text("x".to_string()),
+                None,
+            )
+            .await,
         );
     }
 
@@ -907,7 +1011,9 @@ mod tests {
     async fn constructor_rejects_relative_roots() {
         let tree = TestTree::new();
         let inner: Arc<dyn ExecutionEnv> = Arc::new(TokioEnv::new(tree.project_root()));
-        assert!(RestrictedEnv::new(inner.clone(), Path::new("relative/root"), tree.allowed()).is_err());
+        assert!(
+            RestrictedEnv::new(inner.clone(), Path::new("relative/root"), tree.allowed()).is_err()
+        );
         assert!(RestrictedEnv::for_wiki_agent("relative/root", tree.allowed()).is_err());
     }
 
@@ -916,12 +1022,18 @@ mod tests {
         // 显式包装既有 TokioEnv(cwd = 项目根)的构造路径。
         let tree = TestTree::new();
         let inner: Arc<dyn ExecutionEnv> = Arc::new(TokioEnv::new(tree.project_root()));
-        let env = Arc::new(
-            RestrictedEnv::new(inner, tree.project_root(), tree.allowed()).unwrap(),
-        ) as Arc<dyn ExecutionEnv>;
-        let text = env.read_text_file("src/main.rs".to_string(), None).await.unwrap();
+        let env = Arc::new(RestrictedEnv::new(inner, tree.project_root(), tree.allowed()).unwrap())
+            as Arc<dyn ExecutionEnv>;
+        let text = env
+            .read_text_file("src/main.rs".to_string(), None)
+            .await
+            .unwrap();
         assert_eq!(text, "fn main() {}\n");
-        assert_denied(env.read_text_file(tree.outside_file().to_string_lossy().to_string(), None).await.map(|_| ()));
+        assert_denied(
+            env.read_text_file(tree.outside_file().to_string_lossy().to_string(), None)
+                .await
+                .map(|_| ()),
+        );
     }
 
     #[cfg(windows)]
@@ -953,8 +1065,15 @@ mod tests {
     async fn unix_paths_stay_case_sensitive() {
         let tree = TestTree::new();
         let env = tree.env();
-        assert_denied(env.read_text_file("README.MD".to_string(), None).await.map(|_| ()));
-        assert!(env.read_text_file("readme.md".to_string(), None).await.is_ok());
+        assert_denied(
+            env.read_text_file("README.MD".to_string(), None)
+                .await
+                .map(|_| ()),
+        );
+        assert!(env
+            .read_text_file("readme.md".to_string(), None)
+            .await
+            .is_ok());
     }
 
     mod symlinks {
@@ -997,15 +1116,27 @@ mod tests {
 
             let env = tree.env();
             // 目录 symlink 本身与其子路径:词法在项目内,canonical 在外 → 拒绝。
-            assert_denied(env.read_text_file("evil-link".to_string(), None).await.map(|_| ()));
+            assert_denied(
+                env.read_text_file("evil-link".to_string(), None)
+                    .await
+                    .map(|_| ()),
+            );
             assert_denied(
                 env.read_text_file("evil-link/secret.txt".to_string(), None)
                     .await
                     .map(|_| ()),
             );
             // absolute_path 是遍历入口,同样拒绝(candidate 是项目内 symlink 时防逃逸)。
-            assert_denied(env.absolute_path("evil-link/secret.txt".to_string(), None).await.map(|_| ()));
-            assert_denied(env.list_dir("evil-link".to_string(), None).await.map(|_| ()));
+            assert_denied(
+                env.absolute_path("evil-link/secret.txt".to_string(), None)
+                    .await
+                    .map(|_| ()),
+            );
+            assert_denied(
+                env.list_dir("evil-link".to_string(), None)
+                    .await
+                    .map(|_| ()),
+            );
 
             fs::remove_dir_all(&outside_dir).ok();
         }
@@ -1018,8 +1149,16 @@ mod tests {
             }
 
             let env = tree.env();
-            assert_denied(env.read_text_file("leak.md".to_string(), None).await.map(|_| ()));
-            assert_denied(env.canonical_path("leak.md".to_string(), None).await.map(|_| ()));
+            assert_denied(
+                env.read_text_file("leak.md".to_string(), None)
+                    .await
+                    .map(|_| ()),
+            );
+            assert_denied(
+                env.canonical_path("leak.md".to_string(), None)
+                    .await
+                    .map(|_| ()),
+            );
         }
 
         #[tokio::test]
@@ -1051,7 +1190,11 @@ mod tests {
             }
 
             let env = tree.env();
-            let link = tree.base.join("wiki/page-link.md").to_string_lossy().to_string();
+            let link = tree
+                .base
+                .join("wiki/page-link.md")
+                .to_string_lossy()
+                .to_string();
             let text = env.read_text_file(link, None).await.unwrap();
             assert_eq!(text, "# Page\n");
         }
@@ -1059,7 +1202,10 @@ mod tests {
         #[tokio::test]
         async fn dangling_symlink_reports_not_found() {
             let tree = TestTree::new();
-            if !symlink_or_skip(&tree.base.join("nowhere.txt"), &tree.project_root().join("dangling.md")) {
+            if !symlink_or_skip(
+                &tree.base.join("nowhere.txt"),
+                &tree.project_root().join("dangling.md"),
+            ) {
                 return;
             }
 
@@ -1069,7 +1215,11 @@ mod tests {
                 .read_text_file("dangling.md".to_string(), None)
                 .await
                 .unwrap_err();
-            assert_eq!(error.code, crate::agent::harness::types::FileErrorCode::NotFound, "{error}");
+            assert_eq!(
+                error.code,
+                crate::agent::harness::types::FileErrorCode::NotFound,
+                "{error}"
+            );
         }
     }
 }

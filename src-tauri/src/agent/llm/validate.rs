@@ -21,10 +21,7 @@ use serde_json::Value;
 
 /// 校验工具调用参数是否符合工具的 JSON Schema。
 /// `parameters` 为工具的 JSON Schema,`args` 为 LLM 输出的原始参数对象。
-pub fn validate_tool_arguments(
-    parameters: &Value,
-    args: Value,
-) -> Result<Value, String> {
+pub fn validate_tool_arguments(parameters: &Value, args: Value) -> Result<Value, String> {
     let original = args.clone();
     let mut coerced = args;
     normalize_optional_nulls(&mut coerced, parameters);
@@ -37,8 +34,7 @@ pub fn validate_tool_arguments(
     };
 
     // TS:coercion 生效且双方非「对象/数组」时,校验失败退回未校验的原始 args。
-    let both_containers =
-        is_container(&coerced) && is_container(&original);
+    let both_containers = is_container(&coerced) && is_container(&original);
     if changed && !both_containers {
         if validator.is_valid(&coerced) {
             return Ok(coerced);
@@ -138,7 +134,10 @@ fn normalize_optional_nulls(value: &mut Value, schema: &Value) {
                 }
                 let is_null = object.get(key).is_some_and(Value::is_null);
                 let not_required = !required.contains(key.as_str());
-                let not_ref = property_schema.get("$ref").and_then(Value::as_str).is_none();
+                let not_ref = property_schema
+                    .get("$ref")
+                    .and_then(Value::as_str)
+                    .is_none();
                 // TS:validator 存在且 Check(null) === false 才删除;编译失败保持原值
                 let null_rejected = match jsonschema::validator_for(property_schema) {
                     Ok(sub) => !sub.is_valid(&Value::Null),
@@ -386,8 +385,14 @@ mod tests {
             "required": ["query"],
         });
         let error = validate_tool_arguments(&schema, json!({})).unwrap_err();
-        assert!(error.contains("- query: \"query\" is a required property"), "{error}");
-        assert!(error.starts_with("Validation failed for tool arguments:"), "{error}");
+        assert!(
+            error.contains("- query: \"query\" is a required property"),
+            "{error}"
+        );
+        assert!(
+            error.starts_with("Validation failed for tool arguments:"),
+            "{error}"
+        );
         assert!(error.contains("Received arguments:"), "{error}");
         assert!(error.contains("{}"), "{error}");
     }
@@ -405,7 +410,10 @@ mod tests {
             },
         });
         let error = validate_tool_arguments(&schema, json!({"options": {}})).unwrap_err();
-        assert!(error.contains("- options.name: \"name\" is a required property"), "{error}");
+        assert!(
+            error.contains("- options.name: \"name\" is a required property"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -420,7 +428,8 @@ mod tests {
     fn incoercible_type_mismatch_reports_error_path() {
         // 对象无法强转成 string → 校验失败,错误带属性路径
         let schema = json!({"type": "object", "properties": {"count": {"type": "string"}}});
-        let error = validate_tool_arguments(&schema, json!({"count": {"nested": true}})).unwrap_err();
+        let error =
+            validate_tool_arguments(&schema, json!({"count": {"nested": true}})).unwrap_err();
         assert!(error.contains("- count: "), "{error}");
     }
 
@@ -435,7 +444,8 @@ mod tests {
 
     #[test]
     fn string_integer_is_coerced_and_fractional_string_rejected() {
-        let schema = json!({"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]});
+        let schema =
+            json!({"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]});
         let args = validate_tool_arguments(&schema, json!({"n": "42"})).unwrap();
         assert_eq!(args, json!({"n": 42}));
         assert!(validate_tool_arguments(&schema, json!({"n": "4.2"})).is_err());

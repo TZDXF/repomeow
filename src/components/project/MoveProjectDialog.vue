@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useProjectsStore } from "@/stores/projects";
-import { splitDirName } from "@/lib/path";
+import { joinPath, splitDirName } from "@/lib/path";
 import type { Project } from "@/types";
 
 const { t } = useI18n();
@@ -37,11 +37,9 @@ watch(open, (v) => {
 });
 
 const targetPreview = computed(() => {
-  const parent = parentDir.value.replace(/[\\/]+$/, "");
   const name = dirName.value.trim();
-  if (!parent || !name) return "";
-  const sep = parentDir.value.includes("\\") ? "\\" : "/";
-  return parent + sep + name;
+  if (!parentDir.value || !name) return "";
+  return joinPath(parentDir.value, name);
 });
 
 async function pickParent() {

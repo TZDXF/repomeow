@@ -10,8 +10,8 @@ use super::storage::{
     begin_wiki_in, begin_wiki_page_staging_in, cancel_wiki_page_staging_in,
     cleanup_wiki_page_staging_in, has_wiki_in, load_config_in, load_wiki_in, promote_validated,
     promote_wiki_page_staging_in, read_wiki_page_staging_in, remove_wiki_dir, save_config_in,
-    save_meta_in, save_page_in, validate_staged_page, valid_page_file, CONFIG_FILE, META_FILE,
-    MAX_STAGED_PAGE_BYTES, META_VERSION, PAGES_DIR, STAGING_PREFIX,
+    save_meta_in, save_page_in, valid_page_file, validate_staged_page, CONFIG_FILE,
+    MAX_STAGED_PAGE_BYTES, META_FILE, META_VERSION, PAGES_DIR, STAGING_PREFIX,
 };
 use super::types::{
     WikiCommitKind, WikiGenerationConfig, WikiMeta, WikiOutlinePage, CONFIG_VERSION,
@@ -394,10 +394,7 @@ fn staging_begin_read_promote_success() {
     assert!(staging_path.is_file(), "首次生成暂存文件应为空文件占位");
     let name = staging_path.file_name().unwrap().to_str().unwrap();
     assert!(name.starts_with(STAGING_PREFIX));
-    assert!(
-        !valid_page_file(name),
-        "暂存名不得通过正式页名校验: {name}"
-    );
+    assert!(!valid_page_file(name), "暂存名不得通过正式页名校验: {name}");
     assert_eq!(
         read_wiki_page_staging_in(&wiki, "run-1", &page.file).unwrap(),
         ""
@@ -444,14 +441,10 @@ fn staging_promote_rejects_invalid_content() {
             "sources 未闭合",
         ),
         (
-            "# 概览\n\n<!-- sources\nREADME.md\nsrc/main.rs\ndocs/guide.md\n-->\n尾随文字\n"
-                .into(),
+            "# 概览\n\n<!-- sources\nREADME.md\nsrc/main.rs\ndocs/guide.md\n-->\n尾随文字\n".into(),
             "sources 块后还有内容",
         ),
-        (
-            sources_wrapped("README.md\nsrc/main.rs"),
-            "只有 2 条来源",
-        ),
+        (sources_wrapped("README.md\nsrc/main.rs"), "只有 2 条来源"),
         (sources_wrapped(eleven.trim_end()), "来源超过 10 条"),
         (
             sources_wrapped("README.md\nsrc/main.rs\nmissing/not-here.rs"),
@@ -528,7 +521,10 @@ fn staging_rejects_oversized_content() {
     let mut content = staged_content();
     content.push_str(&"x".repeat(MAX_STAGED_PAGE_BYTES));
     let error = validate_staged_page(&content, &page, &project_path_of(&project)).err();
-    assert_eq!(error.expect("超限应报错").code(), "ai_response_parse_failed");
+    assert_eq!(
+        error.expect("超限应报错").code(),
+        "ai_response_parse_failed"
+    );
     fs::remove_dir_all(&project).ok();
 }
 
@@ -575,10 +571,7 @@ fn staging_cleanup_removes_leftovers() {
     .unwrap();
 
     assert_eq!(cleanup_wiki_page_staging_in(&wiki).unwrap(), 3);
-    assert!(
-        pages.join("01-overview.md").is_file(),
-        "正式页不应被清理"
-    );
+    assert!(pages.join("01-overview.md").is_file(), "正式页不应被清理");
     assert_eq!(cleanup_wiki_page_staging_in(&wiki).unwrap(), 0, "清理幂等");
 
     // pages/ 缺失时直接返回 0
@@ -605,7 +598,11 @@ fn staging_promote_replaces_existing_and_rolls_back() {
         staged_content()
     );
     assert!(!PathBuf::from(&staging).exists());
-    assert_eq!(cleanup_wiki_page_staging_in(&wiki).unwrap(), 0, "不应残留备份");
+    assert_eq!(
+        cleanup_wiki_page_staging_in(&wiki).unwrap(),
+        0,
+        "不应残留备份"
+    );
 
     // 回滚:提升中途失败(暂存缺失)时旧页必须恢复,且不残留备份
     let missing = pages.join(format!("{STAGING_PREFIX}missing_01-overview.md"));
@@ -617,7 +614,11 @@ fn staging_promote_replaces_existing_and_rolls_back() {
         staged_content(),
         "提升失败必须回滚恢复旧页"
     );
-    assert_eq!(cleanup_wiki_page_staging_in(&wiki).unwrap(), 0, "回滚后不应残留备份");
+    assert_eq!(
+        cleanup_wiki_page_staging_in(&wiki).unwrap(),
+        0,
+        "回滚后不应残留备份"
+    );
     fs::remove_dir_all(&wiki).ok();
     fs::remove_dir_all(&project).ok();
 }

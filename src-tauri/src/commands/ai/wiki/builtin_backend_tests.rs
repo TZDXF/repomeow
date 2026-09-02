@@ -69,14 +69,14 @@ fn page_markdown(title: &str) -> String {
 
 /// 非法页面:只有 2 条 sources(校验要求 3-10)
 fn invalid_page_markdown(title: &str) -> String {
-    format!(
-        "# {title}\n\nBody.\n\n<!-- sources\nREADME.md:1\nsrc/main.rs:1\n-->\n"
-    )
+    format!("# {title}\n\nBody.\n\n<!-- sources\nREADME.md:1\nsrc/main.rs:1\n-->\n")
 }
 
 /// 暂存路径与 storage.rs 的 `staging_path_in` 派生规则一致(pages/.staging_{run}_{file})
 fn staging_path(wiki_dir: &Path, run_id: &str, file: &str) -> PathBuf {
-    wiki_dir.join("pages").join(format!(".staging_{run_id}_{file}"))
+    wiki_dir
+        .join("pages")
+        .join(format!(".staging_{run_id}_{file}"))
 }
 
 fn write_script(draft: &Path, content: &str) -> Script {
@@ -103,7 +103,8 @@ fn test_db(dir: &Path) -> Db {
 }
 
 fn usage_rows(db: &Db) -> i64 {
-    db.0.lock().unwrap()
+    db.0.lock()
+        .unwrap()
         .query_row("SELECT COUNT(*) FROM ai_usage_log", [], |r| r.get(0))
         .unwrap()
 }
@@ -124,10 +125,8 @@ async fn builtin_page_agent_writes_draft_and_promotes() {
     let page = sample_page();
     let draft = staging_path(&wiki_dir, "run-1", &page.file);
     let markdown = page_markdown("Overview");
-    let (stream_fn, calls) = scripted_stream_fn(vec![
-        write_script(&draft, &markdown),
-        text_script("done"),
-    ]);
+    let (stream_fn, calls) =
+        scripted_stream_fn(vec![write_script(&draft, &markdown), text_script("done")]);
 
     let progress_log: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let progress_sink = progress_log.clone();
@@ -157,7 +156,11 @@ async fn builtin_page_agent_writes_draft_and_promotes() {
     assert!(!draft.exists(), "staging file should be promoted away");
     // 流式预览来自 write 参数内容
     assert!(
-        progress_log.lock().unwrap().iter().any(|p| p.contains("# Overview")),
+        progress_log
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|p| p.contains("# Overview")),
         "preview should receive write content"
     );
     // 逐请求用量已落库(2 次 LLM 调用)
@@ -213,7 +216,10 @@ async fn builtin_page_invalid_draft_gets_one_repair_round() {
     let captured = calls.lock().unwrap();
     assert_eq!(captured.len(), 4);
     let repair_prompt = last_user_text(&captured[2]);
-    assert!(repair_prompt.contains("failed validation"), "{repair_prompt}");
+    assert!(
+        repair_prompt.contains("failed validation"),
+        "{repair_prompt}"
+    );
     assert!(repair_prompt.contains("sources"), "{repair_prompt}");
 }
 
@@ -316,10 +322,8 @@ async fn builtin_outline_retries_once_with_correction_prompt() {
         head_sha: None,
     };
     let outline = valid_outline_json();
-    let (stream_fn, calls) = scripted_stream_fn(vec![
-        text_script("this is not json"),
-        text_script(&outline),
-    ]);
+    let (stream_fn, calls) =
+        scripted_stream_fn(vec![text_script("this is not json"), text_script(&outline)]);
 
     let retry_log: Arc<Mutex<Vec<WikiRetryNotice>>> = Arc::new(Mutex::new(Vec::new()));
     let retry_sink = retry_log.clone();

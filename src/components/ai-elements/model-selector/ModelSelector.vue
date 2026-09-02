@@ -45,8 +45,11 @@ const hasAnyModel = computed(() => props.groups.some((group) => group.models.len
     </SelectTrigger>
     <!-- disableOutsidePointerEvents=false:浮层场景(如 ChatDock 面板 pointer-events-auto)
          下 reka 默认的 body pointer-events:none 拦截不到面板内其他触发器,
-         会导致两个下拉同时打开;关闭后点另一个下拉即可正常收起到前一个 -->
-    <SelectContent class="max-h-80" :disable-outside-pointer-events="false">
+         会导致两个下拉同时打开;关闭后点另一个下拉即可正常收起到前一个。
+         必须同时 bodyLock=false:reka Select 的 bodyLock 默认 true,useBodyScrollLock
+         会无条件给 body 写 pointer-events:none,disableOutsidePointerEvents=false 时
+         内容不再自恢复 auto,选项会整体失去点击命中(下拉展开但无法选择) -->
+    <SelectContent class="max-h-80" :disable-outside-pointer-events="false" :body-lock="false">
       <template v-for="group in groups" :key="group.providerId">
         <SelectGroup v-if="group.models.length">
           <SelectLabel>{{ group.providerName }}</SelectLabel>

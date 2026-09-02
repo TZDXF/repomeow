@@ -83,7 +83,10 @@ async fn appends_messages_and_tracks_stats() {
         .set_label(id1.clone(), Some("keep".into()))
         .await
         .unwrap();
-    assert_eq!(session.get_label(id1.clone()).await.as_deref(), Some("keep"));
+    assert_eq!(
+        session.get_label(id1.clone()).await.as_deref(),
+        Some("keep")
+    );
 }
 
 #[tokio::test]
@@ -241,7 +244,10 @@ async fn open_operations_and_fork() {
         _ => panic!("expected message entry"),
     }
     let metadata = child.get_metadata().await.unwrap();
-    assert_eq!(metadata.parent_session_id.as_deref(), Some(parent_id.as_str()));
+    assert_eq!(
+        metadata.parent_session_id.as_deref(),
+        Some(parent_id.as_str())
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -393,7 +399,10 @@ impl crate::agent::harness::types::FileSystem for MemFs {
     fn file_info<'a>(
         &'a self,
         path: String,
-    ) -> BoxFuture<'a, Result<crate::agent::harness::types::FileInfo, crate::agent::harness::types::FileError>> {
+    ) -> BoxFuture<
+        'a,
+        Result<crate::agent::harness::types::FileInfo, crate::agent::harness::types::FileError>,
+    > {
         Box::pin(async move {
             let files = self.files.lock().unwrap();
             files
@@ -418,7 +427,13 @@ impl crate::agent::harness::types::FileSystem for MemFs {
         &'a self,
         _path: String,
         _abort: Option<crate::agent::types::AbortSignal>,
-    ) -> BoxFuture<'a, Result<Vec<crate::agent::harness::types::FileInfo>, crate::agent::harness::types::FileError>> {
+    ) -> BoxFuture<
+        'a,
+        Result<
+            Vec<crate::agent::harness::types::FileInfo>,
+            crate::agent::harness::types::FileError,
+        >,
+    > {
         Box::pin(async move { Ok(Vec::new()) })
     }
 
@@ -465,7 +480,8 @@ impl crate::agent::harness::types::FileSystem for MemFs {
         Box::pin(async move {
             Ok(format!(
                 "/tmp/{}",
-                self.counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                self.counter
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
             ))
         })
     }
@@ -477,7 +493,8 @@ impl crate::agent::harness::types::FileSystem for MemFs {
         Box::pin(async move {
             Ok(format!(
                 "/tmp/file-{}",
-                self.counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                self.counter
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
             ))
         })
     }
@@ -492,7 +509,13 @@ impl crate::agent::harness::types::Shell for MemFs {
         &'a self,
         _command: String,
         _options: crate::agent::harness::types::ShellExecOptions,
-    ) -> BoxFuture<'a, Result<crate::agent::harness::types::ExecOutcome, crate::agent::harness::types::ExecutionError>> {
+    ) -> BoxFuture<
+        'a,
+        Result<
+            crate::agent::harness::types::ExecOutcome,
+            crate::agent::harness::types::ExecutionError,
+        >,
+    > {
         Box::pin(async move {
             Ok(crate::agent::harness::types::ExecOutcome {
                 stdout: String::new(),
@@ -555,7 +578,10 @@ async fn jsonl_storage_round_trip_via_memory_fs() {
 
     let reloaded = JsonlSessionStorage::load(fs, path).await.unwrap();
     assert_eq!(reloaded.get_name().await, Some("named".to_string()));
-    let entry = reloaded.get_entry("e-1".into()).await.expect("entry e-1 exists");
+    let entry = reloaded
+        .get_entry("e-1".into())
+        .await
+        .expect("entry e-1 exists");
     assert_eq!(entry.seq(), 1);
     assert!(matches!(entry, Entry::Custom(_)));
     let open = reloaded

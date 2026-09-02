@@ -6,7 +6,7 @@ use tauri::AppHandle;
 
 use crate::commands::open;
 use crate::error::{AppError, AppResult, ErrorCode};
-use crate::path_util::{clean_str, to_forward_slash_str};
+use crate::path_util::{clean_str, repo_relative_str};
 use crate::time_util::now_ts_nanos;
 
 use super::paths::{head_sha, wiki_dir};
@@ -202,9 +202,10 @@ fn staging_path_in(dir: &Path, run_id: &str, file_name: &str) -> AppResult<PathB
     if !valid_page_file(file_name) {
         return Err(AppError::coded(ErrorCode::InvalidPath, file_name));
     }
-    Ok(dir
-        .join(PAGES_DIR)
-        .join(format!("{STAGING_PREFIX}{}_{file_name}", staging_run_tag(run_id))))
+    Ok(dir.join(PAGES_DIR).join(format!(
+        "{STAGING_PREFIX}{}_{file_name}",
+        staging_run_tag(run_id)
+    )))
 }
 
 /// 为 (project, run id, page) 创建唯一暂存文件并返回其绝对路径。
@@ -283,17 +284,9 @@ fn staged_invalid(page: &WikiOutlinePage, reason: &str) -> AppError {
     )
 }
 
-/// 归一化 sources 条目路径:与前端 normalizeFilePath 及大纲校验的 normalize_path 一致
-/// (统一 / 分隔、去 `./` 与 `/` 前缀),统一走 path_util,不做 ad-hoc replace
+/// 归一化 sources 条目路径:与前端 normalizeFilePath 一致,统一走 path_util
 fn normalize_source_path(raw: &str) -> String {
-    let mut path = to_forward_slash_str(raw);
-    while let Some(stripped) = path.strip_prefix("./") {
-        path = stripped.to_string();
-    }
-    if let Some(stripped) = path.strip_prefix('/') {
-        path = stripped.to_string();
-    }
-    path
+    repo_relative_str(raw)
 }
 
 /// 解析 `:start` / `:start-end` 行区间(1-based 闭区间,与前端 parseWikiSources 一致)。
@@ -301,9 +294,7 @@ fn normalize_source_path(raw: &str) -> String {
 fn parse_line_range(spec: &str) -> Result<Option<(u64, u64)>, String> {
     let trimmed = spec.trim();
     let looks_numeric = !trimmed.is_empty()
-        && trimmed
-            .chars()
-            .all(|c| c.is_ascii_digit() || c == '-')
+        && trimmed.chars().all(|c| c.is_ascii_digit() || c == '-')
         && trimmed.chars().any(|c| c.is_ascii_digit());
     if !looks_numeric {
         return Ok(None);
@@ -386,9 +377,7 @@ fn source_path_allowed(path: &str, page: &WikiOutlinePage, project_root: &Path) 
     if !path.contains('/') && known.iter().any(|f| f.rsplit('/').next() == Some(path)) {
         return true;
     }
-    if path.split('/').any(|seg| seg == "..")
-        || path.contains(':')
-        || Path::new(path).is_absolute()
+    if path.split('/').any(|seg| seg == "..") || path.contains(':') || Path::new(path).is_absolute()
     {
         return false;
     }
@@ -420,7 +409,10 @@ pub(super) fn validate_staged_page(
         .find(|line| !line.trim().is_empty())
         .unwrap_or_default();
     if heading.trim() != expected {
-        return Err(staged_invalid(page, &format!("首个非空行必须精确为 `{expected}`")));
+        return Err(staged_invalid(
+            page,
+            &format!("首个非空行必须精确为 `{expected}`"),
+        ));
     }
     let entries = sources_entries(content).map_err(|reason| staged_invalid(page, &reason))?;
     let project_root = Path::new(project_path);

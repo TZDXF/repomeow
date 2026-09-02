@@ -9,8 +9,7 @@ pub const DEFAULT_REPORT_PROMPT: &str = include_str!("prompts/report-daily.md");
 pub const DEFAULT_WEEKLY_REPORT_PROMPT: &str = include_str!("prompts/report-weekly.md");
 pub const AGENT_WIKI_OUTLINE_PROMPT: &str = include_str!("prompts/wiki-agent-outline.md");
 pub const AGENT_WIKI_PAGE_PROMPT: &str = include_str!("prompts/wiki-agent-page.md");
-pub const BUILTIN_AGENT_WIKI_PAGE_PROMPT: &str =
-    include_str!("prompts/wiki-builtin-agent-page.md");
+pub const BUILTIN_AGENT_WIKI_PAGE_PROMPT: &str = include_str!("prompts/wiki-builtin-agent-page.md");
 
 pub fn language_name(language: &str) -> &'static str {
     if language == "zh-CN" {

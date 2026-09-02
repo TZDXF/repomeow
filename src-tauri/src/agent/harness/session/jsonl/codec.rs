@@ -80,7 +80,10 @@ fn decode_header(line: &str) -> Result<JsonlV4Header, JsonlDecodeError> {
 
 /// 编码头行为带 `\n` 结尾的单行(对齐 TS `encodeHeader`)。
 pub fn encode_header(header: &JsonlV4Header) -> String {
-    format!("{}\n", serde_json::to_string(header).expect("header serializes"))
+    format!(
+        "{}\n",
+        serde_json::to_string(header).expect("header serializes")
+    )
 }
 
 /// 头 + 文件字段 → 会话元数据(对齐 TS `metadataFromHeader`)。
@@ -116,13 +119,15 @@ pub fn parse_mutation(line: &str) -> Result<SessionMutation, JsonlDecodeError> {
             "has invalid seq",
         ));
     }
-    if matches!(value.get("kind").and_then(Value::as_str), Some("lane") | Some("fact")) {
+    if matches!(
+        value.get("kind").and_then(Value::as_str),
+        Some("lane") | Some("fact")
+    ) {
         // lane/fact 的 seq 已在 session_mutation_from_value 内校验;此处保持一致即可。
         let _ = seq;
     }
-    session_mutation_from_value(Value::Object(value)).map_err(|error| {
-        JsonlDecodeError::new(JsonlDecodeErrorKind::Schema, error.message)
-    })
+    session_mutation_from_value(Value::Object(value))
+        .map_err(|error| JsonlDecodeError::new(JsonlDecodeErrorKind::Schema, error.message))
 }
 
 /// 编码变更为带 `\n` 结尾的单行(对齐 TS `encodeMutation`)。
@@ -160,9 +165,7 @@ fn require_string(
     }
 }
 
-fn require_timestamp(
-    value: &serde_json::Map<String, Value>,
-) -> Result<i64, JsonlDecodeError> {
+fn require_timestamp(value: &serde_json::Map<String, Value>) -> Result<i64, JsonlDecodeError> {
     match value.get("createdAt").and_then(Value::as_i64) {
         Some(timestamp) if timestamp >= 0 => Ok(timestamp),
         _ => Err(JsonlDecodeError::new(
@@ -182,9 +185,9 @@ fn _result_helpers() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     use crate::agent::harness::session::state::SessionMutation;
-    use crate::agent::harness::session::types::{Entry, CustomEntry};
+    use crate::agent::harness::session::types::{CustomEntry, Entry};
+    use serde_json::json;
 
     fn custom_entry(seq: i64, parent_id: Option<&str>) -> Entry {
         Entry::Custom(CustomEntry {
@@ -239,7 +242,10 @@ mod tests {
         let error = parse_header(line).unwrap_err();
         assert_eq!(error.kind, JsonlDecodeErrorKind::Schema);
         let line = r#"{"kind":"header","version":3,"id":"s","createdAt":1,"cwd":"/w"}"#;
-        assert_eq!(parse_header(line).unwrap_err().kind, JsonlDecodeErrorKind::Schema);
+        assert_eq!(
+            parse_header(line).unwrap_err().kind,
+            JsonlDecodeErrorKind::Schema
+        );
     }
 
     #[test]
@@ -254,7 +260,8 @@ mod tests {
             legacy_parent_session_path: Some("/sessions/missing-parent.jsonl".into()),
             metadata: Some(json!({"owner": "agent"}).as_object().cloned().unwrap()),
         };
-        let metadata = metadata_from_header(&header, "/sessions/session.jsonl", 1_700_000_000_100.0);
+        let metadata =
+            metadata_from_header(&header, "/sessions/session.jsonl", 1_700_000_000_100.0);
         assert_eq!(metadata.id, "session");
         assert_eq!(metadata.path, "/sessions/session.jsonl");
         assert_eq!(metadata.modified_at, 1_700_000_000_100.0);
@@ -306,7 +313,8 @@ mod tests {
                 label: Some("keep".into()),
             },
         };
-        let value: serde_json::Value = serde_json::from_str(encode_mutation(&fact).trim_end()).unwrap();
+        let value: serde_json::Value =
+            serde_json::from_str(encode_mutation(&fact).trim_end()).unwrap();
         assert_eq!(value["kind"], "fact");
         assert_eq!(value["fact"], "label");
         assert_eq!(value["targetId"], "entry-1");
@@ -341,7 +349,8 @@ mod tests {
                 },
             ),
         };
-        let value: serde_json::Value = serde_json::from_str(encode_mutation(&record).trim_end()).unwrap();
+        let value: serde_json::Value =
+            serde_json::from_str(encode_mutation(&record).trim_end()).unwrap();
         assert_eq!(value["kind"], "record");
         assert_eq!(value["type"], "operation_started");
         assert_eq!(value["intent"]["kind"], "run");

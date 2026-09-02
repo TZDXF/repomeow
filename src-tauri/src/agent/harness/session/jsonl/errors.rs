@@ -4,9 +4,7 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
-use crate::agent::harness::session::types::{
-    SessionError, SessionErrorCode,
-};
+use crate::agent::harness::session::types::{SessionError, SessionErrorCode};
 use crate::agent::harness::types::{FileError, Result};
 
 /// JSONL 行解码错误(kind 限定 syntax/schema;对齐 TS `JsonlDecodeError`)。
@@ -52,11 +50,10 @@ pub fn file_result<T>(result: Result<T, FileError>, message: &str) -> Result<T, 
             } else {
                 SessionErrorCode::Storage
             };
-            Err(SessionError::new(
-                code,
-                format!("{}: {}", message, error.message),
+            Err(
+                SessionError::new(code, format!("{}: {}", message, error.message))
+                    .with_cause(Arc::new(error)),
             )
-            .with_cause(Arc::new(error)))
         }
     }
 }

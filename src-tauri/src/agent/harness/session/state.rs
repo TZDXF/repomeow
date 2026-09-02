@@ -50,7 +50,9 @@ impl Serialize for SessionMutation {
                 }
                 let entry_value = serde_json::to_value(entry).map_err(serde::ser::Error::custom)?;
                 let Value::Object(entry_fields) = entry_value else {
-                    return Err(serde::ser::Error::custom("entry must serialize to an object"));
+                    return Err(serde::ser::Error::custom(
+                        "entry must serialize to an object",
+                    ));
                 };
                 for (key, value) in entry_fields {
                     map.insert(key, value);
@@ -58,9 +60,12 @@ impl Serialize for SessionMutation {
             }
             SessionMutation::Record { record } => {
                 map.insert("kind".to_string(), Value::String("record".to_string()));
-                let record_value = serde_json::to_value(record).map_err(serde::ser::Error::custom)?;
+                let record_value =
+                    serde_json::to_value(record).map_err(serde::ser::Error::custom)?;
                 let Value::Object(record_fields) = record_value else {
-                    return Err(serde::ser::Error::custom("record must serialize to an object"));
+                    return Err(serde::ser::Error::custom(
+                        "record must serialize to an object",
+                    ));
                 };
                 for (key, value) in record_fields {
                     map.insert(key, value);
@@ -83,7 +88,9 @@ impl Serialize for SessionMutation {
                 map.insert("seq".to_string(), Value::from(*seq));
                 let fact_value = serde_json::to_value(fact).map_err(serde::ser::Error::custom)?;
                 let Value::Object(fact_fields) = fact_value else {
-                    return Err(serde::ser::Error::custom("fact must serialize to an object"));
+                    return Err(serde::ser::Error::custom(
+                        "fact must serialize to an object",
+                    ));
                 };
                 for (key, value) in fact_fields {
                     map.insert(key, value);
@@ -204,9 +211,7 @@ fn from_value(value: Value) -> Result<SessionMutation, SessionError> {
 
 fn require_seq(map: &serde_json::Map<String, Value>) -> Result<i64, SessionError> {
     match map.get("seq") {
-        Some(Value::Number(number)) => number
-            .as_i64()
-            .ok_or_else(|| invalid("has invalid seq")),
+        Some(Value::Number(number)) => number.as_i64().ok_or_else(|| invalid("has invalid seq")),
         _ => Err(invalid("has invalid seq")),
     }
 }
@@ -388,9 +393,11 @@ impl SessionState {
                 self.sequence = seq;
                 self.used_ids.insert(entry.id().to_string());
                 self.entries.push(entry.clone());
-                self.entries_by_id.insert(entry.id().to_string(), entry.clone());
+                self.entries_by_id
+                    .insert(entry.id().to_string(), entry.clone());
                 if let Some(lane) = lane {
-                    self.lanes.insert(lane.clone(), Some(entry.id().to_string()));
+                    self.lanes
+                        .insert(lane.clone(), Some(entry.id().to_string()));
                 }
                 self.log.push(LogItem::Entry {
                     seq,
@@ -402,7 +409,10 @@ impl SessionState {
             }
             SessionMutation::Record { record } => {
                 if !self.lanes.contains_key(record.lane()) {
-                    return Err(invalid(format!("references missing lane {}", record.lane())));
+                    return Err(invalid(format!(
+                        "references missing lane {}",
+                        record.lane()
+                    )));
                 }
                 if self.used_ids.contains(record.id()) {
                     return Err(invalid(format!("contains duplicate id {}", record.id())));
@@ -448,7 +458,9 @@ impl SessionState {
             SessionMutation::Fact { fact, .. } => match fact {
                 SessionFact::Label { target_id, label } => {
                     if !self.entries_by_id.contains_key(target_id) {
-                        return Err(invalid(format!("references missing label target {target_id}")));
+                        return Err(invalid(format!(
+                            "references missing label target {target_id}"
+                        )));
                     }
                     self.sequence = seq;
                     match label {
@@ -515,7 +527,9 @@ impl SessionState {
                 if self.matches_entry_query(entry, entry_query) {
                     results.push(entry.clone());
                 }
-                if reached_bound || (entry_query.limit.is_some() && results.len() == entry_query.limit.unwrap()) {
+                if reached_bound
+                    || (entry_query.limit.is_some() && results.len() == entry_query.limit.unwrap())
+                {
                     break;
                 }
             }
@@ -532,7 +546,10 @@ impl SessionState {
         Ok(results)
     }
 
-    pub fn find_records(&self, query: &super::types::RecordQuery) -> Result<Vec<LaneRecord>, SessionError> {
+    pub fn find_records(
+        &self,
+        query: &super::types::RecordQuery,
+    ) -> Result<Vec<LaneRecord>, SessionError> {
         assert_valid_limit(query.limit)?;
         assert_valid_cursor(query.after_seq)?;
         let mut results = Vec::new();
@@ -566,7 +583,10 @@ impl SessionState {
         })
     }
 
-    pub fn get_log(&self, options: &super::types::LogOptions) -> Result<Vec<LogItem>, SessionError> {
+    pub fn get_log(
+        &self,
+        options: &super::types::LogOptions,
+    ) -> Result<Vec<LogItem>, SessionError> {
         assert_valid_limit(options.limit)?;
         assert_valid_cursor(options.after_seq)?;
         let mut results = Vec::new();
@@ -597,7 +617,10 @@ impl SessionState {
     }
 
     /// 生成 fork 变更序列(对齐 TS `createForkMutations`)。
-    pub fn create_fork_mutations(&self, options: &ForkOptions) -> Result<Vec<SessionMutation>, SessionError> {
+    pub fn create_fork_mutations(
+        &self,
+        options: &ForkOptions,
+    ) -> Result<Vec<SessionMutation>, SessionError> {
         let copied_entries: Vec<Entry>;
         let fork_lanes: Vec<LanePointer>;
         if options.scope == Some(ForkScope::Tree) {
@@ -610,14 +633,12 @@ impl SessionState {
             let selected_entry_id = self.require_lane("main")?;
             let mut target_id: Option<String> = None;
             if let Some(selected_entry_id) = selected_entry_id {
-                let entry = self
-                    .get_entry(&selected_entry_id)
-                    .ok_or_else(|| {
-                        SessionError::new(
-                            SessionErrorCode::InvalidForkTarget,
-                            format!("Fork target is not a message entry: {selected_entry_id}"),
-                        )
-                    })?;
+                let entry = self.get_entry(&selected_entry_id).ok_or_else(|| {
+                    SessionError::new(
+                        SessionErrorCode::InvalidForkTarget,
+                        format!("Fork target is not a message entry: {selected_entry_id}"),
+                    )
+                })?;
                 if entry.entry_type() != "message" {
                     return Err(SessionError::new(
                         SessionErrorCode::InvalidForkTarget,
@@ -764,11 +785,7 @@ impl SessionState {
         type_matches && custom_matches && cursor_matches
     }
 
-    fn matches_record_query(
-        &self,
-        record: &LaneRecord,
-        query: &super::types::RecordQuery,
-    ) -> bool {
+    fn matches_record_query(&self, record: &LaneRecord, query: &super::types::RecordQuery) -> bool {
         let lane_matches = query
             .lane
             .as_ref()
@@ -787,21 +804,17 @@ impl SessionState {
         let operation_kind_matches = query
             .operation_kind
             .as_ref()
-            .map(|kind| {
-                match record {
-                    LaneRecord::OperationStarted(operation) => {
-                        serde_json::to_value(&operation.intent)
-                            .ok()
-                            .and_then(|value| {
-                                value
-                                    .get("kind")
-                                    .and_then(Value::as_str)
-                                    .map(|k| k == kind.as_str())
-                            })
-                            .unwrap_or(false)
-                    }
-                    _ => false,
-                }
+            .map(|kind| match record {
+                LaneRecord::OperationStarted(operation) => serde_json::to_value(&operation.intent)
+                    .ok()
+                    .and_then(|value| {
+                        value
+                            .get("kind")
+                            .and_then(Value::as_str)
+                            .map(|k| k == kind.as_str())
+                    })
+                    .unwrap_or(false),
+                _ => false,
             })
             .unwrap_or(true);
         let after_seq_matches = query

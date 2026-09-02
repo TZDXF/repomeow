@@ -529,14 +529,9 @@ mod tests {
         let project = TempProject::new();
         project.write("a.ts", "");
         let tool = create_find_tool(project.env());
-        let error = (tool.execute)(
-            "call-1".to_string(),
-            json!({ "pattern": "[" }),
-            None,
-            None,
-        )
-        .await
-        .unwrap_err();
+        let error = (tool.execute)("call-1".to_string(), json!({ "pattern": "[" }), None, None)
+            .await
+            .unwrap_err();
         assert!(error.to_string().contains("Invalid pattern"), "{error}");
     }
 }

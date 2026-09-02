@@ -136,13 +136,20 @@ impl Default for ChatPrefs {
     }
 }
 
-/// 问答工具权限:全部工具 / 仅只读工具。
+/// 问答工具权限:
+/// - `all`:全部工具直接执行;
+/// - `ask`:全部工具可用,但四个有副作用工具(`update_wiki` /
+///   `regenerate_wiki` / `add_custom_command` / `generate_report`)执行前
+///   由应用弹出硬确认(见 `commands/chat.rs` 的 before_tool_call 门禁)。
+///
+/// 旧值 `readOnly` 反序列化为 Ask(全部工具 + 执行前确认),保证旧配置平滑升级。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ChatPermission {
     #[default]
     All,
-    ReadOnly,
+    #[serde(alias = "readOnly")]
+    Ask,
 }
 
 // ── 读写(原子写;缺/坏 → 播种) ──────────────────────────────────────
@@ -200,9 +207,8 @@ pub fn save_ai_config_file_at(data_dir: &Path, config: &AiConfigFile) -> AppResu
     let tmp = data_dir.join(format!("{AI_CONFIG_FILE_NAME}.tmp"));
     fs::write(&tmp, body)
         .map_err(|e| AppError::coded(ErrorCode::IoError, format!("{}: {e}", tmp.display())))?;
-    fs::rename(&tmp, &path).map_err(|e| {
-        AppError::coded(ErrorCode::IoError, format!("{}: {e}", path.display()))
-    })?;
+    fs::rename(&tmp, &path)
+        .map_err(|e| AppError::coded(ErrorCode::IoError, format!("{}: {e}", path.display())))?;
     Ok(())
 }
 
@@ -331,14 +337,15 @@ pub fn normalize(config: &mut AiConfigFile) {
         .provider_id
         .as_deref()
         .zip(config.chat.model_id.as_deref())
-        .is_some_and(|(provider_id, model_id)| {
-            model_exists(config, provider_id, model_id)
-        });
+        .is_some_and(|(provider_id, model_id)| model_exists(config, provider_id, model_id));
     if !chat_model_valid {
         config.chat.provider_id = None;
         config.chat.model_id = None;
     }
-    if !matches!(config.chat.thinking.as_str(), "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max") {
+    if !matches!(
+        config.chat.thinking.as_str(),
+        "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+    ) {
         config.chat.thinking = default_thinking();
     }
 }
@@ -387,11 +394,7 @@ pub fn resolve_chat_prefs(config: &AiConfigFile) -> Option<(ModelRef, ChatPrefs)
 }
 
 /// 厂商 + 模型定义 → 填全元数据的 `Model`(替代原 `Model::from_settings`)。
-pub fn resolve_model(
-    config: &AiConfigFile,
-    provider_id: &str,
-    model_id: &str,
-) -> AppResult<Model> {
+pub fn resolve_model(config: &AiConfigFile, provider_id: &str, model_id: &str) -> AppResult<Model> {
     let provider = config.providers.get(provider_id).ok_or_else(|| {
         AppError::coded(
             ErrorCode::AiNotConfigured,
@@ -401,7 +404,10 @@ pub fn resolve_model(
     if provider.api != API_OPENAI_COMPLETIONS {
         return Err(AppError::coded(
             ErrorCode::AiRequestFailed,
-            format!("暂不支持 AI API 类型「{}」,请使用 OpenAI 兼容接口", provider.api),
+            format!(
+                "暂不支持 AI API 类型「{}」,请使用 OpenAI 兼容接口",
+                provider.api
+            ),
         ));
     }
     let definition = provider
@@ -486,7 +492,8 @@ mod tests {
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("repomeow-catalog-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("repomeow-catalog-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -601,5 +608,39 @@ mod tests {
         assert_eq!(parse_thinking_level("high"), ModelThinkingLevel::High);
         assert_eq!(parse_thinking_level("xhigh"), ModelThinkingLevel::Xhigh);
         assert_eq!(parse_thinking_level("bogus"), ModelThinkingLevel::Off);
+    }
+
+    #[test]
+    fn chat_permission_accepts_legacy_readonly_and_serializes_as_ask() {
+        // 默认仍为 All。
+        assert_eq!(ChatPermission::default(), ChatPermission::All);
+        // 当前取值 all / ask。
+        assert_eq!(
+            serde_json::from_str::<ChatPermission>("\"all\"").unwrap(),
+            ChatPermission::All
+        );
+        assert_eq!(
+            serde_json::from_str::<ChatPermission>("\"ask\"").unwrap(),
+            ChatPermission::Ask
+        );
+        // 旧值 readOnly 兼容反序列化为 Ask(全部工具 + 执行前确认)。
+        assert_eq!(
+            serde_json::from_str::<ChatPermission>("\"readOnly\"").unwrap(),
+            ChatPermission::Ask
+        );
+        // ChatPrefs 缺省 permission → All;旧 readOnly → Ask。
+        let prefs: ChatPrefs = serde_json::from_str("{}").unwrap();
+        assert_eq!(prefs.permission, ChatPermission::All);
+        let prefs: ChatPrefs = serde_json::from_str(r#"{"permission":"readOnly"}"#).unwrap();
+        assert_eq!(prefs.permission, ChatPermission::Ask);
+        // 序列化只输出 all / ask,不再输出 readOnly。
+        assert_eq!(
+            serde_json::to_string(&ChatPermission::Ask).unwrap(),
+            "\"ask\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ChatPermission::All).unwrap(),
+            "\"all\""
+        );
     }
 }

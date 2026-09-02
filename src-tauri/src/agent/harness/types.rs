@@ -164,7 +164,10 @@ pub enum AgentHarnessToolContextSource {
 }
 
 /// 把 harness 工具绑定到上下文来源,产出 core `AgentTool`(供 `AgentContext.tools` 使用)。
-pub fn bind_harness_tool(tool: AgentHarnessTool, source: AgentHarnessToolContextSource) -> crate::agent::types::AgentTool {
+pub fn bind_harness_tool(
+    tool: AgentHarnessTool,
+    source: AgentHarnessToolContextSource,
+) -> crate::agent::types::AgentTool {
     let execute = tool.execute.clone();
     let bound: crate::agent::types::ToolExecuteFn = Arc::new(
         move |tool_call_id: String,
@@ -306,10 +309,7 @@ impl FileError {
         self
     }
 
-    pub fn with_cause(
-        mut self,
-        cause: Arc<dyn std::error::Error + Send + Sync>,
-    ) -> Self {
+    pub fn with_cause(mut self, cause: Arc<dyn std::error::Error + Send + Sync>) -> Self {
         self.cause = Some(cause);
         self
     }
@@ -618,11 +618,18 @@ pub trait FileSystem: Send + Sync {
     ) -> BoxFuture<'a, Result<bool, FileError>>;
 
     /// 创建目录;默认 recursive=true、无 abort。
-    fn create_dir<'a>(&'a self, path: String, options: CreateDirOptions)
-        -> BoxFuture<'a, Result<(), FileError>>;
+    fn create_dir<'a>(
+        &'a self,
+        path: String,
+        options: CreateDirOptions,
+    ) -> BoxFuture<'a, Result<(), FileError>>;
 
     /// 删除文件或目录;默认 recursive=false、force=false、无 abort。
-    fn remove<'a>(&'a self, path: String, options: RemoveOptions) -> BoxFuture<'a, Result<(), FileError>>;
+    fn remove<'a>(
+        &'a self,
+        path: String,
+        options: RemoveOptions,
+    ) -> BoxFuture<'a, Result<(), FileError>>;
 
     /// 创建临时目录并返回绝对路径;默认 prefix="tmp-"、无 abort。
     fn create_temp_dir<'a>(

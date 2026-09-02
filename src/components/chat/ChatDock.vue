@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref, useTemplateRef, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { toast } from "vue-sonner";
@@ -65,7 +65,7 @@ import type { Project } from "@/types";
 
 const props = defineProps<{ project: Project }>();
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const router = useRouter();
 const chat = useChatStore();
 const aiConfig = useAiConfigStore();
@@ -107,9 +107,12 @@ function toggleOpen() {
 const PANEL_DEFAULT_WIDTH = 500;
 const PANEL_DEFAULT_HEIGHT = 640;
 const PANEL_EXPANDED_WIDTH = 720;
-const PANEL_MIN_WIDTH = 360;
+const PANEL_FALLBACK_MIN_WIDTH = 420;
 const PANEL_MIN_HEIGHT = 320;
 const PANEL_MARGIN = 68; // 2rem + 2.25rem
+// 底栏固定占位:发送/停止槽 32 + 上下文圆圈约 28 + footer 横向 padding 16
+// + 间隙 8 + 输入区 p-3 24 + 边框 2 ≈ 110;实测工具组 scrollWidth 后加上它
+const PANEL_TOOLS_OVERHEAD = 110;
 
 const expanded = ref(false);
 const panelWidth = ref(PANEL_DEFAULT_WIDTH);
@@ -132,9 +135,35 @@ function toggleExpanded() {
 const panelStyle = computed(() => ({
   width: `${panelWidth.value}px`,
   height: `${panelHeight.value}px`,
+  minWidth: `${minPanelWidth.value}px`,
   maxWidth: "calc(100vw - 2rem)",
   maxHeight: "calc(100vh - 2rem - 2.25rem)",
 }));
+
+// 最小宽度实测:临时取消工具组换行读 scrollWidth,保证底栏(权限/模型/思考强度
+// + 上下文圆圈 + 发送钮)永不换行;标签随模型/语言变化,打开面板或相关值变化时重测
+const toolsRef = useTemplateRef<{ $el: HTMLElement } | null>("tools");
+const minPanelWidth = ref(PANEL_FALLBACK_MIN_WIDTH);
+
+async function measureMinPanelWidth() {
+  await nextTick();
+  const el = toolsRef.value?.$el;
+  if (!el) return;
+  el.classList.add("flex-nowrap");
+  const toolsWidth = el.scrollWidth;
+  el.classList.remove("flex-nowrap");
+  minPanelWidth.value = Math.max(
+    PANEL_FALLBACK_MIN_WIDTH,
+    Math.ceil(toolsWidth) + PANEL_TOOLS_OVERHEAD,
+  );
+}
+
+watch(
+  [open, () => aiConfig.chatModelValue, () => aiConfig.chatPermission, () => locale.value],
+  () => {
+    if (open.value) void measureMinPanelWidth();
+  },
+);
 
 // 上边/左边/左上角拖拽:面板锚定右下角,拖左边加宽、拖上边加高;
 // 拖拽中禁用尺寸过渡,避免 0.25s 过渡滞后于指针
@@ -154,7 +183,7 @@ function startResize(axis: "x" | "y" | "both", event: PointerEvent) {
     expanded.value = false;
     if (axis !== "y") {
       panelWidth.value = Math.min(
-        Math.max(startWidth + (startX - e.clientX), PANEL_MIN_WIDTH),
+        Math.max(startWidth + (startX - e.clientX), minPanelWidth.value),
         maxPanelWidth(),
       );
     }
@@ -224,7 +253,7 @@ const thinkingTitle = computed(() =>
 );
 
 const permissionTitle = computed(() =>
-  aiConfig.chatPermission === "all" ? t("chat.permission.all") : t("chat.permission.readOnly"),
+  aiConfig.chatPermission === "all" ? t("chat.permission.all") : t("chat.permission.ask"),
 );
 
 /** 偏好写入失败统一 toast(落盘失败时 store 已回读后端真实状态) */
@@ -244,8 +273,15 @@ function onThinkingChange(level: unknown) {
 }
 
 function onPermissionChange(value: unknown) {
-  if (value !== "all" && value !== "readOnly") return;
+  if (value !== "all" && value !== "ask") return;
   void applyPref(() => aiConfig.setChatPermission(value as ChatPermission));
+}
+
+/** ChatToolCard 冒泡的工具权限请求:经 store 回应后端;失败 toast 提示可重试 */
+function onToolPermissionRespond(payload: { id: string; allow: boolean }) {
+  void chat.respondToolPermission(props.project.path, payload.id, payload.allow).then((ok) => {
+    if (!ok) toast.error(t("chat.toolPermission.respondFailed"));
+  });
 }
 
 // 上下文占用:窗口来自所选模型元数据;明细来自最近一次整轮用量
@@ -463,6 +499,7 @@ const retrySeconds = computed(() => {
                       v-if="view.groups.length > 0"
                       :groups="view.groups"
                       :active="view.active"
+                      @respond="onToolPermissionRespond"
                     />
                     <MessageResponse
                       v-for="(content, ci) in view.contents"
@@ -523,7 +560,10 @@ const retrySeconds = computed(() => {
               />
             </PromptInputBody>
             <PromptInputFooter class="px-2 pb-2">
-              <PromptInputTools class="min-w-0 flex-1 flex-wrap">
+              <PromptInputTools ref="tools" class="min-w-0 flex-1 flex-wrap">
+                <!-- body-lock 必须与 disable-outside-pointer-events=false 成对出现:
+                     reka Select 的 bodyLock 默认 true 会给 body 写 pointer-events:none,
+                     内容不自恢复 auto 时选项无法点击(见 ModelSelector.vue 注释) -->
                 <Select
                   :model-value="aiConfig.chatPermission"
                   :disabled="session.busy"
@@ -534,23 +574,19 @@ const retrySeconds = computed(() => {
                     class="text-muted-foreground h-7 gap-1 px-2 text-xs"
                     :title="permissionTitle"
                   >
-                    <Eye v-if="aiConfig.chatPermission === 'readOnly'" class="size-3.5 shrink-0" />
+                    <Eye v-if="aiConfig.chatPermission === 'ask'" class="size-3.5 shrink-0" />
                     <Wrench v-else class="size-3.5 shrink-0" />
                     <span>
                       {{
                         aiConfig.chatPermission === "all"
                           ? t("chat.permission.allShort")
-                          : t("chat.permission.readOnlyShort")
+                          : t("chat.permission.askShort")
                       }}
                     </span>
                   </SelectTrigger>
-                  <SelectContent :disable-outside-pointer-events="false">
-                    <SelectItem
-                      value="readOnly"
-                      class="text-xs"
-                      :title="t('chat.permission.readOnly')"
-                    >
-                      {{ t("chat.permission.readOnlyShort") }}
+                  <SelectContent :disable-outside-pointer-events="false" :body-lock="false">
+                    <SelectItem value="ask" class="text-xs" :title="t('chat.permission.ask')">
+                      {{ t("chat.permission.askShort") }}
                     </SelectItem>
                     <SelectItem value="all" class="text-xs" :title="t('chat.permission.all')">
                       {{ t("chat.permission.allShort") }}
@@ -577,7 +613,7 @@ const retrySeconds = computed(() => {
                     <Brain class="size-3.5 shrink-0" />
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent :disable-outside-pointer-events="false">
+                  <SelectContent :disable-outside-pointer-events="false" :body-lock="false">
                     <SelectItem
                       v-for="level in CHAT_THINKING_LEVELS"
                       :key="level"

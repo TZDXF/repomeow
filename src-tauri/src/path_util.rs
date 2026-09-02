@@ -55,6 +55,16 @@ pub fn to_forward_slash_str(s: &str) -> String {
     trim_trailing_seps(&s.trim().replace('\\', "/"), '/')
 }
 
+/// 归一化 LLM 产出的仓库相对路径:`/` 分隔、去 `./` 与 `/` 前缀。
+/// wiki 大纲校验与页面 sources 条目共用;前端对应 `src/lib/wiki-parse.ts` 的
+/// normalizeFilePath
+pub fn repo_relative_str(s: &str) -> String {
+    to_forward_slash_str(s)
+        .trim_start_matches("./")
+        .trim_start_matches('/')
+        .to_string()
+}
+
 /// Windows: 转 `\` 分隔字符串(explorer `/select,` 等只认反斜杠的下游消费者)
 #[cfg(windows)]
 pub fn to_native_separator(s: &str) -> String {
@@ -104,6 +114,16 @@ mod tests {
         assert_eq!(clean_str("/"), "/");
         // 反斜杠是合法文件名字符,不替换
         assert_eq!(clean_str("/repo/a\\b"), "/repo/a\\b");
+    }
+
+    #[test]
+    fn repo_relative_strips_prefixes() {
+        assert_eq!(repo_relative_str("src/foo.rs"), "src/foo.rs");
+        assert_eq!(repo_relative_str("./src/foo.rs"), "src/foo.rs");
+        assert_eq!(repo_relative_str("././src/foo.rs"), "src/foo.rs");
+        assert_eq!(repo_relative_str("/src/foo.rs"), "src/foo.rs");
+        assert_eq!(repo_relative_str("src\\foo.rs"), "src/foo.rs");
+        assert_eq!(repo_relative_str("src/foo.rs/"), "src/foo.rs");
     }
 
     #[test]

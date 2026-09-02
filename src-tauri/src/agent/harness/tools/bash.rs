@@ -11,9 +11,9 @@ use crate::agent::harness::utils::shell_output::{
     execute_shell_with_capture, ShellCaptureOptions, ShellCaptureProgress,
 };
 use crate::agent::harness::utils::truncate::{
-    format_size, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, TruncatedBy, TruncationResult,
+    format_size, TruncatedBy, TruncationResult, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES,
 };
-use crate::agent::types::{AgentTool, AgentToolResult, AbortSignal, ToolExecutionError};
+use crate::agent::types::{AbortSignal, AgentTool, AgentToolResult, ToolExecutionError};
 
 /// bash 最长超时(秒;对齐 TS `MAX_TIMEOUT_SECONDS`)。
 pub const MAX_TIMEOUT_SECONDS: f64 = 2_147_483_647.0 / 1000.0;
@@ -78,10 +78,16 @@ impl UpdateThrottle {
         let delay = BASH_UPDATE_THROTTLE_MS.saturating_sub(now.saturating_sub(last));
         if delay == 0 {
             self.last_update_at.store(now, Ordering::SeqCst);
-            *self.pending.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = false;
+            *self
+                .pending
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = false;
             true
         } else {
-            *self.pending.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
+            *self
+                .pending
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
             false
         }
     }
@@ -89,7 +95,10 @@ impl UpdateThrottle {
     /// 终态冲刷:无论节流都允许发出。
     fn flush(&self) -> bool {
         self.last_update_at.store(now_ms_u64(), Ordering::SeqCst);
-        let mut pending = self.pending.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut pending = self
+            .pending
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let was_pending = *pending;
         *pending = false;
         was_pending || true
@@ -304,7 +313,9 @@ pub fn create_bash_tool(env: Arc<dyn ExecutionEnv>, options: Option<BashToolOpti
 
 fn partial_result_from_progress(progress: &ShellCaptureProgress) -> AgentToolResult {
     AgentToolResult {
-        content: vec![crate::agent::types::TextOrImageContent::text(progress.output.clone())],
+        content: vec![crate::agent::types::TextOrImageContent::text(
+            progress.output.clone(),
+        )],
         details: serde_json::to_value(BashToolDetails {
             truncation: if progress.truncation.truncated {
                 Some(progress.truncation.clone())

@@ -155,7 +155,10 @@ pub fn serialize_conversation(messages: &[Message]) -> String {
                     }
                 }
                 if !thinking_parts.is_empty() {
-                    parts.push(format!("[Assistant thinking]: {}", thinking_parts.join("\n")));
+                    parts.push(format!(
+                        "[Assistant thinking]: {}",
+                        thinking_parts.join("\n")
+                    ));
                 }
                 let has_text = assistant
                     .content
@@ -258,14 +261,15 @@ mod tests {
                     redacted: false,
                 },
                 AssistantContent::text("answer"),
-                AssistantContent::ToolCall(test_tool_call("t1", "read", json!({"path": "/x", "n": 3}))),
+                AssistantContent::ToolCall(test_tool_call(
+                    "t1",
+                    "read",
+                    json!({"path": "/x", "n": 3}),
+                )),
             ],
             StopReason::Stop,
         );
-        let output = serialize_conversation(&[
-            Message::User(user),
-            Message::Assistant(assistant),
-        ]);
+        let output = serialize_conversation(&[Message::User(user), Message::Assistant(assistant)]);
         assert!(output.contains("[User]: hello there"));
         assert!(output.contains("[Assistant thinking]: hmm"));
         assert!(output.contains("[Assistant]: answer"));
@@ -279,7 +283,9 @@ mod tests {
             role: "toolResult".to_string(),
             tool_call_id: "t".to_string(),
             tool_name: "read".to_string(),
-            content: vec![crate::agent::llm::types::TextOrImageContent::text(long_text)],
+            content: vec![crate::agent::llm::types::TextOrImageContent::text(
+                long_text,
+            )],
             details: None,
             usage: None,
             added_tool_names: None,

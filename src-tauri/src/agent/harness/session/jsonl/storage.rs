@@ -9,7 +9,9 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 use tokio::sync::Mutex;
 
-use super::codec::{encode_header, encode_mutation, metadata_from_header, parse_header, parse_mutation};
+use super::codec::{
+    encode_header, encode_mutation, metadata_from_header, parse_header, parse_mutation,
+};
 use super::errors::{file_result, invalid_file, JsonlDecodeError, JsonlDecodeErrorKind};
 use super::types::{JsonlSessionMetadata, JsonlV4Header};
 use crate::agent::agent_loop::now_ms;
@@ -121,13 +123,16 @@ impl JsonlSessionStorage {
                 &JsonlDecodeError::new(JsonlDecodeErrorKind::Schema, "is missing a header"),
             ));
         }
-        let header = parse_header(physical_lines[0])
-            .map_err(|error| invalid_file(path, 1, &error))?;
+        let header =
+            parse_header(physical_lines[0]).map_err(|error| invalid_file(path, 1, &error))?;
         let file_info = file_result(
             fs.file_info(path.to_string()).await,
             &format!("Failed to read session metadata {path}"),
         )?;
-        let storage = Self::new(fs.clone(), metadata_from_header(&header, path, file_info.mtime_ms));
+        let storage = Self::new(
+            fs.clone(),
+            metadata_from_header(&header, path, file_info.mtime_ms),
+        );
         let mut torn_tail_repaired = false;
         for (offset, line) in physical_lines.iter().skip(1).enumerate() {
             let index = offset + 1; // 1-based 行号(蓝本 index 从 1 开始)
@@ -156,7 +161,10 @@ impl JsonlSessionStorage {
                     return Err(invalid_file(path, index + 1, &error));
                 }
             };
-            let mut state = storage.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut state = storage
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             if let Err(error) = state.apply_mutation(&mutation) {
                 if error.code == SessionErrorCode::InvalidEntry {
                     return Err(invalid_file(path, index + 1, &error));
@@ -238,7 +246,9 @@ impl JsonlSessionStorage {
     }
 
     fn state_lock(&self) -> std::sync::MutexGuard<'_, SessionState> {
-        self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
 
@@ -406,9 +416,11 @@ impl SessionStorage for JsonlSessionStorage {
         query: BranchEntryQuery,
     ) -> BoxFuture<'a, Result<Vec<Entry>, SessionError>> {
         Box::pin(async move {
-            Ok(self
-                .state_lock()
-                .find_entries_on_branch(&query.query, &query.bounds, &query.start)?)
+            Ok(self.state_lock().find_entries_on_branch(
+                &query.query,
+                &query.bounds,
+                &query.start,
+            )?)
         })
     }
 
@@ -427,7 +439,10 @@ impl SessionStorage for JsonlSessionStorage {
         Box::pin(async move { Ok(self.state_lock().find_open_operations(&lane, limit)?) })
     }
 
-    fn get_log<'a>(&'a self, options: LogOptions) -> BoxFuture<'a, Result<Vec<LogItem>, SessionError>> {
+    fn get_log<'a>(
+        &'a self,
+        options: LogOptions,
+    ) -> BoxFuture<'a, Result<Vec<LogItem>, SessionError>> {
         Box::pin(async move { Ok(self.state_lock().get_log(&options)?) })
     }
 

@@ -9,9 +9,9 @@
 use std::sync::Arc;
 
 use crate::agent::harness::env::ShellKind;
+use crate::agent::harness::tools::bash::{create_bash_tool, BashToolOptions};
 use crate::agent::harness::types::ExecutionEnv;
 use crate::agent::types::AgentTool;
-use crate::agent::harness::tools::bash::{create_bash_tool, BashToolOptions};
 
 /// PowerShell 命令前缀:强制 Console 输出编码为 UTF-8(对齐蓝本
 /// `UTF8_OUTPUT_PREFIX`;失败静默忽略,兼容受限主机)。
@@ -114,7 +114,8 @@ mod tests {
     #[cfg(windows)]
     #[tokio::test]
     async fn reports_nonzero_exit_code() {
-        let temp_dir = std::env::temp_dir().join(format!("repomeow-ps-exit-{}", std::process::id()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("repomeow-ps-exit-{}", std::process::id()));
         std::fs::create_dir_all(&temp_dir).unwrap();
         let tool = create_local_powershell_tool(&temp_dir, None).unwrap();
         let error = (tool.execute)(

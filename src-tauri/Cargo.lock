@@ -4022,6 +4022,7 @@ dependencies = [
  "tiktoken-rs",
  "tokio",
  "tokio-util",
+ "toml 0.8.2",
  "url",
  "urlpattern",
  "which",

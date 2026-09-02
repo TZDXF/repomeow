@@ -57,7 +57,9 @@ pub type OnResponseCallback = Arc<dyn Fn(&ProviderResponse) + Send + Sync>;
 /// TS `prepareNextTurn(signal)`(无上下文变体)的 Rust 形状;注入的
 /// AgentLoopConfig.prepare_next_turn 直接承载上下文变体。
 pub type PrepareNextTurnSimpleFn = Arc<
-    dyn Fn(Option<AbortSignal>) -> BoxFuture<'static, Option<crate::agent::types::AgentLoopTurnUpdate>>
+    dyn Fn(
+            Option<AbortSignal>,
+        ) -> BoxFuture<'static, Option<crate::agent::types::AgentLoopTurnUpdate>>
         + Send
         + Sync,
 >;
@@ -85,7 +87,9 @@ pub fn default_convert_to_llm_fn() -> crate::agent::types::ConvertToLlmFn {
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// 排队消息队列(mode 决定 drain 数量)。
@@ -263,12 +267,8 @@ impl AgentInner {
             }
         }
 
-        let signal = {
-            lock(&self.active_run)
-                .as_ref()
-                .map(|run| run.abort.clone())
-        }
-        .expect("Agent listener invoked outside active run");
+        let signal = { lock(&self.active_run).as_ref().map(|run| run.abort.clone()) }
+            .expect("Agent listener invoked outside active run");
         let listeners: Vec<AgentListener> = {
             lock(&self.listeners)
                 .items
@@ -414,8 +414,12 @@ impl Agent {
                 base_config: Mutex::new(config),
                 stream_function: Mutex::new(stream_fn),
                 listeners: Mutex::new(Listeners::default()),
-                steering_queue: Arc::new(Mutex::new(PendingMessageQueue::new(QueueMode::OneAtATime))),
-                follow_up_queue: Arc::new(Mutex::new(PendingMessageQueue::new(QueueMode::OneAtATime))),
+                steering_queue: Arc::new(Mutex::new(PendingMessageQueue::new(
+                    QueueMode::OneAtATime,
+                ))),
+                follow_up_queue: Arc::new(Mutex::new(PendingMessageQueue::new(
+                    QueueMode::OneAtATime,
+                ))),
                 active_run: Mutex::new(None),
             }),
         }
@@ -573,7 +577,9 @@ impl Agent {
     /// 清空 transcript、运行状态与队列;运行中返回 Err(对齐 TS throw)。
     pub fn reset(&self) -> Result<(), String> {
         if lock(&self.inner.active_run).is_some() {
-            return Err("Agent is already processing. Wait for completion before resetting.".to_string());
+            return Err(
+                "Agent is already processing. Wait for completion before resetting.".to_string(),
+            );
         }
         {
             let mut state = lock(&self.inner.state);
@@ -624,17 +630,18 @@ impl Agent {
     /// 从当前 transcript 续跑;末尾 assistant 时先 drain 队列,否则直接续跑。
     pub async fn continue_run(&self) -> Result<(), String> {
         if lock(&self.inner.active_run).is_some() {
-            return Err("Agent is already processing. Wait for completion before continuing.".to_string());
+            return Err(
+                "Agent is already processing. Wait for completion before continuing.".to_string(),
+            );
         }
 
         let last_is_assistant = {
             let state = lock(&self.inner.state);
             match state.messages.last() {
                 None => return Err("No messages to continue from".to_string()),
-                Some(message) => matches!(
-                    message,
-                    AgentMessage::Message(TypedMessage::Assistant(_))
-                ),
+                Some(message) => {
+                    matches!(message, AgentMessage::Message(TypedMessage::Assistant(_)))
+                }
             }
         };
 
@@ -653,11 +660,7 @@ impl Agent {
         self.run_continuation().await
     }
 
-    fn text_user_message(
-        &self,
-        text: String,
-        images: Vec<TextOrImageContent>,
-    ) -> AgentMessage {
+    fn text_user_message(&self, text: String, images: Vec<TextOrImageContent>) -> AgentMessage {
         let mut content = vec![TextOrImageContent::text(text)];
         content.extend(images);
         AgentMessage::Message(TypedMessage::User(UserMessage {
@@ -1101,5 +1104,4 @@ mod tests {
             other => panic!("expected assistant message, got {other:?}"),
         }
     }
-
 }

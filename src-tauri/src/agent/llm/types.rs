@@ -92,8 +92,7 @@ pub struct ProviderResponse {
 }
 
 /// provider 请求发出前观测/改写 payload 的回调(Rust 侧不序列化)。
-pub type OnPayloadFn =
-    Box<dyn Fn(Value) -> BoxFuture<'static, Option<Value>> + Send + Sync>;
+pub type OnPayloadFn = Box<dyn Fn(Value) -> BoxFuture<'static, Option<Value>> + Send + Sync>;
 /// 收到 HTTP 响应后的回调(Rust 侧不序列化)。
 pub type OnResponseFn = Box<dyn Fn(&ProviderResponse) + Send + Sync>;
 
@@ -546,7 +545,6 @@ pub struct OpenAICompletionsCompat {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supports_strict_mode: Option<bool>,
 }
-
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

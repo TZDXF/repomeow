@@ -32,11 +32,11 @@ use crate::agent::harness::session::types::{
     UsageCauseKind, UsageRecord,
 };
 use crate::agent::harness::types::{AgentHarnessStreamOptions, AgentHarnessTool, ToolContext};
+use crate::agent::harness::uuid::uuid_v7;
 use crate::agent::llm::SimpleStreamOptions;
 use crate::agent::types::{
     AgentEvent, AgentListener, AgentMessage, AgentTool, QueueMode, TypedMessage,
 };
-use crate::agent::harness::uuid::uuid_v7;
 
 /// 排队条目(entry_id 对应 `QueueEnqueuedRecord.target.id`,消费时物化为同 id 条目)。
 #[derive(Clone, Debug)]
@@ -146,8 +146,10 @@ pub(crate) fn stream_options_to_simple(options: &AgentHarnessStreamOptions) -> S
 /// 从 session 当前分支构建时间序上下文(消息 + 派生状态)。
 pub(crate) async fn build_history(
     session: &Session,
-) -> Result<crate::agent::harness::session::context::SessionContext, crate::agent::harness::session::types::SessionError>
-{
+) -> Result<
+    crate::agent::harness::session::context::SessionContext,
+    crate::agent::harness::session::types::SessionError,
+> {
     if session.get_leaf_id().await?.is_none() {
         return Ok(Default::default());
     }
@@ -185,7 +187,9 @@ pub(crate) async fn branch_entries(
 }
 
 /// SessionError → OperationError(记录落库失败的统一包装)。
-pub(crate) fn operation_error(error: crate::agent::harness::session::types::SessionError) -> OperationError {
+pub(crate) fn operation_error(
+    error: crate::agent::harness::session::types::SessionError,
+) -> OperationError {
     OperationError {
         code: format!("session_{}", error.code),
         message: error.message,
@@ -325,10 +329,7 @@ pub(crate) fn make_mirroring_listener(shared: RuntimeShared, run_id: String) -> 
                 }
                 AgentEvent::MessageStart { message } => {
                     // 仅 assistant 请求计时;steering 注入的 user 消息不走流式。
-                    if matches!(
-                        message,
-                        AgentMessage::Message(TypedMessage::Assistant(_))
-                    ) {
+                    if matches!(message, AgentMessage::Message(TypedMessage::Assistant(_))) {
                         *assistant_started_at
                             .lock()
                             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(now_ms());
@@ -339,12 +340,14 @@ pub(crate) fn make_mirroring_listener(shared: RuntimeShared, run_id: String) -> 
                     assistant_message_event,
                 } => {
                     // 增量透传:不落 session,仅供实时监听方(流式预览/逐请求用量)消费。
-                    shared.bus.emit(&HarnessEvent::MessageUpdate(MessageUpdateEvent {
-                        lane: "main".to_string(),
-                        run_id,
-                        message: message.clone(),
-                        assistant_message_event: assistant_message_event.clone(),
-                    }));
+                    shared
+                        .bus
+                        .emit(&HarnessEvent::MessageUpdate(MessageUpdateEvent {
+                            lane: "main".to_string(),
+                            run_id,
+                            message: message.clone(),
+                            assistant_message_event: assistant_message_event.clone(),
+                        }));
                 }
                 AgentEvent::ToolExecutionStart {
                     tool_call_id,
@@ -625,13 +628,14 @@ mod runtime_tests {
             crate::agent::harness::events::HarnessEventType::Usage,
         ] {
             let seen = seen.clone();
-            let _ = harness
-                .events()
-                .on(event_type, Arc::new(move |event| {
+            let _ = harness.events().on(
+                event_type,
+                Arc::new(move |event| {
                     seen.lock()
                         .unwrap()
                         .push(event.event_type().as_str().to_string());
-                }));
+                }),
+            );
         }
 
         let outcome = harness.prompt("hi".to_string()).await.unwrap();
@@ -704,7 +708,8 @@ mod runtime_tests {
                     .push(event.event_type().as_str().to_string());
             }),
         );
-        let usages: Arc<Mutex<Vec<(Option<i64>, Option<String>)>>> = Arc::new(Mutex::new(Vec::new()));
+        let usages: Arc<Mutex<Vec<(Option<i64>, Option<String>)>>> =
+            Arc::new(Mutex::new(Vec::new()));
         let usage_sink = usages.clone();
         let _unsubscribe_usage = harness.on_event(
             crate::agent::harness::events::HarnessEventType::Usage,
@@ -756,10 +761,14 @@ mod runtime_tests {
     async fn busy_prompt_rejected_until_idle() {
         let session = memory_session();
         let gate = Arc::new(tokio::sync::Notify::new());
-        let (harness, _) =
-            AgentHarness::create(options(session, gated_stream_fn(gate.clone()), Vec::new(), None))
-                .await
-                .unwrap();
+        let (harness, _) = AgentHarness::create(options(
+            session,
+            gated_stream_fn(gate.clone()),
+            Vec::new(),
+            None,
+        ))
+        .await
+        .unwrap();
         let harness = Arc::new(harness);
         let run = {
             let harness = harness.clone();
@@ -788,9 +797,12 @@ mod runtime_tests {
     async fn abort_mid_run_marks_aborted_and_returns_queues() {
         let session = memory_session();
         let gate = Arc::new(tokio::sync::Notify::new());
-        let (harness, _) = AgentHarness::create(
-            options(session.clone(), gated_stream_fn(gate.clone()), Vec::new(), None),
-        )
+        let (harness, _) = AgentHarness::create(options(
+            session.clone(),
+            gated_stream_fn(gate.clone()),
+            Vec::new(),
+            None,
+        ))
         .await
         .unwrap();
         let harness = Arc::new(harness);
@@ -846,7 +858,11 @@ mod runtime_tests {
                     let gate = gates.lock().unwrap()[index].clone();
                     gate.notified().await;
                     let (stream, writer) = crate::agent::llm::event_stream::event_stream();
-                    let script = if index == 0 { text_script("one") } else { text_script("two") };
+                    let script = if index == 0 {
+                        text_script("one")
+                    } else {
+                        text_script("two")
+                    };
                     for event in script.events {
                         writer.push(event);
                     }
@@ -860,14 +876,15 @@ mod runtime_tests {
             let inner = stream_fn;
             let calls = Arc::new(Mutex::new(Vec::new()));
             let sink = calls.clone();
-            let wrapped: crate::agent::types::StreamFn = Arc::new(move |model, context, options| {
-                let inner = inner.clone();
-                let sink = sink.clone();
-                Box::pin(async move {
-                    sink.lock().unwrap().push(context.clone());
-                    inner(model, context, options).await
-                })
-            });
+            let wrapped: crate::agent::types::StreamFn =
+                Arc::new(move |model, context, options| {
+                    let inner = inner.clone();
+                    let sink = sink.clone();
+                    Box::pin(async move {
+                        sink.lock().unwrap().push(context.clone());
+                        inner(model, context, options).await
+                    })
+                });
             (wrapped, calls)
         };
         let (harness, _) =
@@ -967,7 +984,11 @@ mod runtime_tests {
                 crate::agent::llm::types::Message::ToolResult(_) => "toolResult",
             })
             .collect();
-        assert_eq!(history, vec!["user", "assistant", "user", "user"], "{history:?}");
+        assert_eq!(
+            history,
+            vec!["user", "assistant", "user", "user"],
+            "{history:?}"
+        );
     }
 
     #[tokio::test]
@@ -1092,25 +1113,29 @@ mod runtime_tests {
         ));
 
         harness
-            .patch_stream_options(crate::agent::harness::types::AgentHarnessStreamOptionsPatch {
-                timeout_ms: Some(1_000),
-                headers: Some(Some(StdHashMap::from([(
-                    "x-a".to_string(),
-                    Some("1".to_string()),
-                )]))),
-                ..Default::default()
-            })
+            .patch_stream_options(
+                crate::agent::harness::types::AgentHarnessStreamOptionsPatch {
+                    timeout_ms: Some(1_000),
+                    headers: Some(Some(StdHashMap::from([(
+                        "x-a".to_string(),
+                        Some("1".to_string()),
+                    )]))),
+                    ..Default::default()
+                },
+            )
             .await;
         let stream_options = harness.get_stream_options().await;
         assert_eq!(stream_options.timeout_ms, Some(1_000));
         assert_eq!(stream_options.headers.as_ref().unwrap()["x-a"], "1");
         // 删除键 + 标量回退。
         harness
-            .patch_stream_options(crate::agent::harness::types::AgentHarnessStreamOptionsPatch {
-                headers: Some(Some(StdHashMap::from([("x-a".to_string(), None)]))),
-                timeout_ms: Some(2_000),
-                ..Default::default()
-            })
+            .patch_stream_options(
+                crate::agent::harness::types::AgentHarnessStreamOptionsPatch {
+                    headers: Some(Some(StdHashMap::from([("x-a".to_string(), None)]))),
+                    timeout_ms: Some(2_000),
+                    ..Default::default()
+                },
+            )
             .await;
         let stream_options = harness.get_stream_options().await;
         assert!(stream_options.headers.unwrap().is_empty());
@@ -1122,10 +1147,9 @@ mod runtime_tests {
         let session = memory_session();
         session.append_message(user_message("q1", 1)).await.unwrap();
         session
-            .append_message(AgentMessage::Message(TypedMessage::Assistant(test_assistant(
-                vec![AssistantContent::text("a1")],
-                StopReason::Stop,
-            ))))
+            .append_message(AgentMessage::Message(TypedMessage::Assistant(
+                test_assistant(vec![AssistantContent::text("a1")], StopReason::Stop),
+            )))
             .await
             .unwrap();
         let (stream_fn, _calls) = scripted_stream_fn(vec![text_script("summary of history")]);
@@ -1140,7 +1164,11 @@ mod runtime_tests {
         else {
             panic!("expected completed compaction");
         };
-        assert!(entry.summary.contains("summary of history"), "{}", entry.summary);
+        assert!(
+            entry.summary.contains("summary of history"),
+            "{}",
+            entry.summary
+        );
 
         let finished = records_of(&session, "operation_finished").await;
         assert!(matches!(
@@ -1159,10 +1187,14 @@ mod runtime_tests {
     async fn close_rejects_and_cancels_active_run() {
         let session = memory_session();
         let gate = Arc::new(tokio::sync::Notify::new());
-        let (harness, _) =
-            AgentHarness::create(options(session, gated_stream_fn(gate.clone()), Vec::new(), None))
-                .await
-                .unwrap();
+        let (harness, _) = AgentHarness::create(options(
+            session,
+            gated_stream_fn(gate.clone()),
+            Vec::new(),
+            None,
+        ))
+        .await
+        .unwrap();
         let harness = Arc::new(harness);
         let run = {
             let harness = harness.clone();

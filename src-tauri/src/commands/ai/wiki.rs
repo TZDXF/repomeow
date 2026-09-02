@@ -355,7 +355,9 @@ pub async fn ai_regenerate_wiki_page(
     let page_title = request.page.title.clone();
     let project_path = request.project_path.clone();
     let generated = match backend {
-        WikiGenerationBackend::Builtin { model, thinking, .. } => {
+        WikiGenerationBackend::Builtin {
+            model, thinking, ..
+        } => {
             let model_name = generate_builtin_page_to_disk(
                 &app,
                 &db,

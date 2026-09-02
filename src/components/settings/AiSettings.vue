@@ -1,8 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, nextTick, onMounted, reactive, ref, type ComponentPublicInstance } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
-import { ChevronDown, FolderOpen, Loader2, Plug, Plus, RefreshCw, Trash2 } from "@lucide/vue";
+import {
+  Check,
+  ChevronDown,
+  FolderOpen,
+  Import,
+  Loader2,
+  Plug,
+  Plus,
+  RefreshCw,
+  Trash2,
+} from "@lucide/vue";
 import {
   ModelSelector,
   modelOptionValue,
@@ -33,10 +43,13 @@ import { fetchAiModels, testAiConnection } from "@/lib/ai";
 import {
   emptyChatPrefs,
   getBuiltinAiProviders,
+  listCcSwitchProviders,
   revealAiConfigDir,
   type AiModelDef,
   type AiModelRef,
   type AiProvider,
+  type CcSwitchProvider,
+  type CcSwitchScan,
 } from "@/lib/ai-config";
 import { useAiConfigStore } from "@/stores/ai-config";
 import { useSettingsStore } from "@/stores/settings";
@@ -199,6 +212,92 @@ function confirmAddProvider() {
   addDialogOpen.value = false;
 }
 
+// ── 从 CC Switch 导入 ───────────────────────────────────────────────
+
+const ccSwitchDialogOpen = ref(false);
+const ccSwitchLoading = ref(false);
+const ccSwitchScan = ref<CcSwitchScan | null>(null);
+/** 勾选项的 key:`${app}/${id}`(不同应用间 id 可能重复) */
+const ccSwitchChecked = ref<Set<string>>(new Set());
+
+function ccSwitchKey(provider: CcSwitchProvider): string {
+  return `${provider.app}/${provider.id}`;
+}
+
+async function openCcSwitchDialog() {
+  ccSwitchDialogOpen.value = true;
+  ccSwitchLoading.value = true;
+  ccSwitchScan.value = null;
+  try {
+    const scan = await listCcSwitchProviders();
+    ccSwitchScan.value = scan;
+    // 默认勾选「当前启用」的供应商,其余由用户自行挑选
+    ccSwitchChecked.value = new Set(
+      scan.providers.filter((provider) => provider.current).map(ccSwitchKey),
+    );
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : String(error));
+    ccSwitchDialogOpen.value = false;
+  } finally {
+    ccSwitchLoading.value = false;
+  }
+}
+
+function toggleCcSwitchProvider(provider: CcSwitchProvider) {
+  const key = ccSwitchKey(provider);
+  const next = new Set(ccSwitchChecked.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  ccSwitchChecked.value = next;
+}
+
+const ccSwitchAllChecked = computed(() => {
+  const providers = ccSwitchScan.value?.providers ?? [];
+  return (
+    providers.length > 0 &&
+    providers.every((provider) => ccSwitchChecked.value.has(ccSwitchKey(provider)))
+  );
+});
+
+function toggleCcSwitchAll() {
+  const providers = ccSwitchScan.value?.providers ?? [];
+  ccSwitchChecked.value = ccSwitchAllChecked.value
+    ? new Set()
+    : new Set(providers.map(ccSwitchKey));
+}
+
+/** 为导入的厂商生成不与现有草稿冲突的 id(重复时追加 -2/-3 后缀) */
+function uniqueProviderId(base: string): string {
+  const used = new Set(drafts.value.map((draft) => draft.id.trim()));
+  const root = base.trim() || "imported";
+  if (!used.has(root)) return root;
+  for (let index = 2; ; index++) {
+    const candidate = `${root}-${index}`;
+    if (!used.has(candidate)) return candidate;
+  }
+}
+
+function confirmCcSwitchImport() {
+  const providers = (ccSwitchScan.value?.providers ?? []).filter((provider) =>
+    ccSwitchChecked.value.has(ccSwitchKey(provider)),
+  );
+  if (!providers.length) return;
+  for (const provider of providers) {
+    const draft: ProviderDraft = {
+      key: nextKey(),
+      id: uniqueProviderId(provider.id),
+      name: provider.name.trim(),
+      baseUrl: provider.baseUrl.trim(),
+      apiKey: provider.apiKey.trim(),
+      models: provider.models.map((model) => draftModel(model)),
+    };
+    drafts.value = [...drafts.value, draft];
+    openMap[draft.key] = true;
+  }
+  ccSwitchDialogOpen.value = false;
+  toast.success(t("settings.ai.ccSwitchImported", { count: providers.length }));
+}
+
 // ── 厂商删除 ─────────────────────────────────────────────────────────
 
 function removeProvider(draft: ProviderDraft) {
@@ -239,8 +338,11 @@ function removeModel(draft: ProviderDraft, model: ModelDraft) {
 
 /** 各厂商最近一次拉取到的模型 ID 列表(按厂商本地 key 存放) */
 const fetchedModels = reactive<Record<string, string[]>>({});
-/** 各模型行 ID 输入框的候选弹层开关 */
+/** 各模型行 ID 输入框的候选弹层开关(仅由行内下拉按钮开合) */
 const suggestionOpen = reactive<Record<string, boolean>>({});
+/** 弹层顶部搜索框文本(弹层关闭时删除,打开时重置) */
+const suggestionQuery = reactive<Record<string, string>>({});
+const suggestionSearchRefs = new Map<string, HTMLInputElement>();
 const SUGGESTION_LIMIT = 50;
 
 /** 拉取厂商模型列表,作为模型 ID 输入框的下拉候选 */
@@ -259,29 +361,43 @@ async function fetchModels(draft: ProviderDraft) {
   }
 }
 
-/** 当前行的下拉候选:按输入过滤、排除其他行已占用的 ID */
+/** 该厂商是否已有拉取到的模型候选(决定模型行是否展示下拉按钮) */
+function hasFetchedModels(draft: ProviderDraft): boolean {
+  return (fetchedModels[draft.key]?.length ?? 0) > 0;
+}
+
+/** 当前行的下拉候选:按弹层搜索词模糊过滤、排除其他行已占用的 ID */
 function modelSuggestions(draft: ProviderDraft, model: ModelDraft): string[] {
   const list = fetchedModels[draft.key];
   if (!list?.length) return [];
   const used = new Set(draft.models.filter((item) => item !== model).map((item) => item.id.trim()));
-  const keyword = model.id.trim().toLowerCase();
+  const keyword = (suggestionQuery[model.key] ?? "").trim().toLowerCase();
   return list
     .filter((id) => !used.has(id) && (!keyword || id.toLowerCase().includes(keyword)))
     .slice(0, SUGGESTION_LIMIT);
 }
 
-function openSuggestions(draft: ProviderDraft, model: ModelDraft) {
-  suggestionOpen[model.key] = modelSuggestions(draft, model).length > 0;
+function setSuggestionSearchRef(key: string, el: unknown) {
+  const input = (el as ComponentPublicInstance | null)?.$el;
+  if (input instanceof HTMLInputElement) suggestionSearchRefs.set(key, input);
+  else suggestionSearchRefs.delete(key);
 }
 
-function onModelIdInput(draft: ProviderDraft, model: ModelDraft, value: string) {
-  model.id = value;
-  openSuggestions(draft, model);
+/** 弹层开合统一入口:展开时重置搜索词并聚焦搜索框,关闭时清理 */
+function onSuggestionOpenChange(model: ModelDraft, open: boolean) {
+  suggestionOpen[model.key] = open;
+  if (!open) {
+    delete suggestionQuery[model.key];
+    return;
+  }
+  suggestionQuery[model.key] = "";
+  nextTick(() => suggestionSearchRefs.get(model.key)?.focus());
 }
 
 function pickModelId(model: ModelDraft, id: string) {
   model.id = id;
   suggestionOpen[model.key] = false;
+  delete suggestionQuery[model.key];
 }
 
 // ── 默认模型 ─────────────────────────────────────────────────────────
@@ -441,10 +557,16 @@ const CONCURRENCY_OPTIONS = [1, 2, 3, 4, 5];
       <div class="flex flex-col gap-1.5">
         <div class="flex items-center justify-between">
           <label class="text-sm font-medium">{{ t("settings.ai.providers") }}</label>
-          <Button variant="outline" size="sm" class="h-7 gap-1" @click="openAddDialog">
-            <Plus class="h-3.5 w-3.5" />
-            {{ t("settings.ai.addProvider") }}
-          </Button>
+          <div class="flex items-center gap-1.5">
+            <Button variant="outline" size="sm" class="h-7 gap-1" @click="openCcSwitchDialog">
+              <Import class="h-3.5 w-3.5" />
+              {{ t("settings.ai.importCcSwitch") }}
+            </Button>
+            <Button variant="outline" size="sm" class="h-7 gap-1" @click="openAddDialog">
+              <Plus class="h-3.5 w-3.5" />
+              {{ t("settings.ai.addProvider") }}
+            </Button>
+          </div>
         </div>
 
         <p v-if="!drafts.length" class="text-muted-foreground text-xs">
@@ -589,53 +711,79 @@ const CONCURRENCY_OPTIONS = [1, 2, 3, 4, 5];
                       :key="model.key"
                       class="flex flex-col gap-2 rounded-md border p-2"
                     >
-                      <div class="flex items-end gap-1.5">
-                        <div class="flex min-w-0 flex-1 flex-col gap-1">
-                          <label class="text-muted-foreground text-xs">{{
-                            t("settings.ai.modelId")
-                          }}</label>
-                          <Popover
-                            :open="suggestionOpen[model.key] ?? false"
-                            @update:open="suggestionOpen[model.key] = $event"
-                          >
+                      <Popover
+                        :open="suggestionOpen[model.key] ?? false"
+                        @update:open="onSuggestionOpenChange(model, $event)"
+                      >
+                        <div class="flex items-end gap-1.5">
+                          <div class="flex min-w-0 flex-1 flex-col gap-1">
+                            <label class="text-muted-foreground text-xs">{{
+                              t("settings.ai.modelId")
+                            }}</label>
                             <PopoverAnchor as-child>
                               <Input
-                                :model-value="model.id"
+                                v-model="model.id"
                                 class="h-7 text-xs"
                                 :placeholder="t('settings.ai.modelIdPlaceholder')"
                                 spellcheck="false"
-                                @update:model-value="onModelIdInput(draft, model, String($event))"
-                                @focus="openSuggestions(draft, model)"
                               />
                             </PopoverAnchor>
-                            <PopoverContent
-                              class="w-(--reka-popper-anchor-width) max-h-56 gap-0 overflow-y-auto p-1"
-                              align="start"
-                              @open-auto-focus.prevent
-                              @close-auto-focus.prevent
-                            >
-                              <button
-                                v-for="option in modelSuggestions(draft, model)"
-                                :key="option"
-                                type="button"
-                                class="hover:bg-accent w-full truncate rounded-sm px-2 py-1 text-left text-xs"
-                                @click="pickModelId(model, option)"
-                              >
-                                {{ option }}
-                              </button>
-                            </PopoverContent>
-                          </Popover>
+                          </div>
+                          <PopoverTrigger
+                            v-if="hasFetchedModels(draft)"
+                            as-child
+                            :title="t('settings.ai.pickFetchedModel')"
+                          >
+                            <Button variant="outline" size="icon" class="h-7 w-7 shrink-0">
+                              <ChevronDown
+                                class="h-3.5 w-3.5 transition-transform"
+                                :class="suggestionOpen[model.key] ? 'rotate-180' : ''"
+                              />
+                            </Button>
+                          </PopoverTrigger>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            class="text-muted-foreground hover:text-destructive h-7 w-7 shrink-0"
+                            :title="t('settings.ai.removeModel')"
+                            @click="removeModel(draft, model)"
+                          >
+                            <Trash2 class="h-3.5 w-3.5" />
+                          </Button>
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          class="text-muted-foreground hover:text-destructive h-7 w-7 shrink-0"
-                          :title="t('settings.ai.removeModel')"
-                          @click="removeModel(draft, model)"
+                        <PopoverContent
+                          class="w-(--reka-popper-anchor-width) gap-1 p-1"
+                          align="start"
+                          @open-auto-focus.prevent
+                          @close-auto-focus.prevent
                         >
-                          <Trash2 class="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
+                          <Input
+                            :ref="(el) => setSuggestionSearchRef(model.key, el)"
+                            :model-value="suggestionQuery[model.key] ?? ''"
+                            class="h-7 text-xs"
+                            :placeholder="t('settings.ai.searchFetchedModels')"
+                            spellcheck="false"
+                            @update:model-value="suggestionQuery[model.key] = String($event)"
+                          />
+                          <div class="max-h-56 overflow-y-auto">
+                            <button
+                              v-for="option in modelSuggestions(draft, model)"
+                              :key="option"
+                              type="button"
+                              class="hover:bg-accent w-full truncate rounded-sm px-2 py-1 text-left text-xs"
+                              @click="pickModelId(model, option)"
+                            >
+                              {{ option }}
+                            </button>
+                            <p
+                              v-if="!modelSuggestions(draft, model).length"
+                              class="text-muted-foreground px-2 py-1.5 text-xs"
+                            >
+                              {{ t("settings.ai.noMatchedModels") }}
+                            </p>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
                       <div class="grid grid-cols-3 gap-1.5">
                         <div class="flex flex-col gap-1">
                           <label class="text-muted-foreground text-xs">{{
@@ -822,6 +970,113 @@ const CONCURRENCY_OPTIONS = [1, 2, 3, 4, 5];
         <DialogFooter>
           <Button variant="outline" @click="addDialogOpen = false">{{ t("common.cancel") }}</Button>
           <Button @click="confirmAddProvider">{{ t("common.add") }}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- 从 CC Switch 导入对话框:列出本机 ~/.cc-switch 中 OpenAI chat 兼容的供应商,勾选后并入草稿 -->
+    <Dialog v-model:open="ccSwitchDialogOpen">
+      <DialogContent class="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{{ t("settings.ai.ccSwitchTitle") }}</DialogTitle>
+          <DialogDescription>{{ t("settings.ai.ccSwitchDesc") }}</DialogDescription>
+        </DialogHeader>
+
+        <div
+          v-if="ccSwitchLoading"
+          class="text-muted-foreground flex items-center gap-2 py-6 text-sm"
+        >
+          <Loader2 class="h-4 w-4 animate-spin" />
+          {{ t("settings.ai.ccSwitchLoading") }}
+        </div>
+        <p
+          v-else-if="ccSwitchScan && !ccSwitchScan.found"
+          class="text-muted-foreground py-6 text-sm"
+        >
+          {{ t("settings.ai.ccSwitchNotFound") }}
+        </p>
+        <p
+          v-else-if="ccSwitchScan && !ccSwitchScan.providers.length"
+          class="text-muted-foreground py-6 text-sm"
+        >
+          {{ t("settings.ai.ccSwitchEmpty") }}
+        </p>
+        <template v-else-if="ccSwitchScan">
+          <div class="flex items-center justify-between">
+            <span class="text-muted-foreground text-xs">
+              {{
+                t("settings.ai.ccSwitchSelected", {
+                  selected: ccSwitchChecked.size,
+                  total: ccSwitchScan.providers.length,
+                })
+              }}
+            </span>
+            <Button variant="ghost" size="sm" class="h-6 px-2 text-xs" @click="toggleCcSwitchAll">
+              {{
+                ccSwitchAllChecked
+                  ? t("settings.ai.ccSwitchDeselectAll")
+                  : t("settings.ai.ccSwitchSelectAll")
+              }}
+            </Button>
+          </div>
+          <div class="flex max-h-72 flex-col gap-1.5 overflow-y-auto py-1">
+            <button
+              v-for="provider in ccSwitchScan.providers"
+              :key="ccSwitchKey(provider)"
+              type="button"
+              class="hover:bg-accent flex items-center gap-2 rounded-md border px-2 py-1.5 text-left"
+              :class="
+                ccSwitchChecked.has(ccSwitchKey(provider)) ? 'border-primary/50 bg-primary/5' : ''
+              "
+              @click="toggleCcSwitchProvider(provider)"
+            >
+              <span
+                class="flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border"
+                :class="
+                  ccSwitchChecked.has(ccSwitchKey(provider))
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-input'
+                "
+              >
+                <Check v-if="ccSwitchChecked.has(ccSwitchKey(provider))" class="h-3 w-3" />
+              </span>
+              <span class="flex min-w-0 flex-1 flex-col">
+                <span class="flex items-center gap-1.5">
+                  <span class="truncate text-sm font-medium">
+                    {{ provider.name.trim() || provider.id }}
+                  </span>
+                  <span
+                    class="bg-muted text-muted-foreground shrink-0 rounded-full px-1.5 py-px text-[10px]"
+                  >
+                    {{ provider.app }}
+                  </span>
+                  <span
+                    v-if="provider.current"
+                    class="bg-primary/10 text-primary shrink-0 rounded-full px-1.5 py-px text-[10px]"
+                  >
+                    {{ t("settings.ai.ccSwitchCurrent") }}
+                  </span>
+                </span>
+                <span class="text-muted-foreground truncate text-xs">{{ provider.baseUrl }}</span>
+              </span>
+              <span class="text-muted-foreground shrink-0 text-xs">
+                {{
+                  provider.apiKey
+                    ? t("settings.ai.modelCount", { count: provider.models.length })
+                    : t("settings.ai.ccSwitchNoKey")
+                }}
+              </span>
+            </button>
+          </div>
+        </template>
+
+        <DialogFooter>
+          <Button variant="outline" @click="ccSwitchDialogOpen = false">
+            {{ t("common.cancel") }}
+          </Button>
+          <Button :disabled="!ccSwitchChecked.size" @click="confirmCcSwitchImport">
+            {{ t("settings.ai.ccSwitchImport", { count: ccSwitchChecked.size }) }}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

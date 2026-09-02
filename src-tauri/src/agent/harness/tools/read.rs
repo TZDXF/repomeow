@@ -6,11 +6,9 @@ use serde_json::{json, Value};
 
 use crate::agent::harness::tools::image::{detect_supported_image_mime_type, encode_base64};
 use crate::agent::harness::tools::path_utils::resolve_read_tool_path;
-use crate::agent::harness::types::{
-    ExecutionEnv, FileContent, SimpleError,
-};
+use crate::agent::harness::types::{ExecutionEnv, FileContent, SimpleError};
 use crate::agent::harness::utils::truncate::{
-    format_size, truncate_head, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, TruncationResult,
+    format_size, truncate_head, TruncationResult, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES,
 };
 use crate::agent::types::{AgentTool, TextOrImageContent, ToolExecutionError};
 
@@ -74,13 +72,15 @@ pub fn create_read_tool(env: Arc<dyn ExecutionEnv>, options: Option<ReadToolOpti
         execute: Arc::new(move |_tool_call_id, params, signal, _on_update| {
             let env = env.clone();
             Box::pin(async move {
-                let input: ReadToolInput = serde_json::from_value(params)
-                    .map_err(|error| ToolExecutionError::from(SimpleError::new(error.to_string())))?;
-                let absolute_path = resolve_read_tool_path(env.as_ref(), &input.path, signal.clone())
-                    .await
-                    .map_err(|error| {
-                        ToolExecutionError::from(SimpleError::new(error.to_string()))
-                    })?;
+                let input: ReadToolInput = serde_json::from_value(params).map_err(|error| {
+                    ToolExecutionError::from(SimpleError::new(error.to_string()))
+                })?;
+                let absolute_path =
+                    resolve_read_tool_path(env.as_ref(), &input.path, signal.clone())
+                        .await
+                        .map_err(|error| {
+                            ToolExecutionError::from(SimpleError::new(error.to_string()))
+                        })?;
                 let bytes = env
                     .read_binary_file(absolute_path.clone(), signal.clone())
                     .await
@@ -111,7 +111,10 @@ pub fn create_read_tool(env: Arc<dyn ExecutionEnv>, options: Option<ReadToolOpti
                 let text_content = String::from_utf8_lossy(&bytes).to_string();
                 let all_lines: Vec<&str> = text_content.split('\n').collect();
                 let total_file_lines = all_lines.len();
-                let start_line = input.offset.map(|offset| offset.max(1.0) as usize - 1).unwrap_or(0);
+                let start_line = input
+                    .offset
+                    .map(|offset| offset.max(1.0) as usize - 1)
+                    .unwrap_or(0);
                 let start_line_display = start_line + 1;
                 if start_line >= all_lines.len() {
                     return Err(ToolExecutionError::from(SimpleError::new(format!(
@@ -155,7 +158,9 @@ pub fn create_read_tool(env: Arc<dyn ExecutionEnv>, options: Option<ReadToolOpti
                     let end_line_display = start_line_display + truncation.output_lines - 1;
                     let next_offset = end_line_display + 1;
                     let mut tail = truncation.content.clone();
-                    if truncation.truncated_by == Some(crate::agent::harness::utils::truncate::TruncatedBy::Lines) {
+                    if truncation.truncated_by
+                        == Some(crate::agent::harness::utils::truncate::TruncatedBy::Lines)
+                    {
                         tail.push_str(&format!(
                             "\n\n[Showing lines {start_line_display}-{end_line_display} of {total_file_lines}. Use offset={next_offset} to continue.]"
                         ));
@@ -201,4 +206,3 @@ pub fn create_read_tool(env: Arc<dyn ExecutionEnv>, options: Option<ReadToolOpti
 fn _file_content_reference(content: FileContent) -> FileContent {
     content
 }
-

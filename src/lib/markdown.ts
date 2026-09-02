@@ -1,5 +1,7 @@
 /** Markdown 内容中 URL/路径的处理工具(README 图片解析、链接拦截共用) */
 
+import { cleanPath } from "@/lib/path";
+
 /** Windows 盘符绝对路径(C:\ 或 C:/) */
 const WINDOWS_ABS = /^[a-zA-Z]:[\\/]/;
 
@@ -44,7 +46,8 @@ export function resolvePath(base: string, rel: string): string {
   clean = clean.split("#")[0].split("?")[0];
   // 已是绝对路径(Windows 盘符 / UNC)原样返回
   if (WINDOWS_ABS.test(clean) || clean.startsWith("\\\\")) return clean;
-  // root-relative(/xxx)与普通相对路径统一拼到项目根上
-  const joined = `${base.replace(/[\\/]+$/, "")}/${clean.replace(/^[\\/]+/, "")}`;
+  // root-relative(/xxx)与普通相对路径统一拼到项目根上;base 为根(C:\、/)时不再补分隔符
+  const root = cleanPath(base);
+  const joined = `${root}${/[\\/]$/.test(root) ? "" : "/"}${clean.replace(/^[\\/]+/, "")}`;
   return normalizeSegments(joined);
 }

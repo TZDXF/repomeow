@@ -156,8 +156,8 @@ pub fn apply_replacements_preserving_unchanged_lines(
     let mut sorted_replacements: Vec<TextReplacement> = replacements.to_vec();
     sorted_replacements.sort_by_key(|replacement| replacement.match_index);
     for replacement in sorted_replacements {
-        let (start_line, end_line) = get_replacement_line_range(&base_lines, &replacement)
-            .map_err(|error| error)?;
+        let (start_line, end_line) =
+            get_replacement_line_range(&base_lines, &replacement).map_err(|error| error)?;
         match groups.last_mut() {
             Some(last) if start_line < last.1 => {
                 last.1 = last.1.max(end_line);
@@ -274,7 +274,12 @@ fn get_not_found_error(path: &str, edit_index: usize, total_edits: usize) -> Str
     }
 }
 
-fn get_duplicate_error(path: &str, edit_index: usize, total_edits: usize, occurrences: usize) -> String {
+fn get_duplicate_error(
+    path: &str,
+    edit_index: usize,
+    total_edits: usize,
+    occurrences: usize,
+) -> String {
     if total_edits == 1 {
         format!(
             "Found {occurrences} occurrences of the text in {path}. The text must be unique. Please provide more context to make it unique."
@@ -316,7 +321,11 @@ pub fn apply_edits_to_normalized_content(
 
     for (index, edit) in normalized_edits.iter().enumerate() {
         if edit.old_text.is_empty() {
-            return Err(get_empty_old_text_error(path, index, normalized_edits.len()));
+            return Err(get_empty_old_text_error(
+                path,
+                index,
+                normalized_edits.len(),
+            ));
         }
     }
 
@@ -340,7 +349,12 @@ pub fn apply_edits_to_normalized_content(
 
         let occurrences = count_occurrences(&replacement_base_content, &edit.old_text);
         if occurrences > 1 {
-            return Err(get_duplicate_error(path, index, normalized_edits.len(), occurrences));
+            return Err(get_duplicate_error(
+                path,
+                index,
+                normalized_edits.len(),
+                occurrences,
+            ));
         }
 
         matched_edits.push((
@@ -388,7 +402,12 @@ pub fn apply_edits_to_normalized_content(
 }
 
 /// 标准统一补丁(对齐 TS `generateUnifiedPatch`,context 默认 4,仅文件头)。
-pub fn generate_unified_patch(path: &str, old_content: &str, new_content: &str, context_lines: usize) -> String {
+pub fn generate_unified_patch(
+    path: &str,
+    old_content: &str,
+    new_content: &str,
+    context_lines: usize,
+) -> String {
     let diff = TextDiff::from_lines(old_content, new_content);
     let old_header = format!("a/{path}");
     let new_header = format!("b/{path}");
@@ -450,11 +469,19 @@ pub fn generate_diff_string(
                 for line in &raw {
                     match tag {
                         ChangeTag::Insert => {
-                            output.push(format!("+{} {}", pad_left(new_line_num, line_num_width), line));
+                            output.push(format!(
+                                "+{} {}",
+                                pad_left(new_line_num, line_num_width),
+                                line
+                            ));
                             new_line_num += 1;
                         }
                         _ => {
-                            output.push(format!("-{} {}", pad_left(old_line_num, line_num_width), line));
+                            output.push(format!(
+                                "-{} {}",
+                                pad_left(old_line_num, line_num_width),
+                                line
+                            ));
                             old_line_num += 1;
                         }
                     }
@@ -470,18 +497,29 @@ pub fn generate_diff_string(
                 if has_leading_change && has_trailing_change {
                     if raw.len() <= context_lines * 2 {
                         for line in &raw {
-                            output.push(format!(" {} {}", pad_left(old_line_num, line_num_width), line));
+                            output.push(format!(
+                                " {} {}",
+                                pad_left(old_line_num, line_num_width),
+                                line
+                            ));
                             old_line_num += 1;
                             new_line_num += 1;
                         }
                     } else {
                         let leading: Vec<&str> = raw.iter().take(context_lines).copied().collect();
-                        let trailing: Vec<&str> =
-                            raw.iter().skip(raw.len() - context_lines).copied().collect();
+                        let trailing: Vec<&str> = raw
+                            .iter()
+                            .skip(raw.len() - context_lines)
+                            .copied()
+                            .collect();
                         let skipped = raw.len() - leading.len() - trailing.len();
 
                         for line in &leading {
-                            output.push(format!(" {} {}", pad_left(old_line_num, line_num_width), line));
+                            output.push(format!(
+                                " {} {}",
+                                pad_left(old_line_num, line_num_width),
+                                line
+                            ));
                             old_line_num += 1;
                             new_line_num += 1;
                         }
@@ -489,7 +527,11 @@ pub fn generate_diff_string(
                         old_line_num += skipped;
                         new_line_num += skipped;
                         for line in &trailing {
-                            output.push(format!(" {} {}", pad_left(old_line_num, line_num_width), line));
+                            output.push(format!(
+                                " {} {}",
+                                pad_left(old_line_num, line_num_width),
+                                line
+                            ));
                             old_line_num += 1;
                             new_line_num += 1;
                         }
@@ -498,7 +540,11 @@ pub fn generate_diff_string(
                     let shown: Vec<&str> = raw.iter().take(context_lines).copied().collect();
                     let skipped = raw.len() - shown.len();
                     for line in &shown {
-                        output.push(format!(" {} {}", pad_left(old_line_num, line_num_width), line));
+                        output.push(format!(
+                            " {} {}",
+                            pad_left(old_line_num, line_num_width),
+                            line
+                        ));
                         old_line_num += 1;
                         new_line_num += 1;
                     }
@@ -515,7 +561,11 @@ pub fn generate_diff_string(
                         new_line_num += skipped;
                     }
                     for line in raw.iter().skip(skipped) {
-                        output.push(format!(" {} {}", pad_left(old_line_num, line_num_width), line));
+                        output.push(format!(
+                            " {} {}",
+                            pad_left(old_line_num, line_num_width),
+                            line
+                        ));
                         old_line_num += 1;
                         new_line_num += 1;
                     }
@@ -528,8 +578,13 @@ pub fn generate_diff_string(
         }
     }
 
-    (output.join("
-"), first_changed_line)
+    (
+        output.join(
+            "
+",
+        ),
+        first_changed_line,
+    )
 }
 
 fn pad_left(value: usize, width: usize) -> String {
@@ -753,7 +808,12 @@ mod tests {
         let (diff, _) = generate_diff_string(old, &new, 2);
         assert!(diff.contains("..."));
         // 未变更的远端行不应出现。
-        assert!(!diff.contains("o
-p") && !diff.contains(" o"), "{diff}");
+        assert!(
+            !diff.contains(
+                "o
+p"
+            ) && !diff.contains(" o"),
+            "{diff}"
+        );
     }
 }

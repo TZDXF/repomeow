@@ -11,7 +11,9 @@ use crate::agent::harness::tools::edit_diff::{
 use crate::agent::harness::tools::file_mutation_queue::with_file_mutation_queue;
 use crate::agent::harness::tools::path_utils::resolve_tool_path;
 use crate::agent::harness::types::{ExecutionEnv, FileContent, FileError, SimpleError};
-use crate::agent::types::{AbortSignal, AgentTool, AgentToolResult, PrepareArgumentsFn, ToolExecutionError};
+use crate::agent::types::{
+    AbortSignal, AgentTool, AgentToolResult, PrepareArgumentsFn, ToolExecutionError,
+};
 
 /// edit 工具详情(对齐 TS `EditToolDetails`)。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -80,8 +82,14 @@ fn prepare_edit_arguments_impl(input: Value) -> Value {
         _ => {}
     }
 
-    let legacy_old = args.get("oldText").and_then(Value::as_str).map(str::to_string);
-    let legacy_new = args.get("newText").and_then(Value::as_str).map(str::to_string);
+    let legacy_old = args
+        .get("oldText")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let legacy_new = args
+        .get("newText")
+        .and_then(Value::as_str)
+        .map(str::to_string);
     let (Some(old_text), Some(new_text)) = (legacy_old, legacy_new) else {
         return Value::Object(args);
     };
@@ -281,38 +289,26 @@ mod tests {
             "oldText": "a",
             "newText": "b"
         }));
-        assert_eq!(
-            prepared["edits"],
-            json!([{"oldText": "a", "newText": "b"}])
-        );
+        assert_eq!(prepared["edits"], json!([{"oldText": "a", "newText": "b"}]));
         assert!(prepared.get("oldText").is_none());
 
         let prepared = prepare_edit_arguments_impl(json!({
             "path": "/f.txt",
             "edits": "{\"oldText\":\"a\",\"newText\":\"b\"}"
         }));
-        assert_eq!(
-            prepared["edits"],
-            json!([{"oldText": "a", "newText": "b"}])
-        );
+        assert_eq!(prepared["edits"], json!([{"oldText": "a", "newText": "b"}]));
 
         let prepared = prepare_edit_arguments_impl(json!({
             "path": "/f.txt",
             "edits": {"oldText": "a", "newText": "b"}
         }));
-        assert_eq!(
-            prepared["edits"],
-            json!([{"oldText": "a", "newText": "b"}])
-        );
+        assert_eq!(prepared["edits"], json!([{"oldText": "a", "newText": "b"}]));
 
         // 数组保持原样。
         let prepared = prepare_edit_arguments_impl(json!({
             "path": "/f.txt",
             "edits": [{"oldText": "a", "newText": "b"}]
         }));
-        assert_eq!(
-            prepared["edits"],
-            json!([{"oldText": "a", "newText": "b"}])
-        );
+        assert_eq!(prepared["edits"], json!([{"oldText": "a", "newText": "b"}]));
     }
 }

@@ -71,10 +71,7 @@ pub fn format_skill_invocation(skill: &Skill, additional_instructions: Option<&s
 }
 
 /// 从一个或多个目录加载技能(对齐 TS `loadSkills`;缺失目录跳过)。
-pub async fn load_skills(
-    env: &dyn ExecutionEnv,
-    dirs: &[&str],
-) -> SkillsLoadResult {
+pub async fn load_skills(env: &dyn ExecutionEnv, dirs: &[&str]) -> SkillsLoadResult {
     let mut skills: Vec<Skill> = Vec::new();
     let mut diagnostics: Vec<SkillDiagnostic> = Vec::new();
     for dir in dirs {
@@ -107,7 +104,10 @@ pub async fn load_skills(
         skills.extend(result.skills);
         diagnostics.extend(result.diagnostics);
     }
-    SkillsLoadResult { skills, diagnostics }
+    SkillsLoadResult {
+        skills,
+        diagnostics,
+    }
 }
 
 /// Gitignore 匹配器:复用 `ignore` crate 的 gitignore 语义。
@@ -176,11 +176,17 @@ async fn load_skills_from_dir_internal(
                     path: dir.to_string(),
                 });
             }
-            return SkillsLoadResult { skills, diagnostics };
+            return SkillsLoadResult {
+                skills,
+                diagnostics,
+            };
         }
     };
     if resolve_kind(env, &dir_info, &mut diagnostics).await != Some(FileKind::Directory) {
-        return SkillsLoadResult { skills, diagnostics };
+        return SkillsLoadResult {
+            skills,
+            diagnostics,
+        };
     }
 
     add_ignore_rules(env, &ignore_matcher, dir, root_dir, &mut diagnostics).await;
@@ -194,7 +200,10 @@ async fn load_skills_from_dir_internal(
                 message: error.message,
                 path: dir.to_string(),
             });
-            return SkillsLoadResult { skills, diagnostics };
+            return SkillsLoadResult {
+                skills,
+                diagnostics,
+            };
         }
     };
 
@@ -209,19 +218,19 @@ async fn load_skills_from_dir_internal(
             continue;
         }
         let rel_path = relative_env_path(root_dir, &full_path);
-        if ignore_matcher
-            .lock()
-            .await
-            .ignores(&rel_path, false)
-        {
+        if ignore_matcher.lock().await.ignores(&rel_path, false) {
             continue;
         }
-        let (skill, skill_diagnostics) = load_skill_from_file(env, &full_path, &dir_info.name).await;
+        let (skill, skill_diagnostics) =
+            load_skill_from_file(env, &full_path, &dir_info.name).await;
         if let Some(skill) = skill {
             skills.push(skill);
         }
         diagnostics.extend(skill_diagnostics);
-        return SkillsLoadResult { skills, diagnostics };
+        return SkillsLoadResult {
+            skills,
+            diagnostics,
+        };
     }
 
     let mut sorted_entries = entries;
@@ -266,14 +275,18 @@ async fn load_skills_from_dir_internal(
         if kind != FileKind::File || !include_root_files || !entry.name.ends_with(".md") {
             continue;
         }
-        let (skill, skill_diagnostics) = load_skill_from_file(env, &full_path, &dir_info.name).await;
+        let (skill, skill_diagnostics) =
+            load_skill_from_file(env, &full_path, &dir_info.name).await;
         if let Some(skill) = skill {
             skills.push(skill);
         }
         diagnostics.extend(skill_diagnostics);
     }
 
-    SkillsLoadResult { skills, diagnostics }
+    SkillsLoadResult {
+        skills,
+        diagnostics,
+    }
 }
 
 async fn add_ignore_rules(
@@ -291,7 +304,9 @@ async fn add_ignore_rules(
     };
 
     for filename in IGNORE_FILE_NAMES {
-        let ignore_path = match env.join_path(vec![dir.to_string(), filename.to_string()], None).await
+        let ignore_path = match env
+            .join_path(vec![dir.to_string(), filename.to_string()], None)
+            .await
         {
             Ok(path) => path,
             Err(error) => {
@@ -375,7 +390,9 @@ fn prefix_ignore_pattern(line: &str, prefix: &str) -> Option<String> {
 }
 
 /// 解析 frontmatter + 正文(对齐 TS `parseFrontmatter` 的 `---` 分隔约定)。
-pub fn parse_frontmatter(content: &str) -> Result<(serde_json::Map<String, Value>, String), SimpleSkillError> {
+pub fn parse_frontmatter(
+    content: &str,
+) -> Result<(serde_json::Map<String, Value>, String), SimpleSkillError> {
     let normalized = content.replace("\r\n", "\n").replace('\r', "\n");
     if !normalized.starts_with("---") {
         return ok((serde_json::Map::new(), normalized));
@@ -390,8 +407,8 @@ pub fn parse_frontmatter(content: &str) -> Result<(serde_json::Map<String, Value
         ""
     };
     let body = normalized[end_index + 4..].trim().to_string();
-    let parsed: serde_json::Value = serde_yaml_ng::from_str(yaml_string)
-        .map_err(|error| SimpleSkillError {
+    let parsed: serde_json::Value =
+        serde_yaml_ng::from_str(yaml_string).map_err(|error| SimpleSkillError {
             message: error.to_string(),
         })?;
     let object = match parsed {
@@ -457,7 +474,10 @@ async fn load_skill_from_file(
         .and_then(Value::as_str)
         .map(str::to_string);
     if !is_declared_skill
-        && description.as_ref().map(|d| d.trim().is_empty()).unwrap_or(true)
+        && description
+            .as_ref()
+            .map(|d| d.trim().is_empty())
+            .unwrap_or(true)
     {
         return (None, diagnostics);
     }
@@ -483,7 +503,11 @@ async fn load_skill_from_file(
         });
     }
 
-    if description.as_ref().map(|d| d.trim().is_empty()).unwrap_or(true) {
+    if description
+        .as_ref()
+        .map(|d| d.trim().is_empty())
+        .unwrap_or(true)
+    {
         return (None, diagnostics);
     }
 
@@ -518,7 +542,10 @@ fn validate_name(name: &str, parent_dir_name: &str) -> Vec<String> {
         .chars()
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
     {
-        errors.push("name contains invalid characters (must be lowercase a-z, 0-9, hyphens only)".to_string());
+        errors.push(
+            "name contains invalid characters (must be lowercase a-z, 0-9, hyphens only)"
+                .to_string(),
+        );
     }
     if name.starts_with('-') || name.ends_with('-') {
         errors.push("name must not start or end with a hyphen".to_string());
@@ -625,9 +652,7 @@ pub fn relative_env_path(root: &str, path: &str) -> String {
     if let Some(stripped) = normalized_path.strip_prefix(&root_prefix) {
         stripped.to_string()
     } else {
-        normalized_path
-            .trim_start_matches('/')
-            .to_string()
+        normalized_path.trim_start_matches('/').to_string()
     }
 }
 
@@ -639,13 +664,18 @@ mod tests {
     fn parses_skill_frontmatter() {
         let content = "---\nname: commit-helper\ndescription: Helps with commits\ndisable-model-invocation: true\n---\n\nBody text.";
         let (frontmatter, body) = parse_frontmatter(content).unwrap();
-        assert_eq!(frontmatter.get("name").and_then(Value::as_str), Some("commit-helper"));
+        assert_eq!(
+            frontmatter.get("name").and_then(Value::as_str),
+            Some("commit-helper")
+        );
         assert_eq!(
             frontmatter.get("description").and_then(Value::as_str),
             Some("Helps with commits")
         );
         assert_eq!(
-            frontmatter.get("disable-model-invocation").and_then(Value::as_bool),
+            frontmatter
+                .get("disable-model-invocation")
+                .and_then(Value::as_bool),
             Some(true)
         );
         assert_eq!(body, "Body text.");
@@ -701,7 +731,10 @@ mod tests {
     fn relative_and_dirname_paths() {
         assert_eq!(relative_env_path("/root", "/root/sub/dir"), "sub/dir");
         assert_eq!(relative_env_path("/root", "/root"), "");
-        assert_eq!(relative_env_path("C:\\root", "C:\\root\\file.md"), "file.md");
+        assert_eq!(
+            relative_env_path("C:\\root", "C:\\root\\file.md"),
+            "file.md"
+        );
         assert_eq!(dirname_env_path("/root/sub/SKILL.md"), "/root/sub");
         assert_eq!(dirname_env_path("C:\\skills\\x\\SKILL.md"), "C:\\skills\\x");
         assert_eq!(dirname_env_path("/SKILL.md"), "/");

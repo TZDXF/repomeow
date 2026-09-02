@@ -7,9 +7,7 @@ use std::time::Duration;
 use crate::agent::harness::agent_harness::{
     AgentHarness, AgentHarnessOptions, RetryPolicy, RunOutcome,
 };
-use crate::agent::harness::events::{
-    HarnessEvent, HarnessEventType, ToolEventPhase, UsageEvent,
-};
+use crate::agent::harness::events::{HarnessEvent, HarnessEventType, ToolEventPhase, UsageEvent};
 use crate::agent::harness::restricted_env::RestrictedEnv;
 use crate::agent::harness::runtime::harness_tool_from_core;
 use crate::agent::harness::session::memory::InMemorySessionStorage;
@@ -26,9 +24,7 @@ use crate::agent::llm::types::{
     AssistantContent, AssistantMessage, AssistantMessageEvent, Model, ModelThinkingLevel,
     SimpleStreamOptions, StopReason,
 };
-use crate::agent::types::{
-    AgentTool, QueueMode, StreamFn, ToolExecutionError, ToolExecutionMode,
-};
+use crate::agent::types::{AgentTool, QueueMode, StreamFn, ToolExecutionError, ToolExecutionMode};
 use tokio_util::sync::CancellationToken;
 
 const OUTLINE_READ_BUDGET: usize = 20;
@@ -206,10 +202,13 @@ fn run_outcome_message(outcome: RunOutcome) -> AppResult<AssistantMessage> {
                     .unwrap_or_else(|| format!("agent stopped: {:?}", final_message.stop_reason)),
             ))
         }
-        RunOutcome::Failed { error, .. } => Err(AppError::coded(ErrorCode::AiRequestFailed, error.message)),
-        RunOutcome::Suspended { .. } => {
-            Err(AppError::coded(ErrorCode::AiRequestFailed, "agent suspended"))
+        RunOutcome::Failed { error, .. } => {
+            Err(AppError::coded(ErrorCode::AiRequestFailed, error.message))
         }
+        RunOutcome::Suspended { .. } => Err(AppError::coded(
+            ErrorCode::AiRequestFailed,
+            "agent suspended",
+        )),
     }
 }
 
@@ -271,7 +270,10 @@ async fn prompt_with_timeout(
     watcher.abort();
     match result {
         Ok(Ok(outcome)) => run_outcome_message(outcome),
-        Ok(Err(error)) => Err(AppError::coded(ErrorCode::AiRequestFailed, error.to_string())),
+        Ok(Err(error)) => Err(AppError::coded(
+            ErrorCode::AiRequestFailed,
+            error.to_string(),
+        )),
         Err(_) => {
             request_cancel.cancel();
             let _ = harness.abort().await;
@@ -283,9 +285,7 @@ async fn prompt_with_timeout(
     }
 }
 
-async fn collect_usage_events(
-    harness: &AgentHarness,
-) -> Arc<std::sync::Mutex<Vec<UsageEvent>>> {
+async fn collect_usage_events(harness: &AgentHarness) -> Arc<std::sync::Mutex<Vec<UsageEvent>>> {
     let usages = Arc::new(std::sync::Mutex::new(Vec::<UsageEvent>::new()));
     let listener = usages.clone();
     let _subscription = harness.on_event(
@@ -388,13 +388,9 @@ pub(super) async fn generate_outline_with(
     let mut last_error = "wiki outline JSON was not generated".to_string();
     let result = async {
         for attempt in 1..=MAX_ATTEMPTS {
-            let message = prompt_with_timeout(
-                harness.clone(),
-                prompt.clone(),
-                cancel,
-                &request_cancel,
-            )
-            .await?;
+            let message =
+                prompt_with_timeout(harness.clone(), prompt.clone(), cancel, &request_cancel)
+                    .await?;
             let text = sdk::strip_thinking(&assistant_text(&message));
             match crate::ai::wiki_outline::parse_outline(&text, &valid_files) {
                 Ok(pages) => return Ok(pages),
@@ -538,11 +534,16 @@ pub(super) async fn generate_page_with(
                     continue;
                 };
                 if call.name == "write"
-                    && call.arguments.get("path").and_then(serde_json::Value::as_str)
+                    && call
+                        .arguments
+                        .get("path")
+                        .and_then(serde_json::Value::as_str)
                         == Some(preview_path.as_str())
                 {
-                    if let Some(content) =
-                        call.arguments.get("content").and_then(serde_json::Value::as_str)
+                    if let Some(content) = call
+                        .arguments
+                        .get("content")
+                        .and_then(serde_json::Value::as_str)
                     {
                         preview(content.to_string());
                     }

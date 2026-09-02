@@ -1,6 +1,8 @@
-/** 归一化 LLM 给的文件路径:去 ./ 与 / 前缀、反斜杠转正斜杠 */
+import { toForwardSlash } from "@/lib/path";
+
+/** 归一化 LLM 给的文件路径:去 ./ 与 / 前缀、反斜杠转正斜杠(与后端 path_util::repo_relative_str 一致) */
 function normalizeFilePath(p: string): string {
-  return p.replace(/\\/g, "/").replace(/^\.?\//, "");
+  return toForwardSlash(p).replace(/^(?:\.\/)*\/*/, "");
 }
 
 // ── 页面来源引用(path:start-end 行级标注) ────────────────────────────────

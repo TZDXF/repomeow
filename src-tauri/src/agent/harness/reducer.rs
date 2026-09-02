@@ -264,7 +264,10 @@ fn validate_attempt_reason(record: &StepAttemptRecord) -> Result<(), RecordLogCo
             if record.compaction_reason.is_none() {
                 return Err(corrupt(
                     RecordLogCorruptionReason::InvalidCompactionReason,
-                    format!("Compaction attempt {} has no valid compaction reason", record.id),
+                    format!(
+                        "Compaction attempt {} has no valid compaction reason",
+                        record.id
+                    ),
                 ));
             }
         }
@@ -272,7 +275,11 @@ fn validate_attempt_reason(record: &StepAttemptRecord) -> Result<(), RecordLogCo
             if record.compaction_reason.is_some() {
                 return Err(corrupt(
                     RecordLogCorruptionReason::InvalidCompactionReason,
-                    format!("{} attempt {} has a compaction reason", step_name(record.step), record.id),
+                    format!(
+                        "{} attempt {} has a compaction reason",
+                        step_name(record.step),
+                        record.id
+                    ),
                 ));
             }
         }
@@ -294,12 +301,15 @@ fn validate_attempt_sequence(
     entries_by_id: &HashMap<String, Entry>,
 ) -> Result<(), RecordLogCorruption> {
     let previous_record = previous;
-    let previous_result = previous_record.and_then(|record| entries_by_id.get(&record.result_entry_id));
+    let previous_result =
+        previous_record.and_then(|record| entries_by_id.get(&record.result_entry_id));
     let continues_series = match previous_record {
-        Some(previous_record) => previous_record.step == record.step
-            && previous_result
-                .map(|result| result.seq() >= record.seq)
-                .unwrap_or(true),
+        Some(previous_record) => {
+            previous_record.step == record.step
+                && previous_result
+                    .map(|result| result.seq() >= record.seq)
+                    .unwrap_or(true)
+        }
         None => false,
     };
     let expected_attempt = if continues_series {
@@ -326,7 +336,10 @@ fn validate_attempt_sequence(
     if record.result_entry_id != previous_record.result_entry_id {
         return Err(corrupt(
             RecordLogCorruptionReason::InconsistentStep,
-            format!("{} attempts disagree on their result entry id", step_name(record.step)),
+            format!(
+                "{} attempts disagree on their result entry id",
+                step_name(record.step)
+            ),
         ));
     }
     if record.compaction_reason != previous_record.compaction_reason {
@@ -387,16 +400,23 @@ fn validate_tool_start(
     }
     invocations.insert(invocation);
 
-    let Some(Entry::Message(assistant_entry)) = entries_by_id.get(&record.assistant_entry_id) else {
+    let Some(Entry::Message(assistant_entry)) = entries_by_id.get(&record.assistant_entry_id)
+    else {
         return Err(corrupt(
             RecordLogCorruptionReason::ToolCallMismatch,
-            format!("Tool start {} does not reference an assistant entry", record.id),
+            format!(
+                "Tool start {} does not reference an assistant entry",
+                record.id
+            ),
         ));
     };
     let Some(assistant_message) = as_assistant(&assistant_entry.message) else {
         return Err(corrupt(
             RecordLogCorruptionReason::ToolCallMismatch,
-            format!("Tool start {} does not reference an assistant entry", record.id),
+            format!(
+                "Tool start {} does not reference an assistant entry",
+                record.id
+            ),
         ));
     };
     let tool_calls: Vec<&ToolCall> = assistant_message
@@ -441,7 +461,8 @@ fn validate_tool_start(
 
 fn tool_result_field<'a>(message: &'a AgentMessage, field: &str) -> Option<&'a str> {
     match message {
-        AgentMessage::Message(crate::agent::types::TypedMessage::ToolResult(result)) => match field {
+        AgentMessage::Message(crate::agent::types::TypedMessage::ToolResult(result)) => match field
+        {
             "toolCallId" => Some(&result.tool_call_id),
             "toolName" => Some(&result.tool_name),
             _ => None,
@@ -455,12 +476,16 @@ fn validate_operation_result(
     record: &OperationStartedRecord,
 ) -> Result<(), RecordLogCorruption> {
     match &record.intent {
-        OperationIntent::Run { initial_messages, .. } => {
+        OperationIntent::Run {
+            initial_messages, ..
+        } => {
             for target in initial_messages {
                 validate_exact_provisioned_entry(entries_by_id, target)?;
             }
         }
-        OperationIntent::Compaction { result_entry_id, .. } => {
+        OperationIntent::Compaction {
+            result_entry_id, ..
+        } => {
             validate_result_entry(
                 entries_by_id,
                 result_entry_id,
@@ -468,7 +493,9 @@ fn validate_operation_result(
                 "manual compaction",
             )?;
         }
-        OperationIntent::Navigation { summary_entry_id, .. } => {
+        OperationIntent::Navigation {
+            summary_entry_id, ..
+        } => {
             if let Some(summary_entry_id) = summary_entry_id {
                 validate_result_entry(
                     entries_by_id,
@@ -516,7 +543,11 @@ pub fn validate_record_log(input: &RecordLogSlice) -> Result<(), RecordLogCorrup
             if !starts.contains_key(run_id) {
                 return Err(corrupt(
                     RecordLogCorruptionReason::UnknownOperation,
-                    format!("Record {} references unknown operation {}", record.id(), run_id),
+                    format!(
+                        "Record {} references unknown operation {}",
+                        record.id(),
+                        run_id
+                    ),
                 ));
             }
             if let Some(finish_seq) = finished_at.get(run_id) {
@@ -637,7 +668,11 @@ mod seq_key {
 fn derive_effective_configuration(input: &LaneReductionInput) -> EffectiveLaneConfiguration {
     let mut configuration = input.defaults.clone();
     let mut entries_by_id: HashMap<String, Entry> = HashMap::new();
-    for entry in input.configuration_entries.iter().chain(input.own_entries.iter()) {
+    for entry in input
+        .configuration_entries
+        .iter()
+        .chain(input.own_entries.iter())
+    {
         entries_by_id.insert(entry.id().to_string(), entry.clone());
     }
 
@@ -718,14 +753,18 @@ fn derive_tool_batch(
         .content
         .iter()
         .filter_map(|content| match content {
-            crate::agent::llm::types::AssistantContent::ToolCall(tool_call) => Some(tool_call.clone()),
+            crate::agent::llm::types::AssistantContent::ToolCall(tool_call) => {
+                Some(tool_call.clone())
+            }
             _ => None,
         })
         .collect();
     let mut starts: HashMap<usize, ToolStartedRecord> = HashMap::new();
     for record in records {
         if let LaneRecord::ToolStarted(started) = record {
-            if started.run_id == operation_id && started.assistant_entry_id == assistant_message_entry.id {
+            if started.run_id == operation_id
+                && started.assistant_entry_id == assistant_message_entry.id
+            {
                 starts.insert(started.tool_index, started.clone());
             }
         }
@@ -770,7 +809,9 @@ fn derive_tool_batch(
 }
 
 /// 纯函数重建单 lane 的编排状态(对齐 TS `reduceLaneState`)。
-pub fn reduce_lane_state(input: &LaneReductionInput) -> Result<LaneReductionResult, RecordLogCorruption> {
+pub fn reduce_lane_state(
+    input: &LaneReductionInput,
+) -> Result<LaneReductionResult, RecordLogCorruption> {
     let slice = RecordLogSlice {
         lane: input.lane.clone(),
         open_operations: input.open_operations.clone(),
@@ -792,24 +833,27 @@ pub fn reduce_lane_state(input: &LaneReductionInput) -> Result<LaneReductionResu
             _ => None,
         })
         .collect();
-    let pending_queue_records: Vec<crate::agent::harness::session::types::QueueEnqueuedRecord> = records
-        .iter()
-        .filter_map(|record| match record {
-            LaneRecord::QueueEnqueued(enqueue)
-                if !entries_by_id.contains_key(enqueue.target.id())
-                    && !cancelled_queue_ids.contains(enqueue.target.id()) =>
-            {
-                Some(enqueue.clone())
-            }
-            _ => None,
-        })
-        .collect();
+    let pending_queue_records: Vec<crate::agent::harness::session::types::QueueEnqueuedRecord> =
+        records
+            .iter()
+            .filter_map(|record| match record {
+                LaneRecord::QueueEnqueued(enqueue)
+                    if !entries_by_id.contains_key(enqueue.target.id())
+                        && !cancelled_queue_ids.contains(enqueue.target.id()) =>
+                {
+                    Some(enqueue.clone())
+                }
+                _ => None,
+            })
+            .collect();
     let started = input.open_operations.first().cloned();
     let captured_initial_message_ids: HashSet<String> = started
         .as_ref()
         .filter(|operation| matches!(operation.intent, OperationIntent::Run { .. }))
         .map(|operation| match &operation.intent {
-            OperationIntent::Run { initial_messages, .. } => initial_messages
+            OperationIntent::Run {
+                initial_messages, ..
+            } => initial_messages
                 .iter()
                 .map(ProvisionedEntry::id)
                 .map(str::to_string)
@@ -855,7 +899,10 @@ pub fn reduce_lane_state(input: &LaneReductionInput) -> Result<LaneReductionResu
     } else {
         pending_queue_records
             .iter()
-            .filter(|record| record.queue == QueueKind::Steer && record.run_id.as_deref() == Some(started.id.as_str()))
+            .filter(|record| {
+                record.queue == QueueKind::Steer
+                    && record.run_id.as_deref() == Some(started.id.as_str())
+            })
             .map(|record| record.target.clone())
             .collect()
     };
@@ -864,21 +911,28 @@ pub fn reduce_lane_state(input: &LaneReductionInput) -> Result<LaneReductionResu
     } else {
         pending_queue_records
             .iter()
-            .filter(|record| record.queue == QueueKind::FollowUp && record.run_id.as_deref() == Some(started.id.as_str()))
+            .filter(|record| {
+                record.queue == QueueKind::FollowUp
+                    && record.run_id.as_deref() == Some(started.id.as_str())
+            })
             .map(|record| record.target.clone())
             .collect()
     };
     let pending_writes: Vec<ProvisionedEntry> = operation_records
         .iter()
         .filter_map(|record| match record {
-            LaneRecord::WriteDeferred(deferred) if !entries_by_id.contains_key(deferred.target.id()) => {
+            LaneRecord::WriteDeferred(deferred)
+                if !entries_by_id.contains_key(deferred.target.id()) =>
+            {
                 Some(deferred.target.clone())
             }
             _ => None,
         })
         .collect();
     let missing_initial_messages: Vec<ProvisionedEntry> = match &started.intent {
-        OperationIntent::Run { initial_messages, .. } => initial_messages
+        OperationIntent::Run {
+            initial_messages, ..
+        } => initial_messages
             .iter()
             .filter(|target| !entries_by_id.contains_key(target.id()))
             .cloned()
@@ -892,7 +946,9 @@ pub fn reduce_lane_state(input: &LaneReductionInput) -> Result<LaneReductionResu
         .find(|record| matches!(record, LaneRecord::StepAttempt(_)))
         .copied();
     let step: Option<LaneStepState> = match newest_attempt {
-        Some(LaneRecord::StepAttempt(attempt)) if !entries_by_id.contains_key(&attempt.result_entry_id) => {
+        Some(LaneRecord::StepAttempt(attempt))
+            if !entries_by_id.contains_key(&attempt.result_entry_id) =>
+        {
             Some(LaneStepState {
                 kind: attempt.step,
                 attempts: attempt.attempt,
@@ -908,7 +964,10 @@ pub fn reduce_lane_state(input: &LaneReductionInput) -> Result<LaneReductionResu
     };
 
     let mut consumed_input_ids: HashSet<String> = HashSet::new();
-    if let OperationIntent::Run { initial_messages, .. } = &started.intent {
+    if let OperationIntent::Run {
+        initial_messages, ..
+    } = &started.intent
+    {
         for target in initial_messages {
             consumed_input_ids.insert(target.id().to_string());
         }
@@ -939,10 +998,14 @@ pub fn reduce_lane_state(input: &LaneReductionInput) -> Result<LaneReductionResu
     let deferred: Option<DeferredHandle> = None;
     let mut targets = OperationTargets::default();
     match &started.intent {
-        OperationIntent::Compaction { result_entry_id, .. } => {
+        OperationIntent::Compaction {
+            result_entry_id, ..
+        } => {
             targets.result = entries_by_id.contains_key(result_entry_id);
         }
-        OperationIntent::Navigation { summary_entry_id, .. } => {
+        OperationIntent::Navigation {
+            summary_entry_id, ..
+        } => {
             if let Some(summary_entry_id) = summary_entry_id {
                 targets.summary = entries_by_id.contains_key(summary_entry_id);
             }
@@ -1036,8 +1099,8 @@ mod tests {
     use super::*;
     use crate::agent::agent_loop::testing::{test_assistant, test_tool_call};
     use crate::agent::harness::session::types::{
-        MessageEntry, OperationStartedRecord, QueueEnqueuedRecord, ProvisionedCustomEntry,
-        ProvisionedEntry, UsageCauseKind, UsageRecord,
+        MessageEntry, OperationStartedRecord, ProvisionedCustomEntry, ProvisionedEntry,
+        QueueEnqueuedRecord, UsageCauseKind, UsageRecord,
     };
     use crate::agent::llm::types::AssistantContent;
     use serde_json::json;
@@ -1105,7 +1168,10 @@ mod tests {
             },
         ];
         let error = reduce_lane_state(&input).unwrap_err();
-        assert_eq!(error.reason, RecordLogCorruptionReason::MultipleOpenOperations);
+        assert_eq!(
+            error.reason,
+            RecordLogCorruptionReason::MultipleOpenOperations
+        );
     }
 
     #[test]
@@ -1303,13 +1369,15 @@ mod tests {
                     resume_data: None,
                 },
             }),
-            LaneRecord::AbortRequested(crate::agent::harness::session::types::AbortRequestedRecord {
-                id: "r-abort".into(),
-                seq: 2,
-                lane: "main".into(),
-                timestamp: 0,
-                run_id: "op-1".into(),
-            }),
+            LaneRecord::AbortRequested(
+                crate::agent::harness::session::types::AbortRequestedRecord {
+                    id: "r-abort".into(),
+                    seq: 2,
+                    lane: "main".into(),
+                    timestamp: 0,
+                    run_id: "op-1".into(),
+                },
+            ),
             LaneRecord::QueueEnqueued(QueueEnqueuedRecord {
                 id: "r-3".into(),
                 seq: 3,
@@ -1449,7 +1517,10 @@ mod tests {
             },
         )];
         let result = reduce_lane_state(&input).unwrap();
-        assert_eq!(result.effective_configuration.model, ("openai".to_string(), "gpt-5".to_string()));
+        assert_eq!(
+            result.effective_configuration.model,
+            ("openai".to_string(), "gpt-5".to_string())
+        );
         assert_eq!(result.effective_configuration.thinking_level, "high");
     }
 
@@ -1469,7 +1540,10 @@ mod tests {
             tool_call_id: Some("c1".into()),
             details: None,
         };
-        let value = serde_json::to_value(&crate::agent::harness::session::types::LaneRecord::Usage(record.clone())).unwrap();
+        let value = serde_json::to_value(
+            &crate::agent::harness::session::types::LaneRecord::Usage(record.clone()),
+        )
+        .unwrap();
         assert_eq!(value["type"], "usage");
         assert_eq!(value["cause"], "tool");
         assert_eq!(value["toolCallId"], "c1");

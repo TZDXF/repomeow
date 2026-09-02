@@ -32,5 +32,5 @@ pub use types::{
     LaneRecord, LogItem, LogOptions, OperationIntent, OperationOutcome, ProvisionedEntry,
     QueueKind, RecordQuery, SessionCreateOptions, SessionError, SessionErrorCode, SessionFact,
     SessionMetadata, SessionStats, SessionStopReason, SessionStorage, SessionTree, StepKind,
-    ToolReplay, UuidIdGenerator, UsageCauseKind, UsageRecord,
+    ToolReplay, UsageCauseKind, UsageRecord, UuidIdGenerator,
 };

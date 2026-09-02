@@ -14,7 +14,8 @@ use crate::agent::harness::compaction::compaction::{self as compaction_mod, Comp
 use crate::agent::harness::errors::{
     Closed, HarnessClosed, HarnessNotImplemented, HarnessUnavailable, InvalidLane, InvalidMessage,
     LaneBusy, LaneExists, MissingIdentities, NoActiveOperation, NoActiveRun, NothingToCompact,
-    NothingToResume, OperationError, UnknownQueueItem, UnknownSkill, UnknownTarget, UnknownTemplate,
+    NothingToResume, OperationError, UnknownQueueItem, UnknownSkill, UnknownTarget,
+    UnknownTemplate,
 };
 use crate::agent::harness::events::{
     HarnessEvent, HarnessEventBus, HarnessEventListener, HarnessEventType, RunEndEvent,
@@ -22,7 +23,7 @@ use crate::agent::harness::events::{
 };
 use crate::agent::harness::runtime::{
     branch_entries, build_history, make_mirroring_listener, make_queue_getter, operation_error,
-    stream_options_to_simple, EngineHandle, EmptyToolContext, QueuedEntry, QueueSet, RuntimeShared,
+    stream_options_to_simple, EmptyToolContext, EngineHandle, QueueSet, QueuedEntry, RuntimeShared,
 };
 use crate::agent::harness::session::session::Session;
 use crate::agent::harness::session::types::{
@@ -33,8 +34,8 @@ use crate::agent::harness::session::types::{
 };
 use crate::agent::harness::telemetry::TelemetryContext;
 use crate::agent::harness::types::{
-    AgentHarnessResources, AgentHarnessStreamOptions, AgentHarnessStreamOptionsPatch, ToolContext,
-    Result as ResultValue,
+    AgentHarnessResources, AgentHarnessStreamOptions, AgentHarnessStreamOptionsPatch,
+    Result as ResultValue, ToolContext,
 };
 use crate::agent::harness::uuid::uuid_v7;
 use crate::agent::llm::retry::{is_retryable_assistant_error, retry_delay_ms, sleep_with_cancel};
@@ -482,7 +483,11 @@ impl AgentHarness {
         } = options;
         let (queues, engine, busy) = {
             let shared = RuntimeShared::new(session.clone());
-            (shared.queues.clone(), shared.engine.clone(), shared.busy.clone())
+            (
+                shared.queues.clone(),
+                shared.engine.clone(),
+                shared.busy.clone(),
+            )
         };
         let active_tool_names = active_tool_names
             .unwrap_or_else(|| tools.iter().map(|tool| tool.name.clone()).collect());
@@ -502,8 +507,9 @@ impl AgentHarness {
                     },
                     stream_options,
                     retry_policy: retry.unwrap_or_default(),
-                    compaction_settings: compaction
-                        .unwrap_or(crate::agent::harness::compaction::compaction::DEFAULT_COMPACTION_SETTINGS),
+                    compaction_settings: compaction.unwrap_or(
+                        crate::agent::harness::compaction::compaction::DEFAULT_COMPACTION_SETTINGS,
+                    ),
                     steering_mode,
                     follow_up_mode,
                     closed: false,
@@ -534,7 +540,9 @@ impl AgentHarness {
                 OperationIntent::Navigation { .. } => OperationKind::Navigation,
             };
             let prompt = match &record.intent {
-                OperationIntent::Run { original_prompt, .. } => Some(original_prompt.clone()),
+                OperationIntent::Run {
+                    original_prompt, ..
+                } => Some(original_prompt.clone()),
                 _ => None,
             };
             session
@@ -619,7 +627,10 @@ impl AgentHarness {
 
     /// 当前运行期共享依赖(从既有字段拼装)。
     fn shared(&self) -> RuntimeShared {
-        let state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         RuntimeShared {
             session: self.session.clone(),
             bus: self.events.clone(),
@@ -655,13 +666,11 @@ impl AgentHarness {
             .engine
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        engine
-            .as_ref()
-            .map(|engine| LaneOperationInfo {
-                id: engine.run_id.clone(),
-                kind: OperationKind::Run,
-                status: OperationStatus::Running,
-            })
+        engine.as_ref().map(|engine| LaneOperationInfo {
+            id: engine.run_id.clone(),
+            kind: OperationKind::Run,
+            status: OperationStatus::Running,
+        })
     }
 
     async fn main_lane(&self) -> Lane {
@@ -694,7 +703,10 @@ impl AgentHarness {
                 },
             ))
             .await;
-        *shared.engine.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        *shared
+            .engine
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
         let _ = shared.busy.send(false);
     }
 
@@ -709,7 +721,10 @@ impl AgentHarness {
             if state.closed {
                 return Err(Self::closed_error());
             }
-            let engine = state.engine.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let engine = state
+                .engine
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             if let Some(engine) = engine.as_ref() {
                 return Err(RunRejected::LaneBusy(LaneBusy::new(
                     format!("Lane main is busy with operation {}", engine.run_id),
@@ -754,7 +769,10 @@ impl AgentHarness {
 
         // 3. nextRun 捕获项 + durable intent 落库。
         let initial: Vec<QueuedEntry> = {
-            let mut queues = shared.queues.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut queues = shared
+                .queues
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             QueueSet::drain(&mut queues.next_run, QueueMode::All)
         };
         let accept = self
@@ -836,7 +854,10 @@ impl AgentHarness {
             .iter()
             .filter(|tool| active.contains(&tool.name))
             .map(|tool| {
-                crate::agent::harness::types::bind_harness_tool(tool.clone(), context_source.clone())
+                crate::agent::harness::types::bind_harness_tool(
+                    tool.clone(),
+                    context_source.clone(),
+                )
             })
             .collect();
         let loop_config = AgentLoopConfig {
@@ -875,10 +896,17 @@ impl AgentHarness {
             error_message: None,
         };
         let signal = tokio_util::sync::CancellationToken::new();
-        let agent = Arc::new(Agent::new(agent_state, loop_config, snapshot.stream_fn.clone()));
+        let agent = Arc::new(Agent::new(
+            agent_state,
+            loop_config,
+            snapshot.stream_fn.clone(),
+        ));
         let listener_id = agent.subscribe(make_mirroring_listener(shared.clone(), run_id.clone()));
         {
-            let mut engine = shared.engine.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut engine = shared
+                .engine
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             *engine = Some(EngineHandle {
                 run_id: run_id.clone(),
                 signal: signal.clone(),
@@ -961,17 +989,22 @@ impl AgentHarness {
 
         // 8. 结果归约 + 收尾。
         let cancelled = signal.is_cancelled();
-        let final_assistant = agent.messages().iter().rev().find_map(|message| match message {
-            AgentMessage::Message(TypedMessage::Assistant(assistant)) => Some(assistant.clone()),
-            _ => None,
-        });
+        let final_assistant = agent
+            .messages()
+            .iter()
+            .rev()
+            .find_map(|message| match message {
+                AgentMessage::Message(TypedMessage::Assistant(assistant)) => {
+                    Some(assistant.clone())
+                }
+                _ => None,
+            });
         agent.unsubscribe(listener_id);
 
         let leaf_id = self.leaf_id().await;
         let (record_outcome, run_outcome, end_outcome) = if cancelled {
-            let assistant = final_assistant.unwrap_or_else(|| {
-                synthetic_assistant(&snapshot.model, StopReason::Aborted, None)
-            });
+            let assistant = final_assistant
+                .unwrap_or_else(|| synthetic_assistant(&snapshot.model, StopReason::Aborted, None));
             (
                 OperationOutcome::Aborted,
                 RunOutcome::Aborted {
@@ -983,9 +1016,8 @@ impl AgentHarness {
             )
         } else if matches!(&final_assistant, Some(assistant) if assistant.stop_reason == StopReason::Error)
         {
-            let assistant = final_assistant.unwrap_or_else(|| {
-                synthetic_assistant(&snapshot.model, StopReason::Error, None)
-            });
+            let assistant = final_assistant
+                .unwrap_or_else(|| synthetic_assistant(&snapshot.model, StopReason::Error, None));
             let error = OperationError {
                 code: "provider_error".to_string(),
                 message: assistant
@@ -1004,9 +1036,8 @@ impl AgentHarness {
                 RunEndOutcome::Failed,
             )
         } else {
-            let assistant = final_assistant.unwrap_or_else(|| {
-                synthetic_assistant(&snapshot.model, StopReason::Stop, None)
-            });
+            let assistant = final_assistant
+                .unwrap_or_else(|| synthetic_assistant(&snapshot.model, StopReason::Stop, None));
             (
                 OperationOutcome::Completed,
                 RunOutcome::Completed {
@@ -1017,7 +1048,8 @@ impl AgentHarness {
                 RunEndOutcome::Completed,
             )
         };
-        self.finish_run(&shared, &run_id, record_outcome, None).await;
+        self.finish_run(&shared, &run_id, record_outcome, None)
+            .await;
         self.events.emit(&HarnessEvent::RunEnd(RunEndEvent {
             lane: "main".to_string(),
             run_id: run_id.clone(),
@@ -1054,7 +1086,12 @@ impl AgentHarness {
             if state.closed {
                 return Err(HarnessClosed.into());
             }
-            if state.engine.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).is_some() {
+            if state
+                .engine
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .is_some()
+            {
                 return Err(HarnessUnavailable::from(HarnessNotImplemented::new(
                     "compact.busy",
                 )));
@@ -1100,8 +1137,13 @@ impl AgentHarness {
         let entries = match branch_entries(&self.session).await {
             Ok(entries) => entries,
             Err(error) => {
-                self.finish_run(&shared, &run_id, OperationOutcome::Failed, Some(operation_error(error)))
-                    .await;
+                self.finish_run(
+                    &shared,
+                    &run_id,
+                    OperationOutcome::Failed,
+                    Some(operation_error(error)),
+                )
+                .await;
                 return Ok(CompactionOutcome::Failed {
                     leaf_id: self.leaf_id().await,
                     error: OperationError {
@@ -1121,10 +1163,15 @@ impl AgentHarness {
                 });
             }
             Err(error) => {
-                self.finish_run(&shared, &run_id, OperationOutcome::Failed, Some(OperationError {
-                    code: format!("compaction_{}", error.code),
-                    message: error.message.clone(),
-                }))
+                self.finish_run(
+                    &shared,
+                    &run_id,
+                    OperationOutcome::Failed,
+                    Some(OperationError {
+                        code: format!("compaction_{}", error.code),
+                        message: error.message.clone(),
+                    }),
+                )
                 .await;
                 return Ok(CompactionOutcome::Failed {
                     leaf_id: self.leaf_id().await,
@@ -1220,7 +1267,8 @@ impl AgentHarness {
                 })
             }
             Err(error) => {
-                let aborted = error.code == crate::agent::harness::types::CompactionErrorCode::Aborted;
+                let aborted =
+                    error.code == crate::agent::harness::types::CompactionErrorCode::Aborted;
                 self.finish_run(
                     &shared,
                     &run_id,
@@ -1263,7 +1311,9 @@ impl AgentHarness {
     /// 恢复:create 已把崩溃 operation 归约 aborted,正常运行后无挂起可续。
     pub async fn resume(&self) -> ResumeResult {
         if self.is_closed() {
-            return Err(ResumeRejected::Closed(Closed::new("AgentHarness was closed")));
+            return Err(ResumeRejected::Closed(Closed::new(
+                "AgentHarness was closed",
+            )));
         }
         Err(ResumeRejected::NothingToResume(NothingToResume::new(
             "No suspended operation to resume; interrupted operations are restored as aborted by create().",
@@ -1278,7 +1328,9 @@ impl AgentHarness {
         let handle = {
             let state = self.lock_state();
             if state.closed {
-                return Err(AbortRejected::Closed(Closed::new("AgentHarness was closed")));
+                return Err(AbortRejected::Closed(Closed::new(
+                    "AgentHarness was closed",
+                )));
             }
             let engine = state
                 .engine
@@ -1296,7 +1348,10 @@ impl AgentHarness {
         };
         // 队列载荷收集 + 清空(abort 语义:返回给调用方自行处置)。
         let (steer, follow_up) = {
-            let mut queues = shared.queues.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut queues = shared
+                .queues
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             (
                 std::mem::take(&mut queues.steer),
                 std::mem::take(&mut queues.follow_up),
@@ -1328,7 +1383,9 @@ impl AgentHarness {
         let run_id = {
             let state = self.lock_state();
             if state.closed {
-                return Err(QueueRejected::Closed(Closed::new("AgentHarness was closed")));
+                return Err(QueueRejected::Closed(Closed::new(
+                    "AgentHarness was closed",
+                )));
             }
             let engine = state
                 .engine
@@ -1421,18 +1478,29 @@ impl AgentHarness {
         }
         // 先从内存队列移除。
         let removed = {
-            let mut queues = shared.queues.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut queues = shared
+                .queues
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             let mut removed = false;
-            if let Some(position) = queues.steer.iter().position(|item| item.entry_id == entry_id) {
+            if let Some(position) = queues
+                .steer
+                .iter()
+                .position(|item| item.entry_id == entry_id)
+            {
                 queues.steer.remove(position);
                 removed = true;
-            } else if let Some(position) =
-                queues.follow_up.iter().position(|item| item.entry_id == entry_id)
+            } else if let Some(position) = queues
+                .follow_up
+                .iter()
+                .position(|item| item.entry_id == entry_id)
             {
                 queues.follow_up.remove(position);
                 removed = true;
-            } else if let Some(position) =
-                queues.next_run.iter().position(|item| item.entry_id == entry_id)
+            } else if let Some(position) = queues
+                .next_run
+                .iter()
+                .position(|item| item.entry_id == entry_id)
             {
                 queues.next_run.remove(position);
                 removed = true;
@@ -1475,11 +1543,13 @@ impl AgentHarness {
                 LaneRecord::QueueEnqueued(enqueued)
                     if enqueued.target.id() == entry_id)
         }) else {
-            return Err(CancelQueuedRejected::UnknownQueueItem(UnknownQueueItem::new(
-                format!("Unknown queue item: {entry_id}"),
-                "main".to_string(),
-                entry_id,
-            )));
+            return Err(CancelQueuedRejected::UnknownQueueItem(
+                UnknownQueueItem::new(
+                    format!("Unknown queue item: {entry_id}"),
+                    "main".to_string(),
+                    entry_id,
+                ),
+            ));
         };
         let record_run_id = match &record {
             LaneRecord::QueueEnqueued(enqueued) => enqueued.run_id.clone(),
@@ -1725,8 +1795,8 @@ impl AgentHarness {
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        state.active_tool_names = active_names
-            .unwrap_or_else(|| tools.iter().map(|tool| tool.name.clone()).collect());
+        state.active_tool_names =
+            active_names.unwrap_or_else(|| tools.iter().map(|tool| tool.name.clone()).collect());
         state.tools = tools;
     }
 
@@ -1918,7 +1988,11 @@ struct PromptSnapshot {
 }
 
 /// 无真实 assistant 消息时(如首响应前中止)的结果占位消息。
-fn synthetic_assistant(model: &Model, stop_reason: StopReason, error: Option<String>) -> AssistantMessage {
+fn synthetic_assistant(
+    model: &Model,
+    stop_reason: StopReason,
+    error: Option<String>,
+) -> AssistantMessage {
     AssistantMessage {
         role: "assistant".to_string(),
         content: Vec::new(),

@@ -105,7 +105,10 @@ pub trait TelemetrySpan: Send + Sync {
     fn record_error(&self, message: &str) {
         self.add_event(
             "exception",
-            vec![("exception.message".to_string(), AttributeValue::from(message))],
+            vec![(
+                "exception.message".to_string(),
+                AttributeValue::from(message),
+            )],
         );
         self.set_status(SpanStatus::Error);
     }
@@ -188,14 +191,18 @@ impl Drop for InMemorySpan {
             .status
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        self.state.spans.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(RecordedSpan {
-            name: self.name.clone(),
-            attributes,
-            events,
-            status,
-            start_ms: self.start_ms,
-            end_ms,
-        });
+        self.state
+            .spans
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(RecordedSpan {
+                name: self.name.clone(),
+                attributes,
+                events,
+                status,
+                start_ms: self.start_ms,
+                end_ms,
+            });
     }
 }
 
@@ -231,7 +238,8 @@ impl InMemoryTelemetryContext {
 
 impl TelemetryContext for InMemoryTelemetryContext {
     fn start_span(&self, options: SpanOptions) -> Arc<dyn TelemetrySpan> {
-        let mut attributes: HashMap<String, AttributeValue> = options.attributes.into_iter().collect();
+        let mut attributes: HashMap<String, AttributeValue> =
+            options.attributes.into_iter().collect();
         let sequence = self.state.counter.fetch_add(1, Ordering::SeqCst);
         attributes.insert(
             "pi.span.sequence".to_string(),
@@ -287,39 +295,39 @@ pub const NOOP: NoopTelemetryContext = NoopTelemetryContext;
 /// (json! 不支持 const,改为函数;蓝本为 const 对象。)
 pub fn ai_telemetry_schema() -> Value {
     json!({
-    "version": 1,
-    "spans": {
-        "pi.ai.request": {
-            "description": "One logical request to an AI provider",
-            "parents": { "kind": "any" },
-            "startAttributes": {
-                "pi.ai.operation": { "type": "string", "required": true, "values": ["stream", "fetch_deferred", "cancel_deferred", "generate_images"] },
-                "pi.ai.provider": { "type": "string", "required": true },
-                "pi.ai.model": { "type": "string", "required": true },
-                "pi.ai.api": { "type": "string", "required": true },
-                "pi.ai.streaming": { "type": "boolean", "required": true },
-                "pi.ai.deferred": { "type": "boolean", "required": false }
-            },
-            "endAttributes": {
-                "pi.ai.response.model": { "type": "string" },
-                "pi.ai.response.id": { "type": "string", "cardinality": "high" },
-                "pi.ai.response.stop_reason": { "type": "string", "values": ["stop", "length", "tool_use", "error", "aborted", "deferred"] },
-                "pi.ai.http.status_code": { "type": "number" },
-                "pi.ai.usage.input_tokens": { "type": "number" },
-                "pi.ai.usage.output_tokens": { "type": "number" },
-                "pi.ai.usage.cache_read_tokens": { "type": "number" },
-                "pi.ai.usage.cache_write_tokens": { "type": "number" },
-                "pi.ai.usage.reasoning_tokens": { "type": "number" },
-                "pi.ai.usage.total_tokens": { "type": "number" },
-                "pi.ai.usage.cost": { "type": "number" },
-                "pi.ai.stream.chunk_count": { "type": "number" },
-                "pi.ai.stream.time_to_first_chunk_ms": { "type": "number" },
-                "pi.ai.error.type": { "type": "string", "cardinality": "low" }
-            },
-            "status": { "default": "ok" }
+        "version": 1,
+        "spans": {
+            "pi.ai.request": {
+                "description": "One logical request to an AI provider",
+                "parents": { "kind": "any" },
+                "startAttributes": {
+                    "pi.ai.operation": { "type": "string", "required": true, "values": ["stream", "fetch_deferred", "cancel_deferred", "generate_images"] },
+                    "pi.ai.provider": { "type": "string", "required": true },
+                    "pi.ai.model": { "type": "string", "required": true },
+                    "pi.ai.api": { "type": "string", "required": true },
+                    "pi.ai.streaming": { "type": "boolean", "required": true },
+                    "pi.ai.deferred": { "type": "boolean", "required": false }
+                },
+                "endAttributes": {
+                    "pi.ai.response.model": { "type": "string" },
+                    "pi.ai.response.id": { "type": "string", "cardinality": "high" },
+                    "pi.ai.response.stop_reason": { "type": "string", "values": ["stop", "length", "tool_use", "error", "aborted", "deferred"] },
+                    "pi.ai.http.status_code": { "type": "number" },
+                    "pi.ai.usage.input_tokens": { "type": "number" },
+                    "pi.ai.usage.output_tokens": { "type": "number" },
+                    "pi.ai.usage.cache_read_tokens": { "type": "number" },
+                    "pi.ai.usage.cache_write_tokens": { "type": "number" },
+                    "pi.ai.usage.reasoning_tokens": { "type": "number" },
+                    "pi.ai.usage.total_tokens": { "type": "number" },
+                    "pi.ai.usage.cost": { "type": "number" },
+                    "pi.ai.stream.chunk_count": { "type": "number" },
+                    "pi.ai.stream.time_to_first_chunk_ms": { "type": "number" },
+                    "pi.ai.error.type": { "type": "string", "cardinality": "low" }
+                },
+                "status": { "default": "ok" }
+            }
         }
-    }
-})
+    })
 }
 
 /// harness 钩子名(蓝本 HOOK_NAMES)。
@@ -373,154 +381,154 @@ pub const EVENT_TYPES: [&str; 29] = [
 /// harness 遥测 schema(JSON 表;键与蓝本一致)。
 pub fn harness_telemetry_schema() -> Value {
     json!({
-    "version": 1,
-    "spans": {
-        "pi.harness.run": {
-            "parents": { "kind": "root_or_external" },
-            "startAttributes": {
-                "pi.session.id": { "type": "string", "required": true },
-                "pi.lane.name": { "type": "string", "required": true },
-                "pi.operation.id": { "type": "string", "required": true },
-                "pi.operation.recovery": { "type": "boolean", "required": true },
-                "pi.operation.kind": { "type": "string", "required": true, "values": ["run"] }
+        "version": 1,
+        "spans": {
+            "pi.harness.run": {
+                "parents": { "kind": "root_or_external" },
+                "startAttributes": {
+                    "pi.session.id": { "type": "string", "required": true },
+                    "pi.lane.name": { "type": "string", "required": true },
+                    "pi.operation.id": { "type": "string", "required": true },
+                    "pi.operation.recovery": { "type": "boolean", "required": true },
+                    "pi.operation.kind": { "type": "string", "required": true, "values": ["run"] }
+                },
+                "endAttributes": {
+                    "pi.operation.outcome": { "type": "string", "values": ["completed", "aborted", "failed", "suspended"] },
+                    "pi.error.code": { "type": "string", "cardinality": "low" },
+                    "pi.error.type": { "type": "string", "cardinality": "low" }
+                },
+                "status": { "default": "ok" }
             },
-            "endAttributes": {
-                "pi.operation.outcome": { "type": "string", "values": ["completed", "aborted", "failed", "suspended"] },
-                "pi.error.code": { "type": "string", "cardinality": "low" },
-                "pi.error.type": { "type": "string", "cardinality": "low" }
+            "pi.harness.compaction": {
+                "parents": { "kind": "root_or_external" },
+                "startAttributes": {
+                    "pi.session.id": { "type": "string", "required": true },
+                    "pi.lane.name": { "type": "string", "required": true },
+                    "pi.operation.id": { "type": "string", "required": true },
+                    "pi.operation.recovery": { "type": "boolean", "required": true },
+                    "pi.operation.kind": { "type": "string", "required": true, "values": ["compaction"] }
+                },
+                "endAttributes": {
+                    "pi.operation.outcome": { "type": "string", "values": ["completed", "declined", "aborted", "failed"] },
+                    "pi.error.code": { "type": "string", "cardinality": "low" },
+                    "pi.error.type": { "type": "string", "cardinality": "low" }
+                },
+                "status": { "default": "ok" }
             },
-            "status": { "default": "ok" }
-        },
-        "pi.harness.compaction": {
-            "parents": { "kind": "root_or_external" },
-            "startAttributes": {
-                "pi.session.id": { "type": "string", "required": true },
-                "pi.lane.name": { "type": "string", "required": true },
-                "pi.operation.id": { "type": "string", "required": true },
-                "pi.operation.recovery": { "type": "boolean", "required": true },
-                "pi.operation.kind": { "type": "string", "required": true, "values": ["compaction"] }
+            "pi.harness.navigation": {
+                "parents": { "kind": "root_or_external" },
+                "startAttributes": {
+                    "pi.session.id": { "type": "string", "required": true },
+                    "pi.lane.name": { "type": "string", "required": true },
+                    "pi.operation.id": { "type": "string", "required": true },
+                    "pi.operation.recovery": { "type": "boolean", "required": true },
+                    "pi.operation.kind": { "type": "string", "required": true, "values": ["navigation"] }
+                },
+                "endAttributes": {
+                    "pi.operation.outcome": { "type": "string", "values": ["completed", "declined", "aborted", "failed"] },
+                    "pi.error.code": { "type": "string", "cardinality": "low" },
+                    "pi.error.type": { "type": "string", "cardinality": "low" }
+                },
+                "status": { "default": "ok" }
             },
-            "endAttributes": {
-                "pi.operation.outcome": { "type": "string", "values": ["completed", "declined", "aborted", "failed"] },
-                "pi.error.code": { "type": "string", "cardinality": "low" },
-                "pi.error.type": { "type": "string", "cardinality": "low" }
+            "pi.harness.checkpoint": {
+                "parents": { "kind": "spans", "spans": ["pi.harness.run"] },
+                "startAttributes": {
+                    "pi.lane.name": { "type": "string", "required": true },
+                    "pi.operation.id": { "type": "string", "required": true },
+                    "pi.checkpoint.kind": { "type": "string", "required": true, "values": ["normal", "failure_drain", "abort_reconcile"] }
+                },
+                "endAttributes": {},
+                "status": { "default": "ok" }
             },
-            "status": { "default": "ok" }
-        },
-        "pi.harness.navigation": {
-            "parents": { "kind": "root_or_external" },
-            "startAttributes": {
-                "pi.session.id": { "type": "string", "required": true },
-                "pi.lane.name": { "type": "string", "required": true },
-                "pi.operation.id": { "type": "string", "required": true },
-                "pi.operation.recovery": { "type": "boolean", "required": true },
-                "pi.operation.kind": { "type": "string", "required": true, "values": ["navigation"] }
+            "pi.harness.turn": {
+                "parents": { "kind": "spans", "spans": ["pi.harness.run"] },
+                "startAttributes": {
+                    "pi.lane.name": { "type": "string", "required": true },
+                    "pi.operation.id": { "type": "string", "required": true },
+                    "pi.turn.id": { "type": "string", "required": true }
+                },
+                "endAttributes": {},
+                "status": { "default": "ok" }
             },
-            "endAttributes": {
-                "pi.operation.outcome": { "type": "string", "values": ["completed", "declined", "aborted", "failed"] },
-                "pi.error.code": { "type": "string", "cardinality": "low" },
-                "pi.error.type": { "type": "string", "cardinality": "low" }
+            "pi.harness.step": {
+                "parents": { "kind": "spans", "spans": ["pi.harness.turn", "pi.harness.checkpoint", "pi.harness.compaction", "pi.harness.navigation"] },
+                "startAttributes": {
+                    "pi.lane.name": { "type": "string", "required": true },
+                    "pi.operation.id": { "type": "string", "required": true },
+                    "pi.step.kind": { "type": "string", "required": true, "values": ["assistant", "compaction", "branch_summary"] },
+                    "pi.step.attempt": { "type": "number", "required": true },
+                    "pi.compaction.reason": { "type": "string", "required": false, "values": ["manual", "threshold", "overflow"] }
+                },
+                "endAttributes": {
+                    "pi.step.outcome": { "type": "string", "values": ["succeeded", "retry", "failed", "aborted", "deferred", "overflow"] }
+                },
+                "status": { "default": "ok" }
             },
-            "status": { "default": "ok" }
-        },
-        "pi.harness.checkpoint": {
-            "parents": { "kind": "spans", "spans": ["pi.harness.run"] },
-            "startAttributes": {
-                "pi.lane.name": { "type": "string", "required": true },
-                "pi.operation.id": { "type": "string", "required": true },
-                "pi.checkpoint.kind": { "type": "string", "required": true, "values": ["normal", "failure_drain", "abort_reconcile"] }
+            "pi.harness.tool": {
+                "parents": { "kind": "spans", "spans": ["pi.harness.turn", "pi.harness.run"] },
+                "startAttributes": {
+                    "pi.lane.name": { "type": "string", "required": true },
+                    "pi.operation.id": { "type": "string", "required": true },
+                    "pi.turn.id": { "type": "string", "required": false },
+                    "pi.tool.name": { "type": "string", "required": true },
+                    "pi.tool.call_id": { "type": "string", "required": true },
+                    "pi.tool.replay": { "type": "string", "required": true, "values": ["never", "safe"] },
+                    "pi.tool.recovery": { "type": "boolean", "required": true }
+                },
+                "endAttributes": {
+                    "pi.tool.is_error": { "type": "boolean" }
+                },
+                "status": { "default": "ok" }
             },
-            "endAttributes": {},
-            "status": { "default": "ok" }
-        },
-        "pi.harness.turn": {
-            "parents": { "kind": "spans", "spans": ["pi.harness.run"] },
-            "startAttributes": {
-                "pi.lane.name": { "type": "string", "required": true },
-                "pi.operation.id": { "type": "string", "required": true },
-                "pi.turn.id": { "type": "string", "required": true }
+            "pi.harness.hook": {
+                "parents": { "kind": "any" },
+                "startAttributes": {
+                    "pi.lane.name": { "type": "string", "required": true },
+                    "pi.operation.id": { "type": "string", "required": false },
+                    "pi.hook.name": { "type": "string", "required": true, "values": ["before_run", "before_resume", "before_run_end", "transform_context", "before_request", "before_payload", "after_response", "before_tool", "after_tool", "before_compaction", "before_navigation"] },
+                    "pi.hook.registration_id": { "type": "string", "required": false }
+                },
+                "endAttributes": {
+                    "pi.hook.outcome": { "type": "string", "values": ["completed", "skipped", "blocked", "failed"] }
+                },
+                "status": { "default": "ok" }
             },
-            "endAttributes": {},
-            "status": { "default": "ok" }
-        },
-        "pi.harness.step": {
-            "parents": { "kind": "spans", "spans": ["pi.harness.turn", "pi.harness.checkpoint", "pi.harness.compaction", "pi.harness.navigation"] },
-            "startAttributes": {
-                "pi.lane.name": { "type": "string", "required": true },
-                "pi.operation.id": { "type": "string", "required": true },
-                "pi.step.kind": { "type": "string", "required": true, "values": ["assistant", "compaction", "branch_summary"] },
-                "pi.step.attempt": { "type": "number", "required": true },
-                "pi.compaction.reason": { "type": "string", "required": false, "values": ["manual", "threshold", "overflow"] }
+            "pi.harness.sleep": {
+                "parents": { "kind": "spans", "spans": ["pi.harness.step", "pi.harness.run"] },
+                "startAttributes": {
+                    "pi.operation.id": { "type": "string", "required": true },
+                    "pi.sleep.delay_ms": { "type": "number", "required": true }
+                },
+                "endAttributes": {
+                    "pi.sleep.outcome": { "type": "string", "values": ["elapsed", "aborted"] }
+                },
+                "status": { "default": "ok" }
             },
-            "endAttributes": {
-                "pi.step.outcome": { "type": "string", "values": ["succeeded", "retry", "failed", "aborted", "deferred", "overflow"] }
+            "pi.harness.event_handler": {
+                "parents": { "kind": "any" },
+                "startAttributes": {
+                    "pi.event.type": { "type": "string", "required": true, "values": ["run_start", "run_resume", "run_suspend", "run_abort", "run_end", "fault", "handler_error", "turn_start", "turn_end", "retry_scheduled", "retry_start", "retry_end", "message_start", "message_update", "message_end", "tool_start", "tool_update", "tool_end", "entry_added", "write_pending", "queue_update", "fact_update", "config_update", "compaction_start", "compaction_end", "navigation_start", "navigation_end", "lane_created", "usage"] },
+                    "pi.lane.name": { "type": "string", "required": false }
+                },
+                "endAttributes": {},
+                "status": { "default": "ok" }
             },
-            "status": { "default": "ok" }
-        },
-        "pi.harness.tool": {
-            "parents": { "kind": "spans", "spans": ["pi.harness.turn", "pi.harness.run"] },
-            "startAttributes": {
-                "pi.lane.name": { "type": "string", "required": true },
-                "pi.operation.id": { "type": "string", "required": true },
-                "pi.turn.id": { "type": "string", "required": false },
-                "pi.tool.name": { "type": "string", "required": true },
-                "pi.tool.call_id": { "type": "string", "required": true },
-                "pi.tool.replay": { "type": "string", "required": true, "values": ["never", "safe"] },
-                "pi.tool.recovery": { "type": "boolean", "required": true }
-            },
-            "endAttributes": {
-                "pi.tool.is_error": { "type": "boolean" }
-            },
-            "status": { "default": "ok" }
-        },
-        "pi.harness.hook": {
-            "parents": { "kind": "any" },
-            "startAttributes": {
-                "pi.lane.name": { "type": "string", "required": true },
-                "pi.operation.id": { "type": "string", "required": false },
-                "pi.hook.name": { "type": "string", "required": true, "values": ["before_run", "before_resume", "before_run_end", "transform_context", "before_request", "before_payload", "after_response", "before_tool", "after_tool", "before_compaction", "before_navigation"] },
-                "pi.hook.registration_id": { "type": "string", "required": false }
-            },
-            "endAttributes": {
-                "pi.hook.outcome": { "type": "string", "values": ["completed", "skipped", "blocked", "failed"] }
-            },
-            "status": { "default": "ok" }
-        },
-        "pi.harness.sleep": {
-            "parents": { "kind": "spans", "spans": ["pi.harness.step", "pi.harness.run"] },
-            "startAttributes": {
-                "pi.operation.id": { "type": "string", "required": true },
-                "pi.sleep.delay_ms": { "type": "number", "required": true }
-            },
-            "endAttributes": {
-                "pi.sleep.outcome": { "type": "string", "values": ["elapsed", "aborted"] }
-            },
-            "status": { "default": "ok" }
-        },
-        "pi.harness.event_handler": {
-            "parents": { "kind": "any" },
-            "startAttributes": {
-                "pi.event.type": { "type": "string", "required": true, "values": ["run_start", "run_resume", "run_suspend", "run_abort", "run_end", "fault", "handler_error", "turn_start", "turn_end", "retry_scheduled", "retry_start", "retry_end", "message_start", "message_update", "message_end", "tool_start", "tool_update", "tool_end", "entry_added", "write_pending", "queue_update", "fact_update", "config_update", "compaction_start", "compaction_end", "navigation_start", "navigation_end", "lane_created", "usage"] },
-                "pi.lane.name": { "type": "string", "required": false }
-            },
-            "endAttributes": {},
-            "status": { "default": "ok" }
-        },
-        "pi.session.write": {
-            "parents": { "kind": "any" },
-            "startAttributes": {
-                "pi.lane.name": { "type": "string", "required": true },
-                "pi.operation.id": { "type": "string", "required": false },
-                "pi.session.mutation": { "type": "string", "required": true, "values": ["entry", "record", "lane", "fact"] },
-                "pi.session.item_type": { "type": "string", "required": false }
-            },
-            "endAttributes": {
-                "pi.session.seq": { "type": "number" }
-            },
-            "status": { "default": "ok" }
+            "pi.session.write": {
+                "parents": { "kind": "any" },
+                "startAttributes": {
+                    "pi.lane.name": { "type": "string", "required": true },
+                    "pi.operation.id": { "type": "string", "required": false },
+                    "pi.session.mutation": { "type": "string", "required": true, "values": ["entry", "record", "lane", "fact"] },
+                    "pi.session.item_type": { "type": "string", "required": false }
+                },
+                "endAttributes": {
+                    "pi.session.seq": { "type": "number" }
+                },
+                "status": { "default": "ok" }
+            }
         }
-    }
-})
+    })
 }
 
 /// 组合 schema(对齐 TS `AGENT_TELEMETRY_SCHEMAS`)。
@@ -569,11 +577,17 @@ where
         context,
         "pi.ai.request",
         vec![
-            ("pi.ai.operation".to_string(), AttributeValue::from(operation)),
+            (
+                "pi.ai.operation".to_string(),
+                AttributeValue::from(operation),
+            ),
             ("pi.ai.provider".to_string(), AttributeValue::from(provider)),
             ("pi.ai.model".to_string(), AttributeValue::from(model_id)),
             ("pi.ai.api".to_string(), AttributeValue::from(api)),
-            ("pi.ai.streaming".to_string(), AttributeValue::from(streaming)),
+            (
+                "pi.ai.streaming".to_string(),
+                AttributeValue::from(streaming),
+            ),
         ],
         callback,
     )
@@ -597,10 +611,19 @@ where
         context,
         "pi.harness.run",
         vec![
-            ("pi.session.id".to_string(), AttributeValue::from(session_id)),
+            (
+                "pi.session.id".to_string(),
+                AttributeValue::from(session_id),
+            ),
             ("pi.lane.name".to_string(), AttributeValue::from(lane)),
-            ("pi.operation.id".to_string(), AttributeValue::from(operation_id)),
-            ("pi.operation.recovery".to_string(), AttributeValue::from(recovery)),
+            (
+                "pi.operation.id".to_string(),
+                AttributeValue::from(operation_id),
+            ),
+            (
+                "pi.operation.recovery".to_string(),
+                AttributeValue::from(recovery),
+            ),
             ("pi.operation.kind".to_string(), AttributeValue::from("run")),
         ],
         callback,
@@ -625,11 +648,23 @@ where
         context,
         "pi.harness.compaction",
         vec![
-            ("pi.session.id".to_string(), AttributeValue::from(session_id)),
+            (
+                "pi.session.id".to_string(),
+                AttributeValue::from(session_id),
+            ),
             ("pi.lane.name".to_string(), AttributeValue::from(lane)),
-            ("pi.operation.id".to_string(), AttributeValue::from(operation_id)),
-            ("pi.operation.recovery".to_string(), AttributeValue::from(recovery)),
-            ("pi.operation.kind".to_string(), AttributeValue::from("compaction")),
+            (
+                "pi.operation.id".to_string(),
+                AttributeValue::from(operation_id),
+            ),
+            (
+                "pi.operation.recovery".to_string(),
+                AttributeValue::from(recovery),
+            ),
+            (
+                "pi.operation.kind".to_string(),
+                AttributeValue::from("compaction"),
+            ),
         ],
         callback,
     )
@@ -653,11 +688,23 @@ where
         context,
         "pi.harness.navigation",
         vec![
-            ("pi.session.id".to_string(), AttributeValue::from(session_id)),
+            (
+                "pi.session.id".to_string(),
+                AttributeValue::from(session_id),
+            ),
             ("pi.lane.name".to_string(), AttributeValue::from(lane)),
-            ("pi.operation.id".to_string(), AttributeValue::from(operation_id)),
-            ("pi.operation.recovery".to_string(), AttributeValue::from(recovery)),
-            ("pi.operation.kind".to_string(), AttributeValue::from("navigation")),
+            (
+                "pi.operation.id".to_string(),
+                AttributeValue::from(operation_id),
+            ),
+            (
+                "pi.operation.recovery".to_string(),
+                AttributeValue::from(recovery),
+            ),
+            (
+                "pi.operation.kind".to_string(),
+                AttributeValue::from("navigation"),
+            ),
         ],
         callback,
     )
