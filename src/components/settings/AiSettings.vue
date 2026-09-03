@@ -45,6 +45,7 @@ import {
   getBuiltinAiProviders,
   listCcSwitchProviders,
   revealAiConfigDir,
+  type AiModelCompat,
   type AiModelDef,
   type AiModelRef,
   type AiProvider,
@@ -60,13 +61,26 @@ const settings = useSettingsStore();
 
 // ── 本地编辑副本(API Key 类输入不适合边敲边存,点「保存」才全量落盘) ──
 
+/** 三态兼容开关:auto = 跟随 provider/baseUrl 自动探测(不写入配置) */
+type CompatTriState = "auto" | "on" | "off";
+type CompatMaxTokensField = "auto" | "max_completion_tokens" | "max_tokens";
+
+/** 模型高级配置草稿:仅暴露自建网关常见的四个兼容开关 */
+interface ModelCompatDraft {
+  supportsDeveloperRole: CompatTriState;
+  supportsReasoningEffort: CompatTriState;
+  supportsStore: CompatTriState;
+  maxTokensField: CompatMaxTokensField;
+}
+
 interface ModelDraft {
   key: string;
   id: string;
   name: string;
   contextWindow: string;
   maxTokens: string;
-  /** 建控件之外的原始定义(cost/compat/input 等透传保存,避免 UI 字段丢元数据) */
+  compat: ModelCompatDraft;
+  /** 建控件之外的原始定义(cost/input 等透传保存,避免 UI 字段丢元数据) */
   source: AiModelDef;
 }
 
@@ -103,6 +117,10 @@ function draftProvider(id: string, provider: AiProvider): ProviderDraft {
   };
 }
 
+function toTriState(value: boolean | undefined): CompatTriState {
+  return value === undefined ? "auto" : value ? "on" : "off";
+}
+
 function draftModel(model: AiModelDef): ModelDraft {
   return {
     key: nextKey(),
@@ -110,6 +128,12 @@ function draftModel(model: AiModelDef): ModelDraft {
     name: model.name,
     contextWindow: model.contextWindow > 0 ? String(model.contextWindow) : "",
     maxTokens: model.maxTokens > 0 ? String(model.maxTokens) : "",
+    compat: {
+      supportsDeveloperRole: toTriState(model.compat?.supportsDeveloperRole),
+      supportsReasoningEffort: toTriState(model.compat?.supportsReasoningEffort),
+      supportsStore: toTriState(model.compat?.supportsStore),
+      maxTokensField: model.compat?.maxTokensField ?? "auto",
+    },
     source: model,
   };
 }
@@ -334,6 +358,51 @@ function removeModel(draft: ProviderDraft, model: ModelDraft) {
   draft.models = draft.models.filter((item) => item !== model);
 }
 
+// ── 模型高级配置(compat 兼容开关) ────────────────────────────────────
+
+/** 各模型行高级配置区的展开开关 */
+const advancedOpen = reactive<Record<string, boolean>>({});
+
+/** 暴露给 UI 的兼容开关;maxTokensField 选项为字段名,其余为三态 */
+const COMPAT_FIELDS: readonly {
+  key: keyof ModelCompatDraft;
+  labelKey: string;
+  options: readonly string[];
+}[] = [
+  {
+    key: "supportsDeveloperRole",
+    labelKey: "settings.ai.compatDeveloperRole",
+    options: ["auto", "on", "off"],
+  },
+  {
+    key: "supportsReasoningEffort",
+    labelKey: "settings.ai.compatReasoningEffort",
+    options: ["auto", "on", "off"],
+  },
+  {
+    key: "supportsStore",
+    labelKey: "settings.ai.compatStore",
+    options: ["auto", "on", "off"],
+  },
+  {
+    key: "maxTokensField",
+    labelKey: "settings.ai.compatMaxTokensField",
+    options: ["auto", "max_completion_tokens", "max_tokens"],
+  },
+];
+
+/** 选项文案:auto/支持/不支持走 i18n,字段名选项原样展示 */
+function compatOptionLabel(option: string): string {
+  if (option === "auto") return t("settings.ai.compatAuto");
+  if (option === "on") return t("settings.ai.compatOn");
+  if (option === "off") return t("settings.ai.compatOff");
+  return option;
+}
+
+function setCompatOption(model: ModelDraft, key: keyof ModelCompatDraft, value: unknown) {
+  (model.compat as unknown as Record<string, string>)[key] = String(value);
+}
+
 // ── 模型 ID 下拉候选(「获取模型列表」的结果,供填写时挑选,不直接落行) ──
 
 /** 各厂商最近一次拉取到的模型 ID 列表(按厂商本地 key 存放) */
@@ -443,6 +512,27 @@ function parseTokenCount(value: string): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
+/**
+ * 由三态草稿合成 compat:auto 不落字段(回退自动探测);
+ * 保留 UI 未暴露的既有字段(thinkingFormat 等),全 auto 且无残留时返回 undefined。
+ */
+function buildCompat(model: ModelDraft): AiModelCompat | undefined {
+  const compat: AiModelCompat = { ...model.source.compat };
+  const applyTri = (
+    key: "supportsDeveloperRole" | "supportsReasoningEffort" | "supportsStore",
+    state: CompatTriState,
+  ) => {
+    if (state === "auto") delete compat[key];
+    else compat[key] = state === "on";
+  };
+  applyTri("supportsDeveloperRole", model.compat.supportsDeveloperRole);
+  applyTri("supportsReasoningEffort", model.compat.supportsReasoningEffort);
+  applyTri("supportsStore", model.compat.supportsStore);
+  if (model.compat.maxTokensField === "auto") delete compat.maxTokensField;
+  else compat.maxTokensField = model.compat.maxTokensField;
+  return Object.keys(compat).length > 0 ? compat : undefined;
+}
+
 function buildProviders(): Record<string, AiProvider> | null {
   const providers: Record<string, AiProvider> = {};
   for (const draft of drafts.value) {
@@ -469,6 +559,8 @@ function buildProviders(): Record<string, AiProvider> | null {
           reasoning: true,
           contextWindow: parseTokenCount(model.contextWindow),
           maxTokens: parseTokenCount(model.maxTokens),
+          // undefined 时 JSON 序列化丢弃该键,配置回到全自动探测
+          compat: buildCompat(model),
         })),
     };
   }
@@ -815,6 +907,52 @@ const CONCURRENCY_OPTIONS = [1, 2, 3, 4, 5];
                             class="h-7 text-xs tabular-nums"
                             :placeholder="t('settings.ai.maxTokensPlaceholder')"
                           />
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        class="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-xs"
+                        @click="advancedOpen[model.key] = !advancedOpen[model.key]"
+                      >
+                        <ChevronDown
+                          class="h-3 w-3 transition-transform"
+                          :class="advancedOpen[model.key] ? 'rotate-180' : ''"
+                        />
+                        {{ t("settings.ai.advancedConfig") }}
+                      </button>
+                      <div v-if="advancedOpen[model.key]" class="flex flex-col gap-1.5">
+                        <p class="text-muted-foreground text-xs">
+                          {{ t("settings.ai.advancedConfigHint") }}
+                        </p>
+                        <div class="grid grid-cols-2 gap-1.5">
+                          <div
+                            v-for="field in COMPAT_FIELDS"
+                            :key="field.key"
+                            class="flex flex-col gap-1"
+                          >
+                            <label class="text-muted-foreground text-xs">{{
+                              t(field.labelKey)
+                            }}</label>
+                            <Select
+                              :model-value="model.compat[field.key]"
+                              @update:model-value="setCompatOption(model, field.key, $event)"
+                            >
+                              <SelectTrigger class="h-7 w-full text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectGroup>
+                                  <SelectItem
+                                    v-for="option in field.options"
+                                    :key="option"
+                                    :value="option"
+                                  >
+                                    {{ compatOptionLabel(option) }}
+                                  </SelectItem>
+                                </SelectGroup>
+                              </SelectContent>
+                            </Select>
+                          </div>
                         </div>
                       </div>
                     </div>

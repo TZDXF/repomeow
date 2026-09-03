@@ -215,6 +215,8 @@ fn detect_compat(model: &Model) -> ResolvedCompat {
 
     ResolvedCompat {
         supports_store: !is_non_standard,
+        // 对齐蓝本:未知厂商默认支持 developer 角色;不支持的自建网关可
+        // 在设置页模型高级配置(model.compat)里显式关闭。
         supports_developer_role: is_openrouter_developer_role_model
             || (!is_non_standard && !is_openrouter && !is_qwen),
         supports_reasoning_effort: !is_grok
@@ -2692,6 +2694,17 @@ mod tests {
         // 默认探测(supportsDeveloperRole = true)但 model.reasoning = true → developer
         let body = build_request_body(&model, &context, None);
         assert_eq!(body["messages"][0]["role"], "developer");
+
+        // 未知厂商(自建网关)同样默认放行,compat 显式关闭后回退 system
+        let mut unknown = reasoning_model("http://192.168.3.3:8084/v1");
+        let body = build_request_body(&unknown, &context, None);
+        assert_eq!(body["messages"][0]["role"], "developer");
+        unknown.compat = Some(OpenAICompletionsCompat {
+            supports_developer_role: Some(false),
+            ..Default::default()
+        });
+        let body = build_request_body(&unknown, &context, None);
+        assert_eq!(body["messages"][0]["role"], "system");
 
         // 显式关闭 developer role
         model.compat = Some(OpenAICompletionsCompat {

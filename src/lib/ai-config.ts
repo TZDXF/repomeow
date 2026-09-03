@@ -37,6 +37,28 @@ export interface AiModelCost {
   cacheWrite: number;
 }
 
+/**
+ * OpenAI 兼容端点的模型级兼容开关(对齐 pi 的 OpenAICompletionsCompat 子集)。
+ * 字段缺省 = 按 provider/baseUrl 自动探测;自建网关报错时在设置页模型
+ * 高级配置里显式覆盖。UI 未暴露的字段(thinkingFormat 等)原样透传。
+ */
+export interface AiModelCompat {
+  /** 端点是否接受 store 字段 */
+  supportsStore?: boolean;
+  /** reasoning 模型的系统提示词是否可用 developer 角色(否则回退 system) */
+  supportsDeveloperRole?: boolean;
+  /** 端点是否接受 reasoning_effort 思考强度参数 */
+  supportsReasoningEffort?: boolean;
+  /** 流式响应是否携带 usage */
+  supportsUsageInStreaming?: boolean;
+  /** 端点是否返回 finish_reason */
+  supportsFinishReason?: boolean;
+  /** 令牌上限字段名:max_completion_tokens(OpenAI 新式)/ max_tokens(旧式) */
+  maxTokensField?: "max_completion_tokens" | "max_tokens";
+  /** 工具参数是否可附加 strict 标记 */
+  supportsStrictMode?: boolean;
+}
+
 /** 厂商下的模型定义(元数据支撑上下文占用显示、思考参数与成本计算) */
 export interface AiModelDef {
   id: string;
@@ -47,6 +69,7 @@ export interface AiModelDef {
   contextWindow: number;
   maxTokens: number;
   cost?: AiModelCost;
+  compat?: AiModelCompat;
 }
 
 /** 一个厂商(OpenAI 兼容端点) */
