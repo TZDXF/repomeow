@@ -1334,12 +1334,29 @@ export default {
       reconnectHint:
         "Changes apply to new MCP connections. Disconnect and reconnect your MCP client after changing a switch.",
       git: {
-        title: "Git commits",
-        description: "Allow MCP clients to commit all changes or selected files in a repository",
+        title: "Git status & commits",
+        description:
+          "Allow MCP clients to read repository status summaries and commit all changes or selected files",
       },
       wiki: {
         title: "Wiki lookup",
-        description: "Allow MCP clients to get the directory and meta.json of a completed Wiki",
+        description:
+          "Allow MCP clients to read the outline and pages of a completed Wiki and get its directory",
+      },
+      sem: {
+        title: "Semantic code analysis",
+        description:
+          "Allow MCP clients to search code entities by name, inspect entity context and call relations, and summarize uncommitted changes",
+      },
+      project: {
+        title: "Project data lookup",
+        description:
+          "Allow MCP clients to read project files, report history, and registered custom commands",
+      },
+      report: {
+        title: "Report generation",
+        description:
+          "Allow MCP clients to generate daily/weekly reports for registered projects (calls AI and writes to report history, consuming AI quota)",
       },
       configuration: "How to configure",
       stepEnable: "Enable the tool groups you want to use.",

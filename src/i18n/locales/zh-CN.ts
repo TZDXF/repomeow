@@ -1291,12 +1291,25 @@ export default {
       toolGroupsHint: "仅已开启的工具组会对外可见;所有工具组默认关闭",
       reconnectHint: "开关在新的 MCP 连接中生效;修改后请在 MCP 客户端断开并重新连接。",
       git: {
-        title: "Git 提交",
-        description: "允许 MCP 客户端提交指定仓库的全部变更或所选文件",
+        title: "Git 状态与提交",
+        description: "允许 MCP 客户端读取仓库状态摘要,并提交全部变更或所选文件",
       },
       wiki: {
         title: "Wiki 查询",
-        description: "允许 MCP 客户端获取已生成完成的 Wiki 目录与 meta.json",
+        description: "允许 MCP 客户端读取已生成 Wiki 的大纲与页面正文,并获取 Wiki 目录",
+      },
+      sem: {
+        title: "代码语义分析",
+        description: "允许 MCP 客户端语义搜索代码实体、查看实体上下文与调用关系、汇总未提交变更",
+      },
+      project: {
+        title: "项目数据查询",
+        description: "允许 MCP 客户端读取项目内文件、报告历史与已登记的自定义命令",
+      },
+      report: {
+        title: "报告生成",
+        description:
+          "允许 MCP 客户端为已登记项目生成日报/周报(调用 AI 并写入报告历史,消耗 AI 额度)",
       },
       configuration: "如何配置",
       stepEnable: "开启需要使用的工具组。",

@@ -9,7 +9,7 @@ use crate::error::{AppError, AppResult, ErrorCode};
 use crate::path_util::{clean_str, repo_relative_str};
 use crate::time_util::now_ts_nanos;
 
-use super::paths::{head_sha, wiki_dir};
+use super::paths::{head_sha, wiki_dir, wiki_dir_in, WIKI_DIR_NAME};
 use super::snapshot::{commit_message, commit_wiki_in};
 use super::types::{
     WikiCommitKind, WikiData, WikiGenerationConfig, WikiMeta, WikiOutlinePage, WikiPageData,
@@ -633,6 +633,18 @@ pub(super) fn load_wiki(app: AppHandle, project_path: String) -> AppResult<Optio
         _ => false,
     };
     Ok(Some(WikiData { meta, pages, stale }))
+}
+
+/// 无 AppHandle 场景(内置 MCP server)按应用数据根目录读取 wiki;
+/// stale 判定口径与 load_wiki 一致。
+pub(crate) fn load_wiki_at(data_root: &Path, project_path: &str) -> Option<WikiData> {
+    let dir = wiki_dir_in(&data_root.join(WIKI_DIR_NAME), project_path);
+    let (meta, pages) = load_wiki_in(&dir)?;
+    let stale = match (&meta.head_sha, &head_sha(project_path)) {
+        (Some(a), Some(b)) => a != b,
+        _ => false,
+    };
+    Some(WikiData { meta, pages, stale })
 }
 
 pub(super) fn delete_wiki(app: AppHandle, project_path: String) -> AppResult<()> {

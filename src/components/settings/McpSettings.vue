@@ -1,8 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import type { Component } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
-import { Copy, GitCommitHorizontal, LibraryBig } from "@lucide/vue";
+import {
+  Copy,
+  FileText,
+  FolderSearch,
+  GitCommitHorizontal,
+  LibraryBig,
+  ScanSearch,
+} from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { cmd } from "@/lib/tauri";
@@ -14,12 +22,29 @@ interface McpServerInfo {
   args: string[];
 }
 
+type McpGroupId = "git" | "wiki" | "sem" | "project" | "report";
+
 const { t } = useI18n();
 const settings = useSettingsStore();
 const serverInfo = ref<McpServerInfo | null>(null);
 const loadingInfo = ref(true);
-const gitPending = ref(false);
-const wikiPending = ref(false);
+const pending = ref<Partial<Record<McpGroupId, boolean>>>({});
+
+const groups: { id: McpGroupId; icon: Component; tools: string[] }[] = [
+  { id: "git", icon: GitCommitHorizontal, tools: ["commit_code", "get_git_status"] },
+  {
+    id: "wiki",
+    icon: LibraryBig,
+    tools: ["get_wiki_directory", "list_wiki_pages", "read_wiki_page"],
+  },
+  { id: "sem", icon: ScanSearch, tools: ["sem_find", "sem_context", "sem_relations", "sem_diff"] },
+  {
+    id: "project",
+    icon: FolderSearch,
+    tools: ["read_project_file", "list_reports", "list_custom_commands"],
+  },
+  { id: "report", icon: FileText, tools: ["generate_report"] },
+];
 
 const clientConfig = computed(() => {
   if (!serverInfo.value) {
@@ -49,31 +74,48 @@ onMounted(async () => {
   }
 });
 
-async function toggleGit(enabled: boolean) {
-  if (gitPending.value) {
-    return;
-  }
-  gitPending.value = true;
-  try {
-    await settings.setMcpGitCommitEnabled(enabled);
-  } catch (error) {
-    toast.error(error instanceof Error ? error.message : String(error));
-  } finally {
-    gitPending.value = false;
+function groupEnabled(id: McpGroupId): boolean {
+  switch (id) {
+    case "git":
+      return settings.mcpGitCommitEnabled;
+    case "wiki":
+      return settings.mcpWikiEnabled;
+    case "sem":
+      return settings.mcpSemEnabled;
+    case "project":
+      return settings.mcpProjectEnabled;
+    case "report":
+      return settings.mcpReportEnabled;
   }
 }
 
-async function toggleWiki(enabled: boolean) {
-  if (wikiPending.value) {
+async function toggleGroup(id: McpGroupId, enabled: boolean) {
+  if (pending.value[id]) {
     return;
   }
-  wikiPending.value = true;
+  pending.value[id] = true;
   try {
-    await settings.setMcpWikiEnabled(enabled);
+    switch (id) {
+      case "git":
+        await settings.setMcpGitCommitEnabled(enabled);
+        break;
+      case "wiki":
+        await settings.setMcpWikiEnabled(enabled);
+        break;
+      case "sem":
+        await settings.setMcpSemEnabled(enabled);
+        break;
+      case "project":
+        await settings.setMcpProjectEnabled(enabled);
+        break;
+      case "report":
+        await settings.setMcpReportEnabled(enabled);
+        break;
+    }
   } catch (error) {
     toast.error(error instanceof Error ? error.message : String(error));
   } finally {
-    wikiPending.value = false;
+    pending.value[id] = false;
   }
 }
 </script>
@@ -92,49 +134,31 @@ async function toggleWiki(enabled: boolean) {
       </p>
 
       <div class="mt-3 flex flex-col gap-3">
-        <div class="flex items-center justify-between gap-4 rounded-lg border px-3 py-3">
+        <div
+          v-for="group in groups"
+          :key="group.id"
+          class="flex items-center justify-between gap-4 rounded-lg border px-3 py-3"
+        >
           <div class="flex min-w-0 items-start gap-3">
             <div class="mt-0.5 rounded-md bg-muted p-2 text-muted-foreground">
-              <GitCommitHorizontal class="h-4 w-4" />
+              <component :is="group.icon" class="h-4 w-4" />
             </div>
             <div class="min-w-0">
-              <p class="text-sm font-medium">{{ t("settings.mcp.git.title") }}</p>
+              <p class="text-sm font-medium">{{ t(`settings.mcp.${group.id}.title`) }}</p>
               <p class="mt-0.5 text-xs text-muted-foreground">
-                {{ t("settings.mcp.git.description") }}
-              </p>
-              <code class="mt-1.5 block text-[11px] text-muted-foreground">commit_code</code>
-            </div>
-          </div>
-          <Switch
-            class="shrink-0"
-            :model-value="settings.mcpGitCommitEnabled"
-            :disabled="gitPending"
-            :title="t('settings.mcp.git.title')"
-            @update:model-value="toggleGit"
-          />
-        </div>
-
-        <div class="flex items-center justify-between gap-4 rounded-lg border px-3 py-3">
-          <div class="flex min-w-0 items-start gap-3">
-            <div class="mt-0.5 rounded-md bg-muted p-2 text-muted-foreground">
-              <LibraryBig class="h-4 w-4" />
-            </div>
-            <div class="min-w-0">
-              <p class="text-sm font-medium">{{ t("settings.mcp.wiki.title") }}</p>
-              <p class="mt-0.5 text-xs text-muted-foreground">
-                {{ t("settings.mcp.wiki.description") }}
+                {{ t(`settings.mcp.${group.id}.description`) }}
               </p>
               <code class="mt-1.5 block text-[11px] text-muted-foreground">
-                get_wiki_directory
+                {{ group.tools.join(", ") }}
               </code>
             </div>
           </div>
           <Switch
             class="shrink-0"
-            :model-value="settings.mcpWikiEnabled"
-            :disabled="wikiPending"
-            :title="t('settings.mcp.wiki.title')"
-            @update:model-value="toggleWiki"
+            :model-value="groupEnabled(group.id)"
+            :disabled="pending[group.id]"
+            :title="t(`settings.mcp.${group.id}.title`)"
+            @update:model-value="toggleGroup(group.id, $event)"
           />
         </div>
       </div>

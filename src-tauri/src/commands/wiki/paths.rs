@@ -7,7 +7,7 @@ use crate::error::{AppError, AppResult, ErrorCode};
 use crate::path_util::clean_str;
 use crate::APP_DATA_DIR_NAME;
 
-const WIKI_DIR_NAME: &str = "wiki";
+pub(super) const WIKI_DIR_NAME: &str = "wiki";
 
 /// FNV-1a 64 位:自实现保证跨版本稳定(std 的 DefaultHasher 不承诺哈希值稳定)
 fn fnv1a64(s: &str) -> u64 {

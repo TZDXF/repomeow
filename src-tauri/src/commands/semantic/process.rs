@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -9,9 +9,13 @@ use std::os::windows::process::CommandExt;
 use tauri::AppHandle;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Semaphore;
 
 use crate::error::{AppError, AppResult, ErrorCode};
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 const SEM_TIMEOUT: Duration = Duration::from_secs(60);
 const STDOUT_LIMIT: usize = 32 * 1024 * 1024;
@@ -62,6 +66,54 @@ pub(super) struct SemOutput {
     pub code: Option<i32>,
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
+}
+
+/// sem 二进制的启动方式:应用内经 Tauri sidecar 插件;headless 进程(内置 MCP
+/// server 的 `--mcp` 模式)没有 AppHandle,按可执行文件旁的显式路径直接 spawn。
+#[derive(Clone)]
+pub(crate) enum SemLauncher {
+    App(AppHandle),
+    Standalone(PathBuf),
+}
+
+impl From<&AppHandle> for SemLauncher {
+    fn from(app: &AppHandle) -> Self {
+        Self::App(app.clone())
+    }
+}
+
+/// headless 场景定位 sem sidecar:Tauri 构建/开发时会把 externalBin 复制到
+/// 可执行文件旁(dev 在 target/debug/,release 在安装目录),文件名通常为
+/// `sem-<target-triple>[.exe]`;按 triple 后缀优先、裸名兜底探测。
+pub(crate) fn resolve_sem_binary() -> AppResult<PathBuf> {
+    let missing = |detail: String| AppError::coded(ErrorCode::SemanticToolMissing, detail);
+    let exe = std::env::current_exe().map_err(|error| missing(error.to_string()))?;
+    let dir = exe
+        .parent()
+        .ok_or_else(|| missing("cannot resolve executable directory".to_string()))?;
+    let mut triple_named = None;
+    let entries = std::fs::read_dir(dir).map_err(|error| missing(error.to_string()))?;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let is_sidecar = name.strip_prefix("sem-").is_some_and(|rest| {
+            !rest.is_empty() && (!cfg!(windows) || rest.ends_with(".exe"))
+        });
+        if is_sidecar && entry.file_type().is_ok_and(|kind| kind.is_file()) {
+            triple_named = Some(entry.path());
+            break;
+        }
+    }
+    if let Some(path) = triple_named {
+        return Ok(path);
+    }
+    let plain = dir.join(if cfg!(windows) { "sem.exe" } else { "sem" });
+    if plain.is_file() {
+        return Ok(plain);
+    }
+    Err(missing(format!(
+        "sem sidecar not found next to {}",
+        exe.display()
+    )))
 }
 
 enum CollectError {
@@ -213,37 +265,205 @@ async fn collect_output(
 }
 
 pub(super) async fn run_sem(
-    app: &AppHandle,
+    launcher: &SemLauncher,
     current_dir: Option<&Path>,
     args: &[String],
     policy: SemRunPolicy,
     request_id: Option<&str>,
 ) -> AppResult<SemOutput> {
-    run_sem_inner(app, current_dir, args, policy, request_id, None).await
+    run_sem_inner(launcher, current_dir, args, policy, request_id, None).await
 }
 
-/// 运行需要 stdin 的 sem 命令。写完立即丢弃 CommandChild 以关闭管道，
+/// 运行需要 stdin 的 sem 命令。写完立即关闭 stdin 管道，
 /// 否则 `sem diff --stdin` 等读取标准输入的命令会一直等待 EOF。
 pub(super) async fn run_sem_with_input(
-    app: &AppHandle,
+    launcher: &SemLauncher,
     current_dir: Option<&Path>,
     args: &[String],
     policy: SemRunPolicy,
     request_id: Option<&str>,
     input: &[u8],
 ) -> AppResult<SemOutput> {
-    run_sem_inner(app, current_dir, args, policy, request_id, Some(input)).await
+    run_sem_inner(launcher, current_dir, args, policy, request_id, Some(input)).await
 }
 
-fn terminate_child(child: &mut Option<CommandChild>, pid: u32) {
-    if let Some(child) = child.take() {
-        let _ = child.kill();
+/// 已 spawn 的 sem 子进程:Tauri sidecar(CommandEvent 流)或独立 tokio 进程。
+/// pid 在 spawn 时固定,stdin 写完即关(sidecar 靠丢弃 CommandChild)。
+enum SemChild {
+    Shell {
+        pid: u32,
+        child: Option<CommandChild>,
+        receiver: Option<tauri::async_runtime::Receiver<CommandEvent>>,
+    },
+    Std {
+        pid: u32,
+        child: tokio::process::Child,
+    },
+}
+
+impl SemChild {
+    fn pid(&self) -> u32 {
+        match self {
+            Self::Shell { pid, .. } | Self::Std { pid, .. } => *pid,
+        }
     }
-    kill_pid(pid);
+
+    async fn write_stdin(&mut self, bytes: &[u8]) -> Result<(), String> {
+        match self {
+            Self::Shell { child, .. } => {
+                let result = child.as_mut().expect("spawned child missing").write(bytes);
+                // CommandChild 持有 stdin_writer；drop 后 sem 才能读到 EOF。
+                drop(child.take());
+                result.map_err(|error| format!("stdin write failed: {error}"))
+            }
+            Self::Std { child, .. } => {
+                let mut stdin = child.stdin.take().expect("stdin piped");
+                let result = stdin
+                    .write_all(bytes)
+                    .await
+                    .map_err(|error| format!("stdin write failed: {error}"));
+                drop(stdin);
+                result
+            }
+        }
+    }
+
+    fn terminate(&mut self) {
+        match self {
+            Self::Shell { pid, child, .. } => {
+                if let Some(child) = child.take() {
+                    let _ = child.kill();
+                }
+                kill_pid(*pid);
+            }
+            Self::Std { pid, child } => {
+                let _ = child.start_kill();
+                kill_pid(*pid);
+            }
+        }
+    }
+
+    async fn collect(&mut self, stdout_limit: usize) -> Result<SemOutput, CollectError> {
+        match self {
+            Self::Shell { receiver, .. } => {
+                collect_output(receiver.take().expect("receiver missing"), stdout_limit).await
+            }
+            Self::Std { child, .. } => collect_std_output(child, stdout_limit).await,
+        }
+    }
+}
+
+fn spawn_sidecar(
+    app: &AppHandle,
+    current_dir: Option<&Path>,
+    args: &[String],
+) -> AppResult<SemChild> {
+    let mut command = app
+        .shell()
+        .sidecar("sem")
+        .map_err(|error| AppError::coded(ErrorCode::SemanticToolMissing, error.to_string()))?
+        .args(args)
+        .env("DO_NOT_TRACK", "1")
+        .env("SEM_NO_TELEMETRY", "1")
+        .env("SEM_NO_UPDATE_CHECK", "1")
+        .env("SEM_NO_NETWORK", "1")
+        .env("NO_COLOR", "1")
+        .set_raw_out(true);
+    if let Some(path) = current_dir {
+        command = command.current_dir(path);
+    }
+    let (receiver, spawned) = command
+        .spawn()
+        .map_err(|error| AppError::coded(ErrorCode::SemanticToolMissing, error.to_string()))?;
+    Ok(SemChild::Shell {
+        pid: spawned.pid(),
+        child: Some(spawned),
+        receiver: Some(receiver),
+    })
+}
+
+fn spawn_standalone(
+    bin: &Path,
+    current_dir: Option<&Path>,
+    args: &[String],
+) -> AppResult<SemChild> {
+    let mut command = tokio::process::Command::new(bin);
+    command
+        .args(args)
+        .env("DO_NOT_TRACK", "1")
+        .env("SEM_NO_TELEMETRY", "1")
+        .env("SEM_NO_UPDATE_CHECK", "1")
+        .env("SEM_NO_NETWORK", "1")
+        .env("NO_COLOR", "1")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    if let Some(path) = current_dir {
+        command.current_dir(path);
+    }
+    let child = command
+        .spawn()
+        .map_err(|error| AppError::coded(ErrorCode::SemanticToolMissing, error.to_string()))?;
+    let pid = child.id().unwrap_or(0);
+    Ok(SemChild::Std { pid, child })
+}
+
+/// 独立进程(tokio)的输出采集:与 collect_output 同一语义——stdout 超限即失败,
+/// stderr 只保留尾部,进程退出码取 wait 结果。
+async fn collect_std_output(
+    child: &mut tokio::process::Child,
+    stdout_limit: usize,
+) -> Result<SemOutput, CollectError> {
+    let mut stdout_pipe = child.stdout.take().expect("stdout piped");
+    let mut stderr_pipe = child.stderr.take().expect("stderr piped");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let read_out = async {
+        let mut buf = [0u8; 8192];
+        loop {
+            let n = stdout_pipe
+                .read(&mut buf)
+                .await
+                .map_err(|error| CollectError::Process(error.to_string()))?;
+            if n == 0 {
+                break;
+            }
+            if stdout.len().saturating_add(n) > stdout_limit {
+                return Err(CollectError::OutputTooLarge);
+            }
+            stdout.extend_from_slice(&buf[..n]);
+        }
+        Ok(())
+    };
+    let read_err = async {
+        let mut buf = [0u8; 8192];
+        loop {
+            let n = stderr_pipe
+                .read(&mut buf)
+                .await
+                .map_err(|error| CollectError::Process(error.to_string()))?;
+            if n == 0 {
+                break;
+            }
+            append_bounded_tail(&mut stderr, &buf[..n], STDERR_LIMIT);
+        }
+        Ok(())
+    };
+    let (out_result, err_result, status) = tokio::join!(read_out, read_err, child.wait());
+    out_result?;
+    err_result?;
+    let status = status.map_err(|error| CollectError::Process(error.to_string()))?;
+    Ok(SemOutput {
+        code: status.code(),
+        stdout,
+        stderr,
+    })
 }
 
 async fn run_sem_inner(
-    app: &AppHandle,
+    launcher: &SemLauncher,
     current_dir: Option<&Path>,
     args: &[String],
     policy: SemRunPolicy,
@@ -275,78 +495,54 @@ async fn run_sem_inner(
         }
     }
 
-    let mut command = app
-        .shell()
-        .sidecar("sem")
-        .map_err(|error| AppError::coded(ErrorCode::SemanticToolMissing, error.to_string()))?
-        .args(args)
-        .env("DO_NOT_TRACK", "1")
-        .env("SEM_NO_TELEMETRY", "1")
-        .env("SEM_NO_UPDATE_CHECK", "1")
-        .env("SEM_NO_NETWORK", "1")
-        .env("NO_COLOR", "1")
-        .set_raw_out(true);
-    if let Some(path) = current_dir {
-        command = command.current_dir(path);
-    }
-    let (receiver, spawned) = command
-        .spawn()
-        .map_err(|error| AppError::coded(ErrorCode::SemanticToolMissing, error.to_string()))?;
+    let mut spawned = match launcher {
+        SemLauncher::App(app) => spawn_sidecar(app, current_dir, args)?,
+        SemLauncher::Standalone(bin) => spawn_standalone(bin, current_dir, args)?,
+    };
     let pid = spawned.pid();
     let guard = SemPidGuard::new(pid, request_id);
-    let mut child = Some(spawned);
 
     // spawn 与登记之间可能已收到取消:立即补杀。
     if let Some(id) = request_id {
         if is_request_canceled(id) {
-            terminate_child(&mut child, pid);
+            spawned.terminate();
             drop(guard);
             return Err(canceled_error(id));
         }
     }
 
     if let Some(bytes) = input {
-        let write_result = child.as_mut().expect("spawned child missing").write(bytes);
-        if let Err(error) = write_result {
-            terminate_child(&mut child, pid);
+        if let Err(error) = spawned.write_stdin(bytes).await {
+            spawned.terminate();
             drop(guard);
-            return Err(AppError::coded(
-                ErrorCode::SemanticToolFailed,
-                format!("stdin write failed: {error}"),
-            ));
+            return Err(AppError::coded(ErrorCode::SemanticToolFailed, error));
         }
-        // CommandChild 持有 stdin_writer；drop 后 sem 才能读到 EOF。
-        drop(child.take());
     }
 
-    let result = tokio::time::timeout(
-        policy.timeout,
-        collect_output(receiver, policy.stdout_limit),
-    )
-    .await;
+    let result = tokio::time::timeout(policy.timeout, spawned.collect(policy.stdout_limit)).await;
     let canceled = request_id.is_some_and(is_request_canceled);
     drop(guard);
     match result {
         Err(_) => {
-            terminate_child(&mut child, pid);
+            spawned.terminate();
             Err(AppError::coded(
                 ErrorCode::SemanticAnalysisTimeout,
                 format!("pid={pid}"),
             ))
         }
         Ok(_) if canceled => {
-            terminate_child(&mut child, pid);
+            spawned.terminate();
             Err(canceled_error(request_id.unwrap_or_default()))
         }
         Ok(Err(CollectError::OutputTooLarge)) => {
-            terminate_child(&mut child, pid);
+            spawned.terminate();
             Err(AppError::coded(
                 ErrorCode::SemanticOutputTooLarge,
                 format!("limit={}", policy.stdout_limit),
             ))
         }
         Ok(Err(CollectError::Process(error))) => {
-            terminate_child(&mut child, pid);
+            spawned.terminate();
             Err(AppError::coded(ErrorCode::SemanticToolFailed, error))
         }
         Ok(Ok(output)) => Ok(output),
@@ -354,7 +550,6 @@ async fn run_sem_inner(
 }
 #[cfg(windows)]
 fn kill_pid(pid: u32) {
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let _ = Command::new("taskkill")
         .args(["/PID", &pid.to_string(), "/T", "/F"])
         .creation_flags(CREATE_NO_WINDOW)

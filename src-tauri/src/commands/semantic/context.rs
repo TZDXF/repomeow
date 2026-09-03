@@ -14,7 +14,7 @@ use super::models::{
     SemanticContextEntry, SemanticContextOmitted, SemanticContextResult, SemanticDiffResult,
 };
 use super::parse::parse_stdout;
-use super::process::{run_sem, run_sem_with_input, SemRunPolicy};
+use super::process::{run_sem, run_sem_with_input, SemLauncher, SemRunPolicy};
 use super::{
     detect_version, output_error, resolve_workdir, validate_entity_token, validate_rel_file_path,
 };
@@ -95,15 +95,15 @@ fn clamp_hops(hops: Option<usize>) -> usize {
 /// 工作区语义 diff:HEAD → index+worktree(仅已跟踪文件,口径同 git_commit_context);
 /// 仓库尚无 HEAD(unborn)时回退到暂存区 diff(相对空树)。
 pub(super) async fn worktree_diff_impl(
-    app: AppHandle,
+    launcher: SemLauncher,
     path: String,
     request_id: Option<String>,
 ) -> AppResult<SemanticDiffResult> {
-    worktree_diff(&app, &path, request_id.as_deref()).await
+    worktree_diff(&launcher, &path, request_id.as_deref()).await
 }
 
 pub(super) async fn worktree_diff(
-    app: &AppHandle,
+    launcher: &SemLauncher,
     path: &str,
     request_id: Option<&str>,
 ) -> AppResult<SemanticDiffResult> {
@@ -126,9 +126,9 @@ pub(super) async fn worktree_diff(
     args.push("--format".to_string());
     args.push("json".to_string());
 
-    let version = detect_version(&app).await?;
+    let version = detect_version(launcher).await?;
     let output = run_sem(
-        &app,
+        launcher,
         Some(&root),
         &args,
         SemRunPolicy::CONTEXT,
@@ -151,7 +151,7 @@ pub(super) async fn worktree_diff(
 /// 单实体的 token 预算上下文(sem context)。entries[].content 是源码片段,
 /// 仅在用户显式触发后经 IPC 返回,不落库、不写日志。
 pub(super) async fn entity_context_impl(
-    app: AppHandle,
+    launcher: SemLauncher,
     path: String,
     entity_id: Option<String>,
     entity_name: Option<String>,
@@ -190,9 +190,9 @@ pub(super) async fn entity_context_impl(
     args.push(hops.to_string());
     args.push("--json".to_string());
 
-    let version = detect_version(&app).await?;
+    let version = detect_version(&launcher).await?;
     let output = run_sem(
-        &app,
+        &launcher,
         Some(&root),
         &args,
         SemRunPolicy::CONTEXT,
@@ -257,13 +257,14 @@ pub(crate) async fn commit_input_analysis(
     path: &str,
     input: &str,
 ) -> AppResult<SemanticCommitAnalysis> {
+    let launcher = SemLauncher::from(app);
     let root = resolve_workdir(path)?;
     let args = COMMIT_DIFF_ARGS
         .iter()
         .map(|value| (*value).to_string())
         .collect::<Vec<_>>();
     let output = run_sem_with_input(
-        app,
+        &launcher,
         Some(&root),
         &args,
         SemRunPolicy::CONTEXT,

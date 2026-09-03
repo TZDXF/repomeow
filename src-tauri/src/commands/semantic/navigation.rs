@@ -1,7 +1,6 @@
 //! 语义导航:entities / find / callers / refs(第 2 期)。
 
 use serde::Deserialize;
-use tauri::AppHandle;
 
 use crate::error::{AppError, AppResult, ErrorCode};
 
@@ -10,7 +9,7 @@ use super::models::{
     SemanticRelationGroup, SemanticRelationResult,
 };
 use super::parse::{build_entity_id, detects_path_scheme, entity_ref, parse_stdout, truncate_to};
-use super::process::{run_sem, SemRunPolicy};
+use super::process::{run_sem, SemLauncher, SemRunPolicy};
 use super::{
     detect_version, output_error, resolve_workdir, validate_entity_token, validate_query,
     validate_rel_file_path,
@@ -128,17 +127,17 @@ fn entity_file_args(root: &std::path::Path, file_path: Option<String>) -> AppRes
 }
 
 pub(super) async fn file_entities_impl(
-    app: AppHandle,
+    launcher: SemLauncher,
     path: String,
     file_path: String,
     request_id: Option<String>,
 ) -> AppResult<SemanticFileEntitiesResult> {
     let root = resolve_workdir(&path)?;
     let file = validate_rel_file_path(&root, &file_path)?;
-    let version = detect_version(&app).await?;
+    let version = detect_version(&launcher).await?;
     let args = vec!["entities".to_string(), file.clone(), "--json".to_string()];
     let output = run_sem(
-        &app,
+        &launcher,
         Some(&root),
         &args,
         SemRunPolicy::NAV,
@@ -185,17 +184,17 @@ pub(super) async fn file_entities_impl(
 }
 
 pub(super) async fn find_entities_impl(
-    app: AppHandle,
+    launcher: SemLauncher,
     path: String,
     query: String,
     request_id: Option<String>,
 ) -> AppResult<SemanticFindResult> {
     let root = resolve_workdir(&path)?;
     let query = validate_query(&query)?;
-    let version = detect_version(&app).await?;
+    let version = detect_version(&launcher).await?;
     let args = vec!["find".to_string(), query.clone(), "--json".to_string()];
     let output = run_sem(
-        &app,
+        &launcher,
         Some(&root),
         &args,
         SemRunPolicy::NAV,
@@ -229,7 +228,7 @@ pub(super) async fn find_entities_impl(
 }
 
 pub(super) async fn entity_relation_impl(
-    app: AppHandle,
+    launcher: SemLauncher,
     path: String,
     kind: RelationKind,
     entity_id: Option<String>,
@@ -242,9 +241,9 @@ pub(super) async fn entity_relation_impl(
     args.extend(entity_query_args(entity_id, entity_name)?);
     args.extend(entity_file_args(&root, file_path)?);
     args.push("--json".to_string());
-    let version = detect_version(&app).await?;
+    let version = detect_version(&launcher).await?;
     let output = run_sem(
-        &app,
+        &launcher,
         Some(&root),
         &args,
         SemRunPolicy::NAV,

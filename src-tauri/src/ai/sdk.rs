@@ -61,6 +61,12 @@ pub fn load_config(app: &AppHandle) -> AiConfig {
     crate::ai::catalog::legacy_ai_config(&file).normalized()
 }
 
+/// 无 AppHandle 变体(MCP 等 headless 场景):按数据目录热读 ai-config.json。
+pub fn load_config_at(data_dir: &std::path::Path) -> AiConfig {
+    let file = crate::ai::catalog::load_ai_config_file_at(data_dir);
+    crate::ai::catalog::legacy_ai_config(&file).normalized()
+}
+
 pub(crate) fn client(config: &AiConfig, require_model: bool) -> AppResult<OpenAiClient> {
     config.validate(require_model)?;
     let sdk_config = OpenAIConfig::new()

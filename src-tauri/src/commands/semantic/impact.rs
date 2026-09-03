@@ -1,13 +1,12 @@
 //! 影响分析:impact(第 3 期)。
 
 use serde::Deserialize;
-use tauri::AppHandle;
 
 use crate::error::{AppError, AppResult, ErrorCode};
 
 use super::models::{SemanticEntityRef, SemanticImpactResult, SemanticImpactedEntity};
 use super::parse::{entity_ref, parse_stdout, truncate_to};
-use super::process::{run_sem, SemRunPolicy};
+use super::process::{run_sem, SemLauncher, SemRunPolicy};
 use super::{
     detect_version, output_error, resolve_workdir, validate_entity_token, validate_rel_file_path,
 };
@@ -95,7 +94,7 @@ fn validate_depth(depth: Option<usize>) -> AppResult<usize> {
 }
 
 pub(super) async fn entity_impact_impl(
-    app: AppHandle,
+    launcher: SemLauncher,
     path: String,
     entity_id: Option<String>,
     entity_name: Option<String>,
@@ -131,9 +130,9 @@ pub(super) async fn entity_impact_impl(
     args.push(depth.to_string());
     args.push("--json".to_string());
 
-    let version = detect_version(&app).await?;
+    let version = detect_version(&launcher).await?;
     let output = run_sem(
-        &app,
+        &launcher,
         Some(&root),
         &args,
         SemRunPolicy::HEAVY,

@@ -88,6 +88,12 @@ export const useSettingsStore = defineStore("settings", () => {
   const mcpGitCommitEnabled = ref(false);
   /** MCP Wiki 查询工具组(默认关闭,避免默认暴露本地项目元数据) */
   const mcpWikiEnabled = ref(false);
+  /** MCP 代码语义分析工具组(默认关闭,opt-in) */
+  const mcpSemEnabled = ref(false);
+  /** MCP 项目数据查询工具组(默认关闭,opt-in) */
+  const mcpProjectEnabled = ref(false);
+  /** MCP 报告生成工具组(默认关闭,开启后外部客户端可调用 AI 生成报告) */
+  const mcpReportEnabled = ref(false);
   /** 新建 worktree 的默认目录模板:支持 {branch} 占位符与相对路径(相对主工作区根解析) */
   const worktreeDirTemplate = ref(".worktrees/{branch}");
   /** 用户登记的 JDK 列表(开发环境配置,Spring Boot 运行按项目选用) */
@@ -369,6 +375,9 @@ export const useSettingsStore = defineStore("settings", () => {
         enableGhCli: "false",
         mcpGitCommitEnabled: "false",
         mcpWikiEnabled: "false",
+        mcpSemEnabled: "false",
+        mcpProjectEnabled: "false",
+        mcpReportEnabled: "false",
         worktreeDirTemplate: ".worktrees/{branch}",
       },
     });
@@ -445,7 +454,7 @@ export const useSettingsStore = defineStore("settings", () => {
     if (savedEnableGhCli === "true" || savedEnableGhCli === "false") {
       enableGhCli.value = savedEnableGhCli === "true";
     }
-    // MCP 工具组均为显式 opt-in；Rust MCP 进程从同一 settings.json 读取这两个字符串键
+    // MCP 工具组均为显式 opt-in；Rust MCP 进程从同一 settings.json 读取这些字符串键
     const savedMcpGitCommit = await fileStore.get<string>("mcpGitCommitEnabled");
     if (savedMcpGitCommit === "true" || savedMcpGitCommit === "false") {
       mcpGitCommitEnabled.value = savedMcpGitCommit === "true";
@@ -453,6 +462,18 @@ export const useSettingsStore = defineStore("settings", () => {
     const savedMcpWiki = await fileStore.get<string>("mcpWikiEnabled");
     if (savedMcpWiki === "true" || savedMcpWiki === "false") {
       mcpWikiEnabled.value = savedMcpWiki === "true";
+    }
+    const savedMcpSem = await fileStore.get<string>("mcpSemEnabled");
+    if (savedMcpSem === "true" || savedMcpSem === "false") {
+      mcpSemEnabled.value = savedMcpSem === "true";
+    }
+    const savedMcpProject = await fileStore.get<string>("mcpProjectEnabled");
+    if (savedMcpProject === "true" || savedMcpProject === "false") {
+      mcpProjectEnabled.value = savedMcpProject === "true";
+    }
+    const savedMcpReport = await fileStore.get<string>("mcpReportEnabled");
+    if (savedMcpReport === "true" || savedMcpReport === "false") {
+      mcpReportEnabled.value = savedMcpReport === "true";
     }
     // worktree 默认目录模板:自由文本,trim 后非空才采用
     const savedWorktreeDir = await fileStore.get<string>("worktreeDirTemplate");
@@ -635,6 +656,21 @@ export const useSettingsStore = defineStore("settings", () => {
     await persist("mcpWikiEnabled", String(value));
   }
 
+  async function setMcpSemEnabled(value: boolean) {
+    mcpSemEnabled.value = value;
+    await persist("mcpSemEnabled", String(value));
+  }
+
+  async function setMcpProjectEnabled(value: boolean) {
+    mcpProjectEnabled.value = value;
+    await persist("mcpProjectEnabled", String(value));
+  }
+
+  async function setMcpReportEnabled(value: boolean) {
+    mcpReportEnabled.value = value;
+    await persist("mcpReportEnabled", String(value));
+  }
+
   async function setWorktreeDirTemplate(value: string) {
     const v = value.trim();
     if (!v) return;
@@ -742,6 +778,9 @@ export const useSettingsStore = defineStore("settings", () => {
     enableGhCli,
     mcpGitCommitEnabled,
     mcpWikiEnabled,
+    mcpSemEnabled,
+    mcpProjectEnabled,
+    mcpReportEnabled,
     worktreeDirTemplate,
     jdkList,
     defaultJdkId,
@@ -771,6 +810,9 @@ export const useSettingsStore = defineStore("settings", () => {
     setEnableGhCli,
     setMcpGitCommitEnabled,
     setMcpWikiEnabled,
+    setMcpSemEnabled,
+    setMcpProjectEnabled,
+    setMcpReportEnabled,
     setWorktreeDirTemplate,
     saveJdk,
     addJdks,

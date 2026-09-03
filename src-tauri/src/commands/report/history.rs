@@ -70,8 +70,9 @@ pub struct ReportGeneratedPayload {
 
 /// 写入报告历史的内部入口。手动、批量与 AI 后端生成共用这一实现，确保报告正文、
 /// 提交快照和刷新事件始终由后端一次性完成。
+/// `app` 为 None 时(MCP 等 headless 场景)只落库,不发前端事件。
 pub(crate) fn save_report_history_impl(
-    app: &AppHandle,
+    app: Option<&AppHandle>,
     conn: &Connection,
     project_ids: &[i64],
     date_from: &str,
@@ -110,14 +111,16 @@ pub(crate) fn save_report_history_impl(
 
     // 通知前端刷新(报告历史页日历/列表);与 scheduler 定时生成共用同一事件,
     // 手动/批量生成没有任务名,schedule_name 置空
-    let payload = ReportGeneratedPayload {
-        schedule_name: String::new(),
-        history_id: report_id,
-        date_from: date_from.to_string(),
-        date_to: date_to.to_string(),
-    };
-    if let Err(e) = app.emit("report://generated", payload) {
-        eprintln!("[report] 发送前端通知失败: {e}");
+    if let Some(app) = app {
+        let payload = ReportGeneratedPayload {
+            schedule_name: String::new(),
+            history_id: report_id,
+            date_from: date_from.to_string(),
+            date_to: date_to.to_string(),
+        };
+        if let Err(e) = app.emit("report://generated", payload) {
+            eprintln!("[report] 发送前端通知失败: {e}");
+        }
     }
 
     Ok(report_id)

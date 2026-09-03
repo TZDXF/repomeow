@@ -1,7 +1,6 @@
 //! 实体历史:blame / log(第 4A 期)。
 
 use serde::Deserialize;
-use tauri::AppHandle;
 
 use crate::error::{AppError, AppResult, ErrorCode};
 
@@ -9,7 +8,7 @@ use super::models::{
     SemanticBlameEntry, SemanticEntityLogChange, SemanticEntityLogResult, SemanticFileBlameResult,
 };
 use super::parse::{parse_stdout, truncate_to};
-use super::process::{run_sem, SemRunPolicy};
+use super::process::{run_sem, SemLauncher, SemRunPolicy};
 use super::{
     detect_version, output_error, resolve_workdir, validate_entity_token, validate_rel_file_path,
 };
@@ -78,17 +77,17 @@ fn clamp_log_limit(limit: Option<usize>) -> usize {
 }
 
 pub(super) async fn file_blame_impl(
-    app: AppHandle,
+    launcher: SemLauncher,
     path: String,
     file_path: String,
     request_id: Option<String>,
 ) -> AppResult<SemanticFileBlameResult> {
     let root = resolve_workdir(&path)?;
     let file = validate_rel_file_path(&root, &file_path)?;
-    let version = detect_version(&app).await?;
+    let version = detect_version(&launcher).await?;
     let args = vec!["blame".to_string(), file.clone(), "--json".to_string()];
     let output = run_sem(
-        &app,
+        &launcher,
         Some(&root),
         &args,
         SemRunPolicy::HEAVY,
@@ -122,7 +121,7 @@ pub(super) async fn file_blame_impl(
 }
 
 pub(super) async fn entity_log_impl(
-    app: AppHandle,
+    launcher: SemLauncher,
     path: String,
     entity_name: String,
     file_path: Option<String>,
@@ -143,9 +142,9 @@ pub(super) async fn entity_log_impl(
         args.push("--file".to_string());
         args.push(validate_rel_file_path(&root, &file)?);
     }
-    let version = detect_version(&app).await?;
+    let version = detect_version(&launcher).await?;
     let output = run_sem(
-        &app,
+        &launcher,
         Some(&root),
         &args,
         SemRunPolicy::HEAVY,

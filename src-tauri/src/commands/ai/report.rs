@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::path::Path;
 use std::time::Instant;
 
 use futures::{stream, StreamExt};
@@ -8,7 +9,7 @@ use tauri::{AppHandle, State};
 use tokio_util::sync::CancellationToken;
 
 use crate::ai::prompts::{
-    effective_system_prompt, DEFAULT_REPORT_PROMPT, DEFAULT_WEEKLY_REPORT_PROMPT,
+    effective_system_prompt_at, DEFAULT_REPORT_PROMPT, DEFAULT_WEEKLY_REPORT_PROMPT,
 };
 use crate::ai::sdk;
 use crate::commands::{git, report};
@@ -22,11 +23,11 @@ use super::run::{record_usage, RegisteredRun};
 #[serde(rename_all = "camelCase")]
 pub struct ReportProjectCommits {
     #[serde(default)]
-    project_id: Option<i64>,
-    project_name: String,
+    pub(crate) project_id: Option<i64>,
+    pub(crate) project_name: String,
     #[serde(default)]
-    project_description: String,
-    commits: Vec<GitCommitInfo>,
+    pub(crate) project_description: String,
+    pub(crate) commits: Vec<GitCommitInfo>,
 }
 
 #[derive(Deserialize)]
@@ -84,7 +85,7 @@ pub struct BatchReportEvent {
 }
 
 async fn generate_report_text(
-    app: &AppHandle,
+    data_dir: &Path,
     db: &Db,
     data: &[ReportProjectCommits],
     range_label: &str,
@@ -117,8 +118,8 @@ async fn generate_report_text(
         .collect::<Vec<_>>()
         .join("\n\n");
     let weekly = period_type == "weekly";
-    let system_prompt = effective_system_prompt(
-        app,
+    let system_prompt = effective_system_prompt_at(
+        data_dir,
         if weekly {
             "report-weekly.md"
         } else {
@@ -135,7 +136,7 @@ async fn generate_report_text(
         "Time range: {}.\n\nCommit records:\n{sections}",
         range_label
     );
-    let config = sdk::load_config(app);
+    let config = sdk::load_config_at(data_dir);
     let started = Instant::now();
     let output = sdk::chat(
         &config,
@@ -237,7 +238,7 @@ async fn collect_report_commits(
 }
 
 fn save_generated_report(
-    app: &AppHandle,
+    app: Option<&AppHandle>,
     db: &Db,
     request: &GenerateAndSaveReportRequest,
     result: String,
@@ -299,8 +300,9 @@ pub async fn ai_generate_and_save_report(
     if data.is_empty() || run.token.is_cancelled() {
         return Ok(None);
     }
+    let data_dir = crate::app_data_dir(&app)?;
     let result = generate_report_text(
-        &app,
+        &data_dir,
         &db,
         &data,
         &request.range_label,
@@ -312,7 +314,41 @@ pub async fn ai_generate_and_save_report(
     if run.token.is_cancelled() {
         return Ok(None);
     }
-    save_generated_report(&app, &db, &request, result, data).map(Some)
+    save_generated_report(Some(&app), &db, &request, result, data).map(Some)
+}
+
+/// MCP(headless)报告管线:与手动报告同一实现,无运行注册/取消与前端事件。
+pub(crate) async fn mcp_generate_and_save_report(
+    data_dir: &Path,
+    db: &Db,
+    request: &GenerateAndSaveReportRequest,
+) -> AppResult<Option<GeneratedReport>> {
+    let token = CancellationToken::new();
+    let data = collect_report_commits(
+        db,
+        &request.project_ids,
+        &request.date_from,
+        &request.date_to,
+        &request.author_mode,
+    )
+    .await?
+    .into_iter()
+    .filter(|project| !project.commits.is_empty())
+    .collect::<Vec<_>>();
+    if data.is_empty() {
+        return Ok(None);
+    }
+    let result = generate_report_text(
+        data_dir,
+        db,
+        &data,
+        &request.range_label,
+        &request.language,
+        &request.period_type,
+        &token,
+    )
+    .await?;
+    save_generated_report(None, db, request, result, data).map(Some)
 }
 
 fn send_batch_status(
@@ -339,6 +375,7 @@ pub async fn ai_generate_batch_reports(
 ) -> AppResult<()> {
     let run = RegisteredRun::new(request.run_id.clone());
     let concurrency = request.concurrency.clamp(1, 8);
+    let data_dir = crate::app_data_dir(&app)?;
     let pending: Vec<BatchReportItem> = request
         .items
         .iter()
@@ -354,6 +391,7 @@ pub async fn ai_generate_batch_reports(
         .for_each_concurrent(concurrency, |item| {
             let app = app.clone();
             let db = &db;
+            let data_dir = &data_dir;
             let token = run.token.clone();
             let project_ids = project_ids.clone();
             let author_mode = author_mode.clone();
@@ -382,7 +420,7 @@ pub async fn ai_generate_batch_reports(
                         return Ok::<_, AppError>(false);
                     }
                     let result = generate_report_text(
-                        &app,
+                        data_dir,
                         db,
                         &data,
                         &item.label,
@@ -404,7 +442,7 @@ pub async fn ai_generate_batch_reports(
                         language: language.clone(),
                         period_type: period_type.clone(),
                     };
-                    save_generated_report(&app, db, &single, result, data)?;
+                    save_generated_report(Some(&app), db, &single, result, data)?;
                     Ok(true)
                 }
                 .await;

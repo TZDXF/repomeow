@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::Path;
 
 use tauri::AppHandle;
 
@@ -27,15 +28,14 @@ pub fn fixed_system_prompt(template: &str, language: &str) -> String {
     )
 }
 
-pub fn effective_system_prompt(
-    app: &AppHandle,
+/// 无 AppHandle 变体(MCP/scheduler 等 headless 场景):直接按数据目录读自定义提示词。
+pub fn effective_system_prompt_at(
+    data_dir: &Path,
     custom_file: &str,
     fallback: &str,
     language: &str,
 ) -> String {
-    let custom = app_data_dir(app)
-        .ok()
-        .and_then(|dir| fs::read_to_string(dir.join("prompts").join(custom_file)).ok())
+    let custom = fs::read_to_string(data_dir.join("prompts").join(custom_file))
         .unwrap_or_default();
     fixed_system_prompt(
         if custom.trim().is_empty() {
@@ -45,6 +45,18 @@ pub fn effective_system_prompt(
         },
         language,
     )
+}
+
+pub fn effective_system_prompt(
+    app: &AppHandle,
+    custom_file: &str,
+    fallback: &str,
+    language: &str,
+) -> String {
+    match app_data_dir(app) {
+        Ok(dir) => effective_system_prompt_at(&dir, custom_file, fallback, language),
+        Err(_) => fixed_system_prompt(fallback, language),
+    }
 }
 
 #[cfg(test)]

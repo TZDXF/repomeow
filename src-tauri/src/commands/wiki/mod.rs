@@ -19,8 +19,8 @@ pub(crate) use paths::{wiki_dir, wiki_dir_in};
 pub(crate) use snapshot::wiki_changed_files;
 pub(crate) use storage::{
     begin_wiki, begin_wiki_page_staging_in, cancel_wiki_page_staging_in, commit_wiki,
-    load_wiki_config_internal, promote_wiki_page_staging_in, read_wiki_page_staging_in,
-    save_wiki_meta, save_wiki_page_internal,
+    load_wiki_at, load_wiki_config_internal, promote_wiki_page_staging_in,
+    read_wiki_page_staging_in, save_wiki_meta, save_wiki_page_internal,
 };
 pub use types::*;
 

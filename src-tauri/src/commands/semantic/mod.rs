@@ -22,7 +22,7 @@ pub use models::{
     SemanticFileEntitiesResult, SemanticFindResult, SemanticImpactResult, SemanticRelationResult,
     SemanticStatus,
 };
-use process::{run_sem, SemRunPolicy};
+use process::{run_sem, SemLauncher, SemRunPolicy};
 
 static SEM_VERSION: OnceLock<String> = OnceLock::new();
 
@@ -44,12 +44,12 @@ pub(super) fn output_error(code: Option<i32>, stderr: &[u8]) -> AppError {
     )
 }
 
-pub(super) async fn detect_version(app: &AppHandle) -> AppResult<String> {
+pub(super) async fn detect_version(launcher: &SemLauncher) -> AppResult<String> {
     if let Some(version) = SEM_VERSION.get() {
         return Ok(version.clone());
     }
     let output = run_sem(
-        app,
+        launcher,
         None,
         &["--version".to_string()],
         SemRunPolicy::DEFAULT,
@@ -156,7 +156,7 @@ pub(super) fn validate_entity_token(value: &str) -> AppResult<String> {
 #[tauri::command]
 pub async fn semantic_status(app: AppHandle) -> AppResult<SemanticStatus> {
     Ok(SemanticStatus {
-        version: detect_version(&app).await?,
+        version: detect_version(&SemLauncher::from(&app)).await?,
     })
 }
 
@@ -176,7 +176,7 @@ pub async fn semantic_file_entities(
     file_path: String,
     request_id: Option<String>,
 ) -> AppResult<SemanticFileEntitiesResult> {
-    navigation::file_entities_impl(app, path, file_path, request_id).await
+    navigation::file_entities_impl(SemLauncher::from(&app), path, file_path, request_id).await
 }
 
 #[tauri::command]
@@ -186,7 +186,7 @@ pub async fn semantic_find_entities(
     query: String,
     request_id: Option<String>,
 ) -> AppResult<SemanticFindResult> {
-    navigation::find_entities_impl(app, path, query, request_id).await
+    navigation::find_entities_impl(SemLauncher::from(&app), path, query, request_id).await
 }
 
 #[tauri::command]
@@ -199,7 +199,7 @@ pub async fn semantic_entity_callers(
     request_id: Option<String>,
 ) -> AppResult<SemanticRelationResult> {
     navigation::entity_relation_impl(
-        app,
+        SemLauncher::from(&app),
         path,
         navigation::RelationKind::Callers,
         entity_id,
@@ -220,7 +220,7 @@ pub async fn semantic_entity_refs(
     request_id: Option<String>,
 ) -> AppResult<SemanticRelationResult> {
     navigation::entity_relation_impl(
-        app,
+        SemLauncher::from(&app),
         path,
         navigation::RelationKind::Refs,
         entity_id,
@@ -244,7 +244,7 @@ pub async fn semantic_entity_impact(
     request_id: Option<String>,
 ) -> AppResult<SemanticImpactResult> {
     impact::entity_impact_impl(
-        app,
+        SemLauncher::from(&app),
         path,
         entity_id,
         entity_name,
@@ -264,7 +264,7 @@ pub async fn semantic_file_blame(
     file_path: String,
     request_id: Option<String>,
 ) -> AppResult<SemanticFileBlameResult> {
-    history::file_blame_impl(app, path, file_path, request_id).await
+    history::file_blame_impl(SemLauncher::from(&app), path, file_path, request_id).await
 }
 
 #[tauri::command]
@@ -276,7 +276,15 @@ pub async fn semantic_entity_log(
     limit: Option<usize>,
     request_id: Option<String>,
 ) -> AppResult<SemanticEntityLogResult> {
-    history::entity_log_impl(app, path, entity_name, file_path, limit, request_id).await
+    history::entity_log_impl(
+        SemLauncher::from(&app),
+        path,
+        entity_name,
+        file_path,
+        limit,
+        request_id,
+    )
+    .await
 }
 
 // ── 第 4B 期:AI 语义上下文 ──────────────────────────────────────────
@@ -287,7 +295,7 @@ pub async fn semantic_worktree_diff(
     path: String,
     request_id: Option<String>,
 ) -> AppResult<SemanticDiffResult> {
-    context::worktree_diff_impl(app, path, request_id).await
+    context::worktree_diff_impl(SemLauncher::from(&app), path, request_id).await
 }
 
 #[tauri::command]
@@ -302,7 +310,7 @@ pub async fn semantic_entity_context(
     request_id: Option<String>,
 ) -> AppResult<SemanticContextResult> {
     context::entity_context_impl(
-        app,
+        SemLauncher::from(&app),
         path,
         entity_id,
         entity_name,
@@ -312,6 +320,75 @@ pub async fn semantic_entity_context(
         request_id,
     )
     .await
+}
+
+// ── MCP(headless)入口:sidecar 按可执行文件旁路径解析,无请求取消 ──────
+
+/// standalone launcher:二进制缺失时返回 SemanticToolMissing。
+fn standalone_launcher() -> AppResult<SemLauncher> {
+    Ok(SemLauncher::Standalone(process::resolve_sem_binary()?))
+}
+
+pub async fn mcp_semantic_find_entities(
+    path: String,
+    query: String,
+) -> AppResult<SemanticFindResult> {
+    navigation::find_entities_impl(standalone_launcher()?, path, query, None).await
+}
+
+pub async fn mcp_semantic_entity_context(
+    path: String,
+    entity_id: Option<String>,
+    entity_name: Option<String>,
+    file_path: Option<String>,
+    budget: Option<usize>,
+    hops: Option<usize>,
+) -> AppResult<SemanticContextResult> {
+    context::entity_context_impl(
+        standalone_launcher()?,
+        path,
+        entity_id,
+        entity_name,
+        file_path,
+        budget,
+        hops,
+        None,
+    )
+    .await
+}
+
+pub async fn mcp_semantic_entity_relations(
+    path: String,
+    entity_id: Option<String>,
+    entity_name: Option<String>,
+    file_path: Option<String>,
+) -> AppResult<(SemanticRelationResult, SemanticRelationResult)> {
+    let launcher = standalone_launcher()?;
+    let callers = navigation::entity_relation_impl(
+        launcher.clone(),
+        path.clone(),
+        navigation::RelationKind::Callers,
+        entity_id.clone(),
+        entity_name.clone(),
+        file_path.clone(),
+        None,
+    )
+    .await?;
+    let refs = navigation::entity_relation_impl(
+        launcher,
+        path,
+        navigation::RelationKind::Refs,
+        entity_id,
+        entity_name,
+        file_path,
+        None,
+    )
+    .await?;
+    Ok((callers, refs))
+}
+
+pub async fn mcp_semantic_worktree_diff(path: String) -> AppResult<SemanticDiffResult> {
+    context::worktree_diff_impl(standalone_launcher()?, path, None).await
 }
 
 pub(crate) use context::commit_input_analysis;
