@@ -149,6 +149,11 @@ export function newChatSession(projectPath: string): Promise<void> {
   return cmd<void>("chat_new_session", { projectPath });
 }
 
+/** 编辑重发:丢弃后端会话里最后一条用户消息及其后的整个回答回合 */
+export function truncateChatLastTurn(projectPath: string): Promise<void> {
+  return cmd<void>("chat_truncate_last_turn", { projectPath });
+}
+
 /** 回应工具权限请求:allow=true 允许本次执行,false 拒绝(后端仍会以 toolResult 收尾) */
 export function respondToolPermission(
   projectPath: string,

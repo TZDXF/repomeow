@@ -138,9 +138,10 @@ impl Default for ChatPrefs {
 
 /// 问答工具权限:
 /// - `all`:全部工具直接执行;
-/// - `ask`:全部工具可用,但四个有副作用工具(`update_wiki` /
-///   `regenerate_wiki` / `add_custom_command` / `generate_report`)执行前
-///   由应用弹出硬确认(见 `commands/chat.rs` 的 before_tool_call 门禁)。
+/// - `ask`:全部工具可用,但五个有副作用工具(`update_wiki` /
+///   `regenerate_wiki` / `add_custom_command` / `generate_report` /
+///   `set_wiki_model`)执行前由应用弹出硬确认(见 `commands/chat.rs` 的
+///   before_tool_call 门禁)。
 ///
 /// 旧值 `readOnly` 反序列化为 Ask(全部工具 + 执行前确认),保证旧配置平滑升级。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
-import { respondToolPermission } from "@/lib/chat";
+import { respondToolPermission, sendChatMessage, truncateChatLastTurn } from "@/lib/chat";
 import type { ChatEvent, ChatUsageSummary } from "@/lib/chat";
 import { useChatStore } from "@/stores/chat";
 
@@ -29,6 +29,7 @@ vi.mock("@/lib/chat", () => ({
   abortChat: vi.fn(async () => {}),
   newChatSession: vi.fn(async () => {}),
   respondToolPermission: vi.fn(async () => true),
+  truncateChatLastTurn: vi.fn(async () => {}),
 }));
 
 const USAGE: ChatUsageSummary = {
@@ -496,22 +497,118 @@ describe("chat store", () => {
     expect(store.sessions[PATH].toolRuns.t1.permission).toBeNull();
   });
 
-  it("retryScheduled 清理未决审批状态", async () => {
+  it("editLastUserMessage 截掉最后回合并以新文本重发,清理其工具记录", async () => {
     const store = useChatStore();
-    const run = store.send(PATH, PROJECT, "帮我加命令");
-    emit(PATH, { kind: "toolCall", id: "t1", name: "add_custom_command", args: {} });
-    emit(PATH, { kind: "toolPermissionRequest", id: "t1", name: "add_custom_command", args: {} });
-    emit(PATH, {
-      kind: "retryScheduled",
-      attempt: 1,
-      maxAttempts: 3,
-      delayMs: 2_000,
-      message: "429: rate limited",
-    });
+    // 第一轮:带工具调用的完整回合
+    const first = store.send(PATH, PROJECT, "第一问");
+    emit(PATH, { kind: "toolCall", id: "t1", name: "read_file", args: {} });
+    emit(PATH, { kind: "toolResult", id: "t1", ok: true, summary: "ok" });
+    emit(PATH, { kind: "textDelta", delta: "第一答" });
+    emit(PATH, { kind: "turnEnd", contextTokens: 100 });
+    finish(PATH, USAGE);
+    await first;
+    // 第二轮:纯文本回合
+    const second = store.send(PATH, PROJECT, "第二问");
+    emit(PATH, { kind: "textDelta", delta: "第二答" });
+    emit(PATH, { kind: "turnEnd", contextTokens: 110 });
+    finish(PATH, USAGE);
+    await second;
+    expect(store.sessions[PATH].messages).toHaveLength(4);
 
-    expect(store.sessions[PATH].toolRuns.t1.permission).toBeNull();
+    // 不立即 await:返回的 promise 要等重发回合结束才兑现
+    const edit = store.editLastUserMessage(PATH, PROJECT, "第二问(改)");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(vi.mocked(truncateChatLastTurn)).toHaveBeenCalledWith(PATH);
 
-    finish(PATH, null);
+    const session = store.sessions[PATH];
+    // 截掉「第二问+第二答」后以新文本重新入列;发送中的回合待 finish
+    expect(session.messages).toHaveLength(3);
+    expect(session.messages[1]).toMatchObject({ role: "assistant", content: "第一答" });
+    expect(session.messages[2]).toMatchObject({ role: "user", content: "第二问(改)" });
+    expect(session.busy).toBe(true);
+    // 第二轮无工具,t1 仍被第一轮引用故保留
+    expect(session.toolRuns.t1).toBeDefined();
+
+    emit(PATH, { kind: "textDelta", delta: "第二答(新)" });
+    emit(PATH, { kind: "turnEnd", contextTokens: 120 });
+    finish(PATH, USAGE);
+    await expect(edit).resolves.toBe(true);
+    expect(session.messages).toHaveLength(4);
+    expect(session.messages[3]).toMatchObject({ role: "assistant", content: "第二答(新)" });
+  });
+
+  it("editLastUserMessage 清理被截回合遗留的孤立工具记录", async () => {
+    const store = useChatStore();
+    const run = store.send(PATH, PROJECT, "带工具的提问");
+    emit(PATH, { kind: "toolCall", id: "t9", name: "read_file", args: {} });
+    emit(PATH, { kind: "toolResult", id: "t9", ok: true, summary: "ok" });
+    emit(PATH, { kind: "textDelta", delta: "回答" });
+    emit(PATH, { kind: "turnEnd", contextTokens: 100 });
+    finish(PATH, USAGE);
     await run;
+    expect(store.sessions[PATH].toolRuns.t9).toBeDefined();
+
+    const edit = store.editLastUserMessage(PATH, PROJECT, "改后的提问");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(store.sessions[PATH].toolRuns.t9).toBeUndefined();
+    expect(store.sessions[PATH].messages).toHaveLength(1);
+
+    finish(PATH, USAGE);
+    await expect(edit).resolves.toBe(true);
+  });
+
+  it("editLastUserMessage 后端截断失败时恢复消息并进入 error 阶段", async () => {
+    const store = useChatStore();
+    const run = store.send(PATH, PROJECT, "原始提问");
+    emit(PATH, { kind: "textDelta", delta: "原始回答" });
+    emit(PATH, { kind: "turnEnd", contextTokens: 100 });
+    finish(PATH, USAGE);
+    await run;
+
+    vi.mocked(truncateChatLastTurn).mockRejectedValueOnce(
+      Object.assign(new Error("chat_busy: agent is already processing"), {
+        cause: { code: "ai_request_failed", message: "chat_busy: agent is already processing" },
+      }),
+    );
+    const accepted = await store.editLastUserMessage(PATH, PROJECT, "改后的提问");
+
+    expect(accepted).toBe(false);
+    const session = store.sessions[PATH];
+    expect(session.messages).toHaveLength(2);
+    expect(session.messages[0]).toMatchObject({ role: "user", content: "原始提问" });
+    expect(session.messages[1]).toMatchObject({ role: "assistant", content: "原始回答" });
+    expect(session.error).toContain("稍候");
+    expect(session.phase).toBe("error");
+    expect(session.busy).toBe(false);
+    // 截断失败不重发:sendChatMessage 仅被最初那次发送调用
+    expect(vi.mocked(sendChatMessage)).toHaveBeenCalledTimes(1);
+  });
+
+  it("editLastUserMessage 忙时拒绝,无历史时退化为普通发送", async () => {
+    const store = useChatStore();
+    const run = store.send(PATH, PROJECT, "进行中的提问");
+    await expect(store.editLastUserMessage(PATH, PROJECT, "改动")).resolves.toBe(false);
+    expect(vi.mocked(truncateChatLastTurn)).not.toHaveBeenCalled();
+    finish(PATH, USAGE);
+    await run;
+
+    const FRESH_PATH = "D:\\repos\\fresh";
+    const fresh = store.editLastUserMessage(
+      FRESH_PATH,
+      { path: FRESH_PATH, name: "fresh" },
+      "首条提问",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(vi.mocked(truncateChatLastTurn)).not.toHaveBeenCalled();
+    expect(chatHarness.pending.has(FRESH_PATH)).toBe(true);
+    chatHarness.pending.get(FRESH_PATH)?.resolve(USAGE);
+    await expect(fresh).resolves.toBe(true);
+  });
+
+  it("editLastUserMessage 空白文本直接拒绝", async () => {
+    const store = useChatStore();
+    await expect(store.editLastUserMessage(PATH, PROJECT, "   ")).resolves.toBe(false);
+    expect(vi.mocked(truncateChatLastTurn)).not.toHaveBeenCalled();
+    expect(vi.mocked(sendChatMessage)).not.toHaveBeenCalled();
   });
 });

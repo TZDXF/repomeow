@@ -716,6 +716,7 @@ export default {
     },
     send: "发送",
     editMessage: "编辑并重发",
+    copy: "复制",
     stop: "停止",
     emptyTitle: "有什么可以帮你?",
     emptyHint: "基于当前项目上下文回答问题",
@@ -749,6 +750,8 @@ export default {
       generate_report: "生成日报/周报",
       list_reports: "报告历史",
       read_project_file: "读项目文件",
+      get_ai_config: "AI 配置",
+      set_wiki_model: "切换 Wiki 模型",
     },
     reasoning: {
       thinking: "正在思考…",

@@ -6,10 +6,12 @@ import { toast } from "vue-sonner";
 import {
   Bot,
   Brain,
+  Copy,
   Eye,
   Maximize2,
   MessageCircleMore,
   Minimize2,
+  Pencil,
   RotateCcw,
   Square,
   TriangleAlert,
@@ -35,7 +37,13 @@ import {
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
 import { Loader } from "@/components/ai-elements/loader";
-import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
+import {
+  Message,
+  MessageAction,
+  MessageActions,
+  MessageContent,
+  MessageResponse,
+} from "@/components/ai-elements/message";
 import { ModelSelector, type ModelSelectorGroup } from "@/components/ai-elements/model-selector";
 import {
   PromptInput,
@@ -59,6 +67,7 @@ import { Button } from "@/components/ui/button";
 import ChatTurnProcess from "@/components/chat/ChatTurnProcess.vue";
 import { CHAT_THINKING_LEVELS, type ChatPermission, type ChatThinkingLevel } from "@/lib/ai-config";
 import type { ChatProcessGroup, ChatToolRun } from "@/lib/chat";
+import { copyToClipboard } from "@/lib/utils";
 import { useAiConfigStore } from "@/stores/ai-config";
 import { useChatStore, type ChatRetryState } from "@/stores/chat";
 import type { Project } from "@/types";
@@ -213,11 +222,55 @@ function onSubmit(message: PromptInputMessage) {
 function sendText(text: string) {
   const trimmed = text.trim();
   if (!trimmed || !aiReady.value || session.value.busy) return;
+  cancelEdit();
   void chat.send(props.project.path, props.project, trimmed);
 }
 
 function abort() {
   chat.abort(props.project.path);
+}
+
+// --- 编辑上一条提问:最后一条用户消息悬停出现编辑钮,气泡内联编辑,
+// Enter 确认(截掉该提问的回答回合后以新文本重发),Esc 取消 ---
+const editingKey = ref<string | null>(null);
+const editText = ref("");
+const editTextareaRef = useTemplateRef<HTMLTextAreaElement>("editTextarea");
+
+const editRows = computed(() => Math.min(10, Math.max(2, editText.value.split("\n").length)));
+
+function startEdit(view: { key: string; content: string }) {
+  editingKey.value = view.key;
+  editText.value = view.content;
+  void nextTick(() => {
+    const el = editTextareaRef.value;
+    if (el) {
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    }
+  });
+}
+
+function cancelEdit() {
+  editingKey.value = null;
+  editText.value = "";
+}
+
+// --- 复制:提问复制原文;回答复制该回合的全部正文段(流式中不显示,
+// 避免复制到残缺文本)。成功/失败提示由 copyToClipboard 统一 toast ---
+function copyText(text: string) {
+  void copyToClipboard(text);
+}
+
+function copyTurn(view: TurnView) {
+  copyText(view.contents.join("\n\n"));
+}
+
+function confirmEdit() {
+  if (editingKey.value === null) return;
+  const text = editText.value.trim();
+  if (!text || !aiReady.value || session.value.busy) return;
+  cancelEdit();
+  void chat.editLastUserMessage(props.project.path, props.project, text);
 }
 
 // 发送/停止共用一个位置(参照 ai-elements chatbot 示例):状态驱动提交按钮图标,
@@ -230,6 +283,7 @@ const submitStatus = computed<ChatStatus>(() => {
 
 function startNewSession() {
   // 忙时直接清:store 内部先中止在途请求,等待落地后重置前后端会话
+  cancelEdit();
   void chat.newSession(props.project.path);
 }
 
@@ -328,7 +382,7 @@ interface TurnView {
   retry: ChatRetryState | null;
 }
 
-type TimelineView = { kind: "user"; key: string; content: string } | TurnView;
+type TimelineView = { kind: "user"; key: string; content: string; editable: boolean } | TurnView;
 
 function resolveRuns(runIds: string[], toolRuns: Record<string, ChatToolRun>) {
   return runIds.map((id) => toolRuns[id]).filter((run) => run != null);
@@ -351,10 +405,23 @@ const timeline = computed<TimelineView[]>(() => {
   const s = session.value;
   const views: TimelineView[] = [];
   let turn: TurnView | null = null;
+  // 仅最后一条用户提问可编辑重发;忙时禁用(编辑会截断后端回合,与在途请求冲突)
+  let lastUserId: string | null = null;
+  for (let i = s.messages.length - 1; i >= 0; i--) {
+    if (s.messages[i].role === "user") {
+      lastUserId = s.messages[i].id;
+      break;
+    }
+  }
   for (const message of s.messages) {
     if (message.role === "user") {
       turn = null;
-      views.push({ kind: "user", key: message.id, content: message.content });
+      views.push({
+        kind: "user",
+        key: message.id,
+        content: message.content,
+        editable: !s.busy && message.id === lastUserId,
+      });
       continue;
     }
     if (!turn) {
@@ -488,51 +555,113 @@ const retrySeconds = computed(() => {
             <template v-else>
               <template v-for="view in timeline" :key="view.key">
                 <Message v-if="view.kind === 'user'" from="user" class="max-w-[90%]">
-                  <MessageContent>
-                    <span class="whitespace-pre-wrap">{{ view.content }}</span>
+                  <!-- 编辑态:气泡换成内联 textarea,Enter 确认重发 / Esc 取消
+                       (Esc 拦截冒泡,避免触发面板级 Esc 收起) -->
+                  <MessageContent v-if="editingKey === view.key" class="w-full min-w-0">
+                    <textarea
+                      ref="editTextarea"
+                      v-model="editText"
+                      :rows="editRows"
+                      class="w-full resize-none bg-transparent outline-none"
+                      @keydown.enter.exact.prevent="confirmEdit"
+                      @keydown.esc.stop="cancelEdit"
+                    />
+                    <div class="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        class="h-7 px-2 text-xs"
+                        @click="cancelEdit"
+                      >
+                        {{ t("common.cancel") }}
+                      </Button>
+                      <Button
+                        size="sm"
+                        class="h-7 px-2 text-xs"
+                        :disabled="!editText.trim() || !aiReady"
+                        @click="confirmEdit"
+                      >
+                        {{ t("chat.send") }}
+                      </Button>
+                    </div>
                   </MessageContent>
+                  <template v-else>
+                    <!-- 操作钮固定占位(opacity 切换),悬停气泡时显示,不引起布局位移;
+                         复制对所有提问可用,编辑仅最后一条 -->
+                    <MessageActions
+                      class="shrink-0 self-center opacity-0 transition-opacity group-hover:opacity-100"
+                    >
+                      <MessageAction
+                        v-if="view.editable"
+                        :tooltip="t('chat.editMessage')"
+                        @click="startEdit(view)"
+                      >
+                        <Pencil class="size-3.5" />
+                      </MessageAction>
+                      <MessageAction :tooltip="t('chat.copy')" @click="copyText(view.content)">
+                        <Copy class="size-3.5" />
+                      </MessageAction>
+                    </MessageActions>
+                    <MessageContent>
+                      <span class="whitespace-pre-wrap">{{ view.content }}</span>
+                    </MessageContent>
+                  </template>
                 </Message>
                 <!-- assistant 回合:思考与工具的统一折叠块 + 各段正文 -->
                 <Message v-else from="assistant" class="max-w-[90%]">
-                  <MessageContent>
-                    <ChatTurnProcess
-                      v-if="view.groups.length > 0"
-                      :groups="view.groups"
-                      :active="view.active"
-                      @respond="onToolPermissionRespond"
-                    />
-                    <MessageResponse
-                      v-for="(content, ci) in view.contents"
-                      :key="ci"
-                      :content="content"
-                    />
-                    <template v-if="view.live">
-                      <MessageResponse
-                        v-if="view.streamingText.trim()"
-                        :content="view.streamingText"
-                        mode="streaming"
+                  <div class="flex min-w-0 flex-col">
+                    <MessageContent>
+                      <ChatTurnProcess
+                        v-if="view.groups.length > 0"
+                        :groups="view.groups"
+                        :active="view.active"
+                        @respond="onToolPermissionRespond"
                       />
-                      <div
-                        v-else-if="view.retry"
-                        class="flex items-center gap-2 text-muted-foreground text-xs"
-                        :title="view.retry.message"
-                      >
-                        <Loader />
-                        <span>
-                          {{
-                            t("chat.retryScheduled", {
-                              attempt: view.retry.attempt,
-                              max: view.retry.maxAttempts,
-                              seconds: retrySeconds,
-                            })
-                          }}
-                        </span>
-                      </div>
-                      <!-- 过程折叠块头部已带「正在思考与执行…」旋转图标,仅在尚未
+                      <MessageResponse
+                        v-for="(content, ci) in view.contents"
+                        :key="ci"
+                        :content="content"
+                      />
+                      <template v-if="view.live">
+                        <MessageResponse
+                          v-if="view.streamingText.trim()"
+                          :content="view.streamingText"
+                          mode="streaming"
+                        />
+                        <div
+                          v-else-if="view.retry"
+                          class="flex items-center gap-2 text-muted-foreground text-xs"
+                          :title="view.retry.message"
+                        >
+                          <Loader />
+                          <span>
+                            {{
+                              t("chat.retryScheduled", {
+                                attempt: view.retry.attempt,
+                                max: view.retry.maxAttempts,
+                                seconds: retrySeconds,
+                              })
+                            }}
+                          </span>
+                        </div>
+                        <!-- 过程折叠块头部已带「正在思考与执行…」旋转图标,仅在尚未
                            产出任何过程(无思考、无工具)时才需要独立的 Loader -->
-                      <Loader v-else-if="view.groups.length === 0" class="text-muted-foreground" />
-                    </template>
-                  </MessageContent>
+                        <Loader
+                          v-else-if="view.groups.length === 0"
+                          class="text-muted-foreground"
+                        />
+                      </template>
+                    </MessageContent>
+                    <!-- 回合复制:悬停显现;流式中(正文未定型)不显示 -->
+                    <MessageActions
+                      v-if="!view.live && view.contents.length > 0"
+                      class="opacity-0 transition-opacity group-hover:opacity-100"
+                    >
+                      <MessageAction :tooltip="t('chat.copy')" @click="copyTurn(view)">
+                        <Copy class="size-3.5" />
+                      </MessageAction>
+                    </MessageActions>
+                  </div>
                 </Message>
               </template>
             </template>

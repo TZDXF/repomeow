@@ -739,6 +739,7 @@ export default {
     },
     send: "Send",
     editMessage: "Edit & resend",
+    copy: "Copy",
     stop: "Stop",
     emptyTitle: "How can I help?",
     emptyHint: "Answers are grounded in the current project context",
@@ -772,6 +773,8 @@ export default {
       generate_report: "Generate report",
       list_reports: "Report history",
       read_project_file: "Read project file",
+      get_ai_config: "AI config",
+      set_wiki_model: "Switch wiki model",
     },
     reasoning: {
       thinking: "Thinking…",

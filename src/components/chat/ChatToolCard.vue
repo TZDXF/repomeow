@@ -60,6 +60,7 @@ const PRIMARY_ARGS: Record<string, string[]> = {
   add_custom_command: ["name"],
   generate_report: ["date_from", "date_to"],
   read_project_file: ["path"],
+  set_wiki_model: ["model_id"],
 };
 
 const subtitle = computed(() => {

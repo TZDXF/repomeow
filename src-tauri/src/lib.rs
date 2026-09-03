@@ -296,6 +296,7 @@ pub fn run() {
             commands::chat::chat_abort,
             commands::chat::chat_new_session,
             commands::chat::chat_tool_permission_respond,
+            commands::chat::chat_truncate_last_turn,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

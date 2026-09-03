@@ -5,6 +5,7 @@ import {
   newChatSession,
   respondToolPermission as respondToolPermissionCmd,
   sendChatMessage,
+  truncateChatLastTurn,
   type ChatContextBreakdown,
   type ChatEvent,
   type ChatMessage,
@@ -341,6 +342,46 @@ export const useChatStore = defineStore("chat", () => {
     controllers.get(path)?.abort();
   }
 
+  /**
+   * 编辑上一条提问并重发:先截掉该提问及其后的回答回合(前端时间线与
+   * 后端会话历史同步截断),再以新文本走正常发送流程。后端截断失败时
+   * 恢复前端消息并提示,不重发。忙时/无用户消息时分别拒绝/退化为普通发送。
+   */
+  async function editLastUserMessage(
+    path: string,
+    project: ChatProject,
+    text: string,
+  ): Promise<boolean> {
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    if (activeRuns.has(path)) return false;
+    const session = ensureSession(path);
+    const index = session.messages.map((message) => message.role).lastIndexOf("user");
+    if (index < 0) return send(path, project, trimmed);
+
+    const previousMessages = session.messages;
+    const previousToolRuns = session.toolRuns;
+    session.messages = session.messages.slice(0, index);
+    // 清理被截回合遗留的工具调用记录(仅保留仍被消息引用的)
+    const referenced = new Set(session.messages.flatMap((message) => message.toolRunIds));
+    session.toolRuns = Object.fromEntries(
+      Object.entries(session.toolRuns).filter(([id]) => referenced.has(id)),
+    );
+    session.error = null;
+
+    try {
+      await truncateChatLastTurn(path);
+    } catch (error) {
+      session.messages = previousMessages;
+      session.toolRuns = previousToolRuns;
+      const { code, message } = extractChatError(error);
+      session.error = friendlyChatError(code, message);
+      session.phase = "error";
+      return false;
+    }
+    return send(path, project, trimmed);
+  }
+
   /** 清理未决的审批状态:把 pending/responding 的 run 还原为无需审批 */
   function resetApprovalStates(session: ChatSessionState) {
     let changed = false;
@@ -425,6 +466,7 @@ export const useChatStore = defineStore("chat", () => {
     ensureSession,
     send,
     abort,
+    editLastUserMessage,
     respondToolPermission,
     newSession,
   };

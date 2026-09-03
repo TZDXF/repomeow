@@ -11,9 +11,10 @@
 //! 状态热切换方法就地生效(会话历史保留),模型与密钥由 StreamFn 每次
 //! LLM 调用时重读。
 //!
-//! ask 权限(硬确认):工具集与 all 相同,但四个有副作用工具
+//! ask 权限(硬确认):工具集与 all 相同,但五个有副作用工具
 //! (`update_wiki` / `regenerate_wiki` / `add_custom_command` /
-//! `generate_report`)执行前经 `AgentLoopConfig.before_tool_call` 钩子拦截,
+//! `generate_report` / `set_wiki_model`)执行前经 `AgentLoopConfig.before_tool_call`
+//! 钩子拦截,
 //! 推 `ToolPermissionRequest` 事件并等待 `chat_tool_permission_respond`
 //! 决策(允许继续 / 拒绝或 2 分钟超时则 block);这些工具均带 sequential
 //! 标记,含它们的批次整体顺序执行,确认一次最多挂起一个。
@@ -577,7 +578,32 @@ mod tests {
     // ── ask 权限工具硬确认 ─────────────────────────────────────────────
 
     #[test]
-    fn gated_tool_list_is_exactly_the_four_side_effect_tools() {
+    fn truncate_last_user_turn_drops_the_last_turn() {
+        let model = Model::from_settings("gpt-test", "http://localhost");
+        let agent = test_agent(Arc::new(Mutex::new(Vec::new())));
+        agent.set_messages(vec![
+            AgentMessage::user_text("第一问", 0),
+            AgentMessage::Message(TypedMessage::Assistant(ok_message(&model, "第一答"))),
+            AgentMessage::user_text("第二问", 0),
+            AgentMessage::Message(TypedMessage::Assistant(ok_message(&model, "第二答"))),
+        ]);
+
+        assert!(truncate_last_user_turn(&agent));
+        let messages = agent.messages();
+        assert_eq!(messages.len(), 2);
+        assert!(matches!(
+            messages[1],
+            AgentMessage::Message(TypedMessage::Assistant(_))
+        ));
+
+        // 再截一次:第一轮也被移除,会话清空;空会话幂等返回 false。
+        assert!(truncate_last_user_turn(&agent));
+        assert!(agent.messages().is_empty());
+        assert!(!truncate_last_user_turn(&agent));
+    }
+
+    #[test]
+    fn gated_tool_list_is_exactly_the_five_side_effect_tools() {
         let mut tools = CONFIRM_REQUIRED_TOOLS.to_vec();
         tools.sort_unstable();
         assert_eq!(
@@ -586,6 +612,7 @@ mod tests {
                 "add_custom_command",
                 "generate_report",
                 "regenerate_wiki",
+                "set_wiki_model",
                 "update_wiki"
             ]
         );
@@ -598,6 +625,7 @@ mod tests {
             "sem_relations",
             "sem_diff",
             "read_project_file",
+            "get_ai_config",
         ] {
             assert!(
                 !CONFIRM_REQUIRED_TOOLS.contains(&name),
@@ -975,15 +1003,51 @@ pub async fn chat_new_session(project_path: String) -> AppResult<()> {
     Ok(())
 }
 
+/// 编辑上一条提问:丢弃会话里最后一条用户消息及其后的整个回答回合
+/// (前端随后以新文本重新发送)。会话不存在或无用户消息时幂等空操作;
+/// 回合进行中拒绝(busy)。
+#[tauri::command]
+pub async fn chat_truncate_last_turn(project_path: String) -> AppResult<()> {
+    let session_key = clean_str(&project_path);
+    let session = chat_sessions().lock().unwrap().get(&session_key).cloned();
+    let Some(session) = session else {
+        return Ok(());
+    };
+    if session.busy.load(Ordering::SeqCst) {
+        return Err(AppError::coded(
+            ErrorCode::AiRequestFailed,
+            "chat_busy: agent is already processing",
+        ));
+    }
+    truncate_last_user_turn(&session.agent);
+    Ok(())
+}
+
+/// 截掉最后一条 user 消息及其后的全部消息(该提问的回答回合)。返回是否
+/// 有截断发生。
+fn truncate_last_user_turn(agent: &Agent) -> bool {
+    let mut messages = agent.messages();
+    let Some(index) = messages
+        .iter()
+        .rposition(|message| matches!(message, AgentMessage::Message(TypedMessage::User(_))))
+    else {
+        return false;
+    };
+    messages.truncate(index);
+    agent.set_messages(messages);
+    true
+}
+
 // ── 会话构建 ─────────────────────────────────────────────────────────
 
 /// ask 权限下执行前需用户硬确认的工具(有副作用:写入 wiki / 自定义命令 /
-/// 生成报告)。
-const CONFIRM_REQUIRED_TOOLS: [&str; 4] = [
+/// 生成报告 / 修改 wiki 生成配置)。
+const CONFIRM_REQUIRED_TOOLS: [&str; 5] = [
     "update_wiki",
     "regenerate_wiki",
     "add_custom_command",
     "generate_report",
+    "set_wiki_model",
 ];
 
 /// 确认等待的安全超时:超时按拒绝处理,避免会话永久挂起。
@@ -1196,7 +1260,7 @@ fn build_session(
         get_steering_messages: None,
         get_follow_up_messages: None,
         tool_execution: ToolExecutionMode::Parallel,
-        // ask 权限下拦截四个有副作用工具的硬确认门禁(通用 agent core 不动)。
+        // ask 权限下拦截五个有副作用工具的硬确认门禁(通用 agent core 不动)。
         before_tool_call: Some(build_permission_hook(
             pending_cell.clone(),
             prefs_cell.clone(),
