@@ -218,7 +218,7 @@ async function saveDesc() {
 </script>
 
 <template>
-  <div v-if="project" class="flex h-full flex-col overflow-y-auto">
+  <div v-if="project" class="flex h-full flex-col overflow-hidden">
     <header class="shrink-0 border-b px-4 py-3">
       <div class="flex items-start justify-between gap-4">
         <div class="flex min-w-0 items-center gap-2">
@@ -404,7 +404,7 @@ async function saveDesc() {
       </div>
     </header>
 
-    <template v-if="project.path_exists">
+    <div v-if="project.path_exists" class="min-h-0 flex-1 overflow-y-auto">
       <div
         v-if="detailView === 'overview'"
         class="grid items-start gap-4 p-6 [grid-template-columns:repeat(auto-fill,minmax(360px,1fr))]"
@@ -415,7 +415,7 @@ async function saveDesc() {
         <CustomCommands :project="worktreeProject ?? project" />
       </div>
       <AiAssetsView v-else :project="worktreeProject ?? project" />
-    </template>
+    </div>
 
     <DailyReportDialog v-model:open="reportOpen" :preset-project-id="project.id" />
     <RelocateProjectDialog v-model:open="relocateOpen" :project="project" />

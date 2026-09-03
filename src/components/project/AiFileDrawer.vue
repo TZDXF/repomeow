@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, onBeforeUnmount } from "vue";
+import { computed, nextTick, ref, watch, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { openPath } from "@tauri-apps/plugin-opener";
@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import CodeViewer from "@/components/files/CodeViewer.vue";
 import { cmd } from "@/lib/tauri";
 import { joinPath } from "@/lib/path";
+import { FILE_REF_CLASS, linkifyFileRefs, resolveRefPath } from "@/lib/ai-file-refs";
 import { useSettingsStore } from "@/stores/settings";
 import type { FilePreview } from "@/types";
 
@@ -16,6 +17,8 @@ import type { FilePreview } from "@/types";
  * AI 面板的文件右侧抽屉:经 read_file_preview 读取项目内文件,
  * Markdown 默认渲染态(可切编辑),其余文件代码态;编辑经 CodeViewer
  * editable 模式 + save_text_file 落盘,Esc/遮罩关闭(编辑中有改动时 Esc 不生效)。
+ * 渲染态正文里的 `@path/to/file` 引用会被 linkify 成按钮,点击经 navigate
+ * 事件让父组件把抽屉切到被引用文件(解析相对当前文件所在目录)。
  */
 const props = defineProps<{
   /** 项目根目录(read_file_preview 的 root,越界访问由后端拒绝) */
@@ -23,7 +26,12 @@ const props = defineProps<{
   /** 仓库内相对路径;null 表示关闭 */
   relPath: string | null;
 }>();
-const emit = defineEmits<{ (e: "close"): void; (e: "saved"): void }>();
+const emit = defineEmits<{
+  (e: "close"): void;
+  (e: "saved"): void;
+  /** 点击正文 @ 引用请求跳转;跳转失败时也会回发原路径让父组件恢复 */
+  (e: "navigate", relPath: string): void;
+}>();
 
 const { t } = useI18n();
 const settingsStore = useSettingsStore();
@@ -47,7 +55,7 @@ function isDirty(): boolean {
 
 watch(
   () => props.relPath,
-  async (rel) => {
+  async (rel, prevRel) => {
     editing.value = false;
     if (!rel) {
       preview.value = null;
@@ -62,9 +70,14 @@ watch(
       });
       if (seq === loadSeq) preview.value = result;
     } catch (e) {
-      if (seq === loadSeq) {
+      if (seq !== loadSeq) return;
+      toast.error(String(e));
+      // @ 引用跳转失败(文件不存在等):回到之前的文件,不直接关抽屉;
+      // 初次打开就失败(此时还没有任何已加载内容)才关闭
+      if (prevRel && preview.value) {
+        emit("navigate", prevRel);
+      } else {
         preview.value = null;
-        toast.error(String(e));
         emit("close");
       }
     } finally {
@@ -137,6 +150,27 @@ async function openExternal() {
     toast.error(String(e));
   }
 }
+
+// ── 正文 @ 文件引用 linkify(渲染态 Markdown 专属) ──────────────────────────
+const mdBody = ref<HTMLElement | null>(null);
+
+// Markdown 组件渲染完成后(link 语法已由库处理)再扫纯文本节点插入引用按钮;
+// 编辑态切换/保存后内容重渲染,同样需要重扫
+watch(
+  () => [preview.value?.text, editing.value] as const,
+  async () => {
+    await nextTick();
+    if (mdBody.value) linkifyFileRefs(mdBody.value);
+  },
+);
+
+function onMarkdownClick(e: MouseEvent) {
+  const btn = (e.target as HTMLElement).closest(`button.${FILE_REF_CLASS}`);
+  if (!btn || !props.relPath) return;
+  const ref = (btn as HTMLElement).dataset.ref;
+  if (!ref) return;
+  emit("navigate", resolveRefPath(props.relPath, ref));
+}
 </script>
 
 <template>
@@ -144,8 +178,12 @@ async function openExternal() {
     <Transition name="ai-drawer">
       <div v-if="open" class="fixed inset-0 z-40" @click="requestClose">
         <div class="absolute inset-0 bg-black/40" />
+        <!--
+          抽屉是 teleport 到 body 的 fixed 层,顶部须避让 TitleBar(h-9, z-[60] 在其上),
+          否则抽屉头部会被标题栏盖住
+        -->
         <aside
-          class="absolute inset-y-0 right-0 flex w-[560px] max-w-[92vw] flex-col border-l bg-background shadow-xl"
+          class="absolute bottom-0 right-0 top-9 flex w-[560px] max-w-[92vw] flex-col border-l border-t bg-background shadow-xl"
           @click.stop
         >
           <header class="flex shrink-0 items-center gap-2 border-b px-4 py-3">
@@ -213,7 +251,12 @@ async function openExternal() {
               :editable="editing"
             />
           </div>
-          <div v-else class="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+          <div
+            v-else
+            ref="mdBody"
+            class="min-h-0 flex-1 overflow-y-auto px-6 py-4"
+            @click="onMarkdownClick"
+          >
             <Markdown mode="static" :content="preview.text" :locale="settingsStore.language" />
           </div>
         </aside>

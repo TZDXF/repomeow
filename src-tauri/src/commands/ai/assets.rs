@@ -2,7 +2,8 @@
 //!
 //! - `scan_project_ai_assets`:固定路径 + 已知目录探测项目内的指令文件
 //!   (CLAUDE.md / AGENTS.md / GEMINI.md 等)、MCP 配置(.mcp.json 等)与
-//!   skills 目录(.claude/skills/*),并与 registry 的 13 个 agent 安装状态交叉。
+//!   skills 目录(`.claude/skills/*` 与 `.agents/skills/*`,按技能名去重),
+//!   并与 registry 的 13 个 agent 安装状态交叉。
 //!   不做全仓库递归:直接 `Path::exists` 探测,天然覆盖隐藏条目且代价恒定。
 //! - `set_project_cc_skill` / `set_project_cc_mcp`:把 cc-switch(`~/.cc-switch`)
 //!   管理的 skill / MCP 服务器按项目勾选导出到项目文件
@@ -44,7 +45,7 @@ pub struct ProjectMcpFile {
     pub servers: Vec<String>,
 }
 
-/// 项目 .claude/skills 下的一个技能。
+/// 项目 skills 目录下的一个技能。
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectSkill {
@@ -110,6 +111,10 @@ const MCP_PROBES: &[(&str, &str)] = &[
     (".cursor/mcp.json", "mcpServers"),
     (".vscode/mcp.json", "servers"),
 ];
+
+/// 项目级 skills 目录候选(按优先级排序,同名技能先命中者保留)。
+/// `.claude/skills` 是 Claude Code 约定,`.agents/skills` 是 pi 等工具的跨 agent 约定。
+const SKILL_DIR_PROBES: &[&str] = &[".claude/skills", ".agents/skills"];
 
 /// agent → 项目内配置探测路径(agent 状态行的「已配置」判定)。
 const AGENT_PROBES: &[(&str, &[&str])] = &[
@@ -188,7 +193,7 @@ fn scan_assets(path: &str) -> AppResult<ProjectAiAssets> {
         })
         .collect();
 
-    let skills = scan_project_skills(&root.join(".claude").join("skills"));
+    let skills = scan_project_skills(root);
 
     let agents = list_agents()
         .into_iter()
@@ -238,34 +243,44 @@ fn read_mcp_server_names(path: &Path, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// 扫 .claude/skills 一层:每个含 SKILL.md 的子目录算一个技能。
-fn scan_project_skills(skills_dir: &Path) -> Vec<ProjectSkill> {
-    let Ok(entries) = fs::read_dir(skills_dir) else {
-        return Vec::new();
-    };
-    let mut skills: Vec<ProjectSkill> = entries
-        .flatten()
-        .filter_map(|entry| {
-            let dir = entry.path();
-            if !dir.is_dir() {
-                return None;
-            }
-            let skill_md = dir.join("SKILL.md");
-            if !skill_md.is_file() {
-                return None;
-            }
-            let dir_name = dir.file_name()?.to_string_lossy().to_string();
-            let (name, description) = fs::read_to_string(&skill_md)
-                .map(|content| parse_skill_frontmatter(&content))
-                .unwrap_or_default();
-            Some(ProjectSkill {
-                dir: format!(".claude/skills/{dir_name}"),
-                name: name.unwrap_or_else(|| dir_name.clone()),
-                description: description.unwrap_or_default(),
+/// 扫全部候选 skills 目录:每个含 SKILL.md 的子目录算一个技能,
+/// 跨目录按技能名去重(候选顺序即优先级,先命中者保留)。
+fn scan_project_skills(root: &Path) -> Vec<ProjectSkill> {
+    let mut skills: Vec<ProjectSkill> = Vec::new();
+    for rel_dir in SKILL_DIR_PROBES {
+        let Ok(entries) = fs::read_dir(root.join(rel_dir)) else {
+            continue;
+        };
+        let mut dir_skills: Vec<ProjectSkill> = entries
+            .flatten()
+            .filter_map(|entry| {
+                let dir = entry.path();
+                if !dir.is_dir() {
+                    return None;
+                }
+                let skill_md = dir.join("SKILL.md");
+                if !skill_md.is_file() {
+                    return None;
+                }
+                let dir_name = dir.file_name()?.to_string_lossy().to_string();
+                let (name, description) = fs::read_to_string(&skill_md)
+                    .map(|content| parse_skill_frontmatter(&content))
+                    .unwrap_or_default();
+                Some(ProjectSkill {
+                    dir: format!("{rel_dir}/{dir_name}"),
+                    name: name.unwrap_or_else(|| dir_name.clone()),
+                    description: description.unwrap_or_default(),
+                })
             })
-        })
-        .collect();
-    skills.sort_by(|a, b| a.dir.cmp(&b.dir));
+            .collect();
+        dir_skills.sort_by(|a, b| a.dir.cmp(&b.dir));
+        for skill in dir_skills {
+            if !skills.iter().any(|s| s.name == skill.name) {
+                skills.push(skill);
+            }
+        }
+    }
+    skills.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.dir.cmp(&b.dir)));
     skills
 }
 
@@ -619,6 +634,29 @@ mod tests {
         assert_eq!(assets.skills[0].dir, ".claude/skills/demo");
         assert_eq!(assets.skills[0].name, "demo-skill");
         assert_eq!(assets.skills[0].description, "做演示");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scans_multiple_skill_dirs_and_dedupes_by_name() {
+        let dir = temp_project_dir("skills-dedup");
+        // .agents/skills 独有技能
+        let agents_only = dir.join(".agents/skills/review");
+        fs::create_dir_all(&agents_only).unwrap();
+        fs::write(agents_only.join("SKILL.md"), "---\nname: review\n---\n").unwrap();
+        // 两个目录同名技能:.claude/skills 优先保留
+        for rel in [".claude/skills/shared", ".agents/skills/shared"] {
+            let shared = dir.join(rel);
+            fs::create_dir_all(&shared).unwrap();
+            fs::write(shared.join("SKILL.md"), "---\nname: shared\n---\n").unwrap();
+        }
+
+        let assets = scan_assets(&dir.to_string_lossy()).unwrap();
+        let names: Vec<&str> = assets.skills.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["review", "shared"]);
+        assert_eq!(assets.skills[0].dir, ".agents/skills/review");
+        assert_eq!(assets.skills[1].dir, ".claude/skills/shared");
 
         let _ = fs::remove_dir_all(&dir);
     }

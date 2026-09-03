@@ -17,13 +17,14 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import AiFileDrawer from "@/components/project/AiFileDrawer.vue";
 import CcSwitchImportDialog from "@/components/project/CcSwitchImportDialog.vue";
+import { baseName, splitDirName } from "@/lib/path";
 import { cmd } from "@/lib/tauri";
 import type { CcSwitchAssets, Project, ProjectAiAssets } from "@/types";
 
 /**
  * 项目详情页「AI 视图」:全宽非卡片布局,聚合展示项目内 AI 资产——
  * 指令/规则文件(CLAUDE.md、AGENTS.md、.cursor/rules 等)、MCP 配置(.mcp.json 等)、
- * skills(.claude/skills)与 13 个 agent 工具的安装/配置状态;
+ * skills(.claude/skills 与 .agents/skills,按名称去重)与 13 个 agent 工具的安装/配置状态;
  * 支持从 cc-switch(~/.cc-switch)勾选导入 skills 与 MCP 到项目文件。
  * 点击文件条目打开右侧抽屉预览/编辑(AiFileDrawer)。
  */
@@ -82,10 +83,8 @@ const isEmpty = computed(
 );
 const ccAvailable = computed(() => !!ccAssets.value?.found);
 
-/** 项目已有 skills 目录名(导入对话框勾选态初始化) */
-const projectSkillDirs = computed(() =>
-  (assets.value?.skills ?? []).map((s) => s.dir.slice(".claude/skills/".length)),
-);
+/** 项目已有 skills 目录名(导入对话框勾选态初始化;skills 可多目录来源,取末段目录名) */
+const projectSkillDirs = computed(() => (assets.value?.skills ?? []).map((s) => baseName(s.dir)));
 /** 项目根 .mcp.json 已有的服务器名 */
 const projectMcpNames = computed(
   () => assets.value?.mcp.find((m) => m.path === ".mcp.json")?.servers ?? [],
@@ -195,13 +194,19 @@ function onImported() {
             :key="skill.dir"
             type="button"
             class="flex items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent"
-            :title="skill.description || skill.dir"
+            :title="`${skill.dir}${skill.description ? `\n${skill.description}` : ''}`"
             @click="drawerPath = `${skill.dir}/SKILL.md`"
           >
             <Package class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <span class="min-w-0 truncate text-xs font-medium">{{ skill.name }}</span>
-            <span v-if="skill.description" class="min-w-0 truncate text-xs text-muted-foreground">
+            <span class="w-36 shrink-0 truncate text-xs font-medium">{{ skill.name }}</span>
+            <span
+              v-if="skill.description"
+              class="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+            >
               {{ skill.description }}
+            </span>
+            <span class="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground/70">
+              {{ splitDirName(skill.dir).parent }}
             </span>
           </button>
         </div>
@@ -261,7 +266,12 @@ function onImported() {
     </div>
   </div>
 
-  <AiFileDrawer :root="project.path" :rel-path="drawerPath" @close="drawerPath = null" />
+  <AiFileDrawer
+    :root="project.path"
+    :rel-path="drawerPath"
+    @close="drawerPath = null"
+    @navigate="drawerPath = $event"
+  />
   <CcSwitchImportDialog
     v-model:open="importOpen"
     :project="project"

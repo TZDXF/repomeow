@@ -617,7 +617,7 @@ export interface ProjectMcpFile {
   servers: string[];
 }
 
-/** 项目 .claude/skills 下的一个技能 */
+/** 项目 skills 目录(.claude/skills、.agents/skills)下的一个技能 */
 export interface ProjectSkill {
   /** 技能目录的仓库相对路径,如 ".claude/skills/foo" */
   dir: string;

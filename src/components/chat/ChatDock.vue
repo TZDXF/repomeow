@@ -149,8 +149,9 @@ const panelStyle = computed(() => ({
   maxHeight: "calc(100vh - 2rem - 2.25rem)",
 }));
 
-// 最小宽度实测:临时取消工具组换行读 scrollWidth,保证底栏(权限/模型/思考强度
-// + 上下文圆圈 + 发送钮)永不换行;标签随模型/语言变化,打开面板或相关值变化时重测
+// 最小宽度实测:临时把工具组脱离 flex 布局按内容量出自然单行宽度,保证底栏
+// (权限/模型/思考强度 + 上下文圆圈 + 发送钮)永不换行;标签随模型/语言变化,
+// 打开面板或相关值变化时重测
 const toolsRef = useTemplateRef<{ $el: HTMLElement } | null>("tools");
 const minPanelWidth = ref(PANEL_FALLBACK_MIN_WIDTH);
 
@@ -158,9 +159,15 @@ async function measureMinPanelWidth() {
   await nextTick();
   const el = toolsRef.value?.$el;
   if (!el) return;
-  el.classList.add("flex-nowrap");
-  const toolsWidth = el.scrollWidth;
-  el.classList.remove("flex-nowrap");
+  // 不能靠叠 flex-nowrap 读 scrollWidth:Tailwind v4 里 .flex-wrap 层叠序晚于
+  // .flex-nowrap(叠加无效),且 flex-1(basis:0%)下 scrollWidth 恒等于
+  // clientWidth——量到的是当前分得的空间而非内容宽度,每次重测都会把
+  // 「当前宽度 + 常量开销」写成新 min-width,切换下拉即不断变宽
+  el.style.flex = "none";
+  el.style.width = "max-content";
+  const toolsWidth = el.getBoundingClientRect().width;
+  el.style.flex = "";
+  el.style.width = "";
   minPanelWidth.value = Math.max(
     PANEL_FALLBACK_MIN_WIDTH,
     Math.ceil(toolsWidth) + PANEL_TOOLS_OVERHEAD,
