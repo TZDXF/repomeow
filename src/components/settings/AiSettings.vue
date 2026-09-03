@@ -1,18 +1,18 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, type ComponentPublicInstance } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
+import { FolderOpen, Import, Loader2, Plug, Plus } from "@lucide/vue";
+import AiProviderAddDialog from "@/components/settings/AiProviderAddDialog.vue";
+import AiProviderCard from "@/components/settings/AiProviderCard.vue";
+import CcSwitchImportDialog from "@/components/settings/CcSwitchImportDialog.vue";
 import {
-  Check,
-  ChevronDown,
-  FolderOpen,
-  Import,
-  Loader2,
-  Plug,
-  Plus,
-  RefreshCw,
-  Trash2,
-} from "@lucide/vue";
+  draftModel,
+  nextDraftKey,
+  type CompatTriState,
+  type ModelDraft,
+  type ProviderDraft,
+} from "@/components/settings/ai-provider-draft";
 import {
   ModelSelector,
   modelOptionValue,
@@ -20,37 +20,16 @@ import {
   type ModelSelectorGroup,
 } from "@/components/ai-elements/model-selector";
 import { Button } from "@/components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { fetchAiModels, testAiConnection } from "@/lib/ai";
 import {
   emptyChatPrefs,
   getBuiltinAiProviders,
-  listCcSwitchProviders,
   revealAiConfigDir,
   type AiModelCompat,
   type AiModelDef,
   type AiModelRef,
   type AiProvider,
   type CcSwitchProvider,
-  type CcSwitchScan,
 } from "@/lib/ai-config";
 import { useAiConfigStore } from "@/stores/ai-config";
 import { useSettingsStore } from "@/stores/settings";
@@ -60,38 +39,6 @@ const store = useAiConfigStore();
 const settings = useSettingsStore();
 
 // ── 本地编辑副本(API Key 类输入不适合边敲边存,点「保存」才全量落盘) ──
-
-/** 三态兼容开关:auto = 跟随 provider/baseUrl 自动探测(不写入配置) */
-type CompatTriState = "auto" | "on" | "off";
-type CompatMaxTokensField = "auto" | "max_completion_tokens" | "max_tokens";
-
-/** 模型高级配置草稿:仅暴露自建网关常见的四个兼容开关 */
-interface ModelCompatDraft {
-  supportsDeveloperRole: CompatTriState;
-  supportsReasoningEffort: CompatTriState;
-  supportsStore: CompatTriState;
-  maxTokensField: CompatMaxTokensField;
-}
-
-interface ModelDraft {
-  key: string;
-  id: string;
-  name: string;
-  contextWindow: string;
-  maxTokens: string;
-  compat: ModelCompatDraft;
-  /** 建控件之外的原始定义(cost/input 等透传保存,避免 UI 字段丢元数据) */
-  source: AiModelDef;
-}
-
-interface ProviderDraft {
-  key: string;
-  id: string;
-  name: string;
-  baseUrl: string;
-  apiKey: string;
-  models: ModelDraft[];
-}
 
 const drafts = ref<ProviderDraft[]>([]);
 const defaultRef = ref<AiModelRef | null>(null);
@@ -103,38 +50,14 @@ const fetchingKey = ref<string | null>(null);
 const confirmDeleteKey = ref<string | null>(null);
 const openMap = reactive<Record<string, boolean>>({});
 
-let localKey = 0;
-const nextKey = () => `local-${localKey++}`;
-
 function draftProvider(id: string, provider: AiProvider): ProviderDraft {
   return {
-    key: id || nextKey(),
+    key: id || nextDraftKey(),
     id,
     name: provider.name,
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey,
     models: provider.models.map((model) => draftModel(model)),
-  };
-}
-
-function toTriState(value: boolean | undefined): CompatTriState {
-  return value === undefined ? "auto" : value ? "on" : "off";
-}
-
-function draftModel(model: AiModelDef): ModelDraft {
-  return {
-    key: nextKey(),
-    id: model.id,
-    name: model.name,
-    contextWindow: model.contextWindow > 0 ? String(model.contextWindow) : "",
-    maxTokens: model.maxTokens > 0 ? String(model.maxTokens) : "",
-    compat: {
-      supportsDeveloperRole: toTriState(model.compat?.supportsDeveloperRole),
-      supportsReasoningEffort: toTriState(model.compat?.supportsReasoningEffort),
-      supportsStore: toTriState(model.compat?.supportsStore),
-      maxTokensField: model.compat?.maxTokensField ?? "auto",
-    },
-    source: model,
   };
 }
 
@@ -161,133 +84,32 @@ onMounted(async () => {
   }
 });
 
-// ── 添加厂商对话框 ───────────────────────────────────────────────────
-
-/** 厂商选择中「自定义」选项的固定值 */
-const CUSTOM_CHOICE = "custom";
+// ── 添加厂商 / 从 CC Switch 导入(对话框抽为子组件,确认后并入草稿) ────
 
 const addDialogOpen = ref(false);
 const builtinCatalog = ref<Record<string, AiProvider>>({});
-const addChoice = ref(CUSTOM_CHOICE);
-const addForm = reactive({ id: "", name: "", baseUrl: "", apiKey: "" });
+const ccSwitchDialogOpen = ref(false);
 
-/** 内置目录中尚未添加的厂商(已存在的 id 不再提供,避免重复) */
-const addOptions = computed(() => {
-  const used = new Set(drafts.value.map((draft) => draft.id.trim()));
-  return Object.entries(builtinCatalog.value)
-    .filter(([id]) => !used.has(id))
-    .map(([id, provider]) => ({ id, name: provider.name.trim() || id }));
-});
+/** 已占用的厂商 id(传给添加对话框做去重与选项过滤) */
+const existingProviderIds = computed(() => drafts.value.map((draft) => draft.id.trim()));
 
-/** 选中内置厂商时带入的预置模型数(对话框提示用) */
-const seededModelCount = computed(() =>
-  addChoice.value === CUSTOM_CHOICE
-    ? 0
-    : (builtinCatalog.value[addChoice.value]?.models.length ?? 0),
-);
-
-function openAddDialog() {
-  addChoice.value = CUSTOM_CHOICE;
-  addForm.id = "";
-  addForm.name = "";
-  addForm.baseUrl = "";
-  addForm.apiKey = "";
-  addDialogOpen.value = true;
-}
-
-function onAddChoiceChange(value: unknown) {
-  const choice = String(value);
-  addChoice.value = choice;
-  if (choice === CUSTOM_CHOICE) {
-    addForm.id = "";
-    addForm.name = "";
-    addForm.baseUrl = "";
-    return;
-  }
-  const provider = builtinCatalog.value[choice];
-  if (!provider) return;
-  addForm.id = choice;
-  addForm.name = provider.name;
-  addForm.baseUrl = provider.baseUrl;
-}
-
-function confirmAddProvider() {
-  const id = addForm.id.trim();
-  if (!id) {
-    toast.error(t("settings.ai.missingProviderId"));
-    return;
-  }
-  if (drafts.value.some((draft) => draft.id.trim() === id)) {
-    toast.error(t("settings.ai.duplicateProviderId", { id }));
-    return;
-  }
-  const catalogModels =
-    addChoice.value === CUSTOM_CHOICE ? [] : (builtinCatalog.value[addChoice.value]?.models ?? []);
+function onAddProvider(payload: {
+  id: string;
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  models: AiModelDef[];
+}) {
   const draft: ProviderDraft = {
-    key: nextKey(),
-    id,
-    name: addForm.name.trim(),
-    baseUrl: addForm.baseUrl.trim(),
-    apiKey: addForm.apiKey.trim(),
-    models: catalogModels.map((model) => draftModel(model)),
+    key: nextDraftKey(),
+    id: payload.id,
+    name: payload.name,
+    baseUrl: payload.baseUrl,
+    apiKey: payload.apiKey,
+    models: payload.models.map((model) => draftModel(model)),
   };
   drafts.value = [...drafts.value, draft];
   openMap[draft.key] = true;
-  addDialogOpen.value = false;
-}
-
-// ── 从 CC Switch 导入 ───────────────────────────────────────────────
-
-const ccSwitchDialogOpen = ref(false);
-const ccSwitchLoading = ref(false);
-const ccSwitchScan = ref<CcSwitchScan | null>(null);
-/** 勾选项的 key:`${app}/${id}`(不同应用间 id 可能重复) */
-const ccSwitchChecked = ref<Set<string>>(new Set());
-
-function ccSwitchKey(provider: CcSwitchProvider): string {
-  return `${provider.app}/${provider.id}`;
-}
-
-async function openCcSwitchDialog() {
-  ccSwitchDialogOpen.value = true;
-  ccSwitchLoading.value = true;
-  ccSwitchScan.value = null;
-  try {
-    const scan = await listCcSwitchProviders();
-    ccSwitchScan.value = scan;
-    // 默认勾选「当前启用」的供应商,其余由用户自行挑选
-    ccSwitchChecked.value = new Set(
-      scan.providers.filter((provider) => provider.current).map(ccSwitchKey),
-    );
-  } catch (error) {
-    toast.error(error instanceof Error ? error.message : String(error));
-    ccSwitchDialogOpen.value = false;
-  } finally {
-    ccSwitchLoading.value = false;
-  }
-}
-
-function toggleCcSwitchProvider(provider: CcSwitchProvider) {
-  const key = ccSwitchKey(provider);
-  const next = new Set(ccSwitchChecked.value);
-  if (next.has(key)) next.delete(key);
-  else next.add(key);
-  ccSwitchChecked.value = next;
-}
-
-const ccSwitchAllChecked = computed(() => {
-  const providers = ccSwitchScan.value?.providers ?? [];
-  return (
-    providers.length > 0 &&
-    providers.every((provider) => ccSwitchChecked.value.has(ccSwitchKey(provider)))
-  );
-});
-
-function toggleCcSwitchAll() {
-  const providers = ccSwitchScan.value?.providers ?? [];
-  ccSwitchChecked.value = ccSwitchAllChecked.value
-    ? new Set()
-    : new Set(providers.map(ccSwitchKey));
 }
 
 /** 为导入的厂商生成不与现有草稿冲突的 id(重复时追加 -2/-3 后缀) */
@@ -301,14 +123,10 @@ function uniqueProviderId(base: string): string {
   }
 }
 
-function confirmCcSwitchImport() {
-  const providers = (ccSwitchScan.value?.providers ?? []).filter((provider) =>
-    ccSwitchChecked.value.has(ccSwitchKey(provider)),
-  );
-  if (!providers.length) return;
+function onCcSwitchImport(providers: CcSwitchProvider[]) {
   for (const provider of providers) {
     const draft: ProviderDraft = {
-      key: nextKey(),
+      key: nextDraftKey(),
       id: uniqueProviderId(provider.id),
       name: provider.name.trim(),
       baseUrl: provider.baseUrl.trim(),
@@ -318,7 +136,6 @@ function confirmCcSwitchImport() {
     drafts.value = [...drafts.value, draft];
     openMap[draft.key] = true;
   }
-  ccSwitchDialogOpen.value = false;
   toast.success(t("settings.ai.ccSwitchImported", { count: providers.length }));
 }
 
@@ -338,81 +155,10 @@ function removeProvider(draft: ProviderDraft) {
   delete openMap[draft.key];
 }
 
-// ── 模型行 ───────────────────────────────────────────────────────────
-
-function addModel(draft: ProviderDraft) {
-  draft.models = [
-    ...draft.models,
-    draftModel({
-      id: "",
-      name: "",
-      reasoning: true,
-      input: ["text"],
-      contextWindow: 0,
-      maxTokens: 0,
-    }),
-  ];
-}
-
-function removeModel(draft: ProviderDraft, model: ModelDraft) {
-  draft.models = draft.models.filter((item) => item !== model);
-}
-
-// ── 模型高级配置(compat 兼容开关) ────────────────────────────────────
-
-/** 各模型行高级配置区的展开开关 */
-const advancedOpen = reactive<Record<string, boolean>>({});
-
-/** 暴露给 UI 的兼容开关;maxTokensField 选项为字段名,其余为三态 */
-const COMPAT_FIELDS: readonly {
-  key: keyof ModelCompatDraft;
-  labelKey: string;
-  options: readonly string[];
-}[] = [
-  {
-    key: "supportsDeveloperRole",
-    labelKey: "settings.ai.compatDeveloperRole",
-    options: ["auto", "on", "off"],
-  },
-  {
-    key: "supportsReasoningEffort",
-    labelKey: "settings.ai.compatReasoningEffort",
-    options: ["auto", "on", "off"],
-  },
-  {
-    key: "supportsStore",
-    labelKey: "settings.ai.compatStore",
-    options: ["auto", "on", "off"],
-  },
-  {
-    key: "maxTokensField",
-    labelKey: "settings.ai.compatMaxTokensField",
-    options: ["auto", "max_completion_tokens", "max_tokens"],
-  },
-];
-
-/** 选项文案:auto/支持/不支持走 i18n,字段名选项原样展示 */
-function compatOptionLabel(option: string): string {
-  if (option === "auto") return t("settings.ai.compatAuto");
-  if (option === "on") return t("settings.ai.compatOn");
-  if (option === "off") return t("settings.ai.compatOff");
-  return option;
-}
-
-function setCompatOption(model: ModelDraft, key: keyof ModelCompatDraft, value: unknown) {
-  (model.compat as unknown as Record<string, string>)[key] = String(value);
-}
-
 // ── 模型 ID 下拉候选(「获取模型列表」的结果,供填写时挑选,不直接落行) ──
 
 /** 各厂商最近一次拉取到的模型 ID 列表(按厂商本地 key 存放) */
 const fetchedModels = reactive<Record<string, string[]>>({});
-/** 各模型行 ID 输入框的候选弹层开关(仅由行内下拉按钮开合) */
-const suggestionOpen = reactive<Record<string, boolean>>({});
-/** 弹层顶部搜索框文本(弹层关闭时删除,打开时重置) */
-const suggestionQuery = reactive<Record<string, string>>({});
-const suggestionSearchRefs = new Map<string, HTMLInputElement>();
-const SUGGESTION_LIMIT = 50;
 
 /** 拉取厂商模型列表,作为模型 ID 输入框的下拉候选 */
 async function fetchModels(draft: ProviderDraft) {
@@ -428,45 +174,6 @@ async function fetchModels(draft: ProviderDraft) {
   } finally {
     fetchingKey.value = null;
   }
-}
-
-/** 该厂商是否已有拉取到的模型候选(决定模型行是否展示下拉按钮) */
-function hasFetchedModels(draft: ProviderDraft): boolean {
-  return (fetchedModels[draft.key]?.length ?? 0) > 0;
-}
-
-/** 当前行的下拉候选:按弹层搜索词模糊过滤、排除其他行已占用的 ID */
-function modelSuggestions(draft: ProviderDraft, model: ModelDraft): string[] {
-  const list = fetchedModels[draft.key];
-  if (!list?.length) return [];
-  const used = new Set(draft.models.filter((item) => item !== model).map((item) => item.id.trim()));
-  const keyword = (suggestionQuery[model.key] ?? "").trim().toLowerCase();
-  return list
-    .filter((id) => !used.has(id) && (!keyword || id.toLowerCase().includes(keyword)))
-    .slice(0, SUGGESTION_LIMIT);
-}
-
-function setSuggestionSearchRef(key: string, el: unknown) {
-  const input = (el as ComponentPublicInstance | null)?.$el;
-  if (input instanceof HTMLInputElement) suggestionSearchRefs.set(key, input);
-  else suggestionSearchRefs.delete(key);
-}
-
-/** 弹层开合统一入口:展开时重置搜索词并聚焦搜索框,关闭时清理 */
-function onSuggestionOpenChange(model: ModelDraft, open: boolean) {
-  suggestionOpen[model.key] = open;
-  if (!open) {
-    delete suggestionQuery[model.key];
-    return;
-  }
-  suggestionQuery[model.key] = "";
-  nextTick(() => suggestionSearchRefs.get(model.key)?.focus());
-}
-
-function pickModelId(model: ModelDraft, id: string) {
-  model.id = id;
-  suggestionOpen[model.key] = false;
-  delete suggestionQuery[model.key];
 }
 
 // ── 默认模型 ─────────────────────────────────────────────────────────
@@ -650,11 +357,16 @@ const CONCURRENCY_OPTIONS = [1, 2, 3, 4, 5];
         <div class="flex items-center justify-between">
           <label class="text-sm font-medium">{{ t("settings.ai.providers") }}</label>
           <div class="flex items-center gap-1.5">
-            <Button variant="outline" size="sm" class="h-7 gap-1" @click="openCcSwitchDialog">
+            <Button
+              variant="outline"
+              size="sm"
+              class="h-7 gap-1"
+              @click="ccSwitchDialogOpen = true"
+            >
               <Import class="h-3.5 w-3.5" />
               {{ t("settings.ai.importCcSwitch") }}
             </Button>
-            <Button variant="outline" size="sm" class="h-7 gap-1" @click="openAddDialog">
+            <Button variant="outline" size="sm" class="h-7 gap-1" @click="addDialogOpen = true">
               <Plus class="h-3.5 w-3.5" />
               {{ t("settings.ai.addProvider") }}
             </Button>
@@ -666,310 +378,19 @@ const CONCURRENCY_OPTIONS = [1, 2, 3, 4, 5];
         </p>
 
         <div class="flex flex-col gap-2">
-          <Collapsible
+          <AiProviderCard
             v-for="draft in drafts"
             :key="draft.key"
-            :open="openMap[draft.key]"
+            :draft="draft"
+            :open="openMap[draft.key] ?? false"
+            :confirm-delete="confirmDeleteKey === draft.key"
+            :is-default="isDefaultProvider(draft)"
+            :fetching-key="fetchingKey"
+            :fetched-model-ids="fetchedModels[draft.key] ?? []"
             @update:open="openMap[draft.key] = $event"
-          >
-            <div class="rounded-lg border">
-              <div class="flex items-center gap-2 px-2 py-1.5">
-                <CollapsibleTrigger as-child>
-                  <button
-                    type="button"
-                    class="hover:bg-accent flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-left"
-                  >
-                    <ChevronDown
-                      class="text-muted-foreground h-3.5 w-3.5 shrink-0 transition-transform"
-                      :class="openMap[draft.key] ? 'rotate-180' : ''"
-                    />
-                    <span class="truncate text-sm font-medium">
-                      {{ draft.name.trim() || draft.id.trim() || t("settings.ai.unnamedProvider") }}
-                    </span>
-                    <span class="text-muted-foreground truncate text-xs">
-                      {{ draft.baseUrl.trim() }}
-                    </span>
-                  </button>
-                </CollapsibleTrigger>
-                <span
-                  v-if="isDefaultProvider(draft)"
-                  class="bg-primary/10 text-primary shrink-0 rounded-full px-2 py-0.5 text-xs font-medium"
-                >
-                  {{ t("settings.ai.defaultBadge") }}
-                </span>
-                <span class="text-muted-foreground shrink-0 text-xs">
-                  {{ t("settings.ai.modelCount", { count: draft.models.length }) }}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  class="h-7 shrink-0 px-2 text-xs"
-                  :class="
-                    confirmDeleteKey === draft.key ? 'text-destructive' : 'text-muted-foreground'
-                  "
-                  :title="t('settings.ai.deleteProvider')"
-                  @click="removeProvider(draft)"
-                >
-                  <Trash2 class="h-3.5 w-3.5" />
-                  {{
-                    confirmDeleteKey === draft.key
-                      ? t("settings.ai.confirmDeleteProvider")
-                      : t("settings.ai.deleteProvider")
-                  }}
-                </Button>
-              </div>
-
-              <CollapsibleContent>
-                <div class="flex flex-col gap-3 border-t px-3 py-3">
-                  <div class="grid grid-cols-2 gap-2">
-                    <div class="flex flex-col gap-1">
-                      <label class="text-muted-foreground text-xs">{{
-                        t("settings.ai.providerId")
-                      }}</label>
-                      <Input
-                        v-model="draft.id"
-                        class="h-8 text-xs"
-                        :placeholder="t('settings.ai.providerIdPlaceholder')"
-                        spellcheck="false"
-                      />
-                    </div>
-                    <div class="flex flex-col gap-1">
-                      <label class="text-muted-foreground text-xs">{{
-                        t("settings.ai.providerName")
-                      }}</label>
-                      <Input
-                        v-model="draft.name"
-                        class="h-8 text-xs"
-                        :placeholder="t('settings.ai.providerNamePlaceholder')"
-                        spellcheck="false"
-                      />
-                    </div>
-                  </div>
-                  <div class="flex flex-col gap-1">
-                    <label class="text-muted-foreground text-xs">{{
-                      t("settings.ai.baseUrl")
-                    }}</label>
-                    <Input
-                      v-model="draft.baseUrl"
-                      class="h-8 text-xs"
-                      :placeholder="t('settings.ai.baseUrlPlaceholder')"
-                      spellcheck="false"
-                    />
-                  </div>
-                  <div class="flex flex-col gap-1">
-                    <label class="text-muted-foreground text-xs">{{
-                      t("settings.ai.apiKey")
-                    }}</label>
-                    <Input
-                      v-model="draft.apiKey"
-                      type="password"
-                      class="h-8 text-xs"
-                      :placeholder="t('settings.ai.apiKeyPlaceholder')"
-                      autocomplete="off"
-                      spellcheck="false"
-                    />
-                  </div>
-
-                  <!-- 模型行 -->
-                  <div class="flex flex-col gap-1.5">
-                    <div class="flex items-center justify-between">
-                      <label class="text-muted-foreground text-xs">{{
-                        t("settings.ai.models")
-                      }}</label>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        class="h-7 gap-1"
-                        :disabled="
-                          fetchingKey != null || !draft.baseUrl.trim() || !draft.apiKey.trim()
-                        "
-                        :title="t('settings.ai.fetchModelsHint')"
-                        @click="fetchModels(draft)"
-                      >
-                        <Loader2 v-if="fetchingKey === draft.key" class="h-3 w-3 animate-spin" />
-                        <RefreshCw v-else class="h-3 w-3" />
-                        {{
-                          fetchingKey === draft.key
-                            ? t("settings.ai.fetchingModels")
-                            : t("settings.ai.fetchModels")
-                        }}
-                      </Button>
-                    </div>
-                    <p v-if="!draft.models.length" class="text-muted-foreground text-xs">
-                      {{ t("settings.ai.noModels") }}
-                    </p>
-                    <div
-                      v-for="model in draft.models"
-                      :key="model.key"
-                      class="flex flex-col gap-2 rounded-md border p-2"
-                    >
-                      <Popover
-                        :open="suggestionOpen[model.key] ?? false"
-                        @update:open="onSuggestionOpenChange(model, $event)"
-                      >
-                        <div class="flex items-end gap-1.5">
-                          <div class="flex min-w-0 flex-1 flex-col gap-1">
-                            <label class="text-muted-foreground text-xs">{{
-                              t("settings.ai.modelId")
-                            }}</label>
-                            <PopoverAnchor as-child>
-                              <Input
-                                v-model="model.id"
-                                class="h-7 text-xs"
-                                :placeholder="t('settings.ai.modelIdPlaceholder')"
-                                spellcheck="false"
-                              />
-                            </PopoverAnchor>
-                          </div>
-                          <PopoverTrigger
-                            v-if="hasFetchedModels(draft)"
-                            as-child
-                            :title="t('settings.ai.pickFetchedModel')"
-                          >
-                            <Button variant="outline" size="icon" class="h-7 w-7 shrink-0">
-                              <ChevronDown
-                                class="h-3.5 w-3.5 transition-transform"
-                                :class="suggestionOpen[model.key] ? 'rotate-180' : ''"
-                              />
-                            </Button>
-                          </PopoverTrigger>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            class="text-muted-foreground hover:text-destructive h-7 w-7 shrink-0"
-                            :title="t('settings.ai.removeModel')"
-                            @click="removeModel(draft, model)"
-                          >
-                            <Trash2 class="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                        <PopoverContent
-                          class="w-(--reka-popper-anchor-width) gap-1 p-1"
-                          align="start"
-                          @open-auto-focus.prevent
-                          @close-auto-focus.prevent
-                        >
-                          <Input
-                            :ref="(el) => setSuggestionSearchRef(model.key, el)"
-                            :model-value="suggestionQuery[model.key] ?? ''"
-                            class="h-7 text-xs"
-                            :placeholder="t('settings.ai.searchFetchedModels')"
-                            spellcheck="false"
-                            @update:model-value="suggestionQuery[model.key] = String($event)"
-                          />
-                          <div class="max-h-56 overflow-y-auto">
-                            <button
-                              v-for="option in modelSuggestions(draft, model)"
-                              :key="option"
-                              type="button"
-                              class="hover:bg-accent w-full truncate rounded-sm px-2 py-1 text-left text-xs"
-                              @click="pickModelId(model, option)"
-                            >
-                              {{ option }}
-                            </button>
-                            <p
-                              v-if="!modelSuggestions(draft, model).length"
-                              class="text-muted-foreground px-2 py-1.5 text-xs"
-                            >
-                              {{ t("settings.ai.noMatchedModels") }}
-                            </p>
-                          </div>
-                        </PopoverContent>
-                      </Popover>
-                      <div class="grid grid-cols-3 gap-1.5">
-                        <div class="flex flex-col gap-1">
-                          <label class="text-muted-foreground text-xs">{{
-                            t("settings.ai.modelName")
-                          }}</label>
-                          <Input
-                            v-model="model.name"
-                            class="h-7 text-xs"
-                            :placeholder="t('settings.ai.modelNamePlaceholder')"
-                            spellcheck="false"
-                          />
-                        </div>
-                        <div class="flex flex-col gap-1">
-                          <label class="text-muted-foreground text-xs">{{
-                            t("settings.ai.contextWindow")
-                          }}</label>
-                          <Input
-                            v-model="model.contextWindow"
-                            class="h-7 text-xs tabular-nums"
-                            :placeholder="t('settings.ai.contextWindowPlaceholder')"
-                          />
-                        </div>
-                        <div class="flex flex-col gap-1">
-                          <label class="text-muted-foreground text-xs">{{
-                            t("settings.ai.maxTokens")
-                          }}</label>
-                          <Input
-                            v-model="model.maxTokens"
-                            class="h-7 text-xs tabular-nums"
-                            :placeholder="t('settings.ai.maxTokensPlaceholder')"
-                          />
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        class="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-xs"
-                        @click="advancedOpen[model.key] = !advancedOpen[model.key]"
-                      >
-                        <ChevronDown
-                          class="h-3 w-3 transition-transform"
-                          :class="advancedOpen[model.key] ? 'rotate-180' : ''"
-                        />
-                        {{ t("settings.ai.advancedConfig") }}
-                      </button>
-                      <div v-if="advancedOpen[model.key]" class="flex flex-col gap-1.5">
-                        <p class="text-muted-foreground text-xs">
-                          {{ t("settings.ai.advancedConfigHint") }}
-                        </p>
-                        <div class="grid grid-cols-2 gap-1.5">
-                          <div
-                            v-for="field in COMPAT_FIELDS"
-                            :key="field.key"
-                            class="flex flex-col gap-1"
-                          >
-                            <label class="text-muted-foreground text-xs">{{
-                              t(field.labelKey)
-                            }}</label>
-                            <Select
-                              :model-value="model.compat[field.key]"
-                              @update:model-value="setCompatOption(model, field.key, $event)"
-                            >
-                              <SelectTrigger class="h-7 w-full text-xs">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectGroup>
-                                  <SelectItem
-                                    v-for="option in field.options"
-                                    :key="option"
-                                    :value="option"
-                                  >
-                                    {{ compatOptionLabel(option) }}
-                                  </SelectItem>
-                                </SelectGroup>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      class="h-7 w-fit gap-1 text-xs"
-                      @click="addModel(draft)"
-                    >
-                      <Plus class="h-3 w-3" />
-                      {{ t("settings.ai.addModel") }}
-                    </Button>
-                  </div>
-                </div>
-              </CollapsibleContent>
-            </div>
-          </Collapsible>
+            @remove="removeProvider(draft)"
+            @fetch-models="fetchModels(draft)"
+          />
         </div>
       </div>
 
@@ -1029,194 +450,14 @@ const CONCURRENCY_OPTIONS = [1, 2, 3, 4, 5];
     </div>
 
     <!-- 添加厂商对话框:先选内置厂商(带入地址与预置模型)或自定义,再补 API Key -->
-    <Dialog v-model:open="addDialogOpen">
-      <DialogContent class="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{{ t("settings.ai.addProviderTitle") }}</DialogTitle>
-          <DialogDescription>{{ t("settings.ai.addProviderDesc") }}</DialogDescription>
-        </DialogHeader>
-
-        <div class="flex flex-col gap-3 py-1">
-          <div class="flex flex-col gap-1">
-            <label class="text-muted-foreground text-xs">{{
-              t("settings.ai.providerSelect")
-            }}</label>
-            <Select :model-value="addChoice" @update:model-value="onAddChoiceChange">
-              <SelectTrigger class="h-8 w-full text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem :value="CUSTOM_CHOICE">
-                    {{ t("settings.ai.customProvider") }}
-                  </SelectItem>
-                  <SelectItem v-for="option in addOptions" :key="option.id" :value="option.id">
-                    {{ option.name }}
-                  </SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div class="grid grid-cols-2 gap-2">
-            <div class="flex flex-col gap-1">
-              <label class="text-muted-foreground text-xs">{{ t("settings.ai.providerId") }}</label>
-              <Input
-                v-model="addForm.id"
-                class="h-8 text-xs"
-                :placeholder="t('settings.ai.providerIdPlaceholder')"
-                spellcheck="false"
-              />
-            </div>
-            <div class="flex flex-col gap-1">
-              <label class="text-muted-foreground text-xs">{{
-                t("settings.ai.providerName")
-              }}</label>
-              <Input
-                v-model="addForm.name"
-                class="h-8 text-xs"
-                :placeholder="t('settings.ai.providerNamePlaceholder')"
-                spellcheck="false"
-              />
-            </div>
-          </div>
-          <div class="flex flex-col gap-1">
-            <label class="text-muted-foreground text-xs">{{ t("settings.ai.baseUrl") }}</label>
-            <Input
-              v-model="addForm.baseUrl"
-              class="h-8 text-xs"
-              :placeholder="t('settings.ai.baseUrlPlaceholder')"
-              spellcheck="false"
-            />
-          </div>
-          <div class="flex flex-col gap-1">
-            <label class="text-muted-foreground text-xs">{{ t("settings.ai.apiKey") }}</label>
-            <Input
-              v-model="addForm.apiKey"
-              type="password"
-              class="h-8 text-xs"
-              :placeholder="t('settings.ai.apiKeyPlaceholder')"
-              autocomplete="off"
-              spellcheck="false"
-            />
-          </div>
-          <p v-if="seededModelCount > 0" class="text-muted-foreground text-xs">
-            {{ t("settings.ai.seededModelsHint", { count: seededModelCount }) }}
-          </p>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" @click="addDialogOpen = false">{{ t("common.cancel") }}</Button>
-          <Button @click="confirmAddProvider">{{ t("common.add") }}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <AiProviderAddDialog
+      v-model:open="addDialogOpen"
+      :catalog="builtinCatalog"
+      :existing-ids="existingProviderIds"
+      @add="onAddProvider"
+    />
 
     <!-- 从 CC Switch 导入对话框:列出本机 ~/.cc-switch 中 OpenAI chat 兼容的供应商,勾选后并入草稿 -->
-    <Dialog v-model:open="ccSwitchDialogOpen">
-      <DialogContent class="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{{ t("settings.ai.ccSwitchTitle") }}</DialogTitle>
-          <DialogDescription>{{ t("settings.ai.ccSwitchDesc") }}</DialogDescription>
-        </DialogHeader>
-
-        <div
-          v-if="ccSwitchLoading"
-          class="text-muted-foreground flex items-center gap-2 py-6 text-sm"
-        >
-          <Loader2 class="h-4 w-4 animate-spin" />
-          {{ t("settings.ai.ccSwitchLoading") }}
-        </div>
-        <p
-          v-else-if="ccSwitchScan && !ccSwitchScan.found"
-          class="text-muted-foreground py-6 text-sm"
-        >
-          {{ t("settings.ai.ccSwitchNotFound") }}
-        </p>
-        <p
-          v-else-if="ccSwitchScan && !ccSwitchScan.providers.length"
-          class="text-muted-foreground py-6 text-sm"
-        >
-          {{ t("settings.ai.ccSwitchEmpty") }}
-        </p>
-        <template v-else-if="ccSwitchScan">
-          <div class="flex items-center justify-between">
-            <span class="text-muted-foreground text-xs">
-              {{
-                t("settings.ai.ccSwitchSelected", {
-                  selected: ccSwitchChecked.size,
-                  total: ccSwitchScan.providers.length,
-                })
-              }}
-            </span>
-            <Button variant="ghost" size="sm" class="h-6 px-2 text-xs" @click="toggleCcSwitchAll">
-              {{
-                ccSwitchAllChecked
-                  ? t("settings.ai.ccSwitchDeselectAll")
-                  : t("settings.ai.ccSwitchSelectAll")
-              }}
-            </Button>
-          </div>
-          <div class="flex max-h-72 flex-col gap-1.5 overflow-y-auto py-1">
-            <button
-              v-for="provider in ccSwitchScan.providers"
-              :key="ccSwitchKey(provider)"
-              type="button"
-              class="hover:bg-accent flex items-center gap-2 rounded-md border px-2 py-1.5 text-left"
-              :class="
-                ccSwitchChecked.has(ccSwitchKey(provider)) ? 'border-primary/50 bg-primary/5' : ''
-              "
-              @click="toggleCcSwitchProvider(provider)"
-            >
-              <span
-                class="flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border"
-                :class="
-                  ccSwitchChecked.has(ccSwitchKey(provider))
-                    ? 'border-primary bg-primary text-primary-foreground'
-                    : 'border-input'
-                "
-              >
-                <Check v-if="ccSwitchChecked.has(ccSwitchKey(provider))" class="h-3 w-3" />
-              </span>
-              <span class="flex min-w-0 flex-1 flex-col">
-                <span class="flex items-center gap-1.5">
-                  <span class="truncate text-sm font-medium">
-                    {{ provider.name.trim() || provider.id }}
-                  </span>
-                  <span
-                    class="bg-muted text-muted-foreground shrink-0 rounded-full px-1.5 py-px text-[10px]"
-                  >
-                    {{ provider.app }}
-                  </span>
-                  <span
-                    v-if="provider.current"
-                    class="bg-primary/10 text-primary shrink-0 rounded-full px-1.5 py-px text-[10px]"
-                  >
-                    {{ t("settings.ai.ccSwitchCurrent") }}
-                  </span>
-                </span>
-                <span class="text-muted-foreground truncate text-xs">{{ provider.baseUrl }}</span>
-              </span>
-              <span class="text-muted-foreground shrink-0 text-xs">
-                {{
-                  provider.apiKey
-                    ? t("settings.ai.modelCount", { count: provider.models.length })
-                    : t("settings.ai.ccSwitchNoKey")
-                }}
-              </span>
-            </button>
-          </div>
-        </template>
-
-        <DialogFooter>
-          <Button variant="outline" @click="ccSwitchDialogOpen = false">
-            {{ t("common.cancel") }}
-          </Button>
-          <Button :disabled="!ccSwitchChecked.size" @click="confirmCcSwitchImport">
-            {{ t("settings.ai.ccSwitchImport", { count: ccSwitchChecked.size }) }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <CcSwitchImportDialog v-model:open="ccSwitchDialogOpen" @import="onCcSwitchImport" />
   </section>
 </template>
