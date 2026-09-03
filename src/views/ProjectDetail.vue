@@ -6,9 +6,11 @@ import { toast } from "vue-sonner";
 import {
   ArrowLeft,
   BookOpenText,
+  Bot,
   FileText,
   FolderSync,
   FolderTree,
+  LayoutGrid,
   Pencil,
   Radar,
   Star,
@@ -24,6 +26,7 @@ import WorktreeSwitcher from "@/components/git/WorktreeSwitcher.vue";
 import ChatDock from "@/components/chat/ChatDock.vue";
 import OpenWithMenu from "@/components/open/OpenWithMenu.vue";
 import DockerCompose from "@/components/project/DockerCompose.vue";
+import AiAssetsView from "@/components/project/AiAssetsView.vue";
 import SpringBootCard from "@/components/java/SpringBootCard.vue";
 import RelocateProjectDialog from "@/components/project/RelocateProjectDialog.vue";
 import DailyReportDialog from "@/components/report/DailyReportDialog.vue";
@@ -141,6 +144,11 @@ function onWorktreeChanged() {
   const target = worktreeProject.value ?? project.value;
   if (target) store.refreshGitStatus(target, { force: true });
 }
+
+// --- 视图切换:执行(脚本/服务/命令卡片网格)与 AI(项目 AI 资产,全宽非卡片) ---
+// 全局记忆(UI 偏好,不按项目区分),与 worktree-selection 同走 localStorage
+type DetailView = "overview" | "ai";
+const detailView = useLocalStorage<DetailView>("repomeow.project-detail-view", "overview");
 
 // --- 收藏切换(收藏项目在列表中置顶) ---
 async function toggleFavorite() {
@@ -363,19 +371,51 @@ async function saveDesc() {
             <Waypoints class="h-3.5 w-3.5" />
             {{ t("git.graph.title") }}
           </Button>
+          <!-- 视图切换:执行(卡片网格)/ AI(全宽非卡片),固定在头部右下角 -->
+          <div class="ml-auto flex gap-1 rounded-lg bg-muted p-1">
+            <button
+              type="button"
+              class="flex items-center gap-1.5 rounded-md px-3 py-1 text-sm transition-colors"
+              :class="
+                detailView === 'overview'
+                  ? 'bg-background shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              "
+              @click="detailView = 'overview'"
+            >
+              <LayoutGrid class="h-3.5 w-3.5" />
+              {{ t("projects.detail.viewOverview") }}
+            </button>
+            <button
+              type="button"
+              class="flex items-center gap-1.5 rounded-md px-3 py-1 text-sm transition-colors"
+              :class="
+                detailView === 'ai'
+                  ? 'bg-background shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              "
+              @click="detailView = 'ai'"
+            >
+              <Bot class="h-3.5 w-3.5" />
+              {{ t("projects.detail.viewAi") }}
+            </button>
+          </div>
         </template>
       </div>
     </header>
 
-    <div
-      v-if="project.path_exists"
-      class="grid items-start gap-4 p-6 [grid-template-columns:repeat(auto-fill,minmax(360px,1fr))]"
-    >
-      <PackageScripts :project="worktreeProject ?? project" />
-      <DockerCompose :project="worktreeProject ?? project" />
-      <SpringBootCard :project="worktreeProject ?? project" />
-      <CustomCommands :project="worktreeProject ?? project" />
-    </div>
+    <template v-if="project.path_exists">
+      <div
+        v-if="detailView === 'overview'"
+        class="grid items-start gap-4 p-6 [grid-template-columns:repeat(auto-fill,minmax(360px,1fr))]"
+      >
+        <PackageScripts :project="worktreeProject ?? project" />
+        <DockerCompose :project="worktreeProject ?? project" />
+        <SpringBootCard :project="worktreeProject ?? project" />
+        <CustomCommands :project="worktreeProject ?? project" />
+      </div>
+      <AiAssetsView v-else :project="worktreeProject ?? project" />
+    </template>
 
     <DailyReportDialog v-model:open="reportOpen" :preset-project-id="project.id" />
     <RelocateProjectDialog v-model:open="relocateOpen" :project="project" />

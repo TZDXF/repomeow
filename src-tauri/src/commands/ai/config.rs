@@ -46,3 +46,9 @@ pub fn ai_config_reveal(app: AppHandle) -> AppResult<()> {
 pub fn ai_cc_switch_providers(app: AppHandle) -> AppResult<CcSwitchScan> {
     cc_switch::scan_cc_switch_providers(&app)
 }
+
+/// 读取 CC Switch 管理的技能与 MCP 服务器(详情页 AI 面板的「从 CC Switch 导入」数据源)。
+#[tauri::command]
+pub fn ai_cc_switch_assets(app: AppHandle) -> AppResult<cc_switch::CcSwitchAssets> {
+    cc_switch::scan_cc_switch_assets(&app)
+}

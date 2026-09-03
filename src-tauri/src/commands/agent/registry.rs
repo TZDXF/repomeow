@@ -154,13 +154,13 @@ fn agent_kind_str(kind: &AgentKind) -> &'static str {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentInfo {
-    id: &'static str,
-    name: &'static str,
-    kind: &'static str,
-    installed: bool,
+    pub id: &'static str,
+    pub name: &'static str,
+    pub kind: &'static str,
+    pub installed: bool,
     /// 探测到的可执行路径(npx 类为 npx 路径);未安装为 None
-    detail: Option<String>,
-    login_hint: &'static str,
+    pub detail: Option<String>,
+    pub login_hint: &'static str,
 }
 
 /// 精选 agent 清单 + 安装探测(npx 类探测 node/npx,二进制类探测命令本身)

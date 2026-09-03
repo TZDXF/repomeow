@@ -14,7 +14,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
@@ -51,13 +51,115 @@ pub struct CcSwitchScan {
     pub providers: Vec<CcSwitchProvider>,
 }
 
-/// 从本机 `~/.cc-switch/` 扫描可导入的 OpenAI chat 兼容供应商。
-pub fn scan_cc_switch_providers(app: &AppHandle) -> AppResult<CcSwitchScan> {
+/// CC Switch 管理的一个技能(~/.cc-switch/skills/<directory>/,SKILL.md 含 frontmatter)。
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CcSwitchSkill {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    /// skills/ 下的子目录名(导出到项目时的目标目录名)。
+    pub directory: String,
+    /// 在 CC Switch 中对哪些应用启用(claude/codex/gemini/grokbuild/opencode/hermes)。
+    #[serde(default)]
+    pub enabled_apps: Vec<String>,
+}
+
+/// CC Switch 管理的一个 MCP 服务器(mcp_servers 表,server_config 为各应用原生 JSON)。
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CcSwitchMcpServer {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// 原始服务器定义(stdio/sse/http 等),导出项目 .mcp.json 时按 name 键原样写入。
+    pub server_config: Value,
+    #[serde(default)]
+    pub enabled_apps: Vec<String>,
+}
+
+/// cc-switch 的 skills + MCP 扫描结果;`found = false` 表示本机没有 ~/.cc-switch。
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CcSwitchAssets {
+    pub found: bool,
+    #[serde(default)]
+    pub skills: Vec<CcSwitchSkill>,
+    #[serde(default)]
+    pub mcp_servers: Vec<CcSwitchMcpServer>,
+}
+
+/// `~/.cc-switch/` 目录(home_dir 失败按 IO 错误上抛)。
+pub fn cc_switch_dir(app: &AppHandle) -> AppResult<PathBuf> {
     let home = app
         .path()
         .home_dir()
         .map_err(|e| AppError::coded(ErrorCode::IoError, e.to_string()))?;
-    scan_at(&home.join(".cc-switch"))
+    Ok(home.join(".cc-switch"))
+}
+
+/// 从本机 `~/.cc-switch/` 扫描可导入的 OpenAI chat 兼容供应商。
+pub fn scan_cc_switch_providers(app: &AppHandle) -> AppResult<CcSwitchScan> {
+    scan_at(&cc_switch_dir(app)?)
+}
+
+/// 读取 CC Switch 管理的技能与 MCP 服务器(仅 3.x SQLite 库有这两张表;
+/// 旧版 config.json 或缺表按空列表处理)。skills 正文在 skills/ 目录,DB 只存元数据。
+pub fn scan_cc_switch_assets(app: &AppHandle) -> AppResult<CcSwitchAssets> {
+    let dir = cc_switch_dir(app)?;
+    let db_path = dir.join("cc-switch.db");
+    if !db_path.is_file() {
+        return Ok(CcSwitchAssets {
+            found: false,
+            skills: Vec::new(),
+            mcp_servers: Vec::new(),
+        });
+    }
+    with_staged_db(&db_path, |copy| {
+        let conn = Connection::open(copy)?;
+        Ok(CcSwitchAssets {
+            found: true,
+            skills: query_skills(&conn)?,
+            mcp_servers: query_mcp_servers(&conn)?,
+        })
+    })
+}
+
+/// 按 id 取单个 MCP 服务器的 (name, server_config),供导出到项目 .mcp.json;
+/// 找不到返回 None(调用方报「配置已不存在」)。
+pub fn mcp_server_by_id(dir: &Path, server_id: &str) -> AppResult<Option<(String, Value)>> {
+    let db_path = dir.join("cc-switch.db");
+    if !db_path.is_file() {
+        return Ok(None);
+    }
+    with_staged_db(&db_path, |copy| {
+        let conn = Connection::open(copy)?;
+        let mut stmt = match conn
+            .prepare("SELECT name, server_config FROM mcp_servers WHERE id = ?1")
+        {
+            Ok(stmt) => stmt,
+            Err(rusqlite::Error::SqliteFailure(_, Some(message)))
+                if message.contains("no such table") =>
+            {
+                return Ok(None);
+            }
+            Err(error) => return Err(error.into()),
+        };
+        let row = stmt
+            .query_row([server_id], |row| {
+                let config_text: String = row.get(1)?;
+                Ok((
+                    row.get::<_, String>(0)?,
+                    serde_json::from_str(&config_text).unwrap_or(Value::Null),
+                ))
+            })
+            .optional()?;
+        Ok(row)
+    })
 }
 
 fn scan_at(dir: &Path) -> AppResult<CcSwitchScan> {
@@ -94,25 +196,27 @@ struct RawProvider {
 }
 
 /// CC Switch 可能正在运行并持有数据库;复制(含 WAL 侧车文件)到临时目录再打开,
-/// 避免锁冲突,也能读到 WAL 中已提交的最新数据。
-fn read_providers_db(db_path: &Path) -> AppResult<Vec<RawProvider>> {
+/// 避免锁冲突,也能读到 WAL 中已提交的最新数据。回调拿到的是临时副本路径。
+fn with_staged_db<T>(db_path: &Path, f: impl FnOnce(&Path) -> AppResult<T>) -> AppResult<T> {
     let staging = std::env::temp_dir().join(format!("repomeow-cc-switch-{}", now_ts_nanos()));
     fs::create_dir_all(&staging)?;
-    let result = read_providers_db_staged(db_path, &staging);
+    let result = (|| {
+        let copy = staging.join("cc-switch.db");
+        fs::copy(db_path, &copy)?;
+        for suffix in ["-wal", "-shm"] {
+            let sidecar = PathBuf::from(format!("{}{}", db_path.display(), suffix));
+            if sidecar.is_file() {
+                fs::copy(&sidecar, staging.join(format!("cc-switch.db{suffix}")))?;
+            }
+        }
+        f(&copy)
+    })();
     let _ = fs::remove_dir_all(&staging);
     result
 }
 
-fn read_providers_db_staged(db_path: &Path, staging: &Path) -> AppResult<Vec<RawProvider>> {
-    let copy = staging.join("cc-switch.db");
-    fs::copy(db_path, &copy)?;
-    for suffix in ["-wal", "-shm"] {
-        let sidecar = PathBuf::from(format!("{}{}", db_path.display(), suffix));
-        if sidecar.is_file() {
-            fs::copy(&sidecar, staging.join(format!("cc-switch.db{suffix}")))?;
-        }
-    }
-    query_providers(&copy)
+fn read_providers_db(db_path: &Path) -> AppResult<Vec<RawProvider>> {
+    with_staged_db(db_path, |copy| query_providers(copy))
 }
 
 fn query_providers(path: &Path) -> AppResult<Vec<RawProvider>> {
@@ -146,10 +250,92 @@ fn query_providers(path: &Path) -> AppResult<Vec<RawProvider>> {
     Ok(providers)
 }
 
+/// skills / mcp_servers 表的 enabled_* 列 → 应用 id。
+const ENABLED_APP_COLUMNS: &[(&str, &str)] = &[
+    ("enabled_claude", "claude"),
+    ("enabled_codex", "codex"),
+    ("enabled_gemini", "gemini"),
+    ("enabled_grokbuild", "grokbuild"),
+    ("enabled_opencode", "opencode"),
+    ("enabled_hermes", "hermes"),
+];
+
+fn enabled_apps(row: &rusqlite::Row<'_>, base: usize) -> Vec<String> {
+    ENABLED_APP_COLUMNS
+        .iter()
+        .enumerate()
+        .filter_map(|(i, (_, app))| {
+            (row.get::<_, i64>(base + i).unwrap_or(0) != 0).then(|| app.to_string())
+        })
+        .collect()
+}
+
+/// 缺表(旧版库)按空列表处理;缺列等其他错误上抛。
+fn table_missing(error: &rusqlite::Error) -> bool {
+    matches!(
+        error,
+        rusqlite::Error::SqliteFailure(_, Some(message)) if message.contains("no such table")
+    )
+}
+
+fn query_skills(conn: &Connection) -> AppResult<Vec<CcSwitchSkill>> {
+    let mut stmt = match conn.prepare(
+        "SELECT id, name, description, directory, \
+         enabled_claude, enabled_codex, enabled_gemini, \
+         enabled_grokbuild, enabled_opencode, enabled_hermes FROM skills",
+    ) {
+        Ok(stmt) => stmt,
+        Err(error) if table_missing(&error) => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+    };
+    let rows = stmt.query_map([], |row| {
+        Ok(CcSwitchSkill {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            description: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+            directory: row.get(3)?,
+            enabled_apps: enabled_apps(row, 4),
+        })
+    })?;
+    let mut skills = Vec::new();
+    for row in rows {
+        skills.push(row?);
+    }
+    Ok(skills)
+}
+
+fn query_mcp_servers(conn: &Connection) -> AppResult<Vec<CcSwitchMcpServer>> {
+    let mut stmt = match conn.prepare(
+        "SELECT id, name, server_config, description, tags, \
+         enabled_claude, enabled_codex, enabled_gemini, \
+         enabled_grokbuild, enabled_opencode, enabled_hermes FROM mcp_servers",
+    ) {
+        Ok(stmt) => stmt,
+        Err(error) if table_missing(&error) => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+    };
+    let rows = stmt.query_map([], |row| {
+        let config_text: String = row.get(2)?;
+        let tags_text: String = row.get::<_, Option<String>>(4)?.unwrap_or_default();
+        Ok(CcSwitchMcpServer {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            server_config: serde_json::from_str(&config_text).unwrap_or(Value::Null),
+            description: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+            tags: serde_json::from_str(&tags_text).unwrap_or_default(),
+            enabled_apps: enabled_apps(row, 5),
+        })
+    })?;
+    let mut servers = Vec::new();
+    for row in rows {
+        servers.push(row?);
+    }
+    Ok(servers)
+}
+
 /// 旧版 CC Switch(<3.x)的 `config.json`:`{ apps: { <app>: { providers: {id: Provider}, current } } }`。
 /// 解析失败按无供应商处理(不阻断,数据库才是新版事实源)。
-fn read_legacy_config(path: &Path) -> Vec<RawProvider> {
-    let Ok(raw) = fs::read_to_string(path) else {
+fn read_legacy_config(path: &Path) -> Vec<RawProvider> {    let Ok(raw) = fs::read_to_string(path) else {
         return Vec::new();
     };
     let Ok(value) = serde_json::from_str::<Value>(&raw) else {

@@ -27,6 +27,8 @@ use tokio::sync::{mpsc, oneshot, Notify};
 
 pub use config::{AcpConfigOptionInfo, AcpModeInfo};
 pub use registry::AgentInfo;
+// ai 资产扫描(commands::ai::assets)复用安装探测,不重复 which 逻辑
+pub(crate) use registry::list_agents;
 
 use process::kill_agent_pid;
 use session::run_session;

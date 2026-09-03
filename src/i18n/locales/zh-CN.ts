@@ -229,6 +229,33 @@ export default {
     searchPlaceholder: "搜索项目...",
     empty: "没有匹配的项目",
   },
+  aiAssets: {
+    title: "AI 资产",
+    refresh: "刷新",
+    importCc: "从 CC Switch 导入",
+    empty: "未检测到 AI 相关文件,可从 CC Switch 导入 skills 与 MCP",
+    files: "指令与规则",
+    mcp: "MCP 配置",
+    skills: "Skills",
+    agents: "Agent 工具",
+    installed: "已安装",
+    notInstalled: "未安装",
+    configured: "本项目已配置 {count} 处",
+    drawer: {
+      edit: "编辑",
+      saved: "已保存",
+      externalOpen: "用系统默认程序打开",
+    },
+    import: {
+      title: "从 CC Switch 导入",
+      description:
+        "勾选即写入项目文件(skills → .claude/skills/,MCP → .mcp.json),取消勾选即从项目移除。",
+      tabSkills: "Skills",
+      tabMcp: "MCP",
+      emptySkills: "CC Switch 中没有已安装的技能",
+      emptyMcp: "CC Switch 中没有 MCP 服务器",
+    },
+  },
   pins: {
     mark: "标记为常用命令(托盘弹窗中可快速执行)",
     unmark: "取消常用标记",
@@ -370,6 +397,8 @@ export default {
       saved: "项目信息已保存",
       notFound: "项目不存在或已被删除",
       backToListShort: "返回项目列表",
+      viewOverview: "执行",
+      viewAi: "AI",
     },
   },
   git: {

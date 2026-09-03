@@ -9,21 +9,28 @@ import {
   type DecorationSet,
 } from "@codemirror/view";
 import { codeFolding, foldGutter, syntaxHighlighting } from "@codemirror/language";
+import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import { keymap } from "@codemirror/view";
 import { cmViewerHighlight, cmViewerTheme } from "@/lib/cm-theme";
 import { resolveCmLanguage } from "@/lib/cm-languages";
 import { buildFindRegExp, collectMatches, type FindQuery, type TextRange } from "@/lib/text-search";
 
 // ── 任务描述 ─────────────────────────────────────────────────────────────────
-// CodeMirror 6 只读代码查看器(文件预览专用):
+// CodeMirror 6 代码查看器(文件预览专用,默认只读):
 // - 行号 + 代码折叠 + 语法高亮;换行经 wrap prop 由 Compartment 热切换;
 // - 语言按 path 惰性解析,期间先以纯文本呈现、解析完成后 reconfigure;
-// - 只读双保险(readOnly + editable:false),但保留鼠标选区——后续「选取代码
+// - 默认只读双保险(readOnly + editable:false),但保留鼠标选区——后续「选取代码
 //   做批注」经 getView() 拿 EditorView,读 state.selection 或注 Decoration;
+// - editable=true 时切换为可编辑(附 history 与默认键位),内容经 getText() 读回
+//   (AI 面板抽屉的应用内编辑用);
 // - 文件内查找:runFind/gotoMatch/clearFind 经 expose 驱动,匹配经 StateField
 //   挂 Decoration.mark 高亮(当前项强调),文档替换时随 tr.map 保持定位。
 // 滚动交给 CM 自带 scroller(行号槽固定、双向滚动),宿主须提供确定高度。
 
-const props = defineProps<{ text: string; path: string; wrap: boolean }>();
+const props = withDefaults(
+  defineProps<{ text: string; path: string; wrap: boolean; editable?: boolean }>(),
+  { editable: false },
+);
 
 const host = ref<HTMLElement | null>(null);
 let view: EditorView | null = null;
@@ -31,6 +38,7 @@ let langSeq = 0;
 
 const languageConf = new Compartment();
 const wrapConf = new Compartment();
+const editableConf = new Compartment();
 
 async function applyLanguage() {
   const mySeq = ++langSeq;
@@ -186,8 +194,11 @@ onMounted(() => {
         foldGutter({ markerDOM: foldMarkerDOM }),
         codeFolding(),
         drawSelection(),
-        EditorState.readOnly.of(true),
-        EditorView.editable.of(false),
+        editableConf.of([
+          EditorState.readOnly.of(!props.editable),
+          EditorView.editable.of(props.editable),
+          ...(props.editable ? [history(), keymap.of([...defaultKeymap, ...historyKeymap])] : []),
+        ]),
         languageConf.of([]),
         wrapConf.of(props.wrap ? EditorView.lineWrapping : []),
         findMarks,
@@ -227,17 +238,44 @@ watch(
   },
 );
 
+watch(
+  () => props.editable,
+  (editable) => {
+    view?.dispatch({
+      effects: editableConf.reconfigure([
+        EditorState.readOnly.of(!editable),
+        EditorView.editable.of(editable),
+        ...(editable ? [history(), keymap.of([...defaultKeymap, ...historyKeymap])] : []),
+      ]),
+    });
+  },
+);
+
 onBeforeUnmount(() => {
   view?.destroy();
   view = null;
 });
+
+/** 当前文档全文(editable 模式下宿主保存时读回) */
+function getText(): string {
+  return view?.state.doc.toString() ?? props.text;
+}
 
 /** 供批注/查找等扩展层访问编辑器实例(挂载后非空) */
 function getView() {
   return view;
 }
 
-defineExpose({ getView, runFind, clearFind, gotoMatch, getFindCursor, revealLine, revealLines });
+defineExpose({
+  getView,
+  runFind,
+  clearFind,
+  gotoMatch,
+  getFindCursor,
+  revealLine,
+  revealLines,
+  getText,
+});
 </script>
 
 <template>

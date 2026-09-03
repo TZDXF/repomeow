@@ -237,6 +237,33 @@ export default {
     searchPlaceholder: "Search projects...",
     empty: "No matching projects",
   },
+  aiAssets: {
+    title: "AI Assets",
+    refresh: "Refresh",
+    importCc: "Import from CC Switch",
+    empty: "No AI-related files detected. You can import skills and MCP servers from CC Switch.",
+    files: "Instructions & Rules",
+    mcp: "MCP Configs",
+    skills: "Skills",
+    agents: "Agent Tools",
+    installed: "Installed",
+    notInstalled: "Not installed",
+    configured: "{count} config(s) in this project",
+    drawer: {
+      edit: "Edit",
+      saved: "Saved",
+      externalOpen: "Open with system default app",
+    },
+    import: {
+      title: "Import from CC Switch",
+      description:
+        "Checked items are written into the project (skills → .claude/skills/, MCP → .mcp.json); unchecking removes them from the project.",
+      tabSkills: "Skills",
+      tabMcp: "MCP",
+      emptySkills: "No skills installed in CC Switch",
+      emptyMcp: "No MCP servers in CC Switch",
+    },
+  },
   pins: {
     mark: "Pin as frequent command (quick run from tray popup)",
     unmark: "Unpin frequent command",
@@ -383,6 +410,8 @@ export default {
       saved: "Project info saved.",
       notFound: "Project does not exist or has been deleted",
       backToListShort: "Back to projects",
+      viewOverview: "Run",
+      viewAi: "AI",
     },
   },
   git: {
