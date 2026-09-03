@@ -1,5 +1,7 @@
+use std::fs::File;
+use std::io::{BufWriter, Read, Write};
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -174,6 +176,166 @@ fn docker_action_label(zh: &'static str, en: &'static str, language: &str) -> &'
     }
 }
 
+/// compose 文件全部服务的列表(config --services,按配置顺序)
+fn compose_services(dir: &Path, file: &str, language: &str) -> AppResult<Vec<String>> {
+    let cfg = ensure_ok(
+        docker_action_label("读取服务列表", "list services", language),
+        run_docker(dir, &["compose", "-f", file, "config", "--services"])?,
+    )?;
+    Ok(String::from_utf8_lossy(&cfg.stdout)
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect())
+}
+
+/// 本地是否已存在该镜像(docker image inspect);探测失败一律视为不存在
+fn image_exists(dir: &Path, image: &str) -> bool {
+    docker_command()
+        .args(["image", "inspect", "-q", image])
+        .current_dir(dir)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// 合并导出容器时临时镜像名的合法化:docker 仓库名仅允许小写字母/数字/. _ -,
+/// 其余字符(服务名理论上已合法,防御兜底)归一为 '-'
+fn sanitize_repo_name(service: &str) -> String {
+    service
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-') {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+/// 导出目标写入器:可选 gzip 压缩。
+/// gzip 尾部只有显式 finish 才写出,所以封装成显式完成语义而不是靠 Drop 兜底
+enum ExportWriter {
+    Plain(BufWriter<File>),
+    Gzip(flate2::write::GzEncoder<BufWriter<File>>),
+}
+
+impl Write for ExportWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            ExportWriter::Plain(w) => w.write(buf),
+            ExportWriter::Gzip(w) => w.write(buf),
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            ExportWriter::Plain(w) => w.flush(),
+            ExportWriter::Gzip(w) => w.flush(),
+        }
+    }
+}
+
+impl ExportWriter {
+    fn create(dest: &Path, compress: bool) -> AppResult<ExportWriter> {
+        let file = File::create(dest)
+            .map_err(|e| AppError::coded(ErrorCode::DockerSaveFailed, e.to_string()))?;
+        let buf = BufWriter::new(file);
+        Ok(if compress {
+            ExportWriter::Gzip(flate2::write::GzEncoder::new(
+                buf,
+                flate2::Compression::default(),
+            ))
+        } else {
+            ExportWriter::Plain(buf)
+        })
+    }
+
+    fn finish(self) -> std::io::Result<()> {
+        match self {
+            ExportWriter::Plain(mut w) => w.flush(),
+            ExportWriter::Gzip(w) => w.finish().map(|_| ()),
+        }
+    }
+}
+
+/// 运行 docker 命令并把 stdout 流式写入 dest(可选 gzip 压缩)。
+/// stderr 独立线程采集,避免管道写满与 stdout 读取相互阻塞死锁;
+/// 任何失败(进程非零退出/写盘失败)都删除残缺输出,避免半截 tar 被误认为导出成功
+fn run_docker_streaming(
+    dir: &Path,
+    args: &[&str],
+    dest: &Path,
+    compress: bool,
+    action: &str,
+) -> AppResult<()> {
+    let mut writer = ExportWriter::create(dest, compress)?;
+    let mut child = docker_command()
+        .args(args)
+        .current_dir(dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| AppError::coded(ErrorCode::DockerExecFailed, e.to_string()))?;
+    let mut stdout = child.stdout.take().expect("stdout 已管道化");
+    let mut stderr = child.stderr.take().expect("stderr 已管道化");
+    let err_thread = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stderr.read_to_end(&mut buf);
+        String::from_utf8_lossy(&buf).trim().to_string()
+    });
+    let copy_result = std::io::copy(&mut stdout, &mut writer);
+    if copy_result.is_err() {
+        // 写盘失败时 docker 可能仍在向无人读取的 stdout 管道写,wait 会死等;先杀进程再回收
+        let _ = child.kill();
+    }
+    let wait_result = child.wait();
+    let stderr = err_thread.join().unwrap_or_default();
+    if let Err(e) = copy_result {
+        let _ = std::fs::remove_file(dest);
+        return Err(AppError::coded(ErrorCode::DockerSaveFailed, e.to_string()));
+    }
+    let status = wait_result.map_err(|e| AppError::coded(ErrorCode::DockerExecFailed, e.to_string()))?;
+    if !status.success() {
+        let _ = std::fs::remove_file(dest);
+        return Err(AppError::coded(
+            ErrorCode::DockerActionFailed,
+            format!("action={action} stderr={stderr}"),
+        ));
+    }
+    if let Err(e) = writer.finish() {
+        let _ = std::fs::remove_file(dest);
+        return Err(AppError::coded(ErrorCode::DockerSaveFailed, e.to_string()));
+    }
+    Ok(())
+}
+
+/// docker save 一个或多个镜像到 dest(可选 gzip 压缩)。
+/// 单镜像时把「本地无此镜像」映射为可操作的错误提示
+fn save_images(
+    dir: &Path,
+    images: &[String],
+    dest: &Path,
+    compress: bool,
+    language: &str,
+) -> AppResult<()> {
+    let mut args: Vec<&str> = vec!["save"];
+    args.extend(images.iter().map(String::as_str));
+    let action = docker_action_label("保存镜像", "save images", language);
+    match run_docker_streaming(dir, &args, dest, compress, action) {
+        Err(AppError::Coded { message, .. })
+            if images.len() == 1 && message.contains("No such image") =>
+        {
+            Err(AppError::coded(
+                ErrorCode::DockerContainerNotCreated,
+                format!("image={}", images[0]),
+            ))
+        }
+        other => other,
+    }
+}
+
 /// 服务的容器 id;容器未创建时返回 None
 fn container_id(
     dir: &Path,
@@ -212,25 +374,6 @@ fn service_images(dir: &Path, file: &str, language: &str) -> AppResult<Vec<(Stri
         .collect())
 }
 
-/// docker save 镜像到 dest;本地无此镜像时给出可操作的中文提示
-fn save_image(dir: &Path, image: &str, dest: &Path) -> AppResult<()> {
-    let out = run_docker(dir, &["save", "-o", &dest.to_string_lossy(), image])?;
-    if out.status.success() {
-        return Ok(());
-    }
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    if stderr.contains("No such image") {
-        return Err(AppError::coded(
-            ErrorCode::DockerContainerNotCreated,
-            format!("image={image}"),
-        ));
-    }
-    Err(AppError::coded(
-        ErrorCode::DockerSaveFailed,
-        stderr.trim().to_string(),
-    ))
-}
-
 /// 导出单个服务:container → docker export(需容器已创建);image → docker save(只需本地有镜像)
 fn export_one(
     dir: &Path,
@@ -238,6 +381,7 @@ fn export_one(
     service: &str,
     kind: &str,
     dest: &Path,
+    compress: bool,
     language: &str,
 ) -> AppResult<()> {
     match kind {
@@ -245,9 +389,13 @@ fn export_one(
             let id = container_id(dir, file, service, language)?.ok_or_else(|| {
                 AppError::coded(ErrorCode::DockerContainerNotCreated, service.to_string())
             })?;
-            let out = run_docker(dir, &["export", "-o", &dest.to_string_lossy(), &id])?;
-            ensure_ok(docker_action_label("导出", "export", language), out)?;
-            Ok(())
+            run_docker_streaming(
+                dir,
+                &["export", &id],
+                dest,
+                compress,
+                docker_action_label("导出", "export", language),
+            )
         }
         "image" => {
             let image = service_images(dir, file, language)?
@@ -257,7 +405,7 @@ fn export_one(
                 .ok_or_else(|| {
                     AppError::coded(ErrorCode::DockerServiceImageMissing, service.to_string())
                 })?;
-            save_image(dir, &image, dest)
+            save_images(dir, &[image], dest, compress, language)
         }
         _ => Err(AppError::coded(
             ErrorCode::DockerUnknownExportKind,
@@ -266,70 +414,170 @@ fn export_one(
     }
 }
 
-/// 导出 compose 文件全部服务到目录(dest 为目录):逐服务导出 `<service>-<kind>.tar`。
-/// container:需容器已创建,未创建的跳过;image:只需本地有镜像,按名去重避免重复 save,
+/// 导出 compose 文件全部服务。
+/// 不合并:dest 为目录,逐服务导出 `<service>-<kind>.tar(.gz)`;
+/// 合并:dest 为单文件——镜像一次 docker save 全部打包,容器先逐个 docker commit
+/// 为临时镜像再 docker save,产物均可 docker load 整体恢复为镜像。
+/// container:需容器已创建,未创建的跳过;image:只需本地有镜像,按名去重,
 /// 本地缺失的镜像跳过。一个都没导出时才报错
-fn export_all(dir: &Path, file: &str, kind: &str, dest_dir: &str, language: &str) -> AppResult<()> {
-    let dest_dir = Path::new(dest_dir);
+fn export_all(
+    dir: &Path,
+    file: &str,
+    kind: &str,
+    dest: &str,
+    merge: bool,
+    compress: bool,
+    language: &str,
+) -> AppResult<()> {
+    match kind {
+        "image" => export_all_images(dir, file, dest, merge, compress, language),
+        "container" => export_all_containers(dir, file, dest, merge, compress, language),
+        _ => Err(AppError::coded(
+            ErrorCode::DockerUnknownExportKind,
+            kind.to_string(),
+        )),
+    }
+}
+
+fn export_all_images(
+    dir: &Path,
+    file: &str,
+    dest: &str,
+    merge: bool,
+    compress: bool,
+    language: &str,
+) -> AppResult<()> {
+    // 按镜像名去重:多服务共用同一镜像时只导一次(单文件导出沿用首个服务名)
+    let mut entries: Vec<(String, String)> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for (service, image) in service_images(dir, file, language)? {
+        if seen.insert(image.clone()) {
+            entries.push((service, image));
+        }
+    }
+    if merge {
+        // dest 为单个文件:本地存在的镜像一次 docker save 合并导出(共享层自动去重,docker load 可整体恢复)
+        let images: Vec<String> = entries
+            .into_iter()
+            .filter(|(_, image)| image_exists(dir, image))
+            .map(|(_, image)| image)
+            .collect();
+        if images.is_empty() {
+            return Err(AppError::coded(ErrorCode::DockerNoExportableImages, ""));
+        }
+        return save_images(dir, &images, Path::new(dest), compress, language);
+    }
+    let dest_dir = Path::new(dest);
     if !dest_dir.is_dir() {
         return Err(AppError::coded(
             ErrorCode::DockerDirNotFound,
             dest_dir.display().to_string(),
         ));
     }
-    if kind == "image" {
-        let mut exported = 0usize;
-        let mut saved = std::collections::HashSet::new();
-        for (service, image) in service_images(dir, file, language)? {
-            if !saved.insert(image.clone()) {
-                continue;
-            }
-            let dest = dest_dir.join(format!("{service}-image.tar"));
-            // 本地未拉取/构建的镜像跳过,不打断整体导出
-            if save_image(dir, &image, &dest).is_ok() {
-                exported += 1;
-            }
-        }
-        if exported == 0 {
-            return Err(AppError::coded(ErrorCode::DockerNoExportableImages, ""));
-        }
-        return Ok(());
-    }
-    if kind != "container" {
-        return Err(AppError::coded(
-            ErrorCode::DockerUnknownExportKind,
-            kind.to_string(),
-        ));
-    }
-    let cfg = ensure_ok(
-        docker_action_label("读取服务列表", "list services", language),
-        run_docker(dir, &["compose", "-f", file, "config", "--services"])?,
-    )?;
-    let services: Vec<String> = String::from_utf8_lossy(&cfg.stdout)
-        .lines()
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty())
-        .collect();
+    let ext = if compress { "tar.gz" } else { "tar" };
     let mut exported = 0usize;
-    for service in &services {
-        // 未创建容器的服务跳过,不打断整体导出
-        let Some(id) = container_id(dir, file, service, language)? else {
+    for (service, image) in entries {
+        // 本地未拉取/构建的镜像跳过,不打断整体导出
+        if !image_exists(dir, &image) {
             continue;
-        };
-        let dest = dest_dir.join(format!("{service}-container.tar"));
-        let out = run_docker(dir, &["export", "-o", &dest.to_string_lossy(), &id])?;
-        ensure_ok(docker_action_label("导出", "export", language), out)?;
+        }
+        let dest_file = dest_dir.join(format!("{service}-image.{ext}"));
+        save_images(dir, &[image], &dest_file, compress, language)?;
         exported += 1;
     }
     if exported == 0 {
-        return Err(AppError::coded(ErrorCode::DockerNoExportableContainers, ""));
+        return Err(AppError::coded(ErrorCode::DockerNoExportableImages, ""));
     }
     Ok(())
 }
 
+fn export_all_containers(
+    dir: &Path,
+    file: &str,
+    dest: &str,
+    merge: bool,
+    compress: bool,
+    language: &str,
+) -> AppResult<()> {
+    let services = compose_services(dir, file, language)?;
+    // 未创建容器的服务跳过,不打断整体导出
+    let mut containers: Vec<(String, String)> = Vec::new(); // (service, container id)
+    for service in services {
+        let Some(id) = container_id(dir, file, &service, language)? else {
+            continue;
+        };
+        containers.push((service, id));
+    }
+    if containers.is_empty() {
+        return Err(AppError::coded(ErrorCode::DockerNoExportableContainers, ""));
+    }
+    if merge {
+        return export_containers_merged(dir, &containers, Path::new(dest), compress, language);
+    }
+    let dest_dir = Path::new(dest);
+    if !dest_dir.is_dir() {
+        return Err(AppError::coded(
+            ErrorCode::DockerDirNotFound,
+            dest_dir.display().to_string(),
+        ));
+    }
+    let ext = if compress { "tar.gz" } else { "tar" };
+    for (service, id) in containers {
+        let dest_file = dest_dir.join(format!("{service}-container.{ext}"));
+        run_docker_streaming(
+            dir,
+            &["export", &id],
+            &dest_file,
+            compress,
+            docker_action_label("导出", "export", language),
+        )?;
+    }
+    Ok(())
+}
+
+/// 合并导出多个容器为单文件:docker export 没有「多容器合并」语义,先把每个容器 docker commit 为临时镜像,
+/// 再一次 docker save 成单 tar(共享层自动去重,产物可 docker load 整体恢复为镜像);
+/// 结束后 rmi 清理临时镜像(失败仅记日志,不阻断导出结果)
+fn export_containers_merged(
+    dir: &Path,
+    containers: &[(String, String)],
+    dest: &Path,
+    compress: bool,
+    language: &str,
+) -> AppResult<()> {
+    let ts = crate::time_util::now_ts();
+    let mut images: Vec<String> = Vec::with_capacity(containers.len());
+    for (service, id) in containers {
+        let image = format!("repomeow-export-{}:{}", sanitize_repo_name(service), ts);
+        let committed = run_docker(dir, &["commit", "--pause=false", id.as_str(), &image]).and_then(|out| {
+            ensure_ok(
+                docker_action_label("提交临时镜像", "commit temporary image", language),
+                out,
+            )
+        });
+        if let Err(e) = committed {
+            // commit 失败时清掉已提交的临时镜像,不残留半成品
+            for committed_image in &images {
+                let _ = run_docker(dir, &["rmi", committed_image.as_str()]);
+            }
+            return Err(e);
+        }
+        images.push(image);
+    }
+    let result = save_images(dir, &images, dest, compress, language);
+    // 无论导出成功失败都清理临时镜像(失败仅记日志,不阻断导出结果)
+    for image in &images {
+        if let Err(e) = run_docker(dir, &["rmi", image.as_str()]) {
+            eprintln!("[docker] 清理导出临时镜像失败({image}): {e}");
+        }
+    }
+    result
+}
+
 /// 导出 compose 服务的容器文件系统 / 镜像为 tar 包
 /// kind: "container" → docker export;"image" → docker save。
-/// service 为空时导出该文件的全部服务,此时 dest 为目标目录
+/// service 为空时导出该文件的全部服务:merge 为 true 时合并为单个文件(dest 为文件路径),否则 dest 为目标目录;
+/// compress 为 true 时产物 gzip 压缩(单服务导出无合并语义,merge 忽略)
 #[tauri::command]
 pub async fn compose_export(
     app: AppHandle,
@@ -338,6 +586,8 @@ pub async fn compose_export(
     service: String,
     kind: String,
     dest: String,
+    merge: bool,
+    compress: bool,
 ) -> AppResult<()> {
     // 一次性读界面语言并向下传递(避免 export_one / export_all 内每条
     // ensure_ok 都重复读 settings.json)
@@ -348,9 +598,10 @@ pub async fn compose_export(
             return Err(AppError::coded(ErrorCode::DockerDirNotFound, path));
         }
         if service.is_empty() {
-            export_all(dir, &file, &kind, &dest, &language)
+            export_all(dir, &file, &kind, &dest, merge, compress, &language)
         } else {
-            export_one(dir, &file, &service, &kind, Path::new(&dest), &language)
+            // 单服务导出没有「合并」语义,merge 仅批量导出使用,此处忽略
+            export_one(dir, &file, &service, &kind, Path::new(&dest), compress, &language)
         }
     })
     .await

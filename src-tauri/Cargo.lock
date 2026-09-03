@@ -3989,6 +3989,7 @@ dependencies = [
  "async-process",
  "base64 0.22.1",
  "chrono",
+ "flate2",
  "futures",
  "git2",
  "globset",

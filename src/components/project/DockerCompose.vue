@@ -23,6 +23,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -30,6 +38,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Switch } from "@/components/ui/switch";
 import { useCollapsibleOpen } from "@/composables/useCollapsibleOpen";
 import { cmd, runInTerminal } from "@/lib/tauri";
 import { usePinsStore } from "@/stores/pins";
@@ -276,42 +285,64 @@ async function run(
   }
 }
 
-/** 导出服务的容器文件系统 / 镜像为 tar 包(save 对话框选路径,后端直接执行) */
-async function exportService(file: ComposeFile, service: string, kind: "container" | "image") {
-  try {
-    const dest = await save({
-      title: t(kind === "container" ? "docker.exportContainer" : "docker.exportImage"),
-      defaultPath: `${service}-${kind}.tar`,
-      filters: [{ name: "Tar", extensions: ["tar"] }],
-    });
-    if (!dest) return;
-    await cmd("compose_export", {
-      path: props.project.path,
-      file: file.path,
-      service,
-      kind,
-      dest,
-    });
-    toast.success(t("docker.exported", { path: dest }));
-  } catch (e) {
-    toast.error(String(e));
-  }
+/** 导出选项对话框的待处理目标;null 表示关闭 */
+const exportRequest = ref<{
+  file: ComposeFile;
+  /** 空字符串 = 导出该文件全部服务 */
+  service: string;
+  kind: "container" | "image";
+} | null>(null);
+const exportMerge = ref(false);
+const exportCompress = ref(false);
+
+/** 打开导出选项弹窗(每次打开重置选项) */
+function openExportOptions(file: ComposeFile, service: string, kind: "container" | "image") {
+  exportMerge.value = false;
+  exportCompress.value = false;
+  exportRequest.value = { file, service, kind };
 }
 
-/** 导出 compose 文件全部服务:选一个目录,逐服务生成 `<service>-<kind>.tar` */
-async function exportAll(file: ComposeFile, kind: "container" | "image") {
+/** 确认导出选项后:按合并与否选单文件/目录,压缩追加 .gz 后缀,然后调后端执行 */
+async function confirmExport() {
+  const req = exportRequest.value;
+  if (!req) return;
+  // 单服务导出没有「合并」语义,合并开关仅批量导出时展示,单服务恒为 false
+  const merge = !req.service && exportMerge.value;
+  const compress = exportCompress.value;
+  exportRequest.value = null;
+  const ext = compress ? "tar.gz" : "tar";
+  const title = t(req.kind === "container" ? "docker.exportContainer" : "docker.exportImage");
   try {
-    const dest = await open({
-      directory: true,
-      title: t(kind === "container" ? "docker.exportContainer" : "docker.exportImage"),
-    });
+    let dest: string | null;
+    if (req.service) {
+      // 单服务:选择导出文件路径
+      dest = await save({
+        title,
+        defaultPath: `${req.service}-${req.kind}.${ext}`,
+        filters: [{ name: "Tar", extensions: [ext] }],
+      });
+    } else if (merge) {
+      // 合并导出:选择合并后的单文件路径(如 docker-compose-images.tar.gz)
+      const stem = req.file.file_name.replace(/\.[^.]*$/, "");
+      const group = req.kind === "image" ? "images" : "containers";
+      dest = await save({
+        title,
+        defaultPath: `${stem}-${group}.${ext}`,
+        filters: [{ name: "Tar", extensions: [ext] }],
+      });
+    } else {
+      // 不合并:选目录,后端逐服务生成 <service>-<kind>.tar(.gz)
+      dest = await open({ directory: true, title });
+    }
     if (!dest) return;
     await cmd("compose_export", {
       path: props.project.path,
-      file: file.path,
-      service: "",
-      kind,
+      file: req.file.path,
+      service: req.service,
+      kind: req.kind,
       dest,
+      merge,
+      compress,
     });
     toast.success(t("docker.exported", { path: dest }));
   } catch (e) {
@@ -456,11 +487,17 @@ async function exportAll(file: ComposeFile, kind: "container" | "image") {
                     {{ t("docker.restart") }}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem class="gap-2 text-xs" @click="exportAll(d.file, 'container')">
+                  <DropdownMenuItem
+                    class="gap-2 text-xs"
+                    @click="openExportOptions(d.file, '', 'container')"
+                  >
                     <Download class="h-3.5 w-3.5" />
                     {{ t("docker.exportContainer") }}
                   </DropdownMenuItem>
-                  <DropdownMenuItem class="gap-2 text-xs" @click="exportAll(d.file, 'image')">
+                  <DropdownMenuItem
+                    class="gap-2 text-xs"
+                    @click="openExportOptions(d.file, '', 'image')"
+                  >
                     <ImageDown class="h-3.5 w-3.5" />
                     {{ t("docker.exportImage") }}
                   </DropdownMenuItem>
@@ -573,14 +610,14 @@ async function exportAll(file: ComposeFile, kind: "container" | "image") {
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
                       class="gap-2 text-xs"
-                      @click="exportService(d.file, s.name, 'container')"
+                      @click="openExportOptions(d.file, s.name, 'container')"
                     >
                       <Download class="h-3.5 w-3.5" />
                       {{ t("docker.exportContainer") }}
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       class="gap-2 text-xs"
-                      @click="exportService(d.file, s.name, 'image')"
+                      @click="openExportOptions(d.file, s.name, 'image')"
                     >
                       <ImageDown class="h-3.5 w-3.5" />
                       {{ t("docker.exportImage") }}
@@ -594,4 +631,31 @@ async function exportAll(file: ComposeFile, kind: "container" | "image") {
       </ScrollArea>
     </CardContent>
   </Card>
+  <!-- 导出选项:批量导出可选合并为单文件;压缩时产物为 .tar.gz -->
+  <Dialog :open="!!exportRequest" @update:open="!$event && (exportRequest = null)">
+    <DialogContent v-if="exportRequest">
+      <DialogHeader>
+        <DialogTitle>{{ t("docker.exportOptions") }}</DialogTitle>
+        <DialogDescription>
+          {{ exportRequest.service || exportRequest.file.file_name }}
+        </DialogDescription>
+      </DialogHeader>
+      <div class="flex flex-col gap-4">
+        <div v-if="!exportRequest.service" class="flex items-center justify-between gap-4">
+          <label for="docker-export-merge" class="text-sm">{{ t("docker.exportMerge") }}</label>
+          <Switch id="docker-export-merge" v-model:checked="exportMerge" />
+        </div>
+        <div class="flex items-center justify-between gap-4">
+          <label for="docker-export-compress" class="text-sm">{{
+            t("docker.exportCompress")
+          }}</label>
+          <Switch id="docker-export-compress" v-model:checked="exportCompress" />
+        </div>
+      </div>
+      <DialogFooter>
+        <Button variant="outline" @click="exportRequest = null">{{ t("common.cancel") }}</Button>
+        <Button @click="confirmExport">{{ t("common.confirm") }}</Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 </template>

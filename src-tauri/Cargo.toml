@@ -62,6 +62,8 @@ regex = "1"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 # 提交内图片预览(git_commit_file_blob):git blob 内容 base64 编码后经 IPC 传前端拼 data: URL
 base64 = "0.22"
+# docker 导出可选 gzip 压缩:纯 Rust 编码器,避免依赖系统 gzip(Windows 无内置)
+flate2 = "1"
 # ACP(Agent Client Protocol)官方客户端:wiki agent 后端与本地 coding agent CLI 的 JSON-RPC over stdio 交互
 # unstable_end_turn_token_usage:PromptResponse.usage(UNSTABLE,agent 未必上报)供用量统计
 agent-client-protocol = { version = "2", features = ["unstable_end_turn_token_usage"] }
