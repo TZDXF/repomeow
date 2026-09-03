@@ -115,9 +115,11 @@ fn read_file_preview_text_binary_and_escape() {
     let r = read_file_preview(dir.clone(), "a.txt".into()).unwrap();
     assert_eq!(r.text.as_deref(), Some("hello"));
     assert!(!r.truncated);
+    assert_eq!(r.token_count, Some(1));
 
     let r = read_file_preview(dir.clone(), "b.bin".into()).unwrap();
     assert!(r.text.is_none());
+    assert_eq!(r.token_count, None);
 
     // 目录不是文件
     assert!(read_file_preview(dir.clone(), "sub".into()).is_err());
@@ -146,9 +148,11 @@ fn read_file_preview_truncates_on_utf8_boundary() {
 
     let r = read_file_preview(dir.clone(), "big.txt".into()).unwrap();
     assert!(r.truncated);
+    let token_count = r.token_count.unwrap();
     let text = r.text.unwrap();
     assert!(text.len() <= PREVIEW_MAX_BYTES as usize);
     assert!(text.chars().all(|c| c == 'a'));
+    assert!(token_count > crate::commands::usage::count_o200k_tokens(&text));
 
     let _ = fs::remove_dir_all(&dir);
 }

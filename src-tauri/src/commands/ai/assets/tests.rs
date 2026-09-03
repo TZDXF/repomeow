@@ -3,6 +3,8 @@ use super::*;
 
 use serde_json::json;
 
+use crate::commands::usage::count_o200k_tokens;
+
 fn temp_project_dir(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "repomeow-ai-assets-{tag}-{}-{}",
@@ -33,11 +35,7 @@ fn detects_fixed_instruction_files() {
     assert!(paths.contains(&".cursor/rules/a.mdc"));
     assert!(paths.contains(&".cursor/rules/b.md"));
     assert!(!paths.contains(&".cursor/rules/c.txt"));
-    let agents_md = assets
-        .files
-        .iter()
-        .find(|f| f.path == "AGENTS.md")
-        .unwrap();
+    let agents_md = assets.files.iter().find(|f| f.path == "AGENTS.md").unwrap();
     assert!(agents_md.agents.contains(&"codex".to_string()));
 
     // agent 状态:claude/codex/copilot/cursor 应报「已配置」
@@ -61,11 +59,7 @@ fn detects_fixed_instruction_files() {
 #[test]
 fn reads_mcp_server_names_and_tolerates_corrupt() {
     let dir = temp_project_dir("mcp");
-    fs::write(
-        dir.join(".mcp.json"),
-        r#"{"mcpServers":{"b":{},"a":{}}}"#,
-    )
-    .unwrap();
+    fs::write(dir.join(".mcp.json"), r#"{"mcpServers":{"b":{},"a":{}}}"#).unwrap();
     fs::create_dir_all(dir.join(".cursor")).unwrap();
     fs::write(dir.join(".cursor/mcp.json"), "not json").unwrap();
 
@@ -101,6 +95,14 @@ fn scans_project_skills_with_frontmatter() {
     assert_eq!(assets.skills[0].dir, ".claude/skills/demo");
     assert_eq!(assets.skills[0].name, "demo-skill");
     assert_eq!(assets.skills[0].description, "做演示");
+    assert_eq!(
+        assets.skills[0].description_token_count,
+        count_o200k_tokens("做演示")
+    );
+    assert_eq!(
+        assets.skills[0].token_count,
+        count_o200k_tokens("---\nname: demo-skill\ndescription: \"做演示\"\n---\n\n# Demo\n")
+    );
 
     let _ = fs::remove_dir_all(&dir);
 }
@@ -112,8 +114,16 @@ fn scans_multiple_skill_dirs_and_dedupes_by_name() {
     let agents_only = dir.join(".agents/skills/review");
     fs::create_dir_all(&agents_only).unwrap();
     fs::write(agents_only.join("SKILL.md"), "---\nname: review\n---\n").unwrap();
-    // 两个目录同名技能:.claude/skills 优先保留
-    for rel in [".claude/skills/shared", ".agents/skills/shared"] {
+    // .zcode/skills 独有技能
+    let zcode_only = dir.join(".zcode/skills/zcode-skill");
+    fs::create_dir_all(&zcode_only).unwrap();
+    fs::write(zcode_only.join("SKILL.md"), "---\nname: zcode-skill\n---\n").unwrap();
+    // 三个目录同名技能:.claude/skills 优先保留
+    for rel in [
+        ".claude/skills/shared",
+        ".agents/skills/shared",
+        ".zcode/skills/shared",
+    ] {
         let shared = dir.join(rel);
         fs::create_dir_all(&shared).unwrap();
         fs::write(shared.join("SKILL.md"), "---\nname: shared\n---\n").unwrap();
@@ -121,9 +131,10 @@ fn scans_multiple_skill_dirs_and_dedupes_by_name() {
 
     let assets = scan_assets(&dir.to_string_lossy()).unwrap();
     let names: Vec<&str> = assets.skills.iter().map(|s| s.name.as_str()).collect();
-    assert_eq!(names, ["review", "shared"]);
+    assert_eq!(names, ["review", "shared", "zcode-skill"]);
     assert_eq!(assets.skills[0].dir, ".agents/skills/review");
     assert_eq!(assets.skills[1].dir, ".claude/skills/shared");
+    assert_eq!(assets.skills[2].dir, ".zcode/skills/zcode-skill");
 
     let _ = fs::remove_dir_all(&dir);
 }
@@ -180,22 +191,24 @@ fn mcp_upsert_merges_and_remove_is_idempotent() {
         r#"{"mcpServers":{"own":{"command":"own"}},"other":1}"#,
     )
     .unwrap();
-    upsert_mcp_server(&target, "web", json!({"command": "npx", "args": ["mcp-web"]})).unwrap();
-    let doc: Value =
-        serde_json::from_str(&fs::read_to_string(&target).unwrap()).unwrap();
+    upsert_mcp_server(
+        &target,
+        "web",
+        json!({"command": "npx", "args": ["mcp-web"]}),
+    )
+    .unwrap();
+    let doc: Value = serde_json::from_str(&fs::read_to_string(&target).unwrap()).unwrap();
     assert!(doc["mcpServers"]["own"].is_object());
     assert_eq!(doc["mcpServers"]["web"]["command"], json!("npx"));
     assert_eq!(doc["other"], json!(1));
 
     // 覆盖同名键
     upsert_mcp_server(&target, "web", json!({"url": "https://x"})).unwrap();
-    let doc: Value =
-        serde_json::from_str(&fs::read_to_string(&target).unwrap()).unwrap();
+    let doc: Value = serde_json::from_str(&fs::read_to_string(&target).unwrap()).unwrap();
     assert_eq!(doc["mcpServers"]["web"]["url"], json!("https://x"));
 
     remove_mcp_server(&target, "web").unwrap();
-    let doc: Value =
-        serde_json::from_str(&fs::read_to_string(&target).unwrap()).unwrap();
+    let doc: Value = serde_json::from_str(&fs::read_to_string(&target).unwrap()).unwrap();
     assert!(doc["mcpServers"]["web"].is_null());
     assert!(doc["mcpServers"]["own"].is_object());
     // 再删幂等;文件不存在也幂等

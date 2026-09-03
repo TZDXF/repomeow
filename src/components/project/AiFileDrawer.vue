@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { openPath } from "@tauri-apps/plugin-opener";
+import { useLocalStorage } from "@vueuse/core";
 import { ExternalLink, FileCode, LoaderCircle, Pencil, Save, Undo2, X } from "@lucide/vue";
 import { Markdown } from "vue-stream-markdown";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import CodeViewer from "@/components/files/CodeViewer.vue";
 import { cmd } from "@/lib/tauri";
 import { joinPath } from "@/lib/path";
 import { FILE_REF_CLASS, linkifyFileRefs, resolveRefPath } from "@/lib/ai-file-refs";
+import { formatTokenCount } from "@/lib/chat";
 import { useSettingsStore } from "@/stores/settings";
 import type { FilePreview } from "@/types";
 
@@ -25,6 +27,8 @@ const props = defineProps<{
   root: string;
   /** 仓库内相对路径;null 表示关闭 */
   relPath: string | null;
+  /** 当前路径为已扫描的 SKILL.md 时，其 frontmatter description 的 token 数。 */
+  descriptionTokenCount?: number | null;
 }>();
 const emit = defineEmits<{
   (e: "close"): void;
@@ -35,6 +39,10 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const settingsStore = useSettingsStore();
+
+// 传游离元素,避免 Markdown 库将 island/glass 的十六进制主题变量写成无效的 hsl(#…)。
+const detachedThemeEl = document.createElement("div");
+const themeElement = () => detachedThemeEl;
 
 const preview = ref<FilePreview | null>(null);
 const loading = ref(false);
@@ -47,6 +55,36 @@ let loadSeq = 0;
 
 const open = computed(() => props.relPath !== null);
 const isMarkdown = computed(() => /\.(md|mdc|markdown)$/i.test(props.relPath ?? ""));
+
+const drawerWidth = useLocalStorage("repomeow:ai-file-drawer-w", 680);
+const DRAWER_MIN_W = 400;
+const DRAWER_MAX_VIEWPORT_RATIO = 0.92;
+let drawerResizeCleanups: (() => void)[] = [];
+
+function drawerWidthCap() {
+  return Math.max(DRAWER_MIN_W, Math.floor(window.innerWidth * DRAWER_MAX_VIEWPORT_RATIO));
+}
+
+function startDrawerResize(e: PointerEvent) {
+  e.preventDefault();
+  const startX = e.clientX;
+  const startW = drawerWidth.value;
+  const onMove = (ev: PointerEvent) => {
+    drawerWidth.value = Math.min(
+      drawerWidthCap(),
+      Math.max(DRAWER_MIN_W, Math.round(startW + startX - ev.clientX)),
+    );
+  };
+  const onUp = () => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    drawerResizeCleanups = drawerResizeCleanups.filter((fn) => fn !== cleanup);
+  };
+  const cleanup = onUp;
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+  drawerResizeCleanups.push(cleanup);
+}
 /** 编辑中且内容有改动(用于 Esc 守卫与取消按钮) */
 function isDirty(): boolean {
   if (!editing.value || !preview.value) return false;
@@ -109,7 +147,11 @@ watch(
   },
   { immediate: true },
 );
-onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown, true));
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", onKeydown, true);
+  for (const cleanup of drawerResizeCleanups) cleanup();
+  drawerResizeCleanups = [];
+});
 
 function startEdit() {
   editing.value = true;
@@ -131,7 +173,10 @@ async function save() {
   saving.value = true;
   try {
     await cmd<void>("save_text_file", { path: joinPath(props.root, rel), content: text });
-    preview.value = { ...preview.value, text };
+    preview.value = await cmd<FilePreview>("read_file_preview", {
+      root: props.root,
+      relPath: rel,
+    });
     editing.value = false;
     emit("saved");
     toast.success(t("aiAssets.drawer.saved"));
@@ -183,13 +228,39 @@ function onMarkdownClick(e: MouseEvent) {
           否则抽屉头部会被标题栏盖住
         -->
         <aside
-          class="absolute bottom-0 right-0 top-9 flex w-[560px] max-w-[92vw] flex-col border-l border-t bg-background shadow-xl"
+          class="absolute bottom-0 right-0 top-9 flex max-w-[92vw] flex-col border-l border-t bg-background shadow-xl"
+          :style="{ width: `${drawerWidth}px` }"
           @click.stop
         >
+          <div
+            class="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize touch-none transition-colors hover:bg-primary/50"
+            @pointerdown="startDrawerResize"
+          />
           <header class="flex shrink-0 items-center gap-2 border-b px-4 py-3">
             <FileCode class="h-4 w-4 shrink-0 text-muted-foreground" />
             <span class="min-w-0 flex-1 truncate font-mono text-xs" :title="relPath ?? ''">
               {{ relPath }}
+            </span>
+            <span
+              v-if="preview?.tokenCount !== null && preview?.tokenCount !== undefined"
+              class="shrink-0 text-xs tabular-nums text-muted-foreground"
+              :title="
+                descriptionTokenCount !== null && descriptionTokenCount !== undefined
+                  ? t('aiAssets.skillTokenUsageFull', {
+                      description: descriptionTokenCount,
+                      total: preview.tokenCount,
+                    })
+                  : t('aiAssets.drawer.fileTokensFull', { count: preview.tokenCount })
+              "
+            >
+              {{
+                descriptionTokenCount !== null && descriptionTokenCount !== undefined
+                  ? t("aiAssets.skillTokenUsage", {
+                      description: formatTokenCount(descriptionTokenCount),
+                      total: formatTokenCount(preview.tokenCount),
+                    })
+                  : t("aiAssets.drawer.fileTokens", { count: formatTokenCount(preview.tokenCount) })
+              }}
             </span>
             <Button
               size="sm"
@@ -257,7 +328,12 @@ function onMarkdownClick(e: MouseEvent) {
             class="min-h-0 flex-1 overflow-y-auto px-6 py-4"
             @click="onMarkdownClick"
           >
-            <Markdown mode="static" :content="preview.text" :locale="settingsStore.language" />
+            <Markdown
+              mode="static"
+              :content="preview.text"
+              :locale="settingsStore.language"
+              :theme-element="themeElement"
+            />
           </div>
         </aside>
       </div>
@@ -266,6 +342,10 @@ function onMarkdownClick(e: MouseEvent) {
 </template>
 
 <style scoped>
+:deep(.stream-markdown [data-stream-markdown="code-block-header"]) {
+  background-color: var(--color-muted);
+}
+
 .ai-drawer-enter-active,
 .ai-drawer-leave-active {
   transition: opacity 0.15s ease;

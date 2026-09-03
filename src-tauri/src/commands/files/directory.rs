@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use crate::commands::usage::count_o200k_tokens;
 use crate::commands::walk;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::{FilePreview, ProjectFileEntry};
@@ -120,8 +121,11 @@ pub(super) fn read_file_preview(root: String, rel_path: String) -> AppResult<Fil
         return Ok(FilePreview {
             text: None,
             truncated: false,
+            token_count: None,
         });
     }
+    let full_text = String::from_utf8_lossy(&bytes);
+    let token_count = count_o200k_tokens(&full_text);
     let truncated = bytes.len() as u64 > PREVIEW_MAX_BYTES;
     let mut end = bytes.len().min(PREVIEW_MAX_BYTES as usize);
     // 按 UTF-8 边界截断:跳过 continuation byte(0b10xxxxxx)
@@ -131,5 +135,6 @@ pub(super) fn read_file_preview(root: String, rel_path: String) -> AppResult<Fil
     Ok(FilePreview {
         text: Some(String::from_utf8_lossy(&bytes[..end]).into_owned()),
         truncated,
+        token_count: Some(token_count),
     })
 }

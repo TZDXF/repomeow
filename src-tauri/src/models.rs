@@ -335,10 +335,13 @@ pub struct CustomCommand {
 
 /// 文件预览内容(read_file_preview):text 为 None 表示二进制文件不可预览
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FilePreview {
     pub text: Option<String>,
     /// 文本是否因超过大小上限被截断
     pub truncated: bool,
+    /// 完整文本按固定 o200k_base 编码器统计的 token 数;二进制文件为 None。
+    pub token_count: Option<i64>,
 }
 
 /// 项目文件清单条目(list_project_files / search_project_files)

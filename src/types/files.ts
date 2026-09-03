@@ -3,6 +3,8 @@ export interface FilePreview {
   text: string | null;
   /** 文本是否因超过大小上限被截断 */
   truncated: boolean;
+  /** 完整文本按固定 o200k_base 编码器统计的 token 数;二进制文件为 null */
+  tokenCount: number | null;
 }
 
 /** 项目文件清单条目(list_project_files / search_project_files) */

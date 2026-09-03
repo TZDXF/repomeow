@@ -21,6 +21,14 @@ const BY_DAY_LIMIT: i64 = 190;
 /// 明细日志分页单页大小上限(前端「加载更多」按此步进)
 pub const LIST_PAGE_SIZE: i64 = 50;
 
+/// 以固定 o200k_base 编码器统计文本 token。
+///
+/// 用于不绑定某个模型的本地文本统计，例如项目 AI 资产；tokenizer 固定可避免用户切换
+/// 默认模型或聊天模型后，同一文件在界面上的计数发生变化。
+pub(crate) fn count_o200k_tokens(text: &str) -> i64 {
+    i64::try_from(tiktoken_rs::o200k_base_singleton().count_ordinary(text)).unwrap_or(i64::MAX)
+}
+
 /// ACP agent 未上报 usage 时的本地估算。优先按已知 OpenAI 模型选择编码器，
 /// 未知/第三方模型统一回退 o200k_base；只覆盖应用可见的 prompt 与最终正文，
 /// 不包含 agent 内部工具调用和上下文，因此结果是保守估算值。
@@ -28,9 +36,9 @@ pub(crate) fn estimate_text_tokens(model: &str, text: &str) -> i64 {
     let configured_model = model
         .rsplit_once(" · ")
         .map_or(model, |(_, configured)| configured);
-    let bpe = tiktoken_rs::bpe_for_model(configured_model)
-        .unwrap_or_else(|_| tiktoken_rs::o200k_base_singleton());
-    i64::try_from(bpe.count_ordinary(text)).unwrap_or(i64::MAX)
+    tiktoken_rs::bpe_for_model(configured_model)
+        .map(|bpe| i64::try_from(bpe.count_ordinary(text)).unwrap_or(i64::MAX))
+        .unwrap_or_else(|_| count_o200k_tokens(text))
 }
 
 pub(crate) fn insert_usage_row(
@@ -229,6 +237,12 @@ mod tests {
             2,
         );
         assert_eq!(estimate_text_tokens("unknown", ""), 0);
+    }
+
+    #[test]
+    fn counts_assets_with_fixed_o200k_tokenizer() {
+        assert_eq!(count_o200k_tokens("hello world"), 2);
+        assert_eq!(count_o200k_tokens(""), 0);
     }
 
     fn rec_cached(

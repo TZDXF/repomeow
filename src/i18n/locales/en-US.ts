@@ -249,10 +249,14 @@ export default {
     installed: "Installed",
     notInstalled: "Not installed",
     configured: "{count} config(s) in this project",
+    skillTokenUsage: "Description {description} / Full {total} tokens",
+    skillTokenUsageFull: "Description: {description} tokens / Full SKILL.md: {total} tokens",
     drawer: {
       edit: "Edit",
       saved: "Saved",
       externalOpen: "Open with system default app",
+      fileTokens: "{count} tokens",
+      fileTokensFull: "Full file: {count} tokens",
     },
     import: {
       title: "Import from CC Switch",

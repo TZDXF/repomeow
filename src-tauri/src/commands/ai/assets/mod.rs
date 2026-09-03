@@ -2,7 +2,7 @@
 //!
 //! - `scan_project_ai_assets`:固定路径 + 已知目录探测项目内的指令文件
 //!   (CLAUDE.md / AGENTS.md / GEMINI.md 等)、MCP 配置(.mcp.json 等)与
-//!   skills 目录(`.claude/skills/*` 与 `.agents/skills/*`,按技能名去重),
+//!   skills 目录(`.claude/skills/*`、`.agents/skills/*` 与 `.zcode/skills/*`,按技能名去重),
 //!   并与 registry 的 13 个 agent 安装状态交叉。
 //!   不做全仓库递归:直接 `Path::exists` 探测,天然覆盖隐藏条目且代价恒定。
 //! - `set_project_cc_skill` / `set_project_cc_mcp`:把 cc-switch(`~/.cc-switch`)
@@ -18,6 +18,7 @@ use serde_json::Value;
 
 use crate::commands::agent::list_agents;
 use crate::commands::files;
+use crate::commands::usage::count_o200k_tokens;
 use crate::error::{AppError, AppResult, ErrorCode};
 
 mod cc_export;
@@ -58,6 +59,10 @@ pub struct ProjectSkill {
     pub name: String,
     #[serde(default)]
     pub description: String,
+    /// frontmatter description 按固定 o200k_base 编码器统计的 token 数。
+    pub description_token_count: i64,
+    /// 完整 SKILL.md 按固定 o200k_base 编码器统计的 token 数。
+    pub token_count: i64,
 }
 
 /// 一个 agent 工具的本机安装状态 + 本项目配置命中情况。
@@ -117,8 +122,9 @@ const MCP_PROBES: &[(&str, &str)] = &[
 ];
 
 /// 项目级 skills 目录候选(按优先级排序,同名技能先命中者保留)。
-/// `.claude/skills` 是 Claude Code 约定,`.agents/skills` 是 pi 等工具的跨 agent 约定。
-const SKILL_DIR_PROBES: &[&str] = &[".claude/skills", ".agents/skills"];
+/// `.claude/skills` 是 Claude Code 约定,`.agents/skills` 是跨 agent 约定,
+/// `.zcode/skills` 是 ZCode 项目级 skills 目录。
+const SKILL_DIR_PROBES: &[&str] = &[".claude/skills", ".agents/skills", ".zcode/skills"];
 
 /// agent → 项目内配置探测路径(agent 状态行的「已配置」判定)。
 const AGENT_PROBES: &[(&str, &[&str])] = &[
@@ -173,15 +179,18 @@ fn scan_assets(path: &str) -> AppResult<ProjectAiAssets> {
             .map(|e| e.path())
             .filter(|p| {
                 p.is_file()
-                    && p.extension()
-                        .and_then(|e| e.to_str())
-                        .is_some_and(|e| e.eq_ignore_ascii_case("mdc") || e.eq_ignore_ascii_case("md"))
+                    && p.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+                        e.eq_ignore_ascii_case("mdc") || e.eq_ignore_ascii_case("md")
+                    })
             })
             .collect();
         entries.sort();
         for entry in entries {
             items.push(AiAssetItem {
-                path: format!(".cursor/rules/{}", entry.file_name().unwrap_or_default().to_string_lossy()),
+                path: format!(
+                    ".cursor/rules/{}",
+                    entry.file_name().unwrap_or_default().to_string_lossy()
+                ),
                 kind: "rule",
                 agents: vec!["cursor".to_string()],
             });
@@ -267,13 +276,29 @@ fn scan_project_skills(root: &Path) -> Vec<ProjectSkill> {
                     return None;
                 }
                 let dir_name = dir.file_name()?.to_string_lossy().to_string();
-                let (name, description) = fs::read_to_string(&skill_md)
-                    .map(|content| parse_skill_frontmatter(&content))
-                    .unwrap_or_default();
+                let (name, description, description_token_count, token_count) =
+                    match fs::read_to_string(&skill_md) {
+                        Ok(content) => {
+                            let (name, description) = parse_skill_frontmatter(&content);
+                            let description_token_count = description
+                                .as_deref()
+                                .map(count_o200k_tokens)
+                                .unwrap_or_default();
+                            (
+                                name,
+                                description,
+                                description_token_count,
+                                count_o200k_tokens(&content),
+                            )
+                        }
+                        Err(_) => (None, None, 0, 0),
+                    };
                 Some(ProjectSkill {
                     dir: format!("{rel_dir}/{dir_name}"),
                     name: name.unwrap_or_else(|| dir_name.clone()),
                     description: description.unwrap_or_default(),
+                    description_token_count,
+                    token_count,
                 })
             })
             .collect();

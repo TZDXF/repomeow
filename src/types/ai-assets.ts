@@ -17,12 +17,16 @@ export interface ProjectMcpFile {
   servers: string[];
 }
 
-/** 项目 skills 目录(.claude/skills、.agents/skills)下的一个技能 */
+/** 项目 skills 目录(.claude/skills、.agents/skills、.zcode/skills)下的一个技能 */
 export interface ProjectSkill {
   /** 技能目录的仓库相对路径,如 ".claude/skills/foo" */
   dir: string;
   name: string;
   description: string;
+  /** frontmatter description 按固定 o200k_base 编码器统计的 token 数 */
+  descriptionTokenCount: number;
+  /** 完整 SKILL.md 按固定 o200k_base 编码器统计的 token 数 */
+  tokenCount: number;
 }
 
 /** 一个 agent 工具的本机安装状态 + 本项目配置命中情况 */

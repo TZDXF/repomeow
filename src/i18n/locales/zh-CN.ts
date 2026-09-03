@@ -241,10 +241,14 @@ export default {
     installed: "已安装",
     notInstalled: "未安装",
     configured: "本项目已配置 {count} 处",
+    skillTokenUsage: "描述 {description} / 全文 {total} tokens",
+    skillTokenUsageFull: "描述: {description} tokens / SKILL.md 全文: {total} tokens",
     drawer: {
       edit: "编辑",
       saved: "已保存",
       externalOpen: "用系统默认程序打开",
+      fileTokens: "{count} tokens",
+      fileTokensFull: "完整文件: {count} tokens",
     },
     import: {
       title: "从 CC Switch 导入",

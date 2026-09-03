@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import AiFileDrawer from "@/components/project/AiFileDrawer.vue";
 import CcSwitchImportDialog from "@/components/project/CcSwitchImportDialog.vue";
+import { formatTokenCount } from "@/lib/chat";
 import { baseName, splitDirName } from "@/lib/path";
 import { cmd } from "@/lib/tauri";
 import type { CcSwitchAssets, Project, ProjectAiAssets } from "@/types";
@@ -24,7 +25,7 @@ import type { CcSwitchAssets, Project, ProjectAiAssets } from "@/types";
 /**
  * 项目详情页「AI 视图」:全宽非卡片布局,聚合展示项目内 AI 资产——
  * 指令/规则文件(CLAUDE.md、AGENTS.md、.cursor/rules 等)、MCP 配置(.mcp.json 等)、
- * skills(.claude/skills 与 .agents/skills,按名称去重)与 13 个 agent 工具的安装/配置状态;
+ * skills(.claude/skills、.agents/skills 与 .zcode/skills,按名称去重)与 13 个 agent 工具的安装/配置状态;
  * 支持从 cc-switch(~/.cc-switch)勾选导入 skills 与 MCP 到项目文件。
  * 点击文件条目打开右侧抽屉预览/编辑(AiFileDrawer)。
  */
@@ -85,6 +86,11 @@ const ccAvailable = computed(() => !!ccAssets.value?.found);
 
 /** 项目已有 skills 目录名(导入对话框勾选态初始化;skills 可多目录来源,取末段目录名) */
 const projectSkillDirs = computed(() => (assets.value?.skills ?? []).map((s) => baseName(s.dir)));
+/** 当前抽屉若打开一个已扫描的 SKILL.md，则提供其描述 token 供抽屉头部展示。 */
+const drawerSkill = computed(() => {
+  if (!drawerPath.value) return null;
+  return assets.value?.skills.find((skill) => `${skill.dir}/SKILL.md` === drawerPath.value) ?? null;
+});
 /** 项目根 .mcp.json 已有的服务器名 */
 const projectMcpNames = computed(
   () => assets.value?.mcp.find((m) => m.path === ".mcp.json")?.servers ?? [],
@@ -205,6 +211,22 @@ function onImported() {
             >
               {{ skill.description }}
             </span>
+            <span
+              class="shrink-0 text-[10px] tabular-nums text-muted-foreground/70"
+              :title="
+                t('aiAssets.skillTokenUsageFull', {
+                  description: skill.descriptionTokenCount,
+                  total: skill.tokenCount,
+                })
+              "
+            >
+              {{
+                t("aiAssets.skillTokenUsage", {
+                  description: formatTokenCount(skill.descriptionTokenCount),
+                  total: formatTokenCount(skill.tokenCount),
+                })
+              }}
+            </span>
             <span class="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground/70">
               {{ splitDirName(skill.dir).parent }}
             </span>
@@ -269,6 +291,7 @@ function onImported() {
   <AiFileDrawer
     :root="project.path"
     :rel-path="drawerPath"
+    :description-token-count="drawerSkill?.descriptionTokenCount ?? null"
     @close="drawerPath = null"
     @navigate="drawerPath = $event"
   />
