@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- 应用清单:bin 与 lib 单元测试二进制统一由 build.rs 经链接参数嵌入本文件。
+     内容与 tauri-build 默认清单一致(comctl32 v6 依赖);tauri-build 侧的
+     清单嵌入已用 WindowsAttributes::new_without_app_manifest() 关闭,
+     否则与 /MANIFESTINPUT 重复导致 CVT1100/LNK1123。
+     缺少本清单时 comctl32 解析到 v5,tauri-plugin-dialog 引入的
+     TaskDialogIndirect 在加载期即 STATUS_ENTRYPOINT_NOT_FOUND(0xC0000139)。 -->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*" />
+    </dependentAssembly>
+  </dependency>
+</assembly>
