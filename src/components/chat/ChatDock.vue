@@ -658,16 +658,13 @@ const retrySeconds = computed(() => {
                           class="text-muted-foreground"
                         />
                       </template>
+                      <!-- 回合复制仅在回答完成后显示，并紧跟在回答正文底部 -->
+                      <MessageActions v-if="!view.live && view.contents.length > 0">
+                        <MessageAction :tooltip="t('chat.copy')" @click="copyTurn(view)">
+                          <Copy class="size-3.5" />
+                        </MessageAction>
+                      </MessageActions>
                     </MessageContent>
-                    <!-- 回合复制:悬停显现;流式中(正文未定型)不显示 -->
-                    <MessageActions
-                      v-if="!view.live && view.contents.length > 0"
-                      class="opacity-0 transition-opacity group-hover:opacity-100"
-                    >
-                      <MessageAction :tooltip="t('chat.copy')" @click="copyTurn(view)">
-                        <Copy class="size-3.5" />
-                      </MessageAction>
-                    </MessageActions>
                   </div>
                 </Message>
               </template>
