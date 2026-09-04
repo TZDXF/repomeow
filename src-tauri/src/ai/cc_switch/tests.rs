@@ -30,6 +30,7 @@ fn codex_chat_wire_api() {
         }),
     )
     .expect("chat wire_api 应可导入");
+    assert_eq!(provider.api, "openai-completions");
     assert_eq!(provider.base_url, "https://api.example.com/v1");
     assert_eq!(provider.api_key, "sk-test");
     assert_eq!(provider.models.len(), 1);
@@ -37,23 +38,65 @@ fn codex_chat_wire_api() {
 }
 
 #[test]
-fn codex_responses_wire_api_skipped() {
-    assert!(convert_app(
+fn codex_responses_wire_api_maps_responses_adapter() {
+    let provider = convert_app(
         "codex",
         json!({
             "auth": { "OPENAI_API_KEY": "sk-test" },
-            "config": "[model_providers.custom]\nbase_url = \"https://api.example.com/v1\"\nwire_api = \"responses\"\n",
+            "config": "model_provider = \"custom\"\n\n[model_providers.custom]\nbase_url = \"https://api.example.com/v1\"\nwire_api = \"responses\"\n",
         }),
     )
-    .is_none());
-    // 未写 wire_api 按 responses 处理,不导入
-    assert!(convert_app(
+    .expect("responses wire_api 应可导入");
+    assert_eq!(provider.api, "openai-responses");
+    // 未写 wire_api 按 codex 惯例视为 responses
+    let provider = convert_app(
         "codex",
         json!({
-            "config": "[model_providers.custom]\nbase_url = \"https://api.example.com/v1\"\n",
+            "config": "model_provider = \"custom\"\n\n[model_providers.custom]\nbase_url = \"https://api.example.com/v1\"\n",
         }),
     )
-    .is_none());
+    .expect("缺省 wire_api 应按 responses 导入");
+    assert_eq!(provider.api, "openai-responses");
+    // 未知取值不导入
+    let mut unknown = json!({
+        "config": "model_provider = \"custom\"\n\n[model_providers.custom]\nbase_url = \"https://api.example.com/v1\"\n",
+    });
+    unknown["config"] = json!("model_provider = \"custom\"\n\n[model_providers.custom]\nbase_url = \"https://api.example.com/v1\"\nwire_api = \"grpc\"\n");
+    assert!(convert_app("codex", unknown).is_none());
+}
+
+#[test]
+fn codex_model_catalog_models() {
+    let provider = convert_app(
+        "codex",
+        json!({
+            "auth": { "OPENAI_API_KEY": "sk-test" },
+            "config": "model_provider = \"custom\"\nmodel = \"k3\"\n\n[model_providers.custom]\nbase_url = \"http://192.168.1.1:8084/v1\"\nwire_api = \"responses\"\n",
+            "modelCatalog": {
+                "models": [
+                    { "model": "k3", "displayName": "k3", "contextWindow": 1000000 },
+                    { "model": "glm-5", "contextWindow": 0 },
+                    { "model": "" },
+                ],
+            },
+        }),
+    )
+    .expect("modelCatalog 应可导入");
+    assert_eq!(provider.models.len(), 2);
+    assert_eq!(provider.models[0].id, "k3");
+    assert_eq!(provider.models[0].name, "k3");
+    assert_eq!(provider.models[0].context_window, 1000000);
+    assert_eq!(provider.models[1].id, "glm-5");
+    // 无 modelCatalog 时回退 TOML 顶层 model
+    let provider = convert_app(
+        "codex",
+        json!({
+            "config": "model_provider = \"custom\"\nmodel = \"gpt-5\"\n\n[model_providers.custom]\nbase_url = \"https://api.example.com/v1\"\nwire_api = \"chat\"\n",
+        }),
+    )
+    .expect("顶层 model 兜底");
+    assert_eq!(provider.models.len(), 1);
+    assert_eq!(provider.models[0].id, "gpt-5");
 }
 
 #[test]
@@ -69,22 +112,38 @@ fn codex_bearer_token_fallback() {
 }
 
 #[test]
-fn opencode_requires_openai_compatible_npm() {
-    let settings = || {
+fn opencode_npm_maps_adapter() {
+    let settings = |npm: &str| {
         json!({
-            "npm": "@ai-sdk/openai-compatible",
+            "npm": npm,
             "options": { "baseURL": "https://api.example.com/v1", "apiKey": "sk-x" },
             "models": { "gpt-4o": { "name": "GPT-4o", "limit": { "context": 128000, "output": 16384 } } },
         })
     };
-    let provider = convert_app("opencode", settings()).expect("openai-compatible 应可导入");
-    assert_eq!(provider.base_url, "https://api.example.com/v1");
+    let provider = convert_app("opencode", settings("@ai-sdk/openai-compatible"))
+        .expect("openai-compatible 应可导入");
+    assert_eq!(provider.api, "openai-completions");
     assert_eq!(provider.models[0].context_window, 128000);
     assert_eq!(provider.models[0].max_tokens, 16384);
 
-    let mut other = settings();
-    other["npm"] = json!("@ai-sdk/anthropic");
-    assert!(convert_app("opencode", other).is_none());
+    assert_eq!(
+        convert_app("opencode", settings("@ai-sdk/anthropic"))
+            .expect("anthropic 包应可导入")
+            .api,
+        "anthropic-messages"
+    );
+    assert_eq!(
+        convert_app("opencode", settings("@ai-sdk/google")).expect("google 包应可导入").api,
+        "google-generative-ai"
+    );
+    assert_eq!(
+        convert_app("opencode", settings("@ai-sdk/openai"))
+            .expect("openai 包应可导入")
+            .api,
+        "openai-responses"
+    );
+    // 未知 npm 包不导入
+    assert!(convert_app("opencode", settings("@ai-sdk/amazon-bedrock")).is_none());
 }
 
 #[test]
@@ -193,6 +252,8 @@ fn hermes_snake_case_fields() {
     assert_eq!(provider.base_url, "https://openrouter.ai/api/v1");
     assert_eq!(provider.models.len(), 1);
     assert_eq!(provider.models[0].context_window, 200000);
+    // base_url 缺失不导入
+    assert!(convert_app("hermes", json!({ "api_key": "sk-x" })).is_none());
 }
 
 #[test]
@@ -210,19 +271,81 @@ fn grokbuild_chat_completions_only() {
 }
 
 #[test]
-fn anthropic_and_gemini_apps_skipped() {
-    assert!(convert_app(
+fn claude_env_maps_anthropic_messages() {
+    let provider = convert_app(
         "claude",
-        json!({ "env": { "ANTHROPIC_BASE_URL": "https://api.example.com", "ANTHROPIC_AUTH_TOKEN": "sk-x" } }),
+        json!({
+            "env": {
+                "ANTHROPIC_BASE_URL": "https://api.example.com/anthropic/",
+                "ANTHROPIC_AUTH_TOKEN": "sk-x",
+                "ANTHROPIC_MODEL": "glm-5[1M]",
+                "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5[1M]",
+                "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5",
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-v4",
+                "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME": "glm-5",
+            },
+        }),
     )
-    .is_none());
-    assert!(convert_app(
+    .expect("claude 应可导入");
+    assert_eq!(provider.api, "anthropic-messages");
+    assert_eq!(provider.base_url, "https://api.example.com/anthropic");
+    assert_eq!(provider.api_key, "sk-x");
+    // [1M] 后缀剥离、跨档去重,SONNET/OPUS/HAIKU 顺序保持在 ANTHROPIC_MODEL 之后
+    let ids: Vec<&str> = provider.models.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(ids, vec!["glm-5", "deepseek-v4"]);
+
+    // claude-desktop 同为 Anthropic env 形状
+    let provider = convert_app(
+        "claude-desktop",
+        json!({ "env": { "ANTHROPIC_BASE_URL": "http://192.168.1.1:8084/v1", "ANTHROPIC_AUTH_TOKEN": "sk-y" } }),
+    )
+    .expect("claude-desktop 应可导入");
+    assert_eq!(provider.api, "anthropic-messages");
+    assert!(provider.models.is_empty());
+    // ANTHROPIC_API_KEY 兜底
+    let provider = convert_app(
+        "claude",
+        json!({ "env": { "ANTHROPIC_BASE_URL": "https://api.example.com", "ANTHROPIC_API_KEY": "sk-z" } }),
+    )
+    .expect("API_KEY 兜底");
+    assert_eq!(provider.api_key, "sk-z");
+    // 仅官方登录(无 base_url)不导入
+    assert!(convert_app("claude", json!({ "env": {} })).is_none());
+}
+
+#[test]
+fn gemini_env_maps_google_generative_ai() {
+    let provider = convert_app(
         "gemini",
-        json!({ "env": { "GOOGLE_GEMINI_BASE_URL": "https://api.example.com", "GEMINI_API_KEY": "sk-x" } }),
+        json!({
+            "env": {
+                "GOOGLE_GEMINI_BASE_URL": "https://ark.example.com/api/coding/v3",
+                "GEMINI_API_KEY": "sk-x",
+                "GEMINI_MODEL": "glm-4.7",
+            },
+        }),
     )
-    .is_none());
-    // base_url 缺失不导入
-    assert!(convert_app("hermes", json!({ "api_key": "sk-x" })).is_none());
+    .expect("gemini 应可导入");
+    assert_eq!(provider.api, "google-generative-ai");
+    assert_eq!(provider.base_url, "https://ark.example.com/api/coding/v3");
+    assert_eq!(provider.models.len(), 1);
+    assert_eq!(provider.models[0].id, "glm-4.7");
+    // GOOGLE_API_KEY 与 GOOGLE_GEMINI_MODEL 兜底
+    let provider = convert_app(
+        "gemini",
+        json!({
+            "env": {
+                "GOOGLE_GEMINI_BASE_URL": "https://api.example.com",
+                "GOOGLE_API_KEY": "sk-y",
+                "GOOGLE_GEMINI_MODEL": "gemini-2.5-pro",
+            },
+        }),
+    )
+    .expect("GOOGLE_ 兜底");
+    assert_eq!(provider.api_key, "sk-y");
+    assert_eq!(provider.models[0].id, "gemini-2.5-pro");
+    // 仅官方登录(无 base_url)不导入
+    assert!(convert_app("gemini", json!({ "env": {}, "config": {} })).is_none());
 }
 
 #[test]
@@ -262,9 +385,12 @@ fn legacy_config_json_shape() {
     let scan = scan_at(&dir).expect("扫描成功");
     let _ = fs::remove_dir_all(&dir);
     assert!(scan.found);
-    assert_eq!(scan.providers.len(), 1);
+    // codex chat + claude(Anthropic env)各导入一条;current 优先排序
+    assert_eq!(scan.providers.len(), 2);
     assert_eq!(scan.providers[0].id, "a");
     assert!(scan.providers[0].current);
+    assert_eq!(scan.providers[1].id, "b");
+    assert_eq!(scan.providers[1].api, "anthropic-messages");
 }
 
 #[test]

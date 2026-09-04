@@ -1511,10 +1511,10 @@ export default {
       importCcSwitch: "从 CC Switch 导入",
       ccSwitchTitle: "从 CC Switch 导入",
       ccSwitchDesc:
-        "读取本机 ~/.cc-switch 中的供应商,仅列出 OpenAI chat 兼容的项(codex / opencode / openclaw / pi / hermes / grokbuild);claude、gemini 等非 OpenAI chat 协议的供应商不支持导入",
+        "读取本机 ~/.cc-switch 中的供应商,按来源应用自动映射接口协议(codex / claude / gemini / opencode / openclaw / pi / hermes / grokbuild);无法识别协议的项不会列出",
       ccSwitchLoading: "正在读取 CC Switch 配置...",
       ccSwitchNotFound: "未检测到 CC Switch 配置(本机不存在 ~/.cc-switch)",
-      ccSwitchEmpty: "没有可导入的 OpenAI chat 兼容供应商",
+      ccSwitchEmpty: "没有可导入的供应商",
       ccSwitchSelected: "已选 {selected} / {total}",
       ccSwitchSelectAll: "全选",
       ccSwitchDeselectAll: "全不选",

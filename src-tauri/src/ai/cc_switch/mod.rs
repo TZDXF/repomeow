@@ -1,8 +1,10 @@
 //! 从 CC Switch(`~/.cc-switch`)读取供应商供设置页导入。
 //!
 //! CC Switch 3.x 以 SQLite(`cc-switch.db`)为唯一事实源,旧版为 `config.json`;
-//! openclaw / pi 的 `api` 在四种已实现 wire adapter 内原样保留;codex / opencode /
-//! hermes / grokbuild 只在能明确判定为 OpenAI Chat Completions 时导入。
+//! 按来源应用解析出四种已实现 wire adapter 之一:openclaw / pi 的 `api` 原样保留,
+//! claude / claude-desktop → anthropic-messages、gemini → google-generative-ai,
+//! codex 按 wire_api(chat → completions,缺省 responses → responses)、opencode 按
+//! npm SDK 包判定;hermes / grokbuild 固定 OpenAI Chat,无法判定协议的项不导入。
 
 use std::path::{Path, PathBuf};
 
@@ -28,7 +30,7 @@ pub struct CcSwitchProvider {
     /// CC Switch 内的供应商 id(前端去重后作为厂商 id 候选)。
     pub id: String,
     pub name: String,
-    /// 来源应用:codex / opencode / openclaw / pi / hermes / grokbuild。
+    /// 来源应用:claude / claude-desktop / codex / gemini / opencode / openclaw / pi / hermes / grokbuild。
     pub app: String,
     pub base_url: String,
     /// 可能为空(如密钥走环境变量),导入后由用户补齐。
@@ -100,7 +102,7 @@ pub fn cc_switch_dir(app: &AppHandle) -> AppResult<PathBuf> {
 }
 
 /// 从本机 `~/.cc-switch/` 扫描可导入的供应商
-/// (openclaw/pi 支持四种 wire adapter,codex/opencode/hermes/grokbuild 仅 OpenAI Chat)。
+/// (按来源应用映射四种 wire adapter,无法判定协议的项跳过)。
 pub fn scan_cc_switch_providers(app: &AppHandle) -> AppResult<CcSwitchScan> {
     scan_at(&cc_switch_dir(app)?)
 }

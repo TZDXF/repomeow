@@ -91,7 +91,7 @@ function confirmCcSwitchImport() {
 </script>
 
 <template>
-  <!-- 列出本机 ~/.cc-switch 中 OpenAI chat 兼容的供应商,勾选后并入草稿 -->
+  <!-- 列出本机 ~/.cc-switch 中可识别接口协议的供应商,勾选后并入草稿 -->
   <Dialog :open="open" @update:open="emit('update:open', $event)">
     <DialogContent class="sm:max-w-lg">
       <DialogHeader>
@@ -163,6 +163,11 @@ function confirmCcSwitchImport() {
                   class="bg-muted text-muted-foreground shrink-0 rounded-full px-1.5 py-px text-[10px]"
                 >
                   {{ provider.app }}
+                </span>
+                <span
+                  class="text-muted-foreground shrink-0 rounded-full border px-1.5 py-px text-[10px]"
+                >
+                  {{ t(`settings.ai.apiTypes.${provider.api}`) }}
                 </span>
                 <span
                   v-if="provider.current"

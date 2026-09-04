@@ -1571,10 +1571,10 @@ export default {
       importCcSwitch: "Import from CC Switch",
       ccSwitchTitle: "Import from CC Switch",
       ccSwitchDesc:
-        "Reads providers from ~/.cc-switch on this machine. Only OpenAI chat-compatible entries are listed (codex / opencode / openclaw / pi / hermes / grokbuild); providers on other protocols (claude, gemini, ...) are not supported",
+        "Reads providers from ~/.cc-switch on this machine and maps each source app to a supported wire API (codex / claude / gemini / opencode / openclaw / pi / hermes / grokbuild); entries with an unrecognized protocol are not listed",
       ccSwitchLoading: "Reading CC Switch configuration...",
       ccSwitchNotFound: "No CC Switch configuration detected (~/.cc-switch does not exist)",
-      ccSwitchEmpty: "No OpenAI chat-compatible providers to import",
+      ccSwitchEmpty: "No providers available for import",
       ccSwitchSelected: "{selected} / {total} selected",
       ccSwitchSelectAll: "Select all",
       ccSwitchDeselectAll: "Deselect all",

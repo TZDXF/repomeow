@@ -173,7 +173,7 @@ export interface CcSwitchProvider {
   /** CC Switch 内的供应商 id(导入时去重后作为厂商 id 候选) */
   id: string;
   name: string;
-  /** 来源应用:codex / opencode / openclaw / pi / hermes / grokbuild */
+  /** 来源应用:claude / claude-desktop / codex / gemini / opencode / openclaw / pi / hermes / grokbuild */
   app: string;
   baseUrl: string;
   /** 可能为空(如密钥走环境变量),导入后需用户补齐 */

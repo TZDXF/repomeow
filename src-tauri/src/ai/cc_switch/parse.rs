@@ -1,6 +1,9 @@
 use serde_json::Value;
 
-use crate::agent::llm::types::{is_supported_api, API_OPENAI_COMPLETIONS};
+use crate::agent::llm::types::{
+    is_supported_api, API_ANTHROPIC_MESSAGES, API_GOOGLE_GENERATIVE_AI, API_OPENAI_COMPLETIONS,
+    API_OPENAI_RESPONSES,
+};
 
 use crate::ai::catalog::AiModelDef;
 use super::read::RawProvider;
@@ -28,16 +31,26 @@ fn api_key_text(value: Option<&Value>) -> String {
 
 pub(super) fn convert(raw: &RawProvider) -> Option<CcSwitchProvider> {
     let (base_url, api_key, api, models) = match raw.app.as_str() {
-        "codex" => parse_codex(&raw.settings_config)
-            .map(|(base_url, api_key, models)| (base_url, api_key, API_OPENAI_COMPLETIONS.to_string(), models))?,
-        "opencode" => parse_opencode(&raw.settings_config)
-            .map(|(base_url, api_key, models)| (base_url, api_key, API_OPENAI_COMPLETIONS.to_string(), models))?,
+        "codex" => parse_codex(&raw.settings_config)?,
+        "opencode" => parse_opencode(&raw.settings_config)?,
+        "claude" | "claude-desktop" => {
+            let (base_url, api_key, models) = parse_claude(&raw.settings_config)?;
+            (base_url, api_key, API_ANTHROPIC_MESSAGES.to_string(), models)
+        }
+        "gemini" => {
+            let (base_url, api_key, models) = parse_gemini(&raw.settings_config)?;
+            (base_url, api_key, API_GOOGLE_GENERATIVE_AI.to_string(), models)
+        }
         "openclaw" => parse_openclaw(&raw.settings_config)?,
         "pi" => parse_pi(&raw.settings_config)?,
-        "hermes" => parse_hermes(&raw.settings_config)
-            .map(|(base_url, api_key, models)| (base_url, api_key, API_OPENAI_COMPLETIONS.to_string(), models))?,
-        "grokbuild" => parse_grokbuild(&raw.settings_config)
-            .map(|(base_url, api_key, models)| (base_url, api_key, API_OPENAI_COMPLETIONS.to_string(), models))?,
+        "hermes" => {
+            let (base_url, api_key, models) = parse_hermes(&raw.settings_config)?;
+            (base_url, api_key, API_OPENAI_COMPLETIONS.to_string(), models)
+        }
+        "grokbuild" => {
+            let (base_url, api_key, models) = parse_grokbuild(&raw.settings_config)?;
+            (base_url, api_key, API_OPENAI_COMPLETIONS.to_string(), models)
+        }
         _ => return None,
     };
     if base_url.is_empty() {
@@ -104,9 +117,9 @@ fn parse_model_array(config: &Value) -> Vec<AiModelDef> {
         .unwrap_or_default()
 }
 
-/// codex:`{ auth: { OPENAI_API_KEY }, config: "<config.toml 文本>" }`;
-/// 仅当激活 model_provider 的 `wire_api = "chat"` 时兼容 OpenAI chat。
-fn parse_codex(config: &Value) -> Option<(String, String, Vec<AiModelDef>)> {
+/// codex:`{ auth: { OPENAI_API_KEY }, config: "<config.toml 文本>", modelCatalog? }`;
+/// 按激活 model_provider 的 `wire_api` 判定协议:`chat` → OpenAI Chat,缺省/`responses` → OpenAI Responses。
+fn parse_codex(config: &Value) -> Option<(String, String, String, Vec<AiModelDef>)> {
     let config_text = config.get("config").and_then(Value::as_str)?;
     let doc = config_text.parse::<toml::Value>().ok()?;
     let providers = doc.get("model_providers").and_then(toml::Value::as_table);
@@ -120,15 +133,17 @@ fn parse_codex(config: &Value) -> Option<(String, String, Vec<AiModelDef>)> {
         .map(str::trim)
         .map(|url| url.trim_end_matches('/').to_string())
         .filter(|url| !url.is_empty())?;
-    // wire_api:只看激活条目;缺省按 codex 惯例视为 responses,不写 "chat" 的不导入
+    // wire_api:只看激活条目;缺省按 codex 惯例视为 responses,其余取值不导入
     let wire_api = active
         .and_then(|table| table.get("wire_api"))
         .and_then(toml::Value::as_str)
         .map(str::trim)
         .unwrap_or("responses");
-    if wire_api != "chat" {
-        return None;
-    }
+    let api = match wire_api {
+        "chat" => API_OPENAI_COMPLETIONS.to_string(),
+        "responses" => API_OPENAI_RESPONSES.to_string(),
+        _ => return None,
+    };
     // 密钥:auth.OPENAI_API_KEY → 激活条目/顶层 experimental_bearer_token
     let bearer = active
         .and_then(|table| table.get("experimental_bearer_token"))
@@ -145,23 +160,57 @@ fn parse_codex(config: &Value) -> Option<(String, String, Vec<AiModelDef>)> {
         .map(str::trim)
         .unwrap_or("")
         .to_string();
-    let models = doc
-        .get("model")
-        .and_then(toml::Value::as_str)
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-        .map(|id| vec![bare_model(id, id.to_string(), 0, 0)])
-        .unwrap_or_default();
-    Some((base_url, api_key, models))
+    // 模型:settings_config.modelCatalog.models[](cc-switch 扩展)优先,回退 TOML 顶层 model
+    let mut models = parse_codex_catalog(config);
+    if models.is_empty() {
+        if let Some(id) = doc
+            .get("model")
+            .and_then(toml::Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+        {
+            models.push(bare_model(id, id.to_string(), 0, 0));
+        }
+    }
+    Some((base_url, api_key, api, models))
+}
+
+/// settings_config.modelCatalog.models[]:`{ model, displayName?, contextWindow? }`(cc-switch 扩展字段)。
+fn parse_codex_catalog(config: &Value) -> Vec<AiModelDef> {
+    config
+        .get("modelCatalog")
+        .and_then(|catalog| catalog.get("models"))
+        .and_then(Value::as_array)
+        .map(|models| {
+            models
+                .iter()
+                .filter_map(|model| {
+                    let id = text(model.get("model"));
+                    if id.is_empty() {
+                        return None;
+                    }
+                    let context = model
+                        .get("contextWindow")
+                        .and_then(Value::as_i64)
+                        .filter(|value| *value > 0)
+                        .unwrap_or(0);
+                    let name = text(model.get("displayName"));
+                    Some(bare_model(
+                        &id,
+                        if name.is_empty() { id.clone() } else { name },
+                        context,
+                        0,
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// opencode:`{ npm, options: { baseURL, apiKey }, models: { id: { name, limit } } }`;
-/// 仅 `@ai-sdk/openai-compatible` 包是 OpenAI chat 协议。
-fn parse_opencode(config: &Value) -> Option<(String, String, Vec<AiModelDef>)> {
-    let npm = text(config.get("npm"));
-    if npm != "@ai-sdk/openai-compatible" {
-        return None;
-    }
+/// npm 是 AI SDK 供应商包,据此判定 wire adapter,未知包不导入。
+fn parse_opencode(config: &Value) -> Option<(String, String, String, Vec<AiModelDef>)> {
+    let api = opencode_api(&text(config.get("npm")))?;
     let options = config.get("options");
     let base_url = text(options.and_then(|o| o.get("baseURL")))
         .trim_end_matches('/')
@@ -194,6 +243,80 @@ fn parse_opencode(config: &Value) -> Option<(String, String, Vec<AiModelDef>)> {
                 .collect()
         })
         .unwrap_or_default();
+    Some((base_url, api_key, api, models))
+}
+
+/// opencode 的 npm SDK 包 → wire adapter;`@ai-sdk/openai` 在 AI SDK v5 默认走 Responses 协议。
+fn opencode_api(npm: &str) -> Option<String> {
+    match npm {
+        "@ai-sdk/openai-compatible" => Some(API_OPENAI_COMPLETIONS.to_string()),
+        "@ai-sdk/openai" => Some(API_OPENAI_RESPONSES.to_string()),
+        "@ai-sdk/anthropic" => Some(API_ANTHROPIC_MESSAGES.to_string()),
+        "@ai-sdk/google" => Some(API_GOOGLE_GENERATIVE_AI.to_string()),
+        _ => None,
+    }
+}
+
+/// Claude Code 的 `[1m]` 模型后缀是 1M 上下文 beta 标记,不是模型 id 的一部分。
+fn strip_context_suffix(id: &str) -> &str {
+    id.strip_suffix("[1m]")
+        .or_else(|| id.strip_suffix("[1M]"))
+        .unwrap_or(id)
+}
+
+/// claude / claude-desktop:`{ env: { ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_MODEL, … } }`。
+/// 模型取 ANTHROPIC_MODEL 与 SONNET/OPUS/HAIKU 分档映射去重;仅官方登录(无 base_url)的项不导入。
+fn parse_claude(config: &Value) -> Option<(String, String, Vec<AiModelDef>)> {
+    let env = config.get("env");
+    let base_url = text(env.and_then(|e| e.get("ANTHROPIC_BASE_URL")))
+        .trim_end_matches('/')
+        .to_string();
+    if base_url.is_empty() {
+        return None;
+    }
+    let mut api_key = api_key_text(env.and_then(|e| e.get("ANTHROPIC_AUTH_TOKEN")));
+    if api_key.is_empty() {
+        api_key = api_key_text(env.and_then(|e| e.get("ANTHROPIC_API_KEY")));
+    }
+    let mut models: Vec<AiModelDef> = Vec::new();
+    for key in [
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    ] {
+        let id = strip_context_suffix(&text(env.and_then(|e| e.get(key)))).to_string();
+        if id.is_empty() || models.iter().any(|model| model.id == id) {
+            continue;
+        }
+        models.push(bare_model(&id, id.clone(), 0, 0));
+    }
+    Some((base_url, api_key, models))
+}
+
+/// gemini:`{ env: { GOOGLE_GEMINI_BASE_URL, GEMINI_API_KEY, GEMINI_MODEL } }`;
+/// 仅官方登录(无 base_url)的项不导入。
+fn parse_gemini(config: &Value) -> Option<(String, String, Vec<AiModelDef>)> {
+    let env = config.get("env");
+    let base_url = text(env.and_then(|e| e.get("GOOGLE_GEMINI_BASE_URL")))
+        .trim_end_matches('/')
+        .to_string();
+    if base_url.is_empty() {
+        return None;
+    }
+    let mut api_key = api_key_text(env.and_then(|e| e.get("GEMINI_API_KEY")));
+    if api_key.is_empty() {
+        api_key = api_key_text(env.and_then(|e| e.get("GOOGLE_API_KEY")));
+    }
+    let mut model_id = text(env.and_then(|e| e.get("GEMINI_MODEL")));
+    if model_id.is_empty() {
+        model_id = text(env.and_then(|e| e.get("GOOGLE_GEMINI_MODEL")));
+    }
+    let models = if model_id.is_empty() {
+        Vec::new()
+    } else {
+        vec![bare_model(&model_id, model_id.clone(), 0, 0)]
+    };
     Some((base_url, api_key, models))
 }
 
