@@ -6,8 +6,19 @@ import { cmd } from "@/lib/tauri";
  * 前端一律经命令读写,不自算路径。Rust 侧每次调用重读文件,保存即生效。
  */
 
-/** AI API 类型;当前仅实现 OpenAI 兼容接口,其余值预留扩展 */
-export type AiApiType = "openai-completions";
+/** 已实现的 AI wire API；开放字符串保留外部配置的未知值。 */
+export const AI_API_TYPES = [
+  "openai-completions",
+  "openai-responses",
+  "anthropic-messages",
+  "google-generative-ai",
+] as const;
+export type KnownAiApiType = (typeof AI_API_TYPES)[number];
+export type AiApiType = KnownAiApiType | (string & {});
+
+export function isKnownAiApiType(value: string): value is KnownAiApiType {
+  return (AI_API_TYPES as readonly string[]).includes(value);
+}
 
 /** 问答工具权限档位:all = 全部工具;ask = 写操作前询问确认 */
 export type ChatPermission = "all" | "ask";
@@ -57,11 +68,37 @@ export interface AiModelCompat {
   maxTokensField?: "max_completion_tokens" | "max_tokens";
   /** 工具参数是否可附加 strict 标记 */
   supportsStrictMode?: boolean;
+  /** Responses / Anthropic 是否支持长时缓存。 */
+  supportsLongCacheRetention?: boolean;
+  /** Responses 是否接受 max_output_tokens。 */
+  supportsMaxOutputTokens?: boolean;
+  /** Anthropic 是否接受 eager_input_streaming。 */
+  supportsEagerToolInputStreaming?: boolean;
+  /** Anthropic 是否发送会话亲和头。 */
+  sendSessionAffinityHeaders?: boolean;
+  /** Anthropic 是否允许在工具定义上放 cache_control。 */
+  supportsCacheControlOnTools?: boolean;
+  /** Anthropic 是否接受 temperature。 */
+  supportsTemperature?: boolean;
+  /** Anthropic 是否强制 adaptive thinking。 */
+  forceAdaptiveThinking?: boolean;
+  /** Anthropic 是否回放空 thinking signature。 */
+  allowEmptySignature?: boolean;
+  /** Anthropic 是否支持 strict tools。 */
+  supportsStrictTools?: boolean;
 }
 
 /** 厂商下的模型定义(元数据支撑上下文占用显示、思考参数与成本计算) */
 export interface AiModelDef {
   id: string;
+  /** 为空时继承厂商 API。 */
+  api?: AiApiType;
+  /** 为空时继承厂商 Base URL。 */
+  baseUrl?: string;
+  /** 模型级 header 覆盖厂商 header。 */
+  headers?: Record<string, string>;
+  /** OpenAI 系 adapter 的附加采样参数。 */
+  samplingParams?: Record<string, unknown>;
   /** 为空时展示与请求按 id 兜底 */
   name: string;
   reasoning: boolean;
@@ -72,12 +109,14 @@ export interface AiModelDef {
   compat?: AiModelCompat;
 }
 
-/** 一个厂商(OpenAI 兼容端点) */
+/** 一个厂商；api 决定默认 wire adapter。 */
 export interface AiProvider {
   name: string;
   baseUrl: string;
   apiKey: string;
   api: AiApiType;
+  /** 请求默认 header，可被模型级覆盖。 */
+  headers?: Record<string, string>;
   models: AiModelDef[];
 }
 
@@ -139,6 +178,7 @@ export interface CcSwitchProvider {
   baseUrl: string;
   /** 可能为空(如密钥走环境变量),导入后需用户补齐 */
   apiKey: string;
+  api: AiApiType;
   models: AiModelDef[];
   /** 在 CC Switch 中是否为该应用当前启用项 */
   current: boolean;

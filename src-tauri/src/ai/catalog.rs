@@ -1,7 +1,8 @@
 //! 多厂商 AI 接入配置(`~/.repomeow/ai-config.json`)。
 //!
 //! 格式对齐 pi 的 models.json(provider 列表 + 模型元数据),字段为 camelCase;
-//! `api` 预留多 API 类型,当前仅支持 `openai-completions`。文件缺失时用
+//! `api` 按 pi 的 wire adapter 语义支持 `openai-completions` / `openai-responses` /
+//! `anthropic-messages` / `google-generative-ai`,模型级可覆盖厂商默认值。文件缺失时用
 //! 内置目录(`builtin_models.json`)播种;播种时若旧版 `settings.json` 的
 //! `aiBaseUrl/aiApiKey/aiModel` 三键仍在,额外合成一个「自定义」厂商完成
 //! 迁移。文件损坏时备份后重新播种,绝不阻塞调用方。
@@ -12,7 +13,7 @@
 //! - 项目问答(chat):经 [`resolve_chat_prefs`] 取 chat 偏好(缺省回退
 //!   defaultModel),再经 [`resolve_model`] 得到填全元数据的 `Model`。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -21,8 +22,8 @@ use serde_json::Value;
 use tauri::AppHandle;
 
 use crate::agent::llm::types::{
-    InputKind, Model, ModelCost, ModelCostRates, ModelThinkingLevel, OpenAICompletionsCompat,
-    API_OPENAI_COMPLETIONS,
+    is_supported_api, InputKind, Model, ModelCost, ModelCostRates, ModelThinkingLevel,
+    OpenAICompletionsCompat, API_OPENAI_COMPLETIONS,
 };
 use crate::app_data_dir;
 use crate::error::{AppError, AppResult, ErrorCode};
@@ -62,7 +63,7 @@ fn default_thinking() -> String {
     "off".to_string()
 }
 
-/// 一个厂商(OpenAI 兼容端点)。
+/// 一个厂商；`api` 决定默认 wire adapter。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiProvider {
@@ -74,6 +75,8 @@ pub struct AiProvider {
     pub api_key: String,
     #[serde(default = "default_api")]
     pub api: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headers: Option<HashMap<String, String>>,
     #[serde(default)]
     pub models: Vec<AiModelDef>,
 }
@@ -83,6 +86,14 @@ pub struct AiProvider {
 #[serde(rename_all = "camelCase")]
 pub struct AiModelDef {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headers: Option<HashMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sampling_params: Option<HashMap<String, Value>>,
     #[serde(default)]
     pub name: String,
     #[serde(default)]
@@ -240,8 +251,13 @@ fn seed_at(data_dir: &Path) -> AiConfigFile {
                 base_url: base_url.trim_end_matches('/').to_string(),
                 api_key: api_key.to_string(),
                 api: API_OPENAI_COMPLETIONS.to_string(),
+                headers: None,
                 models: vec![AiModelDef {
                     id: model.to_string(),
+                    api: None,
+                    base_url: None,
+                    headers: None,
+                    sampling_params: None,
                     name: String::new(),
                     reasoning: false,
                     input: vec![InputKind::Text],
@@ -308,7 +324,8 @@ pub fn normalize(config: &mut AiConfigFile) {
         provider.name = provider.name.trim().to_string();
         provider.base_url = provider.base_url.trim().trim_end_matches('/').to_string();
         provider.api_key = provider.api_key.trim().to_string();
-        if provider.api.trim() != API_OPENAI_COMPLETIONS {
+        provider.api = provider.api.trim().to_string();
+        if provider.api.is_empty() {
             provider.api = API_OPENAI_COMPLETIONS.to_string();
         }
         let mut models = Vec::new();
@@ -318,6 +335,16 @@ pub fn normalize(config: &mut AiConfigFile) {
             if model.id.is_empty() || !seen.insert(model.id.clone()) {
                 continue;
             }
+            model.api = model
+                .api
+                .take()
+                .map(|api| api.trim().to_string())
+                .filter(|api| !api.is_empty());
+            model.base_url = model
+                .base_url
+                .take()
+                .map(|url| url.trim().trim_end_matches('/').to_string())
+                .filter(|url| !url.is_empty());
             model.name = model.name.trim().to_string();
             if model.input.is_empty() {
                 model.input = vec![InputKind::Text];
@@ -402,15 +429,6 @@ pub fn resolve_model(config: &AiConfigFile, provider_id: &str, model_id: &str) -
             format!("provider not found: {provider_id}"),
         )
     })?;
-    if provider.api != API_OPENAI_COMPLETIONS {
-        return Err(AppError::coded(
-            ErrorCode::AiRequestFailed,
-            format!(
-                "暂不支持 AI API 类型「{}」,请使用 OpenAI 兼容接口",
-                provider.api
-            ),
-        ));
-    }
     let definition = provider
         .models
         .iter()
@@ -421,6 +439,17 @@ pub fn resolve_model(config: &AiConfigFile, provider_id: &str, model_id: &str) -
                 format!("model not found: {provider_id}/{model_id}"),
             )
         })?;
+    let api = definition.api.as_deref().unwrap_or(&provider.api);
+    if !is_supported_api(api) {
+        return Err(AppError::coded(
+            ErrorCode::AiRequestFailed,
+            format!("暂不支持 AI API 类型「{api}」"),
+        ));
+    }
+    let mut headers = provider.headers.clone().unwrap_or_default();
+    if let Some(model_headers) = &definition.headers {
+        headers.extend(model_headers.clone());
+    }
     Ok(Model {
         id: definition.id.clone(),
         name: if definition.name.is_empty() {
@@ -428,9 +457,12 @@ pub fn resolve_model(config: &AiConfigFile, provider_id: &str, model_id: &str) -
         } else {
             definition.name.clone()
         },
-        api: API_OPENAI_COMPLETIONS.to_string(),
+        api: api.to_string(),
         provider: provider_id.to_string(),
-        base_url: provider.base_url.clone(),
+        base_url: definition
+            .base_url
+            .clone()
+            .unwrap_or_else(|| provider.base_url.clone()),
         reasoning: definition.reasoning,
         thinking_level_map: definition.thinking_level_map.as_ref().map(|map| {
             map.iter()
@@ -453,8 +485,8 @@ pub fn resolve_model(config: &AiConfigFile, provider_id: &str, model_id: &str) -
         }),
         context_window: definition.context_window,
         max_tokens: definition.max_tokens,
-        sampling_params: None,
-        headers: None,
+        sampling_params: definition.sampling_params.clone(),
+        headers: (!headers.is_empty()).then_some(headers),
         compat: definition.compat.clone(),
     })
 }
@@ -468,10 +500,16 @@ pub fn legacy_ai_config(config: &AiConfigFile) -> crate::ai::sdk::AiConfig {
     let Some(provider) = config.providers.get(&reference.provider_id) else {
         return empty;
     };
+    let resolved_model = resolve_model(config, &reference.provider_id, &reference.model_id).ok();
     crate::ai::sdk::AiConfig {
         ai_base_url: provider.base_url.clone(),
         ai_api_key: provider.api_key.clone(),
         ai_model: reference.model_id.clone(),
+        api: resolved_model
+            .as_ref()
+            .map(|model| model.api.clone())
+            .unwrap_or_else(|| provider.api.clone()),
+        resolved_model,
     }
 }
 
@@ -557,10 +595,35 @@ mod tests {
         assert!(config.chat.model_id.is_none());
         assert_eq!(config.chat.thinking, "off");
         assert_eq!(config.chat.permission, ChatPermission::All);
-        assert!(config
-            .providers
-            .values()
-            .all(|provider| provider.api == API_OPENAI_COMPLETIONS));
+        assert_eq!(config.providers["openai"].api, "openai-responses");
+        assert_eq!(config.providers["deepseek"].api, API_OPENAI_COMPLETIONS);
+    }
+
+    #[test]
+    fn model_api_overrides_provider_and_unknown_values_survive_normalize() {
+        let mut config: AiConfigFile = serde_json::from_str(
+            r#"{
+              "providers": {
+                "mixed": {
+                  "baseUrl": "https://example.com",
+                  "apiKey": "key",
+                  "api": "openai-responses",
+                  "models": [
+                    {"id":"chat","api":"openai-completions"},
+                    {"id":"future","api":"future-wire"}
+                  ]
+                }
+              }
+            }"#,
+        )
+        .unwrap();
+        normalize(&mut config);
+        assert_eq!(
+            resolve_model(&config, "mixed", "chat").unwrap().api,
+            API_OPENAI_COMPLETIONS
+        );
+        assert_eq!(config.providers["mixed"].models[1].api.as_deref(), Some("future-wire"));
+        assert!(resolve_model(&config, "mixed", "future").is_err());
     }
 
     #[test]

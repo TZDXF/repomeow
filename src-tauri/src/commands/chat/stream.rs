@@ -1,8 +1,7 @@
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle};
 use crate::agent::llm::event_stream::event_stream;
-use crate::agent::llm::openai_completions::stream_openai_completions;
-use crate::agent::llm::{AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, Context, Model, SimpleStreamOptions, StopReason, Usage, API_OPENAI_COMPLETIONS};
+use crate::agent::llm::{stream_simple, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, Context, Model, SimpleStreamOptions, StopReason, Usage};
 use crate::agent::types::{StreamFn};
 use crate::ai::catalog::{self};
 use crate::commands::usage::{estimate_text_tokens};
@@ -34,7 +33,7 @@ pub(super) fn chat_stream_fn(
                         api_key: Some(api_key),
                         ..base
                     };
-                    stream_openai_completions(model, context, Some(options), signal)
+                    stream_simple(model, context, Some(options), signal)
                 }
                 Err(error) => error_event_stream(&fallback_model, &error.to_string()),
             }
@@ -101,7 +100,7 @@ pub(super) fn error_assistant_message(model: &Model, message: &str) -> Assistant
     AssistantMessage {
         role: "assistant".to_string(),
         content: Vec::new(),
-        api: API_OPENAI_COMPLETIONS.to_string(),
+        api: model.api.clone(),
         provider: model.provider.clone(),
         model: model.id.clone(),
         response_model: None,

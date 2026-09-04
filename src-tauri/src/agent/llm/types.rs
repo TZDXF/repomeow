@@ -13,9 +13,22 @@ use serde_json::Value;
 
 use super::event_stream::EventStream;
 
-/// 已知 API 名。TS 为 `KnownApi | (string & {})`,Rust 用 String 承载,
-/// 本应用只实现 `openai-completions`。
+/// 已知 API 名。TS 为 `KnownApi | (string & {})`,Rust 用 String 承载。
 pub const API_OPENAI_COMPLETIONS: &str = "openai-completions";
+pub const API_OPENAI_RESPONSES: &str = "openai-responses";
+pub const API_ANTHROPIC_MESSAGES: &str = "anthropic-messages";
+pub const API_GOOGLE_GENERATIVE_AI: &str = "google-generative-ai";
+
+pub const SUPPORTED_APIS: [&str; 4] = [
+    API_OPENAI_COMPLETIONS,
+    API_OPENAI_RESPONSES,
+    API_ANTHROPIC_MESSAGES,
+    API_GOOGLE_GENERATIVE_AI,
+];
+
+pub fn is_supported_api(api: &str) -> bool {
+    SUPPORTED_APIS.contains(&api)
+}
 
 pub type Api = String;
 pub type ProviderId = String;
@@ -544,6 +557,24 @@ pub struct OpenAICompletionsCompat {
     pub thinking_token_budget_field: Option<ThinkingTokenBudgetField>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supports_strict_mode: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_long_cache_retention: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_max_output_tokens: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_eager_tool_input_streaming: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send_session_affinity_headers: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_cache_control_on_tools: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_temperature: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub force_adaptive_thinking: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_empty_signature: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_strict_tools: Option<bool>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

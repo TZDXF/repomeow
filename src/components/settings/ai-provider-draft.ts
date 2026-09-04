@@ -1,4 +1,4 @@
-import type { AiModelDef } from "@/lib/ai-config";
+import type { AiApiType, AiModelDef, AiProvider } from "@/lib/ai-config";
 
 /** 三态兼容开关:auto = 跟随 provider/baseUrl 自动探测(不写入配置) */
 export type CompatTriState = "auto" | "on" | "off";
@@ -16,6 +16,7 @@ export interface ModelDraft {
   key: string;
   id: string;
   name: string;
+  api: AiApiType | "";
   contextWindow: string;
   maxTokens: string;
   compat: ModelCompatDraft;
@@ -27,8 +28,11 @@ export interface ProviderDraft {
   key: string;
   id: string;
   name: string;
+  api: AiApiType;
   baseUrl: string;
   apiKey: string;
+  /** UI 未暴露字段(headers 等)保存时透传 */
+  source?: AiProvider;
   models: ModelDraft[];
 }
 
@@ -44,6 +48,7 @@ export function draftModel(model: AiModelDef): ModelDraft {
     key: nextDraftKey(),
     id: model.id,
     name: model.name,
+    api: model.api ?? "",
     contextWindow: model.contextWindow > 0 ? String(model.contextWindow) : "",
     maxTokens: model.maxTokens > 0 ? String(model.maxTokens) : "",
     compat: {

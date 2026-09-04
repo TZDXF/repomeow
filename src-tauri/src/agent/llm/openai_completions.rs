@@ -3,23 +3,24 @@
 //! 组成:
 //! - [`build_request_body`]:纯函数,把 [`Model`] + [`Context`] + [`SimpleStreamOptions`]
 //!   序列化为 OpenAI 兼容请求体(消息序列化、tools、thinking 参数各分支、compat 探测融合)。
-//! - [`stream_openai_completions`]:流式入口,async-openai byot 走 SSE,把 chunk 聚合为
-//!   [`AssistantMessageEvent`] 推入 [`EventStreamWriter`];失败/中止编码进流
-//!   (stopReason error/aborted + errorMessage),不 panic、不抛出。
+//! - [`stream_openai_completions`]:流式入口,reqwest POST `{base_url}/chat/completions`
+//!   走 SSE,把 chunk 聚合为 [`AssistantMessageEvent`] 推入 [`EventStreamWriter`];
+//!   失败/中止编码进流(stopReason error/aborted + errorMessage),不 panic、不抛出。
+//! - [`send_with_retry`]:provider 内层重试(TS `utils/provider-retry.ts`):
+//!   `max_retries` 缺省 2、x-should-retry 头优先、408/409/429/5xx 与传输错误可重试、
+//!   retry-after-ms/retry-after 服务端延迟(超 `max_retry_delay_ms` 缺省 60s 立即失败)、
+//!   指数退避 + 抖动,退避可被 `CancellationToken` 中断;每次重试都重新发请求。
+//! - [`SseDecoder`]:字节流 → SSE 事件的纯解码器,便于单测。
 //! - [`StreamAggregator`]:SSE chunk → 事件的纯聚合逻辑,便于单测。
 //! - [`crate::agent::llm::validate`] 的消费方(agent-loop)负责工具参数校验,本模块不重复。
 //!
 //! 与蓝本的已知偏差见模块底部 tests 与交付说明(无 constrained sampling/grammar tools、
-//! 无 prompt cache retention、无重试、cost 以模型费率计算)。
+//! 无 prompt cache retention、cost 以模型费率计算)。请求路径不走 async-openai:
+//! 其错误类型丢弃响应头,无法支撑 provider 重试的 x-should-retry/retry-after 语义。
 
 use std::collections::{HashMap, HashSet};
-use std::pin::Pin;
 use std::time::Duration;
 
-use async_openai::config::OpenAIConfig;
-use async_openai::error::OpenAIError;
-use async_openai::Client;
-use futures::{Stream, StreamExt};
 use serde_json::{json, Map, Value};
 use tokio_util::sync::CancellationToken;
 
@@ -32,10 +33,6 @@ use super::types::{
     UsageCost, UserContent,
 };
 use crate::time_util::now_ts_nanos;
-
-/// SSE 流:chunk 用裸 JSON 承载,以兼容 `delta.reasoning_content`/`reasoning`/
-/// `reasoning_text` 等扩展字段(与 TS 蓝本一致按原始 JSON 读取)。
-type SseStream = Pin<Box<dyn Stream<Item = Result<Value, OpenAIError>> + Send>>;
 
 const ASSISTANT_BRIDGE_TEXT: &str = "I have processed the tool results.";
 const TOOL_RESULT_IMAGE_TEXT: &str = "(see attached image)";
@@ -89,49 +86,27 @@ fn push_custom_headers(
     }
 }
 
-/// 自建 async-openai 客户端(对齐 sdk.rs 的 client():固定连接超时;额外的
-/// model.headers / options.headers 走默认 header,options.headers 覆盖同名)。
-fn build_client(
-    model: &Model,
-    options: Option<&SimpleStreamOptions>,
-    api_key: String,
-) -> Result<Client<OpenAIConfig>, String> {
-    let sdk_config = OpenAIConfig::new()
-        .with_api_base(model.base_url.clone())
-        .with_api_key(api_key);
-    let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(15));
-    let mut headers = reqwest::header::HeaderMap::new();
-    push_custom_headers(model.headers.as_ref(), &mut headers);
-    push_custom_headers(
-        options.and_then(|options| options.headers.as_ref()),
-        &mut headers,
-    );
-    if !headers.is_empty() {
-        builder = builder.default_headers(headers);
-    }
-    if let Some(timeout_ms) = options.and_then(|options| options.timeout_ms) {
-        builder = builder.timeout(Duration::from_millis(timeout_ms));
-    }
-    let http = builder
-        .build()
-        .map_err(|error| format!("failed to build HTTP client: {error}"))?;
-    Ok(Client::with_config(sdk_config).with_http_client(http))
-}
-
-/// TS formatProviderError(normalizeProviderError(error)):HTTP 错误保留状态码与
-/// 提供方消息;其余透传 Display。
-fn format_provider_error(error: &OpenAIError) -> String {
-    match error {
-        OpenAIError::ApiError(api) => {
-            let status = api.status_code.as_u16();
-            let message = api.api_error.message.trim();
-            if message.is_empty() {
-                status.to_string()
-            } else {
-                format!("{status}: {message}")
+/// HTTP 非 2xx → 错误文案(对齐 async-openai ApiError 的 "{status}: {message}" 形状:
+/// 优先取 `{"error":{"message"}}` JSON,否则原文截断;空 body 只留状态码)。
+fn format_http_error(status: u16, body: &str) -> String {
+    if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(body) {
+        if let Some(message) = map
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(Value::as_str)
+        {
+            let message = message.trim();
+            if !message.is_empty() {
+                return format!("{status}: {message}");
             }
         }
-        other => other.to_string(),
+    }
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        status.to_string()
+    } else {
+        let truncated: String = trimmed.chars().take(512).collect();
+        format!("{status}: {truncated}")
     }
 }
 
@@ -2462,6 +2437,359 @@ fn parse_streaming_json_object(partial: &str) -> Map<String, Value> {
     Map::new()
 }
 
+// ── Provider 内层重试(TS utils/provider-retry.ts) ────────────────────
+
+/// TS retryProviderRequest 裸默认为 0;应用侧对齐任务规格:未显式配置时重试 2 次。
+const DEFAULT_MAX_RETRIES: u32 = 2;
+const DEFAULT_MAX_RETRY_DELAY_MS: u64 = 60_000;
+
+/// 单次请求失败:错误文案 + 重试判定所需的服务端提示。
+struct RequestFailure {
+    message: String,
+    retryable: bool,
+    /// `retry-after-ms` 原始值(毫秒浮点)。
+    retry_after_ms: Option<String>,
+    /// `retry-after` 原始值(秒数或 HTTP 日期)。
+    retry_after: Option<String>,
+}
+
+/// TS isRetryableProviderError:`x-should-retry` 优先(true 重试/false 不重试),
+/// 否则无 status(传输层错误)或 408/409/429/5xx 可重试。
+fn is_retryable_provider_error(status: Option<u16>, x_should_retry: Option<&str>) -> bool {
+    match x_should_retry {
+        Some("true") => return true,
+        Some("false") => return false,
+        _ => {}
+    }
+    match status {
+        None => true,
+        Some(status) => status == 408 || status == 409 || status == 429 || status >= 500,
+    }
+}
+
+/// `retry-after-ms` 浮点毫秒;非法值忽略(TS parseFloat NaN 检查)。
+fn parse_retry_after_ms(value: &str) -> Option<f64> {
+    value.trim().parse::<f64>().ok().filter(|value| value.is_finite())
+}
+
+/// `retry-after`:秒数,或 HTTP 日期(IMF-fixdate,经 RFC 2822 解析)减当前时间。
+fn parse_retry_after(value: &str, now_ms: i64) -> Option<f64> {
+    let trimmed = value.trim();
+    if let Ok(seconds) = trimmed.parse::<f64>() {
+        return seconds.is_finite().then_some(seconds * 1000.0);
+    }
+    let target = chrono::DateTime::parse_from_rfc2822(trimmed).ok()?;
+    Some((target.timestamp_millis() - now_ms) as f64)
+}
+
+/// 指数退避(秒 → 毫秒,8s 封顶)× 随机抖动(jitter ∈ [0,1],衰减至 75% 起)。
+fn exponential_retry_delay_ms(retry_index: u32, jitter: f64) -> u64 {
+    let base = (0.5 * 2f64.powi(retry_index.min(16) as i32)).min(8.0) * 1000.0;
+    let jitter = jitter.clamp(0.0, 1.0);
+    (base * (1.0 - jitter * 0.25)) as u64
+}
+
+/// TS getRetryDelayMs + validateServerRetryDelayMs:服务端提示延迟优先
+/// (retry-after-ms → retry-after),不做抖动;超过 `max_retry_delay_ms`
+/// (缺省 60s,0 = 不限制)立即失败,文案对齐 TS;否则指数退避 + 抖动。
+/// Err 文案即为流内错误消息。
+fn next_retry_delay_ms(
+    retry_after_ms: Option<&str>,
+    retry_after: Option<&str>,
+    retry_index: u32,
+    max_retry_delay_ms: Option<u64>,
+    now_ms: i64,
+    jitter: f64,
+    provider_error_message: &str,
+) -> Result<u64, String> {
+    let validate = |delay_ms: f64| -> Result<u64, String> {
+        let max_delay = max_retry_delay_ms.unwrap_or(DEFAULT_MAX_RETRY_DELAY_MS) as f64;
+        if max_delay > 0.0 && delay_ms > max_delay {
+            return Err(format!(
+                "Server requested {}s retry delay (max: {}s). {}",
+                (delay_ms / 1000.0).ceil(),
+                (max_delay / 1000.0).ceil(),
+                provider_error_message
+            ));
+        }
+        Ok(delay_ms.max(0.0) as u64)
+    };
+    if let Some(delay_ms) = retry_after_ms.and_then(parse_retry_after_ms) {
+        return validate(delay_ms);
+    }
+    if let Some(delay_ms) = retry_after.and_then(|value| parse_retry_after(value, now_ms)) {
+        return validate(delay_ms);
+    }
+    Ok(exponential_retry_delay_ms(retry_index, jitter))
+}
+
+enum SleepWait {
+    Elapsed,
+    Aborted,
+}
+
+/// 退避睡眠;取消立即返回 [`SleepWait::Aborted`](对齐 TS abortableSleep)。
+async fn sleep_or_cancel(delay_ms: u64, signal: Option<&CancellationToken>) -> SleepWait {
+    let sleep = tokio::time::sleep(Duration::from_millis(delay_ms));
+    match signal {
+        None => {
+            sleep.await;
+            SleepWait::Elapsed
+        }
+        Some(token) => tokio::select! {
+            _ = sleep => SleepWait::Elapsed,
+            _ = token.cancelled() => SleepWait::Aborted,
+        },
+    }
+}
+
+/// 时间派生的伪随机抖动量(指数退避防惊群用,质量不作要求)。
+fn pseudo_random_jitter() -> f64 {
+    (now_ts_nanos() % 1_000_000) as f64 / 1_000_000.0
+}
+
+/// TS retryProviderRequest:循环重试连接请求。每次重试都重新构造并发送
+/// 全新请求;`options.max_retries` 缺省 2,可重试错误见 [`is_retryable_provider_error`];
+/// 服务端延迟超过 `max_retry_delay_ms` 立即失败;退避睡眠可被 `signal` 中断
+/// (中断/发送途中取消 → ("Request was aborted", true))。返回 Err 的 bool = 是否因取消而失败。
+async fn send_with_retry(
+    model: &Model,
+    options: Option<&SimpleStreamOptions>,
+    body: &Value,
+    signal: Option<&CancellationToken>,
+) -> Result<reqwest::Response, (String, bool)> {
+    let api_key = resolve_api_key(model, options).map_err(|message| (message, false))?;
+    let max_retries = options
+        .and_then(|options| options.max_retries)
+        .unwrap_or(DEFAULT_MAX_RETRIES);
+    let max_retry_delay_ms = options.and_then(|options| options.max_retry_delay_ms);
+    let mut retries_remaining = max_retries;
+    let mut retry_index: u32 = 0;
+
+    loop {
+        match send_completions_request(model, options, body, &api_key).await {
+            Ok(response) => return Ok(response),
+            Err(failure) => {
+                if signal.is_some_and(|token| token.is_cancelled()) {
+                    return Err(("Request was aborted".to_string(), true));
+                }
+                if retries_remaining == 0 || !failure.retryable {
+                    return Err((failure.message, false));
+                }
+                retries_remaining -= 1;
+                let now_ms = now_ts_nanos() / 1_000_000;
+                let delay_ms = next_retry_delay_ms(
+                    failure.retry_after_ms.as_deref(),
+                    failure.retry_after.as_deref(),
+                    retry_index,
+                    max_retry_delay_ms,
+                    now_ms,
+                    pseudo_random_jitter(),
+                    &failure.message,
+                )
+                .map_err(|message| (message, false))?;
+                retry_index += 1;
+                if let SleepWait::Aborted = sleep_or_cancel(delay_ms, signal).await {
+                    return Err(("Request was aborted".to_string(), true));
+                }
+            }
+        }
+    }
+}
+
+/// SDK 行为:POST `{base_url}/chat/completions`,返回流式响应。
+/// 非 2xx 时读取响应头/响应体格式化为 [`RequestFailure`](重试判定 + 服务端延迟提示);
+/// 传输层错误按无 status 处理 = 可重试、无延迟提示。
+async fn send_completions_request(
+    model: &Model,
+    options: Option<&SimpleStreamOptions>,
+    body: &Value,
+    api_key: &str,
+) -> Result<reqwest::Response, RequestFailure> {
+    let failure = |message: String, retryable: bool| RequestFailure {
+        message,
+        retryable,
+        retry_after_ms: None,
+        retry_after: None,
+    };
+    let mut headers = reqwest::header::HeaderMap::new();
+    if let Ok(value) = reqwest::header::HeaderValue::from_str(&format!("Bearer {api_key}")) {
+        headers.insert(reqwest::header::AUTHORIZATION, value);
+    }
+    headers.insert(
+        reqwest::header::ACCEPT,
+        reqwest::header::HeaderValue::from_static("text/event-stream"),
+    );
+    // model.headers / options.headers 最后合并,可覆盖默认(options 优先)
+    push_custom_headers(model.headers.as_ref(), &mut headers);
+    push_custom_headers(
+        options.and_then(|options| options.headers.as_ref()),
+        &mut headers,
+    );
+
+    let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(15));
+    if let Some(timeout_ms) = options.and_then(|options| options.timeout_ms) {
+        builder = builder.timeout(Duration::from_millis(timeout_ms));
+    }
+    let http = builder.build().map_err(|error| {
+        // 客户端构造失败与环境相关,重试无意义
+        failure(format!("failed to build HTTP client: {error}"), false)
+    })?;
+    let url = format!("{}/chat/completions", model.base_url.trim_end_matches('/'));
+    let response = http
+        .post(&url)
+        .headers(headers)
+        .json(body)
+        .send()
+        .await
+        // 传输层错误无 status:对齐 TS 视为可重试
+        .map_err(|error| failure(error.to_string(), true))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let header_value = |name: &str| {
+            response
+                .headers()
+                .get(name)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string)
+        };
+        let retry_after_ms = header_value("retry-after-ms");
+        let retry_after = header_value("retry-after");
+        let should_retry = header_value("x-should-retry");
+        let retryable =
+            is_retryable_provider_error(Some(status.as_u16()), should_retry.as_deref());
+        let body_text = response.text().await.unwrap_or_default();
+        return Err(RequestFailure {
+            message: format_http_error(status.as_u16(), &body_text),
+            retryable,
+            retry_after_ms,
+            retry_after,
+        });
+    }
+    Ok(response)
+}
+
+// ── SSE 解码 ──────────────────────────────────────────────────────────
+
+/// 单条 SSE 事件(eventsource-stream 0.2.3 的观测子集;缺省事件类型 = "message")。
+#[derive(Debug)]
+struct ServerSentEvent {
+    event: Option<String>,
+    data: String,
+}
+
+/// 字节流 → SSE 事件:行按 `\r\n` / `\r` / `\n` 切分(跨块断行、跨块 UTF-8 安全),
+/// `:` 注释行忽略,`event`/`data` 字段累积(值省略冒号 = 空串,剥一个前导空格),
+/// 空行分发事件;data 缓冲为空时不分发,流结束时未终止的残缺事件按规范丢弃。
+#[derive(Default)]
+struct SseDecoder {
+    event: Option<String>,
+    data: Vec<String>,
+    buffer: Vec<u8>,
+    started: bool,
+}
+
+impl SseDecoder {
+    /// 喂入一块字节,返回其中凑齐的事件(可能 0 个或多个)。
+    fn push_bytes(&mut self, chunk: &[u8]) -> Vec<ServerSentEvent> {
+        self.buffer.extend_from_slice(chunk);
+        // 流起始的 UTF-8 BOM 按规范剥离
+        if !self.started {
+            self.started = true;
+            if self.buffer.starts_with(&[0xEF, 0xBB, 0xBF]) {
+                self.buffer.drain(..3);
+            }
+        }
+        let mut events = Vec::new();
+        while let Some((line_length, consumed)) = next_line(&self.buffer) {
+            let line = String::from_utf8_lossy(&self.buffer[..line_length]).into_owned();
+            self.buffer.drain(..consumed);
+            if let Some(event) = self.decode_line(&line) {
+                events.push(event);
+            }
+        }
+        events
+    }
+
+    /// 空行分发;":" 注释行忽略;event/data 字段累积。
+    fn decode_line(&mut self, line: &str) -> Option<ServerSentEvent> {
+        if line.is_empty() {
+            return self.flush();
+        }
+        if line.starts_with(':') {
+            return None;
+        }
+        let (field, value) = match line.find(':') {
+            Some(colon_index) => (&line[..colon_index], &line[colon_index + 1..]),
+            None => (line, ""),
+        };
+        let value = value.strip_prefix(' ').unwrap_or(value);
+        match field {
+            "event" => self.event = Some(value.to_string()),
+            "data" => self.data.push(value.to_string()),
+            _ => {}
+        }
+        None
+    }
+
+    /// 分发暂存事件;无 data 行时丢弃(含暂存的 event 类型,对齐 eventsource 的
+    /// builder 重置语义),否则逐行 data 以 `\n` 合并。
+    fn flush(&mut self) -> Option<ServerSentEvent> {
+        let event = self.event.take();
+        if self.data.is_empty() {
+            return None;
+        }
+        Some(ServerSentEvent {
+            event,
+            data: std::mem::take(&mut self.data).join("\n"),
+        })
+    }
+}
+
+/// 返回 (行内容长度, 含换行的消费长度)。
+fn next_line(buffer: &[u8]) -> Option<(usize, usize)> {
+    let carriage_return = buffer.iter().position(|&byte| byte == b'\r');
+    let newline = buffer.iter().position(|&byte| byte == b'\n');
+    let index = match (carriage_return, newline) {
+        (Some(a), Some(b)) => a.min(b),
+        (Some(a), None) => a,
+        (None, Some(b)) => b,
+        (None, None) => return None,
+    };
+    let mut consumed = index + 1;
+    if buffer[index] == b'\r' && buffer.get(consumed) == Some(&b'\n') {
+        consumed += 1;
+    }
+    Some((index, consumed))
+}
+
+/// SSE 事件载荷 → chunk 的消费语义(data "[DONE]" 结束流;event "keepalive" 跳过;
+/// 其余 data 必须是 JSON chunk,解析失败 = 流错误)。
+#[derive(Debug)]
+enum SsePayload {
+    Chunk(Value),
+    Skip,
+    Done,
+    Fatal(String),
+}
+
+fn decode_chunk_payload(sse: &ServerSentEvent) -> SsePayload {
+    if sse.data == "[DONE]" {
+        return SsePayload::Done;
+    }
+    if sse.event.as_deref() == Some("keepalive") {
+        return SsePayload::Skip;
+    }
+    match serde_json::from_str::<Value>(&sse.data) {
+        Ok(value) => SsePayload::Chunk(value),
+        Err(error) => SsePayload::Fatal(format!(
+            "failed to deserialize api response: error:{error} content:{}",
+            sse.data
+        )),
+    }
+}
+
 // ── 流式入口 ──────────────────────────────────────────────────────────
 
 /// OpenAI 兼容流式生成:返回事件流(先 `start`,终止于 `done`/`error`)。
@@ -2510,28 +2838,17 @@ async fn run_stream(
         }
     }
 
-    let connect = async {
-        let api_key =
-            resolve_api_key(&model, options.as_ref()).map_err(|message| (message, false))?;
-        let client =
-            build_client(&model, options.as_ref(), api_key).map_err(|message| (message, false))?;
-        let stream: SseStream = client
-            .chat()
-            .create_stream_byot(body)
-            .await
-            .map_err(|error| (format_provider_error(&error), false))?;
-        Ok::<SseStream, (String, bool)>(stream)
-    };
+    // Provider 内层重试:每次重试重新发请求;取消可打断退避睡眠
     let connected = if let Some(token) = &signal {
         tokio::select! {
-            result = connect => result,
+            result = send_with_retry(&model, options.as_ref(), &body, Some(token)) => result,
             _ = token.cancelled() => Err(("Request was aborted".to_string(), true)),
         }
     } else {
-        connect.await
+        send_with_retry(&model, options.as_ref(), &body, None).await
     };
-    let mut stream = match connected {
-        Ok(stream) => stream,
+    let mut response = match connected {
+        Ok(response) => response,
         Err((message, aborted)) => {
             let reason = if aborted {
                 StopReason::Aborted
@@ -2545,31 +2862,62 @@ async fn run_stream(
         }
     };
 
+    // TS onResponse:仅在重试收敛后的最终成功响应上回调一次(失败的中间尝试不回调)
+    if let Some(on_response) = options
+        .as_ref()
+        .and_then(|options| options.on_response.as_ref())
+    {
+        let mut headers = HashMap::new();
+        for (name, value) in response.headers() {
+            if let Ok(value) = value.to_str() {
+                headers.insert(name.as_str().to_string(), value.to_string());
+            }
+        }
+        on_response(&super::types::ProviderResponse {
+            status: response.status().as_u16(),
+            headers,
+        });
+    }
+
+    let mut decoder = SseDecoder::default();
     let mut aborted = false;
     let mut stream_error: Option<String> = None;
-    loop {
+    'read: loop {
         let item = if let Some(token) = &signal {
             tokio::select! {
-                item = stream.next() => item,
+                item = response.chunk() => item,
                 _ = token.cancelled() => {
                     aborted = true;
-                    break;
+                    break 'read;
                 }
             }
         } else {
-            stream.next().await
+            response.chunk().await
         };
         match item {
-            Some(Ok(chunk)) => {
-                for event in aggregator.apply_chunk(&chunk) {
-                    writer.push(event);
+            Ok(Some(chunk)) => {
+                for sse in decoder.push_bytes(&chunk) {
+                    match decode_chunk_payload(&sse) {
+                        SsePayload::Chunk(value) => {
+                            for event in aggregator.apply_chunk(&value) {
+                                writer.push(event);
+                            }
+                        }
+                        SsePayload::Skip => {}
+                        // data [DONE]:正常结束(对齐 async-openai 在该哨兵处终止流)
+                        SsePayload::Done => break 'read,
+                        SsePayload::Fatal(message) => {
+                            stream_error = Some(message);
+                            break 'read;
+                        }
+                    }
                 }
             }
-            Some(Err(error)) => {
-                stream_error = Some(format_provider_error(&error));
-                break;
+            Ok(None) => break 'read,
+            Err(error) => {
+                stream_error = Some(error.to_string());
+                break 'read;
             }
-            None => break,
         }
     }
     // 流正常结束但 signal 已中止(对齐 TS 循环后的 signal.aborted 检查)
@@ -3681,21 +4029,19 @@ mod tests {
     }
 
     #[test]
-    fn format_provider_error_shapes() {
-        let error = OpenAIError::ApiError(async_openai::error::ApiErrorResponse {
-            status_code: reqwest::StatusCode::TOO_MANY_REQUESTS,
-            api_error: async_openai::error::ApiError {
-                message: "rate limited".to_string(),
-                r#type: None,
-                param: None,
-                code: None,
-            },
-        });
-        assert_eq!(format_provider_error(&error), "429: rate limited");
+    fn format_http_error_shapes() {
+        // {"error":{"message"}} JSON → "status: message"(与 async-openai ApiError 同形)
         assert_eq!(
-            format_provider_error(&OpenAIError::InvalidArgument("bad".to_string())),
-            "invalid args: bad"
+            format_http_error(429, r#"{"error":{"message":"rate limited"}}"#),
+            "429: rate limited"
         );
+        // 非 JSON body → 原文截断(512 字符)
+        assert_eq!(format_http_error(502, "<html>bad gateway</html>"), "502: <html>bad gateway</html>");
+        let long = "x".repeat(600);
+        let message = format_http_error(500, &long);
+        assert_eq!(message, format!("500: {}", "x".repeat(512)));
+        // 空 body → 只有状态码
+        assert_eq!(format_http_error(503, "  \n"), "503");
     }
 
     #[test]
@@ -3730,5 +4076,464 @@ mod tests {
             thinking_budget_for_level(ThinkingLevel::Low, Some(&custom)),
             4096
         );
+    }
+
+    // ── Provider 内层重试 ─────────────────────────────────────────────
+
+    #[test]
+    fn retryable_error_classification() {
+        let retryable = |status: Option<u16>, should_retry: Option<&str>| {
+            is_retryable_provider_error(status, should_retry)
+        };
+        // 无 status(传输层错误)与 408/409/429/5xx 可重试
+        assert!(retryable(None, None));
+        for status in [408u16, 409, 429, 500, 502, 503] {
+            assert!(retryable(Some(status), None), "status {status}");
+        }
+        for status in [400u16, 401, 403, 404, 422] {
+            assert!(!retryable(Some(status), None), "status {status}");
+        }
+        // x-should-retry 优先于状态码判定
+        assert!(retryable(Some(400), Some("true")));
+        assert!(!retryable(Some(500), Some("false")));
+        assert!(retryable(None, Some("true")));
+        assert!(!retryable(None, Some("false")));
+        // 头取其他值时不表态,回落状态码
+        assert!(retryable(Some(429), Some("1")));
+    }
+
+    #[test]
+    fn retry_delay_parsing_and_validation() {
+        let delay = |retry_after_ms: Option<&str>,
+                     retry_after: Option<&str>,
+                     index: u32,
+                     max: Option<u64>,
+                     now_ms: i64,
+                     jitter: f64| {
+            next_retry_delay_ms(retry_after_ms, retry_after, index, max, now_ms, jitter, "boom")
+        };
+        // retry-after-ms 优先于 retry-after,服务端延迟不做抖动
+        assert_eq!(delay(Some("250"), Some("9"), 5, None, 0, 1.0).unwrap(), 250);
+        // retry-after 秒数(支持浮点)
+        assert_eq!(delay(None, Some("1.5"), 0, None, 0, 0.0).unwrap(), 1500);
+        // retry-after HTTP 日期 → 与 now 的差值(上限放宽到 600s)
+        let delta = delay(
+            None,
+            Some("Wed, 21 Oct 2015 07:28:00 GMT"),
+            0,
+            Some(600_000),
+            1_445_412_000_000,
+            0.0,
+        )
+        .unwrap();
+        assert_eq!(delta, 480_000);
+        // 过去的日期 → 钳到 0 立即重试(now 在日期之后 120s)
+        let past = delay(
+            None,
+            Some("Wed, 21 Oct 2015 07:28:00 GMT"),
+            0,
+            Some(600_000),
+            1_445_412_600_000,
+            0.0,
+        )
+        .unwrap();
+        assert_eq!(past, 0);
+        // 两个提示都非法 → 指数退避
+        assert_eq!(
+            delay(Some("abc"), Some("not-a-date"), 0, None, 0, 0.0).unwrap(),
+            500
+        );
+        // 服务端延迟超上限 → 立即失败,文案对齐 TS(向上取整秒)
+        let error = delay(Some("61000"), None, 0, None, 0, 0.0).unwrap_err();
+        assert_eq!(error, "Server requested 61s retry delay (max: 60s). boom");
+        // 显式 max_retry_delay_ms 生效
+        assert!(delay(Some("3000"), None, 0, Some(2000), 0, 0.0).is_err());
+        // max = 0 → 不限制
+        assert_eq!(
+            delay(Some("999999"), None, 0, Some(0), 0, 0.0).unwrap(),
+            999_999
+        );
+    }
+
+    #[test]
+    fn exponential_backoff_caps_and_jitters() {
+        assert_eq!(exponential_retry_delay_ms(0, 0.0), 500);
+        assert_eq!(exponential_retry_delay_ms(1, 0.0), 1000);
+        assert_eq!(exponential_retry_delay_ms(3, 0.0), 4000);
+        // 8s 封顶,指数再大也不再增长
+        assert_eq!(exponential_retry_delay_ms(5, 0.0), 8000);
+        assert_eq!(exponential_retry_delay_ms(30, 0.0), 8000);
+        // 抖动把延迟衰减到 75%..100% 区间
+        assert_eq!(exponential_retry_delay_ms(0, 1.0), 375);
+        assert_eq!(exponential_retry_delay_ms(0, 0.5), 437);
+    }
+
+    // ── SSE 解码 ─────────────────────────────────────────────────────
+
+    fn decode_all(decoder: &mut SseDecoder, chunks: &[&[u8]]) -> Vec<ServerSentEvent> {
+        let mut events = Vec::new();
+        for chunk in chunks {
+            events.extend(decoder.push_bytes(chunk));
+        }
+        events
+    }
+
+    #[test]
+    fn sse_decoder_splits_lines_and_joins_multi_data() {
+        let mut decoder = SseDecoder::default();
+        // 跨块断行 + 多行 data 以 \n 合并
+        let events = decode_all(
+            &mut decoder,
+            &[b"data: Hel", b"lo,\ndata: wor", b"ld!\n\ndata: next\n\n"],
+        );
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].data, "Hello,\nworld!");
+        assert_eq!(events[0].event, None);
+        assert_eq!(events[1].data, "next");
+    }
+
+    #[test]
+    fn sse_decoder_tolerates_crlf_cr_and_comments() {
+        let mut decoder = SseDecoder::default();
+        let events = decode_all(
+            &mut decoder,
+            &[b": keep-alive\r\n\r: ping\r\rdata: a\r\n\r\n"],
+        );
+        // 注释行忽略;裸 \r 也是行结束;最后一个事件由空行分发
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].data, "a");
+        // 无 data 行的空行不分发,event 暂存也被丢弃
+        let events = decode_all(&mut decoder, &[b"event: x\n\n"]);
+        assert!(events.is_empty());
+        let events = decode_all(&mut decoder, &[b"data: b\n\n"]);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].data, "b");
+        assert_eq!(events[0].event, None);
+    }
+
+    #[test]
+    fn sse_decoder_keeps_event_type_and_strips_bom() {
+        let mut decoder = SseDecoder::default();
+        let events = decode_all(
+            &mut decoder,
+            &[
+                "\u{feff}".as_bytes(),
+                b"event: keepalive\ndata: ping\n\n",
+                b"event: message\ndata: {\"a\":1}\n\n",
+            ],
+        );
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].event.as_deref(), Some("keepalive"));
+        assert_eq!(events[0].data, "ping");
+        assert_eq!(events[1].event.as_deref(), Some("message"));
+    }
+
+    #[test]
+    fn decode_chunk_payload_semantics() {
+        let payload = |event: Option<&str>, data: &str| {
+            decode_chunk_payload(&ServerSentEvent {
+                event: event.map(str::to_string),
+                data: data.to_string(),
+            })
+        };
+        // [DONE] 终止流
+        assert!(matches!(payload(None, "[DONE]"), SsePayload::Done));
+        // keepalive 事件跳过(即便 data 不是 JSON)
+        assert!(matches!(
+            payload(Some("keepalive"), "ping"),
+            SsePayload::Skip
+        ));
+        // 普通 JSON chunk
+        match payload(None, "{\"choices\":[]}") {
+            SsePayload::Chunk(value) => assert!(value.get("choices").is_some()),
+            other => panic!("expected chunk, got {other:?}"),
+        }
+        // 非 JSON data → 流错误(对齐既有 Some(Err) 分支)
+        match payload(None, "not json") {
+            SsePayload::Fatal(message) => {
+                assert!(message.starts_with("failed to deserialize api response:"));
+            }
+            other => panic!("expected fatal, got {other:?}"),
+        }
+    }
+
+    // ── 集成:重试管线(本地 TCP mock) ────────────────────────────────
+
+    /// 本地 TCP mock:按脚本逐连接返回响应(读掉请求头与声明的请求体后回写)。
+    fn spawn_mock_server(
+        script: Vec<String>,
+    ) -> (std::net::SocketAddr, std::thread::JoinHandle<u32>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let addr = listener.local_addr().unwrap();
+        let handle = std::thread::spawn(move || {
+            let mut served = 0u32;
+            for response in script {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    break;
+                };
+                served += 1;
+                let mut received = Vec::new();
+                let mut buffer = [0u8; 1024];
+                loop {
+                    let Ok(read) = stream.read(&mut buffer) else { break };
+                    if read == 0 {
+                        break;
+                    }
+                    received.extend_from_slice(&buffer[..read]);
+                    if received.windows(4).any(|window| window == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                // 读完声明的请求体,避免带未读数据关连接触发 RST 吞掉响应
+                let headers = String::from_utf8_lossy(&received).to_lowercase();
+                let content_length = headers
+                    .lines()
+                    .find_map(|line| {
+                        line.strip_prefix("content-length:")
+                            .and_then(|value| value.trim().parse::<usize>().ok())
+                    })
+                    .unwrap_or(0);
+                let body_start = received
+                    .windows(4)
+                    .position(|window| window == b"\r\n\r\n")
+                    .map_or(received.len(), |position| position + 4);
+                while received.len() < body_start + content_length {
+                    let Ok(read) = stream.read(&mut buffer) else { break };
+                    if read == 0 {
+                        break;
+                    }
+                    received.extend_from_slice(&buffer[..read]);
+                }
+                if stream.write_all(response.as_bytes()).is_err() {
+                    break;
+                }
+                let _ = stream.flush();
+                drop(stream);
+            }
+            served
+        });
+        (addr, handle)
+    }
+
+    fn http_error_response(status_line: &str, body: &str, extra: &[(&str, &str)]) -> String {
+        let mut response = format!(
+            "HTTP/1.1 {status_line}\r\ncontent-length: {}\r\nconnection: close\r\n",
+            body.len()
+        );
+        for (name, value) in extra {
+            response.push_str(&format!("{name}: {value}\r\n"));
+        }
+        response.push_str("\r\n");
+        response.push_str(body);
+        response
+    }
+
+    fn http_sse_response(data: &str) -> String {
+        format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{data}",
+            data.len()
+        )
+    }
+
+    /// 完整的 chat.completions SSE 流:文本增量 → finish_reason stop → [DONE]。
+    fn chat_sse_stream() -> String {
+        let first = json!({
+            "id": "chatcmpl-1",
+            "model": "gpt-test",
+            "choices": [{"index": 0, "delta": {"content": "Hi"}, "finish_reason": null}]
+        });
+        let last = json!({
+            "id": "chatcmpl-1",
+            "model": "gpt-test",
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
+        });
+        format!(
+            "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+            first,
+            last
+        )
+    }
+
+    /// 收集终态事件(跳过 start)。
+    async fn collect_terminal(
+        mut stream: AssistantMessageEventStream,
+    ) -> Option<AssistantMessageEvent> {
+        use futures::StreamExt;
+        let mut terminal = None;
+        while let Some(event) = stream.next().await {
+            if !matches!(event, AssistantMessageEvent::Start { .. }) {
+                terminal = Some(event);
+            }
+        }
+        terminal
+    }
+
+    #[tokio::test]
+    async fn provider_retry_reposts_until_success() {
+        let (addr, handler) = spawn_mock_server(vec![
+            http_error_response("500 Internal Server Error", "boom", &[]),
+            http_error_response(
+                "429 Too Many Requests",
+                "slow down",
+                &[("retry-after-ms", "50")],
+            ),
+            http_sse_response(&chat_sse_stream()),
+        ]);
+        let options = SimpleStreamOptions {
+            api_key: Some("k".to_string()),
+            max_retries: Some(3),
+            ..Default::default()
+        };
+        let model = test_model(&format!("http://{addr}"));
+        let stream = stream_openai_completions(
+            model,
+            context_of(vec![user_message("hi")]),
+            Some(options),
+            None,
+        );
+        let terminal = collect_terminal(stream).await;
+
+        // 三个不同连接上的请求 = 每次重试重新发请求
+        assert_eq!(handler.join().unwrap(), 3);
+        match terminal {
+            Some(AssistantMessageEvent::Done {
+                reason: StopReason::Stop,
+                message,
+            }) => {
+                assert_eq!(message.content[0], AssistantContent::text("Hi"));
+                assert_eq!(message.response_id.as_deref(), Some("chatcmpl-1"));
+            }
+            other => panic!("expected done, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_retry_respects_x_should_retry() {
+        let key = || Some("k".to_string());
+        // 400 默认不可重试,但 x-should-retry: true 强制重试
+        let (addr, handler) = spawn_mock_server(vec![
+            http_error_response("400 Bad Request", "maybe", &[("x-should-retry", "true")]),
+            http_sse_response(&chat_sse_stream()),
+        ]);
+        let model = test_model(&format!("http://{addr}"));
+        let stream = stream_openai_completions(
+            model,
+            context_of(vec![user_message("hi")]),
+            Some(SimpleStreamOptions {
+                api_key: key(),
+                ..Default::default() // max_retries 缺省 2
+            }),
+            None,
+        );
+        let terminal = collect_terminal(stream).await;
+        assert_eq!(handler.join().unwrap(), 2);
+        assert!(matches!(
+            terminal,
+            Some(AssistantMessageEvent::Done {
+                reason: StopReason::Stop,
+                ..
+            })
+        ));
+
+        // 5xx 默认可重试,但 x-should-retry: false 立即失败(不建立第二个连接)
+        let (addr, handler) = spawn_mock_server(vec![http_error_response(
+            "503 Service Unavailable",
+            "nope",
+            &[("x-should-retry", "false")],
+        )]);
+        let model = test_model(&format!("http://{addr}"));
+        let stream = stream_openai_completions(
+            model,
+            context_of(vec![user_message("hi")]),
+            Some(SimpleStreamOptions {
+                api_key: key(),
+                ..Default::default()
+            }),
+            None,
+        );
+        let terminal = collect_terminal(stream).await;
+        assert_eq!(handler.join().unwrap(), 1);
+        match terminal {
+            Some(AssistantMessageEvent::Error {
+                reason: StopReason::Error,
+                error,
+            }) => assert_eq!(error.error_message.as_deref(), Some("503: nope")),
+            other => panic!("expected error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_retry_exhaustion_encodes_last_error() {
+        let (addr, handler) = spawn_mock_server(vec![
+            http_error_response("408 Request Timeout", "timeout one", &[("retry-after-ms", "30")]),
+            http_error_response("408 Request Timeout", "timeout two", &[("retry-after-ms", "30")]),
+        ]);
+        let options = SimpleStreamOptions {
+            api_key: Some("k".to_string()),
+            max_retries: Some(1),
+            ..Default::default()
+        };
+        let model = test_model(&format!("http://{addr}"));
+        let stream = stream_openai_completions(
+            model,
+            context_of(vec![user_message("hi")]),
+            Some(options),
+            None,
+        );
+        let terminal = collect_terminal(stream).await;
+
+        // 首次 + 1 次重试 = 2 个请求,之后耗尽
+        assert_eq!(handler.join().unwrap(), 2);
+        match terminal {
+            Some(AssistantMessageEvent::Error {
+                reason: StopReason::Error,
+                error,
+            }) => {
+                assert_eq!(
+                    error.error_message.as_deref(),
+                    Some("408: timeout two")
+                );
+            }
+            other => panic!("expected error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_retry_backoff_is_cancelable() {
+        let (addr, handler) = spawn_mock_server(vec![http_error_response(
+            "408 Request Timeout",
+            "timeout",
+            &[("retry-after-ms", "60000")],
+        )]);
+        let token = CancellationToken::new();
+        let options = SimpleStreamOptions {
+            api_key: Some("k".to_string()),
+            max_retries: Some(2),
+            ..Default::default()
+        };
+        let model = test_model(&format!("http://{addr}"));
+        let signal_clone = token.clone();
+        let stream = stream_openai_completions(
+            model,
+            context_of(vec![user_message("hi")]),
+            Some(options),
+            Some(token),
+        );
+        // 等首个失败进入 60s 退避后取消 → 立即编码为 aborted,而非等满延迟
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        signal_clone.cancel();
+        let terminal = collect_terminal(stream).await;
+
+        let _ = handler.join();
+        match terminal {
+            Some(AssistantMessageEvent::Error {
+                reason: StopReason::Aborted,
+                error,
+            }) => {
+                assert_eq!(error.error_message.as_deref(), Some("Request was aborted"));
+            }
+            other => panic!("expected aborted, got {other:?}"),
+        }
     }
 }

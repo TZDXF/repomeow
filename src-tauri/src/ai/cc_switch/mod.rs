@@ -1,15 +1,8 @@
-//! 从 CC Switch(`~/.cc-switch`)读取供应商,筛选出 OpenAI chat 兼容的项供设置页导入。
+//! 从 CC Switch(`~/.cc-switch`)读取供应商供设置页导入。
 //!
 //! CC Switch 3.x 以 SQLite(`cc-switch.db`)为唯一事实源,旧版为 `config.json`;
-//! 两者统一读出 (app_type, settings_config) 后按应用类型解析,仅保留 OpenAI chat
-//! 兼容的供应商:
-//! - codex:TOML `wire_api = "chat"`(responses 协议未实现)
-//! - opencode:`npm = "@ai-sdk/openai-compatible"`
-//! - openclaw / pi:`api = "openai-completions"`(openclaw 缺省 api 视为 openai-completions)
-//! - hermes:`base_url` + `api_key` 顶层字段(OpenAI 兼容端点)
-//! - grokbuild:TOML `api_backend = "chat_completions"`
-//!
-//! claude(Anthropic 协议)与 gemini(Google 协议)不属于 OpenAI chat 格式,不导入。
+//! openclaw / pi 的 `api` 在四种已实现 wire adapter 内原样保留;codex / opencode /
+//! hermes / grokbuild 只在能明确判定为 OpenAI Chat Completions 时导入。
 
 use std::path::{Path, PathBuf};
 
@@ -40,6 +33,7 @@ pub struct CcSwitchProvider {
     pub base_url: String,
     /// 可能为空(如密钥走环境变量),导入后由用户补齐。
     pub api_key: String,
+    pub api: String,
     #[serde(default)]
     pub models: Vec<AiModelDef>,
     /// 在 CC Switch 中是否为该应用当前启用项。

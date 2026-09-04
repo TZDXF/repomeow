@@ -1587,6 +1587,14 @@ export default {
       addProviderDesc:
         "Pick a provider from the built-in catalog to prefill the endpoint and preset models, or choose Custom to fill everything manually",
       providerSelect: "Provider",
+      apiType: "API type",
+      inheritProviderApi: "Inherit provider",
+      apiTypes: {
+        "openai-completions": "OpenAI Chat Completions",
+        "openai-responses": "OpenAI Responses",
+        "anthropic-messages": "Anthropic Messages",
+        "google-generative-ai": "Google Generative AI",
+      },
       customProvider: "Custom",
       seededModelsHint: "{count} preset models will be included; you can edit them afterwards",
       emptyProviders: "No providers yet",

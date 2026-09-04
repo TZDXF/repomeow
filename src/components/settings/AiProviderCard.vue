@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { AI_API_TYPES, type AiApiType, isKnownAiApiType } from "@/lib/ai-config";
 import {
   draftModel,
   type ModelCompatDraft,
@@ -43,6 +44,27 @@ const emit = defineEmits<{
 const { t } = useI18n();
 
 const fetching = computed(() => props.fetchingKey === props.draft.key);
+const providerApiOptions = computed(() =>
+  isKnownAiApiType(props.draft.api) ? AI_API_TYPES : [props.draft.api, ...AI_API_TYPES],
+);
+
+function modelApiOptions(model: ModelDraft): (AiApiType | "")[] {
+  if (!model.api || isKnownAiApiType(model.api)) return ["", ...AI_API_TYPES];
+  return ["", model.api, ...AI_API_TYPES];
+}
+
+function apiLabel(api: AiApiType | ""): string {
+  if (!api) return t("settings.ai.inheritProviderApi");
+  return isKnownAiApiType(api) ? t(`settings.ai.apiTypes.${api}`) : api;
+}
+
+function effectiveApi(model: ModelDraft): AiApiType {
+  return model.api || props.draft.api;
+}
+
+function setModelApi(model: ModelDraft, value: unknown) {
+  model.api = value === "__inherit__" ? "" : String(value);
+}
 
 // ── 模型行 ───────────────────────────────────────────────────────────
 
@@ -228,6 +250,21 @@ function pickModelId(model: ModelDraft, id: string) {
             </div>
           </div>
           <div class="flex flex-col gap-1">
+            <label class="text-muted-foreground text-xs">{{ t("settings.ai.apiType") }}</label>
+            <Select v-model="draft.api">
+              <SelectTrigger class="h-8 w-full text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem v-for="api in providerApiOptions" :key="api" :value="api">
+                    {{ apiLabel(api) }}
+                  </SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
+          <div class="flex flex-col gap-1">
             <label class="text-muted-foreground text-xs">{{ t("settings.ai.baseUrl") }}</label>
             <Input
               v-model="draft.baseUrl"
@@ -346,7 +383,31 @@ function pickModelId(model: ModelDraft, id: string) {
                   </div>
                 </PopoverContent>
               </Popover>
-              <div class="grid grid-cols-3 gap-1.5">
+              <div class="grid grid-cols-4 gap-1.5">
+                <div class="flex flex-col gap-1">
+                  <label class="text-muted-foreground text-xs">{{
+                    t("settings.ai.apiType")
+                  }}</label>
+                  <Select
+                    :model-value="model.api || '__inherit__'"
+                    @update:model-value="setModelApi(model, $event)"
+                  >
+                    <SelectTrigger class="h-7 w-full text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        <SelectItem
+                          v-for="api in modelApiOptions(model)"
+                          :key="api || 'inherit'"
+                          :value="api || '__inherit__'"
+                        >
+                          {{ apiLabel(api) }}
+                        </SelectItem>
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div class="flex flex-col gap-1">
                   <label class="text-muted-foreground text-xs">{{
                     t("settings.ai.modelName")
@@ -390,7 +451,10 @@ function pickModelId(model: ModelDraft, id: string) {
                 />
                 {{ t("settings.ai.advancedConfig") }}
               </button>
-              <div v-if="advancedOpen[model.key]" class="flex flex-col gap-1.5">
+              <div
+                v-if="advancedOpen[model.key] && effectiveApi(model) === 'openai-completions'"
+                class="flex flex-col gap-1.5"
+              >
                 <p class="text-muted-foreground text-xs">
                   {{ t("settings.ai.advancedConfigHint") }}
                 </p>

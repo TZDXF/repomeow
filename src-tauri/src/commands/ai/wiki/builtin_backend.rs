@@ -19,7 +19,7 @@ use crate::agent::harness::tools::index::{
 };
 use crate::agent::harness::types::{AgentHarnessTool, ExecutionEnv};
 use crate::agent::harness::uuid::uuid_v7;
-use crate::agent::llm::openai_completions::stream_openai_completions;
+use crate::agent::llm::stream_simple;
 use crate::agent::llm::types::{
     AssistantContent, AssistantMessage, AssistantMessageEvent, Model, ModelThinkingLevel,
     SimpleStreamOptions, StopReason,
@@ -82,7 +82,7 @@ fn builtin_stream_fn(api_key: String, cancel: CancellationToken) -> StreamFn {
         let cancel = cancel.clone();
         Box::pin(async move {
             let base = options.unwrap_or_default();
-            stream_openai_completions(
+            stream_simple(
                 model,
                 context,
                 Some(SimpleStreamOptions {

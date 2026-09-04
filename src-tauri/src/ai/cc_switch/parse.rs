@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::agent::llm::types::API_OPENAI_COMPLETIONS;
+use crate::agent::llm::types::{is_supported_api, API_OPENAI_COMPLETIONS};
 
 use crate::ai::catalog::AiModelDef;
 use super::read::RawProvider;
@@ -27,13 +27,17 @@ fn api_key_text(value: Option<&Value>) -> String {
 }
 
 pub(super) fn convert(raw: &RawProvider) -> Option<CcSwitchProvider> {
-    let (base_url, api_key, models) = match raw.app.as_str() {
-        "codex" => parse_codex(&raw.settings_config)?,
-        "opencode" => parse_opencode(&raw.settings_config)?,
+    let (base_url, api_key, api, models) = match raw.app.as_str() {
+        "codex" => parse_codex(&raw.settings_config)
+            .map(|(base_url, api_key, models)| (base_url, api_key, API_OPENAI_COMPLETIONS.to_string(), models))?,
+        "opencode" => parse_opencode(&raw.settings_config)
+            .map(|(base_url, api_key, models)| (base_url, api_key, API_OPENAI_COMPLETIONS.to_string(), models))?,
         "openclaw" => parse_openclaw(&raw.settings_config)?,
         "pi" => parse_pi(&raw.settings_config)?,
-        "hermes" => parse_hermes(&raw.settings_config)?,
-        "grokbuild" => parse_grokbuild(&raw.settings_config)?,
+        "hermes" => parse_hermes(&raw.settings_config)
+            .map(|(base_url, api_key, models)| (base_url, api_key, API_OPENAI_COMPLETIONS.to_string(), models))?,
+        "grokbuild" => parse_grokbuild(&raw.settings_config)
+            .map(|(base_url, api_key, models)| (base_url, api_key, API_OPENAI_COMPLETIONS.to_string(), models))?,
         _ => return None,
     };
     if base_url.is_empty() {
@@ -45,6 +49,7 @@ pub(super) fn convert(raw: &RawProvider) -> Option<CcSwitchProvider> {
         app: raw.app.clone(),
         base_url,
         api_key,
+        api,
         models,
         current: raw.current,
     })
@@ -54,6 +59,10 @@ pub(super) fn convert(raw: &RawProvider) -> Option<CcSwitchProvider> {
 fn bare_model(id: &str, name: String, context_window: i64, max_tokens: i64) -> AiModelDef {
     AiModelDef {
         id: id.to_string(),
+        api: None,
+        base_url: None,
+        headers: None,
+        sampling_params: None,
         name,
         reasoning: true,
         input: Vec::new(),
@@ -190,22 +199,27 @@ fn parse_opencode(config: &Value) -> Option<(String, String, Vec<AiModelDef>)> {
 
 /// openclaw:`{ baseUrl, apiKey, api?, models: […] }`(pi 同族格式);
 /// 写了 api 且不是 openai-completions 的不导入。
-fn parse_openclaw(config: &Value) -> Option<(String, String, Vec<AiModelDef>)> {
+fn parse_openclaw(config: &Value) -> Option<(String, String, String, Vec<AiModelDef>)> {
     let api = text(config.get("api"));
-    if !api.is_empty() && api != API_OPENAI_COMPLETIONS {
+    let api = if api.is_empty() {
+        API_OPENAI_COMPLETIONS.to_string()
+    } else if is_supported_api(&api) {
+        api
+    } else {
         return None;
-    }
+    };
     let base_url = text(config.get("baseUrl"))
         .trim_end_matches('/')
         .to_string();
     let api_key = text(config.get("apiKey"));
-    Some((base_url, api_key, parse_model_array(config)))
+    Some((base_url, api_key, api, parse_model_array(config)))
 }
 
 /// pi:models.json 供应商节点 `{ baseUrl, apiKey, api, models: […] }`;
 /// 仅 `api = "openai-completions"` 兼容。
-fn parse_pi(config: &Value) -> Option<(String, String, Vec<AiModelDef>)> {
-    if text(config.get("api")) != API_OPENAI_COMPLETIONS {
+fn parse_pi(config: &Value) -> Option<(String, String, String, Vec<AiModelDef>)> {
+    let api = text(config.get("api"));
+    if !is_supported_api(&api) {
         return None;
     }
     let base_url = text(config.get("baseUrl"));
@@ -224,7 +238,7 @@ fn parse_pi(config: &Value) -> Option<(String, String, Vec<AiModelDef>)> {
     };
     let base_url = base_url.trim_end_matches('/').to_string();
     let api_key = text(config.get("apiKey"));
-    Some((base_url, api_key, parse_model_array(config)))
+    Some((base_url, api_key, api, parse_model_array(config)))
 }
 
 /// hermes:`{ base_url, api_key, model?, models: { id: { context_length } } }`。

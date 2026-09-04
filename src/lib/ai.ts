@@ -1,5 +1,6 @@
 import { Channel } from "@tauri-apps/api/core";
 import type { SupportedLocale } from "@/i18n";
+import type { AiApiType } from "@/lib/ai-config";
 import { cmd } from "@/lib/tauri";
 import type { GitCommitInfo, ReportPeriodType } from "@/types";
 
@@ -125,9 +126,9 @@ export async function generateBatchReports(
 }
 
 /** 使用后端 SDK 的 Models API，允许设置页用尚未保存的表单配置探测。 */
-export function fetchAiModels(baseURL: string, apiKey: string): Promise<string[]> {
+export function fetchAiModels(baseURL: string, apiKey: string, api: AiApiType): Promise<string[]> {
   return cmd<string[]>("ai_list_models", {
-    config: { aiBaseUrl: baseURL, aiApiKey: apiKey, aiModel: "" },
+    config: { aiBaseUrl: baseURL, aiApiKey: apiKey, aiModel: "", api },
   });
 }
 

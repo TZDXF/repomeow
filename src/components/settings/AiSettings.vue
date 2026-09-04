@@ -55,8 +55,10 @@ function draftProvider(id: string, provider: AiProvider): ProviderDraft {
     key: id || nextDraftKey(),
     id,
     name: provider.name,
+    api: provider.api,
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey,
+    source: provider,
     models: provider.models.map((model) => draftModel(model)),
   };
 }
@@ -98,12 +100,14 @@ function onAddProvider(payload: {
   name: string;
   baseUrl: string;
   apiKey: string;
+  api: AiProvider["api"];
   models: AiModelDef[];
 }) {
   const draft: ProviderDraft = {
     key: nextDraftKey(),
     id: payload.id,
     name: payload.name,
+    api: payload.api,
     baseUrl: payload.baseUrl,
     apiKey: payload.apiKey,
     models: payload.models.map((model) => draftModel(model)),
@@ -129,6 +133,7 @@ function onCcSwitchImport(providers: CcSwitchProvider[]) {
       key: nextDraftKey(),
       id: uniqueProviderId(provider.id),
       name: provider.name.trim(),
+      api: provider.api,
       baseUrl: provider.baseUrl.trim(),
       apiKey: provider.apiKey.trim(),
       models: provider.models.map((model) => draftModel(model)),
@@ -165,7 +170,7 @@ async function fetchModels(draft: ProviderDraft) {
   if (fetchingKey.value) return;
   fetchingKey.value = draft.key;
   try {
-    const list = await fetchAiModels(draft.baseUrl.trim(), draft.apiKey.trim());
+    const list = await fetchAiModels(draft.baseUrl.trim(), draft.apiKey.trim(), draft.api);
     fetchedModels[draft.key] = list.filter((id) => id.trim());
     toast.success(t("settings.ai.fetchModelsSuccess", { count: list.length }));
   } catch (error) {
@@ -189,6 +194,7 @@ const modelGroups = computed<ModelSelectorGroup[]>(() =>
         .map((model) => ({
           ...model.source,
           id: model.id.trim(),
+          api: model.api || undefined,
           name: model.name.trim(),
           reasoning: true,
         })),
@@ -256,12 +262,14 @@ function buildProviders(): Record<string, AiProvider> | null {
       name: draft.name.trim(),
       baseUrl: draft.baseUrl.trim().replace(/\/+$/, ""),
       apiKey: draft.apiKey.trim(),
-      api: "openai-completions",
+      api: draft.api,
+      headers: draft.source?.headers,
       models: draft.models
         .filter((model) => model.id.trim())
         .map((model) => ({
           ...model.source,
           id: model.id.trim(),
+          api: model.api || undefined,
           name: model.name.trim(),
           reasoning: true,
           contextWindow: parseTokenCount(model.contextWindow),

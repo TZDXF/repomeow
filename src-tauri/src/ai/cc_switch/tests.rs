@@ -136,16 +136,16 @@ fn openclaw_api_filter_and_models() {
     let cost = provider.models[0].cost.as_ref().expect("cost 保留");
     assert_eq!(cost.rates.input, 1.0);
     assert_eq!(cost.rates.cache_read, 0.0);
-    // anthropic 协议不导入
-    assert!(convert_app(
+    let anthropic = convert_app(
         "openclaw",
         json!({ "baseUrl": "https://api.example.com", "apiKey": "sk-x", "api": "anthropic-messages" }),
     )
-    .is_none());
+    .expect("已实现的 anthropic 协议应保留");
+    assert_eq!(anthropic.api, "anthropic-messages");
 }
 
 #[test]
-fn pi_requires_openai_completions() {
+fn pi_accepts_supported_api_types() {
     let provider = convert_app(
         "pi",
         json!({
@@ -159,11 +159,12 @@ fn pi_requires_openai_completions() {
     assert_eq!(provider.models[0].max_tokens, 100);
     assert!(provider.models[0].cost.is_some());
 
-    assert!(convert_app(
+    let responses = convert_app(
         "pi",
         json!({ "baseUrl": "https://api.example.com", "apiKey": "sk-x", "api": "openai-responses" }),
     )
-    .is_none());
+    .expect("已实现的 responses 协议应保留");
+    assert_eq!(responses.api, "openai-responses");
     // baseUrl 可落在模型条目上
     let provider = convert_app(
         "pi",

@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { AiModelDef, AiProvider } from "@/lib/ai-config";
+import { AI_API_TYPES, type AiApiType, type AiModelDef, type AiProvider } from "@/lib/ai-config";
 
 const props = defineProps<{
   open: boolean;
@@ -34,7 +34,14 @@ const emit = defineEmits<{
   "update:open": [value: boolean];
   /** 确认添加:models 为内置厂商带入的预置模型(自定义为空数组) */
   add: [
-    payload: { id: string; name: string; baseUrl: string; apiKey: string; models: AiModelDef[] },
+    payload: {
+      id: string;
+      name: string;
+      baseUrl: string;
+      apiKey: string;
+      api: AiApiType;
+      models: AiModelDef[];
+    },
   ];
 }>();
 
@@ -44,7 +51,13 @@ const { t } = useI18n();
 const CUSTOM_CHOICE = "custom";
 
 const addChoice = ref(CUSTOM_CHOICE);
-const addForm = reactive({ id: "", name: "", baseUrl: "", apiKey: "" });
+const addForm = reactive({
+  id: "",
+  name: "",
+  baseUrl: "",
+  apiKey: "",
+  api: "openai-completions" as AiApiType,
+});
 
 watch(
   () => props.open,
@@ -55,6 +68,7 @@ watch(
     addForm.name = "";
     addForm.baseUrl = "";
     addForm.apiKey = "";
+    addForm.api = "openai-completions";
   },
 );
 
@@ -78,6 +92,7 @@ function onAddChoiceChange(value: unknown) {
     addForm.id = "";
     addForm.name = "";
     addForm.baseUrl = "";
+    addForm.api = "openai-completions";
     return;
   }
   const provider = props.catalog[choice];
@@ -85,6 +100,7 @@ function onAddChoiceChange(value: unknown) {
   addForm.id = choice;
   addForm.name = provider.name;
   addForm.baseUrl = provider.baseUrl;
+  addForm.api = provider.api;
 }
 
 function confirmAdd() {
@@ -104,6 +120,7 @@ function confirmAdd() {
     name: addForm.name.trim(),
     baseUrl: addForm.baseUrl.trim(),
     apiKey: addForm.apiKey.trim(),
+    api: addForm.api,
     models: catalogModels,
   });
   emit("update:open", false);
@@ -158,6 +175,21 @@ function confirmAdd() {
               spellcheck="false"
             />
           </div>
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-muted-foreground text-xs">{{ t("settings.ai.apiType") }}</label>
+          <Select v-model="addForm.api">
+            <SelectTrigger class="h-8 w-full text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem v-for="api in AI_API_TYPES" :key="api" :value="api">
+                  {{ t(`settings.ai.apiTypes.${api}`) }}
+                </SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
         </div>
         <div class="flex flex-col gap-1">
           <label class="text-muted-foreground text-xs">{{ t("settings.ai.baseUrl") }}</label>
