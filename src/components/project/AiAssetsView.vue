@@ -41,9 +41,9 @@ import type {
  * 指令/规则文件(CLAUDE.md、AGENTS.md、.cursor/rules 等)、MCP 配置(.mcp.json 等)、
  * skills(.claude/skills、.agents/skills 与 .zcode/skills,按名称去重)与 13 个 agent 工具的安装/配置状态;
  * 支持从 cc-switch(~/.cc-switch)勾选导入 skills 与 MCP 到项目文件,
- * 并可视化管理:MCP 服务器按各 agent 项目级配置文件(claude/cursor/copilot/gemini/
- * codex/opencode 六个目标,含 codex TOML 与 opencode 字段映射)表单新增/编辑/移除、
- * skills 的新建与删除。
+ * 并可视化管理:MCP 服务器按各 agent 项目级配置文件(claude/cursor/copilot/
+ * gemini/codex/opencode/zcode 七个目标,含 codex TOML 与 opencode、zcode 的
+ * 字段映射)表单新增/编辑/移除、skills 的新建与删除。
  * 点击文件条目打开右侧抽屉预览/编辑(AiFileDrawer)。
  */
 const props = defineProps<{ project: Project }>();
