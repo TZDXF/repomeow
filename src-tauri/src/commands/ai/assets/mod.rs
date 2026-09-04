@@ -1,10 +1,13 @@
-//! 项目 AI 资产探测与 cc-switch 资产导出命令(详情页「AI 面板」数据源)。
+//! 项目 AI 资产探测、可视化管理与 cc-switch 资产导出命令(详情页「AI 面板」数据源)。
 //!
 //! - `scan_project_ai_assets`:固定路径 + 已知目录探测项目内的指令文件
 //!   (CLAUDE.md / AGENTS.md / GEMINI.md 等)、MCP 配置(.mcp.json 等)与
 //!   skills 目录(`.claude/skills/*`、`.agents/skills/*` 与 `.zcode/skills/*`,按技能名去重),
 //!   并与 registry 的 13 个 agent 安装状态交叉。
 //!   不做全仓库递归:直接 `Path::exists` 探测,天然覆盖隐藏条目且代价恒定。
+//! - `create_project_skill` / `delete_project_skill` / `set_project_mcp_server` /
+//!   `remove_project_mcp_server`(manage.rs):AI 面板的可视化管理——
+//!   skills 的新建/删除,MCP 服务器的表单新增/修改/移除(只写探测表内的配置文件)。
 //! - `set_project_cc_skill` / `set_project_cc_mcp`:把 cc-switch(`~/.cc-switch`)
 //!   管理的 skill / MCP 服务器按项目勾选导出到项目文件
 //!   (skill → `.claude/skills/<dir>`,MCP → `.mcp.json` 合并写入),取消勾选即移除。
@@ -22,10 +25,12 @@ use crate::commands::usage::count_o200k_tokens;
 use crate::error::{AppError, AppResult, ErrorCode};
 
 mod cc_export;
+mod manage;
 #[cfg(test)]
 mod tests;
 
 pub use cc_export::*;
+pub use manage::*;
 
 // ── 返回结构(camelCase 序列化,与 src/types/ai-assets.ts 对齐) ─────────────
 
@@ -41,13 +46,24 @@ pub struct AiAssetItem {
     pub agents: Vec<String>,
 }
 
-/// 项目内的一个 MCP 配置文件及其声明的服务器名。
+/// 项目内的一个 MCP 服务器条目(名称 + 原始定义)。
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServerEntry {
+    pub name: String,
+    /// 原始服务器定义(stdio: command/args/env;远程: url/type/headers 等)。
+    pub config: Value,
+}
+
+/// 项目内的一个 MCP 配置文件及其声明的服务器。
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectMcpFile {
     pub path: String,
-    /// mcpServers(VS Code 为 servers)对象的键;文件解析失败为空列表(文件仍列出)。
-    pub servers: Vec<String>,
+    /// 服务器对象在文件里的键名(mcpServers / servers),前端写回时原样传回。
+    pub servers_key: &'static str,
+    /// 服务器条目按名称排序;文件解析失败为空列表(文件仍列出)。
+    pub servers: Vec<McpServerEntry>,
 }
 
 /// 项目 skills 目录下的一个技能。
@@ -202,7 +218,8 @@ fn scan_assets(path: &str) -> AppResult<ProjectAiAssets> {
         .filter(|(rel, _)| root.join(rel).is_file())
         .map(|(rel, key)| ProjectMcpFile {
             path: rel.to_string(),
-            servers: read_mcp_server_names(&root.join(rel), key),
+            servers_key: key,
+            servers: read_mcp_servers(&root.join(rel), key),
         })
         .collect();
 
@@ -238,22 +255,26 @@ fn scan_assets(path: &str) -> AppResult<ProjectAiAssets> {
     })
 }
 
-/// 读取 MCP 配置文件里声明的服务器名;解析失败返回空(文件本身仍列出)。
-fn read_mcp_server_names(path: &Path, key: &str) -> Vec<String> {
+/// 读取 MCP 配置文件里声明的服务器(名称+原始定义);解析失败返回空(文件本身仍列出)。
+fn read_mcp_servers(path: &Path, key: &str) -> Vec<McpServerEntry> {
     let Ok(raw) = fs::read_to_string(path) else {
         return Vec::new();
     };
     let Ok(doc) = serde_json::from_str::<Value>(&raw) else {
         return Vec::new();
     };
-    doc.get(key)
-        .and_then(Value::as_object)
-        .map(|servers| {
-            let mut names: Vec<String> = servers.keys().cloned().collect();
-            names.sort();
-            names
+    let Some(servers) = doc.get(key).and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    let mut entries: Vec<McpServerEntry> = servers
+        .into_iter()
+        .map(|(name, config)| McpServerEntry {
+            name: name.clone(),
+            config: config.clone(),
         })
-        .unwrap_or_default()
+        .collect();
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    entries
 }
 
 /// 扫全部候选 skills 目录:每个含 SKILL.md 的子目录算一个技能,

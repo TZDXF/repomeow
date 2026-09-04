@@ -57,16 +57,23 @@ fn detects_fixed_instruction_files() {
 }
 
 #[test]
-fn reads_mcp_server_names_and_tolerates_corrupt() {
+fn reads_mcp_servers_and_tolerates_corrupt() {
     let dir = temp_project_dir("mcp");
-    fs::write(dir.join(".mcp.json"), r#"{"mcpServers":{"b":{},"a":{}}}"#).unwrap();
+    fs::write(
+        dir.join(".mcp.json"),
+        r#"{"mcpServers":{"b":{"command":"b"},"a":{"url":"https://a"}}}"#,
+    )
+    .unwrap();
     fs::create_dir_all(dir.join(".cursor")).unwrap();
     fs::write(dir.join(".cursor/mcp.json"), "not json").unwrap();
 
     let assets = scan_assets(&dir.to_string_lossy()).unwrap();
     assert_eq!(assets.mcp.len(), 2);
     let root_mcp = assets.mcp.iter().find(|m| m.path == ".mcp.json").unwrap();
-    assert_eq!(root_mcp.servers, vec!["a".to_string(), "b".to_string()]);
+    assert_eq!(root_mcp.servers_key, "mcpServers");
+    let names: Vec<&str> = root_mcp.servers.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["a", "b"]);
+    assert_eq!(root_mcp.servers[0].config["url"], "https://a");
     let cursor_mcp = assets
         .mcp
         .iter()
@@ -193,6 +200,7 @@ fn mcp_upsert_merges_and_remove_is_idempotent() {
     .unwrap();
     upsert_mcp_server(
         &target,
+        "mcpServers",
         "web",
         json!({"command": "npx", "args": ["mcp-web"]}),
     )
@@ -203,22 +211,101 @@ fn mcp_upsert_merges_and_remove_is_idempotent() {
     assert_eq!(doc["other"], json!(1));
 
     // 覆盖同名键
-    upsert_mcp_server(&target, "web", json!({"url": "https://x"})).unwrap();
+    upsert_mcp_server(&target, "mcpServers", "web", json!({"url": "https://x"})).unwrap();
     let doc: Value = serde_json::from_str(&fs::read_to_string(&target).unwrap()).unwrap();
     assert_eq!(doc["mcpServers"]["web"]["url"], json!("https://x"));
 
-    remove_mcp_server(&target, "web").unwrap();
+    remove_mcp_server(&target, "mcpServers", "web").unwrap();
     let doc: Value = serde_json::from_str(&fs::read_to_string(&target).unwrap()).unwrap();
     assert!(doc["mcpServers"]["web"].is_null());
     assert!(doc["mcpServers"]["own"].is_object());
     // 再删幂等;文件不存在也幂等
-    remove_mcp_server(&target, "web").unwrap();
-    remove_mcp_server(&dir.join("nope/.mcp.json"), "web").unwrap();
+    remove_mcp_server(&target, "mcpServers", "web").unwrap();
+    remove_mcp_server(&dir.join("nope/.mcp.json"), "mcpServers", "web").unwrap();
 
     // 损坏 JSON 报错且不改写
     fs::write(&target, "not json").unwrap();
-    assert!(upsert_mcp_server(&target, "a", json!({})).is_err());
+    assert!(upsert_mcp_server(&target, "mcpServers", "a", json!({})).is_err());
     assert_eq!(fs::read_to_string(&target).unwrap(), "not json");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn create_and_delete_project_skill_roundtrip() {
+    let dir = temp_project_dir("skill-crud");
+    let created = create_project_skill(
+        dir.to_string_lossy().to_string(),
+        " my-skill ".to_string(),
+        "做演示: \"quoted\"\n第二行".to_string(),
+    )
+    .unwrap();
+    assert_eq!(created, ".claude/skills/my-skill");
+    let md = dir.join(".claude/skills/my-skill/SKILL.md");
+    let content = fs::read_to_string(&md).unwrap();
+    assert!(content.starts_with("---\nname: my-skill\n"));
+    assert!(content.contains("description: \"做演示: \\\"quoted\\\" 第二行\""));
+    // 再建同名报错
+    assert!(create_project_skill(dir.to_string_lossy().to_string(), "my-skill".into(), String::new()).is_err());
+    // 删除后可重建
+    delete_project_skill(dir.to_string_lossy().to_string(), created).unwrap();
+    assert!(!dir.join(".claude/skills/my-skill").exists());
+    delete_project_skill(dir.to_string_lossy().to_string(), ".claude/skills/my-skill".into()).unwrap();
+
+    // 路径穿越与越界目录
+    assert!(delete_project_skill(dir.to_string_lossy().to_string(), "../evil".into()).is_err());
+    assert!(delete_project_skill(dir.to_string_lossy().to_string(), ".claude/skills/a/b".into()).is_err());
+    assert!(delete_project_skill(dir.to_string_lossy().to_string(), "not-skills/x".into()).is_err());
+    // 允许 .agents/.zcode 下的技能
+    let alt = dir.join(".agents/skills/alt");
+    fs::create_dir_all(&alt).unwrap();
+    delete_project_skill(dir.to_string_lossy().to_string(), ".agents/skills/alt".into()).unwrap();
+    assert!(!alt.exists());
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn project_mcp_server_crud_rejects_unknown_config_path() {
+    let dir = temp_project_dir("mcp-crud");
+    let project = dir.to_string_lossy().to_string();
+
+    set_project_mcp_server(
+        project.clone(),
+        ".mcp.json".into(),
+        "web".into(),
+        json!({"type": "stdio", "command": "npx", "args": ["-y", "srv"]}),
+    )
+    .unwrap();
+    // 目标文件不存在时自动创建(仅含 mcpServers)
+    let doc: Value = serde_json::from_str(&fs::read_to_string(dir.join(".mcp.json")).unwrap()).unwrap();
+    assert_eq!(doc["mcpServers"]["web"]["command"], json!("npx"));
+
+    // VS Code 键名为 servers 的文件同样可写
+    fs::create_dir_all(dir.join(".vscode")).unwrap();
+    fs::write(dir.join(".vscode/mcp.json"), r#"{"servers":{"keep":{}}}"#).unwrap();
+    set_project_mcp_server(
+        project.clone(),
+        ".vscode/mcp.json".into(),
+        "remote".into(),
+        json!({"type": "http", "url": "https://mcp.example.com"}),
+    )
+    .unwrap();
+    let doc: Value =
+        serde_json::from_str(&fs::read_to_string(dir.join(".vscode/mcp.json")).unwrap()).unwrap();
+    assert!(doc["servers"]["keep"].is_object());
+    assert_eq!(doc["servers"]["remote"]["url"], json!("https://mcp.example.com"));
+
+    remove_project_mcp_server(project.clone(), ".vscode/mcp.json".into(), "remote".into()).unwrap();
+    let doc: Value =
+        serde_json::from_str(&fs::read_to_string(dir.join(".vscode/mcp.json")).unwrap()).unwrap();
+    assert!(doc["servers"]["remote"].is_null());
+
+    // 只允许探测表内的配置文件;服务器名/非对象定义拒绝
+    assert!(set_project_mcp_server(project.clone(), "evil.json".into(), "x".into(), json!({})).is_err());
+    assert!(set_project_mcp_server(project.clone(), ".mcp.json".into(), "a/b".into(), json!({})).is_err());
+    assert!(set_project_mcp_server(project.clone(), ".mcp.json".into(), "x".into(), json!("str")).is_err());
+    assert!(remove_project_mcp_server(project, ".mcp.json".into(), String::new()).is_err());
 
     let _ = fs::remove_dir_all(&dir);
 }

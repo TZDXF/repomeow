@@ -11,6 +11,8 @@ pub const DEFAULT_WEEKLY_REPORT_PROMPT: &str = include_str!("prompts/report-week
 pub const AGENT_WIKI_OUTLINE_PROMPT: &str = include_str!("prompts/wiki-agent-outline.md");
 pub const AGENT_WIKI_PAGE_PROMPT: &str = include_str!("prompts/wiki-agent-page.md");
 pub const BUILTIN_AGENT_WIKI_PAGE_PROMPT: &str = include_str!("prompts/wiki-builtin-agent-page.md");
+/// 翻译提示词:固定模板,不进提示词管理(输出结构强耦合 Markdown 渲染)。
+pub const DEFAULT_TRANSLATE_PROMPT: &str = include_str!("prompts/translate.md");
 
 pub fn language_name(language: &str) -> &'static str {
     if language == "zh-CN" {
@@ -84,6 +86,7 @@ mod tests {
             AGENT_WIKI_OUTLINE_PROMPT,
             AGENT_WIKI_PAGE_PROMPT,
             BUILTIN_AGENT_WIKI_PAGE_PROMPT,
+            DEFAULT_TRANSLATE_PROMPT,
         ] {
             assert!(!prompt.trim().is_empty());
         }

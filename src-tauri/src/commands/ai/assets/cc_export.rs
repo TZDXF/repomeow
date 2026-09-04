@@ -143,12 +143,12 @@ pub fn set_project_cc_mcp(
                     "cc-switch 中已不存在该 MCP 服务器,请刷新列表".to_string(),
                 )
             })?;
-        upsert_mcp_server(&target, &name, config)
+        upsert_mcp_server(&target, "mcpServers", &name, config)
     } else {
         let name = cc_switch::mcp_server_by_id(&cc_dir, &server_id)?
             .map(|(name, _)| name)
             .unwrap_or(server_name);
-        remove_mcp_server(&target, &name)
+        remove_mcp_server(&target, "mcpServers", &name)
     }
 }
 
@@ -187,36 +187,44 @@ pub(super) fn atomic_write_json(target: &Path, doc: &Value) -> AppResult<()> {
     Ok(())
 }
 
-pub(super) fn mcp_servers_map_mut(doc: &mut Value) -> AppResult<&mut serde_json::Map<String, Value>> {
+pub(super) fn mcp_servers_map_mut<'a>(
+    doc: &'a mut Value,
+    key: &str,
+) -> AppResult<&'a mut serde_json::Map<String, Value>> {
     let obj = doc
         .as_object_mut()
-        .ok_or_else(|| AppError::coded(ErrorCode::InvalidPath, ".mcp.json 顶层非对象"))?;
+        .ok_or_else(|| AppError::coded(ErrorCode::InvalidPath, "MCP 配置文件顶层非对象"))?;
     let entry = obj
-        .entry("mcpServers")
+        .entry(key.to_string())
         .or_insert_with(|| Value::Object(serde_json::Map::new()));
     if !entry.is_object() {
         return Err(AppError::coded(
             ErrorCode::InvalidPath,
-            "项目 .mcp.json 的 mcpServers 不是对象,请先手动修复".to_string(),
+            format!("MCP 配置文件的 {key} 不是对象,请先手动修复"),
         ));
     }
     Ok(entry.as_object_mut().unwrap())
 }
 
-pub(super) fn upsert_mcp_server(target: &Path, name: &str, config: Value) -> AppResult<()> {
+pub(super) fn upsert_mcp_server(
+    target: &Path,
+    key: &str,
+    name: &str,
+    config: Value,
+) -> AppResult<()> {
     let mut doc = read_mcp_json(target)?;
-    mcp_servers_map_mut(&mut doc)?.insert(name.to_string(), config);
+    mcp_servers_map_mut(&mut doc, key)?.insert(name.to_string(), config);
     atomic_write_json(target, &doc)
 }
 
 /// 移除键;键不存在时不改写文件(避免无意义的 mtime 变化)。
-pub(super) fn remove_mcp_server(target: &Path, name: &str) -> AppResult<()> {
+pub(super) fn remove_mcp_server(target: &Path, key: &str, name: &str) -> AppResult<()> {
     if !target.is_file() {
         return Ok(());
     }
     let mut doc = read_mcp_json(target)?;
     let removed = doc
-        .get_mut("mcpServers")
+        .get_mut(key)
         .and_then(Value::as_object_mut)
         .is_some_and(|servers| servers.remove(name).is_some());
     if removed {

@@ -4,7 +4,16 @@ import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useLocalStorage } from "@vueuse/core";
-import { ExternalLink, FileCode, LoaderCircle, Pencil, Save, Undo2, X } from "@lucide/vue";
+import {
+  ExternalLink,
+  FileCode,
+  Languages,
+  LoaderCircle,
+  Pencil,
+  Save,
+  Undo2,
+  X,
+} from "@lucide/vue";
 import { Markdown } from "vue-stream-markdown";
 import { Button } from "@/components/ui/button";
 import CodeViewer from "@/components/files/CodeViewer.vue";
@@ -21,6 +30,8 @@ import type { FilePreview } from "@/types";
  * editable 模式 + save_text_file 落盘,Esc/遮罩关闭(编辑中有改动时 Esc 不生效)。
  * 渲染态正文里的 `@path/to/file` 引用会被 linkify 成按钮,点击经 navigate
  * 事件让父组件把抽屉切到被引用文件(解析相对当前文件所在目录)。
+ * Markdown 渲染态头部提供「翻译」按钮(经后端 ai_translate_markdown 按界面语言
+ * 翻译,原文/译文一键切换,再译/保存/换文件即作废旧译文);token 数仅 md 文件展示。
  */
 const props = defineProps<{
   /** 项目根目录(read_file_preview 的 root,越界访问由后端拒绝) */
@@ -95,6 +106,7 @@ watch(
   () => props.relPath,
   async (rel, prevRel) => {
     editing.value = false;
+    resetTranslation();
     if (!rel) {
       preview.value = null;
       return;
@@ -151,6 +163,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown, true);
   for (const cleanup of drawerResizeCleanups) cleanup();
   drawerResizeCleanups = [];
+  resetTranslation();
 });
 
 function startEdit() {
@@ -178,6 +191,8 @@ async function save() {
       relPath: rel,
     });
     editing.value = false;
+    // 原文已变,旧译文作废
+    resetTranslation();
     emit("saved");
     toast.success(t("aiAssets.drawer.saved"));
   } catch (e) {
@@ -196,13 +211,75 @@ async function openExternal() {
   }
 }
 
+// ── Markdown 翻译(渲染态专属;走设置页默认模型,经后端 ai_translate_markdown) ──
+const translating = ref(false);
+const translatedText = ref<string | null>(null);
+const showTranslated = ref(false);
+/** 当前在途翻译的 runId(ai_cancel_run 的取消句柄);空 = 无在途请求 */
+let translateRunId = "";
+
+/** 渲染态正文:译文激活时展示译文,否则原文 */
+const displayContent = computed(() =>
+  showTranslated.value && translatedText.value !== null
+    ? translatedText.value
+    : (preview.value?.text ?? ""),
+);
+
+function resetTranslation() {
+  if (translateRunId) {
+    void cmd<void>("ai_cancel_run", { runId: translateRunId }).catch(() => {});
+    translateRunId = "";
+  }
+  translating.value = false;
+  translatedText.value = null;
+  showTranslated.value = false;
+}
+
+async function toggleTranslate() {
+  // 翻译中再点 = 取消;已有译文 = 原文/译文切换
+  if (translating.value) {
+    resetTranslation();
+    return;
+  }
+  if (showTranslated.value) {
+    showTranslated.value = false;
+    return;
+  }
+  if (translatedText.value !== null) {
+    showTranslated.value = true;
+    return;
+  }
+  const rel = props.relPath;
+  const text = preview.value?.text;
+  if (!rel || !text) return;
+  translating.value = true;
+  const runId = `translate-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  translateRunId = runId;
+  try {
+    const result = await cmd<string | null>("ai_translate_markdown", {
+      request: { text, language: settingsStore.language, runId },
+    });
+    // 在途期间切换文件/关闭抽屉:丢弃过期结果(取消后返回 null,同样忽略)
+    if (props.relPath !== rel || result === null) return;
+    translatedText.value = result;
+    showTranslated.value = true;
+  } catch (e) {
+    toast.error(String(e));
+  } finally {
+    if (translateRunId === runId) {
+      translateRunId = "";
+      translating.value = false;
+    }
+  }
+}
+
 // ── 正文 @ 文件引用 linkify(渲染态 Markdown 专属) ──────────────────────────
 const mdBody = ref<HTMLElement | null>(null);
 
 // Markdown 组件渲染完成后(link 语法已由库处理)再扫纯文本节点插入引用按钮;
-// 编辑态切换/保存后内容重渲染,同样需要重扫
+// 编辑态切换/保存后内容重渲染、原文/译文切换,同样需要重扫
 watch(
-  () => [preview.value?.text, editing.value] as const,
+  () => [displayContent.value, editing.value] as const,
   async () => {
     await nextTick();
     if (mdBody.value) linkifyFileRefs(mdBody.value);
@@ -241,8 +318,9 @@ function onMarkdownClick(e: MouseEvent) {
             <span class="min-w-0 flex-1 truncate font-mono text-xs" :title="relPath ?? ''">
               {{ relPath }}
             </span>
+            <!-- token 数仅对 Markdown 文档展示(指令/SKILL.md 等喂给 AI 的场景) -->
             <span
-              v-if="preview?.tokenCount !== null && preview?.tokenCount !== undefined"
+              v-if="isMarkdown && preview?.tokenCount !== null && preview?.tokenCount !== undefined"
               class="shrink-0 text-xs tabular-nums text-muted-foreground"
               :title="
                 descriptionTokenCount !== null && descriptionTokenCount !== undefined
@@ -262,6 +340,30 @@ function onMarkdownClick(e: MouseEvent) {
                   : t("aiAssets.drawer.fileTokens", { count: formatTokenCount(preview.tokenCount) })
               }}
             </span>
+            <Button
+              v-if="isMarkdown && !editing && preview?.text"
+              size="sm"
+              variant="ghost"
+              class="text-xs"
+              :title="
+                translating
+                  ? t('aiAssets.drawer.translateCancel')
+                  : showTranslated
+                    ? t('aiAssets.drawer.showOriginal')
+                    : t('aiAssets.drawer.translate')
+              "
+              @click="toggleTranslate"
+            >
+              <LoaderCircle v-if="translating" class="h-3.5 w-3.5 animate-spin" />
+              <Languages v-else class="h-3.5 w-3.5" />
+              {{
+                translating
+                  ? t("aiAssets.drawer.translating")
+                  : showTranslated
+                    ? t("aiAssets.drawer.showOriginal")
+                    : t("aiAssets.drawer.translate")
+              }}
+            </Button>
             <Button
               size="sm"
               variant="ghost"
@@ -330,7 +432,7 @@ function onMarkdownClick(e: MouseEvent) {
           >
             <Markdown
               mode="static"
-              :content="preview.text"
+              :content="displayContent"
               :locale="settingsStore.language"
               :theme-element="themeElement"
             />

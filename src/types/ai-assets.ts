@@ -10,11 +10,20 @@ export interface AiAssetItem {
   agents: string[];
 }
 
-/** 项目内的一个 MCP 配置文件及其声明的服务器名 */
+/** 项目内 MCP 配置文件中的一个服务器条目 */
+export interface McpServerEntry {
+  name: string;
+  /** 原始服务器定义(stdio: command/args/env;远程: url/type/headers 等) */
+  config: Record<string, unknown>;
+}
+
+/** 项目内的一个 MCP 配置文件及其声明的服务器 */
 export interface ProjectMcpFile {
   path: string;
-  /** mcpServers(VS Code 为 servers)对象的键;解析失败为空列表 */
-  servers: string[];
+  /** 服务器对象在文件里的键名(mcpServers / servers),写回时原样传回 */
+  serversKey: string;
+  /** 服务器条目按名称排序;文件解析失败为空列表(文件仍列出) */
+  servers: McpServerEntry[];
 }
 
 /** 项目 skills 目录(.claude/skills、.agents/skills、.zcode/skills)下的一个技能 */
