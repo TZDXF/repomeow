@@ -28,6 +28,7 @@ import { baseName, splitDirName } from "@/lib/path";
 import { cmd } from "@/lib/tauri";
 import type {
   CcSwitchAssets,
+  McpDialect,
   McpServerEntry,
   Project,
   ProjectAiAssets,
@@ -40,7 +41,9 @@ import type {
  * 指令/规则文件(CLAUDE.md、AGENTS.md、.cursor/rules 等)、MCP 配置(.mcp.json 等)、
  * skills(.claude/skills、.agents/skills 与 .zcode/skills,按名称去重)与 13 个 agent 工具的安装/配置状态;
  * 支持从 cc-switch(~/.cc-switch)勾选导入 skills 与 MCP 到项目文件,
- * 并可视化管理:MCP 服务器表单新增/编辑/移除、skills 的新建与删除。
+ * 并可视化管理:MCP 服务器按各 agent 项目级配置文件(claude/cursor/copilot/gemini/
+ * codex/opencode 六个目标,含 codex TOML 与 opencode 字段映射)表单新增/编辑/移除、
+ * skills 的新建与删除。
  * 点击文件条目打开右侧抽屉预览/编辑(AiFileDrawer)。
  */
 const props = defineProps<{ project: Project }>();
@@ -114,9 +117,16 @@ function onImported() {
 // ── MCP 服务器可视化管理(表单新增/编辑/移除) ────────────────────────────
 
 const mcpFormOpen = ref(false);
-const mcpFormConfigPath = ref(".mcp.json");
-const mcpFormEditing = ref<McpServerEntry | null>(null);
+const mcpFormEditing = ref<{ file: ProjectMcpFile; entry: McpServerEntry } | null>(null);
 const pendingMcpDelete = ref<{ file: ProjectMcpFile; entry: McpServerEntry } | null>(null);
+/** 目标选择数据源:全部管理目标,agent id 已解析为展示名 */
+const mcpFormTargets = computed(() =>
+  (assets.value?.mcpTargets ?? []).map((target) => ({
+    path: target.path,
+    dialect: target.dialect,
+    agents: target.agents.map(agentLabel),
+  })),
+);
 
 const mcpDeleteOpen = computed({
   get: () => pendingMcpDelete.value !== null,
@@ -132,14 +142,12 @@ const mcpDeleteDescription = computed(() =>
 );
 
 function openMcpAdd() {
-  mcpFormConfigPath.value = ".mcp.json";
   mcpFormEditing.value = null;
   mcpFormOpen.value = true;
 }
 
 function openMcpEdit(file: ProjectMcpFile, entry: McpServerEntry) {
-  mcpFormConfigPath.value = file.path;
-  mcpFormEditing.value = entry;
+  mcpFormEditing.value = { file, entry };
   mcpFormOpen.value = true;
 }
 
@@ -160,24 +168,38 @@ async function removeMcpServer() {
   }
 }
 
-/** 服务器类型徽标:取 type,缺省按是否有 url 推断 */
-function serverType(config: Record<string, unknown>): string {
+/** 服务器类型徽标:按方言取 type/url/command 推断 */
+function serverType(config: Record<string, unknown>, dialect: McpDialect): string {
+  if (dialect === "opencode") {
+    return config.type === "remote" ? "http" : "stdio";
+  }
+  if (dialect === "gemini") {
+    if (typeof config.command === "string") return "stdio";
+    return typeof config.httpUrl === "string" ? "http" : "sse";
+  }
+  if (dialect === "codex") {
+    return typeof config.url === "string" ? "http" : "stdio";
+  }
   if (config.type === "http" || config.type === "sse" || config.type === "stdio") {
     return config.type;
   }
   return typeof config.url === "string" ? "http" : "stdio";
 }
 
-/** 服务器定义摘要:stdio 显示 command + args,http/sse 显示 url */
-function mcpSummary(config: Record<string, unknown>): string {
-  const command = typeof config.command === "string" ? config.command : "";
-  if (command) {
+/** 服务器定义摘要:stdio 显示 command + args(opencode 为 argv 数组),远程显示 url/httpUrl */
+function mcpSummary(config: Record<string, unknown>, dialect: McpDialect): string {
+  if (dialect === "opencode" && Array.isArray(config.command)) {
+    const argv = config.command.filter((a): a is string => typeof a === "string");
+    if (argv.length) return argv.join(" ");
+  }
+  if (typeof config.command === "string") {
     const args = Array.isArray(config.args)
       ? config.args.filter((a): a is string => typeof a === "string")
       : [];
-    return [command, ...args].join(" ");
+    return [config.command, ...args].join(" ");
   }
-  return typeof config.url === "string" ? config.url : "";
+  if (typeof config.url === "string") return config.url;
+  return typeof config.httpUrl === "string" ? config.httpUrl : "";
 }
 
 // ── Skills 可视化管理(新建/删除) ────────────────────────────────────
@@ -294,6 +316,13 @@ async function removeSkill() {
             >
               <Plug class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <span class="min-w-0 truncate font-mono text-xs">{{ mcpFile.path }}</span>
+              <span
+                v-for="agent in mcpFile.agents"
+                :key="agent"
+                class="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground"
+              >
+                {{ agentLabel(agent) }}
+              </span>
               <span class="ml-auto shrink-0 text-[10px] tabular-nums text-muted-foreground/70">
                 {{ t("aiAssets.mcpServerCount", { count: mcpFile.servers.length }) }}
               </span>
@@ -309,14 +338,14 @@ async function removeSkill() {
               <span
                 class="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] uppercase text-muted-foreground"
               >
-                {{ serverType(entry.config) }}
+                {{ serverType(entry.config, mcpFile.dialect) }}
               </span>
               <span
-                v-if="mcpSummary(entry.config)"
+                v-if="mcpSummary(entry.config, mcpFile.dialect)"
                 class="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground"
-                :title="mcpSummary(entry.config)"
+                :title="mcpSummary(entry.config, mcpFile.dialect)"
               >
-                {{ mcpSummary(entry.config) }}
+                {{ mcpSummary(entry.config, mcpFile.dialect) }}
               </span>
               <span v-else class="min-w-0 flex-1" />
               <span class="flex shrink-0 opacity-0 transition-opacity group-hover:opacity-100">
@@ -489,7 +518,7 @@ async function removeSkill() {
   <McpServerFormDialog
     v-model:open="mcpFormOpen"
     :project-path="project.path"
-    :config-path="mcpFormConfigPath"
+    :targets="mcpFormTargets"
     :editing="mcpFormEditing"
     @saved="reload"
   />

@@ -25,6 +25,7 @@ use crate::commands::usage::count_o200k_tokens;
 use crate::error::{AppError, AppResult, ErrorCode};
 
 mod cc_export;
+mod mcp_formats;
 mod manage;
 #[cfg(test)]
 mod tests;
@@ -60,10 +61,21 @@ pub struct McpServerEntry {
 #[serde(rename_all = "camelCase")]
 pub struct ProjectMcpFile {
     pub path: String,
-    /// 服务器对象在文件里的键名(mcpServers / servers),前端写回时原样传回。
-    pub servers_key: &'static str,
+    /// 配置方言,决定服务器定义的字段映射(claude/codex/gemini/opencode)。
+    pub dialect: &'static str,
+    /// 该文件归属的 agent id。
+    pub agents: Vec<String>,
     /// 服务器条目按名称排序;文件解析失败为空列表(文件仍列出)。
     pub servers: Vec<McpServerEntry>,
+}
+
+/// 一个 MCP 管理目标(含尚未创建的文件),「添加 MCP 服务器」的目标选择数据源。
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpTargetInfo {
+    pub path: String,
+    pub dialect: &'static str,
+    pub agents: Vec<String>,
 }
 
 /// 项目 skills 目录下的一个技能。
@@ -98,6 +110,8 @@ pub struct ProjectAgentStatus {
 pub struct ProjectAiAssets {
     pub files: Vec<AiAssetItem>,
     pub mcp: Vec<ProjectMcpFile>,
+    /// 全部可管理的 MCP 目标(含未创建文件),顺序即 MCP_TARGETS 表。
+    pub mcp_targets: Vec<McpTargetInfo>,
     pub skills: Vec<ProjectSkill>,
     pub agents: Vec<ProjectAgentStatus>,
 }
@@ -130,11 +144,67 @@ const FILE_PROBES: &[(&str, &str, &[&str])] = &[
     ("opencode.json", "setting", &["opencode"]),
 ];
 
-/// 项目内 MCP 配置候选:(相对路径, 服务器对象键名)。
-const MCP_PROBES: &[(&str, &str)] = &[
-    (".mcp.json", "mcpServers"),
-    (".cursor/mcp.json", "mcpServers"),
-    (".vscode/mcp.json", "servers"),
+/// 一个 MCP 管理目标的静态定义。
+pub(super) struct McpTarget {
+    /// 仓库相对路径。
+    pub path: &'static str,
+    /// 配置方言(claude/codex/gemini/opencode),决定读写字段映射与文件格式。
+    pub dialect: &'static str,
+    /// 服务器对象在文件里的键名(codex 为 TOML 的 mcp_servers 表名)。
+    pub key: &'static str,
+    /// 归属 agent id。
+    pub agents: &'static [&'static str],
+}
+
+/// 项目内 MCP 管理目标(各 agent 的项目级 MCP 配置,按各家官方文档:
+/// claude=`.mcp.json`、cursor=`.cursor/mcp.json`、copilot=`.vscode/mcp.json`、
+/// gemini=`.gemini/settings.json` 的 mcpServers、codex=`.codex/config.toml` 的
+/// mcp_servers 表、opencode=`opencode.json` 的 mcp 键、zcode=`.zcode/config.json`
+/// 的嵌套 mcp.servers 键(服务器对象与 claude 同形,复用 claude 方言);
+/// pi 无 MCP 支持故不在列)。
+pub(super) const MCP_TARGETS: &[McpTarget] = &[
+    McpTarget {
+        path: ".mcp.json",
+        dialect: "claude",
+        key: "mcpServers",
+        agents: &["claude"],
+    },
+    McpTarget {
+        path: ".cursor/mcp.json",
+        dialect: "claude",
+        key: "mcpServers",
+        agents: &["cursor"],
+    },
+    McpTarget {
+        path: ".vscode/mcp.json",
+        dialect: "claude",
+        key: "servers",
+        agents: &["copilot"],
+    },
+    McpTarget {
+        path: ".gemini/settings.json",
+        dialect: "gemini",
+        key: "mcpServers",
+        agents: &["gemini"],
+    },
+    McpTarget {
+        path: ".codex/config.toml",
+        dialect: "codex",
+        key: "mcp_servers",
+        agents: &["codex"],
+    },
+    McpTarget {
+        path: "opencode.json",
+        dialect: "opencode",
+        key: "mcp",
+        agents: &["opencode"],
+    },
+    McpTarget {
+        path: ".zcode/config.json",
+        dialect: "claude",
+        key: "mcp.servers",
+        agents: &["zcode"],
+    },
 ];
 
 /// 项目级 skills 目录候选(按优先级排序,同名技能先命中者保留)。
@@ -213,13 +283,22 @@ fn scan_assets(path: &str) -> AppResult<ProjectAiAssets> {
         }
     }
 
-    let mcp = MCP_PROBES
+    let mcp = MCP_TARGETS
         .iter()
-        .filter(|(rel, _)| root.join(rel).is_file())
-        .map(|(rel, key)| ProjectMcpFile {
-            path: rel.to_string(),
-            servers_key: key,
-            servers: read_mcp_servers(&root.join(rel), key),
+        .filter(|target| root.join(target.path).is_file())
+        .map(|target| ProjectMcpFile {
+            path: target.path.to_string(),
+            dialect: target.dialect,
+            agents: target.agents.iter().map(|a| (*a).to_string()).collect(),
+            servers: read_mcp_servers(&root.join(target.path), target),
+        })
+        .collect();
+    let mcp_targets = MCP_TARGETS
+        .iter()
+        .map(|target| McpTargetInfo {
+            path: target.path.to_string(),
+            dialect: target.dialect,
+            agents: target.agents.iter().map(|a| (*a).to_string()).collect(),
         })
         .collect();
 
@@ -250,20 +329,33 @@ fn scan_assets(path: &str) -> AppResult<ProjectAiAssets> {
     Ok(ProjectAiAssets {
         files: items,
         mcp,
+        mcp_targets,
         skills,
         agents,
     })
 }
 
-/// 读取 MCP 配置文件里声明的服务器(名称+原始定义);解析失败返回空(文件本身仍列出)。
-fn read_mcp_servers(path: &Path, key: &str) -> Vec<McpServerEntry> {
+/// 按点号嵌套键路径(如 mcp.servers)逐层取 JSON 值。
+fn get_json_path<'a>(doc: &'a Value, key: &str) -> Option<&'a Value> {
+    let mut current = doc;
+    for segment in key.split('.') {
+        current = current.get(segment)?;
+    }
+    Some(current)
+}
+
+/// 读取一个 MCP 目标里声明的服务器(名称+原始定义);解析失败返回空(文件本身仍列出)。
+fn read_mcp_servers(path: &Path, target: &McpTarget) -> Vec<McpServerEntry> {
+    if target.dialect == "codex" {
+        return mcp_formats::read_codex_servers(path);
+    }
     let Ok(raw) = fs::read_to_string(path) else {
         return Vec::new();
     };
     let Ok(doc) = serde_json::from_str::<Value>(&raw) else {
         return Vec::new();
     };
-    let Some(servers) = doc.get(key).and_then(Value::as_object) else {
+    let Some(servers) = get_json_path(&doc, target.key).and_then(Value::as_object) else {
         return Vec::new();
     };
     let mut entries: Vec<McpServerEntry> = servers

@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use super::cc_export::{remove_dir_robust, remove_mcp_server, upsert_mcp_server};
-use super::{MCP_PROBES, SKILL_DIR_PROBES};
+use super::mcp_formats::{remove_codex_server, upsert_codex_server};
+use super::{MCP_TARGETS, McpTarget, SKILL_DIR_PROBES};
 use crate::commands::files;
 use crate::error::{AppError, AppResult, ErrorCode};
 
@@ -24,20 +25,19 @@ fn validate_single_segment(name: &str, what: &str) -> AppResult<String> {
     Ok(name.to_string())
 }
 
-/// 按探测表解析 MCP 配置文件相对路径 → (绝对目标路径, 服务器对象键名)。
-/// 只允许探测表内的文件,拒绝任意路径写。
-fn resolve_mcp_target(project: &str, config_path: &str) -> AppResult<(PathBuf, &'static str)> {
-    let key = MCP_PROBES
+/// 按管理表解析 MCP 配置文件相对路径 → (目标定义, 绝对路径)。
+/// 只允许表内的文件,拒绝任意路径写。
+fn resolve_mcp_target(project: &str, config_path: &str) -> AppResult<(&'static McpTarget, PathBuf)> {
+    let target = MCP_TARGETS
         .iter()
-        .find(|(rel, _)| *rel == config_path)
-        .map(|(_, key)| *key)
+        .find(|target| target.path == config_path)
         .ok_or_else(|| {
             AppError::coded(
                 ErrorCode::InvalidPath,
                 format!("不支持的 MCP 配置文件:{config_path}"),
             )
         })?;
-    Ok((Path::new(project).join(config_path), key))
+    Ok((target, Path::new(project).join(config_path)))
 }
 
 /// 新建项目技能:在 `.claude/skills/<name>/` 写入带 frontmatter 的 SKILL.md 模板,
@@ -93,7 +93,8 @@ fn validate_skill_dir(project: &Path, dir: &str) -> AppResult<PathBuf> {
 }
 
 /// 表单保存一个 MCP 服务器:按 name 整体写入(同名覆盖,其余条目不动);
-/// config 是前端组装好的完整服务器定义,原样落盘。
+/// config 是前端按方言组装好的完整服务器定义,JSON 方言原样落盘,
+/// codex 方言经 toml_edit 保格式写入 TOML 表。
 #[tauri::command]
 pub fn set_project_mcp_server(
     path: String,
@@ -109,8 +110,12 @@ pub fn set_project_mcp_server(
             "MCP 服务器定义必须是 JSON 对象".to_string(),
         ));
     }
-    let (target, key) = resolve_mcp_target(&path, &config_path)?;
-    upsert_mcp_server(&target, key, &name, config)
+    let (target, abs) = resolve_mcp_target(&path, &config_path)?;
+    match target.dialect {
+        "codex" => upsert_codex_server(&abs, target.key, &name, &config),
+        // claude/gemini/opencode 均为 JSON 文件
+        _ => upsert_mcp_server(&abs, target.key, &name, config),
+    }
 }
 
 /// 移除一个 MCP 服务器条目;键不存在或文件缺失时不动文件。
@@ -118,6 +123,9 @@ pub fn set_project_mcp_server(
 pub fn remove_project_mcp_server(path: String, config_path: String, name: String) -> AppResult<()> {
     files::ensure_dir(&path)?;
     let name = validate_single_segment(&name, "MCP 服务器名")?;
-    let (target, key) = resolve_mcp_target(&path, &config_path)?;
-    remove_mcp_server(&target, key, &name)
+    let (target, abs) = resolve_mcp_target(&path, &config_path)?;
+    match target.dialect {
+        "codex" => remove_codex_server(&abs, target.key, &name),
+        _ => remove_mcp_server(&abs, target.key, &name),
+    }
 }

@@ -10,20 +10,32 @@ export interface AiAssetItem {
   agents: string[];
 }
 
+/** MCP 配置文件方言,决定服务器定义的字段映射与文件格式 */
+export type McpDialect = "claude" | "codex" | "gemini" | "opencode";
+
 /** 项目内 MCP 配置文件中的一个服务器条目 */
 export interface McpServerEntry {
   name: string;
-  /** 原始服务器定义(stdio: command/args/env;远程: url/type/headers 等) */
+  /** 原始服务器定义(各方言字段不同,claude: command/args/env;opencode: command 数组等) */
   config: Record<string, unknown>;
 }
 
 /** 项目内的一个 MCP 配置文件及其声明的服务器 */
 export interface ProjectMcpFile {
   path: string;
-  /** 服务器对象在文件里的键名(mcpServers / servers),写回时原样传回 */
-  serversKey: string;
+  dialect: McpDialect;
+  /** 该文件归属的 agent id */
+  agents: string[];
   /** 服务器条目按名称排序;文件解析失败为空列表(文件仍列出) */
   servers: McpServerEntry[];
+}
+
+/** 一个可管理的 MCP 目标(含尚未创建的文件) */
+export interface McpTargetInfo {
+  path: string;
+  dialect: McpDialect;
+  /** 归属 agent id */
+  agents: string[];
 }
 
 /** 项目 skills 目录(.claude/skills、.agents/skills、.zcode/skills)下的一个技能 */
@@ -51,6 +63,8 @@ export interface ProjectAgentStatus {
 export interface ProjectAiAssets {
   files: AiAssetItem[];
   mcp: ProjectMcpFile[];
+  /** 全部可管理的 MCP 目标(含未创建文件) */
+  mcpTargets: McpTargetInfo[];
   skills: ProjectSkill[];
   agents: ProjectAgentStatus[];
 }

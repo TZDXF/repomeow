@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref, watch } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { LoaderCircle, Save } from "@lucide/vue";
@@ -13,21 +13,33 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { cmd } from "@/lib/tauri";
-import type { McpServerEntry } from "@/types";
+import type { McpDialect, McpServerEntry } from "@/types";
 
 /**
- * MCP 服务器表单对话框:新增/编辑单个服务器并写回对应的 MCP 配置文件。
- * 类型分本地命令(stdio: command/args/env)与远程(http/sse: url/headers);
- * 编辑时保留服务器定义里表单未托管的自定义字段,名称不可改(改键名会留下旧条目)。
+ * MCP 服务器表单对话框:按目标方言(claude/codex/gemini/opencode)组装服务器
+ * 定义并写回对应 agent 的项目级配置文件。新增时可选目标文件(不存在自动创建);
+ * 编辑时保留表单未托管的自定义字段,名称不可改(改键名会留下旧条目)。
+ *
+ * 方言差异:claude 带 type(stdio/http/sse)+ headers;gemini 远程用 url(SSE)/
+ * httpUrl(HTTP);codex 无 type、远程头为 http_headers;opencode type 为
+ * local/remote、command 是数组、env 叫 environment。
  */
 const props = defineProps<{
   projectPath: string;
-  /** 目标 MCP 配置文件(仓库相对路径) */
-  configPath: string;
-  /** 编辑的条目;null = 新增 */
-  editing: McpServerEntry | null;
+  /** 全部可管理目标(含未创建文件),新增时的目标选择数据源 */
+  targets: Array<{ path: string; dialect: McpDialect; agents: string[] }>;
+  /** 编辑的条目及其所在文件;null = 新增 */
+  editing: { file: { path: string; dialect: McpDialect }; entry: McpServerEntry } | null;
 }>();
 const emit = defineEmits<{ (e: "saved"): void }>();
 const open = defineModel<boolean>("open", { required: true });
@@ -35,9 +47,28 @@ const open = defineModel<boolean>("open", { required: true });
 const { t } = useI18n();
 
 type ServerType = "stdio" | "http" | "sse";
-const SERVER_TYPES: ServerType[] = ["stdio", "http", "sse"];
+const TYPE_LABEL_KEYS: Record<ServerType, string> = {
+  stdio: "aiAssets.mcpForm.type_stdio",
+  http: "aiAssets.mcpForm.type_http",
+  sse: "aiAssets.mcpForm.type_sse",
+};
+/** 各方言支持的表单类型 */
+const DIALECT_SERVER_TYPES: Record<McpDialect, ServerType[]> = {
+  claude: ["stdio", "http", "sse"],
+  gemini: ["stdio", "http", "sse"],
+  codex: ["stdio", "http"],
+  opencode: ["stdio", "http"],
+};
+/** 各方言由表单托管的键,保存时先清再按类型回填,其余自定义字段保留 */
+const MANAGED_KEYS: Record<McpDialect, string[]> = {
+  claude: ["type", "command", "args", "env", "url", "headers"],
+  gemini: ["command", "args", "env", "url", "httpUrl", "headers"],
+  codex: ["command", "args", "env", "url", "http_headers"],
+  opencode: ["type", "command", "environment", "url", "headers"],
+};
 
 const form = reactive({
+  path: "",
   name: "",
   type: "stdio" as ServerType,
   command: "",
@@ -48,9 +79,30 @@ const form = reactive({
 });
 const saving = ref(false);
 
-/** 从既有定义推断表单类型:优先 type,缺省按是否有 url 判为 http,否则 stdio */
-function detectType(config: Record<string, unknown>): ServerType {
-  if (typeof config.type === "string" && SERVER_TYPES.includes(config.type as ServerType)) {
+const dialect = computed<McpDialect>(() => {
+  if (props.editing) return props.editing.file.dialect;
+  return props.targets.find((target) => target.path === form.path)?.dialect ?? "claude";
+});
+const serverTypes = computed(() => DIALECT_SERVER_TYPES[dialect.value]);
+const envKey = computed(() => (dialect.value === "opencode" ? "environment" : "env"));
+const headerKey = computed(() => (dialect.value === "codex" ? "http_headers" : "headers"));
+
+function detectType(d: McpDialect, config: Record<string, unknown>): ServerType {
+  if (d === "opencode") {
+    return config.type === "remote" ? "http" : "stdio";
+  }
+  if (d === "gemini") {
+    if (typeof config.httpUrl === "string") return "http";
+    if (typeof config.url === "string") return "sse";
+    return "stdio";
+  }
+  if (d === "codex") {
+    return typeof config.url === "string" ? "http" : "stdio";
+  }
+  if (
+    typeof config.type === "string" &&
+    DIALECT_SERVER_TYPES.claude.includes(config.type as ServerType)
+  ) {
     return config.type as ServerType;
   }
   return typeof config.url === "string" ? "http" : "stdio";
@@ -60,16 +112,30 @@ watch(open, (v) => {
   if (!v) {
     return;
   }
-  const config = props.editing?.config ?? {};
-  form.name = props.editing?.name ?? "";
-  form.type = detectType(config);
-  form.command = typeof config.command === "string" ? config.command : "";
-  form.argsText = Array.isArray(config.args)
-    ? config.args.filter((a): a is string => typeof a === "string").join("\n")
-    : "";
-  form.envText = pairsToText(config.env, "=");
+  form.path = props.editing?.file.path ?? props.targets[0]?.path ?? ".mcp.json";
+  const config = props.editing?.entry.config ?? {};
+  form.name = props.editing?.entry.name ?? "";
+  form.type = detectType(dialect.value, config);
+  if (dialect.value === "opencode" && Array.isArray(config.command)) {
+    const argv = config.command.filter((a): a is string => typeof a === "string");
+    form.command = argv[0] ?? "";
+    form.argsText = argv.slice(1).join("\n");
+  } else {
+    form.command = typeof config.command === "string" ? config.command : "";
+    form.argsText = Array.isArray(config.args)
+      ? config.args.filter((a): a is string => typeof a === "string").join("\n")
+      : "";
+  }
+  form.envText = pairsToText(config[envKey.value], "=");
   form.url = typeof config.url === "string" ? config.url : "";
-  form.headersText = pairsToText(config.headers, ":");
+  form.headersText = pairsToText(config[headerKey.value], ":");
+});
+
+// 切换目标文件会改变方言,当前类型可能不被新方言支持
+watch(dialect, (d) => {
+  if (!DIALECT_SERVER_TYPES[d].includes(form.type)) {
+    form.type = "stdio";
+  }
 });
 
 /** 键值对象 → 每行一组的表单文本(env 用 =,headers 用 :) */
@@ -127,29 +193,45 @@ function save() {
     toast.error(t("aiAssets.mcpForm.invalidHeaders"));
     return;
   }
-  // 编辑时保留表单未托管的自定义字段:从原定义出发,先清托管键再按当前类型回填
-  const config: Record<string, unknown> = { ...(props.editing?.config ?? {}) };
-  for (const key of ["type", "command", "args", "env", "url", "headers"]) {
+  const d = dialect.value;
+  // 编辑时保留表单未托管的自定义字段:从原定义出发,先清托管键再按类型回填
+  const config: Record<string, unknown> = { ...(props.editing?.entry.config ?? {}) };
+  for (const key of MANAGED_KEYS[d]) {
     delete config[key];
   }
+  const args = form.argsText
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
   if (form.type === "stdio") {
-    config.type = "stdio";
-    config.command = form.command.trim();
-    const args = form.argsText
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
-    if (args.length) {
+    if (d === "claude") {
+      config.type = "stdio";
+      config.command = form.command.trim();
+    } else if (d === "opencode") {
+      config.type = "local";
+      config.command = [form.command.trim(), ...args];
+    } else {
+      // codex/gemini 无 type,command 为字符串
+      config.command = form.command.trim();
+    }
+    if (d !== "opencode" && args.length) {
       config.args = args;
     }
     if (Object.keys(env).length) {
-      config.env = env;
+      config[envKey.value] = env;
     }
   } else {
-    config.type = form.type;
-    config.url = form.url.trim();
+    if (d === "claude" || d === "opencode") {
+      config.type = d === "opencode" ? "remote" : form.type;
+    }
+    if (d === "gemini") {
+      // gemini 远程:SSE 用 url,流式 HTTP 用 httpUrl
+      config[form.type === "sse" ? "url" : "httpUrl"] = form.url.trim();
+    } else {
+      config.url = form.url.trim();
+    }
     if (Object.keys(headers).length) {
-      config.headers = headers;
+      config[headerKey.value] = headers;
     }
   }
   void doSave(name, config);
@@ -160,7 +242,7 @@ async function doSave(name: string, config: Record<string, unknown>) {
   try {
     await cmd("set_project_mcp_server", {
       path: props.projectPath,
-      configPath: props.configPath,
+      configPath: form.path,
       name,
       config,
     });
@@ -183,7 +265,7 @@ async function doSave(name: string, config: Record<string, unknown>) {
           {{ editing ? t("aiAssets.mcpForm.editTitle") : t("aiAssets.mcpForm.addTitle") }}
         </DialogTitle>
         <DialogDescription>
-          {{ t("aiAssets.mcpForm.description", { path: configPath }) }}
+          {{ t("aiAssets.mcpForm.description", { path: form.path }) }}
         </DialogDescription>
       </DialogHeader>
 
@@ -197,11 +279,29 @@ async function doSave(name: string, config: Record<string, unknown>) {
           />
         </div>
 
+        <div v-if="!editing" class="flex flex-col gap-1.5">
+          <label class="text-sm font-medium">{{ t("aiAssets.mcpForm.targetLabel") }}</label>
+          <Select v-model="form.path">
+            <SelectTrigger class="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem v-for="target in targets" :key="target.path" :value="target.path">
+                  <span class="font-mono">{{ target.path }}</span>
+                  <span class="text-muted-foreground">· {{ target.agents.join(" / ") }}</span>
+                </SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          <p class="text-xs text-muted-foreground">{{ t("aiAssets.mcpForm.targetHint") }}</p>
+        </div>
+
         <div class="flex flex-col gap-1.5">
           <label class="text-sm font-medium">{{ t("aiAssets.mcpForm.typeLabel") }}</label>
           <div class="flex gap-1 rounded-lg bg-muted p-1">
             <button
-              v-for="ty in SERVER_TYPES"
+              v-for="ty in serverTypes"
               :key="ty"
               type="button"
               class="flex-1 rounded-md px-3 py-1.5 text-sm transition-colors"
@@ -212,7 +312,7 @@ async function doSave(name: string, config: Record<string, unknown>) {
               "
               @click="form.type = ty"
             >
-              {{ t(`aiAssets.mcpForm.type_${ty}`) }}
+              {{ t(TYPE_LABEL_KEYS[ty]) }}
             </button>
           </div>
         </div>
@@ -226,7 +326,7 @@ async function doSave(name: string, config: Record<string, unknown>) {
               :placeholder="t('aiAssets.mcpForm.commandPlaceholder')"
             />
           </div>
-          <div class="flex flex-col gap-1.5">
+          <div v-if="dialect !== 'opencode'" class="flex flex-col gap-1.5">
             <label class="text-sm font-medium">{{ t("aiAssets.mcpForm.argsLabel") }}</label>
             <Textarea
               v-model="form.argsText"

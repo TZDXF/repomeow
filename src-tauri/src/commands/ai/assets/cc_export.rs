@@ -187,23 +187,27 @@ pub(super) fn atomic_write_json(target: &Path, doc: &Value) -> AppResult<()> {
     Ok(())
 }
 
+/// 按点号嵌套键路径(mcp.servers)逐层取/建对象,返回最内层服务器表。
 pub(super) fn mcp_servers_map_mut<'a>(
     doc: &'a mut Value,
     key: &str,
 ) -> AppResult<&'a mut serde_json::Map<String, Value>> {
-    let obj = doc
+    let mut current = doc
         .as_object_mut()
         .ok_or_else(|| AppError::coded(ErrorCode::InvalidPath, "MCP 配置文件顶层非对象"))?;
-    let entry = obj
-        .entry(key.to_string())
-        .or_insert_with(|| Value::Object(serde_json::Map::new()));
-    if !entry.is_object() {
-        return Err(AppError::coded(
-            ErrorCode::InvalidPath,
-            format!("MCP 配置文件的 {key} 不是对象,请先手动修复"),
-        ));
+    for segment in key.split('.') {
+        let entry = current
+            .entry(segment.to_string())
+            .or_insert_with(|| Value::Object(serde_json::Map::new()));
+        if !entry.is_object() {
+            return Err(AppError::coded(
+                ErrorCode::InvalidPath,
+                format!("MCP 配置文件的 {key} 路径上存在非对象值,请先手动修复"),
+            ));
+        }
+        current = entry.as_object_mut().unwrap();
     }
-    Ok(entry.as_object_mut().unwrap())
+    Ok(current)
 }
 
 pub(super) fn upsert_mcp_server(
@@ -223,10 +227,18 @@ pub(super) fn remove_mcp_server(target: &Path, key: &str, name: &str) -> AppResu
         return Ok(());
     }
     let mut doc = read_mcp_json(target)?;
-    let removed = doc
-        .get_mut(key)
-        .and_then(Value::as_object_mut)
-        .is_some_and(|servers| servers.remove(name).is_some());
+    let mut current = doc.as_object_mut();
+    let mut segments = key.split('.');
+    // 逐层下钻,最后一层才是服务器表
+    for segment in segments.by_ref() {
+        let Some(obj) = current else { break };
+        let Some(entry) = obj.get_mut(segment) else {
+            current = None;
+            break;
+        };
+        current = entry.as_object_mut();
+    }
+    let removed = current.is_some_and(|servers| servers.remove(name).is_some());
     if removed {
         atomic_write_json(target, &doc)?;
     }

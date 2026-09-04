@@ -36,6 +36,8 @@ notify = "8"
 rusqlite = { version = "0.31", features = ["bundled"] }
 # codex/grokbuild 的 cc-switch settings_config 内嵌 TOML 文本
 toml = "0.8"
+# codex 项目 .codex/config.toml 的 MCP 服务器编辑:保格式(注释/排版不丢)
+toml_edit = "0.22"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 chrono = { version = "0.4", features = ["serde"] }
