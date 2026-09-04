@@ -286,7 +286,7 @@ export default {
       commandLabel: "Command",
       commandPlaceholder: "e.g. npx",
       argsLabel: "Arguments",
-      argsPlaceholder: "One per line, e.g.:\n-y\n@modelcontextprotocol/server-filesystem",
+      argsPlaceholder: "One per line, e.g.:\n-y\n{'@'}modelcontextprotocol/server-filesystem",
       envLabel: "Environment variables",
       envPlaceholder: "One per line, format KEY=VALUE",
       urlLabel: "URL",

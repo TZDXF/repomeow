@@ -278,7 +278,7 @@ export default {
       commandLabel: "命令",
       commandPlaceholder: "例如: npx",
       argsLabel: "参数",
-      argsPlaceholder: "每行一个,例如:\n-y\n@modelcontextprotocol/server-filesystem",
+      argsPlaceholder: "每行一个,例如:\n-y\n{'@'}modelcontextprotocol/server-filesystem",
       envLabel: "环境变量",
       envPlaceholder: "每行一个,格式 KEY=VALUE",
       urlLabel: "URL",
