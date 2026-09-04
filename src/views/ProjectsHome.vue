@@ -42,7 +42,7 @@ const tagsStore = useTagsStore();
 const settings = useSettingsStore();
 const router = useRouter();
 
-// 搜索(防抖,逻辑同原 Sidebar)
+// 搜索(防抖)
 const searchInput = ref(store.query);
 watchDebounced(searchInput, (value) => store.setQuery(value), { debounce: 250 });
 

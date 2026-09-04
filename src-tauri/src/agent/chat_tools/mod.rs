@@ -1,12 +1,9 @@
 //! 项目问答(chat)的 RepoMeow 工具集。
 //!
 //! 把既有域命令(语义分析 / wiki / 自定义命令 / 报告 / 文件读取 / AI 配置)
-//! 包装成 pi `AgentTool`,供 `commands/chat.rs` 构建的 Agent 使用。工具结果统一为
+//! 包装成 pi `AgentTool`,供 `commands/chat/session.rs` 构建的 Agent 使用。工具结果统一为
 //! 面向 LLM 的文本,超长按 UTF-8 边界截断并标注;执行失败返回 `Err`,
 //! 由 agent-loop 转成 error 工具结果回传模型。
-//!
-//! 注意:本模块是新文件,需在 `agent/mod.rs` 挂 `pub mod chat_tools;`
-//! (对齐阶段由主智能体处理)。
 
 use futures::future::BoxFuture;
 use tauri::AppHandle;

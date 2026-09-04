@@ -9,14 +9,15 @@
 //!   errorMessage),不 panic、不抛出。
 //! - [`SseDecoder`] + [`AnthropicAggregator`]:SSE 文本解码与事件聚合均为纯逻辑,便于单测。
 //!
-//! 与蓝本的已知偏差(详见交付说明):
+//! 与蓝本的已知偏差:
 //! - `Model.compat` 仍是 `OpenAICompletionsCompat`,Anthropic 专属 compat 用
 //!   [`get_anthropic_compat`] 的文件内默认值(forceAdaptiveThinking/supportsMidConvoEffort
 //!   恒 false,adaptive thinking/effort/fallbacks 路径未实现,待类型整合后接入)。
 //! - 无 `tool.constrainedSampling` 建模 → strict tools 恒不启用。
 //! - `providerThinkingLevel`/`insertThinkingLevelMessages`/`input_transformations`
 //!   诊断/Rust 类型未建模,不实现;fallback 模型成本重映射不实现。
-//! - 无 provider 层重试(与 openai-completions 移植一致,重试在 agent-loop 层)。
+//! - provider 内层重试对齐 TS `retryProviderRequest`(x-should-retry 头优先,
+//!   408/409/429/5xx、retry-after、指数退避)。
 //! - `sanitizeSurrogates` 在 Rust 无意义(String 恒为合法 UTF-8),省略。
 //!
 //! 认证:`x-api-key`(普通)或 `Authorization: Bearer`(`sk-ant-oat` OAuth token /

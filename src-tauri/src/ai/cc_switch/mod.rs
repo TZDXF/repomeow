@@ -99,7 +99,8 @@ pub fn cc_switch_dir(app: &AppHandle) -> AppResult<PathBuf> {
     Ok(home.join(".cc-switch"))
 }
 
-/// 从本机 `~/.cc-switch/` 扫描可导入的 OpenAI chat 兼容供应商。
+/// 从本机 `~/.cc-switch/` 扫描可导入的供应商
+/// (openclaw/pi 支持四种 wire adapter,codex/opencode/hermes/grokbuild 仅 OpenAI Chat)。
 pub fn scan_cc_switch_providers(app: &AppHandle) -> AppResult<CcSwitchScan> {
     scan_at(&cc_switch_dir(app)?)
 }

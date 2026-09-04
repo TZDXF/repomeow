@@ -1,3 +1,4 @@
+/** 用户自定义 AI 提示词(~/.repomeow/prompts/*.md);空字符串表示使用内置默认模板 */
 export interface AiPrompts {
   /** 提交信息生成提示词 */
   commit: string;
@@ -9,7 +10,6 @@ export interface AiPrompts {
 
 // ── 项目 Wiki(~/.repomeow/wiki/<basename>-<hash>/ 下的 meta.json + pages/*.md) ──
 
-/** 触发 wiki git 快照提交的操作类型(后端据此组提交信息) */
 /** wiki 大纲中的单个页面条目 */
 export interface WikiOutlinePage {
   id: string;

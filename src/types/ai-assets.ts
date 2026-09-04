@@ -73,5 +73,3 @@ export interface CcSwitchAssets {
   skills: CcSwitchSkill[];
   mcpServers: CcSwitchMcpServer[];
 }
-
-/** Java 构建工具类型 */

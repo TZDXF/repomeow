@@ -1,5 +1,6 @@
 import type { GitCommitInfo } from "./git";
 
+/** 报告类型:日报(单日) | 周报(日期范围) */
 export type ReportPeriodType = "daily" | "weekly";
 
 /** 报告历史日历的选中视角:按日 | 按周(周一至周日) | 按月 */

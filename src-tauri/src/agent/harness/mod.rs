@@ -1,8 +1,8 @@
 //! harness:packages/agent `src/harness/**` 的 Rust 复刻(session/compaction/tools/
 //! reducer/skills/prompt-templates/telemetry/执行环境)。
 //!
-//! 复刻边界与蓝本一致:`AgentHarness` 组合层在上游即为 WIP(运行方法全部
-//! NotImplemented),此处同样对齐;完整实现的组件逐文件对齐移植。
+//! 复刻边界:`AgentHarness` 公开契约对齐蓝本 scaffold,运行方法经本仓库 runtime.rs
+//! 接线(仍 NotImplemented 的子集见 agent_harness.rs 头部);完整实现的组件逐文件对齐移植。
 //!
 //! 蓝本 → Rust 对应:
 //! - `types.rs`    ← harness/types.ts(Result 基础件 + FileSystem/Shell/ExecutionEnv)

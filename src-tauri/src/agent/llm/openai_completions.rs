@@ -14,7 +14,7 @@
 //! - [`StreamAggregator`]:SSE chunk → 事件的纯聚合逻辑,便于单测。
 //! - [`crate::agent::llm::validate`] 的消费方(agent-loop)负责工具参数校验,本模块不重复。
 //!
-//! 与蓝本的已知偏差见模块底部 tests 与交付说明(无 constrained sampling/grammar tools、
+//! 与蓝本的已知偏差见模块底部 tests(无 constrained sampling/grammar tools、
 //! 无 prompt cache retention、cost 以模型费率计算)。请求路径不走 async-openai:
 //! 其错误类型丢弃响应头,无法支撑 provider 重试的 x-should-retry/retry-after 语义。
 

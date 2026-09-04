@@ -168,7 +168,7 @@ export function getBuiltinAiProviders(): Promise<Record<string, AiProvider>> {
   return cmd<Record<string, AiProvider>>("ai_config_builtin_providers");
 }
 
-/** 一个可导入的 CC Switch 供应商(已筛选为 OpenAI chat 兼容) */
+/** 一个可导入的 CC Switch 供应商(api 已筛选为四种受支持 wire adapter 之一) */
 export interface CcSwitchProvider {
   /** CC Switch 内的供应商 id(导入时去重后作为厂商 id 候选) */
   id: string;
@@ -190,7 +190,7 @@ export interface CcSwitchScan {
   providers: CcSwitchProvider[];
 }
 
-/** 扫描本机 CC Switch(~/.cc-switch)中 OpenAI chat 兼容的供应商 */
+/** 扫描本机 CC Switch(~/.cc-switch)中可导入的供应商 */
 export function listCcSwitchProviders(): Promise<CcSwitchScan> {
   return cmd<CcSwitchScan>("ai_cc_switch_providers");
 }

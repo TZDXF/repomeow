@@ -25,7 +25,7 @@ const props = defineProps<{
   project: Project;
   /** cc-switch 资产;null 表示本机没有 ~/.cc-switch */
   assets: CcSwitchAssets | null;
-  /** 项目 .claude/skills 下已有的技能目录名(不含前缀) */
+  /** 项目已有技能的末段目录名(可来自 .claude/.agents/.zcode skills 多目录;导出目标仍为 .claude/skills) */
   projectSkillDirs: string[];
   /** 项目 .mcp.json 的 mcpServers 键(仅根目录 .mcp.json,导出目标文件) */
   projectMcpNames: string[];

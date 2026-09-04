@@ -499,7 +499,7 @@ pub enum ToolchainKind {
     Git,
 }
 
-/// 版本管理器登记的一个版本(rustup 工具链 / nvm·fnm·vp 的 Node 版本 / dotnet SDK)
+/// 版本管理器登记的一个版本(rustup 工具链 / nvm·fnm·vp 的 Node 版本 / uv 的 Python 版本 / dotnet SDK)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ToolchainVersion {
     /// 版本或工具链名,如 "22.11.0" / "stable-x86_64-pc-windows-msvc"
@@ -541,7 +541,7 @@ pub struct ToolchainStatus {
     pub found: bool,
     /// `--version` 解析出的版本串;工具已装但输出无法解析时为 None
     pub version: Option<String>,
-    /// PATH 上命中的可执行文件路径(unix nvm 是 shell 函数无二进制,为 None)
+    /// PATH 上命中的可执行文件路径(unix nvm 是 shell 函数无二进制,回退填 ~/.nvm 目录)
     pub path: Option<String>,
     /// 安装来源:"winget" / "rustup" / "brew" / "standalone"(决定更新/卸载命令)
     pub source: Option<String>,
@@ -553,8 +553,9 @@ pub struct ToolchainStatus {
 }
 
 /// 项目维度被隐藏的 UI 项
-/// kind: "packageFile"(整个 package.json 分组)/ "packageScript"(分组内单条命令)/ "composeFile"
-/// target_key: packageFile = 分组 dir;packageScript = "<dir>\n<name>";composeFile = 文件相对路径
+/// kind: "packageFile"(整个 package.json 分组)/ "packageScript"(分组内单条命令)/ "composeFile" / "javaBuild"(Spring Boot 构建组)
+/// target_key: packageFile = 分组 dir;packageScript = "<dir>\n<name>";composeFile = 文件相对路径;
+///             javaBuild = "<dir>\n<tool>"
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HiddenItem {
@@ -563,10 +564,12 @@ pub struct HiddenItem {
 }
 
 /// 一条被标记为「常用」的命令,在托盘弹窗项目列表中可直接执行
-/// kind: "packageScript" / "composeFile" / "composeService" / "customCommand"
+/// kind: "packageScript" / "composeFile" / "composeService" / "customCommand" / "javaBuild"
 /// target_key: packageScript = "<dir>\n<name>";composeFile = 文件相对路径;
-///             composeService = "<file>\n<service>";customCommand = 命令 id
-/// command: npm/自定义为完整命令;compose 类为基础前缀 `docker compose -f "..."`,动作在执行时拼接
+///             composeService = "<file>\n<service>";customCommand = 命令 id;
+///             javaBuild = "<dir>\n<tool>"
+/// command: npm/自定义/javaBuild 为完整命令(javaBuild 执行时按项目解析 JAVA_HOME 注入);
+///          compose 类为基础前缀 `docker compose -f "..."`,动作在执行时拼接
 #[derive(Debug, Clone, Serialize)]
 pub struct PinnedCommand {
     pub id: i64,

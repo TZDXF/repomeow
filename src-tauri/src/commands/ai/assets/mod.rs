@@ -27,7 +27,7 @@ mod tests;
 
 pub use cc_export::*;
 
-// ── 返回结构(camelCase 序列化,与 src/types/index.ts 对齐) ─────────────
+// ── 返回结构(camelCase 序列化,与 src/types/ai-assets.ts 对齐) ─────────────
 
 /// 项目内检测到的一个 AI 指令/规则/设置文件。
 #[derive(Clone, Debug, Serialize)]

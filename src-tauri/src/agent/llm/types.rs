@@ -3,7 +3,8 @@
 //! 序列化格式与 TS 版 JSON 完全兼容(camelCase 字段、tag 值一致),以便
 //! JSONL 会话存储、跨端调试与前端消费共享同一形状。
 //! 有意精简:provider 请求回调(onPayload/onResponse)以 Rust 回调字段存在、
-//! 不参与序列化;`deferred` 相关(Unused in openai-completions)暂不建模。
+//! 不参与序列化;`AssistantMessage.deferred`(DeferredHandle,蓝本标注
+//! Unused in openai-completions)暂不建模。
 
 use std::collections::HashMap;
 
@@ -528,8 +529,8 @@ pub struct ModelCost {
     pub tiers: Option<Vec<ModelCostTier>>,
 }
 
-/// OpenAI 兼容 completions 的兼容性开关(对齐 `OpenAICompletionsCompat` 的
-/// openai-completions provider 实现所需子集;缺省值由 baseUrl 自动探测)。
+/// OpenAI 系 adapter(openai-completions / openai-responses)的兼容性开关
+/// (对齐蓝本 `OpenAICompletionsCompat`;缺省值由 baseUrl 自动探测)。
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenAICompletionsCompat {

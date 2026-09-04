@@ -34,5 +34,3 @@ export interface HiddenItem {
   kind: HiddenKind;
   targetKey: string;
 }
-
-/** 详情页首屏聚合数据(get_project_overview 一次 IPC 返回) */

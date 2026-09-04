@@ -352,7 +352,7 @@ function onKeydown(e: KeyboardEvent) {
 onMounted(() => window.addEventListener("keydown", onKeydown));
 onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 
-// ── Markdown 渲染(复用 README 抽屉的渲染器与控件配置) ────────────────────────
+// ── Markdown 渲染 ────────────────────────────────────────────────────────────
 // 相对路径图片/链接的解析基准 = 文件所在目录
 const mdBasePath = computed(() =>
   project.value && selected.value

@@ -1,6 +1,7 @@
 import type { CustomCommand } from "./project";
 import type { HiddenItem } from "./open";
 
+/** 详情页首屏聚合数据(get_project_overview 一次 IPC 返回) */
 export interface ProjectOverview {
   hidden_items: HiddenItem[];
   custom_commands: CustomCommand[];
@@ -17,8 +18,10 @@ export type PinKind =
 /**
  * 一条被标记为「常用」的命令,在托盘弹窗项目列表中可直接执行
  * target_key: packageScript = "<dir>\n<name>";composeFile = 文件相对路径;
- *             composeService = "<file>\n<service>";customCommand = 命令 id
- * command: npm/自定义为完整命令;compose 类为基础前缀 `docker compose -f "..."`,动作在执行时拼接
+ *             composeService = "<file>\n<service>";customCommand = 命令 id;
+ *             javaBuild = "<dir>\n<tool>"
+ * command: npm/自定义/javaBuild 为完整命令(javaBuild 执行时按项目解析 JAVA_HOME 注入);
+ *          compose 类为基础前缀 `docker compose -f "..."`,动作在执行时拼接
  */
 export interface PinnedCommand {
   id: number;
@@ -33,5 +36,3 @@ export interface PinnedCommand {
   icon: string | null;
   created_at: number;
 }
-
-/** 报告类型:日报(单日) | 周报(日期范围) */

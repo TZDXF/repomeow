@@ -80,7 +80,7 @@ fn row_to_entry(r: &Row) -> rusqlite::Result<AiUsageEntry> {
 
 const ENTRY_COLS: &str = "id, created_at, task_type, model, input_tokens, output_tokens, total_tokens, duration_ms, cached_tokens";
 
-/// 汇总统计:总计 + 按任务类型 + 最近 30 天按日(SUM 忽略 NULL)
+/// 汇总统计:总计 + 按任务类型 + 最近 190 天按日(SUM 忽略 NULL)
 #[tauri::command]
 pub fn get_ai_usage_summary(db: State<Db>) -> AppResult<AiUsageSummary> {
     usage_summary(&db.0.lock().unwrap())

@@ -148,7 +148,7 @@ impl HarnessFault {
 #[error("AgentHarness was closed while the operation was active")]
 pub struct HarnessClosed;
 
-/// harness 运行方法尚未实现(WIP 骨架;对齐 TS `HarnessNotImplemented`)。
+/// harness 未接线的方法返回此错误(对齐 TS `HarnessNotImplemented`)。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("AgentHarness.{operation} is not implemented yet")]
 pub struct HarnessNotImplemented {
@@ -163,7 +163,7 @@ impl HarnessNotImplemented {
     }
 }
 
-/// WIP 骨架运行方法的统一错误:未实现,或已关闭。
+/// harness 未接线方法的统一错误:未实现,或已关闭。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error(transparent)]
 pub enum HarnessUnavailable {

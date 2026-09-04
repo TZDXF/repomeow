@@ -476,7 +476,7 @@ mod tests {
         ));
 
         create_command(&conn, pid, "a", "b", "", "").unwrap();
-        // 项目已无删除入口(仅归档),这里用原生 SQL 验证 schema 的外键级联仍然有效
+        // 「彻底删除」入口(设置页归档管理)走同一外键级联,这里用原生 SQL 直接验证 schema 仍然有效
         conn.execute("DELETE FROM projects WHERE id = ?1", [pid])
             .unwrap();
         assert!(list_commands(&conn, pid).unwrap().is_empty());

@@ -41,7 +41,7 @@ pub fn ai_config_reveal(app: AppHandle) -> AppResult<()> {
     open::open_explorer(&dir.to_string_lossy())
 }
 
-/// 扫描本机 CC Switch(~/.cc-switch)中 OpenAI chat 兼容的供应商,供设置页选择导入。
+/// 扫描本机 CC Switch(~/.cc-switch)中可导入的供应商,供设置页选择导入。
 #[tauri::command]
 pub fn ai_cc_switch_providers(app: AppHandle) -> AppResult<CcSwitchScan> {
     cc_switch::scan_cc_switch_providers(&app)

@@ -3,7 +3,7 @@ import { cmd } from "@/lib/tauri";
 
 /**
  * wiki agent 后端的前端桥:经 ACP 调用本地 coding agent CLI。
- * Rust 侧(commands/agent.rs)负责进程与协议;这里只做类型化封装。
+ * Rust 侧(commands/agent/ 模块)负责进程与协议;这里只做类型化封装。
  */
 
 /** 精选 agent 清单条目(agent_list 返回) */

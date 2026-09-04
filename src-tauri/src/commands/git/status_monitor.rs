@@ -1,5 +1,7 @@
 use super::*;
 
+/// 打开仓库(向上查找父目录,与 `git -C <path>` 语义一致)。
+/// 非 git 仓库返回 Ok(None),其他错误(权限/损坏等)透传
 pub(crate) fn open_repo(path: &str) -> AppResult<Option<Repository>> {
     match Repository::discover(path) {
         Ok(repo) => Ok(Some(repo)),
@@ -13,7 +15,7 @@ pub(super) fn not_a_repo() -> AppError {
     AppError::coded(ErrorCode::NotGitRepository, "")
 }
 
-/// git2/IO 错误统一映射 GitCommandFailed(全文件 19 处 map_err 共用)
+/// git2/IO 错误统一映射 GitCommandFailed(git 模块各文件共用)
 pub(super) fn git_err(e: impl std::fmt::Display) -> AppError {
     AppError::coded(ErrorCode::GitCommandFailed, e.to_string())
 }
@@ -171,7 +173,8 @@ pub fn status(path: &str) -> AppResult<GitStatus> {
 // ── 本地状态缓存 ─────────────────────────────────────────────────────────
 
 /// 本地 git 状态缓存 TTL:详情页/批量刷新等高频调用直接命中,
-/// 后台刷新循环每 30s 全量重查一次,15s 内命中即视为足够新
+/// 后台刷新循环(monitor_loop,间隔由 system_schedules 配置,默认 10 分钟)
+/// 周期性全量重查,15s 内命中即视为足够新
 pub(super) const STATUS_TTL: Duration = Duration::from_secs(15);
 
 pub(super) struct CachedStatus {

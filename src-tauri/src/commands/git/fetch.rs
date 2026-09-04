@@ -46,8 +46,8 @@ pub(super) fn try_begin_fetch(path: &str) -> bool {
     due
 }
 
-/// fetch 结束回调:成功清除退避记录;失败按连续失败次数指数退避,
-/// 弱网/断网时后台循环不会每 30s 重复撞网络
+/// fetch 结束回调:成功清除退避记录;失败按连续失败次数指数退避
+/// (30s 起步、封顶 15 分钟),弱网/断网时不会每个检查周期都重复撞网络
 pub(super) fn fetch_finished(path: &str, ok: bool) {
     let key = crate::path_util::clean_str(path);
     let mut tracker = fetch_tracker().lock().unwrap();

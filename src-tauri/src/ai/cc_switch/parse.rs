@@ -198,7 +198,7 @@ fn parse_opencode(config: &Value) -> Option<(String, String, Vec<AiModelDef>)> {
 }
 
 /// openclaw:`{ baseUrl, apiKey, api?, models: […] }`(pi 同族格式);
-/// 写了 api 且不是 openai-completions 的不导入。
+/// api 缺省按 openai-completions,写了四种已实现 adapter 之外的不导入。
 fn parse_openclaw(config: &Value) -> Option<(String, String, String, Vec<AiModelDef>)> {
     let api = text(config.get("api"));
     let api = if api.is_empty() {
@@ -216,7 +216,7 @@ fn parse_openclaw(config: &Value) -> Option<(String, String, String, Vec<AiModel
 }
 
 /// pi:models.json 供应商节点 `{ baseUrl, apiKey, api, models: […] }`;
-/// 仅 `api = "openai-completions"` 兼容。
+/// api 必须是四种已实现 adapter 之一,缺省(空)不导入。
 fn parse_pi(config: &Value) -> Option<(String, String, String, Vec<AiModelDef>)> {
     let api = text(config.get("api"));
     if !is_supported_api(&api) {

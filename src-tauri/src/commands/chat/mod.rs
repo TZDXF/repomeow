@@ -1,7 +1,7 @@
 //! 项目问答(chat)Tauri 命令层。
 //!
-//! 前端经 `chat_send` 发送消息,Rust 侧用 pi Agent(OpenAI 兼容流 + RepoMeow
-//! 工具集)跑完整个对话回合,经 `Channel<ChatEvent>` 回推增量事件;会话按
+//! 前端经 `chat_send` 发送消息,Rust 侧用 pi Agent(按模型 api 分派的 provider
+//! 流 + RepoMeow 工具集)跑完整个对话回合,经 `Channel<ChatEvent>` 回推增量事件;会话按
 //! 项目路径隔离,跨消息保留上下文。`chat_abort` 取消进行中的回合,
 //! `chat_new_session` 丢弃会话上下文。每次 `chat_send` 结束后把聚合的
 //! token 用量写入 `ai_usage_log`(task_type = "chat")。

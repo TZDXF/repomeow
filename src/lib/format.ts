@@ -29,7 +29,7 @@ export function formatCompactNumber(value: number): string {
   return `${rounded.toLocaleString(i18n.global.locale.value, { maximumFractionDigits: 1 })}${unit.suffix}`;
 }
 
-/** 字节数 → 可读大小(B/KB/MB/GB,1000 进制,保留 1 位小数) */
+/** 字节数 → 可读大小(B/KB/MB/GB/TB,1000 进制,保留 1 位小数) */
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return "0 B";
   if (bytes < 1000) return `${Math.round(bytes)} B`;

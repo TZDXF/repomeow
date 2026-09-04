@@ -206,9 +206,7 @@ export interface GitCommitFileDiff {
   truncated: boolean;
 }
 
-/** 语义实体引用(sem 各命令统一后的稳定 DTO;entityId 无法可靠构造时为 null,
- * 此时用 name + filePath 回退查询)。 */
-
+/** 一位提交者的统计(git_project_stats;email 归并,展示名为最近一次使用的名字) */
 export interface GitAuthorStat {
   name: string;
   email: string;
@@ -274,5 +272,3 @@ export interface GitProjectStats {
   totalFiles: number;
   totalBytes: number;
 }
-
-/** 单个文件的预览内容(read_file_preview) */

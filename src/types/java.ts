@@ -1,3 +1,4 @@
+/** Java 构建工具类型 */
 export type JavaBuildTool = "maven" | "gradle";
 
 /** 「更多操作」下拉里的一条常用命令(maven/gradle 生命周期目标) */
@@ -45,5 +46,3 @@ export interface RemoteJdkRelease {
   /** 该主版本当前最新的完整版本串,如 "17.0.20+8" */
   version: string;
 }
-
-/** 工具链所属生态(detect_toolchains 输出的分组) */

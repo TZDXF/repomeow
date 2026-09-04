@@ -9,7 +9,7 @@ use crate::time_util::now_ts_nanos;
 use super::parse::text;
 use super::*;
 
-// ── 读取(SQlite 数据库 / 旧版 config.json) ─────────────────────────
+// ── 读取(SQLite 数据库 / 旧版 config.json) ─────────────────────────
 
 /// 数据库行(只取解析所需的核心列,旧库缺新增列也能查)。
 pub(super) struct RawProvider {

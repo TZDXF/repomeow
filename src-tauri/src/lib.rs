@@ -73,7 +73,7 @@ pub fn run() {
             let db = Db::open(&dir.join("projects.db"))?;
             // 清洗入库归一化前的存量登记路径(统一分隔符风格,消除同目录重复登记)
             commands::project::normalize_stored_paths(&db.0.lock().unwrap());
-            // AI 用量日志保留期清理(90 天前)
+            // AI 用量日志保留期清理(190 天前)
             commands::usage::prune_old_entries(&db.0.lock().unwrap());
             app.manage(db);
 
@@ -96,7 +96,7 @@ pub fn run() {
                 }
             }
 
-            // 启动日报定时调度器(后台 tokio 任务,仅 App 运行时生效)
+            // 启动日报/周报定时调度器(后台 tokio 任务,仅 App 运行时生效)
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 scheduler::run(handle).await;

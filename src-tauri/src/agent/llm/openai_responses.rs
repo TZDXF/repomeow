@@ -16,10 +16,10 @@
 //! - 无 constrained sampling/grammar custom tools(grammarToolInputProperties 恒空,
 //!   custom_tool_call 的 input 流式增量按原文拼接,不做 JSON 转义缓冲);
 //! - 无 deferred tools(additional-tools / tool-search 两条路径不触发);
-//! - 无重试与 service tier 定价;HTTP 错误格式化保留状态码 + 截断后的响应体;
-//! - Responses 专属 compat 尚未建模进 `Model.compat`(主代理整合类型后接入),
-//!   现按蓝本缺省行为实现,仅复用既有 `OpenAICompletionsCompat` 的
-//!   `supports_developer_role` / `supports_strict_mode` 两个同义开关。
+//! - 无 service tier 定价;HTTP 错误格式化保留状态码 + 截断后的响应体;
+//! - Responses 专属 compat 尚未建模进 `Model.compat`,复用既有 `OpenAICompletionsCompat`
+//!   的 supports_developer_role / supports_long_cache_retention / supports_strict_mode /
+//!   supports_max_output_tokens 四个开关,其余按蓝本缺省行为实现。
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;

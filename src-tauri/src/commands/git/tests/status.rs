@@ -11,7 +11,7 @@ fn commit_files_reports_status_and_line_counts() {
     git(&dir, &["add", "."]);
     git(&dir, &["commit", "-m", "init"]);
 
-    // M: a.txt 改两行;D: b.txt;A: 二进制 bin.dat
+    // M: a.txt 由 1 行改为 3 行;D: b.txt;A: 二进制 bin.dat
     fs::write(dir.join("a.txt"), "a1\na2\na3\n").unwrap();
     fs::remove_file(dir.join("b.txt")).unwrap();
     fs::write(dir.join("bin.dat"), [0u8, 159, 146, 150]).unwrap();

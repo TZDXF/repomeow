@@ -126,8 +126,6 @@ pub(super) fn update_wiki_tool(app: &AppHandle, ctx: &ChatToolContext) -> AgentT
                             "正在增量更新 Wiki(检测变更并重生成受影响页面)…",
                         ));
                     }
-                    // UpdateWikiRequest / WikiUpdateResult 的字段当前是 pub(super),
-                    // 对齐阶段需放宽为 pub(crate)(见对齐清单)。
                     let request = UpdateWikiRequest {
                         run_id: pseudo_request_id(),
                         project_path: project_path.clone(),
@@ -191,8 +189,6 @@ pub(super) fn regenerate_wiki_tool(app: &AppHandle, ctx: &ChatToolContext) -> Ag
                             )));
                         }
                     }
-                    // GenerateWikiRequest 的字段当前是 pub(super),
-                    // 对齐阶段需放宽为 pub(crate)(见对齐清单)。
                     let request = GenerateWikiRequest {
                         run_id: pseudo_request_id(),
                         project_path: project_path.clone(),

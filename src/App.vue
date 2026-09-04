@@ -134,10 +134,7 @@ onMounted(async () => {
       {
         action: {
           label: t("common.view"),
-          onClick: () => {
-            // navigate to history page — use window.location since router not available here
-            window.location.hash = "#/report-history";
-          },
+          onClick: () => router.push("/report-history"),
         },
       },
     );

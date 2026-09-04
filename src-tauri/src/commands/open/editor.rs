@@ -6,7 +6,6 @@ use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::EditorKind;
 use super::*;
 /// 通过编辑器 CLI 打开目录(命令需在 PATH 中)
-
 pub(super) fn open_editor(cli: &str, path: &str) -> AppResult<()> {
     #[cfg(windows)]
     hidden(Command::new("cmd"))

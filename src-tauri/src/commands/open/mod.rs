@@ -5,8 +5,6 @@ use std::os::windows::process::CommandExt;
 
 use crate::models::EditorKind;
 
-/// 执行命令所用的终端 shell(对应前端 settings.json 的 `terminal` 键,仅 Windows 生效)。
-
 mod editor;
 mod shell;
 mod terminal;

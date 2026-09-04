@@ -1,6 +1,6 @@
 use super::*;
 
-// ── worktree / merge / rebase ─────────────────────────────
+// ── worktree ─────────────────────────────
 
 /// 从已打开的仓库读 worktree 展示信息(主工作区或链接 worktree 通用)。
 /// 路径统一为 '/' 分隔(与原 `git worktree list --porcelain` 在 Windows 上的输出一致)

@@ -85,8 +85,6 @@ pub(super) fn generate_report_tool(app: &AppHandle, ctx: &ChatToolContext) -> Ag
                     if let Some(on_update) = &on_update {
                         on_update(AgentToolResult::text("正在收集提交并生成报告…"));
                     }
-                    // GenerateAndSaveReportRequest / GeneratedReport 的字段当前是模块私有,
-                    // 对齐阶段需放宽为 pub(crate)(见对齐清单)。
                     let request = GenerateAndSaveReportRequest {
                         run_id: pseudo_request_id(),
                         project_ids: vec![project_id],

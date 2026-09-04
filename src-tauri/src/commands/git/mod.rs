@@ -64,10 +64,8 @@ pub(crate) use process::{git_command, run_git};
 // ── git2(libgit2)读操作层 ────────────────────────────────────────────────
 // 所有只读查询(status/分支/log/diff 等)走 libgit2,避免每次查询创建 git 子进程
 // (Windows 上进程创建约 10-30ms,批量状态/图谱等高频路径收益显著);
-// 写操作与网络操作(fetch/pull/push/clone)仍走下方 CLI 辅助以继承用户凭证环境。
+// 写操作与网络操作(fetch/pull/push/clone)仍走 CLI 辅助(git_command/run_git)以继承用户凭证环境。
 
-/// 打开仓库(向上查找父目录,与 `git -C <path>` 语义一致)。
-/// 非 git 仓库返回 Ok(None),其他错误(权限/损坏等)透传
 mod status_monitor;
 pub use status_monitor::*;
 mod refs;

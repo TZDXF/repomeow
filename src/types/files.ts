@@ -1,3 +1,4 @@
+/** 单个文件的预览内容(read_file_preview) */
 export interface FilePreview {
   /** 文本内容;二进制文件为 null */
   text: string | null;
@@ -56,5 +57,3 @@ export interface GitWorktreeFile {
   /** 是否未跟踪文件(勾选"包含未跟踪文件"才会被提交) */
   untracked: boolean;
 }
-
-/** 用户自定义 AI 提示词(~/.repomeow/prompts/*.md);空字符串表示使用内置默认模板 */
