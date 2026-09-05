@@ -108,6 +108,9 @@ pub fn run() {
                 commands::git::monitor_loop(handle).await;
             });
 
+            // 资源库非阻塞同步检查:配置了备份远端才在后台跑一次(失败静默)
+            commands::ai::startup_sync_check(app.handle());
+
             Ok(())
         })
         .on_window_event(|window, event| match event {
@@ -288,6 +291,36 @@ pub fn run() {
             commands::ai::delete_project_skill,
             commands::ai::set_project_mcp_server,
             commands::ai::remove_project_mcp_server,
+            commands::ai::rl_library_info,
+            commands::ai::rl_library_open_dir,
+            commands::ai::rl_skill_list,
+            commands::ai::rl_skill_group_create,
+            commands::ai::rl_skill_group_rename,
+            commands::ai::rl_skill_group_delete,
+            commands::ai::rl_skill_group_reorder,
+            commands::ai::rl_skill_reorder,
+            commands::ai::rl_skill_open_dir,
+            commands::ai::rl_skill_create,
+            commands::ai::rl_skill_update,
+            commands::ai::rl_skill_delete,
+            commands::ai::rl_skill_body_read,
+            commands::ai::rl_skill_body_write,
+            commands::ai::rl_marketplace_list,
+            commands::ai::rl_marketplace_install,
+            commands::ai::rl_mcp_list,
+            commands::ai::rl_mcp_create,
+            commands::ai::rl_mcp_update,
+            commands::ai::rl_mcp_delete,
+            commands::ai::rl_encryption_status,
+            commands::ai::rl_encryption_enable,
+            commands::ai::rl_encryption_disable,
+            commands::ai::rl_encryption_unlock,
+            commands::ai::rl_encryption_lock,
+            commands::ai::rl_remote_configure,
+            commands::ai::rl_remote_remove,
+            commands::ai::rl_sync_status,
+            commands::ai::rl_sync_once,
+            commands::ai::rl_resolve_fork,
             commands::ai::ai_list_models,
             commands::ai::ai_test_connection,
             commands::ai::ai_translate_markdown,

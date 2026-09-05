@@ -5,6 +5,7 @@ import { useRouter } from "vue-router";
 import {
   Archive,
   ArrowLeft,
+  Boxes,
   CalendarClock,
   Cable,
   Coffee,
@@ -30,6 +31,7 @@ import AiUsageSettings from "@/components/settings/AiUsageSettings.vue";
 import AccountSettings from "@/components/settings/AccountSettings.vue";
 import PromptSettings from "@/components/settings/PromptSettings.vue";
 import ReportScheduleSettings from "@/components/settings/ReportScheduleSettings.vue";
+import ResourceLibrarySettings from "@/components/settings/ResourceLibrarySettings.vue";
 import AboutSettings from "@/components/settings/AboutSettings.vue";
 
 const { t } = useI18n();
@@ -87,6 +89,12 @@ const categories: Category[] = [
     component: PromptSettings,
   },
   {
+    id: "resources",
+    labelKey: "settings.categories.resources",
+    icon: Boxes,
+    component: ResourceLibrarySettings,
+  },
+  {
     id: "schedule",
     labelKey: "settings.categories.schedule",
     icon: CalendarClock,
@@ -131,8 +139,12 @@ const active = computed(() => categories.find((c) => c.id === activeId.value) ??
       </nav>
 
       <ScrollArea class="flex-1">
-        <!-- h-full + flex-col:内容矮于窗口时撑满,供列表型设置页(跟踪/归档)的列表区 flex-1 跟随窗口高度 -->
-        <div class="flex h-full max-w-xl flex-col p-6">
+        <!-- h-full + flex-col:内容矮于窗口时撑满,供列表型设置页(跟踪/归档)的列表区 flex-1 跟随窗口高度;
+             资源管理为宽布局分类,内容区放宽 -->
+        <div
+          class="flex h-full flex-col p-6"
+          :class="activeId === 'resources' ? 'max-w-4xl' : 'max-w-xl'"
+        >
           <component :is="active.component" />
         </div>
       </ScrollArea>

@@ -81,6 +81,13 @@ similar = "2"
 # MCP 对外服务：首版通过 stdio 提供代码提交与 Wiki 目录查询。
 rmcp = { version = "3.1.4", features = ["server", "transport-io"] }
 jsonschema = "0.52.0"
+# 资源库加密(commands/ai/resource_library):Argon2id 口令派生 + XChaCha20Poly1305 文件容器,口令仅内存
+argon2 = "0.6"
+chacha20poly1305 = "0.11"
+# 派生密钥/明文缓冲零化(与 argon2 内部同源)
+zeroize = "1"
+# 盐/随机 nonce/库内 ID 的系统随机源
+getrandom = "0.3"
 
 [dev-dependencies]
 urlpattern = "0.3"
