@@ -51,15 +51,6 @@ export async function listResourceSkills(): Promise<ResourceSkillList> {
   };
 }
 
-export function createResourceSkill(input: ResourceSkillInput): Promise<ResourceSkill> {
-  return cmd<ResourceSkill>("rl_skill_create", {
-    name: input.name,
-    description: input.description,
-    groupIds: input.groupIds,
-    body: input.body,
-  });
-}
-
 export function updateResourceSkill(id: string, input: ResourceSkillInput): Promise<ResourceSkill> {
   return cmd<ResourceSkill>("rl_skill_update", {
     id,
@@ -89,6 +80,31 @@ export function reorderResourceSkills(orderedIds: string[]): Promise<void> {
 
 export function openResourceSkillDir(id: string): Promise<void> {
   return cmd<void>("rl_skill_open_dir", { id });
+}
+
+/** 单条被跳过的导入条目;reason 为后端稳定码,由 i18n 映射文案 */
+export interface ResourceSkillImportSkip {
+  name: string;
+  /** conflict = 与现有技能重名;invalid = 缺 frontmatter name */
+  reason: "conflict" | "invalid";
+}
+
+/** 批量导入结果:可导入的照常入库,重名/缺 name 的条目跳过 */
+export interface ResourceSkillImportOutcome {
+  imported: ResourceSkill[];
+  skipped: ResourceSkillImportSkip[];
+}
+
+export function importResourceSkillFolder(path: string): Promise<ResourceSkillImportOutcome> {
+  return cmd<ResourceSkillImportOutcome>("rl_skill_import_folder", { path });
+}
+
+export function importResourceSkillArchive(path: string): Promise<ResourceSkillImportOutcome> {
+  return cmd<ResourceSkillImportOutcome>("rl_skill_import_archive", { path });
+}
+
+export function importResourceSkillUrl(url: string): Promise<ResourceSkillImportOutcome> {
+  return cmd<ResourceSkillImportOutcome>("rl_skill_import_url", { url });
 }
 
 export async function createResourceSkillGroup(

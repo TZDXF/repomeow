@@ -895,3 +895,168 @@ fn library_info_reports_counts_and_git_state() {
     assert_eq!(info.remote_url, None);
     assert_eq!(info.root, t.root.to_string_lossy());
 }
+
+// ── 技能导入(文件夹 / zip / URL)────────────────────────────────────────
+
+use std::io::Cursor;
+use std::io::Write as _;
+
+use super::import;
+use super::store::DIR_SKILLS;
+
+fn write_test_zip(entries: &[(&str, &str)]) -> Vec<u8> {
+    let mut buf = Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(&mut buf);
+    for (name, content) in entries {
+        zip.start_file(*name, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(content.as_bytes()).unwrap();
+    }
+    zip.finish().unwrap();
+    buf.into_inner()
+}
+
+fn skill_body(root: &Path, name: &str) -> String {
+    let data: super::models::SkillLibrary = lib_json(root).unwrap_or_else(|| panic!("skills.json"));
+    let skill = data.skills.iter().find(|s| s.name == name).unwrap();
+    fs::read_to_string(
+        root.join(DIR_SKILLS)
+            .join(&skill.directory)
+            .join("SKILL.md"),
+    )
+    .unwrap()
+}
+
+fn lib_json(root: &Path) -> Option<super::models::SkillLibrary> {
+    let text = fs::read_to_string(root.join(super::store::FILE_SKILLS)).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+#[test]
+fn import_folder_scans_skills_and_skips_conflicts_and_invalid() {
+    let t = temp_lib("imp-folder");
+    ops::skill_create(&t.lib, "已有技能", None, vec![], None).unwrap();
+
+    let src = t
+        .root
+        .parent()
+        .unwrap()
+        .join(format!("imp-src-{}", now_ts_nanos()));
+    let good = src.join("good-skill");
+    fs::create_dir_all(&good).unwrap();
+    fs::write(
+        good.join("SKILL.md"),
+        "---\nname: 导入技能\ndescription: 来自文件夹\n---\n正文",
+    )
+    .unwrap();
+    fs::write(good.join("ref.md"), "# 参考").unwrap();
+    // 无 name 的技能 → 跳过 invalid;深层子目录中的技能 → 也算一个技能
+    let bad = src.join("bad-skill");
+    fs::create_dir_all(&bad).unwrap();
+    fs::write(bad.join("SKILL.md"), "# 没有 frontmatter").unwrap();
+    let nested = src.join("repo").join("nested");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(
+        nested.join("SKILL.md"),
+        "---\nname: 已有技能\n---\n重名正文",
+    )
+    .unwrap();
+
+    let outcome = import::skill_import_folder(&t.lib, &src.to_str().unwrap()).unwrap();
+    let names: Vec<&str> = outcome.imported.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, vec!["导入技能"]);
+    // read_dir 顺序不确定,断言按 (name, reason) 排序后比较
+    let mut skipped = outcome
+        .skipped
+        .iter()
+        .map(|s| (s.name.as_str(), s.reason.as_str()))
+        .collect::<Vec<_>>();
+    skipped.sort_unstable();
+    assert_eq!(
+        skipped,
+        vec![("bad-skill", "invalid"), ("已有技能", "conflict")]
+    );
+    // 正文与附属文件均已复制;frontmatter 保留为事实源
+    assert_eq!(
+        skill_body(&t.root, "导入技能"),
+        "---\nname: 导入技能\ndescription: 来自文件夹\n---\n正文"
+    );
+    let data = lib_json(&t.root).unwrap();
+    let skill = data.skills.iter().find(|s| s.name == "导入技能").unwrap();
+    assert!(t
+        .root
+        .join(DIR_SKILLS)
+        .join(&skill.directory)
+        .join("ref.md")
+        .exists());
+    assert_eq!(skill.description, "来自文件夹");
+
+    let _ = remove_dir_tolerating_readonly(&src);
+}
+
+#[test]
+fn import_archive_extracts_zip_and_blocks_zip_slip() {
+    let t = temp_lib("imp-zip");
+    let zip_path = t
+        .root
+        .parent()
+        .unwrap()
+        .join(format!("imp-{}.zip", now_ts_nanos()));
+    let bytes = write_test_zip(&[
+        ("skill-one/SKILL.md", "---\nname: 压缩技能一\n---\n正文一"),
+        ("skill-one/docs/note.md", "笔记"),
+        (
+            "repo-main/skill-two/SKILL.md",
+            "---\nname: 压缩技能二\n---\n正文二",
+        ),
+        ("../evil.txt", "穿越"),
+    ]);
+    fs::write(&zip_path, &bytes).unwrap();
+
+    let outcome = import::skill_import_archive(&t.lib, zip_path.to_str().unwrap()).unwrap();
+    // 解压目录的 read_dir 顺序不确定,排序后比较
+    let mut names: Vec<&str> = outcome.imported.iter().map(|s| s.name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(names, vec!["压缩技能一", "压缩技能二"]);
+    assert!(outcome.skipped.is_empty());
+    assert_eq!(
+        skill_body(&t.root, "压缩技能一"),
+        "---\nname: 压缩技能一\n---\n正文一"
+    );
+    // zip-slip 条目不得落在库内或临时目录父级
+    assert!(!t.root.join("evil.txt").exists());
+    assert!(!t.root.join(DIR_SKILLS).join("evil.txt").exists());
+    let _ = fs::remove_file(&zip_path);
+}
+
+#[test]
+fn import_rejects_bad_sources_and_empty_archives() {
+    let t = temp_lib("imp-bad");
+    // URL 仅接受 http/https
+    let err = import::skill_import_url(&t.lib, "ftp://example.com/a.zip").unwrap_err();
+    assert_eq!(err.code(), codes::URL_INVALID);
+    // 来源路径不存在
+    let err =
+        import::skill_import_folder(&t.lib, t.root.join("nope").to_str().unwrap()).unwrap_err();
+    assert_eq!(err.code(), codes::IMPORT_SOURCE_INVALID);
+    // 压缩包里没有 SKILL.md
+    let zip_path = t
+        .root
+        .parent()
+        .unwrap()
+        .join(format!("imp-empty-{}.zip", now_ts_nanos()));
+    fs::write(&zip_path, write_test_zip(&[("readme.txt", "没有技能")])).unwrap();
+    let err = import::skill_import_archive(&t.lib, zip_path.to_str().unwrap()).unwrap_err();
+    assert_eq!(err.code(), codes::SKILL_IMPORT_EMPTY);
+    let _ = fs::remove_file(&zip_path);
+    // 非 zip 字节
+    let fake = t
+        .root
+        .parent()
+        .unwrap()
+        .join(format!("imp-fake-{}.zip", now_ts_nanos()));
+    fs::write(&fake, b"not a zip").unwrap();
+    let err = import::skill_import_archive(&t.lib, fake.to_str().unwrap()).unwrap_err();
+    assert_eq!(err.code(), codes::ARCHIVE_INVALID);
+    let _ = fs::remove_file(&fake);
+}

@@ -26,11 +26,11 @@ use tokio_util::sync::CancellationToken;
 
 use super::event_stream::{event_stream, EventStreamWriter};
 use super::types::{
-    AssistantContent, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream,
-    CacheRetention, Context, InputKind, MaxTokensField, Message, Model, ModelThinkingLevel,
-    SimpleStreamOptions, StopReason, TextOrImageContent, ThinkingBudgets, ThinkingFormat,
-    ThinkingLevel, ThinkingTokenBudgetField, Tool, ToolCall, ToolChoice, ToolResultMessage, Usage,
-    UsageCost, UserContent,
+    user_agent, AssistantContent, AssistantMessage, AssistantMessageEvent,
+    AssistantMessageEventStream, CacheRetention, Context, InputKind, MaxTokensField, Message,
+    Model, ModelThinkingLevel, SimpleStreamOptions, StopReason, TextOrImageContent,
+    ThinkingBudgets, ThinkingFormat, ThinkingLevel, ThinkingTokenBudgetField, Tool, ToolCall,
+    ToolChoice, ToolResultMessage, Usage, UsageCost, UserContent,
 };
 use crate::time_util::now_ts_nanos;
 
@@ -2469,7 +2469,11 @@ fn is_retryable_provider_error(status: Option<u16>, x_should_retry: Option<&str>
 
 /// `retry-after-ms` 浮点毫秒;非法值忽略(TS parseFloat NaN 检查)。
 fn parse_retry_after_ms(value: &str) -> Option<f64> {
-    value.trim().parse::<f64>().ok().filter(|value| value.is_finite())
+    value
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite())
 }
 
 /// `retry-after`:秒数,或 HTTP 日期(IMF-fixdate,经 RFC 2822 解析)减当前时间。
@@ -2620,6 +2624,11 @@ async fn send_completions_request(
         reqwest::header::ACCEPT,
         reqwest::header::HeaderValue::from_static("text/event-stream"),
     );
+    headers.insert(
+        reqwest::header::USER_AGENT,
+        reqwest::header::HeaderValue::from_str(&user_agent())
+            .unwrap_or(reqwest::header::HeaderValue::from_static("pi-repomeow")),
+    );
     // model.headers / options.headers 最后合并,可覆盖默认(options 优先)
     push_custom_headers(model.headers.as_ref(), &mut headers);
     push_custom_headers(
@@ -2657,8 +2666,7 @@ async fn send_completions_request(
         let retry_after_ms = header_value("retry-after-ms");
         let retry_after = header_value("retry-after");
         let should_retry = header_value("x-should-retry");
-        let retryable =
-            is_retryable_provider_error(Some(status.as_u16()), should_retry.as_deref());
+        let retryable = is_retryable_provider_error(Some(status.as_u16()), should_retry.as_deref());
         let body_text = response.text().await.unwrap_or_default();
         return Err(RequestFailure {
             message: format_http_error(status.as_u16(), &body_text),
@@ -4036,7 +4044,10 @@ mod tests {
             "429: rate limited"
         );
         // 非 JSON body → 原文截断(512 字符)
-        assert_eq!(format_http_error(502, "<html>bad gateway</html>"), "502: <html>bad gateway</html>");
+        assert_eq!(
+            format_http_error(502, "<html>bad gateway</html>"),
+            "502: <html>bad gateway</html>"
+        );
         let long = "x".repeat(600);
         let message = format_http_error(500, &long);
         assert_eq!(message, format!("500: {}", "x".repeat(512)));
@@ -4110,7 +4121,15 @@ mod tests {
                      max: Option<u64>,
                      now_ms: i64,
                      jitter: f64| {
-            next_retry_delay_ms(retry_after_ms, retry_after, index, max, now_ms, jitter, "boom")
+            next_retry_delay_ms(
+                retry_after_ms,
+                retry_after,
+                index,
+                max,
+                now_ms,
+                jitter,
+                "boom",
+            )
         };
         // retry-after-ms 优先于 retry-after,服务端延迟不做抖动
         assert_eq!(delay(Some("250"), Some("9"), 5, None, 0, 1.0).unwrap(), 250);
@@ -4276,7 +4295,9 @@ mod tests {
                 let mut received = Vec::new();
                 let mut buffer = [0u8; 1024];
                 loop {
-                    let Ok(read) = stream.read(&mut buffer) else { break };
+                    let Ok(read) = stream.read(&mut buffer) else {
+                        break;
+                    };
                     if read == 0 {
                         break;
                     }
@@ -4299,7 +4320,9 @@ mod tests {
                     .position(|window| window == b"\r\n\r\n")
                     .map_or(received.len(), |position| position + 4);
                 while received.len() < body_start + content_length {
-                    let Ok(read) = stream.read(&mut buffer) else { break };
+                    let Ok(read) = stream.read(&mut buffer) else {
+                        break;
+                    };
                     if read == 0 {
                         break;
                     }
@@ -4348,11 +4371,7 @@ mod tests {
             "model": "gpt-test",
             "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
         });
-        format!(
-            "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
-            first,
-            last
-        )
+        format!("data: {}\n\ndata: {}\n\ndata: [DONE]\n\n", first, last)
     }
 
     /// 收集终态事件(跳过 start)。
@@ -4466,8 +4485,16 @@ mod tests {
     #[tokio::test]
     async fn provider_retry_exhaustion_encodes_last_error() {
         let (addr, handler) = spawn_mock_server(vec![
-            http_error_response("408 Request Timeout", "timeout one", &[("retry-after-ms", "30")]),
-            http_error_response("408 Request Timeout", "timeout two", &[("retry-after-ms", "30")]),
+            http_error_response(
+                "408 Request Timeout",
+                "timeout one",
+                &[("retry-after-ms", "30")],
+            ),
+            http_error_response(
+                "408 Request Timeout",
+                "timeout two",
+                &[("retry-after-ms", "30")],
+            ),
         ]);
         let options = SimpleStreamOptions {
             api_key: Some("k".to_string()),
@@ -4490,10 +4517,7 @@ mod tests {
                 reason: StopReason::Error,
                 error,
             }) => {
-                assert_eq!(
-                    error.error_message.as_deref(),
-                    Some("408: timeout two")
-                );
+                assert_eq!(error.error_message.as_deref(), Some("408: timeout two"));
             }
             other => panic!("expected error, got {other:?}"),
         }

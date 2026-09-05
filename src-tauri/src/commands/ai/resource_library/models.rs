@@ -240,6 +240,25 @@ pub struct EncryptionStatus {
     pub unlocked: bool,
 }
 
+/// 单条被跳过的导入来源(SKILL.md 目录):name 取 frontmatter name,
+/// 缺失时取目录名;reason 为稳定字符串码,由前端 i18n 映射文案
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillImportSkip {
+    pub name: String,
+    /// `conflict`(与现有技能重名)| `invalid`(缺 frontmatter name / 读取失败)
+    pub reason: String,
+}
+
+/// 一次批量导入(压缩包 / 文件夹 / URL)的结果;部分成功语义:
+/// 可导入的照常入库,重名或缺 name 的条目跳过并记入 skipped
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillImportOutcome {
+    pub imported: Vec<Skill>,
+    pub skipped: Vec<SkillImportSkip>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillBody {

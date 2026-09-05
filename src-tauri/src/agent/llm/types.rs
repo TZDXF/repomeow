@@ -31,6 +31,11 @@ pub fn is_supported_api(api: &str) -> bool {
     SUPPORTED_APIS.contains(&api)
 }
 
+/// 各 adapter 统一携带的 User-Agent。
+pub fn user_agent() -> String {
+    format!("pi-repomeow/{}", env!("CARGO_PKG_VERSION"))
+}
+
 pub type Api = String;
 pub type ProviderId = String;
 

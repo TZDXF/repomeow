@@ -29,10 +29,10 @@ use tokio_util::sync::CancellationToken;
 
 use super::event_stream::{event_stream, EventStreamWriter};
 use super::types::{
-    AssistantContent, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream,
-    CacheRetention, Context, InputKind, Message, Model, SimpleStreamOptions, StopReason,
-    TextOrImageContent, ThinkingLevel, Tool, ToolCall, ToolChoice, ToolResultMessage, Usage,
-    UsageCost, UserContent,
+    user_agent, AssistantContent, AssistantMessage, AssistantMessageEvent,
+    AssistantMessageEventStream, CacheRetention, Context, InputKind, Message, Model,
+    SimpleStreamOptions, StopReason, TextOrImageContent, ThinkingLevel, Tool, ToolCall, ToolChoice,
+    ToolResultMessage, Usage, UsageCost, UserContent,
 };
 use crate::time_util::now_ts_nanos;
 
@@ -75,7 +75,8 @@ fn resolve_api_key(model: &Model, options: Option<&SimpleStreamOptions>) -> Resu
             })
         })
     };
-    if has_auth_header(model.headers.as_ref()) || has_auth_header(options.and_then(|o| o.headers.as_ref()))
+    if has_auth_header(model.headers.as_ref())
+        || has_auth_header(options.and_then(|o| o.headers.as_ref()))
     {
         return Ok("unused".to_string());
     }
@@ -164,7 +165,9 @@ fn apply_session_affinity_headers(
             insert(headers, "session_id", session_id);
             insert(headers, "x-client-request-id", session_id);
         }
-        SessionAffinityFormat::OpenaiNoSession => insert(headers, "x-client-request-id", session_id),
+        SessionAffinityFormat::OpenaiNoSession => {
+            insert(headers, "x-client-request-id", session_id)
+        }
     }
 }
 
@@ -808,7 +811,9 @@ fn convert_tool_result_output(model: &Model, content: &[TextOrImageContent]) -> 
     let images: Vec<(&str, &str)> = content
         .iter()
         .filter_map(|block| match block {
-            TextOrImageContent::Image { data, mime_type } => Some((data.as_str(), mime_type.as_str())),
+            TextOrImageContent::Image { data, mime_type } => {
+                Some((data.as_str(), mime_type.as_str()))
+            }
             _ => None,
         })
         .collect();
@@ -856,8 +861,7 @@ fn convert_assistant_output(
     for block in &assistant.content {
         match block {
             AssistantContent::Thinking {
-                thinking_signature,
-                ..
+                thinking_signature, ..
             } => {
                 // 签名即完整 ResponseReasoningItem JSON,原样回放(解析失败静默跳过)
                 if let Some(signature) = thinking_signature {
@@ -935,20 +939,22 @@ fn convert_assistant_output(
 }
 
 /// TS convertResponsesMessages:消息历史 → Responses `input` items。
-fn convert_responses_messages(model: &Model, context: &Context, compat: &ResponsesCompat) -> Vec<Value> {
+fn convert_responses_messages(
+    model: &Model,
+    context: &Context,
+    compat: &ResponsesCompat,
+) -> Vec<Value> {
     let mut messages: Vec<Value> = Vec::new();
-    let normalize = |id: &str, source: &AssistantMessage| {
-        normalize_responses_tool_call_id(id, model, source)
-    };
+    let normalize =
+        |id: &str, source: &AssistantMessage| normalize_responses_tool_call_id(id, model, source);
     let transformed = transform_messages(&context.messages, model, Some(&normalize));
 
     if let Some(system_prompt) = &context.system_prompt {
-        let role =
-            if model.reasoning && compat.supports_developer_role {
-                "developer"
-            } else {
-                "system"
-            };
+        let role = if model.reasoning && compat.supports_developer_role {
+            "developer"
+        } else {
+            "system"
+        };
         messages.push(json!({ "role": role, "content": system_prompt }));
     }
 
@@ -1112,7 +1118,10 @@ pub fn build_request_body(
             .map(|level| map_level_or_key(model, thinking_level_key(level)));
         match effort {
             Some(effort) => {
-                body.insert("reasoning".to_string(), json!({ "effort": effort, "summary": "auto" }));
+                body.insert(
+                    "reasoning".to_string(),
+                    json!({ "effort": effort, "summary": "auto" }),
+                );
                 body.insert(
                     "include".to_string(),
                     json!(["reasoning.encrypted_content"]),
@@ -1538,7 +1547,10 @@ impl ResponsesAggregator {
                 Some(slot)
             }
             "function_call" => {
-                let call_id = item.get("call_id").and_then(Value::as_str).unwrap_or_default();
+                let call_id = item
+                    .get("call_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 let item_id = item.get("id").and_then(Value::as_str).unwrap_or_default();
                 let block = ToolCall {
                     id: format!("{call_id}|{item_id}"),
@@ -1561,8 +1573,13 @@ impl ResponsesAggregator {
                     content_index,
                 };
                 self.slots.insert(output_index, slot);
-                self.tool_partial_json
-                    .insert(content_index, item.get("arguments").and_then(Value::as_str).unwrap_or_default().to_string());
+                self.tool_partial_json.insert(
+                    content_index,
+                    item.get("arguments")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                );
                 events.push(AssistantMessageEvent::ToolcallStart {
                     content_index: content_index as u32,
                     partial: self.output.clone(),
@@ -1571,9 +1588,15 @@ impl ResponsesAggregator {
             }
             "custom_tool_call" => {
                 // grammar map 缺省 → input 属性名固定 "input"
-                let call_id = item.get("call_id").and_then(Value::as_str).unwrap_or_default();
+                let call_id = item
+                    .get("call_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 let item_id = item.get("id").and_then(Value::as_str).unwrap_or_default();
-                let input = item.get("input").and_then(Value::as_str).unwrap_or_default();
+                let input = item
+                    .get("input")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 let mut arguments = Map::new();
                 arguments.insert("input".to_string(), json!(input));
                 let block = ToolCall {
@@ -1655,7 +1678,10 @@ impl ResponsesAggregator {
         let Some(event_type) = event.get("type").and_then(Value::as_str) else {
             return Ok(events);
         };
-        let output_index = event.get("output_index").and_then(Value::as_i64).unwrap_or(0);
+        let output_index = event
+            .get("output_index")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
 
         match event_type {
             "response.created" => {
@@ -1838,7 +1864,9 @@ impl ResponsesAggregator {
                 {
                     self.output.raw_stop_reason = Some(status.to_string());
                 }
-                let error = response.and_then(|response| response.get("error")).filter(|error| !error.is_null());
+                let error = response
+                    .and_then(|response| response.get("error"))
+                    .filter(|error| !error.is_null());
                 let details = response
                     .and_then(|response| response.get("incomplete_details"))
                     .filter(|details| !details.is_null());
@@ -1866,7 +1894,10 @@ impl ResponsesAggregator {
                 return Err(message);
             }
             "error" => {
-                let code = event.get("code").and_then(Value::as_str).unwrap_or("undefined");
+                let code = event
+                    .get("code")
+                    .and_then(Value::as_str)
+                    .unwrap_or("undefined");
                 let message = event
                     .get("message")
                     .and_then(Value::as_str)
@@ -1948,7 +1979,9 @@ impl ResponsesAggregator {
                                 if part.get("type").and_then(Value::as_str) == Some("output_text") {
                                     part.get("text").and_then(Value::as_str).unwrap_or_default()
                                 } else {
-                                    part.get("refusal").and_then(Value::as_str).unwrap_or_default()
+                                    part.get("refusal")
+                                        .and_then(Value::as_str)
+                                        .unwrap_or_default()
                                 }
                             })
                             .collect::<String>()
@@ -1971,13 +2004,18 @@ impl ResponsesAggregator {
                 });
                 self.slots.remove(&output_index);
             }
-            ("function_call", SlotKind::ToolCall) if self.tool_partial_json.contains_key(&slot.content_index) => {
+            ("function_call", SlotKind::ToolCall)
+                if self.tool_partial_json.contains_key(&slot.content_index) =>
+            {
                 let partial = self
                     .tool_partial_json
                     .get(&slot.content_index)
                     .cloned()
                     .unwrap_or_default();
-                let item_arguments = item.get("arguments").and_then(Value::as_str).unwrap_or_default();
+                let item_arguments = item
+                    .get("arguments")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 // TS:item.arguments 为空串时回退已累计 partialJson
                 let source = if item_arguments.is_empty() {
                     if partial.is_empty() {
@@ -2003,7 +2041,9 @@ impl ResponsesAggregator {
                 });
                 self.slots.remove(&output_index);
             }
-            ("custom_tool_call", SlotKind::ToolCall) if self.tool_custom_input.contains_key(&slot.content_index) => {
+            ("custom_tool_call", SlotKind::ToolCall)
+                if self.tool_custom_input.contains_key(&slot.content_index) =>
+            {
                 let buffered = self
                     .tool_custom_input
                     .get(&slot.content_index)
@@ -2041,8 +2081,7 @@ impl ResponsesAggregator {
             if item.get("type").and_then(Value::as_str) != Some("reasoning") {
                 continue;
             }
-            let Some(encrypted_content) =
-                item.get("encrypted_content").and_then(Value::as_str)
+            let Some(encrypted_content) = item.get("encrypted_content").and_then(Value::as_str)
             else {
                 continue;
             };
@@ -2052,19 +2091,20 @@ impl ResponsesAggregator {
             let Some(&content_index) = self.reasoning_blocks_by_id.get(item_id) else {
                 continue;
             };
-            let signature = match self
-                .output
-                .content
-                .get(content_index)
-                .and_then(|block| match block {
-                    AssistantContent::Thinking {
-                        thinking_signature, ..
-                    } => thinking_signature.clone(),
-                    _ => None,
-                }) {
-                Some(signature) => signature,
-                None => continue,
-            };
+            let signature =
+                match self
+                    .output
+                    .content
+                    .get(content_index)
+                    .and_then(|block| match block {
+                        AssistantContent::Thinking {
+                            thinking_signature, ..
+                        } => thinking_signature.clone(),
+                        _ => None,
+                    }) {
+                    Some(signature) => signature,
+                    None => continue,
+                };
             let Ok(mut stored) = serde_json::from_str::<Value>(&signature) else {
                 continue;
             };
@@ -2076,10 +2116,7 @@ impl ResponsesAggregator {
                 continue;
             }
             if let Some(stored_object) = stored.as_object_mut() {
-                stored_object.insert(
-                    "encrypted_content".to_string(),
-                    json!(encrypted_content),
-                );
+                stored_object.insert("encrypted_content".to_string(), json!(encrypted_content));
             }
             if let Some(AssistantContent::Thinking {
                 thinking_signature, ..
@@ -2106,9 +2143,8 @@ impl ResponsesAggregator {
         }
 
         if let Some(usage) = response.get("usage").filter(|usage| usage.is_object()) {
-            let number_of = |key: &str| {
-                usage.get(key).and_then(Value::as_f64).unwrap_or(0.0) as i64
-            };
+            let number_of =
+                |key: &str| usage.get(key).and_then(Value::as_f64).unwrap_or(0.0) as i64;
             let input_details = usage.get("input_tokens_details");
             // OpenAI 把缓存命中/写入计入 input_tokens,记账时扣除
             let cached_tokens = input_details
@@ -2144,10 +2180,7 @@ impl ResponsesAggregator {
             .pointer("/incomplete_details/reason")
             .and_then(Value::as_str);
         self.output.raw_stop_reason = match incomplete_reason {
-            Some(reason) => Some(format!(
-                "{}.{reason}",
-                status.unwrap_or("undefined")
-            )),
+            Some(reason) => Some(format!("{}.{reason}", status.unwrap_or("undefined"))),
             None => status.map(str::to_string),
         };
         let (stop_reason, error_message) = map_stop_reason(status, incomplete_reason)?;
@@ -2173,7 +2206,10 @@ impl ResponsesAggregator {
         aborted: bool,
         stream_error: Option<String>,
     ) -> (AssistantMessageEvent, AssistantMessage) {
-        let ResponsesAggregator { output: mut message, .. } = self;
+        let ResponsesAggregator {
+            output: mut message,
+            ..
+        } = self;
         if let Some(error) = stream_error {
             let reason = if aborted {
                 StopReason::Aborted
@@ -2430,7 +2466,11 @@ fn is_retryable_provider_error(status: Option<u16>, x_should_retry: Option<&str>
 
 /// `retry-after-ms` 浮点毫秒;非法值忽略(TS parseFloat NaN 检查)。
 fn parse_retry_after_ms(value: &str) -> Option<f64> {
-    value.trim().parse::<f64>().ok().filter(|value| value.is_finite())
+    value
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite())
 }
 
 /// `retry-after`:秒数,或 HTTP 日期(IMF-fixdate,经 RFC 2822 解析)减当前时间。
@@ -2583,6 +2623,11 @@ async fn send_responses_request(
         reqwest::header::ACCEPT,
         reqwest::header::HeaderValue::from_static("text/event-stream"),
     );
+    headers.insert(
+        reqwest::header::USER_AGENT,
+        reqwest::header::HeaderValue::from_str(&user_agent())
+            .unwrap_or(reqwest::header::HeaderValue::from_static("pi-repomeow")),
+    );
     // 会话亲和头:缓存关闭时不携带(与 prompt_cache_key 同一开关)
     let cache_retention = options
         .and_then(|options| options.cache_retention)
@@ -2632,8 +2677,7 @@ async fn send_responses_request(
         let retry_after_ms = header_value("retry-after-ms");
         let retry_after = header_value("retry-after");
         let should_retry = header_value("x-should-retry");
-        let retryable =
-            is_retryable_provider_error(Some(status.as_u16()), should_retry.as_deref());
+        let retryable = is_retryable_provider_error(Some(status.as_u16()), should_retry.as_deref());
         let body_text = response.text().await.unwrap_or_default();
         return Err(RequestFailure {
             message: format_http_error(status.as_u16(), &body_text),
@@ -3073,7 +3117,10 @@ mod tests {
         };
         let messages = vec![
             user_message("q"),
-            assistant_message(vec![thinking, AssistantContent::text("answer")], StopReason::Stop),
+            assistant_message(
+                vec![thinking, AssistantContent::text("answer")],
+                StopReason::Stop,
+            ),
         ];
         let body = build_request_body(&model, &context_of(messages), None);
         assert_eq!(body["input"][1], reasoning_item);
@@ -3087,7 +3134,11 @@ mod tests {
         let messages = vec![
             user_message("q"),
             assistant_message(
-                vec![tool_call("call_1|fc_item1", "get_weather", json!({"city": "Oslo"}))],
+                vec![tool_call(
+                    "call_1|fc_item1",
+                    "get_weather",
+                    json!({"city": "Oslo"}),
+                )],
                 StopReason::ToolUse,
             ),
             tool_result_message("call_1|fc_item1", "get_weather", "18C"),
@@ -3249,10 +3300,8 @@ mod tests {
         let mut model = test_model("https://api.openai.com/v1");
         model.provider = "openai".to_string();
         let piped = "call|item_with_specials!@#";
-        let mut foreign = assistant_message(
-            vec![tool_call(piped, "f", json!({}))],
-            StopReason::ToolUse,
-        );
+        let mut foreign =
+            assistant_message(vec![tool_call(piped, "f", json!({}))], StopReason::ToolUse);
         if let Message::Assistant(assistant) = &mut foreign {
             assistant.api = "anthropic-messages".to_string();
         }
@@ -3329,11 +3378,18 @@ mod tests {
         let mut decoder = SseDecoder::new();
         assert!(decoder.push(b"data: {\"type\":\"resp").is_empty());
         let events = decoder.push(b"onse.created\"}\r\n\r\ndata: {\"type\":\"response.done\"}\n\n");
-        assert_eq!(events, vec!["{\"type\":\"response.created\"}", "{\"type\":\"response.done\"}"]);
+        assert_eq!(
+            events,
+            vec![
+                "{\"type\":\"response.created\"}",
+                "{\"type\":\"response.done\"}"
+            ]
+        );
 
         // 多行 data 以 \n 合并;event:/注释行忽略
         let mut decoder = SseDecoder::new();
-        let events = decoder.push(b": keep-alive\nevent: response.created\ndata: first\ndata: second\n\n");
+        let events =
+            decoder.push(b": keep-alive\nevent: response.created\ndata: first\ndata: second\n\n");
         assert_eq!(events, vec!["first\nsecond"]);
     }
 
@@ -3343,7 +3399,10 @@ mod tests {
     fn text_stream_produces_ordered_events_and_finalizes() {
         let mut aggregator = aggregator_for("https://api.openai.com/v1");
         let mut events = aggregator
-            .apply_event(&ev("response.created", json!({"response": {"id": "resp_1"}})))
+            .apply_event(&ev(
+                "response.created",
+                json!({"response": {"id": "resp_1"}}),
+            ))
             .unwrap();
         events.extend(
             aggregator
@@ -3452,7 +3511,10 @@ mod tests {
         );
         events.extend(
             aggregator
-                .apply_event(&ev("response.reasoning_summary_part.done", json!({"output_index": 0})))
+                .apply_event(&ev(
+                    "response.reasoning_summary_part.done",
+                    json!({"output_index": 0}),
+                ))
                 .unwrap(),
         );
         events.extend(
@@ -3496,7 +3558,13 @@ mod tests {
             .collect();
         assert_eq!(
             kinds,
-            vec!["thinking_start", "thinking_delta", "thinking_delta", "thinking_delta", "thinking_end"]
+            vec![
+                "thinking_start",
+                "thinking_delta",
+                "thinking_delta",
+                "thinking_delta",
+                "thinking_end"
+            ]
         );
 
         let message = aggregator.finish(false, None).1;
@@ -3557,7 +3625,9 @@ mod tests {
                 ))
                 .unwrap(),
         );
-        aggregator.finalize_response(&json!({"status": "completed"})).unwrap();
+        aggregator
+            .finalize_response(&json!({"status": "completed"}))
+            .unwrap();
 
         // start + delta×2 + done 补发差量 + end
         let kinds: Vec<&str> = events
@@ -3584,8 +3654,9 @@ mod tests {
         );
 
         let (terminal, message) = aggregator.finish(false, None);
-        let Some(AssistantMessageEvent::ToolcallEnd { tool_call, .. }) =
-            events.iter().find(|event| matches!(event, AssistantMessageEvent::ToolcallEnd { .. }))
+        let Some(AssistantMessageEvent::ToolcallEnd { tool_call, .. }) = events
+            .iter()
+            .find(|event| matches!(event, AssistantMessageEvent::ToolcallEnd { .. }))
         else {
             panic!("expected toolcall_end");
         };
@@ -3620,12 +3691,13 @@ mod tests {
             ))
             .unwrap();
         // 初始签名无 encrypted_content
-        let AssistantContent::Thinking { thinking_signature, .. } = &aggregator.output.content[0]
+        let AssistantContent::Thinking {
+            thinking_signature, ..
+        } = &aggregator.output.content[0]
         else {
             panic!()
         };
-        let stored: Value =
-            serde_json::from_str(thinking_signature.as_deref().unwrap()).unwrap();
+        let stored: Value = serde_json::from_str(thinking_signature.as_deref().unwrap()).unwrap();
         assert!(stored.get("encrypted_content").is_none());
 
         // 终态 response.output 提供 encrypted_content → 回填
@@ -3638,12 +3710,13 @@ mod tests {
                 ]
             }))
             .unwrap();
-        let AssistantContent::Thinking { thinking_signature, .. } = &aggregator.output.content[0]
+        let AssistantContent::Thinking {
+            thinking_signature, ..
+        } = &aggregator.output.content[0]
         else {
             panic!()
         };
-        let stored: Value =
-            serde_json::from_str(thinking_signature.as_deref().unwrap()).unwrap();
+        let stored: Value = serde_json::from_str(thinking_signature.as_deref().unwrap()).unwrap();
         assert_eq!(stored["encrypted_content"], "gAAAAA");
     }
 
@@ -3715,7 +3788,10 @@ mod tests {
     fn error_event_and_failed_response_become_stream_errors() {
         let mut aggregator = aggregator_for("https://api.openai.com/v1");
         let error = aggregator
-            .apply_event(&ev("error", json!({"code": "server_error", "message": "boom"})))
+            .apply_event(&ev(
+                "error",
+                json!({"code": "server_error", "message": "boom"}),
+            ))
             .unwrap_err();
         assert_eq!(error, "Error Code server_error: boom");
 
@@ -3732,7 +3808,10 @@ mod tests {
         // 无错误详情的 failed → 兜底文案
         let mut aggregator = aggregator_for("https://api.openai.com/v1");
         let error = aggregator
-            .apply_event(&ev("response.failed", json!({"response": {"status": "failed"}})))
+            .apply_event(&ev(
+                "response.failed",
+                json!({"response": {"status": "failed"}}),
+            ))
             .unwrap_err();
         assert_eq!(error, "Unknown error (no error details in response)");
     }
@@ -3752,7 +3831,10 @@ mod tests {
         match terminal {
             AssistantMessageEvent::Error { reason, error } => {
                 assert_eq!(reason, StopReason::Error);
-                assert_eq!(error.error_message.as_deref(), Some("An unknown error occurred"));
+                assert_eq!(
+                    error.error_message.as_deref(),
+                    Some("An unknown error occurred")
+                );
             }
             other => unreachable!("{other:?}"),
         }
@@ -3773,8 +3855,10 @@ mod tests {
                 json!({"output_index": 0, "delta": "partial"}),
             ))
             .unwrap();
-        let (terminal, message) =
-            aggregator.finish(false, Some("OpenAI Responses stream ended before a terminal response event".to_string()));
+        let (terminal, message) = aggregator.finish(
+            false,
+            Some("OpenAI Responses stream ended before a terminal response event".to_string()),
+        );
         assert!(message.error_message.is_some());
         match terminal {
             AssistantMessageEvent::Error { reason, .. } => assert_eq!(reason, StopReason::Error),
@@ -3830,7 +3914,9 @@ mod tests {
             tiers: None,
         };
         let mut aggregator = ResponsesAggregator::new(&model);
-        aggregator.finalize_response(&json!({"status": "completed"})).unwrap();
+        aggregator
+            .finalize_response(&json!({"status": "completed"}))
+            .unwrap();
         let (_, message) = aggregator.finish(false, None);
         assert_eq!(message.usage.input, 0);
         assert_eq!(message.usage.cost.total, 0.0);
@@ -3904,7 +3990,12 @@ mod tests {
         let token = CancellationToken::new();
         token.cancel();
         let model = test_model("https://127.0.0.1:9/v1");
-        let mut stream = stream_openai_responses(model, context_of(vec![user_message("hi")]), None, Some(token));
+        let mut stream = stream_openai_responses(
+            model,
+            context_of(vec![user_message("hi")]),
+            None,
+            Some(token),
+        );
 
         let mut saw_start = false;
         let mut terminal_seen: Option<AssistantMessageEvent> = None;
@@ -3970,7 +4061,15 @@ mod tests {
                      max: Option<u64>,
                      now_ms: i64,
                      jitter: f64| {
-            next_retry_delay_ms(retry_after_ms, retry_after, index, max, now_ms, jitter, "boom")
+            next_retry_delay_ms(
+                retry_after_ms,
+                retry_after,
+                index,
+                max,
+                now_ms,
+                jitter,
+                "boom",
+            )
         };
         // retry-after-ms 优先于 retry-after,服务端延迟不做抖动
         assert_eq!(delay(Some("250"), Some("9"), 5, None, 0, 1.0).unwrap(), 250);
@@ -4045,7 +4144,9 @@ mod tests {
                 let mut received = Vec::new();
                 let mut buffer = [0u8; 1024];
                 loop {
-                    let Ok(read) = stream.read(&mut buffer) else { break };
+                    let Ok(read) = stream.read(&mut buffer) else {
+                        break;
+                    };
                     if read == 0 {
                         break;
                     }
@@ -4068,7 +4169,9 @@ mod tests {
                     .position(|window| window == b"\r\n\r\n")
                     .map_or(received.len(), |position| position + 4);
                 while received.len() < body_start + content_length {
-                    let Ok(read) = stream.read(&mut buffer) else { break };
+                    let Ok(read) = stream.read(&mut buffer) else {
+                        break;
+                    };
                     if read == 0 {
                         break;
                     }
@@ -4121,8 +4224,8 @@ mod tests {
 
     #[tokio::test]
     async fn provider_retry_reposts_until_success() {
-        use std::sync::Arc;
         use std::sync::atomic::{AtomicU16, AtomicU32, Ordering};
+        use std::sync::Arc;
 
         let sse = "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\"}}\n\n";
         let (addr, handler) = spawn_mock_server(vec![
@@ -4149,8 +4252,12 @@ mod tests {
             ..Default::default()
         };
         let model = test_model(&format!("http://{addr}"));
-        let stream =
-            stream_openai_responses(model, context_of(vec![user_message("hi")]), Some(options), None);
+        let stream = stream_openai_responses(
+            model,
+            context_of(vec![user_message("hi")]),
+            Some(options),
+            None,
+        );
         let terminal = collect_terminal(stream).await;
 
         // 三个不同连接上的请求 = 每次重试重新发请求
@@ -4172,8 +4279,16 @@ mod tests {
     #[tokio::test]
     async fn provider_retry_exhaustion_encodes_last_error() {
         let (addr, handler) = spawn_mock_server(vec![
-            http_error_response("408 Request Timeout", "timeout one", &[("retry-after-ms", "30")]),
-            http_error_response("408 Request Timeout", "timeout two", &[("retry-after-ms", "30")]),
+            http_error_response(
+                "408 Request Timeout",
+                "timeout one",
+                &[("retry-after-ms", "30")],
+            ),
+            http_error_response(
+                "408 Request Timeout",
+                "timeout two",
+                &[("retry-after-ms", "30")],
+            ),
         ]);
         let options = SimpleStreamOptions {
             api_key: Some("k".to_string()),
@@ -4181,8 +4296,12 @@ mod tests {
             ..Default::default()
         };
         let model = test_model(&format!("http://{addr}"));
-        let stream =
-            stream_openai_responses(model, context_of(vec![user_message("hi")]), Some(options), None);
+        let stream = stream_openai_responses(
+            model,
+            context_of(vec![user_message("hi")]),
+            Some(options),
+            None,
+        );
         let terminal = collect_terminal(stream).await;
 
         // 首次 + 1 次重试 = 2 个请求,之后耗尽

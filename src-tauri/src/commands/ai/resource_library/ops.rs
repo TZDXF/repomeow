@@ -25,7 +25,7 @@ use super::models::{
 };
 use super::store::{is_safe_directory, Library, DIR_SKILLS, FILE_SKILLS};
 
-fn new_id(prefix: &str) -> String {
+pub(super) fn new_id(prefix: &str) -> String {
     let mut buf = [0u8; 8];
     getrandom::fill(&mut buf).expect("系统随机源不可用");
     let hex: String = buf.iter().map(|b| format!("{b:02x}")).collect();

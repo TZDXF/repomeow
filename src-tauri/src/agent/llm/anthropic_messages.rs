@@ -32,10 +32,10 @@ use tokio_util::sync::CancellationToken;
 
 use super::event_stream::{event_stream, EventStreamWriter};
 use super::types::{
-    AssistantContent, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream,
-    CacheRetention, Context, InputKind, Message, Model, ProviderResponse, SimpleStreamOptions,
-    StopReason, TextOrImageContent, ThinkingBudgets, ThinkingLevel, Tool, ToolCall, ToolChoice,
-    ToolResultMessage, Usage, UserContent,
+    user_agent, AssistantContent, AssistantMessage, AssistantMessageEvent,
+    AssistantMessageEventStream, CacheRetention, Context, InputKind, Message, Model,
+    ProviderResponse, SimpleStreamOptions, StopReason, TextOrImageContent, ThinkingBudgets,
+    ThinkingLevel, Tool, ToolCall, ToolChoice, ToolResultMessage, Usage, UserContent,
 };
 use crate::time_util::now_ts_nanos;
 
@@ -65,13 +65,15 @@ const CLAUDE_CODE_TOOLS: &[&str] = &[
     "WebSearch",
 ];
 
-const CLAUDE_CODE_IDENTITY_PROMPT: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
+const CLAUDE_CODE_IDENTITY_PROMPT: &str =
+    "You are Claude Code, Anthropic's official CLI for Claude.";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const FINE_GRAINED_TOOL_STREAMING_BETA: &str = "fine-grained-tool-streaming-2025-05-14";
 const INTERLEAVED_THINKING_BETA: &str = "interleaved-thinking-2025-05-14";
 
 const NON_VISION_USER_IMAGE_PLACEHOLDER: &str = "(image omitted: model does not support images)";
-const NON_VISION_TOOL_IMAGE_PLACEHOLDER: &str = "(tool image omitted: model does not support images)";
+const NON_VISION_TOOL_IMAGE_PLACEHOLDER: &str =
+    "(tool image omitted: model does not support images)";
 /// 纯图片内容块补占位文本(Anthropic 拒绝空 text 的纯图片消息)。
 const IMAGE_ONLY_TEXT: &str = "(see attached image)";
 const SYNTHETIC_TOOL_RESULT_TEXT: &str = "No result provided";
@@ -104,7 +106,10 @@ fn to_claude_code_name(name: &str) -> String {
 
 fn from_claude_code_name(name: &str, tools: &[Tool]) -> String {
     if !tools.is_empty() {
-        if let Some(tool) = tools.iter().find(|tool| tool.name.eq_ignore_ascii_case(name)) {
+        if let Some(tool) = tools
+            .iter()
+            .find(|tool| tool.name.eq_ignore_ascii_case(name))
+        {
             return tool.name.clone();
         }
     }
@@ -437,8 +442,14 @@ fn resolve_stream_options(
     options: Option<&SimpleStreamOptions>,
 ) -> ResolvedStreamOptions {
     let temperature = options.and_then(|options| options.temperature);
-    let base_max_tokens =
-        clamp_max_tokens_to_context(model, context, options.and_then(|o| o.max_tokens).map(i64::from).unwrap_or(model.max_tokens));
+    let base_max_tokens = clamp_max_tokens_to_context(
+        model,
+        context,
+        options
+            .and_then(|o| o.max_tokens)
+            .map(i64::from)
+            .unwrap_or(model.max_tokens),
+    );
     let Some(level) = options.and_then(|options| options.reasoning) else {
         return ResolvedStreamOptions {
             max_tokens: base_max_tokens,
@@ -527,8 +538,10 @@ fn transform_messages(
                 let mut user = user.clone();
                 if !supports_images {
                     if let UserContent::Blocks(blocks) = &mut user.content {
-                        *blocks =
-                            replace_images_with_placeholder(blocks, NON_VISION_USER_IMAGE_PLACEHOLDER);
+                        *blocks = replace_images_with_placeholder(
+                            blocks,
+                            NON_VISION_USER_IMAGE_PLACEHOLDER,
+                        );
                     }
                 }
                 first_pass.push(Message::User(user));
@@ -874,7 +887,8 @@ fn convert_messages(
                             if *redacted {
                                 // redacted thinking:密文载荷原样回放
                                 let mut redacted_block = Map::new();
-                                redacted_block.insert("type".to_string(), json!("redacted_thinking"));
+                                redacted_block
+                                    .insert("type".to_string(), json!("redacted_thinking"));
                                 if let Some(data) = thinking_signature {
                                     redacted_block.insert("data".to_string(), json!(data));
                                 }
@@ -959,7 +973,10 @@ fn convert_messages(
             match last.get_mut("content") {
                 Some(Value::Array(blocks)) => {
                     if let Some(last_block) = blocks.last_mut() {
-                        let kind = last_block.get("type").and_then(Value::as_str).unwrap_or_default();
+                        let kind = last_block
+                            .get("type")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default();
                         if matches!(kind, "text" | "image" | "tool_result") {
                             if let Some(object) = last_block.as_object_mut() {
                                 object.insert("cache_control".to_string(), cache_control.clone());
@@ -1004,7 +1021,10 @@ fn split_deferred_tools(
         }
     }
     if !enabled {
-        return (ordered.into_iter().map(|(_, tool)| tool).collect(), Vec::new());
+        return (
+            ordered.into_iter().map(|(_, tool)| tool).collect(),
+            Vec::new(),
+        );
     }
 
     let mut used_names: HashSet<String> = HashSet::new();
@@ -1105,7 +1125,10 @@ fn get_beta_features(
 ) -> Vec<String> {
     // model.headers 后 options.headers,后者覆盖同名配置
     let mut configured: Option<String> = None;
-    for headers in [model.headers.as_ref(), options.and_then(|o| o.headers.as_ref())] {
+    for headers in [
+        model.headers.as_ref(),
+        options.and_then(|o| o.headers.as_ref()),
+    ] {
         let Some(headers) = headers else { continue };
         for (name, value) in headers {
             if name.eq_ignore_ascii_case("anthropic-beta") {
@@ -1207,9 +1230,11 @@ fn build_request_headers(
     };
     insert("content-type", "application/json");
     insert("accept", "application/json");
+    insert("user-agent", &user_agent());
     insert("anthropic-version", ANTHROPIC_VERSION);
     insert("anthropic-dangerous-direct-browser-access", "true");
     if is_oauth {
+        // OAuth token 仅接受 Claude Code 客户端身份,保留伪装 UA 不换 pi-repomeow
         insert("user-agent", &format!("claude-cli/{CLAUDE_CODE_VERSION}"));
         insert("x-app", "cli");
     }
@@ -1227,7 +1252,10 @@ fn build_request_headers(
         }
     }
     push_custom_headers(model.headers.as_ref(), &mut headers);
-    push_custom_headers(options.and_then(|options| options.headers.as_ref()), &mut headers);
+    push_custom_headers(
+        options.and_then(|options| options.headers.as_ref()),
+        &mut headers,
+    );
     headers
 }
 
@@ -1236,9 +1264,7 @@ fn request_url(model: &Model) -> String {
     format!("{}/v1/messages", model.base_url.trim_end_matches('/'))
 }
 
-fn build_http_client(
-    options: Option<&SimpleStreamOptions>,
-) -> Result<reqwest::Client, String> {
+fn build_http_client(options: Option<&SimpleStreamOptions>) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(15));
     if let Some(timeout_ms) = options.and_then(|options| options.timeout_ms) {
         builder = builder.timeout(Duration::from_millis(timeout_ms));
@@ -1330,7 +1356,9 @@ fn is_retryable_provider_error(error: &ProviderRequestError) -> bool {
 fn parse_float_prefix(text: &str) -> Option<f64> {
     let trimmed = text.trim_start();
     let end = trimmed
-        .find(|c: char| !c.is_ascii_digit() && c != '.' && c != 'e' && c != 'E' && c != '+' && c != '-')
+        .find(|c: char| {
+            !c.is_ascii_digit() && c != '.' && c != 'e' && c != 'E' && c != '+' && c != '-'
+        })
         .unwrap_or(trimmed.len());
     trimmed[..end].parse::<f64>().ok()
 }
@@ -1339,7 +1367,9 @@ fn parse_float_prefix(text: &str) -> Option<f64> {
 fn http_date_delay_ms(value: &str) -> f64 {
     let parsed = chrono::DateTime::parse_from_rfc2822(value.trim()).ok();
     match parsed {
-        Some(date) => (date.with_timezone(&chrono::Utc) - chrono::Utc::now()).num_milliseconds() as f64,
+        Some(date) => {
+            (date.with_timezone(&chrono::Utc) - chrono::Utc::now()).num_milliseconds() as f64
+        }
         None => 0.0,
     }
 }
@@ -1936,7 +1966,9 @@ impl AnthropicAggregator {
         match block.get("type").and_then(Value::as_str) {
             Some("fallback") => {
                 if !self.output.content.is_empty() {
-                    return Err("Anthropic performed an unsupported mid-output model fallback".to_string());
+                    return Err(
+                        "Anthropic performed an unsupported mid-output model fallback".to_string(),
+                    );
                 }
             }
             Some("text") => {
@@ -1945,9 +1977,10 @@ impl AnthropicAggregator {
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_string();
-                self.output
-                    .content
-                    .push(AssistantContent::Text { text, text_signature: None });
+                self.output.content.push(AssistantContent::Text {
+                    text,
+                    text_signature: None,
+                });
                 let position = self.output.content.len() - 1;
                 self.blocks.insert(index, position);
                 events.push(AssistantMessageEvent::TextStart {
@@ -2050,8 +2083,14 @@ impl AnthropicAggregator {
                 let Some(&position) = self.blocks.get(&index) else {
                     return Ok(());
                 };
-                if matches!(self.output.content.get(position), Some(AssistantContent::Text { .. })) {
-                    let text = delta.get("text").and_then(Value::as_str).unwrap_or_default();
+                if matches!(
+                    self.output.content.get(position),
+                    Some(AssistantContent::Text { .. })
+                ) {
+                    let text = delta
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
                     if let Some(AssistantContent::Text { text: target, .. }) =
                         self.output.content.get_mut(position)
                     {
@@ -2076,8 +2115,9 @@ impl AnthropicAggregator {
                         .get("thinking")
                         .and_then(Value::as_str)
                         .unwrap_or_default();
-                    if let Some(AssistantContent::Thinking { thinking: target, .. }) =
-                        self.output.content.get_mut(position)
+                    if let Some(AssistantContent::Thinking {
+                        thinking: target, ..
+                    }) = self.output.content.get_mut(position)
                     {
                         target.push_str(thinking);
                     }
@@ -2219,7 +2259,11 @@ impl AnthropicAggregator {
     }
 
     /// 错误收尾:编码 stopReason + errorMessage(对齐 TS catch 分支)。
-    fn error_final(mut self, reason: StopReason, message: String) -> (AssistantMessageEvent, AssistantMessage) {
+    fn error_final(
+        mut self,
+        reason: StopReason,
+        message: String,
+    ) -> (AssistantMessageEvent, AssistantMessage) {
         self.output.stop_reason = reason;
         self.output.error_message = Some(message);
         let event = AssistantMessageEvent::Error {
@@ -2237,7 +2281,8 @@ impl AnthropicAggregator {
         if self.output.stop_reason == StopReason::Pending {
             return Some("Anthropic stream ended without a stop reason".to_string());
         }
-        if self.output.stop_reason == StopReason::Aborted || self.output.stop_reason == StopReason::Error
+        if self.output.stop_reason == StopReason::Aborted
+            || self.output.stop_reason == StopReason::Error
         {
             return Some(
                 self.output
@@ -2294,8 +2339,13 @@ pub fn build_request_body(
         .is_some_and(is_oauth_token);
 
     let transformed = transform_messages(&context.messages, model, normalize_tool_call_id);
-    let normalize_tool_name =
-        |name: &str| -> String { if is_oauth { to_claude_code_name(name) } else { name.to_string() } };
+    let normalize_tool_name = |name: &str| -> String {
+        if is_oauth {
+            to_claude_code_name(name)
+        } else {
+            name.to_string()
+        }
+    };
     let (mut immediate, mut deferred) = split_deferred_tools(
         &context.tools,
         &transformed,
@@ -2326,7 +2376,10 @@ pub fn build_request_body(
 
     // OAuth token 必须携带 Claude Code 身份 system 块
     if is_oauth {
-        let mut system = vec![system_text_block(CLAUDE_CODE_IDENTITY_PROMPT, cache_control.as_ref())];
+        let mut system = vec![system_text_block(
+            CLAUDE_CODE_IDENTITY_PROMPT,
+            cache_control.as_ref(),
+        )];
         if let Some(prompt) = &context.system_prompt {
             system.push(system_text_block(prompt, cache_control.as_ref()));
         }
@@ -2465,7 +2518,10 @@ async fn run_stream(
 
     // 请求体构造 + onPayload 观测/改写
     let mut body = build_request_body(&model, &context, options.as_ref());
-    if let Some(on_payload) = options.as_ref().and_then(|options| options.on_payload.as_ref()) {
+    if let Some(on_payload) = options
+        .as_ref()
+        .and_then(|options| options.on_payload.as_ref())
+    {
         if let Some(next) = on_payload(body.clone()).await {
             body = next;
         }
@@ -2491,13 +2547,14 @@ async fn run_stream(
             options.as_ref(),
         );
         let retention = resolve_cache_retention(options.as_ref());
-        let session_affinity = if retention != CacheRetention::None
-            && compat.send_session_affinity_headers
-        {
-            options.as_ref().and_then(|options| options.session_id.as_deref())
-        } else {
-            None
-        };
+        let session_affinity =
+            if retention != CacheRetention::None && compat.send_session_affinity_headers {
+                options
+                    .as_ref()
+                    .and_then(|options| options.session_id.as_deref())
+            } else {
+                None
+            };
         let headers = build_request_headers(
             &model,
             options.as_ref(),
@@ -2534,8 +2591,9 @@ async fn run_stream(
                         headers: Some(response_headers),
                     });
                 }
-                if let Some(on_response) =
-                    options.as_ref().and_then(|options| options.on_response.as_ref())
+                if let Some(on_response) = options
+                    .as_ref()
+                    .and_then(|options| options.on_response.as_ref())
                 {
                     on_response(&ProviderResponse {
                         status: status.as_u16(),
@@ -2609,11 +2667,7 @@ async fn run_stream(
         match chunk {
             Ok(Some(bytes)) => {
                 for sse in decoder.push_bytes(&bytes) {
-                    match aggregator.feed_sse(
-                        &sse,
-                        &mut saw_message_start,
-                        &mut saw_message_stop,
-                    ) {
+                    match aggregator.feed_sse(&sse, &mut saw_message_start, &mut saw_message_stop) {
                         Ok(events) => {
                             for event in events {
                                 writer.push(event);
@@ -2783,13 +2837,23 @@ mod tests {
             model.id = id.to_string();
             model
         };
-        assert!(default_supports_tool_references(&model("claude-sonnet-4-5-20250929")));
+        assert!(default_supports_tool_references(&model(
+            "claude-sonnet-4-5-20250929"
+        )));
         assert!(default_supports_tool_references(&model("claude-opus-4-6")));
         assert!(default_supports_tool_references(&model("claude-opus-5-x")));
-        assert!(!default_supports_tool_references(&model("claude-opus-4-1-20250805")));
-        assert!(!default_supports_tool_references(&model("claude-sonnet-4-20250514")));
-        assert!(!default_supports_tool_references(&model("claude-3-5-sonnet-20241022")));
-        assert!(!default_supports_tool_references(&model("claude-haiku-4-5-20251001")));
+        assert!(!default_supports_tool_references(&model(
+            "claude-opus-4-1-20250805"
+        )));
+        assert!(!default_supports_tool_references(&model(
+            "claude-sonnet-4-20250514"
+        )));
+        assert!(!default_supports_tool_references(&model(
+            "claude-3-5-sonnet-20241022"
+        )));
+        assert!(!default_supports_tool_references(&model(
+            "claude-haiku-4-5-20251001"
+        )));
         let mut other = model("claude-sonnet-4-5");
         other.provider = "proxy".to_string();
         assert!(!default_supports_tool_references(&other));
@@ -2879,7 +2943,10 @@ mod tests {
         let model = anthropic_model("https://api.anthropic.com");
         let mut context = context_of(vec![user_message("hi")]);
         context.system_prompt = Some("be brief".to_string());
-        context.tools = vec![tool("read", json!({ "type": "object" })), tool("my_tool", json!({}))];
+        context.tools = vec![
+            tool("read", json!({ "type": "object" })),
+            tool("my_tool", json!({})),
+        ];
         let mut options = SimpleStreamOptions::default();
         options.api_key = Some("sk-ant-oat01-token".to_string());
 
@@ -2919,7 +2986,11 @@ mod tests {
             user_message("weather?"),
             // 跨模型历史:provider 不同 → id 归一
             assistant_message(
-                vec![tool_call("call_1|item|with|pipes", "get_weather", json!({"city": "Oslo"}))],
+                vec![tool_call(
+                    "call_1|item|with|pipes",
+                    "get_weather",
+                    json!({"city": "Oslo"}),
+                )],
                 StopReason::ToolUse,
             ),
             tool_result_message("call_1|item|with|pipes", "get_weather", "18C"),
@@ -2936,7 +3007,10 @@ mod tests {
         assert_eq!(body["messages"][2]["content"][0]["content"], "18C");
         assert_eq!(body["messages"][2]["content"][0]["is_error"], false);
         // 末块(此 tool_result)带 cache_control
-        assert_eq!(body["messages"][2]["content"][0]["cache_control"]["type"], "ephemeral");
+        assert_eq!(
+            body["messages"][2]["content"][0]["cache_control"]["type"],
+            "ephemeral"
+        );
     }
 
     #[test]
@@ -2973,10 +3047,14 @@ mod tests {
 
         // 跨模型:redacted 丢弃、签名 thinking 转纯文本
         let cross = cross_model_model("https://api.anthropic.com");
-        let body = build_request_body(&cross, &context_of(vec![assistant_message(
-            vec![thinking, redacted],
-            StopReason::Stop,
-        )]), None);
+        let body = build_request_body(
+            &cross,
+            &context_of(vec![assistant_message(
+                vec![thinking, redacted],
+                StopReason::Stop,
+            )]),
+            None,
+        );
         let blocks = body["messages"][0]["content"].as_array().unwrap();
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0]["type"], "text");
@@ -2988,10 +3066,11 @@ mod tests {
             thinking_signature: None,
             redacted: false,
         };
-        let body = build_request_body(&model, &context_of(vec![assistant_message(
-            vec![unsigned],
-            StopReason::Stop,
-        )]), None);
+        let body = build_request_body(
+            &model,
+            &context_of(vec![assistant_message(vec![unsigned], StopReason::Stop)]),
+            None,
+        );
         assert_eq!(body["messages"][0]["content"][0]["type"], "text");
         assert_eq!(body["messages"][0]["content"][0]["text"], "partial");
     }
@@ -3022,7 +3101,10 @@ mod tests {
 
         // 纯图片 tool result → 补占位文本
         let context = context_of(vec![
-            assistant_message(vec![tool_call("t1", "look", json!({}))], StopReason::ToolUse),
+            assistant_message(
+                vec![tool_call("t1", "look", json!({}))],
+                StopReason::ToolUse,
+            ),
             Message::ToolResult(ToolResultMessage {
                 role: "toolResult".to_string(),
                 tool_call_id: "t1".to_string(),
@@ -3056,9 +3138,7 @@ mod tests {
         options.cache_retention = Some(CacheRetention::None);
         let body = build_request_body(&model, &context, Some(&options));
         assert!(body["system"][0].get("cache_control").is_none());
-        assert!(body["messages"][0]["content"]
-            .as_str()
-            .is_some()); // 字符串 content 不被包装
+        assert!(body["messages"][0]["content"].as_str().is_some()); // 字符串 content 不被包装
 
         let mut options = SimpleStreamOptions::default();
         options.cache_retention = Some(CacheRetention::Long);
@@ -3071,7 +3151,10 @@ mod tests {
         env.insert("PI_CACHE_RETENTION".to_string(), "long".to_string());
         options.env = Some(env);
         let body = build_request_body(&model, &context, Some(&options));
-        assert_eq!(body["messages"][0]["content"][0]["cache_control"]["ttl"], "1h");
+        assert_eq!(
+            body["messages"][0]["content"][0]["cache_control"]["ttl"],
+            "1h"
+        );
     }
 
     #[test]
@@ -3137,9 +3220,17 @@ mod tests {
         let mut decoder = SseDecoder::default();
         let payload = format!(
             ": keep-alive comment\r\n\r\n{}{}{}",
-            String::from_utf8(sse_event_bytes("message_start", r#"{"type":"message_start"}"#)).unwrap(),
+            String::from_utf8(sse_event_bytes(
+                "message_start",
+                r#"{"type":"message_start"}"#
+            ))
+            .unwrap(),
             String::from_utf8(sse_event_bytes("content_block_delta", "{\"a\":\"你\"}")).unwrap(),
-            String::from_utf8(sse_event_bytes("message_stop", r#"{"type":"message_stop"}"#)).unwrap(),
+            String::from_utf8(sse_event_bytes(
+                "message_stop",
+                r#"{"type":"message_stop"}"#
+            ))
+            .unwrap(),
         );
         let bytes = payload.as_bytes();
         assert!(decoder.push_bytes(&bytes[..7]).is_empty());
@@ -3183,7 +3274,11 @@ mod tests {
             SseOutcome::Skip
         ));
         // 无法解析的 data → Fatal 带上下文
-        match handle_sse(&make(Some("message_start"), "not json"), &mut saw_start, &mut saw_stop) {
+        match handle_sse(
+            &make(Some("message_start"), "not json"),
+            &mut saw_start,
+            &mut saw_stop,
+        ) {
             SseOutcome::Fatal(message) => {
                 assert!(message.contains("Could not parse Anthropic SSE event message_start"));
                 assert!(message.contains("raw=data: x"));
@@ -3213,7 +3308,11 @@ mod tests {
     // ── 聚合器 ───────────────────────────────────────────────────────
 
     fn aggregator() -> AnthropicAggregator {
-        AnthropicAggregator::new(&anthropic_model("https://api.anthropic.com"), Vec::new(), false)
+        AnthropicAggregator::new(
+            &anthropic_model("https://api.anthropic.com"),
+            Vec::new(),
+            false,
+        )
     }
 
     fn apply(aggregator: &mut AnthropicAggregator, value: Value) -> Vec<AssistantMessageEvent> {
@@ -3253,7 +3352,13 @@ mod tests {
             &mut aggregate,
             json!({ "type": "content_block_start", "index": 0, "content_block": { "type": "text", "text": "" } }),
         );
-        assert!(matches!(events[0], AssistantMessageEvent::TextStart { content_index: 0, .. }));
+        assert!(matches!(
+            events[0],
+            AssistantMessageEvent::TextStart {
+                content_index: 0,
+                ..
+            }
+        ));
 
         let events = apply(
             &mut aggregate,
@@ -3286,16 +3391,28 @@ mod tests {
             }),
         );
         assert!(events.is_empty());
-        assert_eq!(aggregate.output.raw_stop_reason.as_deref(), Some("end_turn"));
+        assert_eq!(
+            aggregate.output.raw_stop_reason.as_deref(),
+            Some("end_turn")
+        );
         assert_eq!(aggregate.output.stop_reason, StopReason::Stop);
         assert_eq!(aggregate.output.usage.output, 7);
-        assert_eq!(aggregate.output.usage.input, 100, "input 保留 message_start 值");
+        assert_eq!(
+            aggregate.output.usage.input, 100,
+            "input 保留 message_start 值"
+        );
         // total = input + output + cacheRead + cacheWrite = 100+7+40+10
         assert_eq!(aggregate.output.usage.total_tokens, 157);
         assert!(aggregate.tail_error(false).is_none());
 
         let (terminal, message) = aggregate.done_final();
-        assert!(matches!(terminal, AssistantMessageEvent::Done { reason: StopReason::Stop, .. }));
+        assert!(matches!(
+            terminal,
+            AssistantMessageEvent::Done {
+                reason: StopReason::Stop,
+                ..
+            }
+        ));
         assert_eq!(message.content[0], AssistantContent::text("Hello"));
     }
 
@@ -3318,7 +3435,10 @@ mod tests {
             &mut aggregate,
             json!({ "type": "content_block_stop", "index": 0 }),
         );
-        assert!(matches!(events[0], AssistantMessageEvent::ThinkingEnd { .. }));
+        assert!(matches!(
+            events[0],
+            AssistantMessageEvent::ThinkingEnd { .. }
+        ));
         assert_eq!(
             aggregate.output.content[0],
             AssistantContent::Thinking {
@@ -3355,7 +3475,10 @@ mod tests {
         );
         assert!(matches!(
             start_events[0],
-            AssistantMessageEvent::ToolcallStart { content_index: 0, .. }
+            AssistantMessageEvent::ToolcallStart {
+                content_index: 0,
+                ..
+            }
         ));
 
         let events = apply(
@@ -3367,7 +3490,10 @@ mod tests {
             AssistantMessageEvent::ToolcallDelta { ref delta, .. } if delta == "{\"city\": \"Os"
         ));
         // 部分 JSON:字符串值保留部分文本
-        assert_eq!(aggregate.output.content[0], tool_call("tc_1", "get_weather", json!({"city": "Os"})));
+        assert_eq!(
+            aggregate.output.content[0],
+            tool_call("tc_1", "get_weather", json!({"city": "Os"}))
+        );
 
         apply(
             &mut aggregate,
@@ -3380,7 +3506,10 @@ mod tests {
         let AssistantMessageEvent::ToolcallEnd { tool_call, .. } = &events[0] else {
             panic!("expected toolcall_end");
         };
-        assert_eq!(tool_call.arguments.get("city").and_then(Value::as_str), Some("Oslo"));
+        assert_eq!(
+            tool_call.arguments.get("city").and_then(Value::as_str),
+            Some("Oslo")
+        );
         assert_eq!(aggregate.output.stop_reason, StopReason::Pending);
     }
 
@@ -3468,7 +3597,10 @@ mod tests {
             Some("Anthropic stream ended without a stop reason")
         );
         // 中止优先
-        assert_eq!(aggregate.tail_error(true).as_deref(), Some("Request was aborted"));
+        assert_eq!(
+            aggregate.tail_error(true).as_deref(),
+            Some("Request was aborted")
+        );
     }
 
     #[test]
@@ -3598,7 +3730,13 @@ mod tests {
             events.push(event);
         }
         let terminal = events.last().expect("terminal event").clone();
-        assert!(matches!(terminal, AssistantMessageEvent::Done { reason: StopReason::Stop, .. }));
+        assert!(matches!(
+            terminal,
+            AssistantMessageEvent::Done {
+                reason: StopReason::Stop,
+                ..
+            }
+        ));
         let AssistantMessageEvent::Done { message, .. } = terminal else {
             panic!("expected done");
         };
@@ -3612,7 +3750,10 @@ mod tests {
         assert_eq!(events.len(), 5);
 
         // 请求头与请求体校验
-        let head = server.head.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        let head = server
+            .head
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
         let head_text = String::from_utf8_lossy(&head).to_ascii_lowercase();
         assert!(head_text.starts_with("post /v1/messages"));
         assert!(head_text.contains("x-api-key: test-key"));
@@ -3623,13 +3764,9 @@ mod tests {
             .position(|window| window == b"\r\n\r\n")
             .map(|index| index + 4)
             .unwrap_or(head.len());
-        let request_body: Value =
-            serde_json::from_slice(&head[body_start..]).expect("json body");
+        let request_body: Value = serde_json::from_slice(&head[body_start..]).expect("json body");
         assert_eq!(request_body["stream"], true);
-        assert_eq!(
-            request_body["messages"][0]["content"][0]["text"],
-            "hello"
-        );
+        assert_eq!(request_body["messages"][0]["content"][0]["text"], "hello");
     }
 
     #[tokio::test]
@@ -3688,7 +3825,10 @@ mod tests {
         };
         // x-should-retry 头优先于状态码
         assert!(matches!(
-            decide(&provider_error(Some(429), &[("x-should-retry", "false")]), 1),
+            decide(
+                &provider_error(Some(429), &[("x-should-retry", "false")]),
+                1
+            ),
             RetryDecision::NotRetryable
         ));
         assert!(matches!(
@@ -3698,13 +3838,19 @@ mod tests {
         // 状态码策略:408/409/429/5xx/无 status 可重试,其余不可
         for status in [408, 409, 429, 500, 503, 529] {
             assert!(
-                matches!(decide(&provider_error(Some(status), &[]), 1), RetryDecision::Retry(_)),
+                matches!(
+                    decide(&provider_error(Some(status), &[]), 1),
+                    RetryDecision::Retry(_)
+                ),
                 "status {status} 应可重试"
             );
         }
         for status in [400, 401, 403, 404, 422] {
             assert!(
-                matches!(decide(&provider_error(Some(status), &[]), 1), RetryDecision::NotRetryable),
+                matches!(
+                    decide(&provider_error(Some(status), &[]), 1),
+                    RetryDecision::NotRetryable
+                ),
                 "status {status} 不应重试"
             );
         }
@@ -3737,7 +3883,10 @@ mod tests {
         // max_retry_delay_ms = 0 → 不限上限
         assert_eq!(delay(&[("retry-after-ms", "70000")], 0), Ok(70_000));
         // HTTP 日期:过去时刻钳到 0;未来时刻按差值生效
-        assert_eq!(delay(&[("retry-after", "Wed, 21 Oct 2015 07:28:00 GMT")], 60_000), Ok(0));
+        assert_eq!(
+            delay(&[("retry-after", "Wed, 21 Oct 2015 07:28:00 GMT")], 60_000),
+            Ok(0)
+        );
         let future = (chrono::Utc::now() + chrono::Duration::seconds(30))
             .format("%a, %d %b %Y %H:%M:%S GMT")
             .to_string();
@@ -3760,7 +3909,10 @@ mod tests {
     }
 
     /// 多请求 mock:按顺序为每个响应接受一条新连接(Connection: close)。
-    fn spawn_sequential_mock(responses: Vec<Vec<u8>>, served: std::sync::Arc<std::sync::atomic::AtomicUsize>) -> String {
+    fn spawn_sequential_mock(
+        responses: Vec<Vec<u8>>,
+        served: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    ) -> String {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
         let address = listener.local_addr().expect("local addr");
         std::thread::spawn(move || {

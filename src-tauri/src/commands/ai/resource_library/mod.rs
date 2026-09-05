@@ -16,6 +16,7 @@ mod crypto;
 mod errors;
 mod frontmatter;
 mod git;
+mod import;
 mod marketplace;
 mod models;
 mod ops;
@@ -246,6 +247,23 @@ pub async fn rl_skill_update(
 #[tauri::command]
 pub async fn rl_skill_delete(app: AppHandle, id: String) -> RlResult<()> {
     mutate(&app, move |lib| ops::skill_delete(lib, &id)).await
+}
+
+// ── Skill 导入(文件夹 / zip 压缩包 / URL)────────────────────────────
+
+#[tauri::command]
+pub async fn rl_skill_import_folder(app: AppHandle, path: String) -> RlResult<SkillImportOutcome> {
+    mutate(&app, move |lib| import::skill_import_folder(lib, &path)).await
+}
+
+#[tauri::command]
+pub async fn rl_skill_import_archive(app: AppHandle, path: String) -> RlResult<SkillImportOutcome> {
+    mutate(&app, move |lib| import::skill_import_archive(lib, &path)).await
+}
+
+#[tauri::command]
+pub async fn rl_skill_import_url(app: AppHandle, url: String) -> RlResult<SkillImportOutcome> {
+    mutate(&app, move |lib| import::skill_import_url(lib, &url)).await
 }
 
 #[tauri::command]

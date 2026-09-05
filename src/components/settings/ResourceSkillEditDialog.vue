@@ -15,7 +15,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  createResourceSkill,
   openResourceSkillDir,
   readResourceSkillBody,
   updateResourceSkill,
@@ -27,13 +26,12 @@ import {
 const props = defineProps<{
   open: boolean;
   groups: ResourceSkillGroup[];
-  /** null = 新建;非 null = 编辑该技能 */
-  skill: ResourceSkill | null;
+  skill: ResourceSkill;
 }>();
 
 const emit = defineEmits<{
   "update:open": [value: boolean];
-  /** 创建或更新成功后触发(父组件刷新列表) */
+  /** 更新成功后触发(父组件刷新列表) */
   saved: [];
 }>();
 
@@ -46,7 +44,7 @@ const body = ref("");
 const loadingBody = ref(false);
 const saving = ref(false);
 
-/** 打开目标变化(含编辑 A → 直接切新建)时重置表单;token 丢弃迟到的 body 加载结果 */
+/** 每次打开重置表单并加载正文;token 丢弃迟到的加载结果 */
 let loadToken = 0;
 
 watch(
@@ -56,27 +54,23 @@ watch(
       return;
     }
     const token = ++loadToken;
-    name.value = props.skill?.name ?? "";
-    description.value = props.skill?.description ?? "";
-    selectedGroupIds.value = props.skill ? [...props.skill.groupIds] : [];
+    name.value = props.skill.name;
+    description.value = props.skill.description;
+    selectedGroupIds.value = [...props.skill.groupIds];
     body.value = "";
-    if (props.skill) {
-      loadingBody.value = true;
-      try {
-        const loaded = await readResourceSkillBody(props.skill.id);
-        if (token === loadToken) {
-          body.value = loaded.body;
-        }
-      } catch (e) {
-        if (token === loadToken) {
-          toast.error(
-            t("settings.resources.skills.editDialog.loadBodyFailed", { error: String(e) }),
-          );
-        }
-      } finally {
-        if (token === loadToken) {
-          loadingBody.value = false;
-        }
+    loadingBody.value = true;
+    try {
+      const loaded = await readResourceSkillBody(props.skill.id);
+      if (token === loadToken) {
+        body.value = loaded.body;
+      }
+    } catch (e) {
+      if (token === loadToken) {
+        toast.error(t("settings.resources.skills.editDialog.loadBodyFailed", { error: String(e) }));
+      }
+    } finally {
+      if (token === loadToken) {
+        loadingBody.value = false;
       }
     }
   },
@@ -92,9 +86,6 @@ function toggleGroup(groupId: string) {
 }
 
 async function openDir() {
-  if (!props.skill) {
-    return;
-  }
   try {
     await openResourceSkillDir(props.skill.id);
   } catch (e) {
@@ -115,13 +106,8 @@ async function save() {
     body: body.value,
   };
   try {
-    if (props.skill) {
-      await updateResourceSkill(props.skill.id, input);
-      toast.success(t("settings.resources.skills.editDialog.saved"));
-    } else {
-      await createResourceSkill(input);
-      toast.success(t("settings.resources.skills.editDialog.created"));
-    }
+    await updateResourceSkill(props.skill.id, input);
+    toast.success(t("settings.resources.skills.editDialog.saved"));
     emit("saved");
     emit("update:open", false);
   } catch (e) {
@@ -137,18 +123,10 @@ async function save() {
     <DialogContent class="sm:max-w-lg">
       <DialogHeader>
         <DialogTitle>
-          {{
-            skill
-              ? t("settings.resources.skills.editDialog.editTitle")
-              : t("settings.resources.skills.editDialog.createTitle")
-          }}
+          {{ t("settings.resources.skills.editDialog.editTitle") }}
         </DialogTitle>
         <DialogDescription>
-          {{
-            skill
-              ? t("settings.resources.skills.editDialog.editDescription")
-              : t("settings.resources.skills.editDialog.createDescription")
-          }}
+          {{ t("settings.resources.skills.editDialog.editDescription") }}
         </DialogDescription>
       </DialogHeader>
 
@@ -222,11 +200,10 @@ async function save() {
       </div>
 
       <DialogFooter class="gap-2 sm:justify-between">
-        <Button v-if="skill" variant="outline" class="gap-1.5" :disabled="saving" @click="openDir">
+        <Button variant="outline" class="gap-1.5" :disabled="saving" @click="openDir">
           <FolderOpen class="h-3.5 w-3.5" />
           {{ t("settings.resources.skills.editDialog.openDir") }}
         </Button>
-        <span v-else class="flex-1" />
         <span class="flex gap-2">
           <Button variant="outline" :disabled="saving" @click="emit('update:open', false)">
             {{ t("common.cancel") }}

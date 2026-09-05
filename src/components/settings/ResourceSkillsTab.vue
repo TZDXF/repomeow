@@ -2,28 +2,49 @@
 import { computed, onActivated, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   ChevronDown,
   ChevronUp,
+  Download,
+  FileArchive,
   FolderOpen,
   Layers,
+  Link2,
   Pencil,
-  Plus,
   Search,
   Trash2,
 } from "@lucide/vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
   deleteResourceSkill,
   filterSkills,
+  importResourceSkillArchive,
+  importResourceSkillFolder,
+  importResourceSkillUrl,
   listResourceSkills,
   mergeReorderedVisible,
   openResourceSkillDir,
   reorderResourceSkills,
   type ResourceSkill,
   type ResourceSkillGroup,
+  type ResourceSkillImportOutcome,
 } from "@/lib/resource-library";
 import ResourceSkillEditDialog from "./ResourceSkillEditDialog.vue";
 import ResourceSkillGroupsDialog from "./ResourceSkillGroupsDialog.vue";
@@ -37,10 +58,14 @@ const query = ref("");
 const activeGroupId = ref<string | null>(null);
 
 const editDialogOpen = ref(false);
-/** null = 新建,非 null = 编辑该技能 */
 const editingSkill = ref<ResourceSkill | null>(null);
 const groupsDialogOpen = ref(false);
 const pendingDelete = ref<ResourceSkill | null>(null);
+
+const importing = ref(false);
+const urlDialogOpen = ref(false);
+const urlInput = ref("");
+const urlSubmitting = ref(false);
 
 const filtered = computed(() => filterSkills(skills.value, query.value, activeGroupId.value));
 const groupMap = computed(() => new Map(groups.value.map((g) => [g.id, g])));
@@ -73,14 +98,96 @@ async function load() {
 // 从市场标签页安装技能后切回即可看到新技能(KeepAlive 不会重跑 onMounted)
 onActivated(load);
 
-function openCreate() {
-  editingSkill.value = null;
-  editDialogOpen.value = true;
-}
-
 function openEdit(skill: ResourceSkill) {
   editingSkill.value = skill;
   editDialogOpen.value = true;
+}
+
+/** 导入结果外显:成功条数 + 逐条跳过原因;返回是否导入了至少一个技能 */
+function announce(outcome: ResourceSkillImportOutcome): boolean {
+  if (outcome.imported.length) {
+    toast.success(
+      t("settings.resources.skills.import.imported", { count: outcome.imported.length }),
+    );
+  }
+  for (const item of outcome.skipped) {
+    toast.warning(
+      t(
+        item.reason === "conflict"
+          ? "settings.resources.skills.import.skipConflict"
+          : "settings.resources.skills.import.skipInvalid",
+        { name: item.name },
+      ),
+    );
+  }
+  return outcome.imported.length > 0;
+}
+
+/** 执行一次导入并刷新列表;错误已在 toast 外显,以布尔告知调用方成败 */
+async function runImport(task: () => Promise<ResourceSkillImportOutcome>): Promise<boolean> {
+  if (importing.value) {
+    return false;
+  }
+  importing.value = true;
+  try {
+    const ok = announce(await task());
+    await load();
+    return ok;
+  } catch (e) {
+    toast.error(String(e));
+    return false;
+  } finally {
+    importing.value = false;
+  }
+}
+
+async function importArchive() {
+  let selected: string | null = null;
+  try {
+    const result = await openDialog({
+      multiple: false,
+      filters: [{ name: "ZIP", extensions: ["zip"] }],
+    });
+    selected = typeof result === "string" ? result : null;
+  } catch (e) {
+    toast.error(String(e));
+    return;
+  }
+  if (selected) {
+    await runImport(() => importResourceSkillArchive(selected as string));
+  }
+}
+
+async function importFolder() {
+  let selected: string | null = null;
+  try {
+    const result = await openDialog({ directory: true, multiple: false });
+    selected = typeof result === "string" ? result : null;
+  } catch (e) {
+    toast.error(String(e));
+    return;
+  }
+  if (selected) {
+    await runImport(() => importResourceSkillFolder(selected as string));
+  }
+}
+
+async function confirmImportUrl() {
+  const url = urlInput.value.trim();
+  if (!url || urlSubmitting.value) {
+    return;
+  }
+  if (!/^https?:\/\//i.test(url)) {
+    toast.error(t("settings.resources.skills.import.urlInvalid"));
+    return;
+  }
+  urlSubmitting.value = true;
+  const ok = await runImport(() => importResourceSkillUrl(url));
+  urlSubmitting.value = false;
+  if (ok) {
+    urlDialogOpen.value = false;
+    urlInput.value = "";
+  }
 }
 
 /** 在可见列表内移动一项;持久化时合并回全量顺序(隐藏项相对位置不变) */
@@ -158,10 +265,28 @@ async function confirmDelete() {
         <Layers class="h-3.5 w-3.5" />
         {{ t("settings.resources.skills.manageGroups") }}
       </Button>
-      <Button size="sm" class="h-8 shrink-0 gap-1.5" @click="openCreate">
-        <Plus class="h-3.5 w-3.5" />
-        {{ t("settings.resources.skills.create") }}
-      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger as-child>
+          <Button size="sm" class="h-8 shrink-0 gap-1.5" :disabled="importing">
+            <Download class="h-3.5 w-3.5" />
+            {{ t("settings.resources.skills.import.trigger") }}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem class="gap-2" @click="importArchive">
+            <FileArchive class="h-3.5 w-3.5" />
+            {{ t("settings.resources.skills.import.archive") }}
+          </DropdownMenuItem>
+          <DropdownMenuItem class="gap-2" @click="importFolder">
+            <FolderOpen class="h-3.5 w-3.5" />
+            {{ t("settings.resources.skills.import.folder") }}
+          </DropdownMenuItem>
+          <DropdownMenuItem class="gap-2" @click="urlDialogOpen = true">
+            <Link2 class="h-3.5 w-3.5" />
+            {{ t("settings.resources.skills.import.url") }}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
 
     <div v-if="groups.length" class="mt-3 flex flex-wrap items-center gap-1.5">
@@ -290,6 +415,7 @@ async function confirmDelete() {
     </p>
 
     <ResourceSkillEditDialog
+      v-if="editingSkill"
       v-model:open="editDialogOpen"
       :groups="groups"
       :skill="editingSkill"
@@ -304,5 +430,32 @@ async function confirmDelete() {
       destructive
       @confirm="confirmDelete"
     />
+
+    <Dialog :open="urlDialogOpen" @update:open="urlDialogOpen = $event">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{{ t("settings.resources.skills.import.urlTitle") }}</DialogTitle>
+          <DialogDescription>
+            {{ t("settings.resources.skills.import.urlDescription") }}
+          </DialogDescription>
+        </DialogHeader>
+        <Input
+          v-model="urlInput"
+          class="h-8 text-xs"
+          :placeholder="t('settings.resources.skills.import.urlPlaceholder')"
+          spellcheck="false"
+          :disabled="urlSubmitting"
+          @keydown.enter="confirmImportUrl"
+        />
+        <DialogFooter>
+          <Button variant="outline" :disabled="urlSubmitting" @click="urlDialogOpen = false">
+            {{ t("common.cancel") }}
+          </Button>
+          <Button :disabled="!urlInput.trim() || urlSubmitting" @click="confirmImportUrl">
+            {{ t("settings.resources.skills.import.urlConfirm") }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </section>
 </template>

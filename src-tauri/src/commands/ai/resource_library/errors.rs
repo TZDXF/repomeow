@@ -52,6 +52,12 @@ pub mod codes {
     pub const MARKETPLACE_SOURCE_INVALID: &str = "resource_library_marketplace_source_invalid";
     pub const MARKETPLACE_ID_INVALID: &str = "resource_library_marketplace_id_invalid";
     pub const MARKETPLACE_SKILL_INVALID: &str = "resource_library_marketplace_skill_invalid";
+    pub const IMPORT_SOURCE_INVALID: &str = "resource_library_import_source_invalid";
+    pub const SKILL_IMPORT_EMPTY: &str = "resource_library_skill_import_empty";
+    pub const ARCHIVE_INVALID: &str = "resource_library_archive_invalid";
+    pub const ARCHIVE_TOO_LARGE: &str = "resource_library_archive_too_large";
+    pub const URL_INVALID: &str = "resource_library_url_invalid";
+    pub const DOWNLOAD_FAILED: &str = "resource_library_download_failed";
 }
 
 /// 资源库错误。三类构成:

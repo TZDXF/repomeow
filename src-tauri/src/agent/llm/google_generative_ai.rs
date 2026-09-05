@@ -38,10 +38,10 @@ use tokio_util::sync::CancellationToken;
 
 use super::event_stream::{event_stream, EventStreamWriter};
 use super::types::{
-    AssistantContent, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream,
-    Context, InputKind, Message, Model, ModelThinkingLevel, SimpleStreamOptions, StopReason,
-    TextOrImageContent, ThinkingBudgets, ThinkingLevel, Tool, ToolCall, ToolChoice,
-    ToolResultMessage, Usage, UsageCost, UserContent,
+    user_agent, AssistantContent, AssistantMessage, AssistantMessageEvent,
+    AssistantMessageEventStream, Context, InputKind, Message, Model, ModelThinkingLevel,
+    SimpleStreamOptions, StopReason, TextOrImageContent, ThinkingBudgets, ThinkingLevel, Tool,
+    ToolCall, ToolChoice, ToolResultMessage, Usage, UsageCost, UserContent,
 };
 use crate::time_util::now_ts_nanos;
 
@@ -1646,8 +1646,7 @@ fn build_client(
     if let Ok(value) = reqwest::header::HeaderValue::from_str(api_key) {
         headers.insert("x-goog-api-key", value);
     }
-    let user_agent = format!("pi ({} {})", std::env::consts::OS, std::env::consts::ARCH);
-    if let Ok(value) = reqwest::header::HeaderValue::from_str(&user_agent) {
+    if let Ok(value) = reqwest::header::HeaderValue::from_str(&user_agent()) {
         headers.insert(reqwest::header::USER_AGENT, value);
     }
     push_custom_headers(model.headers.as_ref(), &mut headers);
