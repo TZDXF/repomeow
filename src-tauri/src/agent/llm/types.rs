@@ -566,6 +566,8 @@ pub struct OpenAICompletionsCompat {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supports_long_cache_retention: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_explicit_prompt_cache_mode: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supports_max_output_tokens: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supports_eager_tool_input_streaming: Option<bool>,

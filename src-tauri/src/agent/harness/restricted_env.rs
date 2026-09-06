@@ -242,9 +242,9 @@ impl RestrictedEnv {
         })
     }
 
-    /// 便捷构造:以内层 `TokioEnv`(cwd = 项目根)包装出 Wiki 内置 Agent 用的
-    /// 受限环境。
-    pub fn for_wiki_agent(
+    /// 便捷构造:以内层 `TokioEnv`(cwd = 根目录)包装出内置 Agent 用的
+    /// 受限环境(wiki 生成、安全扫描等)。
+    pub fn for_agent(
         project_root: impl AsRef<Path>,
         allowed_write_file: impl AsRef<Path>,
     ) -> Result<Arc<dyn ExecutionEnv>, SimpleError> {
@@ -640,11 +640,11 @@ mod tests {
         }
 
         fn env(&self) -> Arc<dyn ExecutionEnv> {
-            RestrictedEnv::for_wiki_agent(self.project_root(), self.allowed()).unwrap()
+            RestrictedEnv::for_agent(self.project_root(), self.allowed()).unwrap()
         }
 
         fn env_with_allowed(&self, allowed: &Path) -> Arc<dyn ExecutionEnv> {
-            RestrictedEnv::for_wiki_agent(self.project_root(), allowed).unwrap()
+            RestrictedEnv::for_agent(self.project_root(), allowed).unwrap()
         }
     }
 
@@ -1014,7 +1014,7 @@ mod tests {
         assert!(
             RestrictedEnv::new(inner.clone(), Path::new("relative/root"), tree.allowed()).is_err()
         );
-        assert!(RestrictedEnv::for_wiki_agent("relative/root", tree.allowed()).is_err());
+        assert!(RestrictedEnv::for_agent("relative/root", tree.allowed()).is_err());
     }
 
     #[tokio::test]
