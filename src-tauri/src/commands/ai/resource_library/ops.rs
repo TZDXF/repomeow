@@ -19,9 +19,10 @@ use super::crypto::{
 use super::errors::{codes, RlError, RlResult};
 use super::frontmatter as fm;
 use super::git;
+use super::marketplace;
 use super::models::{
-    EncryptionStatus, LibraryInfo, MarketplaceSource, McpServer, McpServerInput, Skill, SkillBody,
-    SkillGroup, SkillLibrary, SyncOutcome, TRANSPORTS,
+    EncryptionStatus, LibraryInfo, MarketplaceDownload, MarketplaceSource, MarketplaceUpdateStatus,
+    McpServer, McpServerInput, Skill, SkillBody, SkillGroup, SkillLibrary, SyncOutcome, TRANSPORTS,
 };
 use super::store::{is_safe_directory, Library, DIR_SKILLS, FILE_SKILLS};
 
@@ -30,6 +31,52 @@ pub(super) fn new_id(prefix: &str) -> String {
     getrandom::fill(&mut buf).expect("系统随机源不可用");
     let hex: String = buf.iter().map(|b| format!("{b:02x}")).collect();
     format!("{prefix}_{hex}")
+}
+
+/// 技能名 → 库内目录名候选:ASCII 字母数字保留(转小写),其余字符折叠为
+/// 单个 `-`;结果恒满足 `is_safe_directory`,纯非 ASCII 名(如中文)折叠后
+/// 为空,由调用方回退随机 id。
+pub(super) fn slugify_directory(name: &str) -> String {
+    const MAX_SLUG_BYTES: usize = 48;
+    let mut slug = String::new();
+    for ch in name.trim().chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+        } else if (ch == '_' || ch == '.') && !slug.is_empty() {
+            slug.push(ch);
+        } else if !slug.is_empty() && !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    while slug.ends_with('-') {
+        slug.pop();
+    }
+    if slug.len() > MAX_SLUG_BYTES {
+        slug.truncate(MAX_SLUG_BYTES);
+        while slug.ends_with('-') {
+            slug.pop();
+        }
+    }
+    slug
+}
+
+/// 选定新技能的落盘目录名:优先用技能名 slug,与库内既有目录冲突时追加
+/// `-2`/`-3`…;slug 为空(纯中文等)时回退随机 id。`taken` 为已占用目录。
+pub(super) fn pick_skill_directory(name: &str, taken: &HashSet<String>) -> String {
+    let base = match slugify_directory(name) {
+        slug if slug.is_empty() => new_id("sk"),
+        slug => slug,
+    };
+    if !taken.contains(&base) {
+        return base;
+    }
+    for n in 2..1000 {
+        let candidate = format!("{base}-{n}");
+        if !taken.contains(&candidate) {
+            return candidate;
+        }
+    }
+    new_id("sk")
 }
 
 /// 校验并规范化分组颜色:#RRGGBB(大小写不敏感,统一小写);空串 = 无颜色
@@ -298,6 +345,7 @@ pub(super) fn skill_create(
     validate_group_ids(&data, &group_ids)?;
     let ts = now_ts();
     let id = new_id("sk");
+    let taken: HashSet<String> = data.skills.iter().map(|s| s.directory.clone()).collect();
     let sort_order = data
         .skills
         .iter()
@@ -306,7 +354,7 @@ pub(super) fn skill_create(
         .map_or(0, |m| m + 1);
     let skill = Skill {
         id: id.clone(),
-        directory: id,
+        directory: pick_skill_directory(name, &taken),
         name: name.to_string(),
         description: description.unwrap_or_default(),
         marketplace: None,
@@ -335,13 +383,16 @@ pub(super) fn skill_create(
 }
 
 /// 导入市场 Skill：同一市场条目幂等返回已有项，不覆盖用户编辑的正文。
+/// 正文落盘 SKILL.md 所在目录下的全部文件;安装基线(installed_sha)由调用方
+/// 预解析,解析失败传 None 不阻断安装。
 pub(super) fn skill_import_marketplace(
     lib: &Library,
     source: MarketplaceSource,
-    body: String,
+    download: MarketplaceDownload,
+    installed_sha: Option<String>,
 ) -> RlResult<Skill> {
     lib.ensure()?;
-    let (frontmatter_name, frontmatter_description) = fm::name_description_of(&body);
+    let (frontmatter_name, frontmatter_description) = fm::name_description_of(&download.skill_md);
     let name = frontmatter_name
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| RlError::coded(codes::MARKETPLACE_SKILL_INVALID, "缺少 frontmatter name"))?;
@@ -360,12 +411,17 @@ pub(super) fn skill_import_marketplace(
     }
     let ts = now_ts();
     let id = new_id("sk");
+    let taken: HashSet<String> = data.skills.iter().map(|s| s.directory.clone()).collect();
     let skill = Skill {
         id: id.clone(),
-        directory: id,
+        directory: pick_skill_directory(&name, &taken),
         name: name.clone(),
         description,
-        marketplace: Some(source),
+        marketplace: Some(MarketplaceSource {
+            installed_sha,
+            installed_at: Some(ts),
+            ..source
+        }),
         group_ids: Vec::new(),
         sort_order: data
             .skills
@@ -376,11 +432,142 @@ pub(super) fn skill_import_marketplace(
         created_at: ts,
         updated_at: ts,
     };
-    lib.write_body(&skill.directory, &body)?;
+    let files: Vec<(String, String)> = download
+        .files
+        .iter()
+        .map(|file| (file.path.clone(), file.contents.clone()))
+        .collect();
+    lib.write_skill_files(&skill.directory, &files)?;
     data.skills.push(skill.clone());
     lib.write_plain_json(FILE_SKILLS, &data)?;
     git::auto_commit(lib, &format!("从市场添加技能:{name}"))?;
     Ok(skill)
+}
+
+/// 应用市场更新:整体重建技能目录(天然处理上游删文件),name 保持本地名避免
+/// 与其他技能重名,description 跟随新 frontmatter;覆盖动作经 auto_commit 留快照
+pub(super) fn skill_apply_marketplace_update(
+    lib: &Library,
+    id: &str,
+    download: MarketplaceDownload,
+    installed_sha: Option<String>,
+) -> RlResult<Skill> {
+    lib.ensure()?;
+    let mut data: SkillLibrary = lib.read_plain_json(FILE_SKILLS)?;
+    let Some(index) = data.skills.iter().position(|skill| skill.id == id) else {
+        return Err(RlError::coded(codes::SKILL_NOT_FOUND, id.to_string()));
+    };
+    let mut marketplace = data.skills[index]
+        .marketplace
+        .clone()
+        .ok_or_else(|| RlError::coded(codes::MARKETPLACE_SKILL_INVALID, id.to_string()))?;
+    let files: Vec<(String, String)> = download
+        .files
+        .iter()
+        .map(|file| (file.path.clone(), file.contents.clone()))
+        .collect();
+    lib.remove_skill_dir(&data.skills[index].directory)?;
+    lib.write_skill_files(&data.skills[index].directory, &files)?;
+    if let (_, Some(description)) = fm::name_description_of(&download.skill_md) {
+        data.skills[index].description = description;
+    }
+    marketplace.repo_dir = download.repo_dir;
+    marketplace.installed_sha = installed_sha;
+    marketplace.installed_at = Some(now_ts());
+    data.skills[index].marketplace = Some(marketplace);
+    data.skills[index].updated_at = now_ts();
+    let name = data.skills[index].name.clone();
+    lib.write_plain_json(FILE_SKILLS, &data)?;
+    git::auto_commit(lib, &format!("更新市场技能:{name}"))?;
+    Ok(data.skills[index].clone())
+}
+
+/// sha 对比判定:双方已知且不同 = 有更新;任一未知 = 无法判断
+pub(super) fn update_from_shas(installed: Option<&str>, latest: Option<&str>) -> Option<bool> {
+    match (installed, latest) {
+        (Some(installed), Some(latest)) => Some(installed != latest),
+        _ => None,
+    }
+}
+
+/// 基线回填:基线缺失的旧安装经内容比对确认一致后,写入当前 sha 作为基线
+fn backfill_installed_sha(lib: &Library, skill_id: &str, sha: Option<String>) -> RlResult<()> {
+    let mut data: SkillLibrary = lib.read_plain_json(FILE_SKILLS)?;
+    let Some(skill) = data.skills.iter_mut().find(|skill| skill.id == skill_id) else {
+        return Err(RlError::coded(codes::SKILL_NOT_FOUND, skill_id.to_string()));
+    };
+    if let Some(marketplace) = &mut skill.marketplace {
+        marketplace.installed_sha = sha;
+        marketplace.installed_at = Some(now_ts());
+    }
+    let name = skill.name.clone();
+    lib.write_plain_json(FILE_SKILLS, &data)?;
+    git::auto_commit(lib, &format!("校准市场技能基线:{name}"))?;
+    Ok(())
+}
+
+/// 单个技能的市场更新检查。installed_sha 已知走 GitHub commits sha 对比;
+/// 未知(旧数据/安装时 GitHub 不可用)回退为重新下载并与本地 SKILL.md 内容比对,
+/// 一致则回填当前 sha 作为基线。单技能失败只记录 error_code,不影响其他技能。
+fn check_marketplace_update(
+    lib: &Library,
+    skill: &Skill,
+    marketplace: &MarketplaceSource,
+) -> MarketplaceUpdateStatus {
+    let mut status = MarketplaceUpdateStatus {
+        skill_id: skill.id.clone(),
+        marketplace_id: marketplace.id.clone(),
+        update_available: None,
+        error_code: None,
+    };
+    let Some(installed_sha) = marketplace.installed_sha.as_deref() else {
+        let local = match lib.read_body(&skill.directory) {
+            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+            Err(err) => {
+                status.error_code = Some(RlError::from(err).code().to_string());
+                return status;
+            }
+        };
+        match marketplace::download(&marketplace.id) {
+            Ok(download) if download.skill_md == local => {
+                match marketplace::latest_commit_sha(&marketplace.source, &marketplace.repo_dir) {
+                    Ok(latest) => match backfill_installed_sha(lib, &skill.id, latest) {
+                        Ok(()) => status.update_available = Some(false),
+                        Err(err) => status.error_code = Some(err.code().to_string()),
+                    },
+                    Err(err) => status.error_code = Some(err.code().to_string()),
+                }
+            }
+            Ok(_) => status.update_available = Some(true),
+            Err(err) => status.error_code = Some(err.code().to_string()),
+        }
+        return status;
+    };
+    match marketplace::latest_commit_sha(&marketplace.source, &marketplace.repo_dir) {
+        Ok(latest) => {
+            status.update_available = update_from_shas(Some(installed_sha), latest.as_deref());
+        }
+        Err(err) => status.error_code = Some(err.code().to_string()),
+    }
+    status
+}
+
+/// 逐技能检查市场更新(只读;基线回填是唯一副作用)
+pub(super) fn skill_check_marketplace_updates(
+    lib: &Library,
+) -> RlResult<Vec<MarketplaceUpdateStatus>> {
+    let data: SkillLibrary = lib.read_plain_json(FILE_SKILLS)?;
+    let statuses = data
+        .skills
+        .iter()
+        .filter_map(|skill| {
+            skill
+                .marketplace
+                .as_ref()
+                .map(|marketplace| check_marketplace_update(lib, skill, marketplace))
+        })
+        .collect();
+    Ok(statuses)
 }
 
 #[cfg(test)]

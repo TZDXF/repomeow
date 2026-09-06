@@ -18,10 +18,22 @@ export interface ResourceSkill {
   description: string;
   directory: string;
   /** 来自 skills.sh 的来源元数据；手动创建 Skill 不带此字段。 */
-  marketplace?: { id: string; source: string; url: string };
+  marketplace?: ResourceSkillMarketplace;
   groupIds: string[];
   sortOrder: number;
   updatedAt?: number;
+}
+
+/** 市场技能来源与安装基线;installedSha 未知时检查更新回退内容比对 */
+export interface ResourceSkillMarketplace {
+  id: string;
+  source: string;
+  url: string;
+  /** 技能在 GitHub 仓库内的目录(仓库相对路径),空串 = 仓库根 */
+  repoDir?: string;
+  /** 安装/最近更新时的 GitHub commit sha */
+  installedSha?: string | null;
+  installedAt?: number | null;
 }
 
 export interface ResourceSkillList {
@@ -220,6 +232,25 @@ export async function listResourceMarketplaceSkills(
 /** 安装市场技能到本地 Skills 库,返回新建的本地技能 */
 export function installResourceMarketplaceSkill(id: string): Promise<ResourceSkill> {
   return cmd<ResourceSkill>("rl_marketplace_install", { id });
+}
+
+/** 单个市场技能的更新检查结果;updateAvailable 为 null 表示无法判断 */
+export interface ResourceMarketplaceUpdateStatus {
+  skillId: string;
+  marketplaceId: string;
+  updateAvailable: boolean | null;
+  /** 后端稳定错误码(如 resource_library_marketplace_rate_limited),由 i18n 映射 */
+  errorCode?: string | null;
+}
+
+/** 批量检查全部市场技能的上游更新(GitHub commits sha 对比,旧数据回退内容比对) */
+export function checkResourceMarketplaceUpdates(): Promise<ResourceMarketplaceUpdateStatus[]> {
+  return cmd<ResourceMarketplaceUpdateStatus[]>("rl_marketplace_check_updates");
+}
+
+/** 应用市场更新:重新下载并整体覆盖技能目录(覆盖前自动 git 快照) */
+export function updateResourceMarketplaceSkill(id: string): Promise<ResourceSkill> {
+  return cmd<ResourceSkill>("rl_marketplace_update_skill", { id });
 }
 
 /** 本地按来源与关键词(名称/描述,大小写不敏感)过滤市场条目;sourceId 为 null = 不过滤 */

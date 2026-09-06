@@ -310,6 +310,8 @@ pub fn run() {
             commands::ai::rl_skill_body_write,
             commands::ai::rl_marketplace_list,
             commands::ai::rl_marketplace_install,
+            commands::ai::rl_marketplace_check_updates,
+            commands::ai::rl_marketplace_update_skill,
             commands::ai::rl_mcp_list,
             commands::ai::rl_mcp_create,
             commands::ai::rl_mcp_update,

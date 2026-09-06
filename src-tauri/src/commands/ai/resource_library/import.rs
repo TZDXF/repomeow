@@ -5,6 +5,7 @@
 //! 目录与 GitHub 整仓 zip(多技能)均可导入;每次导入有大小 / 深度 / 数量
 //! 上限,跳过符号链接与路径穿越条目(zip-slip),重名或缺 name 的条目跳过。
 
+use std::collections::HashSet;
 use std::fs;
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
@@ -14,7 +15,7 @@ use super::errors::{codes, RlError, RlResult};
 use super::frontmatter as fm;
 use super::git;
 use super::models::{Skill, SkillImportOutcome, SkillImportSkip, SkillLibrary};
-use super::ops::new_id;
+use super::ops::{new_id, pick_skill_directory};
 use super::store::{remove_dir_tolerating_readonly, Library, DIR_SKILLS, FILE_SKILLS};
 use crate::time_util::{now_ts, now_ts_nanos};
 
@@ -87,6 +88,7 @@ fn import_from_roots(lib: &Library, roots: &[PathBuf]) -> RlResult<SkillImportOu
         .map(|s| s.sort_order)
         .max()
         .map_or(0, |m| m + 1);
+    let mut taken: HashSet<String> = data.skills.iter().map(|s| s.directory.clone()).collect();
     for root in roots {
         let dir_name = root
             .file_name()
@@ -114,11 +116,13 @@ fn import_from_roots(lib: &Library, roots: &[PathBuf]) -> RlResult<SkillImportOu
             continue;
         }
         let id = new_id("sk");
-        copy_dir_recursive(root, &lib.root().join(DIR_SKILLS).join(&id))?;
+        let directory = pick_skill_directory(&name, &taken);
+        taken.insert(directory.clone());
+        copy_dir_recursive(root, &lib.root().join(DIR_SKILLS).join(&directory))?;
         let ts = now_ts();
         let skill = Skill {
             id: id.clone(),
-            directory: id,
+            directory,
             name: name.clone(),
             description: description.unwrap_or_default(),
             marketplace: None,

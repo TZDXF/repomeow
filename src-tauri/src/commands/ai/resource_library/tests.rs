@@ -1060,3 +1060,242 @@ fn import_rejects_bad_sources_and_empty_archives() {
     assert_eq!(err.code(), codes::ARCHIVE_INVALID);
     let _ = fs::remove_file(&fake);
 }
+
+#[test]
+fn slugify_directory_keeps_safe_ascii_and_drops_unmappable_names() {
+    assert_eq!(ops::slugify_directory("Find Skills"), "find-skills");
+    assert_eq!(
+        ops::slugify_directory("  Code_Review.v2  "),
+        "code_review.v2"
+    );
+    assert_eq!(ops::slugify_directory("--多--空--格--"), "");
+    assert_eq!(ops::slugify_directory("代码审查"), "");
+    // 截断后不残留尾部连字符,且恒满足 is_safe_directory
+    let long = ops::slugify_directory(&"a".repeat(80));
+    assert_eq!(long.len(), 48);
+    assert!(super::store::is_safe_directory(&long));
+    let mixed = ops::slugify_directory("代码审查 code review 中文测试!");
+    assert_eq!(mixed, "code-review");
+}
+
+#[test]
+fn pick_skill_directory_uniquifies_and_falls_back_to_random() {
+    let mut taken = std::collections::HashSet::new();
+    taken.insert("find-skills".to_string());
+    assert_eq!(
+        ops::pick_skill_directory("Find Skills", &taken),
+        "find-skills-2"
+    );
+    taken.insert("find-skills-2".to_string());
+    assert_eq!(
+        ops::pick_skill_directory("Find Skills", &taken),
+        "find-skills-3"
+    );
+    // 纯中文名回退随机 id(sk_ 前缀)
+    let fallback = ops::pick_skill_directory("代码审查", &taken);
+    assert!(fallback.starts_with("sk_"));
+    assert!(super::store::is_safe_directory(&fallback));
+}
+
+#[test]
+fn skill_create_and_import_use_name_based_directories() {
+    let t = temp_lib("dir-name");
+    let s = ops::skill_create(&t.lib, "My Cool Skill", None, vec![], None).unwrap();
+    assert_eq!(s.directory, "my-cool-skill");
+    assert!(t.root.join(DIR_SKILLS).join("my-cool-skill").is_dir());
+    // 同名 slug 被占用时追加序号(!使技能名不同,不会被名称冲突拦截)
+    let s2 = ops::skill_create(&t.lib, "My Cool Skill!", None, vec![], None).unwrap();
+    assert_eq!(s2.directory, "my-cool-skill-2");
+    // 中文技能名回退随机目录
+    let cn = ops::skill_create(&t.lib, "中文技能", None, vec![], None).unwrap();
+    assert!(cn.directory.starts_with("sk_"));
+}
+
+// ── 市场多文件安装与更新检查 ───────────────────────────────────────────
+
+fn market_download(
+    id: &str,
+    repo_dir: &str,
+    files: &[(&str, &str)],
+) -> (
+    super::models::MarketplaceSource,
+    super::models::MarketplaceDownload,
+) {
+    use super::models::{MarketplaceDownload, MarketplaceFile, MarketplaceSource};
+    let skill_md = files
+        .iter()
+        .find(|(path, _)| *path == "SKILL.md" || path.ends_with("/SKILL.md"))
+        .map(|(_, contents)| contents.to_string())
+        .unwrap_or_default();
+    (
+        MarketplaceSource {
+            id: id.into(),
+            source: id
+                .rsplit_once('/')
+                .map(|(prefix, _)| prefix.to_string())
+                .unwrap_or_default(),
+            url: format!("https://skills.sh/{id}"),
+            repo_dir: repo_dir.into(),
+            installed_sha: None,
+            installed_at: None,
+        },
+        MarketplaceDownload {
+            // 模拟 marketplace::download 的输出:路径已改写为相对技能目录
+            files: files
+                .iter()
+                .filter_map(|(path, contents)| {
+                    let relative = if repo_dir.is_empty() {
+                        path.to_string()
+                    } else {
+                        path.strip_prefix(&format!("{repo_dir}/"))?.to_string()
+                    };
+                    Some(MarketplaceFile {
+                        path: relative,
+                        contents: contents.to_string(),
+                    })
+                })
+                .collect(),
+            skill_md,
+            repo_dir: repo_dir.into(),
+        },
+    )
+}
+
+fn skill_file(root: &Path, skill_name: &str, relative: &str) -> PathBuf {
+    let data = lib_json(root).unwrap_or_else(|| panic!("skills.json"));
+    let skill = data.skills.iter().find(|s| s.name == skill_name).unwrap();
+    let mut path = root.join(DIR_SKILLS).join(&skill.directory);
+    for part in relative.split('/') {
+        path = path.join(part);
+    }
+    path
+}
+
+#[test]
+fn write_skill_files_rejects_unsafe_paths_and_accepts_nested() {
+    let t = temp_lib("write-files");
+    let files = vec![("scripts/run.py".to_string(), "print(1)".to_string())];
+    t.lib.write_skill_files("demo", &files).unwrap();
+    assert_eq!(
+        fs::read_to_string(
+            t.root
+                .join(DIR_SKILLS)
+                .join("demo")
+                .join("scripts")
+                .join("run.py")
+        )
+        .unwrap(),
+        "print(1)"
+    );
+    for evil in ["../escape.md", "/abs.md", "a/../../b.md", "a//b.md", ""] {
+        assert!(
+            t.lib
+                .write_skill_files("demo", &[(evil.to_string(), "x".to_string())])
+                .is_err(),
+            "{evil}"
+        );
+    }
+    assert!(super::store::is_safe_relative_path("SKILL.md"));
+    assert!(super::store::is_safe_relative_path("references/api.md"));
+    assert!(!super::store::is_safe_relative_path("a/../b.md"));
+    assert!(!super::store::is_safe_relative_path("/abs"));
+    assert!(!super::store::is_safe_relative_path("含中文.md"));
+}
+
+#[test]
+fn marketplace_install_writes_all_files_and_records_baseline() {
+    let t = temp_lib("market-install-files");
+    let (source, download) = market_download(
+        "owner/repo/code-review",
+        "skills/review",
+        &[
+            (
+                "skills/review/SKILL.md",
+                "---\nname: Code Review\ndescription: 审查\n---\n正文",
+            ),
+            ("skills/review/scripts/run.py", "print(1)"),
+        ],
+    );
+    let skill =
+        ops::skill_import_marketplace(&t.lib, source, download, Some("sha1".into())).unwrap();
+    assert_eq!(
+        fs::read_to_string(skill_file(&t.root, "Code Review", "scripts/run.py")).unwrap(),
+        "print(1)"
+    );
+    // 正文原样落盘(含 frontmatter,name/description 事实源)
+    assert_eq!(
+        skill_body(&t.root, "Code Review"),
+        "---\nname: Code Review\ndescription: 审查\n---\n正文"
+    );
+    let data = lib_json(&t.root).unwrap();
+    let stored = data.skills.iter().find(|s| s.id == skill.id).unwrap();
+    let market = stored.marketplace.as_ref().unwrap();
+    assert_eq!(market.installed_sha.as_deref(), Some("sha1"));
+    assert_eq!(market.repo_dir, "skills/review");
+    assert!(market.installed_at.is_some());
+    assert_eq!(market.source, "owner/repo");
+}
+
+#[test]
+fn marketplace_update_rebuilds_dir_and_refreshes_baseline() {
+    let t = temp_lib("market-update");
+    let (source, download) = market_download(
+        "owner/repo/code-review",
+        "skills/review",
+        &[
+            (
+                "skills/review/SKILL.md",
+                "---\nname: Code Review\ndescription: 旧描述\n---\nv1",
+            ),
+            ("skills/review/old.md", "旧文件"),
+        ],
+    );
+    let skill =
+        ops::skill_import_marketplace(&t.lib, source, download, Some("sha1".into())).unwrap();
+    let commits_before = commit_count(&t.root);
+    let (_, next) = market_download(
+        "owner/repo/code-review",
+        "skills/review",
+        &[
+            (
+                "skills/review/SKILL.md",
+                "---\nname: Renamed\ndescription: 新描述\n---\nv2",
+            ),
+            ("skills/review/new.md", "新文件"),
+        ],
+    );
+    let updated =
+        ops::skill_apply_marketplace_update(&t.lib, &skill.id, next, Some("sha2".into())).unwrap();
+    // name 保持本地名,description 跟随新 frontmatter
+    assert_eq!(updated.name, "Code Review");
+    assert_eq!(updated.description, "新描述");
+    // 整体重建:旧文件清除、新文件写入、正文更新
+    assert!(!skill_file(&t.root, "Code Review", "old.md").exists());
+    assert_eq!(
+        fs::read_to_string(skill_file(&t.root, "Code Review", "new.md")).unwrap(),
+        "新文件"
+    );
+    assert_eq!(
+        skill_body(&t.root, "Code Review"),
+        "---\nname: Renamed\ndescription: 新描述\n---\nv2"
+    );
+    let data = lib_json(&t.root).unwrap();
+    let market = data
+        .skills
+        .iter()
+        .find(|s| s.id == skill.id)
+        .unwrap()
+        .marketplace
+        .as_ref()
+        .unwrap();
+    assert_eq!(market.installed_sha.as_deref(), Some("sha2"));
+    assert!(commit_count(&t.root) > commits_before);
+}
+
+#[test]
+fn update_from_shas_and_baseline_edges() {
+    assert_eq!(ops::update_from_shas(Some("a"), Some("a")), Some(false));
+    assert_eq!(ops::update_from_shas(Some("a"), Some("b")), Some(true));
+    assert_eq!(ops::update_from_shas(Some("a"), None), None);
+    assert_eq!(ops::update_from_shas(None, Some("b")), None);
+}

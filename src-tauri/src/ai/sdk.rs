@@ -164,9 +164,15 @@ pub async fn chat(
     let mut stream = stream_simple(model, context, Some(options), cancel.cloned());
     while stream.next().await.is_some() {}
     let assistant = stream.result().await;
-    if matches!(assistant.stop_reason, StopReason::Error | StopReason::Aborted) {
+    if matches!(
+        assistant.stop_reason,
+        StopReason::Error | StopReason::Aborted
+    ) {
         return Err(map_assistant_error(
-            assistant.error_message.as_deref().unwrap_or("AI request failed"),
+            assistant
+                .error_message
+                .as_deref()
+                .unwrap_or("AI request failed"),
         ));
     }
     let text = assistant
@@ -232,7 +238,10 @@ pub async fn list_models(config: &AiConfig) -> AppResult<Vec<String>> {
             .pointer("/error/message")
             .and_then(Value::as_str)
             .unwrap_or("model list request failed");
-        return Err(map_assistant_error(&format!("{}: {message}", status.as_u16())));
+        return Err(map_assistant_error(&format!(
+            "{}: {message}",
+            status.as_u16()
+        )));
     }
     let mut seen = HashSet::new();
     let mut models: Vec<String> = body
@@ -241,12 +250,39 @@ pub async fn list_models(config: &AiConfig) -> AppResult<Vec<String>> {
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter_map(|model| model.get("id").or_else(|| model.get("name")).and_then(Value::as_str))
+        .filter_map(|model| {
+            model
+                .get("id")
+                .or_else(|| model.get("name"))
+                .and_then(Value::as_str)
+        })
         .map(|id| id.strip_prefix("models/").unwrap_or(id).trim().to_string())
         .filter(|id| !id.is_empty() && seen.insert(id.clone()))
         .collect();
     models.sort();
     Ok(models)
+}
+
+/// 模型偶尔无视提示词里「不要代码围栏」的约定,把整条输出包进 ``` 围栏;
+/// 提交信息等纯文本消费方需要兜底剥离。只剥离首尾成对的围栏行,
+/// 正文内部出现的围栏原样保留。
+pub fn strip_code_fence(text: &str) -> String {
+    let trimmed = text.trim();
+    if !trimmed.starts_with("```") {
+        return trimmed.to_string();
+    }
+    let Some(first_line_end) = trimmed.find('\n') else {
+        // 单行形态:```message``` / ``` message
+        return trimmed
+            .trim_start_matches('`')
+            .trim_end_matches('`')
+            .trim()
+            .to_string();
+    };
+    // 首行其余部分是可选的语言标记,随围栏一起丢弃
+    let body = trimmed[first_line_end + 1..].trim_end();
+    let body = body.strip_suffix("```").unwrap_or(body);
+    body.trim().to_string()
 }
 
 pub fn strip_thinking(text: &str) -> String {
@@ -294,9 +330,15 @@ mod tests {
             ai_api_key: "key".into(),
             ..Default::default()
         };
-        assert_eq!(model_list_url(&config).unwrap(), "https://example.com/models");
+        assert_eq!(
+            model_list_url(&config).unwrap(),
+            "https://example.com/models"
+        );
         config.api = API_ANTHROPIC_MESSAGES.into();
-        assert_eq!(model_list_url(&config).unwrap(), "https://example.com/v1/models");
+        assert_eq!(
+            model_list_url(&config).unwrap(),
+            "https://example.com/v1/models"
+        );
         config.api = API_GOOGLE_GENERATIVE_AI.into();
         assert_eq!(
             model_list_url(&config).unwrap(),
@@ -324,5 +366,36 @@ mod tests {
             "body <think>keep</think>"
         );
         assert_eq!(strip_thinking("<think>unfinished"), "");
+    }
+
+    #[test]
+    fn strip_code_fence_removes_wrapping_only() {
+        assert_eq!(
+            strip_code_fence("```md\n✨ feat: add dark mode\n```"),
+            "✨ feat: add dark mode"
+        );
+        assert_eq!(
+            strip_code_fence("```\n✨ feat: x\n\n- body line\n```"),
+            "✨ feat: x\n\n- body line"
+        );
+        assert_eq!(
+            strip_code_fence("```✨ feat: single line```"),
+            "✨ feat: single line"
+        );
+        assert_eq!(
+            strip_code_fence("```\n✨ feat: unclosed"),
+            "✨ feat: unclosed"
+        );
+        // 未被围栏包裹的输出原样返回
+        assert_eq!(strip_code_fence("✨ feat: plain"), "✨ feat: plain");
+        assert_eq!(
+            strip_code_fence("✨ feat: x\n\n- body with ``` inline fence"),
+            "✨ feat: x\n\n- body with ``` inline fence"
+        );
+        // 正文内部的围栏(如 diff 示例)不受影响
+        assert_eq!(
+            strip_code_fence("```\n✨ feat: x\n\n```diff\n- a\n```\n```"),
+            "✨ feat: x\n\n```diff\n- a\n```"
+        );
     }
 }

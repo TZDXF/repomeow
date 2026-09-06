@@ -121,11 +121,46 @@ pub struct SkillLibrary {
 
 /// skills.sh 市场中单项 Skill 的稳定来源标识，随本地 Skill 同步保存。
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct MarketplaceSource {
     pub id: String,
     pub source: String,
     pub url: String,
+    /// 技能在 GitHub 仓库内的目录（仓库相对路径，`/` 分隔）；空串 = 仓库根
+    pub repo_dir: String,
+    /// 安装/最近一次更新时该目录的 GitHub commit sha；空 = 未知（安装时 GitHub 不可用或旧数据）
+    pub installed_sha: Option<String>,
+    /// 最近一次从市场安装/更新的时间戳
+    pub installed_at: Option<i64>,
+}
+
+impl Default for MarketplaceSource {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            source: String::new(),
+            url: String::new(),
+            repo_dir: String::new(),
+            installed_sha: None,
+            installed_at: None,
+        }
+    }
+}
+
+/// 市场下载结果:SKILL.md 所在目录下的全部文件,`path` 为相对该目录的
+/// 安全相对路径(`/` 分隔);`repo_dir` 是该目录在 GitHub 仓库内的路径,根级为空串
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketplaceFile {
+    pub path: String,
+    pub contents: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct MarketplaceDownload {
+    pub files: Vec<MarketplaceFile>,
+    pub skill_md: String,
+    pub repo_dir: String,
 }
 
 /// 市场卡片的最小展示数据。目录页面没有稳定描述字段，导入时以 SKILL.md frontmatter 为准。
@@ -145,6 +180,17 @@ pub struct MarketplaceSkill {
 #[serde(rename_all = "camelCase", default)]
 pub struct MarketplaceList {
     pub skills: Vec<MarketplaceSkill>,
+}
+
+/// 单个已安装市场技能的更新检查结果;`update_available` 为 None 表示无法判断
+/// (GitHub 查询失败 / 旧数据且内容比对未完成),error_code 为稳定字符串码
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketplaceUpdateStatus {
+    pub skill_id: String,
+    pub marketplace_id: String,
+    pub update_available: Option<bool>,
+    pub error_code: Option<String>,
 }
 
 // ── MCP ────────────────────────────────────────────────────────────────

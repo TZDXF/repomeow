@@ -200,7 +200,8 @@ pub async fn ai_generate_commit_message(
         &output,
         started.elapsed().as_millis() as i64,
     );
-    Ok(Some(output.text))
+    // 模型偶尔无视提示词仍用 ``` 围栏包裹提交信息,返回前兜底剥离
+    Ok(Some(sdk::strip_code_fence(&output.text)))
 }
 
 #[cfg(test)]

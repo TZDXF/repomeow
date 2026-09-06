@@ -34,7 +34,8 @@ use tauri::{AppHandle, Emitter};
 
 use crate::error::{AppError, ErrorCode};
 
-use models::{SyncOutcome, SyncRecord};
+use errors::codes;
+use models::{MarketplaceUpdateStatus, SyncOutcome, SyncRecord};
 use store::{lock_op, Library};
 
 /// 后台自动同步完成事件(负载为 SyncOutcome)
@@ -313,8 +314,45 @@ pub async fn rl_marketplace_list(
 #[tauri::command]
 pub async fn rl_marketplace_install(app: AppHandle, id: String) -> RlResult<Skill> {
     mutate(&app, move |lib| {
-        let (source, body) = marketplace::download(&id)?;
-        ops::skill_import_marketplace(lib, source, body)
+        let download = marketplace::download(&id)?;
+        let source = marketplace::source_for(&id, &download.repo_dir)?;
+        // 安装基线:GitHub 查询失败不阻断安装,留 None 由检查更新时回填
+        let installed_sha = marketplace::latest_commit_sha(&source.source, &source.repo_dir)
+            .ok()
+            .flatten();
+        ops::skill_import_marketplace(lib, source, download, installed_sha)
+    })
+    .await
+}
+
+/// 逐技能检查市场更新;单技能失败只记录 error_code,不整体报错
+#[tauri::command]
+pub async fn rl_marketplace_check_updates(
+    app: AppHandle,
+) -> RlResult<Vec<MarketplaceUpdateStatus>> {
+    let lib = Library::app(&app)?;
+    blocking(move || {
+        let _guard = lock_op();
+        ops::skill_check_marketplace_updates(&lib)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn rl_marketplace_update_skill(app: AppHandle, id: String) -> RlResult<Skill> {
+    mutate(&app, move |lib| {
+        let data = ops::skill_list(lib)?;
+        let marketplace = data
+            .skills
+            .iter()
+            .find(|skill| skill.id == id)
+            .and_then(|skill| skill.marketplace.clone())
+            .ok_or_else(|| RlError::coded(codes::MARKETPLACE_SKILL_INVALID, id.clone()))?;
+        let download = marketplace::download(&marketplace.id)?;
+        let installed_sha = marketplace::latest_commit_sha(&marketplace.source, &download.repo_dir)
+            .ok()
+            .flatten();
+        ops::skill_apply_marketplace_update(lib, &id, download, installed_sha)
     })
     .await
 }

@@ -3,15 +3,18 @@ import { computed, onActivated, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
+  ArrowUpCircle,
   ChevronDown,
   ChevronUp,
   Download,
+  ExternalLink,
   FileArchive,
   FolderOpen,
   Layers,
   Link2,
-  Pencil,
+  RefreshCw,
   Search,
   Trash2,
 } from "@lucide/vue";
@@ -33,6 +36,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
+  checkResourceMarketplaceUpdates,
   deleteResourceSkill,
   filterSkills,
   importResourceSkillArchive,
@@ -42,14 +46,16 @@ import {
   mergeReorderedVisible,
   openResourceSkillDir,
   reorderResourceSkills,
+  updateResourceMarketplaceSkill,
+  type ResourceMarketplaceUpdateStatus,
   type ResourceSkill,
   type ResourceSkillGroup,
   type ResourceSkillImportOutcome,
 } from "@/lib/resource-library";
-import ResourceSkillEditDialog from "./ResourceSkillEditDialog.vue";
 import ResourceSkillGroupsDialog from "./ResourceSkillGroupsDialog.vue";
+import ResourceSkillPreviewDialog from "./ResourceSkillPreviewDialog.vue";
 
-const { t } = useI18n();
+const { t, te } = useI18n();
 
 const loading = ref(true);
 const groups = ref<ResourceSkillGroup[]>([]);
@@ -57,8 +63,7 @@ const skills = ref<ResourceSkill[]>([]);
 const query = ref("");
 const activeGroupId = ref<string | null>(null);
 
-const editDialogOpen = ref(false);
-const editingSkill = ref<ResourceSkill | null>(null);
+const previewSkill = ref<ResourceSkill | null>(null);
 const groupsDialogOpen = ref(false);
 const pendingDelete = ref<ResourceSkill | null>(null);
 
@@ -67,8 +72,94 @@ const urlDialogOpen = ref(false);
 const urlInput = ref("");
 const urlSubmitting = ref(false);
 
+// 市场技能更新状态:skillId → true=有更新 / false=已最新 / null=无法判断
+const checkingUpdates = ref(false);
+const updatingIds = ref<string[]>([]);
+const updateStatus = ref(new Map<string, boolean | null>());
+
+const marketplaceSkillCount = computed(
+  () => skills.value.filter((skill) => skill.marketplace).length,
+);
+
+function isUpdating(skillId: string): boolean {
+  return updatingIds.value.includes(skillId);
+}
+
+/** 检查结果错误码 → 文案;沿用 errors.<code> i18n 通道 */
+function statusMessage(status: ResourceMarketplaceUpdateStatus): string {
+  if (status.errorCode && te(`errors.${status.errorCode}`)) {
+    return t(`errors.${status.errorCode}`);
+  }
+  return t("settings.resources.skills.updateCheckFailed");
+}
+
+async function checkUpdates() {
+  if (checkingUpdates.value || marketplaceSkillCount.value === 0) {
+    return;
+  }
+  checkingUpdates.value = true;
+  try {
+    const statuses = await checkResourceMarketplaceUpdates();
+    const next = new Map<string, boolean | null>();
+    const failed: string[] = [];
+    let available = 0;
+    for (const status of statuses) {
+      next.set(status.skillId, status.updateAvailable);
+      if (status.updateAvailable) {
+        available += 1;
+      }
+      if (status.updateAvailable === null) {
+        failed.push(statusMessage(status));
+      }
+    }
+    updateStatus.value = next;
+    if (available > 0) {
+      toast.success(t("settings.resources.skills.updateFound", { count: available }));
+    } else if (failed.length) {
+      toast.warning(failed[0]);
+    } else {
+      toast.success(t("settings.resources.skills.upToDate"));
+    }
+  } catch (e) {
+    toast.error(String(e));
+  } finally {
+    checkingUpdates.value = false;
+  }
+}
+
+async function applyUpdate(skill: ResourceSkill) {
+  if (updatingIds.value.includes(skill.id)) {
+    return;
+  }
+  updatingIds.value = [...updatingIds.value, skill.id];
+  try {
+    await updateResourceMarketplaceSkill(skill.id);
+    updateStatus.value = new Map(updateStatus.value).set(skill.id, false);
+    toast.success(t("settings.resources.skills.updateDone", { name: skill.name }));
+    await load();
+  } catch (e) {
+    toast.error(t("settings.resources.skills.updateFailed", { error: String(e) }));
+  } finally {
+    updatingIds.value = updatingIds.value.filter((id) => id !== skill.id);
+  }
+}
+
+function openSourcePage(skill: ResourceSkill) {
+  if (skill.marketplace?.url) {
+    openUrl(skill.marketplace.url).catch((e) => toast.error(String(e)));
+  }
+}
+
 const filtered = computed(() => filterSkills(skills.value, query.value, activeGroupId.value));
 const groupMap = computed(() => new Map(groups.value.map((g) => [g.id, g])));
+const previewOpen = computed({
+  get: () => previewSkill.value !== null,
+  set: (v) => {
+    if (!v) {
+      previewSkill.value = null;
+    }
+  },
+});
 const deleteConfirmOpen = computed({
   get: () => pendingDelete.value !== null,
   set: (v) => {
@@ -97,11 +188,6 @@ async function load() {
 // 本页固定在 KeepAlive 内:onActivated 首次挂载与每次切回都会触发,
 // 从市场标签页安装技能后切回即可看到新技能(KeepAlive 不会重跑 onMounted)
 onActivated(load);
-
-function openEdit(skill: ResourceSkill) {
-  editingSkill.value = skill;
-  editDialogOpen.value = true;
-}
 
 /** 导入结果外显:成功条数 + 逐条跳过原因;返回是否导入了至少一个技能 */
 function announce(outcome: ResourceSkillImportOutcome): boolean {
@@ -257,6 +343,24 @@ async function confirmDelete() {
         />
       </div>
       <Button
+        v-if="marketplaceSkillCount > 0"
+        variant="outline"
+        size="sm"
+        class="h-8 shrink-0 gap-1.5"
+        :disabled="checkingUpdates"
+        :title="t('settings.resources.skills.checkUpdatesHint', { count: marketplaceSkillCount })"
+        @click="checkUpdates"
+      >
+        <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': checkingUpdates }" />
+        {{
+          t(
+            checkingUpdates
+              ? "settings.resources.skills.checkingUpdates"
+              : "settings.resources.skills.checkUpdates",
+          )
+        }}
+      </Button>
+      <Button
         variant="outline"
         size="sm"
         class="h-8 shrink-0 gap-1.5"
@@ -326,7 +430,13 @@ async function confirmDelete() {
       {{ t("common.loading") }}
     </p>
     <div v-else-if="filtered.length" class="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
-      <div v-for="(skill, index) in filtered" :key="skill.id" class="group rounded-lg border p-3">
+      <div
+        v-for="(skill, index) in filtered"
+        :key="skill.id"
+        class="group cursor-pointer rounded-lg border p-3 transition-colors hover:border-foreground/40"
+        :title="t('settings.resources.skills.preview')"
+        @click="previewSkill = skill"
+      >
         <div class="flex items-start justify-between gap-2">
           <p class="min-w-0 truncate text-sm font-medium" :title="skill.name">{{ skill.name }}</p>
           <span
@@ -338,7 +448,7 @@ async function confirmDelete() {
               class="h-7 w-7"
               :disabled="index === 0"
               :title="t('settings.resources.skills.up')"
-              @click="moveSkill(skill, -1)"
+              @click.stop="moveSkill(skill, -1)"
             >
               <ChevronUp class="h-3.5 w-3.5" />
             </Button>
@@ -348,25 +458,16 @@ async function confirmDelete() {
               class="h-7 w-7"
               :disabled="index === filtered.length - 1"
               :title="t('settings.resources.skills.down')"
-              @click="moveSkill(skill, 1)"
+              @click.stop="moveSkill(skill, 1)"
             >
               <ChevronDown class="h-3.5 w-3.5" />
             </Button>
             <Button
               variant="ghost"
               size="icon"
-              class="h-7 w-7"
-              :title="t('settings.resources.skills.edit')"
-              @click="openEdit(skill)"
-            >
-              <Pencil class="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
               class="h-7 w-7 text-destructive"
               :title="t('settings.resources.skills.delete')"
-              @click="pendingDelete = skill"
+              @click.stop="pendingDelete = skill"
             >
               <Trash2 class="h-3.5 w-3.5" />
             </Button>
@@ -376,7 +477,7 @@ async function confirmDelete() {
           {{ skill.description }}
         </p>
         <div class="mt-2 flex items-center justify-between gap-2">
-          <div class="flex min-w-0 flex-wrap gap-1.5">
+          <div class="flex min-w-0 flex-wrap items-center gap-1.5">
             <span
               v-for="groupId in skill.groupIds"
               :key="groupId"
@@ -390,16 +491,48 @@ async function confirmDelete() {
               />
               {{ groupMap.get(groupId)?.name ?? groupId }}
             </span>
+            <button
+              v-if="skill.marketplace"
+              type="button"
+              class="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              :title="
+                t('settings.resources.skills.openSource', { source: skill.marketplace.source })
+              "
+              @click.stop="openSourcePage(skill)"
+            >
+              <ExternalLink class="h-3 w-3" />
+              {{ skill.marketplace.source }}
+            </button>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            class="h-7 shrink-0 gap-1 px-2 text-xs text-muted-foreground"
-            @click="openDir(skill)"
-          >
-            <FolderOpen class="h-3.5 w-3.5" />
-            {{ t("settings.resources.skills.openDir") }}
-          </Button>
+          <div class="flex shrink-0 items-center gap-1">
+            <Button
+              v-if="updateStatus.get(skill.id) === true"
+              variant="outline"
+              size="sm"
+              class="h-7 gap-1 border-amber-500/50 px-2 text-xs text-amber-600 dark:text-amber-400"
+              :disabled="isUpdating(skill.id)"
+              :title="t('settings.resources.skills.updateAvailableHint')"
+              @click.stop="applyUpdate(skill)"
+            >
+              <ArrowUpCircle class="h-3.5 w-3.5" />
+              {{
+                t(
+                  isUpdating(skill.id)
+                    ? "settings.resources.skills.updating"
+                    : "settings.resources.skills.update",
+                )
+              }}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              class="h-7 shrink-0 gap-1 px-2 text-xs text-muted-foreground"
+              @click.stop="openDir(skill)"
+            >
+              <FolderOpen class="h-3.5 w-3.5" />
+              {{ t("settings.resources.skills.openDir") }}
+            </Button>
+          </div>
         </div>
       </div>
     </div>
@@ -414,12 +547,10 @@ async function confirmDelete() {
       }}
     </p>
 
-    <ResourceSkillEditDialog
-      v-if="editingSkill"
-      v-model:open="editDialogOpen"
-      :groups="groups"
-      :skill="editingSkill"
-      @saved="load"
+    <ResourceSkillPreviewDialog
+      v-if="previewSkill"
+      v-model:open="previewOpen"
+      :skill="previewSkill"
     />
     <ResourceSkillGroupsDialog v-model:open="groupsDialogOpen" :groups="groups" @changed="load" />
     <ConfirmDialog

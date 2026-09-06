@@ -14,11 +14,16 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::errors::{codes, RlError, RlResult};
-use super::models::{MarketplaceList, MarketplaceSkill, MarketplaceSource};
+use super::models::{
+    MarketplaceDownload, MarketplaceFile, MarketplaceList, MarketplaceSkill, MarketplaceSource,
+};
+use super::store::is_safe_relative_path;
 
 const SKILLS_HOST: &str = "https://skills.sh";
+const GITHUB_HOST: &str = "https://api.github.com";
 const MAX_CATALOG_BYTES: u64 = 2 * 1024 * 1024;
-const MAX_SKILL_BYTES: u64 = 512 * 1024;
+/// 多文件技能包(脚本/参考文件)可能远大于单个 SKILL.md
+const MAX_SKILL_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_RESULTS: usize = 100;
 
 #[derive(Debug, Deserialize)]
@@ -49,6 +54,18 @@ struct DownloadResponse {
     content: String,
     #[serde(default)]
     skill: Option<DownloadSkill>,
+    /// 当前接口格式:多文件列表,path 为仓库内相对路径,SKILL.md 位置不固定。
+    #[serde(default)]
+    files: Vec<DownloadFile>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DownloadFile {
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    contents: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -129,6 +146,20 @@ pub(super) fn parse_marketplace_id(id: &str) -> RlResult<(&str, &str, &str)> {
 
 fn marketplace_url(id: &str) -> String {
     format!("{SKILLS_HOST}/{id}")
+}
+
+/// 由市场条目 id 与下载结果组装随本地技能落库的来源标识
+/// (repo_dir 来自 SKILL.md 在仓库内的实际位置;安装基线由调用方回填)
+pub(super) fn source_for(id: &str, repo_dir: &str) -> RlResult<MarketplaceSource> {
+    let (owner, repo, slug) = parse_marketplace_id(id)?;
+    Ok(MarketplaceSource {
+        id: format!("{owner}/{repo}/{slug}"),
+        source: format!("{owner}/{repo}"),
+        url: marketplace_url(&format!("{owner}/{repo}/{slug}")),
+        repo_dir: repo_dir.to_string(),
+        installed_sha: None,
+        installed_at: None,
+    })
 }
 
 fn skill_from_parts(
@@ -367,49 +398,149 @@ pub(super) fn browse(mode: &str) -> RlResult<MarketplaceList> {
     Ok(MarketplaceList { skills })
 }
 
-/// 下载单个市场 Skill。接口响应形状有过演进，兼容顶层 content 与嵌套 skill 内容，
-/// 但始终只接受一个 UTF-8 SKILL.md 字符串。
-pub(super) fn download(id: &str) -> RlResult<(MarketplaceSource, String)> {
+/// 从多文件列表中定位 SKILL.md 并把其所在目录下的文件改写为相对路径。
+/// 返回 (文件列表, SKILL.md 正文, 技能目录在仓库内的路径);列表为空或
+/// 找不到 SKILL.md 时返回 None,由调用方落到旧格式兼容层。
+fn split_skill_files(files: &[DownloadFile]) -> Option<(Vec<MarketplaceFile>, String, String)> {
+    let entry = files
+        .iter()
+        .find(|file| file.path == "SKILL.md")
+        .or_else(|| files.iter().find(|file| file.path.ends_with("/SKILL.md")))
+        .filter(|entry| !entry.contents.trim().is_empty())?;
+    let (repo_dir, prefix) = match entry.path.rsplit_once('/') {
+        Some((dir, _)) => (dir, format!("{dir}/")),
+        None => ("", String::new()),
+    };
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for file in files {
+        if file.contents.is_empty() || file.path.is_empty() || !seen.insert(file.path.clone()) {
+            continue;
+        }
+        let Some(relative) = file.path.strip_prefix(&prefix) else {
+            continue;
+        };
+        if relative.is_empty() || !is_safe_relative_path(relative) {
+            continue;
+        }
+        out.push(MarketplaceFile {
+            path: relative.to_string(),
+            contents: file.contents.clone(),
+        });
+    }
+    if out.is_empty() {
+        return None;
+    }
+    let skill_md = out
+        .iter()
+        .find(|file| file.path == "SKILL.md")
+        .map(|file| file.contents.clone())?;
+    Some((out, skill_md, repo_dir.to_string()))
+}
+
+/// 下载单个市场 Skill 的完整文件集。接口响应形状有过演进:当前为多文件列表
+/// (`files[].path`/`files[].contents`,SKILL.md 位置不固定),历史上还有顶层
+/// content 与嵌套 skill 内容两种;始终取 SKILL.md 所在目录下的全部文件。
+pub(super) fn download(id: &str) -> RlResult<MarketplaceDownload> {
     let (owner, repo, slug) = parse_marketplace_id(id)?;
     let url = format!("{SKILLS_HOST}/api/download/{owner}/{repo}/{slug}");
     let response = client()?
-        .get(url)
+        .get(&url)
         .send()
         .map_err(|err| RlError::coded(codes::MARKETPLACE_UNAVAILABLE, err.to_string()))?;
     if !response.status().is_success() {
         return Err(RlError::coded(
             codes::MARKETPLACE_UNAVAILABLE,
-            response.status().to_string(),
+            format!("{} {url}", response.status()),
         ));
     }
     let bytes = read_limited(response, MAX_SKILL_BYTES)?;
     let data: DownloadResponse = serde_json::from_slice(&bytes)
         .map_err(|err| RlError::coded(codes::MARKETPLACE_INVALID_RESPONSE, err.to_string()))?;
-    let content = if !data.content.is_empty() {
-        data.content
-    } else if let Some(skill) = data.skill {
-        if !skill.content.is_empty() {
-            skill.content
+    let (files, skill_md, repo_dir) =
+        if let Some((files, skill_md, repo_dir)) = split_skill_files(&data.files) {
+            (files, skill_md, repo_dir)
         } else {
-            skill.markdown
-        }
-    } else {
-        String::new()
-    };
-    if content.trim().is_empty() {
-        return Err(RlError::coded(
-            codes::MARKETPLACE_INVALID_RESPONSE,
-            "下载结果没有 SKILL.md",
-        ));
+            // 旧格式:响应里只有 SKILL.md 正文,视为仓库根级单文件技能
+            let content = if !data.content.is_empty() {
+                data.content
+            } else if let Some(skill) = data.skill {
+                if !skill.content.is_empty() {
+                    skill.content
+                } else {
+                    skill.markdown
+                }
+            } else {
+                String::new()
+            };
+            if content.trim().is_empty() {
+                return Err(RlError::coded(
+                    codes::MARKETPLACE_INVALID_RESPONSE,
+                    "下载结果没有 SKILL.md",
+                ));
+            }
+            (
+                vec![MarketplaceFile {
+                    path: "SKILL.md".to_string(),
+                    contents: content.clone(),
+                }],
+                content,
+                String::new(),
+            )
+        };
+    Ok(MarketplaceDownload {
+        files,
+        skill_md,
+        repo_dir: repo_dir.to_string(),
+    })
+}
+
+fn github_owner_repo(source: &str) -> Option<(&str, &str)> {
+    let (owner, repo) = source.split_once('/')?;
+    (source.matches('/').count() == 1 && validate_part(owner) && validate_part(repo))
+        .then_some((owner, repo))
+}
+
+/// GitHub commits 响应解析:取数组首项的 sha;数组为空或形状不符返回 None。
+fn first_commit_sha(bytes: &[u8]) -> Option<String> {
+    let value: Value = serde_json::from_slice(bytes).ok()?;
+    value
+        .as_array()?
+        .first()?
+        .get("sha")?
+        .as_str()
+        .map(str::to_string)
+}
+
+/// 查询技能目录在 GitHub 上的最新 commit sha(未登录 API,60 次/小时)。
+/// 仓库不存在返回 Ok(None);限流单独报错,便于前端给出明确文案。
+pub(super) fn latest_commit_sha(source: &str, repo_dir: &str) -> RlResult<Option<String>> {
+    let (owner, repo) = github_owner_repo(source)
+        .ok_or_else(|| RlError::coded(codes::MARKETPLACE_SOURCE_INVALID, source.to_string()))?;
+    let mut request = client()?
+        .get(format!("{GITHUB_HOST}/repos/{owner}/{repo}/commits"))
+        .query(&[("per_page", "1")]);
+    if !repo_dir.is_empty() {
+        request = request.query(&[("path", repo_dir)]);
     }
-    Ok((
-        MarketplaceSource {
-            id: format!("{owner}/{repo}/{slug}"),
-            source: format!("{owner}/{repo}"),
-            url: marketplace_url(&format!("{owner}/{repo}/{slug}")),
-        },
-        content,
-    ))
+    let response = request
+        .send()
+        .map_err(|err| RlError::coded(codes::MARKETPLACE_UNAVAILABLE, err.to_string()))?;
+    match response.status() {
+        status if status.as_u16() == 403 || status.as_u16() == 429 => Err(RlError::coded(
+            codes::MARKETPLACE_RATE_LIMITED,
+            status.to_string(),
+        )),
+        status if status.as_u16() == 404 => Ok(None),
+        status if !status.is_success() => Err(RlError::coded(
+            codes::MARKETPLACE_UNAVAILABLE,
+            status.to_string(),
+        )),
+        _ => {
+            let bytes = read_limited(response, MAX_CATALOG_BYTES)?;
+            Ok(first_commit_sha(&bytes))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -489,5 +620,103 @@ mod tests {
             entries.iter().map(|item| item.installs).collect::<Vec<_>>(),
             [3, 4]
         );
+    }
+
+    #[test]
+    fn download_prefers_skill_md_in_files_list() {
+        let data: DownloadResponse = serde_json::from_str(
+            r#"{"hash":"abc","files":[{"path":"README.md","contents":"readme"},{"path":"rules/x.md","contents":"rule"},{"path":"SKILL.md","contents":"---\nname: ok\n---"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(data.files.len(), 3);
+        let entry = data
+            .files
+            .iter()
+            .find(|file| file.path == "SKILL.md")
+            .expect("SKILL.md entry");
+        assert!(entry.contents.starts_with("---\nname: ok"));
+    }
+
+    #[test]
+    fn download_parses_nested_files_format() {
+        let bytes = br#"{"files":[{"path":"AGENTS.md","contents":"agent"},{"path":"skills/main/SKILL.md","contents":"nested"}],"hash":"x"}"#;
+        let data: DownloadResponse = serde_json::from_slice(bytes).unwrap();
+        let entry = data
+            .files
+            .iter()
+            .find(|file| file.path.ends_with("/SKILL.md"))
+            .expect("nested SKILL.md entry");
+        assert_eq!(entry.contents, "nested");
+    }
+
+    fn file(path: &str, contents: &str) -> DownloadFile {
+        DownloadFile {
+            path: path.to_string(),
+            contents: contents.to_string(),
+        }
+    }
+
+    #[test]
+    fn split_keeps_only_files_under_skill_md_dir_and_rewrites_paths() {
+        let files = vec![
+            file("README.md", "仓库根说明,不属于该技能"),
+            file("skills/main/SKILL.md", "---\nname: main\n---"),
+            file("skills/main/scripts/run.py", "print(1)"),
+            file("skills/main/references/api.md", "# api"),
+        ];
+        let (out, skill_md, repo_dir) = split_skill_files(&files).expect("split");
+        assert_eq!(repo_dir, "skills/main");
+        assert_eq!(skill_md, "---\nname: main\n---");
+        let paths: Vec<_> = out.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["SKILL.md", "scripts/run.py", "references/api.md"]);
+    }
+
+    #[test]
+    fn split_root_level_skill_keeps_all_repo_files() {
+        let files = vec![
+            file("SKILL.md", "---\nname: root\n---"),
+            file("scripts/run.sh", "echo"),
+        ];
+        let (out, _, repo_dir) = split_skill_files(&files).expect("split");
+        assert_eq!(repo_dir, "");
+        let paths: Vec<_> = out.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["SKILL.md", "scripts/run.sh"]);
+    }
+
+    #[test]
+    fn split_falls_back_to_none_without_usable_skill_md() {
+        assert!(split_skill_files(&[file("README.md", "x")]).is_none());
+        assert!(split_skill_files(&[file("a/b/SKILL.md", "  ")]).is_none());
+    }
+
+    #[test]
+    fn split_dedupes_and_skips_unsafe_paths() {
+        let files = vec![
+            file("SKILL.md", "---\nname: x\n---"),
+            file("../escape.md", "evil"),
+            file("SKILL.md", "duplicate ignored"),
+        ];
+        let (out, _, _) = split_skill_files(&files).expect("split");
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].path, "SKILL.md");
+    }
+
+    #[test]
+    fn first_commit_sha_parses_github_commits_array() {
+        let sha = first_commit_sha(br#"[{"sha":"abc123def","commit":{"message":"x"}}]"#);
+        assert_eq!(sha.as_deref(), Some("abc123def"));
+        assert!(first_commit_sha(b"[]").is_none());
+        assert!(first_commit_sha(b"not json").is_none());
+    }
+
+    #[test]
+    fn source_for_builds_stable_identity() {
+        let source = source_for("owner/repo/code-review", "skills/review").unwrap();
+        assert_eq!(source.id, "owner/repo/code-review");
+        assert_eq!(source.source, "owner/repo");
+        assert_eq!(source.url, "https://skills.sh/owner/repo/code-review");
+        assert_eq!(source.repo_dir, "skills/review");
+        assert!(source.installed_sha.is_none());
+        assert!(source_for("bad id", "").is_err());
     }
 }

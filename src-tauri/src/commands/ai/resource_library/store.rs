@@ -47,6 +47,25 @@ pub fn is_safe_directory(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
 }
 
+/// 仓库内相对路径白名单(`/` 分隔):拒绝空段、`.`/`..`、绝对路径与首尾分隔符,
+/// 组件级校验防目录穿越;市场下载与 write_skill_files 共用
+pub fn is_safe_relative_path(path: &str) -> bool {
+    !path.is_empty()
+        && !path.starts_with('/')
+        && !path.ends_with('/')
+        && path
+            .split('/')
+            .all(|part| part != ".." && part != "." && is_safe_directory_component(part))
+}
+
+fn is_safe_directory_component(part: &str) -> bool {
+    !part.is_empty()
+        && part.len() <= 100
+        && part
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+}
+
 /// 全模块互斥:串行化库数据读写(短临界区,不含网络操作)
 static OP_LOCK: Mutex<()> = Mutex::new(());
 
@@ -232,6 +251,29 @@ impl Library {
     pub fn write_body(&self, directory: &str, content: &str) -> RlResult<()> {
         let path = self.body_path(directory)?;
         self.atomic_write(&path, content.as_bytes())
+    }
+
+    /// 市场技能的多文件写入:在 skills/<directory>/ 下按相对路径逐文件原子落盘,
+    /// 路径经 is_safe_relative_path 白名单校验,防目录穿越
+    pub fn write_skill_files(&self, directory: &str, files: &[(String, String)]) -> RlResult<()> {
+        if !is_safe_directory(directory) {
+            return Err(RlError::coded(
+                codes::DIRECTORY_INVALID,
+                directory.to_string(),
+            ));
+        }
+        let base = self.root.join(DIR_SKILLS).join(directory);
+        for (path, contents) in files {
+            if !is_safe_relative_path(path) {
+                return Err(RlError::coded(codes::DIRECTORY_INVALID, path.clone()));
+            }
+            let mut target = base.clone();
+            for component in path.split('/') {
+                target = target.join(component);
+            }
+            self.atomic_write(&target, contents.as_bytes())?;
+        }
+        Ok(())
     }
 
     /// 技能目录重命名(directory 变化时迁移正文)
