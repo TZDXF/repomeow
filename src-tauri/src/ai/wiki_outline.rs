@@ -94,7 +94,8 @@ impl From<LenientOutlineDocument> for OutlineDocument {
 
 /// 从可能夹带前言/围栏/尾缀的文本中提取第一个完整平衡的 JSON 对象
 /// (字符串字面量与转义正确跳过)。找不到返回 None。
-fn extract_json_object(text: &str) -> Option<&str> {
+/// pub(crate):资源库技能安全扫描的 LLM 输出解析复用同一容错提取。
+pub(crate) fn extract_json_object(text: &str) -> Option<&str> {
     let start = text.find('{')?;
     let mut depth = 0usize;
     let mut in_string = false;

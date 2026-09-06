@@ -13,6 +13,8 @@ pub const AGENT_WIKI_PAGE_PROMPT: &str = include_str!("prompts/wiki-agent-page.m
 pub const BUILTIN_AGENT_WIKI_PAGE_PROMPT: &str = include_str!("prompts/wiki-builtin-agent-page.md");
 /// 翻译提示词:固定模板,不进提示词管理(输出结构强耦合 Markdown 渲染)。
 pub const DEFAULT_TRANSLATE_PROMPT: &str = include_str!("prompts/translate.md");
+/// 技能安全扫描的语义层提示词:固定模板(反越狱框架与 JSON 输出强耦合)。
+pub const DEFAULT_SKILL_SCAN_PROMPT: &str = include_str!("prompts/skill-scan.md");
 
 pub fn language_name(language: &str) -> &'static str {
     if language == "zh-CN" {
@@ -37,8 +39,7 @@ pub fn effective_system_prompt_at(
     fallback: &str,
     language: &str,
 ) -> String {
-    let custom = fs::read_to_string(data_dir.join("prompts").join(custom_file))
-        .unwrap_or_default();
+    let custom = fs::read_to_string(data_dir.join("prompts").join(custom_file)).unwrap_or_default();
     fixed_system_prompt(
         if custom.trim().is_empty() {
             fallback
