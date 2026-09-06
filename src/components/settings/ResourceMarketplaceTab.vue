@@ -3,15 +3,7 @@ import { computed, onActivated, onDeactivated, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { toast } from "vue-sonner";
-import {
-  Check,
-  ChevronDown,
-  Download,
-  ExternalLink,
-  FolderOpen,
-  RotateCw,
-  Search,
-} from "@lucide/vue";
+import { Check, ChevronDown, Download, ExternalLink, RotateCw, Search } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,7 +14,6 @@ import {
   listResourceMarketplaceSkills,
   markMarketplaceInstalled,
   mergeMarketplaceSources,
-  openResourceSkillDir,
   type ResourceMarketplaceSkill,
   type ResourceMarketplaceSource,
 } from "@/lib/resource-library";
@@ -47,8 +38,8 @@ type MarketplaceSnapshot = {
 };
 /** 无关键词的榜单按模式缓存；搜索结果仍每次向市场查询。 */
 const browseCache = new Map<"all" | "trending" | "hot", MarketplaceSnapshot>();
-/** 正在安装的市场条目 id;非空表示有安装请求在途(串行,避免后端并发写入) */
-const installingId = ref<string | null>(null);
+/** 正在安装的市场条目 id 集合;后端经全局锁串行落盘,其他条目的安装按钮不互斥 */
+const installingIds = ref(new Set<string>());
 
 const filtered = computed(() => filterMarketplaceSkills(skills.value, "", activeSourceId.value));
 const sourceNameMap = computed(
@@ -155,10 +146,10 @@ function selectSource(id: string | null) {
 }
 
 async function install(skill: ResourceMarketplaceSkill) {
-  if (installingId.value !== null || skill.installedSkillId) {
+  if (skill.installedSkillId || installingIds.value.has(skill.id)) {
     return;
   }
-  installingId.value = skill.id;
+  installingIds.value.add(skill.id);
   try {
     const created = await installResourceMarketplaceSkill(skill.id);
     skills.value = markMarketplaceInstalled(skills.value, skill.id, created.id);
@@ -168,24 +159,13 @@ async function install(skill: ResourceMarketplaceSkill) {
   } catch (e) {
     toast.error(t("settings.resources.market.installFailed", { error: String(e) }));
   } finally {
-    installingId.value = null;
+    installingIds.value.delete(skill.id);
   }
 }
 
 async function openSkillPage(skill: ResourceMarketplaceSkill) {
   try {
     await openUrl(skill.url);
-  } catch (e) {
-    toast.error(String(e));
-  }
-}
-
-async function openInstalledDir(skill: ResourceMarketplaceSkill) {
-  if (!skill.installedSkillId) {
-    return;
-  }
-  try {
-    await openResourceSkillDir(skill.installedSkillId);
   } catch (e) {
     toast.error(String(e));
   }
@@ -332,36 +312,26 @@ async function openInstalledDir(skill: ResourceMarketplaceSkill) {
               >
                 <ExternalLink class="h-3.5 w-3.5" />
               </Button>
-              <template v-if="skill.installedSkillId">
-                <span
-                  class="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground"
-                >
-                  <Check class="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
-                  {{ t("settings.resources.market.installed") }}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  class="h-7 w-7"
-                  :title="t('settings.resources.market.openDir')"
-                  @click="openInstalledDir(skill)"
-                >
-                  <FolderOpen class="h-3.5 w-3.5" />
-                </Button>
-              </template>
+              <span
+                v-if="skill.installedSkillId"
+                class="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground"
+              >
+                <Check class="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                {{ t("settings.resources.market.installed") }}
+              </span>
               <Button
                 v-else
                 size="sm"
                 class="h-7 gap-1 px-2 text-xs"
-                :disabled="installingId !== null"
+                :disabled="installingIds.has(skill.id)"
                 @click="install(skill)"
               >
                 <Download
                   class="h-3.5 w-3.5"
-                  :class="{ 'animate-pulse': installingId === skill.id }"
+                  :class="{ 'animate-pulse': installingIds.has(skill.id) }"
                 />
                 {{
-                  installingId === skill.id
+                  installingIds.has(skill.id)
                     ? t("settings.resources.market.installing")
                     : t("settings.resources.market.install")
                 }}
