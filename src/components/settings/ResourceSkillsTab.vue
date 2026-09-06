@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { computed, onActivated, ref } from "vue";
 import { useI18n } from "vue-i18n";
+import { useRouter } from "vue-router";
 import { toast } from "vue-sonner";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   ArrowUpCircle,
-  ChevronDown,
-  ChevronUp,
   Download,
   ExternalLink,
   FileArchive,
@@ -37,15 +36,13 @@ import {
 import { Input } from "@/components/ui/input";
 import {
   checkResourceMarketplaceUpdates,
+  collectSkillSources,
   deleteResourceSkill,
   filterSkills,
   importResourceSkillArchive,
   importResourceSkillFolder,
   importResourceSkillUrl,
   listResourceSkills,
-  mergeReorderedVisible,
-  openResourceSkillDir,
-  reorderResourceSkills,
   updateResourceMarketplaceSkill,
   type ResourceMarketplaceUpdateStatus,
   type ResourceSkill,
@@ -53,17 +50,18 @@ import {
   type ResourceSkillImportOutcome,
 } from "@/lib/resource-library";
 import ResourceSkillGroupsDialog from "./ResourceSkillGroupsDialog.vue";
-import ResourceSkillPreviewDialog from "./ResourceSkillPreviewDialog.vue";
 
 const { t, te } = useI18n();
+const router = useRouter();
 
 const loading = ref(true);
 const groups = ref<ResourceSkillGroup[]>([]);
 const skills = ref<ResourceSkill[]>([]);
 const query = ref("");
 const activeGroupId = ref<string | null>(null);
+// 「来源」特殊分组:按市场技能的 marketplace.source 自动派生,与分组互斥选中
+const activeSourceId = ref<string | null>(null);
 
-const previewSkill = ref<ResourceSkill | null>(null);
 const groupsDialogOpen = ref(false);
 const pendingDelete = ref<ResourceSkill | null>(null);
 
@@ -80,6 +78,10 @@ const updateStatus = ref(new Map<string, boolean | null>());
 const marketplaceSkillCount = computed(
   () => skills.value.filter((skill) => skill.marketplace).length,
 );
+const updatableCount = computed(
+  () => skills.value.filter((skill) => updateStatus.value.get(skill.id) === true).length,
+);
+const updatingAll = ref(false);
 
 function isUpdating(skillId: string): boolean {
   return updatingIds.value.includes(skillId);
@@ -117,8 +119,6 @@ async function checkUpdates() {
       toast.success(t("settings.resources.skills.updateFound", { count: available }));
     } else if (failed.length) {
       toast.warning(failed[0]);
-    } else {
-      toast.success(t("settings.resources.skills.upToDate"));
     }
   } catch (e) {
     toast.error(String(e));
@@ -127,20 +127,53 @@ async function checkUpdates() {
   }
 }
 
-async function applyUpdate(skill: ResourceSkill) {
-  if (updatingIds.value.includes(skill.id)) {
-    return;
-  }
+/** 更新单个市场技能;失败经 toast 外显并以布尔告知调用方 */
+async function updateOne(skill: ResourceSkill): Promise<boolean> {
   updatingIds.value = [...updatingIds.value, skill.id];
   try {
     await updateResourceMarketplaceSkill(skill.id);
     updateStatus.value = new Map(updateStatus.value).set(skill.id, false);
-    toast.success(t("settings.resources.skills.updateDone", { name: skill.name }));
-    await load();
+    return true;
   } catch (e) {
-    toast.error(t("settings.resources.skills.updateFailed", { error: String(e) }));
+    toast.error(
+      t("settings.resources.skills.updateFailed", { name: skill.name, error: String(e) }),
+    );
+    return false;
   } finally {
     updatingIds.value = updatingIds.value.filter((id) => id !== skill.id);
+  }
+}
+
+async function applyUpdate(skill: ResourceSkill) {
+  if (isUpdating(skill.id)) {
+    return;
+  }
+  if (await updateOne(skill)) {
+    toast.success(t("settings.resources.skills.updateDone", { name: skill.name }));
+    await load();
+  }
+}
+
+/** 全部更新:逐个拉取有可用更新的市场技能,结束后统一刷新列表 */
+async function applyAllUpdates() {
+  if (updatingAll.value || updatableCount.value === 0) {
+    return;
+  }
+  updatingAll.value = true;
+  try {
+    const targets = skills.value.filter((skill) => updateStatus.value.get(skill.id) === true);
+    let done = 0;
+    for (const skill of targets) {
+      if (await updateOne(skill)) {
+        done += 1;
+      }
+    }
+    if (done > 0) {
+      toast.success(t("settings.resources.skills.updateAllDone", { count: done }));
+    }
+    await load();
+  } finally {
+    updatingAll.value = false;
   }
 }
 
@@ -150,16 +183,22 @@ function openSourcePage(skill: ResourceSkill) {
   }
 }
 
-const filtered = computed(() => filterSkills(skills.value, query.value, activeGroupId.value));
+const filtered = computed(() =>
+  filterSkills(skills.value, query.value, activeGroupId.value, activeSourceId.value),
+);
 const groupMap = computed(() => new Map(groups.value.map((g) => [g.id, g])));
-const previewOpen = computed({
-  get: () => previewSkill.value !== null,
-  set: (v) => {
-    if (!v) {
-      previewSkill.value = null;
-    }
-  },
-});
+const sources = computed(() => collectSkillSources(skills.value));
+
+/** 分组与来源两个筛选维度互斥:选中任一分组/来源即清空另一维度 */
+function selectGroup(id: string | null) {
+  activeGroupId.value = id;
+  activeSourceId.value = null;
+}
+
+function selectSource(id: string) {
+  activeSourceId.value = id;
+  activeGroupId.value = null;
+}
 const deleteConfirmOpen = computed({
   get: () => pendingDelete.value !== null,
   set: (v) => {
@@ -177,6 +216,13 @@ async function load() {
     skills.value = list.skills;
     if (activeGroupId.value && !groups.value.some((g) => g.id === activeGroupId.value)) {
       activeGroupId.value = null;
+    }
+    // 当前选中的来源已无对应市场技能(被删除/更新掉来源)时归位到「全部」
+    if (
+      activeSourceId.value &&
+      !skills.value.some((s) => s.marketplace?.source === activeSourceId.value)
+    ) {
+      activeSourceId.value = null;
     }
   } catch (e) {
     toast.error(String(e));
@@ -276,39 +322,9 @@ async function confirmImportUrl() {
   }
 }
 
-/** 在可见列表内移动一项;持久化时合并回全量顺序(隐藏项相对位置不变) */
-async function moveSkill(skill: ResourceSkill, dir: -1 | 1) {
-  const visibleIds = filtered.value.map((s) => s.id);
-  const index = visibleIds.indexOf(skill.id);
-  const target = index + dir;
-  if (index === -1 || target < 0 || target >= visibleIds.length) {
-    return;
-  }
-  const nextVisible = [...visibleIds];
-  [nextVisible[index], nextVisible[target]] = [nextVisible[target], nextVisible[index]];
-  const merged = mergeReorderedVisible(
-    skills.value.map((s) => s.id),
-    nextVisible,
-  );
-  // 按合并后的 id 顺序重建列表;理论上每个 id 都能命中,仍用过滤兜底避免 undefined 混入
-  const byId = new Map(skills.value.map((s) => [s.id, s]));
-  skills.value = merged
-    .map((id) => byId.get(id))
-    .filter((s): s is ResourceSkill => s !== undefined);
-  try {
-    await reorderResourceSkills(merged);
-  } catch (e) {
-    toast.error(t("settings.resources.skills.reorderFailed", { error: String(e) }));
-    await load();
-  }
-}
-
-async function openDir(skill: ResourceSkill) {
-  try {
-    await openResourceSkillDir(skill.id);
-  } catch (e) {
-    toast.error(String(e));
-  }
+/** 卡片点击 → 独立技能预览页(token 占用 / 翻译 / 安全扫描) */
+function openPreview(skill: ResourceSkill) {
+  void router.push({ name: "resource-skill", params: { id: skill.id } });
 }
 
 async function confirmDelete() {
@@ -361,6 +377,25 @@ async function confirmDelete() {
         }}
       </Button>
       <Button
+        v-if="updatableCount > 0"
+        variant="outline"
+        size="sm"
+        class="h-8 shrink-0 gap-1.5 border-amber-500/50 text-amber-600 dark:text-amber-400"
+        :disabled="updatingAll"
+        :title="t('settings.resources.skills.updateAllHint')"
+        @click="applyAllUpdates"
+      >
+        <ArrowUpCircle class="h-3.5 w-3.5" :class="{ 'animate-spin': updatingAll }" />
+        {{
+          t(
+            updatingAll
+              ? "settings.resources.skills.updating"
+              : "settings.resources.skills.updateAll",
+            { count: updatableCount },
+          )
+        }}
+      </Button>
+      <Button
         variant="outline"
         size="sm"
         class="h-8 shrink-0 gap-1.5"
@@ -393,16 +428,16 @@ async function confirmDelete() {
       </DropdownMenu>
     </div>
 
-    <div v-if="groups.length" class="mt-3 flex flex-wrap items-center gap-1.5">
+    <div v-if="groups.length || sources.length" class="mt-3 flex flex-wrap items-center gap-1.5">
       <button
         type="button"
         class="rounded-full border px-2.5 py-1 text-xs transition-colors"
         :class="
-          activeGroupId === null
+          activeGroupId === null && activeSourceId === null
             ? 'border-foreground bg-foreground text-background'
             : 'text-muted-foreground hover:bg-accent hover:text-foreground'
         "
-        @click="activeGroupId = null"
+        @click="selectGroup(null)"
       >
         {{ t("settings.resources.skills.allGroups") }}
       </button>
@@ -416,13 +451,31 @@ async function confirmDelete() {
             ? 'border-foreground bg-foreground text-background'
             : 'text-muted-foreground hover:bg-accent hover:text-foreground'
         "
-        @click="activeGroupId = group.id"
+        :title="group.description || group.name"
+        @click="selectGroup(group.id)"
       >
         <span
           class="h-2 w-2 rounded-full"
           :style="{ backgroundColor: group.color ?? 'var(--muted-foreground)' }"
         />
         {{ group.name }}
+      </button>
+      <!-- 来源特殊分组:由市场技能自动派生,无颜色点,用 ExternalLink 图标与普通分组区分 -->
+      <button
+        v-for="source in sources"
+        :key="`source:${source}`"
+        type="button"
+        class="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors"
+        :class="
+          activeSourceId === source
+            ? 'border-foreground bg-foreground text-background'
+            : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+        "
+        :title="t('settings.resources.skills.sourceFilterHint')"
+        @click="selectSource(source)"
+      >
+        <ExternalLink class="h-3 w-3" />
+        {{ source }}
       </button>
     </div>
 
@@ -431,37 +484,17 @@ async function confirmDelete() {
     </p>
     <div v-else-if="filtered.length" class="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
       <div
-        v-for="(skill, index) in filtered"
+        v-for="skill in filtered"
         :key="skill.id"
         class="group cursor-pointer rounded-lg border p-3 transition-colors hover:border-foreground/40"
         :title="t('settings.resources.skills.preview')"
-        @click="previewSkill = skill"
+        @click="openPreview(skill)"
       >
         <div class="flex items-start justify-between gap-2">
           <p class="min-w-0 truncate text-sm font-medium" :title="skill.name">{{ skill.name }}</p>
           <span
             class="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
           >
-            <Button
-              variant="ghost"
-              size="icon"
-              class="h-7 w-7"
-              :disabled="index === 0"
-              :title="t('settings.resources.skills.up')"
-              @click.stop="moveSkill(skill, -1)"
-            >
-              <ChevronUp class="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              class="h-7 w-7"
-              :disabled="index === filtered.length - 1"
-              :title="t('settings.resources.skills.down')"
-              @click.stop="moveSkill(skill, 1)"
-            >
-              <ChevronDown class="h-3.5 w-3.5" />
-            </Button>
             <Button
               variant="ghost"
               size="icon"
@@ -504,9 +537,8 @@ async function confirmDelete() {
               {{ skill.marketplace.source }}
             </button>
           </div>
-          <div class="flex shrink-0 items-center gap-1">
+          <div v-if="updateStatus.get(skill.id) === true" class="flex shrink-0 items-center gap-1">
             <Button
-              v-if="updateStatus.get(skill.id) === true"
               variant="outline"
               size="sm"
               class="h-7 gap-1 border-amber-500/50 px-2 text-xs text-amber-600 dark:text-amber-400"
@@ -523,15 +555,6 @@ async function confirmDelete() {
                 )
               }}
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              class="h-7 shrink-0 gap-1 px-2 text-xs text-muted-foreground"
-              @click.stop="openDir(skill)"
-            >
-              <FolderOpen class="h-3.5 w-3.5" />
-              {{ t("settings.resources.skills.openDir") }}
-            </Button>
           </div>
         </div>
       </div>
@@ -541,18 +564,18 @@ async function confirmDelete() {
       class="mt-6 rounded-md border border-dashed px-3 py-8 text-center text-xs text-muted-foreground"
     >
       {{
-        query || activeGroupId
+        query || activeGroupId || activeSourceId
           ? t("settings.resources.skills.noMatch")
           : t("settings.resources.skills.empty")
       }}
     </p>
 
-    <ResourceSkillPreviewDialog
-      v-if="previewSkill"
-      v-model:open="previewOpen"
-      :skill="previewSkill"
+    <ResourceSkillGroupsDialog
+      v-model:open="groupsDialogOpen"
+      :groups="groups"
+      :skills="skills"
+      @changed="load"
     />
-    <ResourceSkillGroupsDialog v-model:open="groupsDialogOpen" :groups="groups" @changed="load" />
     <ConfirmDialog
       v-model:open="deleteConfirmOpen"
       :title="t('common.delete')"
