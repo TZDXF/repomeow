@@ -79,6 +79,9 @@ pub struct LibraryState {
 pub struct SkillGroup {
     pub id: String,
     pub name: String,
+    /// 分组描述(可选;空串 = 未填写,仅前端展示用)
+    #[serde(default)]
+    pub description: String,
     /// 分组颜色(#RRGGBB,可选;仅前端展示用)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
@@ -258,6 +261,24 @@ pub struct McpServer {
     pub updated_at: i64,
 }
 
+/// 单条被跳过的 MCP 导入条目;reason 为稳定码(conflict/invalid)
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpImportSkip {
+    pub name: String,
+    /// `conflict`(与现有服务器或批内条目重名)| `invalid`(校验失败)
+    pub reason: String,
+}
+
+/// 一次批量导入(JSON 粘贴)的结果;部分成功语义:可导入的照常入库,
+/// 重名或校验失败的条目跳过并记入 skipped
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpImportOutcome {
+    pub imported: Vec<McpServer>,
+    pub skipped: Vec<McpImportSkip>,
+}
+
 // ── 查询结果 ───────────────────────────────────────────────────────────
 
 /// 库信息(设置页/首次引导用;加密未解锁时 MCP 计数取 0)
@@ -310,6 +331,91 @@ pub struct SkillImportOutcome {
 pub struct SkillBody {
     pub id: String,
     pub content: String,
+}
+
+// ── Skill 预览:token 统计与安全扫描 ───────────────────────────────────
+
+/// 技能目录内单文件的 token 统计
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillTokenFile {
+    /// 相对技能目录的路径(`/` 分隔);`SKILL.md` 为正文
+    pub path: String,
+    /// None = 二进制/非 UTF-8 文件,不参与 token 统计
+    pub tokens: Option<i64>,
+    pub bytes: u64,
+}
+
+/// 技能 token 统计(rl_skill_tokens;与项目 AI 资产同口径的 o200k 估算)
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillTokenReport {
+    pub id: String,
+    /// 技能描述(skills.json / frontmatter 同步值)的 token 占用
+    pub description_tokens: i64,
+    /// 全部文本文件 token 合计(二进制文件不计入)
+    pub total_tokens: i64,
+    /// SKILL.md 在首位,其余按路径排序;含二进制文件(tokens 为 null)
+    pub files: Vec<SkillTokenFile>,
+    /// 技能内容指纹(描述 + 全部文件路径与字节的 FNV-1a);前端扫描结果
+    /// 缓存据此判断是否仍有效
+    pub hash: String,
+}
+
+/// 单个技能文件的内容(rl_skill_file_read)
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillFileContent {
+    pub path: String,
+    /// None = 二进制/非 UTF-8 文件或超出预览大小上限,无法以文本预览
+    pub content: Option<String>,
+}
+
+/// 单条安全发现。静态发现:标题/说明为空,前端按 rule_id 走 i18n;
+/// AI 发现:标题/说明直接用模型输出(已按界面语言要求生成)。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillScanFinding {
+    /// `critical` | `high` | `medium` | `low`
+    pub severity: String,
+    /// 固定类别 id,前端 i18n 映射;未知类别为 `other`
+    pub category: String,
+    /// 静态规则 id(仅静态发现)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule_id: Option<String>,
+    pub title: String,
+    pub detail: String,
+    /// 位置(`文件路径:行号` 或自由描述)
+    pub location: String,
+    /// `static` = 本地规则命中;`llm` = AI 语义分析
+    pub source: String,
+    /// 命中行内容(仅静态发现)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
+}
+
+/// 技能安全扫描报告(rl_skill_scan;两层管线合并后的最终结果)
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillScanReport {
+    pub skill_id: String,
+    /// 0-100,含可执行脚本 ×1.3
+    pub score: i32,
+    /// `low` | `medium` | `high` | `critical`
+    pub level: String,
+    /// 静态发现(去掉 AI 判定的误报)+ AI 发现
+    pub findings: Vec<SkillScanFinding>,
+    /// 静态命中总数(含被 AI 过滤的误报)
+    pub static_count: usize,
+    /// 被 AI 判定为误报而过滤的静态命中数
+    pub suppressed_count: usize,
+    pub files_scanned: usize,
+    /// `ok` | `skipped`(AI 未配置)| `canceled` | `failed`
+    pub llm_status: String,
+    pub llm_error_code: Option<String>,
+    pub llm_error_message: Option<String>,
+    pub llm_summary: Option<String>,
+    pub scanned_at: i64,
 }
 
 /// 一次同步尝试的结果(自动同步与显式 `rl_sync_once` 共用;
@@ -395,6 +501,7 @@ mod tests {
             groups: vec![SkillGroup {
                 id: "g1".into(),
                 name: "通用".into(),
+                description: "日常使用".into(),
                 color: None,
                 sort: 0,
                 created_at: 1,

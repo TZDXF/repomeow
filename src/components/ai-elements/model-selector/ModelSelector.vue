@@ -14,7 +14,8 @@ import { modelDisplayName, type ModelSelectorGroup } from "./types";
 
 /**
  * 模型选择器(按厂商分组):value 为复合值 "providerId/modelId"。
- * 支持思考的模型以 ✦ 徽标标注。选项为空时整体禁用。
+ * 支持思考的模型以 ✦ 徽标标注。选项为空时整体禁用;
+ * `genericOption` 可在所有分组前附加一个通用选项(如「默认模型」)。
  */
 const props = withDefaults(
   defineProps<{
@@ -25,19 +26,29 @@ const props = withDefaults(
     size?: "sm" | "default";
     /** 覆盖触发器的宽度约束(默认 min-w-0 max-w-44,浮层紧凑场景用) */
     triggerClass?: string;
+    /** 附加在所有分组之前的通用选项(value 不得含 "/",避免与复合值混淆) */
+    genericOption?: { value: string; label: string };
   }>(),
-  { placeholder: "", disabled: false, size: "sm", triggerClass: "min-w-0 max-w-44" },
+  {
+    placeholder: "",
+    disabled: false,
+    size: "sm",
+    triggerClass: "min-w-0 max-w-44",
+    genericOption: undefined,
+  },
 );
 
 const emit = defineEmits<{ "update:modelValue": [value: string] }>();
 
-const hasAnyModel = computed(() => props.groups.some((group) => group.models.length > 0));
+const hasAnyOption = computed(
+  () => Boolean(props.genericOption) || props.groups.some((group) => group.models.length > 0),
+);
 </script>
 
 <template>
   <Select
     :model-value="modelValue"
-    :disabled="disabled || !hasAnyModel"
+    :disabled="disabled || !hasAnyOption"
     @update:model-value="emit('update:modelValue', String($event))"
   >
     <SelectTrigger :size="size" :class="triggerClass">
@@ -50,6 +61,9 @@ const hasAnyModel = computed(() => props.groups.some((group) => group.models.len
          会无条件给 body 写 pointer-events:none,disableOutsidePointerEvents=false 时
          内容不再自恢复 auto,选项会整体失去点击命中(下拉展开但无法选择) -->
     <SelectContent class="max-h-80" :disable-outside-pointer-events="false" :body-lock="false">
+      <SelectItem v-if="genericOption" :value="genericOption.value" class="text-muted-foreground">
+        {{ genericOption.label }}
+      </SelectItem>
       <template v-for="group in groups" :key="group.providerId">
         <SelectGroup v-if="group.models.length">
           <SelectLabel>{{ group.providerName }}</SelectLabel>

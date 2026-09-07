@@ -16,6 +16,7 @@ use super::errors::codes;
 use super::git;
 use super::models::McpServerInput;
 use super::ops;
+use super::scan;
 use super::store::{remove_dir_tolerating_readonly, Library};
 
 /// 临时资源库:测试结束自动清理(含只读 git 对象)
@@ -127,8 +128,8 @@ fn stdio_def(name: &str) -> McpServerInput {
 #[test]
 fn skills_are_multi_group_and_flat_listed() {
     let t = temp_lib("multi");
-    let g1 = ops::group_create(&t.lib, "通用", None).unwrap();
-    let g2 = ops::group_create(&t.lib, "前端", None).unwrap();
+    let g1 = ops::group_create(&t.lib, "通用", None, None).unwrap();
+    let g2 = ops::group_create(&t.lib, "前端", None, None).unwrap();
     let s = ops::skill_create(
         &t.lib,
         "审查代码",
@@ -155,8 +156,8 @@ fn skills_are_multi_group_and_flat_listed() {
 #[test]
 fn group_delete_detaches_skills_and_ungrouped_is_allowed() {
     let t = temp_lib("detach");
-    let g1 = ops::group_create(&t.lib, "甲", None).unwrap();
-    let g2 = ops::group_create(&t.lib, "乙", None).unwrap();
+    let g1 = ops::group_create(&t.lib, "甲", None, None).unwrap();
+    let g2 = ops::group_create(&t.lib, "乙", None, None).unwrap();
     ops::skill_create(
         &t.lib,
         "无分组技能",
@@ -185,8 +186,8 @@ fn group_delete_detaches_skills_and_ungrouped_is_allowed() {
 #[test]
 fn skill_update_moves_groups_renames_directory_and_deletes() {
     let t = temp_lib("upd");
-    let g1 = ops::group_create(&t.lib, "一组", None).unwrap();
-    let g2 = ops::group_create(&t.lib, "二组", None).unwrap();
+    let g1 = ops::group_create(&t.lib, "一组", None, None).unwrap();
+    let g2 = ops::group_create(&t.lib, "二组", None, None).unwrap();
     let s = ops::skill_create(
         &t.lib,
         "旧名",
@@ -236,24 +237,91 @@ fn skill_update_moves_groups_renames_directory_and_deletes() {
 #[test]
 fn group_color_validation_and_update() {
     let t = temp_lib("gcolor");
-    let g = ops::group_create(&t.lib, "有颜色", Some("#A1b2C3".into())).unwrap();
+    let g = ops::group_create(&t.lib, "有颜色", None, Some("#A1b2C3".into())).unwrap();
     assert_eq!(g.color.as_deref(), Some("#a1b2c3"));
     // 非法颜色
-    let err = ops::group_create(&t.lib, "野颜色", Some("red".into())).unwrap_err();
+    let err = ops::group_create(&t.lib, "野颜色", None, Some("red".into())).unwrap_err();
     assert_eq!(err.code(), codes::GROUP_COLOR_INVALID);
-    let err = ops::group_create(&t.lib, "野颜色", Some("#12345".into())).unwrap_err();
+    let err = ops::group_create(&t.lib, "野颜色", None, Some("#12345".into())).unwrap_err();
     assert_eq!(err.code(), codes::GROUP_COLOR_INVALID);
     // 更新:None 保持,Some 覆盖,空串清除
-    let updated = ops::group_rename(&t.lib, &g.id, "有颜色", None).unwrap();
+    let updated = ops::group_rename(&t.lib, &g.id, "有颜色", None, None).unwrap();
     assert_eq!(updated.color.as_deref(), Some("#a1b2c3"));
-    let updated = ops::group_rename(&t.lib, &g.id, "有颜色", Some("#FF0000".into())).unwrap();
+    let updated = ops::group_rename(&t.lib, &g.id, "有颜色", None, Some("#FF0000".into())).unwrap();
     assert_eq!(updated.color.as_deref(), Some("#ff0000"));
-    let updated = ops::group_rename(&t.lib, &g.id, "有颜色", Some("".into())).unwrap();
+    let updated = ops::group_rename(&t.lib, &g.id, "有颜色", None, Some("".into())).unwrap();
     assert_eq!(updated.color, None);
     // 序列化透传前端(无颜色时省略字段)
     let data = ops::skill_list(&t.lib).unwrap();
     let json = serde_json::to_string(&data.groups[0]).unwrap();
     assert!(!json.contains("color"));
+}
+
+#[test]
+fn group_description_create_and_update() {
+    let t = temp_lib("gdesc");
+    // 创建带描述;旧数据(缺字段)经 serde default 兼容为空串
+    let g = ops::group_create(&t.lib, "前端", Some(" 前端相关技能 ".into()), None).unwrap();
+    assert_eq!(g.description, "前端相关技能");
+    let g2 = ops::group_create(&t.lib, "后端", None, None).unwrap();
+    assert_eq!(g2.description, "");
+    // 更新:None 保持,Some 覆盖(自动 trim),空串清除
+    let updated = ops::group_rename(&t.lib, &g.id, "前端", None, None).unwrap();
+    assert_eq!(updated.description, "前端相关技能");
+    let updated = ops::group_rename(&t.lib, &g.id, "前端", Some("新描述".into()), None).unwrap();
+    assert_eq!(updated.description, "新描述");
+    let updated = ops::group_rename(&t.lib, &g.id, "前端", Some("".into()), None).unwrap();
+    assert_eq!(updated.description, "");
+}
+
+#[test]
+fn group_set_skills_adds_and_removes_by_delta() {
+    let t = temp_lib("gset");
+    let g1 = ops::group_create(&t.lib, "一组", None, None).unwrap();
+    let g2 = ops::group_create(&t.lib, "二组", None, None).unwrap();
+    let s1 = ops::skill_create(&t.lib, "技能一", None, vec![], None).unwrap();
+    let s2 = ops::skill_create(&t.lib, "技能二", None, vec![], None).unwrap();
+    let s3 = ops::skill_create(&t.lib, "技能三", None, vec![g2.id.clone()], None).unwrap();
+
+    // 未知分组 / 未知技能 → 稳定错误码
+    let err = ops::group_set_skills(&t.lib, "grp_missing", &[]).unwrap_err();
+    assert_eq!(err.code(), codes::GROUP_NOT_FOUND);
+    let err = ops::group_set_skills(&t.lib, &g1.id, &["sk_missing".into()]).unwrap_err();
+    assert_eq!(err.code(), codes::SKILL_NOT_FOUND);
+
+    // 设定成员 {s1, s2}:多对多增量添加,重复 id 去重
+    ops::group_set_skills(
+        &t.lib,
+        &g1.id,
+        &[s1.id.clone(), s2.id.clone(), s1.id.clone()],
+    )
+    .unwrap();
+    let data = ops::skill_list(&t.lib).unwrap();
+    let ids = |name: &str| {
+        data.skills
+            .iter()
+            .find(|s| s.name == name)
+            .unwrap()
+            .group_ids
+            .clone()
+    };
+    assert_eq!(ids("技能一"), vec![g1.id.clone()]);
+    assert_eq!(ids("技能二"), vec![g1.id.clone()]);
+
+    // 重设为 {s2, s3}:s1 差量移除,s3 加入且不破坏其原有 g2 归属
+    ops::group_set_skills(&t.lib, &g1.id, &[s2.id.clone(), s3.id.clone()]).unwrap();
+    let data = ops::skill_list(&t.lib).unwrap();
+    let ids = |name: &str| {
+        data.skills
+            .iter()
+            .find(|s| s.name == name)
+            .unwrap()
+            .group_ids
+            .clone()
+    };
+    assert_eq!(ids("技能一"), Vec::<String>::new());
+    assert_eq!(ids("技能二"), vec![g1.id.clone()]);
+    assert_eq!(ids("技能三"), vec![g2.id.clone(), g1.id.clone()]);
 }
 
 #[test]
@@ -306,7 +374,7 @@ fn skill_body_frontmatter_is_source_of_truth() {
     );
     assert!(content.ends_with("# 标题\n正文内容"));
     // 仅换组不重写正文文件
-    let g = ops::group_create(&t.lib, "组", None).unwrap();
+    let g = ops::group_create(&t.lib, "组", None, None).unwrap();
     let before = ops::body_read(&t.lib, &s2b.id).unwrap().content;
     ops::skill_update(&t.lib, &s2b.id, None, None, Some(vec![g.id]), None).unwrap();
     assert_eq!(ops::body_read(&t.lib, &s2b.id).unwrap().content, before);
@@ -335,30 +403,14 @@ fn skill_body_frontmatter_is_source_of_truth() {
 }
 
 #[test]
-fn skill_reorder_assigns_sort_order() {
-    let t = temp_lib("skillorder");
+fn skill_dir_path_matches_body_directory() {
+    let t = temp_lib("skilldirpath");
     let a = ops::skill_create(&t.lib, "甲", None, vec![], None).unwrap();
     let b = ops::skill_create(&t.lib, "乙", None, vec![], None).unwrap();
     let c = ops::skill_create(&t.lib, "丙", None, vec![], None).unwrap();
+    // 创建即按顺序分配 sort_order,保证列表展示顺序稳定
     assert_eq!(a.sort_order, 0);
     assert_eq!(c.sort_order, 2);
-    // 重排:数量/成员不一致报错
-    assert_eq!(
-        ops::skill_reorder(&t.lib, &[a.id.clone()])
-            .unwrap_err()
-            .code(),
-        codes::SKILL_NOT_FOUND
-    );
-    ops::skill_reorder(&t.lib, &[c.id.clone(), a.id.clone(), b.id.clone()]).unwrap();
-    let data = ops::skill_list(&t.lib).unwrap();
-    let mut ordered: Vec<_> = data
-        .skills
-        .iter()
-        .map(|s| (s.sort_order, s.name.as_str()))
-        .collect();
-    ordered.sort_by_key(|(order, _)| *order);
-    let names: Vec<_> = ordered.into_iter().map(|(_, n)| n).collect();
-    assert_eq!(names, vec!["丙", "甲", "乙"]);
     // 打开目录的目标路径与正文目录一致
     let dir = ops::skill_dir_path(&t.lib, &b.id).unwrap();
     assert!(dir.ends_with(&b.directory));
@@ -367,15 +419,19 @@ fn skill_reorder_assigns_sort_order() {
 #[test]
 fn name_conflicts_and_group_reorder() {
     let t = temp_lib("conflict");
-    let g1 = ops::group_create(&t.lib, "组A", None).unwrap();
-    let g2 = ops::group_create(&t.lib, "组B", None).unwrap();
-    let g3 = ops::group_create(&t.lib, "组C", None).unwrap();
+    let g1 = ops::group_create(&t.lib, "组A", None, None).unwrap();
+    let g2 = ops::group_create(&t.lib, "组B", None, None).unwrap();
+    let g3 = ops::group_create(&t.lib, "组C", None, None).unwrap();
     assert_eq!(
-        ops::group_create(&t.lib, "组A", None).unwrap_err().code(),
+        ops::group_create(&t.lib, "组A", None, None)
+            .unwrap_err()
+            .code(),
         codes::GROUP_NAME_CONFLICT
     );
     assert_eq!(
-        ops::group_create(&t.lib, "  ", None).unwrap_err().code(),
+        ops::group_create(&t.lib, "  ", None, None)
+            .unwrap_err()
+            .code(),
         codes::GROUP_NAME_REQUIRED
     );
     ops::skill_create(&t.lib, "技能X", None, vec![], None).unwrap();
@@ -473,13 +529,55 @@ fn mcp_crud_validates_transport_fields() {
     );
 }
 
+// ── MCP 批量导入(部分成功语义)─────────────────────────────────────────
+
+#[test]
+fn mcp_import_skips_conflicts_and_invalid() {
+    let t = temp_lib("mcp-import");
+    ops::mcp_create(&t.lib, &stdio_def("已有")).unwrap();
+    let defs = vec![
+        stdio_def("新服务器"),
+        // 与现有库重名
+        stdio_def("已有"),
+        // 批内重名(两个「新服务器」取第一条,其余跳过)
+        stdio_def("新服务器"),
+        // 缺命令
+        McpServerInput {
+            name: "残缺".into(),
+            transport: "stdio".into(),
+            ..Default::default()
+        },
+    ];
+    let outcome = ops::mcp_import(&t.lib, &defs).unwrap();
+    assert_eq!(outcome.imported.len(), 1);
+    assert_eq!(outcome.imported[0].name, "新服务器");
+    let reasons: Vec<_> = outcome
+        .skipped
+        .iter()
+        .map(|s| (s.name.as_str(), s.reason.as_str()))
+        .collect();
+    assert_eq!(
+        reasons,
+        vec![("已有", "conflict"), ("新服务器", "conflict"), ("残缺", "invalid")]
+    );
+    // 落盘 + 单次快照提交
+    let list = ops::mcp_list(&t.lib).unwrap();
+    assert_eq!(list.len(), 2);
+    assert!(git_out(&t.root, &["log", "--oneline"]).lines().count() >= 2);
+    // 空入参直接返回空结果,不产生新提交
+    let before = git_out(&t.root, &["rev-parse", "HEAD"]);
+    let empty = ops::mcp_import(&t.lib, &[]).unwrap();
+    assert!(empty.imported.is_empty() && empty.skipped.is_empty());
+    assert_eq!(git_out(&t.root, &["rev-parse", "HEAD"]), before);
+}
+
 // ── 自动 git init + 快照提交 ───────────────────────────────────────────
 
 #[test]
 fn every_mutation_auto_inits_and_commits() {
     let t = temp_lib("autocommit");
     assert!(!git::is_repo(&t.lib));
-    let g = ops::group_create(&t.lib, "通用", None).unwrap();
+    let g = ops::group_create(&t.lib, "通用", None, None).unwrap();
     assert!(git::is_repo(&t.lib));
     assert_eq!(commit_count(&t.root), 1);
     // 本地 git 配置固化,不依赖用户全局配置
@@ -883,7 +981,7 @@ fn sync_outcome_records_error_without_failing_local_save() {
 #[test]
 fn library_info_reports_counts_and_git_state() {
     let t = temp_lib("info");
-    let g = ops::group_create(&t.lib, "分组", None).unwrap();
+    let g = ops::group_create(&t.lib, "分组", None, None).unwrap();
     ops::skill_create(&t.lib, "技能", None, vec![g.id], None).unwrap();
     ops::mcp_create(&t.lib, &stdio_def("mcp1")).unwrap();
     let info = ops::library_info(&t.lib).unwrap();
@@ -1298,4 +1396,130 @@ fn update_from_shas_and_baseline_edges() {
     assert_eq!(ops::update_from_shas(Some("a"), Some("b")), Some(true));
     assert_eq!(ops::update_from_shas(Some("a"), None), None);
     assert_eq!(ops::update_from_shas(None, Some("b")), None);
+}
+
+#[test]
+fn skill_file_read_and_token_report() {
+    let t = temp_lib("skill-file-read");
+    let skill = ops::skill_create(&t.lib, "preview-skill", None, vec![], None).unwrap();
+    let dir = t.lib.root().join("skills").join(&skill.directory);
+    fs::create_dir_all(dir.join("scripts")).unwrap();
+    ops::body_write(
+        &t.lib,
+        &skill.id,
+        "---\nname: preview-skill\ndescription: 一段用于统计的描述\n---\n\n# 正文\n",
+    )
+    .unwrap();
+    fs::write(dir.join("scripts/run.sh"), "echo hi\n").unwrap();
+    fs::write(dir.join("logo.png"), [0xFF_u8, 0xD8, 0xFF, 0x00]).unwrap();
+
+    let report = scan::token_report(&t.lib, &skill.id).unwrap();
+    assert!(report.description_tokens > 0);
+    assert_eq!(report.files[0].path, "SKILL.md");
+    let png = report.files.iter().find(|f| f.path == "logo.png").unwrap();
+    assert!(png.tokens.is_none());
+    assert!(report.total_tokens > 0);
+    assert_eq!(
+        report.total_tokens,
+        report.files.iter().filter_map(|f| f.tokens).sum::<i64>()
+    );
+
+    let body = scan::skill_file_read(&t.lib, &skill.id, "SKILL.md").unwrap();
+    assert!(body.content.unwrap().starts_with("---"));
+    let script = scan::skill_file_read(&t.lib, &skill.id, "scripts/run.sh").unwrap();
+    assert_eq!(script.content.unwrap(), "echo hi\n");
+    // 二进制文件可定位但无法以文本预览
+    let binary = scan::skill_file_read(&t.lib, &skill.id, "logo.png").unwrap();
+    assert!(binary.content.is_none());
+    // 路径穿越拒绝
+    let err = scan::skill_file_read(&t.lib, &skill.id, "../evil").unwrap_err();
+    assert_eq!(err.code(), codes::DIRECTORY_INVALID);
+    // 不存在的技能
+    assert_eq!(
+        scan::skill_file_read(&t.lib, "nope", "SKILL.md")
+            .unwrap_err()
+            .code(),
+        codes::SKILL_NOT_FOUND
+    );
+}
+
+#[test]
+fn scan_model_resolves_explicit_choice_and_falls_back_to_default() {
+    use crate::ai::catalog::{AiConfigFile, AiModelDef, AiProvider, ModelRef};
+
+    fn provider(base_url: &str, api_key: &str, models: Vec<AiModelDef>) -> AiProvider {
+        AiProvider {
+            name: String::new(),
+            base_url: base_url.to_string(),
+            api_key: api_key.to_string(),
+            api: "openai-completions".to_string(),
+            headers: None,
+            models,
+        }
+    }
+
+    fn model(id: &str) -> AiModelDef {
+        AiModelDef {
+            id: id.to_string(),
+            api: None,
+            base_url: None,
+            headers: None,
+            sampling_params: None,
+            name: id.to_string(),
+            reasoning: false,
+            input: Vec::new(),
+            context_window: 0,
+            max_tokens: 0,
+            cost: None,
+            thinking_level_map: None,
+            compat: None,
+        }
+    }
+
+    let mut config = AiConfigFile::default();
+    config.providers.insert(
+        "openai".to_string(),
+        provider("https://api.openai.com/v1", "sk-openai", vec![model("gpt-x")]),
+    );
+    config.providers.insert(
+        "deepseek".to_string(),
+        provider(
+            "https://api.deepseek.com",
+            "sk-deepseek",
+            vec![model("deepseek-chat")],
+        ),
+    );
+    config.default_model = Some(ModelRef {
+        provider_id: "openai".to_string(),
+        model_id: "gpt-x".to_string(),
+    });
+
+    // 显式引用可解析 → 使用所选模型与厂商密钥(填全元数据)
+    let (model, api_key) =
+        super::resolve_scan_model(&config, Some("deepseek"), Some("deepseek-chat")).unwrap();
+    assert_eq!(model.id, "deepseek-chat");
+    assert_eq!(model.provider, "deepseek");
+    assert_eq!(model.base_url, "https://api.deepseek.com");
+    assert_eq!(api_key, "sk-deepseek");
+
+    // 未选择 → defaultModel
+    let (model, api_key) = super::resolve_scan_model(&config, None, None).unwrap();
+    assert_eq!(model.id, "gpt-x");
+    assert_eq!(api_key, "sk-openai");
+
+    // 引用失效(厂商或模型不存在)与空白引用 → 回退 defaultModel
+    for (provider_id, model_id) in [
+        (Some("ghost"), Some("m")),
+        (Some("openai"), Some("nope")),
+        (Some("  "), Some(" ")),
+    ] {
+        let (model, api_key) =
+            super::resolve_scan_model(&config, provider_id, model_id).unwrap();
+        assert_eq!(model.id, "gpt-x", "{provider_id:?}/{model_id:?}");
+        assert_eq!(api_key, "sk-openai");
+    }
+
+    // defaultModel 也未配置 → 明确报错(调用方据此跳过语义层)
+    let unset = AiConfigFile::default();
+    assert!(super::resolve_scan_model(&unset, None, None).is_err());
 }

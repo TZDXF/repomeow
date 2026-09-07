@@ -13,7 +13,7 @@ const THEME_CHANGED_EVENT = "settings://theme-changed";
 const OPEN_WITH_CHANGED_EVENT = "settings://open-with-changed";
 
 export type ThemeMode = "system" | "light" | "dark";
-export type ThemeSkin = "default" | "island" | "glass";
+export type ThemeSkin = "default" | "island" | "glass" | "pixel";
 export type MdTheme = "default" | "github" | "notion" | "serif";
 export type Language = SupportedLocale;
 export type ProjectsViewMode = "grid" | "table";
@@ -163,7 +163,8 @@ export const useSettingsStore = defineStore("settings", () => {
     if (
       snapshot.themeSkin === "default" ||
       snapshot.themeSkin === "island" ||
-      snapshot.themeSkin === "glass"
+      snapshot.themeSkin === "glass" ||
+      snapshot.themeSkin === "pixel"
     ) {
       themeSkin.value = snapshot.themeSkin;
     }
@@ -386,7 +387,12 @@ export const useSettingsStore = defineStore("settings", () => {
       theme.value = savedTheme;
     }
     const savedSkin = await fileStore.get<ThemeSkin>("themeSkin");
-    if (savedSkin === "default" || savedSkin === "island" || savedSkin === "glass") {
+    if (
+      savedSkin === "default" ||
+      savedSkin === "island" ||
+      savedSkin === "glass" ||
+      savedSkin === "pixel"
+    ) {
       themeSkin.value = savedSkin;
     }
     const savedMdTheme = await fileStore.get<MdTheme>("mdTheme");

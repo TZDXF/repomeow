@@ -49,6 +49,12 @@ const SKINS: { value: ThemeSkin; labelKey: string; descriptionKey: string; swatc
       descriptionKey: "settings.skin.glassDesc",
       swatches: ["#070d1f", "#22d3ee", "#8b5cf6"],
     },
+    {
+      value: "pixel",
+      labelKey: "settings.skin.pixel",
+      descriptionKey: "settings.skin.pixelDesc",
+      swatches: ["#f4f4f4", "#ff004d", "#1a1c2c"],
+    },
   ];
 </script>
 

@@ -78,8 +78,7 @@ pub fn create_write_tool(env: Arc<dyn ExecutionEnv>) -> AgentTool {
                                 return Err(ToolExecutionError::from(SimpleError::new("Operation aborted")));
                             }
                             Ok(AgentToolResult::text(format!(
-                                "Successfully wrote {} bytes to {}",
-                                input.content.len(),
+                                "Successfully wrote to {}",
                                 input.path
                             )))
                         })

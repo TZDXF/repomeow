@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
-import { Lock, LockOpen, Pencil, Plus, Trash2 } from "@lucide/vue";
+import { FileJson, Lock, LockOpen, Pencil, Plus, Trash2 } from "@lucide/vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,7 @@ import {
   type ResourceMcpServer,
 } from "@/lib/resource-library";
 import ResourceMcpEditDialog from "./ResourceMcpEditDialog.vue";
+import ResourceMcpImportDialog from "./ResourceMcpImportDialog.vue";
 
 const { t } = useI18n();
 
@@ -39,6 +40,7 @@ const libraryLocked = computed(
 const editDialogOpen = ref(false);
 /** null = 新建;非 null = 编辑该服务器 */
 const editingServer = ref<ResourceMcpServer | null>(null);
+const importDialogOpen = ref(false);
 const pendingDelete = ref<ResourceMcpServer | null>(null);
 
 const unlockOpen = ref(false);
@@ -109,6 +111,13 @@ function openCreate() {
   editDialogOpen.value = true;
 }
 
+function openImport() {
+  if (libraryLocked.value) {
+    return;
+  }
+  importDialogOpen.value = true;
+}
+
 function openEdit(server: ResourceMcpServer) {
   if (libraryLocked.value) {
     return;
@@ -174,10 +183,22 @@ async function submitUnlock() {
       <p class="text-sm text-muted-foreground">
         {{ t("settings.resources.mcp.description") }}
       </p>
-      <Button size="sm" class="h-8 shrink-0 gap-1.5" :disabled="libraryLocked" @click="openCreate">
-        <Plus class="h-3.5 w-3.5" />
-        {{ t("settings.resources.mcp.create") }}
-      </Button>
+      <div class="flex shrink-0 items-center gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          class="h-8 gap-1.5"
+          :disabled="libraryLocked"
+          @click="openImport"
+        >
+          <FileJson class="h-3.5 w-3.5" />
+          {{ t("settings.resources.mcp.importButton") }}
+        </Button>
+        <Button size="sm" class="h-8 gap-1.5" :disabled="libraryLocked" @click="openCreate">
+          <Plus class="h-3.5 w-3.5" />
+          {{ t("settings.resources.mcp.create") }}
+        </Button>
+      </div>
     </div>
 
     <div
@@ -252,6 +273,7 @@ async function submitUnlock() {
     </p>
 
     <ResourceMcpEditDialog v-model:open="editDialogOpen" :server="editingServer" @saved="load" />
+    <ResourceMcpImportDialog v-model:open="importDialogOpen" :servers="servers" @saved="load" />
     <ConfirmDialog
       v-model:open="deleteConfirmOpen"
       :title="t('common.delete')"

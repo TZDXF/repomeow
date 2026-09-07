@@ -21,6 +21,7 @@ import { cmd } from "@/lib/tauri";
 import { joinPath } from "@/lib/path";
 import { FILE_REF_CLASS, linkifyFileRefs, resolveRefPath } from "@/lib/ai-file-refs";
 import { formatTokenCount } from "@/lib/chat";
+import { getCachedTranslation, putCachedTranslation } from "@/lib/translation-cache";
 import { useSettingsStore } from "@/stores/settings";
 import type { FilePreview } from "@/types";
 
@@ -31,7 +32,9 @@ import type { FilePreview } from "@/types";
  * 渲染态正文里的 `@path/to/file` 引用会被 linkify 成按钮,点击经 navigate
  * 事件让父组件把抽屉切到被引用文件(解析相对当前文件所在目录)。
  * Markdown 渲染态头部提供「翻译」按钮(经后端 ai_translate_markdown 按界面语言
- * 翻译,原文/译文一键切换,再译/保存/换文件即作废旧译文);token 数仅 md 文件展示。
+ * 翻译,原文/译文一键切换;译文按「界面语言 + 正文内容 hash」缓存入 IndexedDB
+ * 保留 30 天,同内容重复翻译直接命中不再调 AI,再译/保存/换文件仍作废当前译文);
+ * token 数仅 md 文件展示。
  */
 const props = defineProps<{
   /** 项目根目录(read_file_preview 的 root,越界访问由后端拒绝) */
@@ -217,6 +220,8 @@ const translatedText = ref<string | null>(null);
 const showTranslated = ref(false);
 /** 当前在途翻译的 runId(ai_cancel_run 的取消句柄);空 = 无在途请求 */
 let translateRunId = "";
+/** 翻译轮次序号:取消/换文件后自增,使仍在途的缓存查询结果作废 */
+let translateSeq = 0;
 
 /** 渲染态正文:译文激活时展示译文,否则原文 */
 const displayContent = computed(() =>
@@ -226,6 +231,7 @@ const displayContent = computed(() =>
 );
 
 function resetTranslation() {
+  translateSeq += 1;
   if (translateRunId) {
     void cmd<void>("ai_cancel_run", { runId: translateRunId }).catch(() => {});
     translateRunId = "";
@@ -252,6 +258,16 @@ async function toggleTranslate() {
   const rel = props.relPath;
   const text = preview.value?.text;
   if (!rel || !text) return;
+  const seq = ++translateSeq;
+  // 先查 IndexedDB 缓存(键 = 界面语言 + 正文内容 hash,保留 30 天):
+  // 命中直接展示、不再调 AI,未命中才走后端翻译并回填缓存
+  const cached = await getCachedTranslation(text, settingsStore.language);
+  if (seq !== translateSeq || props.relPath !== rel) return;
+  if (cached !== null) {
+    translatedText.value = cached;
+    showTranslated.value = true;
+    return;
+  }
   translating.value = true;
   const runId = `translate-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   translateRunId = runId;
@@ -263,6 +279,7 @@ async function toggleTranslate() {
     if (props.relPath !== rel || result === null) return;
     translatedText.value = result;
     showTranslated.value = true;
+    void putCachedTranslation(text, settingsStore.language, result);
   } catch (e) {
     toast.error(String(e));
   } finally {

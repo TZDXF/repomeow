@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, type Component } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import {
   Archive,
   ArrowLeft,
@@ -104,7 +104,12 @@ const categories: Category[] = [
 ];
 
 const router = useRouter();
-const activeId = ref(categories[0].id);
+const route = useRoute();
+// 支持从子页(如技能预览页)带 ?category=resources 回跳,直接落在原分类
+const initialCategory = String(route.query.category ?? "");
+const activeId = ref(
+  categories.some((c) => c.id === initialCategory) ? initialCategory : categories[0].id,
+);
 const active = computed(() => categories.find((c) => c.id === activeId.value) ?? categories[0]);
 </script>
 

@@ -19,7 +19,8 @@
 //! - 无 service tier 定价;HTTP 错误格式化保留状态码 + 截断后的响应体;
 //! - Responses 专属 compat 尚未建模进 `Model.compat`,复用既有 `OpenAICompletionsCompat`
 //!   的 supports_developer_role / supports_long_cache_retention / supports_strict_mode /
-//!   supports_max_output_tokens 四个开关,其余按蓝本缺省行为实现。
+//!   supports_max_output_tokens / supports_explicit_prompt_cache_mode 五个开关,
+//!   其余按蓝本缺省行为实现。
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -118,6 +119,7 @@ struct ResponsesCompat {
     supports_long_cache_retention: bool,
     supports_strict_mode: bool,
     supports_max_output_tokens: bool,
+    supports_explicit_prompt_cache_mode: bool,
 }
 
 /// TS getCompat + detectSessionAffinityFormat。
@@ -143,6 +145,10 @@ fn get_compat(model: &Model) -> ResponsesCompat {
         supports_max_output_tokens: compat
             .and_then(|value| value.supports_max_output_tokens)
             .unwrap_or(true),
+        // GPT-5.6+ 显式 prompt cache 模式;蓝本缺省 false。
+        supports_explicit_prompt_cache_mode: compat
+            .and_then(|value| value.supports_explicit_prompt_cache_mode)
+            .unwrap_or(false),
     }
 }
 
@@ -1066,10 +1072,26 @@ pub fn build_request_body(
             json!(clamp_openai_prompt_cache_key(session_id)),
         );
     }
-    if cache_retention == CacheRetention::Long && compat.supports_long_cache_retention {
+    // TS getPromptCacheRetention:explicit 模式模型(GPT-5.6+)不发 "24h",
+    // 长保留改走下方 prompt_cache_options.ttl。
+    if cache_retention == CacheRetention::Long
+        && compat.supports_long_cache_retention
+        && !compat.supports_explicit_prompt_cache_mode
+    {
         body.insert("prompt_cache_retention".to_string(), json!("24h"));
     }
-    // supportsExplicitPromptCacheMode 缺省 false → prompt_cache_options 不下发
+    // TS getPromptCacheOptions:explicit 模式模型用 prompt_cache_options 表达
+    // 缓存关闭(mode: "explicit")或长保留(ttl: "30m")。
+    if compat.supports_explicit_prompt_cache_mode {
+        if cache_retention == CacheRetention::None {
+            body.insert(
+                "prompt_cache_options".to_string(),
+                json!({ "mode": "explicit" }),
+            );
+        } else if cache_retention == CacheRetention::Long && compat.supports_long_cache_retention {
+            body.insert("prompt_cache_options".to_string(), json!({ "ttl": "30m" }));
+        }
+    }
     body.insert("store".to_string(), json!(false));
 
     // max_output_tokens:simple 语义(options 缺省回退 model 上限,按上下文收敛),
@@ -2862,6 +2884,62 @@ mod tests {
         };
         let body = build_request_body(&model, &context, Some(&options));
         assert_eq!(body["prompt_cache_key"].as_str().unwrap().len(), 64);
+    }
+
+    #[test]
+    fn prompt_cache_options_explicit_mode() {
+        let context = context_of(vec![user_message("hi")]);
+        let mut model = test_model("https://api.openai.com/v1");
+        model.compat = Some(OpenAICompletionsCompat {
+            supports_explicit_prompt_cache_mode: Some(true),
+            ..Default::default()
+        });
+
+        // explicit 模式 + long:改发 prompt_cache_options.ttl,不再发 "24h"
+        let options = SimpleStreamOptions {
+            session_id: Some("sess".to_string()),
+            cache_retention: Some(CacheRetention::Long),
+            ..Default::default()
+        };
+        let body = build_request_body(&model, &context, Some(&options));
+        assert_eq!(body["prompt_cache_options"]["ttl"], "30m");
+        assert!(body.get("prompt_cache_retention").is_none());
+        assert_eq!(body["prompt_cache_key"], "sess");
+
+        // explicit 模式 + none:mode: "explicit",且无 cache key
+        let options = SimpleStreamOptions {
+            session_id: Some("sess".to_string()),
+            cache_retention: Some(CacheRetention::None),
+            ..Default::default()
+        };
+        let body = build_request_body(&model, &context, Some(&options));
+        assert_eq!(body["prompt_cache_options"]["mode"], "explicit");
+        assert!(body.get("prompt_cache_key").is_none());
+        assert!(body.get("prompt_cache_retention").is_none());
+
+        // explicit 模式 + short(缺省):不下发 prompt_cache_options
+        let options = SimpleStreamOptions {
+            session_id: Some("sess".to_string()),
+            ..Default::default()
+        };
+        let body = build_request_body(&model, &context, Some(&options));
+        assert!(body.get("prompt_cache_options").is_none());
+
+        // explicit 模式但不支持长保留:long 下两个缓存参数都不发
+        let mut model = test_model("https://api.openai.com/v1");
+        model.compat = Some(OpenAICompletionsCompat {
+            supports_explicit_prompt_cache_mode: Some(true),
+            supports_long_cache_retention: Some(false),
+            ..Default::default()
+        });
+        let options = SimpleStreamOptions {
+            session_id: Some("sess".to_string()),
+            cache_retention: Some(CacheRetention::Long),
+            ..Default::default()
+        };
+        let body = build_request_body(&model, &context, Some(&options));
+        assert!(body.get("prompt_cache_options").is_none());
+        assert!(body.get("prompt_cache_retention").is_none());
     }
 
     #[test]

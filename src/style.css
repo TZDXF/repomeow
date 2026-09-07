@@ -293,6 +293,109 @@
   --scrollbar-thumb-hover: rgb(125 180 255 / 0.35);
 }
 
+/* ===== 8bit / Pixel skin（像素艺术）===== */
+/* PICO-8 调色板 + Sweetie-16 中性色:浅灰底、深蓝黑描边、高饱和强调色、
+   直角、等宽字体与硬边偏移阴影;风味细节见文件末尾(必须在 @layer 之外)。 */
+[data-theme="pixel"] {
+  --font-app:
+    "Cascadia Mono", Consolas, "Courier New", "Noto Sans Mono CJK SC", "Microsoft YaHei", monospace;
+  --background: #f4f4f4;
+  --foreground: #1a1c2c;
+  --card: #ffffff;
+  --card-foreground: #1a1c2c;
+  --popover: #ffffff;
+  --popover-foreground: #1a1c2c;
+  --primary: #ff004d;
+  --primary-foreground: #ffffff;
+  --secondary: #f4f4f4;
+  --secondary-foreground: #1a1c2c;
+  --muted: #f4f4f4;
+  --muted-foreground: #5f574f;
+  --accent: #ffec27;
+  --accent-foreground: #1a1c2c;
+  --destructive: #ff004d;
+  --border: #1a1c2c;
+  --input: #1a1c2c;
+  --ring: #29adff;
+  --chart-1: #ff004d;
+  --chart-2: #29adff;
+  --chart-3: #ffec27;
+  --chart-4: #00e436;
+  --chart-5: #ffa300;
+  --radius: 0;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1a1c2c;
+  --sidebar-primary: #ff004d;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ffec27;
+  --sidebar-accent-foreground: #1a1c2c;
+  --sidebar-border: #1a1c2c;
+  --sidebar-ring: #29adff;
+  --scrollbar-thumb: #8b8680;
+  --scrollbar-thumb-hover: #5f574f;
+  /* 硬边阴影颜色:亮色用深蓝黑,暗色切纯黑(见 .dark 块) */
+  --pixel-shadow: #1a1c2c;
+  /* CodeMirror 代码查看器 token 色(8bit 调色板近似映射) */
+  --cm-keyword: #ff004d;
+  --cm-string: #008751;
+  --cm-comment: #8b8680;
+  --cm-number: #ab5236;
+  --cm-function: #3b5dc9;
+  --cm-type: #7e2553;
+  --cm-tag: #ff004d;
+  --cm-attribute: #ab5236;
+  --cm-variable: #1a1c2c;
+  color-scheme: light;
+}
+
+/* 像素暗色:深蓝黑底 + 深蓝面板,强调色保持高饱和硬切 */
+[data-theme="pixel"].dark {
+  --background: #1a1c2c;
+  --foreground: #f4f4f4;
+  --card: #1d2b53;
+  --card-foreground: #f4f4f4;
+  --popover: #1d2b53;
+  --popover-foreground: #f4f4f4;
+  --primary: #ff004d;
+  --primary-foreground: #ffffff;
+  --secondary: #29366f;
+  --secondary-foreground: #f4f4f4;
+  --muted: #29366f;
+  --muted-foreground: #94b0c2;
+  --accent: #ffec27;
+  --accent-foreground: #1a1c2c;
+  --destructive: #ff004d;
+  --border: #333c57;
+  --input: #333c57;
+  --ring: #29adff;
+  --chart-1: #ff004d;
+  --chart-2: #29adff;
+  --chart-3: #ffec27;
+  --chart-4: #00e436;
+  --chart-5: #ffa300;
+  --sidebar: #1d2b53;
+  --sidebar-foreground: #f4f4f4;
+  --sidebar-primary: #ff004d;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ffec27;
+  --sidebar-accent-foreground: #1a1c2c;
+  --sidebar-border: #333c57;
+  --sidebar-ring: #29adff;
+  --scrollbar-thumb: #333c57;
+  --scrollbar-thumb-hover: #566c86;
+  --pixel-shadow: #000000;
+  --cm-keyword: #ff77a8;
+  --cm-string: #00e436;
+  --cm-comment: #8b8680;
+  --cm-number: #ffec27;
+  --cm-function: #29adff;
+  --cm-type: #ffa300;
+  --cm-tag: #ff77a8;
+  --cm-attribute: #ffa300;
+  --cm-variable: #f4f4f4;
+  color-scheme: dark;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -473,4 +576,110 @@ body.tray-popup-window {
   box-shadow:
     0 8px 32px 0 rgb(0 0 0 / 0.5),
     0 0 20px 0 rgb(34 211 238 / 0.12);
+}
+
+/* 注意:pixel 皮肤的覆盖规则与 glass 同理必须放在 @layer 之外 —— 无层样式优先级
+   高于所有具名层,才能压过 rounded-* / shadow-* / transition-* 等工具类。 */
+/* ===== 8bit / Pixel 风味细节(像素艺术)===== */
+
+/* 状态机原则:零过渡 + 零圆角,所有视觉状态变化都是瞬时硬切 */
+[data-theme="pixel"] *,
+[data-theme="pixel"] *::before,
+[data-theme="pixel"] *::after {
+  border-radius: 0;
+  transition: none;
+}
+
+/* CRT 扫描线纹理(水平 1px 暗线,无色彩过渡) */
+/* body:not(.tray-popup-window):托盘弹窗窗口的 body 必须保持全透明 */
+[data-theme="pixel"] body:not(.tray-popup-window) {
+  background-image: repeating-linear-gradient(0deg, rgb(26 28 44 / 0.04) 0 1px, transparent 1px 4px);
+}
+[data-theme="pixel"].dark body:not(.tray-popup-window) {
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgb(244 244 244 / 0.03) 0 1px,
+    transparent 1px 4px
+  );
+}
+
+/* 方形滚动条(去掉胶囊圆角与内缩透明边) */
+[data-theme="pixel"] ::-webkit-scrollbar-thumb {
+  border-radius: 0;
+  border: 0;
+  background-clip: border-box;
+}
+
+/* 硬边聚焦:实心蓝色描边替代柔光 ring */
+[data-theme="pixel"] :focus-visible {
+  outline: 3px solid #29adff;
+  outline-offset: 0;
+}
+
+/* 按钮:粗描边 + 硬边阴影;link 变体是文本链接不参与 */
+/* Pixel Perfect Drop:位移量必须等于阴影偏移 —— 悬停 1px(阴影同步缩到 1px),
+   按下位移 2px 正好盖住静止时的 2px 阴影 */
+[data-theme="pixel"] [data-slot="button"]:not([data-variant="link"]) {
+  border-width: 2px;
+  border-color: var(--pixel-shadow);
+  box-shadow: 2px 2px 0 0 var(--pixel-shadow);
+}
+[data-theme="pixel"] [data-slot="button"]:not([data-variant="link"]):not(:disabled):hover {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 0 var(--pixel-shadow);
+}
+[data-theme="pixel"] [data-slot="button"]:not([data-variant="link"]):not(:disabled):active {
+  transform: translate(2px, 2px);
+  box-shadow: none;
+}
+/* Palette Swap:悬停硬切到另一支 8bit 颜色 —— 主按钮红→蓝,幽灵/描边按钮→黄(选关高亮) */
+[data-theme="pixel"]
+  [data-slot="button"]:where([data-variant="default"], :not([data-variant])):not(:disabled):hover {
+  background-color: #29adff;
+}
+[data-theme="pixel"]
+  [data-slot="button"]:where([data-variant="ghost"], [data-variant="outline"]):not(:disabled):hover {
+  background-color: #ffec27;
+  border-color: var(--pixel-shadow);
+}
+
+/* 卡片与浮动面板:粗描边 + 4px 硬边投影 */
+[data-theme="pixel"] [data-slot="card"],
+[data-theme="pixel"] [data-slot="dialog-content"],
+[data-theme="pixel"] [data-slot="popover-content"],
+[data-theme="pixel"] [data-slot="dropdown-menu-content"],
+[data-theme="pixel"] [data-slot="dropdown-menu-sub-content"],
+[data-theme="pixel"] [data-slot="context-menu-content"],
+[data-theme="pixel"] [data-slot="select-content"],
+[data-theme="pixel"] [data-slot="hover-card-content"],
+[data-theme="pixel"] [data-slot="tray-popup"] {
+  border-width: 2px;
+  box-shadow: 4px 4px 0 0 var(--pixel-shadow);
+}
+
+/* 小型浮层(tooltip)用 2px 阴影,避免小元素被重投影压沉 */
+[data-theme="pixel"] [data-slot="tooltip-content"] {
+  border-width: 2px;
+  box-shadow: 2px 2px 0 0 var(--pixel-shadow);
+}
+
+/* 输入控件:粗描边、无投影;聚焦 = 蓝色内嵌硬边(inset 取代 outline) */
+[data-theme="pixel"] [data-slot="input"],
+[data-theme="pixel"] [data-slot="textarea"],
+[data-theme="pixel"] [data-slot="select-trigger"],
+[data-theme="pixel"] [data-slot="native-select"] {
+  border-width: 2px;
+}
+[data-theme="pixel"] [data-slot="input"]:focus-visible,
+[data-theme="pixel"] [data-slot="textarea"]:focus-visible,
+[data-theme="pixel"] [data-slot="select-trigger"]:focus-visible,
+[data-theme="pixel"] [data-slot="native-select"]:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px #29adff;
+}
+
+/* Toast:方形粗描边 + 硬边投影 */
+[data-theme="pixel"] [data-sonner-toast] {
+  border-width: 2px;
+  box-shadow: 4px 4px 0 0 var(--pixel-shadow);
 }

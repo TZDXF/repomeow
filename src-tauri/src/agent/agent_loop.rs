@@ -803,6 +803,17 @@ async fn execute_tool_calls_parallel(
                 let thunk_signal = signal.cloned();
                 let emit = emit.clone();
                 entries.push(FinalizedEntry::Pending(Box::pin(async move {
+                    // 对齐蓝本(agent-loop.ts):已入队的调用在真正开跑时再查一次
+                    // abort,已中止则产出 error 结果而非照常执行。
+                    if is_aborted(thunk_signal.as_ref()) {
+                        let finalized = FinalizedToolCallOutcome {
+                            tool_call: prepared.tool_call.clone(),
+                            result: create_error_tool_result("Operation aborted"),
+                            is_error: true,
+                        };
+                        emit_tool_execution_end(&finalized, &emit).await;
+                        return finalized;
+                    }
                     let executed =
                         execute_prepared_tool_call(&prepared, thunk_signal.as_ref(), &emit).await;
                     let finalized = finalize_executed_tool_call(

@@ -56,7 +56,7 @@ fn relativize_result_path(result_path: &str, search_path: &str) -> String {
 
 /// 从搜索根向上找 `.git` 判定是否位于 git 仓库内(fd 据此决定
 /// `--no-require-git`;ignore crate 对应 `require_git`)。
-fn inside_git_repo(search_path: &str) -> bool {
+pub(crate) fn inside_git_repo(search_path: &str) -> bool {
     let mut current: Option<&std::path::Path> = Some(std::path::Path::new(search_path));
     while let Some(dir) = current {
         if dir.join(".git").exists() {

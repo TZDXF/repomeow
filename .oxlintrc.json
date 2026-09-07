@@ -24,6 +24,7 @@
     "sort-keys": "off",
     "id-length": "off",
     "func-style": "off",
+    "no-await-in-loop": "off",
     "no-magic-numbers": "off",
     "no-ternary": "off",
     "no-duplicate-imports": "off",

@@ -8,10 +8,12 @@ import {
   isResourceMcpTransport,
   markMarketplaceInstalled,
   mergeMarketplaceSources,
-  mergeReorderedVisible,
   parseArgLines,
   parseEnvLines,
   parseHeaderLines,
+  parseResourceMcpJson,
+  ResourceMcpJsonError,
+  collectSkillSources,
   type ResourceMarketplaceSkill,
   type ResourceSkill,
 } from "./resource-library";
@@ -64,28 +66,52 @@ describe("filterSkills", () => {
     expect(filterSkills(skills, "write", "wiki").map((s) => s.id)).toEqual(["b"]);
     expect(filterSkills(skills, "write", "git")).toEqual([]);
   });
+
+  it("按来源过滤市场技能,手动技能不命中任何来源", () => {
+    const withSource = [
+      skill({
+        id: "a",
+        name: "Git Commit",
+        groupIds: ["git"],
+        marketplace: { id: "m1", source: "owner/repo-a", url: "https://example.com/a" },
+      }),
+      skill({
+        id: "b",
+        name: "Wiki Write",
+        marketplace: { id: "m2", source: "owner/repo-b", url: "https://example.com/b" },
+      }),
+      skill({ id: "c", name: "Docker Deploy" }),
+    ];
+    expect(filterSkills(withSource, "", null, "owner/repo-a").map((s) => s.id)).toEqual(["a"]);
+    expect(filterSkills(withSource, "", null, null)).toHaveLength(3);
+    // 来源与分组同时生效(AND 语义)
+    expect(filterSkills(withSource, "", "git", "owner/repo-a").map((s) => s.id)).toEqual(["a"]);
+    expect(filterSkills(withSource, "", "git", "owner/repo-b")).toEqual([]);
+  });
 });
 
-describe("mergeReorderedVisible", () => {
-  it("全部可见时即新顺序本身", () => {
-    expect(mergeReorderedVisible(["a", "b", "c"], ["c", "a", "b"])).toEqual(["c", "a", "b"]);
-  });
-
-  it("隐藏项保持在原锚点前后,可见项按新顺序插入", () => {
-    // 原序 a(hidden) b c(hidden) d;可见 [b, d] 换为 [d, b]
-    expect(mergeReorderedVisible(["a", "b", "c", "d"], ["d", "b"])).toEqual(["a", "d", "b", "c"]);
-  });
-
-  it("隐藏项在可见项之前时保持最前", () => {
-    expect(mergeReorderedVisible(["x", "a", "b"], ["b", "a"])).toEqual(["x", "b", "a"]);
-  });
-
-  it("可见项为空时保持原顺序", () => {
-    expect(mergeReorderedVisible(["a", "b", "c"], [])).toEqual(["a", "b", "c"]);
-  });
-
-  it("单可见项时原序不变", () => {
-    expect(mergeReorderedVisible(["a", "b", "c"], ["b"])).toEqual(["a", "b", "c"]);
+describe("collectSkillSources", () => {
+  it("去重、按名称排序,手动技能不产生来源", () => {
+    const skills = [
+      skill({
+        id: "a",
+        name: "B",
+        marketplace: { id: "m1", source: "owner/repo-b", url: "https://example.com/b" },
+      }),
+      skill({
+        id: "b",
+        name: "A",
+        marketplace: { id: "m2", source: "owner/repo-a", url: "https://example.com/a" },
+      }),
+      skill({
+        id: "c",
+        name: "C",
+        marketplace: { id: "m3", source: "owner/repo-b", url: "https://example.com/b" },
+      }),
+      skill({ id: "d", name: "D" }),
+    ];
+    expect(collectSkillSources(skills)).toEqual(["owner/repo-a", "owner/repo-b"]);
+    expect(collectSkillSources([])).toEqual([]);
   });
 });
 
@@ -154,6 +180,147 @@ describe("isResourceMcpTransport", () => {
     expect(isResourceMcpTransport("ws")).toBe(false);
     expect(isResourceMcpTransport(null)).toBe(false);
     expect(isResourceMcpTransport(1)).toBe(false);
+  });
+});
+
+describe("parseResourceMcpJson", () => {
+  it("解析 mcpServers 包装结构(stdio + 远程)", () => {
+    const text = JSON.stringify({
+      mcpServers: {
+        filesystem: {
+          command: "npx",
+          args: ["-y", "@modelcontextprotocol/server-filesystem"],
+          env: { ROOT: "/tmp" },
+        },
+        remote: {
+          type: "http",
+          url: "https://mcp.example.com/mcp",
+          headers: { Authorization: "Bearer xxx" },
+        },
+      },
+    });
+    const parsed = parseResourceMcpJson(text);
+    expect(parsed.skipped).toEqual([]);
+    expect(parsed.entries).toEqual([
+      {
+        name: "filesystem",
+        transport: "stdio",
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-filesystem"],
+        env: { ROOT: "/tmp" },
+      },
+      {
+        name: "remote",
+        transport: "http",
+        url: "https://mcp.example.com/mcp",
+        headers: { Authorization: "Bearer xxx" },
+      },
+    ]);
+  });
+
+  it("解析 servers 包装结构与裸键值表", () => {
+    const wrapped = parseResourceMcpJson(
+      JSON.stringify({ servers: { fs: { command: "uvx", args: ["mcp"] } } }),
+    );
+    expect(wrapped.entries).toEqual([
+      { name: "fs", transport: "stdio", command: "uvx", args: ["mcp"] },
+    ]);
+    const bare = parseResourceMcpJson(
+      JSON.stringify({ gh: { url: "https://x/sse", type: "sse" } }),
+    );
+    expect(bare.entries).toEqual([{ name: "gh", transport: "sse", url: "https://x/sse" }]);
+  });
+
+  it("裸键值表兼容名称与定义对象分行的多行排版", () => {
+    const text = `{"blender":
+{
+  "command": "cmd",
+  "args": [
+    "/c",
+    "uvx",
+    "blender-mcp"
+  ]
+}}`;
+    const parsed = parseResourceMcpJson(text);
+    expect(parsed.skipped).toEqual([]);
+    expect(parsed.entries).toEqual([
+      { name: "blender", transport: "stdio", command: "cmd", args: ["/c", "uvx", "blender-mcp"] },
+    ]);
+  });
+
+  it("单个服务器定义对象:名称取自身 name 字段,缺失时留空待补填", () => {
+    const named = parseResourceMcpJson(
+      JSON.stringify({ name: "我的服务", command: "node", args: ["server.js"] }),
+    );
+    expect(named.entries).toEqual([
+      { name: "我的服务", transport: "stdio", command: "node", args: ["server.js"] },
+    ]);
+    const unnamed = parseResourceMcpJson(JSON.stringify({ url: "https://mcp.example.com" }));
+    expect(unnamed.entries).toEqual([
+      { name: "", transport: "http", url: "https://mcp.example.com" },
+    ]);
+  });
+
+  it("type/transport 别名归一,未声明类型按形状推断", () => {
+    const parsed = parseResourceMcpJson(
+      JSON.stringify({
+        a: { type: "streamable-http", url: "https://a" },
+        b: { transport: "STDIO", command: "npx" },
+        c: { command: "node", url: "https://b" },
+      }),
+    );
+    expect(parsed.entries.map((entry) => entry.transport)).toEqual(["http", "stdio", "stdio"]);
+  });
+
+  it("缺 command/url 与未知 type 的条目跳过,其余照常解析", () => {
+    const parsed = parseResourceMcpJson(
+      JSON.stringify({
+        ok: { command: "npx" },
+        empty: { args: ["-y"] },
+        ws: { type: "websocket", url: "wss://x" },
+      }),
+    );
+    expect(parsed.entries).toEqual([{ name: "ok", transport: "stdio", command: "npx" }]);
+    expect(parsed.skipped).toEqual([
+      { name: "empty", reason: "invalid" },
+      { name: "ws", reason: "unsupported" },
+    ]);
+  });
+
+  it("标量 env/headers/args 值字符串化,非标量丢弃", () => {
+    const parsed = parseResourceMcpJson(
+      JSON.stringify({
+        s: { command: "npx", args: ["-y", 3, null, ["x"]], env: { N: 1, B: true, BAD: { a: 1 } } },
+      }),
+    );
+    expect(parsed.entries[0]).toEqual({
+      name: "s",
+      transport: "stdio",
+      command: "npx",
+      args: ["-y", "3"],
+      env: { N: "1", B: "true" },
+    });
+  });
+
+  it("非法 JSON 与无法识别的结构抛 ResourceMcpJsonError", () => {
+    try {
+      parseResourceMcpJson("{ not json");
+      expect.unreachable();
+    } catch (e) {
+      expect((e as ResourceMcpJsonError).code).toBe("invalidJson");
+    }
+    try {
+      parseResourceMcpJson("[1, 2]");
+      expect.unreachable();
+    } catch (e) {
+      expect((e as ResourceMcpJsonError).code).toBe("unrecognized");
+    }
+    try {
+      parseResourceMcpJson('{"foo": "bar"}');
+      expect.unreachable();
+    } catch (e) {
+      expect((e as ResourceMcpJsonError).code).toBe("unrecognized");
+    }
   });
 });
 

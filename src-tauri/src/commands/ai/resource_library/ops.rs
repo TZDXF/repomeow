@@ -22,7 +22,8 @@ use super::git;
 use super::marketplace;
 use super::models::{
     EncryptionStatus, LibraryInfo, MarketplaceDownload, MarketplaceSource, MarketplaceUpdateStatus,
-    McpServer, McpServerInput, Skill, SkillBody, SkillGroup, SkillLibrary, SyncOutcome, TRANSPORTS,
+    McpImportOutcome, McpImportSkip, McpServer, McpServerInput, Skill, SkillBody, SkillGroup,
+    SkillLibrary, SyncOutcome, TRANSPORTS,
 };
 use super::store::{is_safe_directory, Library, DIR_SKILLS, FILE_SKILLS};
 
@@ -203,6 +204,7 @@ pub(super) fn mcp_list(lib: &Library) -> RlResult<Vec<McpServer>> {
 pub(super) fn group_create(
     lib: &Library,
     name: &str,
+    description: Option<String>,
     color: Option<String>,
 ) -> RlResult<SkillGroup> {
     lib.ensure()?;
@@ -210,6 +212,7 @@ pub(super) fn group_create(
     if name.is_empty() {
         return Err(RlError::coded(codes::GROUP_NAME_REQUIRED, ""));
     }
+    let description = description.unwrap_or_default().trim().to_string();
     let color = normalize_color(color)?;
     let mut data: SkillLibrary = lib.read_plain_json(FILE_SKILLS)?;
     if data.groups.iter().any(|g| g.name == name) {
@@ -225,6 +228,7 @@ pub(super) fn group_create(
     let group = SkillGroup {
         id: new_id("grp"),
         name: name.to_string(),
+        description,
         color,
         sort,
         created_at: ts,
@@ -236,11 +240,13 @@ pub(super) fn group_create(
     Ok(group)
 }
 
-/// 分组更新(改名 + 颜色):color 为 None 时保持原值,Some 覆盖(空串清除)
+/// 分组更新(改名 + 描述 + 颜色):color/description 为 None 时保持原值,
+/// Some 覆盖(description 空串清除)
 pub(super) fn group_rename(
     lib: &Library,
     id: &str,
     name: &str,
+    description: Option<String>,
     color: Option<String>,
 ) -> RlResult<SkillGroup> {
     lib.ensure()?;
@@ -267,6 +273,9 @@ pub(super) fn group_rename(
         .find(|g| g.id == id)
         .expect("已校验存在");
     group.name = name.to_string();
+    if let Some(description) = description {
+        group.description = description.trim().to_string();
+    }
     if color_requested {
         group.color = color;
     }
@@ -320,6 +329,54 @@ pub(super) fn group_reorder(lib: &Library, ids: &[String]) -> RlResult<()> {
     }
     lib.write_plain_json(FILE_SKILLS, &data)?;
     git::auto_commit(lib, "调整分组排序")?;
+    Ok(())
+}
+
+/// 以分组维度整体设定成员技能:`skill_ids` 为该分组的完整成员集合
+/// (去重校验存在性),多对多关联按差量就地增删,其余分组归属不受影响
+pub(super) fn group_set_skills(
+    lib: &Library,
+    group_id: &str,
+    skill_ids: &[String],
+) -> RlResult<()> {
+    lib.ensure()?;
+    let mut data: SkillLibrary = lib.read_plain_json(FILE_SKILLS)?;
+    if !data.groups.iter().any(|g| g.id == group_id) {
+        return Err(RlError::coded(codes::GROUP_NOT_FOUND, group_id.to_string()));
+    }
+    let members: Vec<String> = dedup(skill_ids.to_vec());
+    for sid in &members {
+        if !data.skills.iter().any(|s| s.id == *sid) {
+            return Err(RlError::coded(codes::SKILL_NOT_FOUND, sid.to_string()));
+        }
+    }
+    let ts = now_ts();
+    let mut changed = 0usize;
+    for skill in &mut data.skills {
+        let before = skill.group_ids.len();
+        let is_member = members.iter().any(|sid| sid == &skill.id);
+        if is_member && !skill.group_ids.iter().any(|gid| gid == group_id) {
+            skill.group_ids.push(group_id.to_string());
+        } else if !is_member {
+            skill.group_ids.retain(|gid| gid != group_id);
+        }
+        if skill.group_ids.len() != before {
+            skill.updated_at = ts;
+            changed += 1;
+        }
+    }
+    if changed == 0 {
+        return Ok(());
+    }
+    let group_name = data
+        .groups
+        .iter()
+        .find(|g| g.id == group_id)
+        .expect("已校验存在")
+        .name
+        .clone();
+    lib.write_plain_json(FILE_SKILLS, &data)?;
+    git::auto_commit(lib, &format!("调整分组技能:{group_name}"))?;
     Ok(())
 }
 
@@ -673,31 +730,6 @@ pub(super) fn skill_delete(lib: &Library, id: &str) -> RlResult<()> {
     Ok(())
 }
 
-/// 全量重排:ids 必须与现有技能 id 集合完全一致(排序按数组顺序)
-pub(super) fn skill_reorder(lib: &Library, ids: &[String]) -> RlResult<()> {
-    lib.ensure()?;
-    let mut data: SkillLibrary = lib.read_plain_json(FILE_SKILLS)?;
-    let existing: HashSet<&str> = data.skills.iter().map(|s| s.id.as_str()).collect();
-    if ids.len() != existing.len() {
-        return Err(RlError::coded(codes::SKILL_NOT_FOUND, "技能数量不一致"));
-    }
-    for sid in ids {
-        if !existing.contains(sid.as_str()) {
-            return Err(RlError::coded(codes::SKILL_NOT_FOUND, sid.to_string()));
-        }
-    }
-    let ts = now_ts();
-    for (index, sid) in ids.iter().enumerate() {
-        if let Some(skill) = data.skills.iter_mut().find(|s| &s.id == sid) {
-            skill.sort_order = index as u32;
-            skill.updated_at = ts;
-        }
-    }
-    lib.write_plain_json(FILE_SKILLS, &data)?;
-    git::auto_commit(lib, "调整技能排序")?;
-    Ok(())
-}
-
 /// 技能正文目录路径(skills/<directory>),供打开目录与测试使用
 pub(super) fn skill_dir_path(lib: &Library, id: &str) -> RlResult<PathBuf> {
     let data: SkillLibrary = lib.read_plain_json(FILE_SKILLS)?;
@@ -767,17 +799,11 @@ pub(super) fn body_write(lib: &Library, id: &str, content: &str) -> RlResult<()>
 
 // ── MCP CRUD ───────────────────────────────────────────────────────────
 
-pub(super) fn mcp_create(lib: &Library, def: &McpServerInput) -> RlResult<McpServer> {
-    lib.ensure()?;
-    let def = validate_mcp(def)?;
-    let mut list: Vec<McpServer> = lib.read_mcp_json()?;
-    if list.iter().any(|m| m.name == def.name) {
-        return Err(RlError::coded(codes::MCP_NAME_CONFLICT, def.name.clone()));
-    }
-    let ts = now_ts();
-    let server = McpServer {
+/// 由校验后的输入构造待落库的 MCP 服务器(创建与批量导入共用)
+fn server_from_input(def: McpServerInput, ts: i64) -> McpServer {
+    McpServer {
         id: new_id("mcp"),
-        name: def.name.clone(),
+        name: def.name,
         description: def.description,
         transport: def.transport,
         command: def.command,
@@ -788,7 +814,17 @@ pub(super) fn mcp_create(lib: &Library, def: &McpServerInput) -> RlResult<McpSer
         enabled: def.enabled,
         created_at: ts,
         updated_at: ts,
-    };
+    }
+}
+
+pub(super) fn mcp_create(lib: &Library, def: &McpServerInput) -> RlResult<McpServer> {
+    lib.ensure()?;
+    let def = validate_mcp(def)?;
+    let mut list: Vec<McpServer> = lib.read_mcp_json()?;
+    if list.iter().any(|m| m.name == def.name) {
+        return Err(RlError::coded(codes::MCP_NAME_CONFLICT, def.name.clone()));
+    }
+    let server = server_from_input(def, now_ts());
     list.push(server.clone());
     lib.write_mcp_json(&list)?;
     git::auto_commit(lib, &format!("新增 MCP:{}", server.name))?;
@@ -832,6 +868,53 @@ pub(super) fn mcp_delete(lib: &Library, id: &str) -> RlResult<()> {
     lib.write_mcp_json(&list)?;
     git::auto_commit(lib, &format!("删除 MCP:{}", removed.name))?;
     Ok(())
+}
+
+/// 批量导入 MCP 服务器定义(前端粘贴 JSON 解析所得):逐条校验,
+/// 重名(与现有库或批内条目)与校验失败的条目跳过并记入 skipped;
+/// 成功导入非空时整体落盘并只做一次快照提交。
+pub(super) fn mcp_import(lib: &Library, defs: &[McpServerInput]) -> RlResult<McpImportOutcome> {
+    lib.ensure()?;
+    let mut outcome = McpImportOutcome::default();
+    if defs.is_empty() {
+        return Ok(outcome);
+    }
+    let mut list: Vec<McpServer> = lib.read_mcp_json()?;
+    let mut taken: HashSet<String> = list.iter().map(|m| m.name.clone()).collect();
+    for def in defs {
+        let def = match validate_mcp(def) {
+            Ok(def) => def,
+            Err(_) => {
+                outcome.skipped.push(McpImportSkip {
+                    name: def.name.trim().to_string(),
+                    reason: "invalid".to_string(),
+                });
+                continue;
+            }
+        };
+        if taken.contains(&def.name) {
+            outcome.skipped.push(McpImportSkip {
+                name: def.name.clone(),
+                reason: "conflict".to_string(),
+            });
+            continue;
+        }
+        taken.insert(def.name.clone());
+        let server = server_from_input(def, now_ts());
+        list.push(server.clone());
+        outcome.imported.push(server);
+    }
+    if !outcome.imported.is_empty() {
+        let first = &outcome.imported[0].name;
+        let message = if outcome.imported.len() == 1 {
+            format!("导入 MCP:{first}")
+        } else {
+            format!("导入 MCP:{first} 等 {} 个", outcome.imported.len())
+        };
+        lib.write_mcp_json(&list)?;
+        git::auto_commit(lib, &message)?;
+    }
+    Ok(outcome)
 }
 
 // ── 加密开关(仅加密 mcp.json;口令仅内存)──────────────────────────────

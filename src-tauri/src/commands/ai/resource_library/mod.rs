@@ -20,6 +20,8 @@ mod import;
 mod marketplace;
 mod models;
 mod ops;
+mod scan;
+mod scan_agent;
 mod store;
 
 #[cfg(test)]
@@ -28,14 +30,21 @@ mod tests;
 pub use errors::{RlError, RlResult};
 pub use models::*;
 
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, State};
 
+use super::run::RegisteredRun;
+use crate::ai::prompts::{fixed_system_prompt, DEFAULT_SKILL_SCAN_PROMPT};
+use crate::db::Db;
 use crate::error::{AppError, ErrorCode};
 
 use errors::codes;
-use models::{MarketplaceUpdateStatus, SyncOutcome, SyncRecord};
+use models::{
+    MarketplaceUpdateStatus, SkillFileContent, SkillScanReport, SkillTokenReport, SyncOutcome,
+    SyncRecord,
+};
 use store::{lock_op, Library};
 
 /// 后台自动同步完成事件(负载为 SyncOutcome)
@@ -180,9 +189,13 @@ pub fn rl_skill_list(app: AppHandle) -> RlResult<SkillLibrary> {
 pub async fn rl_skill_group_create(
     app: AppHandle,
     name: String,
+    description: Option<String>,
     color: Option<String>,
 ) -> RlResult<SkillGroup> {
-    mutate(&app, move |lib| ops::group_create(lib, &name, color)).await
+    mutate(&app, move |lib| {
+        ops::group_create(lib, &name, description, color)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -190,9 +203,13 @@ pub async fn rl_skill_group_rename(
     app: AppHandle,
     id: String,
     name: String,
+    description: Option<String>,
     color: Option<String>,
 ) -> RlResult<SkillGroup> {
-    mutate(&app, move |lib| ops::group_rename(lib, &id, &name, color)).await
+    mutate(&app, move |lib| {
+        ops::group_rename(lib, &id, &name, description, color)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -205,9 +222,17 @@ pub async fn rl_skill_group_reorder(app: AppHandle, ids: Vec<String>) -> RlResul
     mutate(&app, move |lib| ops::group_reorder(lib, &ids)).await
 }
 
+/// 以分组维度整体设定成员技能(差量增删多对多关联)
 #[tauri::command]
-pub async fn rl_skill_reorder(app: AppHandle, ids: Vec<String>) -> RlResult<()> {
-    mutate(&app, move |lib| ops::skill_reorder(lib, &ids)).await
+pub async fn rl_skill_group_set_skills(
+    app: AppHandle,
+    group_id: String,
+    skill_ids: Vec<String>,
+) -> RlResult<()> {
+    mutate(&app, move |lib| {
+        ops::group_set_skills(lib, &group_id, &skill_ids)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -277,6 +302,178 @@ pub fn rl_skill_body_read(app: AppHandle, id: String) -> RlResult<SkillBody> {
 #[tauri::command]
 pub async fn rl_skill_body_write(app: AppHandle, id: String, content: String) -> RlResult<()> {
     mutate(&app, move |lib| ops::body_write(lib, &id, &content)).await
+}
+
+// ── Skill 预览:token 统计与安全扫描 ───────────────────────────────────
+
+/// 技能 token 统计(与项目 AI 资产同口径的 o200k 估算):描述 + 全部文本文件
+#[tauri::command]
+pub async fn rl_skill_tokens(app: AppHandle, id: String) -> RlResult<SkillTokenReport> {
+    let lib = Library::app(&app)?;
+    blocking(move || {
+        let _guard = lock_op();
+        scan::token_report(&lib, &id)
+    })
+    .await
+}
+
+/// 读取技能目录内单个文件(预览用;路径白名单校验,二进制/超限 content 为 None)
+#[tauri::command]
+pub async fn rl_skill_file_read(
+    app: AppHandle,
+    id: String,
+    path: String,
+) -> RlResult<SkillFileContent> {
+    let lib = Library::app(&app)?;
+    blocking(move || {
+        let _guard = lock_op();
+        scan::skill_file_read(&lib, &id, &path)
+    })
+    .await
+}
+
+/// 安全扫描的语义层模型:显式 provider/model 引用可解析时用所选模型,
+/// 未选或引用失效(厂商/模型已删/密钥为空)回退 defaultModel —— 与 chat
+/// 偏好的回退语义一致,选项展示由前端在配置加载后自行归位。两者都不可用
+/// 返回 Err(调用方据此跳过语义层)。
+fn resolve_scan_model(
+    file: &crate::ai::catalog::AiConfigFile,
+    provider_id: Option<&str>,
+    model_id: Option<&str>,
+) -> crate::error::AppResult<(crate::agent::llm::types::Model, String)> {
+    if let (Some(provider_id), Some(model_id)) =
+        (provider_id.map(str::trim), model_id.map(str::trim))
+    {
+        if !provider_id.is_empty() && !model_id.is_empty() {
+            if let Ok(model) = crate::ai::catalog::resolve_model(file, provider_id, model_id) {
+                if let Some(provider) = file.providers.get(provider_id) {
+                    let api_key = provider.api_key.trim().to_string();
+                    if !api_key.is_empty() {
+                        return Ok((model, api_key));
+                    }
+                }
+            }
+        }
+    }
+    crate::ai::catalog::resolve_default_model(file)
+}
+
+/// 技能安全扫描(参考 SkillSpector 两层管线):静态规则层在进程锁内执行,
+/// 语义层经内置 Agent(显式 provider_id/model_id 时用所选模型,缺省或引用
+/// 失效回退设置页默认模型)在锁外调用;AI 未配置/失败/取消时静态结果照常
+/// 返回,由 llm_status 标注。language 决定 AI 发现的输出语言。
+#[tauri::command]
+pub async fn rl_skill_scan(
+    app: AppHandle,
+    db: State<'_, Db>,
+    id: String,
+    language: Option<String>,
+    run_id: Option<String>,
+    provider_id: Option<String>,
+    model_id: Option<String>,
+) -> RlResult<SkillScanReport> {
+    let lib = Library::app(&app)?;
+    let run = run_id.map(RegisteredRun::new);
+    let id_for_scan = id.clone();
+    let (input, static_findings) = blocking(move || {
+        let _guard = lock_op();
+        let input = scan::load_scan_input(&lib, &id_for_scan)?;
+        let findings = scan::static_findings(&input.files);
+        Ok((input, findings))
+    })
+    .await?;
+    let has_scripts = scan::has_executable_script(&input.files);
+    let language = language
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "zh-CN".to_string());
+    let semantic = {
+        let file = crate::ai::catalog::load_ai_config_file(&app);
+        resolve_scan_model(&file, provider_id.as_deref(), model_id.as_deref()).ok()
+    };
+
+    let mut findings = static_findings.clone();
+    let mut llm_status = "skipped".to_string();
+    let mut llm_error_code: Option<String> = None;
+    let mut llm_error_message: Option<String> = None;
+    let mut llm_summary: Option<String> = None;
+    let mut suppressed = 0usize;
+
+    if let Some((model, api_key)) = semantic {
+        let system_prompt = fixed_system_prompt(DEFAULT_SKILL_SCAN_PROMPT, &language);
+        let user_prompt = scan::build_llm_user_prompt(&input.name, &input.files, &static_findings);
+        let cancel_token = run.as_ref().map(|run| &run.token);
+        let mut parsed: Option<scan::LlmReport> = None;
+        // 解析失败重试一次(provider 错误与取消不重试,与 wiki 大纲纠错策略对齐);
+        // 每次尝试都是全新 harness 会话,usage 由 scan_agent 按 LLM 请求逐条落库
+        for _attempt in 0..2 {
+            let outcome = scan_agent::run_semantic_scan(
+                &db,
+                model.clone(),
+                &api_key,
+                &input.dir,
+                &system_prompt,
+                &user_prompt,
+                cancel_token,
+            )
+            .await;
+            match outcome {
+                Ok(text) => match scan::parse_llm_report(&text, static_findings.len()) {
+                    Ok(report) => {
+                        parsed = Some(report);
+                        break;
+                    }
+                    Err(error) => {
+                        llm_status = "failed".to_string();
+                        llm_error_code = None;
+                        llm_error_message = Some(error);
+                    }
+                },
+                Err(error) => {
+                    if run.as_ref().is_some_and(|run| run.token.is_cancelled()) {
+                        llm_status = "canceled".to_string();
+                        llm_error_code = None;
+                        llm_error_message = None;
+                    } else {
+                        llm_status = "failed".to_string();
+                        llm_error_code = Some(error.code().to_string());
+                        llm_error_message = Some(error.to_string());
+                    }
+                    break;
+                }
+            }
+        }
+        if let Some(llm) = parsed {
+            llm_status = "ok".to_string();
+            llm_error_code = None;
+            llm_error_message = None;
+            llm_summary = Some(llm.summary);
+            let suppressed_set: HashSet<usize> = llm.false_positives.into_iter().collect();
+            suppressed = suppressed_set.len();
+            findings = static_findings
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| !suppressed_set.contains(index))
+                .map(|(_, finding)| finding.clone())
+                .collect();
+            findings.extend(llm.findings);
+        }
+    }
+
+    let (score, level) = scan::score_findings(&findings, has_scripts);
+    Ok(SkillScanReport {
+        skill_id: id,
+        score,
+        level,
+        findings,
+        static_count: static_findings.len(),
+        suppressed_count: suppressed,
+        files_scanned: input.files.len(),
+        llm_status,
+        llm_error_code,
+        llm_error_message,
+        llm_summary,
+        scanned_at: crate::time_util::now_ts(),
+    })
 }
 
 // ── skills.sh 市场 ─────────────────────────────────────────────────────
@@ -379,6 +576,14 @@ pub async fn rl_mcp_update(app: AppHandle, id: String, def: McpServerInput) -> R
 #[tauri::command]
 pub async fn rl_mcp_delete(app: AppHandle, id: String) -> RlResult<()> {
     mutate(&app, move |lib| ops::mcp_delete(lib, &id)).await
+}
+
+#[tauri::command]
+pub async fn rl_mcp_import(
+    app: AppHandle,
+    defs: Vec<McpServerInput>,
+) -> RlResult<McpImportOutcome> {
+    mutate(&app, move |lib| ops::mcp_import(lib, &defs)).await
 }
 
 // ── 加密(可选,口令仅内存)──────────────────────────────────────────────

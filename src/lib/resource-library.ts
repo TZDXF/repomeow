@@ -8,6 +8,8 @@ import { cmd, onListen } from "@/lib/tauri";
 export interface ResourceSkillGroup {
   id: string;
   name: string;
+  /** 分组描述;空串 = 未填写,仅前端展示 */
+  description: string;
   color?: string;
   sortOrder: number;
 }
@@ -73,6 +75,11 @@ export function updateResourceSkill(id: string, input: ResourceSkillInput): Prom
   });
 }
 
+/** 仅更新技能的分组归属(name/description 缺省,后端不改写 SKILL.md frontmatter) */
+export function updateResourceSkillGroups(id: string, groupIds: string[]): Promise<ResourceSkill> {
+  return cmd<ResourceSkill>("rl_skill_update", { id, groupIds });
+}
+
 export async function readResourceSkillBody(id: string): Promise<{ body: string }> {
   const result = await cmd<{ content: string }>("rl_skill_body_read", { id });
   return { body: result.content };
@@ -82,12 +89,98 @@ export function saveResourceSkillBody(id: string, body: string): Promise<void> {
   return cmd<void>("rl_skill_body_write", { id, content: body });
 }
 
-export function deleteResourceSkill(id: string): Promise<void> {
-  return cmd<void>("rl_skill_delete", { id });
+// ---------------------------------------------------------------------------
+// Skill 预览页:token 统计与安全扫描(Rust 侧 rl_skill_tokens / rl_skill_scan)
+// ---------------------------------------------------------------------------
+
+/** 技能目录内单文件的 token 统计(path 为相对技能目录路径,SKILL.md 为正文) */
+export interface ResourceSkillTokenFile {
+  path: string;
+  /** null = 二进制/非 UTF-8 文件,不参与 token 统计 */
+  tokens: number | null;
+  bytes: number;
 }
 
-export function reorderResourceSkills(orderedIds: string[]): Promise<void> {
-  return cmd<void>("rl_skill_reorder", { ids: orderedIds });
+export interface ResourceSkillTokenReport {
+  id: string;
+  /** 技能描述(frontmatter 同步值)的 token 占用 */
+  descriptionTokens: number;
+  /** 全部文本文件 token 合计(二进制文件不计入) */
+  totalTokens: number;
+  /** SKILL.md 在首位,其余按路径排序;含二进制文件(tokens 为 null) */
+  files: ResourceSkillTokenFile[];
+  /** 技能内容指纹(描述 + 全部文件路径与字节);扫描结果缓存的有效性判据 */
+  hash: string;
+}
+
+export function readResourceSkillTokens(id: string): Promise<ResourceSkillTokenReport> {
+  return cmd<ResourceSkillTokenReport>("rl_skill_tokens", { id });
+}
+
+/** 读取技能目录内单个文件;content 为 null = 二进制/超出上限,无法文本预览 */
+export function readResourceSkillFile(
+  id: string,
+  path: string,
+): Promise<{ path: string; content: string | null }> {
+  return cmd<{ path: string; content: string | null }>("rl_skill_file_read", { id, path });
+}
+
+/** 单条安全发现:静态发现按 ruleId 走 i18n 标题,AI 发现直接用后端文本 */
+export interface ResourceSkillScanFinding {
+  severity: "critical" | "high" | "medium" | "low" | string;
+  category: string;
+  ruleId?: string;
+  title: string;
+  detail: string;
+  location: string;
+  source: "static" | "llm" | string;
+  evidence?: string;
+}
+
+export type ResourceSkillScanLevel = "low" | "medium" | "high" | "critical" | string;
+
+export type ResourceSkillScanLlmStatus = "ok" | "skipped" | "canceled" | "failed" | string;
+
+export interface ResourceSkillScanReport {
+  skillId: string;
+  /** 0-100,技能目录含可执行脚本时评分 ×1.3 */
+  score: number;
+  level: ResourceSkillScanLevel;
+  /** 静态发现(去掉 AI 判定的误报)+ AI 发现 */
+  findings: ResourceSkillScanFinding[];
+  /** 静态命中总数(含被 AI 过滤的误报) */
+  staticCount: number;
+  suppressedCount: number;
+  filesScanned: number;
+  /** ok | skipped(AI 未配置)| canceled | failed */
+  llmStatus: ResourceSkillScanLlmStatus;
+  llmErrorCode?: string | null;
+  llmErrorMessage?: string | null;
+  llmSummary?: string | null;
+  scannedAt: number;
+}
+
+/**
+ * 技能安全扫描(参考 SkillSpector 两层管线):静态规则层 + 内置 Agent 语义层。
+ * language 决定 AI 发现的输出语言;runId 供 ai_cancel_run 取消语义层;
+ * providerId/modelId 为显式选择的扫描模型,缺省走设置页默认模型。
+ */
+export function scanResourceSkill(
+  id: string,
+  options: { language: string; runId?: string; providerId?: string; modelId?: string },
+): Promise<ResourceSkillScanReport> {
+  return cmd<ResourceSkillScanReport>("rl_skill_scan", {
+    id,
+    language: options.language,
+    ...(options.runId ? { runId: options.runId } : {}),
+    ...(options.providerId && options.modelId
+      ? { providerId: options.providerId, modelId: options.modelId }
+      : {}),
+  });
+}
+
+export function deleteResourceSkill(id: string): Promise<void> {
+  return cmd<void>("rl_skill_delete", { id });
 }
 
 export function openResourceSkillDir(id: string): Promise<void> {
@@ -122,16 +215,31 @@ export function importResourceSkillUrl(url: string): Promise<ResourceSkillImport
 export async function createResourceSkillGroup(
   name: string,
   color?: string,
+  description?: string,
 ): Promise<ResourceSkillGroup> {
-  return mapGroup(await cmd<BackendSkillGroup>("rl_skill_group_create", { name, color }));
+  return mapGroup(
+    await cmd<BackendSkillGroup>("rl_skill_group_create", {
+      name,
+      color,
+      description: description ?? "",
+    }),
+  );
 }
 
 export async function updateResourceSkillGroup(
   id: string,
   name: string,
   color?: string,
+  description?: string,
 ): Promise<ResourceSkillGroup> {
-  return mapGroup(await cmd<BackendSkillGroup>("rl_skill_group_rename", { id, name, color }));
+  return mapGroup(
+    await cmd<BackendSkillGroup>("rl_skill_group_rename", {
+      id,
+      name,
+      color,
+      description: description ?? "",
+    }),
+  );
 }
 
 export function deleteResourceSkillGroup(id: string): Promise<void> {
@@ -142,25 +250,39 @@ export function reorderResourceSkillGroups(orderedIds: string[]): Promise<void> 
   return cmd<void>("rl_skill_group_reorder", { ids: orderedIds });
 }
 
+/** 以分组维度整体设定成员技能:skillIds 为该分组完整成员集合,后端差量增删 */
+export function setResourceSkillGroupSkills(groupId: string, skillIds: string[]): Promise<void> {
+  return cmd<void>("rl_skill_group_set_skills", { groupId, skillIds });
+}
+
+/**
+ * 技能筛选行里与普通分组并列的「来源」特殊分组:从市场技能的 marketplace.source
+ * 自动派生(去重、按名称排序),不可在分组管理对话框中编辑。
+ */
+export function collectSkillSources(skills: ResourceSkill[]): string[] {
+  const sources = new Set<string>();
+  for (const skill of skills) {
+    if (skill.marketplace?.source) {
+      sources.add(skill.marketplace.source);
+    }
+  }
+  return [...sources].sort((a, b) => a.localeCompare(b));
+}
+
+/** 关键词(名称/描述,大小写不敏感)与分组、来源过滤;groupId/sourceId 为 null = 不过滤 */
 export function filterSkills(
   skills: ResourceSkill[],
   query: string,
   groupId: string | null,
+  sourceId: string | null = null,
 ): ResourceSkill[] {
   const q = query.trim().toLowerCase();
   return skills.filter((skill) => {
     if (groupId !== null && !skill.groupIds.includes(groupId)) return false;
+    if (sourceId !== null && skill.marketplace?.source !== sourceId) return false;
     if (!q) return true;
     return skill.name.toLowerCase().includes(q) || skill.description.toLowerCase().includes(q);
   });
-}
-
-export function mergeReorderedVisible(allIds: string[], visibleNewOrder: string[]): string[] {
-  const visibleSet = new Set(visibleNewOrder);
-  const others = allIds.filter((id) => !visibleSet.has(id));
-  const anchorIndex = allIds.findIndex((id) => visibleSet.has(id));
-  const insertAt = anchorIndex === -1 ? others.length : anchorIndex;
-  return [...others.slice(0, insertAt), ...visibleNewOrder, ...others.slice(insertAt)];
 }
 
 // ---------------------------------------------------------------------------
@@ -349,6 +471,232 @@ export function updateResourceMcpServer(
 
 export function deleteResourceMcpServer(id: string): Promise<void> {
   return cmd<void>("rl_mcp_delete", { id });
+}
+
+// ---------------------------------------------------------------------------
+// MCP JSON 导入(前端解析预览,后端 rl_mcp_import 批量落库)
+// ---------------------------------------------------------------------------
+
+/** 单条被跳过的导入条目;reason 为后端稳定码,由 i18n 映射文案 */
+export interface ResourceMcpImportSkip {
+  name: string;
+  /** conflict = 与现有服务器或批内条目重名;invalid = 校验失败 */
+  reason: "conflict" | "invalid";
+}
+
+/** 批量导入结果:可导入的照常入库,重名/校验失败的条目跳过 */
+export interface ResourceMcpImportOutcome {
+  imported: ResourceMcpServer[];
+  skipped: ResourceMcpImportSkip[];
+}
+
+export function importResourceMcpJson(
+  defs: ResourceMcpServerInput[],
+): Promise<ResourceMcpImportOutcome> {
+  return cmd<ResourceMcpImportOutcome>("rl_mcp_import", { defs });
+}
+
+/** 解析出的单条待导入条目;name 可为空串(裸单对象 JSON 无名称,导入前须补填) */
+export interface ParsedResourceMcpEntry {
+  name: string;
+  description?: string;
+  transport: ResourceMcpTransport;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+}
+
+/** 解析阶段被跳过的条目;reason 为稳定码:invalid(缺 command/url)/ unsupported(type 不支持) */
+export interface ParsedResourceMcpSkip {
+  name: string;
+  reason: "invalid" | "unsupported";
+}
+
+export interface ParsedResourceMcpJson {
+  entries: ParsedResourceMcpEntry[];
+  skipped: ParsedResourceMcpSkip[];
+}
+
+/** JSON 粘贴无法解析时抛出;code 为稳定码,由 i18n 映射文案 */
+export class ResourceMcpJsonError extends Error {
+  /** invalidJson = 非法 JSON 语法;unrecognized = 结构中不包含任何服务器定义 */
+  code: "invalidJson" | "unrecognized";
+
+  constructor(code: "invalidJson" | "unrecognized") {
+    super(code);
+    this.name = "ResourceMcpJsonError";
+    this.code = code;
+  }
+}
+
+type JsonRecord = Record<string, unknown>;
+
+function isJsonRecord(value: unknown): value is JsonRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** 形似服务器定义:含非空字符串 command 或 url 字段 */
+function looksLikeServerDef(value: unknown): value is JsonRecord {
+  return (
+    isJsonRecord(value) &&
+    ((typeof value.command === "string" && value.command.trim() !== "") ||
+      (typeof value.url === "string" && value.url.trim() !== ""))
+  );
+}
+
+function jsonStringField(def: JsonRecord, key: string): string | undefined {
+  const value = def[key];
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
+}
+
+/** args:字符串视为单参数;数组内标量取字符串化值,其余元素忽略 */
+function jsonArgs(value: unknown): string[] | undefined {
+  if (typeof value === "string") {
+    return value.trim() ? [value.trim()] : undefined;
+  }
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const args = value
+    .map((item) =>
+      typeof item === "string" || typeof item === "number" || typeof item === "boolean"
+        ? String(item).trim()
+        : "",
+    )
+    .filter(Boolean);
+  return args.length ? args : undefined;
+}
+
+/** env/headers 键值表:仅保留标量值(字符串化),空键/空值丢弃 */
+function jsonMap(value: unknown): Record<string, string> | undefined {
+  if (!isJsonRecord(value)) {
+    return undefined;
+  }
+  const map: Record<string, string> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item === "string" || typeof item === "number" || typeof item === "boolean") {
+      const text = String(item).trim();
+      if (key.trim() && text) {
+        map[key.trim()] = text;
+      }
+    }
+  }
+  return Object.keys(map).length ? map : undefined;
+}
+
+/** type/transport 字段归一:识别各家常见别名;未声明返回 null,声明但未知视作不支持 */
+function normalizeJsonTransport(raw: unknown): ResourceMcpTransport | null {
+  if (typeof raw !== "string" || raw.trim() === "") {
+    return null;
+  }
+  switch (raw.toLowerCase().replace(/[\s_-]/g, "")) {
+    case "stdio":
+    case "local":
+      return "stdio";
+    case "http":
+    case "streamablehttp":
+    case "remote":
+      return "http";
+    case "sse":
+      return "sse";
+    default:
+      return null;
+  }
+}
+
+function collectJsonServerDef(name: string, value: unknown, out: ParsedResourceMcpJson): void {
+  const entryName =
+    name.trim() || (isJsonRecord(value) ? (jsonStringField(value, "name") ?? "") : "");
+  if (!looksLikeServerDef(value)) {
+    out.skipped.push({ name: entryName, reason: "invalid" });
+    return;
+  }
+  const hasCommand = typeof value.command === "string" && value.command.trim() !== "";
+  const declared = value.type ?? value.transport;
+  const normalized = normalizeJsonTransport(declared);
+  if (typeof declared === "string" && declared.trim() !== "" && normalized === null) {
+    out.skipped.push({ name: entryName, reason: "unsupported" });
+    return;
+  }
+  const description = jsonStringField(value, "description");
+  // 未声明类型时按形状推断:有 command 走 stdio,否则 url 走 http
+  const transport = normalized ?? (hasCommand ? "stdio" : "http");
+  if (transport === "stdio") {
+    const command = hasCommand ? (value.command as string).trim() : "";
+    if (!command) {
+      out.skipped.push({ name: entryName, reason: "invalid" });
+      return;
+    }
+    const args = jsonArgs(value.args);
+    const env = jsonMap(value.env);
+    out.entries.push({
+      name: entryName,
+      ...(description ? { description } : {}),
+      transport,
+      command,
+      ...(args ? { args } : {}),
+      ...(env ? { env } : {}),
+    });
+  } else {
+    const url = (value.url as string).trim();
+    if (!url) {
+      out.skipped.push({ name: entryName, reason: "invalid" });
+      return;
+    }
+    const headers = jsonMap(value.headers);
+    out.entries.push({
+      name: entryName,
+      ...(description ? { description } : {}),
+      transport,
+      url,
+      ...(headers ? { headers } : {}),
+    });
+  }
+}
+
+function collectJsonServerMap(map: JsonRecord, out: ParsedResourceMcpJson): void {
+  for (const [name, value] of Object.entries(map)) {
+    collectJsonServerDef(name, value, out);
+  }
+}
+
+/**
+ * 解析粘贴的 MCP JSON 配置为待导入条目。支持四种结构:
+ * `{mcpServers: {...}}`(claude/cursor/.mcp.json)、`{servers: {...}}`(VS Code)、
+ * 单个服务器定义对象(名称取自身 name 字段)、以及裸键值表 `{名称: 定义}`。
+ */
+export function parseResourceMcpJson(text: string): ParsedResourceMcpJson {
+  let root: unknown;
+  try {
+    root = JSON.parse(text);
+  } catch {
+    throw new ResourceMcpJsonError("invalidJson");
+  }
+  const out: ParsedResourceMcpJson = { entries: [], skipped: [] };
+  if (isJsonRecord(root)) {
+    if (isJsonRecord(root.mcpServers)) {
+      collectJsonServerMap(root.mcpServers, out);
+      return out;
+    }
+    if (isJsonRecord(root.servers)) {
+      collectJsonServerMap(root.servers, out);
+      return out;
+    }
+    if (looksLikeServerDef(root)) {
+      collectJsonServerDef(jsonStringField(root, "name") ?? "", root, out);
+      return out;
+    }
+    // 裸键值表:全部值为对象且至少一个形似服务器定义时按名称导入,
+    // 个别无效条目由 collectJsonServerDef 记入 skipped
+    const values = Object.values(root);
+    if (values.length > 0 && values.every(isJsonRecord) && values.some(looksLikeServerDef)) {
+      collectJsonServerMap(root, out);
+      return out;
+    }
+  }
+  throw new ResourceMcpJsonError("unrecognized");
 }
 
 export function parseEnvLines(text: string): Record<string, string> {

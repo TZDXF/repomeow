@@ -1,17 +1,18 @@
 //! grep 工具:对齐 `packages/coding-agent/src/core/tools/grep.ts`。
 //!
 //! 蓝本经 `rg --json --line-number --color=never --hidden` 子进程搜索;本实现用
-//! `ignore::WalkBuilder + regex` 纯 Rust 等价(默认 require-git 与 rg 的仓库判定
-//! 一致,`--hidden` 对应 `hidden(false)`,`--glob` 对应 overrides 白/黑名单),
-//! 不依赖运行时下载 ripgrep。输出契约保持:相对搜索根的 `/` 分隔路径、
-//! `path:line: text` / `path-line- text`(context)、默认 100 条匹配、单行
-//! 500 字符、总量 50KB 截断与 details 通知。
+//! `ignore::WalkBuilder + regex` 纯 Rust 等价(gitignore 判定与 find 对齐 fd
+//! `--no-require-git`:仓库内外都生效,`--hidden` 对应 `hidden(false)`,
+//! `--glob` 对应 overrides 白/黑名单),不依赖运行时下载 ripgrep。输出契约保持:
+//! 相对搜索根的 `/` 分隔路径、`path:line: text` / `path-line- text`(context)、
+//! 默认 100 条匹配、单行 500 字符、总量 50KB 截断与 details 通知。
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde_json::{json, Value};
 
+use crate::agent::harness::tools::find::inside_git_repo;
 use crate::agent::harness::tools::path_utils::resolve_tool_path;
 use crate::agent::harness::types::{ExecutionEnv, FileKind, SimpleError};
 use crate::agent::harness::utils::truncate::{
@@ -94,6 +95,8 @@ fn search_directory(
     let mut builder = ignore::WalkBuilder::new(root);
     // rg --hidden:搜索隐藏文件但仍遵守 .gitignore。
     builder.hidden(false);
+    // 与 find 对齐 fd --no-require-git 语义:仓库外也尊重 .gitignore。
+    builder.require_git(inside_git_repo(root.to_string_lossy().as_ref()));
     if let Some(glob) = glob {
         let mut overrides = ignore::overrides::OverrideBuilder::new(root);
         overrides.add(glob).map_err(|error| {

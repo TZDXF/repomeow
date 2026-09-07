@@ -12,15 +12,15 @@ const { t } = useI18n();
 type ResourceTabId = "market" | "skills" | "mcp" | "backup";
 
 const tabs: { id: ResourceTabId; icon: Component; component: Component }[] = [
-  { id: "market", icon: Store, component: ResourceMarketplaceTab },
   { id: "skills", icon: Boxes, component: ResourceSkillsTab },
   { id: "mcp", icon: Cable, component: ResourceMcpTab },
   { id: "backup", icon: DatabaseBackup, component: ResourceBackupTab },
+  { id: "market", icon: Store, component: ResourceMarketplaceTab },
 ];
 
-const activeTab = ref<ResourceTabId>("market");
+const activeTab = ref<ResourceTabId>("skills");
 const activeComponent = computed(
-  () => tabs.find((tab) => tab.id === activeTab.value)?.component ?? ResourceMarketplaceTab,
+  () => tabs.find((tab) => tab.id === activeTab.value)?.component ?? ResourceSkillsTab,
 );
 
 /** 方向键在 Tab 间循环切换(简单 keyboard navigation) */
