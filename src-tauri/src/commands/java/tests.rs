@@ -85,7 +85,8 @@ fn discovers_spring_boot_builds() {
     assert_eq!(groups[0].run_dir, ".");
     assert_eq!(
         groups[0].run_command,
-        "mvn install -DskipTests && mvn -f server/pom.xml spring-boot:run"
+        "mvn install -DskipTests && mvn -f server/pom.xml spring-boot:run \
+         -Dspring-boot.run.fork=false -Dspring-boot.run.useTestClasspath=false"
     );
     // gradle 子项目:根目录任务路径
     assert_eq!(groups[1].dir, "svc");
@@ -114,7 +115,10 @@ fn root_module_runs_directly() {
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0].dir, ".");
     assert_eq!(groups[0].run_dir, ".");
-    assert_eq!(groups[0].run_command, "mvn spring-boot:run");
+    assert_eq!(
+        groups[0].run_command,
+        "mvn spring-boot:run -Dspring-boot.run.fork=false -Dspring-boot.run.useTestClasspath=false"
+    );
     // 常用操作:根模块直接跟生命周期目标
     let action_cmds: Vec<&str> = groups[0]
         .more_actions

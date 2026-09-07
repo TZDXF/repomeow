@@ -15,6 +15,12 @@ const POM_MARKER: &str = "spring-boot-maven-plugin";
 /// build.gradle(.kts) 中判定 Spring Boot 项目的标记(boot 插件 id)
 const GRADLE_MARKER: &str = "org.springframework.boot";
 
+/// spring-boot:run 固定追加参数。fork=false 让应用跑在 Maven 自身 JVM 里,
+/// 不再以超长 classpath 拼子进程命令行,规避 Windows 命令行长度上限的
+/// 「路径过长」启动失败;useTestClasspath=false 不把测试类路径拼进 classpath
+const SPRING_BOOT_RUN_FLAGS: &str =
+    "-Dspring-boot.run.fork=false -Dspring-boot.run.useTestClasspath=false";
+
 /// 在已遍历的文件清单上提取 Spring Boot 构建分组(供合并扫描复用,避免重复 walk)。
 /// 只收录构建文件声明了 spring-boot 运行插件的目录(见各 marker 注释),
 /// 普通 Java 项目与多模块工程的库/聚合模块不产出;
@@ -98,7 +104,7 @@ fn build_run_spec(
 
     let (command, more_actions) = match (tool, dir_rel) {
         (JavaBuildTool::Maven, ".") => (
-            format!("{maven_cmd} spring-boot:run"),
+            format!("{maven_cmd} spring-boot:run {SPRING_BOOT_RUN_FLAGS}"),
             vec![
                 action("java.clean", format!("{maven_cmd} clean")),
                 action("java.package", format!("{maven_cmd} package -DskipTests")),
@@ -109,7 +115,7 @@ fn build_run_spec(
         (JavaBuildTool::Maven, module) => (
             format!(
                 "{maven_cmd} install -DskipTests \
-                 && {maven_cmd} -f {module}/pom.xml spring-boot:run"
+                 && {maven_cmd} -f {module}/pom.xml spring-boot:run {SPRING_BOOT_RUN_FLAGS}"
             ),
             vec![
                 action("java.clean", format!("{maven_cmd} clean -pl {module}")),
