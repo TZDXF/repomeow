@@ -17,9 +17,12 @@ const GRADLE_MARKER: &str = "org.springframework.boot";
 
 /// spring-boot:run 固定追加参数。fork=false 让应用跑在 Maven 自身 JVM 里,
 /// 不再以超长 classpath 拼子进程命令行,规避 Windows 命令行长度上限的
-/// 「路径过长」启动失败;useTestClasspath=false 不把测试类路径拼进 classpath
+/// 「路径过长」启动失败;useTestClasspath=false 不把测试类路径拼进 classpath。
+/// 每段 -D 必须套双引号:PowerShell 会把以 - 开头的裸词从点号处拆开,
+/// -Dspring-boot.run.fork=false 会被拆成 -Dspring-boot 与 .run.fork=false,
+/// 后者被 Maven 当生命周期阶段报「Unknown lifecycle phase」(cmd/bash 无此问题)
 const SPRING_BOOT_RUN_FLAGS: &str =
-    "-Dspring-boot.run.fork=false -Dspring-boot.run.useTestClasspath=false";
+    "\"-Dspring-boot.run.fork=false\" \"-Dspring-boot.run.useTestClasspath=false\"";
 
 /// 在已遍历的文件清单上提取 Spring Boot 构建分组(供合并扫描复用,避免重复 walk)。
 /// 只收录构建文件声明了 spring-boot 运行插件的目录(见各 marker 注释),
