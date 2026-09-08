@@ -78,6 +78,8 @@ export const useSettingsStore = defineStore("settings", () => {
    * (projects 表 wiki_auto_update)
    */
   const wikiAutoUpdate = ref(false);
+  // 仅控制项目资源部署目标的显隐,不影响 ACP 或已落盘配置。
+  const hiddenResourceAgents = ref<string[]>([]);
   /** 关闭主窗口行为(默认最小化到托盘) */
   const closeAction = ref<CloseAction>("tray");
   /** 执行命令的终端(默认 cmd,仅 Windows 生效) */
@@ -441,6 +443,12 @@ export const useSettingsStore = defineStore("settings", () => {
       autoCheckUpdate.value = savedAutoCheckUpdate === "true";
     }
     // Wiki 自动增量更新开关:存为字符串 "true"/"false",非法值回退 false
+    const hiddenAgents = await fileStore.get<unknown>("hiddenResourceAgents");
+    if (Array.isArray(hiddenAgents)) {
+      hiddenResourceAgents.value = [
+        ...new Set(hiddenAgents.filter((id): id is string => typeof id === "string")),
+      ];
+    }
     const savedWikiAutoUpdate = await fileStore.get<string>("wikiAutoUpdate");
     if (savedWikiAutoUpdate === "true" || savedWikiAutoUpdate === "false") {
       wikiAutoUpdate.value = savedWikiAutoUpdate === "true";
@@ -502,7 +510,7 @@ export const useSettingsStore = defineStore("settings", () => {
     systemDark.addEventListener("change", onSystemThemeChange);
   }
 
-  async function persist(key: string, value: string) {
+  async function persist(key: string, value: unknown) {
     if (!fileStore) return;
     await fileStore.set(key, value);
     await fileStore.save();
@@ -633,6 +641,12 @@ export const useSettingsStore = defineStore("settings", () => {
   async function setWikiAutoUpdate(value: boolean) {
     wikiAutoUpdate.value = value;
     await persist("wikiAutoUpdate", String(value));
+  }
+
+  async function setHiddenResourceAgents(ids: string[]) {
+    const next = [...new Set(ids)];
+    await persist("hiddenResourceAgents", next);
+    hiddenResourceAgents.value = next;
   }
 
   async function setCloseAction(value: CloseAction) {
@@ -779,6 +793,8 @@ export const useSettingsStore = defineStore("settings", () => {
     projectsSortKey,
     autoCheckUpdate,
     wikiAutoUpdate,
+    hiddenResourceAgents,
+    setHiddenResourceAgents,
     closeAction,
     terminal,
     enableGhCli,

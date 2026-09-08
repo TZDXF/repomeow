@@ -36,6 +36,7 @@ export default {
     view: "查看",
   },
   errors: {
+    project_ai_conflict: "配置冲突或资源不可用:{context}",
     // 通用
     db_error: "数据库错误",
     io_error: "IO 错误",
@@ -275,6 +276,60 @@ export default {
   trayPopup: {
     searchPlaceholder: "搜索项目...",
     empty: "没有匹配的项目",
+  },
+  projectAi: {
+    agentSettingsHint:
+      "控制项目 AI 资源页显示的配置目标,无需安装对应工具。隐藏不会删除已配置资源,不影响 Wiki 的 ACP Agent。此偏好仅保存在本机。",
+    sharedHint:
+      "部分工具也会读取其他工具的技能目录;同一目录的内容变更可能影响其他工具。共享托管路径仍有引用时不会删除。",
+    secretWarning:
+      "MCP 配置可能将密钥明文写入项目。资源库加密不会加密导出文件;请检查 Git 忽略规则,避免提交凭据。",
+    search: "搜索资源或分组…",
+    ungrouped: "未分组",
+    sourceUnavailableHint: "来源暂不可用。请前往资源管理解锁或修复后刷新;已有配置不会自动移除。",
+    libraryEmpty: "资源库暂无资源,请先前往资源管理添加。",
+    noResults: "没有匹配的资源",
+    selectGroup: "选择本组当前结果",
+    unsupported: "当前 Agent 不支持此定义,或来源不可用。已配置项仍可取消选择。",
+    partial: "已应用 {count} 项,{failed} 项失败,请查看下方详情。",
+    applied: "已应用 {count} 项配置",
+    conflictHint: "为保护现有文件,冲突项未被覆盖或删除。请先备份并手动处理对应路径,再刷新重试。",
+    manageLibrary: "资源管理",
+    add: "添加",
+    addTitle: "添加 {kind}",
+    addHint: "从资源库选择要加入项目的资源;加入后在资源行内点击 Agent 标签即可配置。",
+    addCount: "添加 ({count})",
+    allAdded: "资源库中的资源都已加入项目",
+    added: "已添加 {count} 项",
+    filterAll: "全部",
+    remove: "移除",
+    removeSelected: "移除 ({count})",
+    removeSelectedTitle: "批量移除资源",
+    removeSelectedHint:
+      "将当前分类的 {count} 项从项目资源列表移除,并解除所有 Agent 的托管配置;共享路径仍有其他引用时文件会保留。",
+    removedCount: "已移除 {count} 项",
+    removeTitle: "移除资源",
+    removeHint:
+      "将「{name}」从项目资源列表移除,并解除所有 Agent 的托管配置;共享路径仍有其他引用时文件会保留。",
+    removed: "已移除「{name}」",
+    import: "导入",
+    importHint: "导入到资源库并认领为托管配置",
+    imported: "已导入「{name}」并认领为托管配置",
+    sectionHint: "点击「添加」从资源库加入资源,点击行内 Agent 标签控制配置;分类标签可筛选列表。",
+    projectEmpty: "尚未添加资源,点击上方「添加」按钮从资源库选择。",
+    noAgents: "所有配置目标均已隐藏,请前往资源管理的 Agent 工具中启用。",
+    preview: "预览项目中的配置(只读)",
+    unmanaged: "非托管配置",
+    unmanagedHint: "项目原有或手动添加的资源;点击「导入」收入资源库并认领为托管配置。",
+    states: {
+      configured: "已配置",
+      update: "可更新",
+      modified: "本地已修改",
+      missing: "项目文件缺失",
+      sourceMissing: "来源已删除",
+      sourceUnavailable: "来源暂不可用",
+      conflict: "需检查配置",
+    },
   },
   aiAssets: {
     title: "AI 资产",
@@ -1792,6 +1847,7 @@ export default {
         skills: "Skills",
         mcp: "MCP",
         backup: "备份",
+        agents: "Agent 工具",
       },
       market: {
         description: "从市场来源浏览并安装技能,安装后进入本地 Skills 库",

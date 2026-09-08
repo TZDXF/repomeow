@@ -1,4 +1,4 @@
-// ── AI 面板(scan_project_ai_assets / cc-switch 导入) ─────────────────
+// ── AI 面板(scan_project_ai_assets 只读扫描) ─────────────────
 
 /** 项目内检测到的一个 AI 指令/规则/设置文件 */
 export interface AiAssetItem {
@@ -30,14 +30,6 @@ export interface ProjectMcpFile {
   servers: McpServerEntry[];
 }
 
-/** 一个可管理的 MCP 目标(含尚未创建的文件) */
-export interface McpTargetInfo {
-  path: string;
-  dialect: McpDialect;
-  /** 归属 agent id */
-  agents: string[];
-}
-
 /** 项目 skills 目录(.claude/skills、.agents/skills、.zcode/skills)下的一个技能 */
 export interface ProjectSkill {
   /** 技能目录的仓库相对路径,如 ".claude/skills/foo" */
@@ -50,49 +42,9 @@ export interface ProjectSkill {
   tokenCount: number;
 }
 
-/** 一个 agent 工具的本机安装状态 + 本项目配置命中情况 */
-export interface ProjectAgentStatus {
-  id: string;
-  name: string;
-  installed: boolean;
-  /** 本项目内检测到的、该 agent 会读取的配置路径 */
-  configs: string[];
-}
-
 /** scan_project_ai_assets 的聚合结果(详情页 AI 面板数据源) */
 export interface ProjectAiAssets {
   files: AiAssetItem[];
   mcp: ProjectMcpFile[];
-  /** 全部可管理的 MCP 目标(含未创建文件) */
-  mcpTargets: McpTargetInfo[];
   skills: ProjectSkill[];
-  agents: ProjectAgentStatus[];
-}
-
-/** cc-switch 管理的一个技能(~/.cc-switch/skills/<directory>/) */
-export interface CcSwitchSkill {
-  id: string;
-  name: string;
-  description: string;
-  /** skills/ 下的子目录名(导出到项目时的目标目录名) */
-  directory: string;
-  enabledApps: string[];
-}
-
-/** cc-switch 管理的一个 MCP 服务器 */
-export interface CcSwitchMcpServer {
-  id: string;
-  name: string;
-  description: string;
-  tags: string[];
-  /** 原始服务器定义(stdio/sse/http 等),导出时按 name 键写入项目 .mcp.json */
-  serverConfig: Record<string, unknown>;
-  enabledApps: string[];
-}
-
-/** ai_cc_switch_assets 的结果;found=false 表示本机没有 ~/.cc-switch */
-export interface CcSwitchAssets {
-  found: boolean;
-  skills: CcSwitchSkill[];
-  mcpServers: CcSwitchMcpServer[];
 }

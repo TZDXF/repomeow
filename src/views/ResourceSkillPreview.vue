@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { toast } from "vue-sonner";
 import {
   ArrowLeft,
@@ -35,7 +36,10 @@ import {
   openResourceSkillDir,
   readResourceSkillFile,
   readResourceSkillTokens,
+  readSkillDirFile,
+  readSkillDirOverview,
   scanResourceSkill,
+  scanSkillDir,
   updateResourceSkillGroups,
   type ResourceSkill,
   type ResourceSkillGroup,
@@ -62,6 +66,16 @@ const settingsStore = useSettingsStore();
 const aiConfig = useAiConfigStore();
 
 const skillId = computed(() => String(route.params.id ?? ""));
+/** 本地目录模式(项目内非托管技能):query.dir 为技能目录绝对路径,不经资源库 */
+const localDir = computed(() => {
+  const value = route.query.dir;
+  return typeof value === "string" ? value : "";
+});
+const isLocal = computed(() => !!localDir.value);
+/** 扫描报告缓存键:库技能用 id,本地目录用 dir: 前缀路径 */
+const scanCacheId = computed(() => (isLocal.value ? `dir:${localDir.value}` : skillId.value));
+/** 本地目录模式的名称/描述(来自目录报告的 frontmatter 解析) */
+const localMeta = ref<{ name: string; description: string } | null>(null);
 const skill = ref<ResourceSkill | null>(null);
 const tokens = ref<ResourceSkillTokenReport | null>(null);
 const loadingTokens = ref(false);
@@ -89,6 +103,9 @@ onMounted(() => {
 });
 
 async function loadSkill() {
+  if (isLocal.value) {
+    return;
+  }
   try {
     const list = await listResourceSkills();
     allGroups.value = list.groups;
@@ -101,15 +118,25 @@ async function loadSkill() {
 async function loadTokens() {
   loadingTokens.value = true;
   try {
-    const report = await readResourceSkillTokens(skillId.value);
-    tokens.value = report;
+    if (isLocal.value) {
+      const report = await readSkillDirOverview(localDir.value);
+      tokens.value = {
+        id: scanCacheId.value,
+        descriptionTokens: report.descriptionTokens,
+        totalTokens: report.totalTokens,
+        files: report.files,
+        hash: report.hash,
+      };
+      localMeta.value = { name: report.name, description: report.description };
+    } else {
+      tokens.value = await readResourceSkillTokens(skillId.value);
+    }
     hydrateScanCache();
     // 默认选中 SKILL.md;缺失时选第一个文件,目录为空则落在安全扫描
+    const files = tokens.value?.files ?? [];
     if (selected.value.kind === "file" && selected.value.path === "SKILL.md") {
-      if (!report.files.some((f) => f.path === "SKILL.md")) {
-        selected.value = report.files.length
-          ? { kind: "file", path: report.files[0].path }
-          : { kind: "scan" };
+      if (!files.some((f) => f.path === "SKILL.md")) {
+        selected.value = files.length ? { kind: "file", path: files[0].path } : { kind: "scan" };
       }
     }
     // 默认选中的文件不经过 selectFile,内容需在此触发加载
@@ -124,13 +151,23 @@ async function loadTokens() {
 }
 
 function goBack() {
-  // 带 category 回参,Settings 打开时直接落在「资源管理」分类
+  // 项目 AI 资产页等入口经 from 回参指定来源,优先返回来源页;
+  // 否则回设置页,带 category 回参落在「资源管理」分类
+  const from = route.query.from;
+  if (typeof from === "string" && from.startsWith("/")) {
+    void router.push(from);
+    return;
+  }
   void router.push({ path: "/settings", query: { category: "resources" } });
 }
 
 async function openDir() {
   try {
-    await openResourceSkillDir(skillId.value);
+    if (isLocal.value) {
+      await openPath(localDir.value);
+    } else {
+      await openResourceSkillDir(skillId.value);
+    }
   } catch (e) {
     toast.error(String(e));
   }
@@ -241,7 +278,9 @@ async function ensureFileContent(path: string) {
   loadingPath.value = path;
   syncContent();
   try {
-    const result = await readResourceSkillFile(skillId.value, path);
+    const result = isLocal.value
+      ? await readSkillDirFile(localDir.value, path)
+      : await readResourceSkillFile(skillId.value, path);
     fileCache.set(path, result.content);
   } catch (e) {
     toast.error(t("settings.resources.skills.previewPage.readFailed", { error: String(e) }));
@@ -440,7 +479,7 @@ function translateError(e: unknown): string {
 function hydrateScanCache() {
   const fingerprint = tokens.value?.hash;
   if (!fingerprint || scanReport.value || scanning.value) return;
-  void getCachedScanReport(skillId.value, fingerprint).then((cached) => {
+  void getCachedScanReport(scanCacheId.value, fingerprint).then((cached) => {
     if (cached && !scanReport.value && !scanning.value) {
       scanReport.value = cached;
     }
@@ -458,17 +497,20 @@ async function runScan() {
       ? null
       : parseModelOptionValue(scanModelValue.value);
   try {
-    const report = await scanResourceSkill(skillId.value, {
+    const options = {
       language: settingsStore.language,
       runId,
       providerId: modelRef?.providerId,
       modelId: modelRef?.modelId,
-    });
+    };
+    const report = isLocal.value
+      ? await scanSkillDir(localDir.value, options)
+      : await scanResourceSkill(skillId.value, options);
     if (scanRunId === runId) {
       scanReport.value = report;
       // 成功后写入缓存;技能内容变化会改变指纹,旧缓存自动失效
       const fingerprint = tokens.value?.hash;
-      if (fingerprint) void putCachedScanReport(skillId.value, fingerprint, report);
+      if (fingerprint) void putCachedScanReport(scanCacheId.value, fingerprint, report);
     }
   } catch (e) {
     toast.error(translateError(e));
@@ -563,11 +605,17 @@ const llmNotice = computed(() => {
         <ArrowLeft class="h-4 w-4" />
       </Button>
       <div class="min-w-0">
-        <h1 class="truncate text-sm font-semibold" :title="skill?.name ?? skillId">
-          {{ skill?.name ?? skillId }}
+        <h1
+          class="truncate text-sm font-semibold"
+          :title="skill?.name ?? localMeta?.name ?? skillId"
+        >
+          {{ skill?.name ?? localMeta?.name ?? skillId }}
         </h1>
-        <p v-if="skill?.description" class="truncate text-xs text-muted-foreground">
-          {{ skill.description }}
+        <p
+          v-if="skill?.description ?? localMeta?.description"
+          class="truncate text-xs text-muted-foreground"
+        >
+          {{ skill?.description ?? localMeta?.description }}
         </p>
         <!-- 当前技能所属分组徽标,样式与 Skills 列表卡片一致 -->
         <div v-if="skillGroupEntries.length" class="flex flex-wrap items-center gap-1">
@@ -589,6 +637,7 @@ const llmNotice = computed(() => {
           {{ skill.marketplace.source }}
         </Badge>
         <Button
+          v-if="!isLocal"
           variant="ghost"
           size="sm"
           class="h-8 gap-1.5"

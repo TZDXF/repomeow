@@ -22,7 +22,7 @@ mod models;
 mod ops;
 mod scan;
 mod scan_agent;
-mod store;
+pub(super) mod store;
 
 #[cfg(test)]
 mod tests;
@@ -31,6 +31,7 @@ pub use errors::{RlError, RlResult};
 pub use models::*;
 
 use std::collections::HashSet;
+use std::path::Path;
 use std::sync::LazyLock;
 
 use tauri::{AppHandle, Emitter, State};
@@ -55,6 +56,22 @@ static SYNC_LOCK: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::syn
 
 fn spawn_err(e: tokio::task::JoinError) -> RlError {
     RlError::App(AppError::coded(ErrorCode::GitTaskFailed, e.to_string()))
+}
+
+/// 供项目 AI 资产域「一键导入」复用:在库内创建技能(仅 SKILL.md 正文,
+/// 其余文件由调用方写入 skills/<directory>/)。
+pub(crate) fn import_skill(
+    lib: &Library,
+    name: &str,
+    description: Option<String>,
+    body: String,
+) -> RlResult<models::Skill> {
+    ops::skill_create(lib, name, description, vec![], Some(body))
+}
+
+/// 供项目 AI 资产域「一键导入」复用:在库内创建 MCP 服务器。
+pub(crate) fn import_mcp(lib: &Library, def: &McpServerInput) -> RlResult<models::McpServer> {
+    ops::mcp_create(lib, def)
 }
 
 async fn blocking<T, F>(f: F) -> RlResult<T>
@@ -382,12 +399,39 @@ pub async fn rl_skill_scan(
         Ok((input, findings))
     })
     .await?;
+    execute_skill_scan(
+        &app,
+        &db,
+        id,
+        input,
+        static_findings,
+        language,
+        run,
+        provider_id,
+        model_id,
+    )
+    .await
+}
+
+/// 扫描执行主体(库技能与本地目录共用):语义层模型解析、两层结果合并与评分
+#[allow(clippy::too_many_arguments)]
+async fn execute_skill_scan(
+    app: &AppHandle,
+    db: &Db,
+    skill_id: String,
+    input: scan::ScanInput,
+    static_findings: Vec<SkillScanFinding>,
+    language: Option<String>,
+    run: Option<RegisteredRun>,
+    provider_id: Option<String>,
+    model_id: Option<String>,
+) -> RlResult<SkillScanReport> {
     let has_scripts = scan::has_executable_script(&input.files);
     let language = language
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "zh-CN".to_string());
     let semantic = {
-        let file = crate::ai::catalog::load_ai_config_file(&app);
+        let file = crate::ai::catalog::load_ai_config_file(app);
         resolve_scan_model(&file, provider_id.as_deref(), model_id.as_deref()).ok()
     };
 
@@ -407,7 +451,7 @@ pub async fn rl_skill_scan(
         // 每次尝试都是全新 harness 会话,usage 由 scan_agent 按 LLM 请求逐条落库
         for _attempt in 0..2 {
             let outcome = scan_agent::run_semantic_scan(
-                &db,
+                db,
                 model.clone(),
                 &api_key,
                 &input.dir,
@@ -461,7 +505,7 @@ pub async fn rl_skill_scan(
 
     let (score, level) = scan::score_findings(&findings, has_scripts);
     Ok(SkillScanReport {
-        skill_id: id,
+        skill_id,
         score,
         level,
         findings,
@@ -474,6 +518,53 @@ pub async fn rl_skill_scan(
         llm_summary,
         scanned_at: crate::time_util::now_ts(),
     })
+}
+
+// ── 本地技能目录预览(项目内非托管技能;不读写资源库,无需进程锁)──────────
+
+/// 本地技能目录报告:名称/描述(SKILL.md frontmatter)+ token 统计 + 内容指纹
+#[tauri::command]
+pub async fn skill_dir_overview(path: String) -> RlResult<SkillDirReport> {
+    blocking(move || scan::dir_overview(Path::new(&path))).await
+}
+
+/// 读取本地技能目录内单个文件(预览用;与 rl_skill_file_read 同规则)
+#[tauri::command]
+pub async fn skill_dir_file_read(path: String, file: String) -> RlResult<SkillFileContent> {
+    blocking(move || scan::dir_file_read(Path::new(&path), &file)).await
+}
+
+/// 本地技能目录安全扫描(与 rl_skill_scan 同一管线,共用扫描模型解析与取消机制)
+#[tauri::command]
+pub async fn skill_dir_scan(
+    app: AppHandle,
+    db: State<'_, Db>,
+    path: String,
+    language: Option<String>,
+    run_id: Option<String>,
+    provider_id: Option<String>,
+    model_id: Option<String>,
+) -> RlResult<SkillScanReport> {
+    let run = run_id.map(RegisteredRun::new);
+    let path_for_load = path.clone();
+    let (input, static_findings) = blocking(move || {
+        let input = scan::load_scan_input_at(Path::new(&path_for_load))?;
+        let findings = scan::static_findings(&input.files);
+        Ok((input, findings))
+    })
+    .await?;
+    execute_skill_scan(
+        &app,
+        &db,
+        path,
+        input,
+        static_findings,
+        language,
+        run,
+        provider_id,
+        model_id,
+    )
+    .await
 }
 
 // ── skills.sh 市场 ─────────────────────────────────────────────────────

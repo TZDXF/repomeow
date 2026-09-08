@@ -1,19 +1,21 @@
 <script setup lang="ts">
 import { computed, ref, type Component } from "vue";
 import { useI18n } from "vue-i18n";
-import { Boxes, Cable, DatabaseBackup, Store } from "@lucide/vue";
+import { Bot, Boxes, Cable, DatabaseBackup, Store } from "@lucide/vue";
 import ResourceBackupTab from "./ResourceBackupTab.vue";
 import ResourceMcpTab from "./ResourceMcpTab.vue";
 import ResourceMarketplaceTab from "./ResourceMarketplaceTab.vue";
+import ResourceAgentsTab from "./ResourceAgentsTab.vue";
 import ResourceSkillsTab from "./ResourceSkillsTab.vue";
 
 const { t } = useI18n();
 
-type ResourceTabId = "market" | "skills" | "mcp" | "backup";
+type ResourceTabId = "market" | "skills" | "mcp" | "backup" | "agents";
 
 const tabs: { id: ResourceTabId; icon: Component; component: Component }[] = [
   { id: "skills", icon: Boxes, component: ResourceSkillsTab },
   { id: "mcp", icon: Cable, component: ResourceMcpTab },
+  { id: "agents", icon: Bot, component: ResourceAgentsTab },
   { id: "backup", icon: DatabaseBackup, component: ResourceBackupTab },
   { id: "market", icon: Store, component: ResourceMarketplaceTab },
 ];

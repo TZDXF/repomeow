@@ -593,7 +593,11 @@ body.tray-popup-window {
 /* CRT 扫描线纹理(水平 1px 暗线,无色彩过渡) */
 /* body:not(.tray-popup-window):托盘弹窗窗口的 body 必须保持全透明 */
 [data-theme="pixel"] body:not(.tray-popup-window) {
-  background-image: repeating-linear-gradient(0deg, rgb(26 28 44 / 0.04) 0 1px, transparent 1px 4px);
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgb(26 28 44 / 0.04) 0 1px,
+    transparent 1px 4px
+  );
 }
 [data-theme="pixel"].dark body:not(.tray-popup-window) {
   background-image: repeating-linear-gradient(
@@ -638,7 +642,9 @@ body.tray-popup-window {
   background-color: #29adff;
 }
 [data-theme="pixel"]
-  [data-slot="button"]:where([data-variant="ghost"], [data-variant="outline"]):not(:disabled):hover {
+  [data-slot="button"]:where([data-variant="ghost"], [data-variant="outline"]):not(
+    :disabled
+  ):hover {
   background-color: #ffec27;
   border-color: var(--pixel-shadow);
 }

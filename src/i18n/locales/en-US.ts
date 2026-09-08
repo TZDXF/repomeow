@@ -35,6 +35,7 @@ export default {
     view: "View",
   },
   errors: {
+    project_ai_conflict: "Configuration conflict or unavailable resource: {context}",
     // generic
     db_error: "Database error",
     io_error: "IO error",
@@ -291,6 +292,66 @@ export default {
   trayPopup: {
     searchPlaceholder: "Search projects...",
     empty: "No matching projects",
+  },
+  projectAi: {
+    agentSettingsHint:
+      "Choose deployment targets shown on project AI pages. Installation is not required. Hiding a target never removes resources or changes Wiki ACP agents. This preference is local to this device.",
+    sharedHint:
+      "Some tools also read other tools’ skill directories. Changes to shared content may affect them. Managed paths are retained while another target references them.",
+    secretWarning:
+      "MCP credentials may be written to the project in plain text. Library encryption does not encrypt exported files. Check Git ignore rules to avoid committing credentials.",
+    search: "Search resources or groups…",
+    ungrouped: "Ungrouped",
+    sourceUnavailableHint:
+      "The source is unavailable. Unlock or repair it in Resource management, then refresh. Existing configuration is never removed automatically.",
+    libraryEmpty: "The library is empty. Add resources in Resource management first.",
+    noResults: "No matching resources",
+    selectGroup: "Select current results in this group",
+    unsupported:
+      "This agent does not support the definition, or its source is unavailable. Existing resources can still be unchecked.",
+    partial: "Applied {count} changes; {failed} failed. See details below.",
+    applied: "Applied {count} configuration changes",
+    conflictHint:
+      "Conflicting resources were not overwritten or removed. Back up and manually resolve the indicated paths, then refresh and retry.",
+    manageLibrary: "Resource management",
+    add: "Add",
+    addTitle: "Add {kind}",
+    addHint:
+      "Choose library resources to add to the project. Afterwards click an agent tag on each row to configure it.",
+    addCount: "Add ({count})",
+    allAdded: "All library resources are already added",
+    added: "Added {count} resources",
+    filterAll: "All",
+    remove: "Remove",
+    removeSelected: "Remove ({count})",
+    removeSelectedTitle: "Remove selected resources",
+    removeSelectedHint:
+      "Remove all {count} resources in the current category from the project list and undeploy them from every agent. Shared files are kept while another target references them.",
+    removedCount: "Removed {count} resources",
+    removeTitle: "Remove resource",
+    removeHint:
+      "Remove “{name}” from the project resource list and undeploy it from every agent. Shared files are kept while another target references them.",
+    removed: "Removed “{name}”",
+    import: "Import",
+    importHint: "Import into the resource library and adopt as managed configuration",
+    imported: "Imported “{name}” and adopted as managed configuration",
+    sectionHint:
+      "Click Add to include library resources, then click agent tags on each row to configure them. Use category tags to filter the list.",
+    projectEmpty: "No resources added yet. Click Add above to choose from the library.",
+    noAgents: "All targets are hidden. Enable them in Resource management → Agent tools.",
+    preview: "Preview project configuration (read-only)",
+    unmanaged: "Unmanaged configuration",
+    unmanagedHint:
+      "Existing or manually added project resources. Click Import to add them to the library and adopt them as managed configuration.",
+    states: {
+      configured: "Configured",
+      update: "Update available",
+      modified: "Modified locally",
+      missing: "Project files missing",
+      sourceMissing: "Source deleted",
+      sourceUnavailable: "Source unavailable",
+      conflict: "Check configuration",
+    },
   },
   aiAssets: {
     title: "AI Assets",
@@ -1871,6 +1932,7 @@ export default {
         skills: "Skills",
         mcp: "MCP",
         backup: "Backup",
+        agents: "Agent tools",
       },
       market: {
         description:

@@ -1398,6 +1398,54 @@ fn update_from_shas_and_baseline_edges() {
     assert_eq!(ops::update_from_shas(None, Some("b")), None);
 }
 
+/// 本地目录模式(项目内非托管技能预览):overview / 单文件读取 / 扫描输入
+#[test]
+fn skill_dir_local_mode() {
+    let root = std::env::temp_dir().join(format!(
+        "repomeow-rl-skilldir-{}-{}",
+        std::process::id(),
+        now_ts_nanos()
+    ));
+    fs::create_dir_all(root.join("scripts")).unwrap();
+    fs::write(
+        root.join("SKILL.md"),
+        "---\nname: local-skill\ndescription: 本地目录描述\n---\n\n# 正文\n",
+    )
+    .unwrap();
+    fs::write(root.join("scripts/run.sh"), "echo hi\n").unwrap();
+    fs::write(root.join("logo.png"), [0xFF_u8, 0xD8, 0xFF, 0x00]).unwrap();
+
+    let report = scan::dir_overview(&root).unwrap();
+    assert_eq!(report.name, "local-skill");
+    assert_eq!(report.description, "本地目录描述");
+    assert!(report.description_tokens > 0);
+    assert_eq!(report.files[0].path, "SKILL.md");
+    assert!(report.files.iter().find(|f| f.path == "logo.png").unwrap().tokens.is_none());
+
+    // frontmatter 缺 name 时回退目录名
+    fs::write(root.join("SKILL.md"), "# 无 frontmatter\n").unwrap();
+    let fallback = scan::dir_overview(&root).unwrap();
+    assert_eq!(fallback.name, root.file_name().unwrap().to_string_lossy());
+    assert_eq!(fallback.description, "");
+
+    let body = scan::dir_file_read(&root, "SKILL.md").unwrap();
+    assert!(body.content.unwrap().starts_with("# 无 frontmatter"));
+    let binary = scan::dir_file_read(&root, "logo.png").unwrap();
+    assert!(binary.content.is_none());
+    let err = scan::dir_file_read(&root, "../evil").unwrap_err();
+    assert_eq!(err.code(), codes::DIRECTORY_INVALID);
+    let missing = scan::dir_file_read(&root.join("nope"), "SKILL.md").unwrap_err();
+    assert_eq!(missing.code(), codes::SKILL_NOT_FOUND);
+
+    let input = scan::load_scan_input_at(&root).unwrap();
+    assert_eq!(input.dir, root);
+    // 二进制文件不进入扫描输入
+    assert!(input.files.iter().all(|(path, _)| path != "logo.png"));
+    assert!(input.files.iter().any(|(path, _)| path == "scripts/run.sh"));
+
+    let _ = remove_dir_tolerating_readonly(&root);
+}
+
 #[test]
 fn skill_file_read_and_token_report() {
     let t = temp_lib("skill-file-read");

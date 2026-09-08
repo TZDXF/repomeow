@@ -43,6 +43,7 @@ const props = defineProps<{
   relPath: string | null;
   /** 当前路径为已扫描的 SKILL.md 时，其 frontmatter description 的 token 数。 */
   descriptionTokenCount?: number | null;
+  readOnly?: boolean;
 }>();
 const emit = defineEmits<{
   (e: "close"): void;
@@ -170,6 +171,7 @@ onBeforeUnmount(() => {
 });
 
 function startEdit() {
+  if (props.readOnly) return;
   editing.value = true;
 }
 
@@ -180,7 +182,7 @@ function cancelEdit() {
 
 async function save() {
   const rel = props.relPath;
-  if (!rel || !preview.value || saving.value) return;
+  if (props.readOnly || !rel || !preview.value || saving.value) return;
   const text = viewer.value?.getText() ?? preview.value.text ?? "";
   if (text === (preview.value.text ?? "")) {
     editing.value = false;
@@ -390,7 +392,7 @@ function onMarkdownClick(e: MouseEvent) {
               <ExternalLink class="h-4 w-4" />
             </Button>
             <Button
-              v-if="!editing"
+              v-if="!editing && !readOnly"
               size="sm"
               variant="outline"
               :disabled="!preview || preview.text === null"
@@ -399,7 +401,7 @@ function onMarkdownClick(e: MouseEvent) {
               <Pencil class="h-3.5 w-3.5" />
               {{ t("aiAssets.drawer.edit") }}
             </Button>
-            <template v-else>
+            <template v-else-if="editing && !readOnly">
               <Button size="sm" variant="ghost" :disabled="saving" @click="cancelEdit">
                 <Undo2 class="h-3.5 w-3.5" />
                 {{ t("common.cancel") }}

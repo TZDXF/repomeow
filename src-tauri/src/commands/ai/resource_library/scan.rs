@@ -17,7 +17,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use super::errors::{codes, RlError, RlResult};
-use super::models::{SkillFileContent, SkillScanFinding, SkillTokenFile, SkillTokenReport};
+use super::models::{SkillDirReport, SkillFileContent, SkillScanFinding, SkillTokenFile, SkillTokenReport};
 use super::store::{is_safe_relative_path, Library, DIR_SKILLS, FILE_SKILLS};
 
 pub(super) const SEVERITY_CRITICAL: &str = "critical";
@@ -291,22 +291,25 @@ fn collect_files(root: &Path, dir: &Path, out: &mut Vec<(String, Vec<u8>)>, dept
 }
 
 /// 读取技能目录全部文件(SKILL.md 优先,其余按路径排序);含二进制文件
-fn read_skill_files(lib: &Library, directory: &str) -> RlResult<Vec<(String, Vec<u8>)>> {
-    let root = lib.root().join(DIR_SKILLS).join(directory);
+fn read_skill_files_at(root: &Path) -> RlResult<Vec<(String, Vec<u8>)>> {
     if !root.is_dir() {
         return Err(RlError::coded(
             codes::SKILL_NOT_FOUND,
-            format!("skills/{directory}"),
+            root.display().to_string(),
         ));
     }
     let mut files = Vec::new();
-    collect_files(&root, &root, &mut files, 0);
+    collect_files(root, root, &mut files, 0);
     files.sort_by(|a, b| {
         let a_body = a.0 == "SKILL.md";
         let b_body = b.0 == "SKILL.md";
         b_body.cmp(&a_body).then_with(|| a.0.cmp(&b.0))
     });
     Ok(files)
+}
+
+fn read_skill_files(lib: &Library, directory: &str) -> RlResult<Vec<(String, Vec<u8>)>> {
+    read_skill_files_at(&lib.root().join(DIR_SKILLS).join(directory))
 }
 
 fn find_skill(lib: &Library, id: &str) -> RlResult<super::models::Skill> {
@@ -406,6 +409,96 @@ pub(super) fn load_scan_input(lib: &Library, id: &str) -> RlResult<ScanInput> {
     Ok(ScanInput {
         name: skill.name.clone(),
         dir: lib.root().join(DIR_SKILLS).join(&skill.directory),
+        files: files
+            .into_iter()
+            .filter_map(|(path, bytes)| String::from_utf8(bytes).ok().map(|text| (path, text)))
+            .collect(),
+    })
+}
+
+// ── 本地目录模式(项目内非托管技能预览;不经过资源库)────────────────────
+
+/// 目录技能名称/描述:SKILL.md frontmatter 优先,名称缺失回退目录名
+fn dir_name_description(root: &Path, files: &[(String, Vec<u8>)]) -> (String, String) {
+    let body = files
+        .iter()
+        .find(|(path, _)| path == "SKILL.md")
+        .and_then(|(_, bytes)| String::from_utf8(bytes.clone()).ok())
+        .unwrap_or_default();
+    let (name, description) = super::frontmatter::name_description_of(&body);
+    let name = name
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            root.file_name()
+                .map(|value| value.to_string_lossy().to_string())
+        })
+        .unwrap_or_default();
+    (name, description.unwrap_or_default())
+}
+
+/// 本地目录报告:名称/描述 + token 统计 + 内容指纹(与库技能同一口径)
+pub(super) fn dir_overview(root: &Path) -> RlResult<SkillDirReport> {
+    let files = read_skill_files_at(root)?;
+    let (name, description) = dir_name_description(root, &files);
+    let mut out = Vec::new();
+    let mut total = 0i64;
+    for (path, bytes) in &files {
+        let tokens = std::str::from_utf8(bytes)
+            .ok()
+            .map(|text| crate::commands::usage::count_o200k_tokens(text));
+        if let Some(value) = tokens {
+            total += value;
+        }
+        out.push(SkillTokenFile {
+            path: path.clone(),
+            tokens,
+            bytes: bytes.len() as u64,
+        });
+    }
+    let hash = content_fingerprint(&description, &files);
+    Ok(SkillDirReport {
+        name,
+        description_tokens: crate::commands::usage::count_o200k_tokens(&description),
+        description,
+        total_tokens: total,
+        files: out,
+        hash,
+    })
+}
+
+/// 读取本地目录内单个文件(与 skill_file_read 同规则:路径白名单 + 大小上限)
+pub(super) fn dir_file_read(root: &Path, path: &str) -> RlResult<SkillFileContent> {
+    if !root.is_dir() {
+        return Err(RlError::coded(
+            codes::SKILL_NOT_FOUND,
+            root.display().to_string(),
+        ));
+    }
+    if !is_safe_relative_path(path) {
+        return Err(RlError::coded(codes::DIRECTORY_INVALID, path.to_string()));
+    }
+    let mut target = root.to_path_buf();
+    for component in path.split('/') {
+        target = target.join(component);
+    }
+    let content = match fs::read(&target) {
+        Ok(bytes) if bytes.len() as u64 <= MAX_FILE_BYTES => String::from_utf8(bytes).ok(),
+        _ => None,
+    };
+    Ok(SkillFileContent {
+        path: path.to_string(),
+        content,
+    })
+}
+
+/// 本地目录扫描输入(与 load_scan_input 同构,名称取自 frontmatter/目录名)
+pub(super) fn load_scan_input_at(root: &Path) -> RlResult<ScanInput> {
+    let files = read_skill_files_at(root)?;
+    let (name, _) = dir_name_description(root, &files);
+    Ok(ScanInput {
+        name,
+        dir: root.to_path_buf(),
         files: files
             .into_iter()
             .filter_map(|(path, bytes)| String::from_utf8(bytes).ok().map(|text| (path, text)))

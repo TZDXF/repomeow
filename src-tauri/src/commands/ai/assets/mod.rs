@@ -1,17 +1,6 @@
-//! 项目 AI 资产探测、可视化管理与 cc-switch 资产导出命令(详情页「AI 面板」数据源)。
-//!
-//! - `scan_project_ai_assets`:固定路径 + 已知目录探测项目内的指令文件
-//!   (CLAUDE.md / AGENTS.md / GEMINI.md 等)、MCP 配置(.mcp.json 等)与
-//!   skills 目录(`.claude/skills/*`、`.agents/skills/*` 与 `.zcode/skills/*`,按技能名去重),
-//!   并与 registry 的 13 个 agent 安装状态交叉。
-//!   不做全仓库递归:直接 `Path::exists` 探测,天然覆盖隐藏条目且代价恒定。
-//! - `create_project_skill` / `delete_project_skill` / `set_project_mcp_server` /
-//!   `remove_project_mcp_server`(manage.rs):AI 面板的可视化管理——
-//!   skills 的新建/删除,MCP 服务器的表单新增/修改/移除(只写探测表内的配置文件)。
-//! - `set_project_cc_skill` / `set_project_cc_mcp`:把 cc-switch(`~/.cc-switch`)
-//!   管理的 skill / MCP 服务器按项目勾选导出到项目文件
-//!   (skill → `.claude/skills/<dir>`,MCP → `.mcp.json` 合并写入),取消勾选即移除。
-//!   勾选状态不另建存储,由扫描重新探测项目文件推导(用户手动添加的也算)。
+//! 项目 AI 资产只读扫描 + 资源库按 Agent 部署。
+//! 指令文件可编辑;Skills/MCP 只允许经 deployment 接受资源库 ID 写入。
+//! 不扫描工具安装状态,不提供自定义创建或 cc-switch 直写接口。
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -19,19 +8,17 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::commands::agent::list_agents;
 use crate::commands::files;
 use crate::commands::usage::count_o200k_tokens;
 use crate::error::{AppError, AppResult, ErrorCode};
 
-mod cc_export;
+mod deployment;
+mod deployment_io;
+mod deployment_mcp;
 mod mcp_formats;
-mod manage;
+pub use deployment::*;
 #[cfg(test)]
 mod tests;
-
-pub use cc_export::*;
-pub use manage::*;
 
 // ── 返回结构(camelCase 序列化,与 src/types/ai-assets.ts 对齐) ─────────────
 
@@ -69,15 +56,6 @@ pub struct ProjectMcpFile {
     pub servers: Vec<McpServerEntry>,
 }
 
-/// 一个 MCP 管理目标(含尚未创建的文件),「添加 MCP 服务器」的目标选择数据源。
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpTargetInfo {
-    pub path: String,
-    pub dialect: &'static str,
-    pub agents: Vec<String>,
-}
-
 /// 项目 skills 目录下的一个技能。
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -93,27 +71,13 @@ pub struct ProjectSkill {
     pub token_count: i64,
 }
 
-/// 一个 agent 工具的本机安装状态 + 本项目配置命中情况。
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectAgentStatus {
-    pub id: String,
-    pub name: String,
-    pub installed: bool,
-    /// 本项目内检测到的、该 agent 会读取的配置路径('/' 分隔相对路径)。
-    pub configs: Vec<String>,
-}
-
 /// scan_project_ai_assets 的聚合结果。
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectAiAssets {
     pub files: Vec<AiAssetItem>,
     pub mcp: Vec<ProjectMcpFile>,
-    /// 全部可管理的 MCP 目标(含未创建文件),顺序即 MCP_TARGETS 表。
-    pub mcp_targets: Vec<McpTargetInfo>,
     pub skills: Vec<ProjectSkill>,
-    pub agents: Vec<ProjectAgentStatus>,
 }
 
 // ── 探测表 ──────────────────────────────────────────────────────────
@@ -207,35 +171,23 @@ pub(super) const MCP_TARGETS: &[McpTarget] = &[
     },
 ];
 
-/// 项目级 skills 目录候选(按优先级排序,同名技能先命中者保留)。
+/// 项目级 skills 目录候选;同名技能按真实目录独立保留。
 /// `.claude/skills` 是 Claude Code 约定,`.agents/skills` 是跨 agent 约定,
 /// `.zcode/skills` 是 ZCode 项目级 skills 目录。
-const SKILL_DIR_PROBES: &[&str] = &[".claude/skills", ".agents/skills", ".zcode/skills"];
-
-/// agent → 项目内配置探测路径(agent 状态行的「已配置」判定)。
-const AGENT_PROBES: &[(&str, &[&str])] = &[
-    ("claude", &["CLAUDE.md", ".claude", ".mcp.json"]),
-    ("codex", &["AGENTS.md", ".codex"]),
-    ("gemini", &["GEMINI.md", ".gemini"]),
-    (
-        "copilot",
-        &[".github/copilot-instructions.md", ".vscode/mcp.json"],
-    ),
-    ("cursor", &[".cursor", ".cursorrules"]),
-    ("cline", &[".clinerules"]),
-    ("qwen", &["QWEN.md"]),
-    ("goose", &[".goosehints"]),
-    ("opencode", &["opencode.json", ".opencode", "AGENTS.md"]),
-    ("kimi", &[".kimi", "AGENTS.md"]),
-    ("grok", &["AGENTS.md"]),
-    ("glm", &["AGENTS.md"]),
-    ("pi", &["AGENTS.md"]),
+const SKILL_DIR_PROBES: &[&str] = &[
+    ".claude/skills",
+    ".agents/skills",
+    ".zcode/skills",
+    ".cursor/skills",
+    ".github/skills",
+    ".gemini/skills",
+    ".opencode/skills",
 ];
 
 // ── 扫描命令 ─────────────────────────────────────────────────────────
 
-/// 扫描项目的 AI 资产(指令文件 / MCP 配置 / skills / agent 状态)。
-/// 固定路径探测 + which 安装检测,放 spawn_blocking 避免阻塞主线程。
+/// 扫描项目的 AI 资产(指令文件 / MCP 配置 / skills)。
+/// 仅扫描项目固定路径,不探测 Agent 安装状态。
 #[tauri::command]
 pub async fn scan_project_ai_assets(path: String) -> AppResult<ProjectAiAssets> {
     tokio::task::spawn_blocking(move || scan_assets(&path))
@@ -293,45 +245,12 @@ fn scan_assets(path: &str) -> AppResult<ProjectAiAssets> {
             servers: read_mcp_servers(&root.join(target.path), target),
         })
         .collect();
-    let mcp_targets = MCP_TARGETS
-        .iter()
-        .map(|target| McpTargetInfo {
-            path: target.path.to_string(),
-            dialect: target.dialect,
-            agents: target.agents.iter().map(|a| (*a).to_string()).collect(),
-        })
-        .collect();
-
     let skills = scan_project_skills(root);
-
-    let agents = list_agents()
-        .into_iter()
-        .map(|info| {
-            let probes = AGENT_PROBES
-                .iter()
-                .find(|(id, _)| *id == info.id)
-                .map(|(_, probes)| *probes)
-                .unwrap_or_default();
-            let configs = probes
-                .iter()
-                .filter(|rel| root.join(rel).exists())
-                .map(|rel| rel.to_string())
-                .collect();
-            ProjectAgentStatus {
-                id: info.id.to_string(),
-                name: info.name.to_string(),
-                installed: info.installed,
-                configs,
-            }
-        })
-        .collect();
 
     Ok(ProjectAiAssets {
         files: items,
         mcp,
-        mcp_targets,
         skills,
-        agents,
     })
 }
 
@@ -370,7 +289,7 @@ fn read_mcp_servers(path: &Path, target: &McpTarget) -> Vec<McpServerEntry> {
 }
 
 /// 扫全部候选 skills 目录:每个含 SKILL.md 的子目录算一个技能,
-/// 跨目录按技能名去重(候选顺序即优先级,先命中者保留)。
+/// 按真实目录保留所有实例,同名资源可在不同 Agent 目录各自配置。
 fn scan_project_skills(root: &Path) -> Vec<ProjectSkill> {
     let mut skills: Vec<ProjectSkill> = Vec::new();
     for rel_dir in SKILL_DIR_PROBES {
@@ -416,11 +335,7 @@ fn scan_project_skills(root: &Path) -> Vec<ProjectSkill> {
             })
             .collect();
         dir_skills.sort_by(|a, b| a.dir.cmp(&b.dir));
-        for skill in dir_skills {
-            if !skills.iter().any(|s| s.name == skill.name) {
-                skills.push(skill);
-            }
-        }
+        skills.extend(dir_skills);
     }
     skills.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.dir.cmp(&b.dir)));
     skills

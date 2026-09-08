@@ -686,8 +686,8 @@ packages:
   '@iconify-json/ooui@1.2.21':
     resolution: {integrity: sha512-VIOxVs/c8zW31Opb0H/gPVQ6iocT25DDPBapEYEQ6q1z6rxKw9gSCCnaDyNRGtIMZWFMQ+uNlaPMT2KkIPYS6w==}
 
-  '@iconify-json/simple-icons@1.2.93':
-    resolution: {integrity: sha512-/XhANjfGYOuqvSR3TmUnkQkINvQ4GVjVuukvymRbxtVFBvIq/yiXJqCDycKcQPT401OYT9H2vIY6ihAlz1QIAw==}
+  '@iconify-json/simple-icons@1.2.95':
+    resolution: {integrity: sha512-QwWgcoiL+eNCD38QM0OStFVFoOgDvzeHrcwMAvATvcFl0VvMEtED92qp3K3juS0H6RZ9BGUlgq9mODPwNWkjJg==}
 
   '@iconify-json/vscode-icons@1.2.71':
     resolution: {integrity: sha512-sZ0NY91UNXgzBK8XX1FVmhiGyp06YHlQ3flnksT+eVqoVJ1TGLt4VCH42VClcytsihIkcfWDiepFU7bCN7cNIw==}
@@ -4951,7 +4951,7 @@ snapshots:
     dependencies:
       '@iconify/types': 2.0.0
 
-  '@iconify-json/simple-icons@1.2.93':
+  '@iconify-json/simple-icons@1.2.95':
     dependencies:
       '@iconify/types': 2.0.0
 
@@ -6626,7 +6626,7 @@ snapshots:
     dependencies:
       '@iconify-json/carbon': 1.2.25
       '@iconify-json/ooui': 1.2.21
-      '@iconify-json/simple-icons': 1.2.93
+      '@iconify-json/simple-icons': 1.2.95
       '@iconify/utils': 3.1.4
       element-source: 0.0.5(react@19.2.8)
       html2canvas: 1.4.1

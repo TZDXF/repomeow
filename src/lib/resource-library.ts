@@ -179,6 +179,46 @@ export function scanResourceSkill(
   });
 }
 
+// ---------------------------------------------------------------------------
+// 本地技能目录预览(项目内非托管技能;Rust 侧 skill_dir_*,不经过资源库)
+// ---------------------------------------------------------------------------
+
+/** 本地技能目录报告:名称/描述(SKILL.md frontmatter)+ token 统计 + 内容指纹 */
+export interface SkillDirReport {
+  name: string;
+  description: string;
+  descriptionTokens: number;
+  totalTokens: number;
+  files: ResourceSkillTokenFile[];
+  hash: string;
+}
+
+export function readSkillDirOverview(path: string): Promise<SkillDirReport> {
+  return cmd<SkillDirReport>("skill_dir_overview", { path });
+}
+
+export function readSkillDirFile(
+  path: string,
+  file: string,
+): Promise<{ path: string; content: string | null }> {
+  return cmd<{ path: string; content: string | null }>("skill_dir_file_read", { path, file });
+}
+
+/** 本地技能目录安全扫描(与 scanResourceSkill 同一管线) */
+export function scanSkillDir(
+  path: string,
+  options: { language: string; runId?: string; providerId?: string; modelId?: string },
+): Promise<ResourceSkillScanReport> {
+  return cmd<ResourceSkillScanReport>("skill_dir_scan", {
+    path,
+    language: options.language,
+    ...(options.runId ? { runId: options.runId } : {}),
+    ...(options.providerId && options.modelId
+      ? { providerId: options.providerId, modelId: options.modelId }
+      : {}),
+  });
+}
+
 export function deleteResourceSkill(id: string): Promise<void> {
   return cmd<void>("rl_skill_delete", { id });
 }

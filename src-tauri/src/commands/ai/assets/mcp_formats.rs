@@ -38,75 +38,9 @@ pub(super) fn read_codex_servers(path: &Path) -> Vec<McpServerEntry> {
     entries
 }
 
-/// 按 name 整体写入 mcp_servers 表(同名覆盖,其余条目与文件注释/排版不动);
-/// 文件或表不存在时创建。
-pub(super) fn upsert_codex_server(
-    path: &Path,
-    key: &str,
-    name: &str,
-    config: &Value,
-) -> AppResult<()> {
-    let mut doc = read_toml_doc(path)?;
-    let servers = doc
-        .as_table_mut()
-        .entry(key)
-        .or_insert(Item::Table(Table::new()))
-        .as_table_mut()
-        .ok_or_else(|| {
-            AppError::coded(
-                ErrorCode::InvalidPath,
-                format!("{key} 不是标准 TOML 表,请先手动修复"),
-            )
-        })?;
-    servers.insert(name, json_to_toml_item(config)?);
-    write_toml_doc(path, &doc)
-}
-
-/// 移除一个 mcp_servers 表条目;键不存在或文件缺失时不动文件。
-pub(super) fn remove_codex_server(path: &Path, key: &str, name: &str) -> AppResult<()> {
-    if !path.is_file() {
-        return Ok(());
-    }
-    let mut doc = read_toml_doc(path)?;
-    let removed = doc
-        .as_table_mut()
-        .get_mut(key)
-        .and_then(Item::as_table_mut)
-        .is_some_and(|servers| servers.remove(name).is_some());
-    if removed {
-        write_toml_doc(path, &doc)?;
-    }
-    Ok(())
-}
-
-fn read_toml_doc(path: &Path) -> AppResult<DocumentMut> {
-    if !path.is_file() {
-        return Ok(DocumentMut::new());
-    }
-    fs::read_to_string(path)?
-        .parse::<DocumentMut>()
-        .map_err(|e| {
-            AppError::coded(
-                ErrorCode::InvalidPath,
-                format!("TOML 配置解析失败({e}),请先手动修复后再操作"),
-            )
-        })
-}
-
-fn write_toml_doc(path: &Path, doc: &DocumentMut) -> AppResult<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let text = doc.to_string();
-    let tmp = path.with_extension("toml.repomeow-tmp");
-    fs::write(&tmp, text)?;
-    fs::rename(&tmp, path)?;
-    Ok(())
-}
-
 /// JSON 服务器定义 → TOML 条目。对象转普通表,嵌套对象(env 等)渲染为
 /// `[mcp_servers.<name>.env]` 子表;JSON null 在 TOML 无对应,直接报错。
-fn json_to_toml_item(value: &Value) -> AppResult<Item> {
+pub(super) fn json_to_toml_item(value: &Value) -> AppResult<Item> {
     if let Value::Object(map) = value {
         let mut table = Table::new();
         for (key, entry) in map {

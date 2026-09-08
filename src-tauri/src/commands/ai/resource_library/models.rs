@@ -362,6 +362,20 @@ pub struct SkillTokenReport {
     pub hash: String,
 }
 
+/// 本地技能目录报告(skill_dir_overview;项目内非托管技能预览,不经过资源库)。
+/// 名称/描述取自 SKILL.md frontmatter,名称缺失时回退目录名
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDirReport {
+    pub name: String,
+    pub description: String,
+    pub description_tokens: i64,
+    pub total_tokens: i64,
+    pub files: Vec<SkillTokenFile>,
+    /// 与 SkillTokenReport 同口径的内容指纹(描述 + 全部文件路径与字节)
+    pub hash: String,
+}
+
 /// 单个技能文件的内容(rl_skill_file_read)
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
