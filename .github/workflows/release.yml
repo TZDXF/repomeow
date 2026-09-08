@@ -53,7 +53,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Prepare sem sidecar
-        run: pnpm sem:prepare -- --target x86_64-pc-windows-msvc
+        run: pnpm sem:prepare --target x86_64-pc-windows-msvc
 
       - name: Build and publish release
         uses: tauri-apps/tauri-action@v0
