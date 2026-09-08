@@ -2048,7 +2048,6 @@ export default {
         description:
           "Maintain generic MCP server definitions (stdio / HTTP / SSE). When the library is encrypted and locked, unlock it before editing.",
         create: "New server",
-        importButton: "Import from JSON",
         empty: 'No MCP servers yet. Click "New server" to add one.',
         unlock: "Unlock",
         libraryLocked:
@@ -2102,40 +2101,22 @@ export default {
           removeRow: "Remove row",
           jsonLabel: "JSON definition",
           jsonHint:
-            "Accepts a single server definition, a name-to-definition key-value map, or an mcpServers / servers wrapper; only the first definition is applied when multiple are present. Use Import from JSON above the list for batch import.",
+            "Accepts a single server definition, a name-to-definition key-value map, or an mcpServers / servers wrapper; only the first definition is applied when multiple are present.",
+          jsonHintCreate:
+            "Accepts a single server definition, a name-to-definition key-value map, or an mcpServers / servers wrapper (e.g. .mcp.json or claude_desktop_config.json). When multiple definitions are present, saving imports all of them; conflicting or invalid entries are skipped.",
           jsonInvalid: "Failed to parse JSON. Please check the format.",
           jsonUnrecognized:
             "Unrecognized JSON structure: expected a single server definition, a name-to-definition key-value map, or an mcpServers / servers wrapper.",
           jsonNoEntries: "No valid server definition found in the JSON.",
-          jsonMultiple:
-            '{count} server definitions detected; only the first one is applied. Use "Import from JSON" for batch import.',
+          jsonMultiple: "{count} server definitions detected; only the first one is applied here.",
           invalidUrl: "Please enter a valid URL starting with http:// or https://",
           saved: "MCP server saved.",
           created: "MCP server created.",
-        },
-        importDialog: {
-          title: "Import MCP servers from JSON",
-          description:
-            "Paste a standard MCP JSON config (e.g. .mcp.json or claude_desktop_config.json), parse it, then choose the servers to import.",
-          jsonLabel: "JSON configuration",
-          parse: "Parse",
-          noEntries: "No servers found in the JSON.",
-          selectedCount: "{selected}/{total} selected",
-          selectAll: "Select all",
-          deselectAll: "Deselect all",
-          namePlaceholder: "Server name",
-          exists: "Name already in use",
-          duplicate: "Duplicate in list",
-          nameRequired: "Some selected entries have no name yet. Fill them in before importing.",
-          importAction: "Import ({count})",
           imported: "Imported {count} MCP server(s).",
           skipConflict: '"{name}" conflicts with an existing server and was skipped.',
           skipInvalid: '"{name}" is invalid (missing command or url) and was skipped.',
           skipUnsupported:
             '"{name}" uses an unsupported transport (stdio / HTTP / SSE only) and was skipped.',
-          invalidJson: "Failed to parse JSON. Please check the syntax.",
-          unrecognized:
-            "Unrecognized JSON structure: expected an mcpServers / servers key, a single server definition, or a name-to-definition key-value map.",
         },
       },
       backup: {

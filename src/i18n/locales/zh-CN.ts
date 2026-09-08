@@ -1960,7 +1960,6 @@ export default {
         description:
           "维护通用 MCP 服务器定义(stdio / HTTP / SSE);资源库加密且未解锁时须先解锁才能编辑",
         create: "新建服务器",
-        importButton: "从 JSON 导入",
         empty: "还没有 MCP 服务器,点击「新建服务器」添加",
         unlock: "解锁",
         libraryLocked: "资源库已加密且未解锁:解锁后才能新增、编辑或删除 MCP 服务器",
@@ -2013,38 +2012,21 @@ export default {
           removeRow: "移除此行",
           jsonLabel: "JSON 定义",
           jsonHint:
-            "支持单个服务器定义、「名称: 定义」键值表或 mcpServers / servers 包装;含多个定义时仅应用第一个,批量导入请使用「从 JSON 导入」",
+            "支持单个服务器定义、「名称: 定义」键值表或 mcpServers / servers 包装;含多个定义时仅应用第一个",
+          jsonHintCreate:
+            "支持单个服务器定义、「名称: 定义」键值表或 mcpServers / servers 包装(如 .mcp.json、claude_desktop_config.json);含多个定义时保存将批量导入,重名或无效条目自动跳过",
           jsonInvalid: "JSON 解析失败,请检查格式",
           jsonUnrecognized:
             "无法识别的 JSON 结构:需为单个服务器定义、「名称: 定义」键值表,或包含 mcpServers / servers 键",
           jsonNoEntries: "JSON 中没有有效的服务器定义",
-          jsonMultiple: "检测到 {count} 个服务器定义,已应用第一个;批量导入请使用「从 JSON 导入」",
+          jsonMultiple: "检测到 {count} 个服务器定义,此处仅应用第一个",
           invalidUrl: "请填写以 http:// 或 https:// 开头的有效 URL",
           saved: "MCP 服务器已保存",
           created: "MCP 服务器已创建",
-        },
-        importDialog: {
-          title: "从 JSON 导入 MCP 服务器",
-          description:
-            "粘贴标准 MCP JSON 配置(如 .mcp.json、claude_desktop_config.json),解析后勾选导入",
-          jsonLabel: "JSON 配置",
-          parse: "解析",
-          noEntries: "未解析到任何服务器",
-          selectedCount: "已选 {selected}/{total} 项",
-          selectAll: "全选",
-          deselectAll: "全不选",
-          namePlaceholder: "服务器名称",
-          exists: "与现有服务器重名",
-          duplicate: "批内重名",
-          nameRequired: "部分所选条目还没有名称,请补填后再导入",
-          importAction: "导入({count})",
           imported: "已导入 {count} 个 MCP 服务器",
           skipConflict: "「{name}」与现有服务器重名,已跳过",
           skipInvalid: "「{name}」定义无效(缺少 command 或 url),已跳过",
           skipUnsupported: "「{name}」的传输类型不支持(仅支持 stdio / HTTP / SSE),已跳过",
-          invalidJson: "JSON 解析失败,请检查格式",
-          unrecognized:
-            "无法识别的 JSON 结构:需包含 mcpServers / servers 键、单个服务器定义或「名称: 定义」键值表",
         },
       },
       backup: {

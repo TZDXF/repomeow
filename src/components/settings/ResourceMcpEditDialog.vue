@@ -24,10 +24,12 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   RESOURCE_MCP_TRANSPORTS,
   createResourceMcpServer,
+  importResourceMcpJson,
   parseResourceMcpJson,
   ResourceMcpJsonError,
   updateResourceMcpServer,
   type ParsedResourceMcpEntry,
+  type ParsedResourceMcpJson,
   type ResourceMcpServer,
   type ResourceMcpServerInput,
   type ResourceMcpTransport,
@@ -49,12 +51,29 @@ const emit = defineEmits<{
 const { t } = useI18n();
 
 // 示例 JSON 是代码而非文案,且 vue-i18n 会把字面 {} 当插值语法,故放组件常量
-const JSON_EXAMPLE = `{
+const JSON_EXAMPLE_SINGLE = `{
   "blender": {
     "command": "cmd",
     "args": ["/c", "uvx", "blender-mcp"]
   }
 }`;
+
+const JSON_EXAMPLE_MULTI = `{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem"]
+    },
+    "remote": {
+      "type": "http",
+      "url": "https://mcp.example.com/mcp",
+      "headers": { "Authorization": "Bearer xxx" }
+    }
+  }
+}`;
+
+/** 新建时示例展示可批量导入的 mcpServers 包装;编辑现有服务器时仅单个定义 */
+const jsonExample = computed(() => (props.server ? JSON_EXAMPLE_SINGLE : JSON_EXAMPLE_MULTI));
 
 /** 连接定义的编辑方式:表单控件或直接编辑 JSON */
 type Mode = "form" | "json";
@@ -283,11 +302,110 @@ function buildInput(): ResourceMcpServerInput {
   };
 }
 
+/** 新建模式下保存 JSON:解析全部服务器定义——单条回填表单后按常规创建,
+ *  多条经 rl_mcp_import 批量导入(重名/无效条目跳过并提示,部分成功语义);
+ *  不需要的条目在粘贴前从 JSON 文本中删除即可 */
+async function saveCreateFromJson(): Promise<void> {
+  let parsed: ParsedResourceMcpJson;
+  try {
+    parsed = parseResourceMcpJson(jsonText.value);
+  } catch (e) {
+    if (e instanceof ResourceMcpJsonError) {
+      toast.error(
+        t(
+          e.code === "invalidJson"
+            ? "settings.resources.mcp.editDialog.jsonInvalid"
+            : "settings.resources.mcp.editDialog.jsonUnrecognized",
+        ),
+      );
+    } else {
+      toast.error(String(e));
+    }
+    return;
+  }
+  if (!parsed.entries.length) {
+    toast.error(t("settings.resources.mcp.editDialog.jsonNoEntries"));
+    return;
+  }
+  for (const skip of parsed.skipped) {
+    toast.warning(
+      t(
+        skip.reason === "unsupported"
+          ? "settings.resources.mcp.editDialog.skipUnsupported"
+          : "settings.resources.mcp.editDialog.skipInvalid",
+        { name: skip.name },
+      ),
+    );
+  }
+  // 单条定义:沿用表单回填 + 常规创建(保留名称/描述回填与名称必填校验)
+  if (parsed.entries.length === 1) {
+    applyEntryToForm(parsed.entries[0]);
+    if (!name.value.trim()) {
+      toast.error(t("settings.resources.mcp.editDialog.nameRequired"));
+      return;
+    }
+    saving.value = true;
+    try {
+      await createResourceMcpServer(buildInput());
+      toast.success(t("settings.resources.mcp.editDialog.created"));
+      emit("saved");
+      emit("update:open", false);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      saving.value = false;
+    }
+    return;
+  }
+  // 多条定义:批量导入,不触碰顶部名称/描述表单;全部跳过时保持对话框打开以便修改重试
+  saving.value = true;
+  try {
+    const outcome = await importResourceMcpJson(
+      parsed.entries.map((entry) => ({
+        name: entry.name.trim(),
+        description: entry.description,
+        transport: entry.transport,
+        ...(entry.transport === "stdio"
+          ? { command: entry.command, args: entry.args, env: entry.env }
+          : { url: entry.url, headers: entry.headers }),
+      })),
+    );
+    if (outcome.imported.length) {
+      toast.success(
+        t("settings.resources.mcp.editDialog.imported", { count: outcome.imported.length }),
+      );
+    }
+    for (const skip of outcome.skipped) {
+      toast.warning(
+        t(
+          skip.reason === "conflict"
+            ? "settings.resources.mcp.editDialog.skipConflict"
+            : "settings.resources.mcp.editDialog.skipInvalid",
+          { name: skip.name },
+        ),
+      );
+    }
+    if (outcome.imported.length) {
+      emit("saved");
+      emit("update:open", false);
+    }
+  } catch (e) {
+    toast.error(String(e));
+  } finally {
+    saving.value = false;
+  }
+}
+
 async function save() {
   if (saveDisabled.value) {
     return;
   }
   if (mode.value === "json") {
+    // 新建:JSON 可含多个服务器定义,走批量导入;编辑:仅单个定义
+    if (!props.server) {
+      await saveCreateFromJson();
+      return;
+    }
     const entry = parseJsonEntry();
     if (!entry) {
       return;
@@ -483,10 +601,16 @@ async function save() {
               rows="10"
               spellcheck="false"
               class="resize-y font-mono text-xs"
-              :placeholder="JSON_EXAMPLE"
+              :placeholder="jsonExample"
             />
             <p class="text-[11px] text-muted-foreground">
-              {{ t("settings.resources.mcp.editDialog.jsonHint") }}
+              {{
+                t(
+                  server
+                    ? "settings.resources.mcp.editDialog.jsonHint"
+                    : "settings.resources.mcp.editDialog.jsonHintCreate",
+                )
+              }}
             </p>
           </div>
         </template>
