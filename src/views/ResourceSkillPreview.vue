@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { toast } from "vue-sonner";
@@ -361,6 +361,33 @@ async function toggleTranslate() {
 const scanning = ref(false);
 const scanReport = ref<ResourceSkillScanReport | null>(null);
 let scanRunId = "";
+
+/** 扫描进行中的已用时长(秒),驱动进度面板的计时显示 */
+const scanElapsed = ref(0);
+let scanElapsedTimer: ReturnType<typeof setInterval> | null = null;
+
+watch(scanning, (on) => {
+  if (scanElapsedTimer) {
+    clearInterval(scanElapsedTimer);
+    scanElapsedTimer = null;
+  }
+  if (on) {
+    scanElapsed.value = 0;
+    scanElapsedTimer = setInterval(() => {
+      scanElapsed.value += 1;
+    }, 1000);
+  }
+});
+
+onBeforeUnmount(() => {
+  if (scanElapsedTimer) clearInterval(scanElapsedTimer);
+});
+
+const scanElapsedLabel = computed(() => {
+  const minutes = Math.floor(scanElapsed.value / 60);
+  const seconds = scanElapsed.value % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+});
 
 // ── 扫描模型选择:复合值 "providerId/modelId",缺省跟随设置页默认模型 ──
 // 显式引用失效(厂商/模型被删)时后端会回退默认模型,前端在配置加载后
@@ -738,15 +765,27 @@ const llmNotice = computed(() => {
         <div class="min-h-0 flex-1 overflow-y-auto">
           <!-- 安全扫描 -->
           <div v-if="selected.kind === 'scan'" class="mx-auto max-w-3xl space-y-3 p-4">
-            <div v-if="scanning" class="flex items-center gap-2 text-xs text-muted-foreground">
-              <RefreshCw class="h-3.5 w-3.5 animate-spin" />
-              {{ t("settings.resources.skills.previewPage.scan.running") }}
-              <Button
-                variant="ghost"
-                size="sm"
-                class="ml-auto h-7 px-2 text-xs"
-                @click="cancelScan"
-              >
+            <div v-if="scanning" class="flex flex-col items-center gap-4 px-6 py-16 text-center">
+              <div class="relative flex h-14 w-14 items-center justify-center">
+                <span class="scan-pulse absolute inset-0 rounded-full bg-primary/15" />
+                <span class="absolute inset-2 rounded-full border border-primary/25" />
+                <ShieldCheck class="h-6 w-6 text-primary" />
+              </div>
+              <div class="space-y-1">
+                <p class="text-sm font-medium">
+                  {{ t("settings.resources.skills.previewPage.scan.running") }}
+                </p>
+                <p class="text-xs text-muted-foreground">
+                  {{ t("settings.resources.skills.previewPage.scan.runningHint") }}
+                </p>
+              </div>
+              <div class="h-0.5 w-52 overflow-hidden rounded-full bg-muted">
+                <div class="scan-indeterminate h-full w-1/3 rounded-full bg-primary/70" />
+              </div>
+              <p class="font-mono text-[11px] tabular-nums text-muted-foreground/70">
+                {{ scanElapsedLabel }}
+              </p>
+              <Button variant="ghost" size="sm" class="h-7 px-3 text-xs" @click="cancelScan">
                 {{ t("settings.resources.skills.previewPage.scan.cancel") }}
               </Button>
             </div>
@@ -968,3 +1007,35 @@ const llmNotice = computed(() => {
     </Dialog>
   </div>
 </template>
+
+<style scoped>
+/* 扫描进行中:细进度条滑动 + 盾牌外圈脉冲 */
+@keyframes scan-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+.scan-indeterminate {
+  animation: scan-slide 1.4s ease-in-out infinite;
+}
+
+@keyframes scan-pulse {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.9;
+  }
+  70%,
+  100% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+}
+
+.scan-pulse {
+  animation: scan-pulse 1.8s ease-out infinite;
+}
+</style>

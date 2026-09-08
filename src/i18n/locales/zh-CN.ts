@@ -1907,6 +1907,7 @@ export default {
             run: "开始扫描",
             rerun: "重新扫描",
             running: "扫描中…",
+            runningHint: "正在执行静态规则扫描与 AI 语义分析",
             cancel: "取消",
             modelLabel: "语义分析使用的模型",
             modelDefault: "默认模型",

@@ -1994,6 +1994,7 @@ export default {
             run: "Start scan",
             rerun: "Rescan",
             running: "Scanning…",
+            runningHint: "Running static rules and AI semantic analysis",
             cancel: "Cancel",
             modelLabel: "Model used for semantic analysis",
             modelDefault: "Default model",
