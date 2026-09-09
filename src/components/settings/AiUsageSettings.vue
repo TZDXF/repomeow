@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { Loader2, RefreshCw, Trash2 } from "@lucide/vue";
@@ -25,6 +25,7 @@ import type { AiUsageEntry, AiUsageSummary, AiUsageTaskStat } from "@/types";
 const { t } = useI18n();
 
 const PAGE_SIZE = 50;
+const PREFETCH_DISTANCE = 160;
 
 // ── 汇总与明细加载 ─────────────────────────────────────────────────────────
 
@@ -33,6 +34,19 @@ const entries = ref<AiUsageEntry[]>([]);
 const hasMore = ref(false);
 const loading = ref(false);
 const taskFilter = ref<string>("all");
+const logContent = ref<HTMLDivElement | null>(null);
+
+function logViewport() {
+  return logContent.value?.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
+}
+
+function prefetchIfNearBottom() {
+  const viewport = logViewport();
+  if (!viewport || viewport.clientHeight === 0) return;
+  if (viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= PREFETCH_DISTANCE) {
+    void loadMore();
+  }
+}
 // 单调递增请求令牌:筛选切换时丢弃过期响应(照抄 ReportHistory 的防竞态范式)
 let loadToken = 0;
 
@@ -52,11 +66,18 @@ async function fetchPage(offset: number) {
 async function reload() {
   const token = ++loadToken;
   loading.value = true;
+  hasMore.value = false;
   try {
     const [, page] = await Promise.all([loadSummary(), fetchPage(0)]);
     if (token !== loadToken) return;
     entries.value = page;
     hasMore.value = page.length >= PAGE_SIZE;
+    await nextTick();
+    if (token !== loadToken) return;
+    const viewport = logViewport();
+    if (viewport) viewport.scrollTop = 0;
+    loading.value = false;
+    prefetchIfNearBottom();
   } catch (e) {
     if (token === loadToken) toast.error(String(e));
   } finally {
@@ -73,6 +94,10 @@ async function loadMore() {
     if (token !== loadToken) return;
     entries.value.push(...page);
     hasMore.value = page.length >= PAGE_SIZE;
+    await nextTick();
+    if (token !== loadToken) return;
+    loading.value = false;
+    prefetchIfNearBottom();
   } catch (e) {
     if (token === loadToken) toast.error(String(e));
   } finally {
@@ -306,8 +331,8 @@ function ioTitle(entry: AiUsageEntry): string {
         </SelectContent>
       </Select>
 
-      <ScrollArea class="mt-2 max-h-80">
-        <div class="flex flex-col gap-0.5 pr-2">
+      <ScrollArea class="mt-2 max-h-80" @scroll.capture="prefetchIfNearBottom">
+        <div ref="logContent" class="flex flex-col gap-0.5 pr-2">
           <div
             v-for="entry in entries"
             :key="entry.id"
@@ -340,16 +365,22 @@ function ioTitle(entry: AiUsageEntry): string {
               taskFilter === "all" ? t("settings.usage.empty") : t("settings.usage.emptyFiltered")
             }}
           </p>
+          <div
+            v-if="loading"
+            class="flex items-center justify-center gap-1.5 py-2 text-xs text-muted-foreground"
+            role="status"
+          >
+            <Loader2 class="h-3.5 w-3.5 animate-spin" />
+            {{ t("common.loading") }}
+          </div>
+          <p
+            v-else-if="entries.length && !hasMore"
+            class="py-2 text-center text-xs text-muted-foreground"
+          >
+            {{ t("settings.usage.noMore") }}
+          </p>
         </div>
       </ScrollArea>
-      <p v-if="entries.length >= PAGE_SIZE" class="mt-1 text-center">
-        <Button v-if="hasMore" variant="ghost" size="sm" :disabled="loading" @click="loadMore">
-          {{ loading ? t("common.loading") : t("settings.usage.loadMore") }}
-        </Button>
-        <span v-else class="text-xs text-muted-foreground">
-          {{ t("settings.usage.noMore") }}
-        </span>
-      </p>
     </div>
 
     <ConfirmDialog
