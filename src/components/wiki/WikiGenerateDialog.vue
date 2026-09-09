@@ -13,6 +13,12 @@ import {
 } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { cmd } from "@/lib/tauri";
+import { toForwardSlash } from "@/lib/path";
+import { useProjectsStore } from "@/stores/projects";
+import { useSettingsStore } from "@/stores/settings";
+import type { Project } from "@/types";
 import { acpTestCached, agentList, type AcpTestResult } from "@/lib/agent";
 import { CHAT_THINKING_LEVELS } from "@/lib/ai-config";
 import { loadWikiConfig, saveWikiConfig } from "@/lib/wiki";
@@ -42,6 +48,11 @@ const { t } = useI18n();
 
 /** ai-config 配置副本:内置后端的模型清单来源(空/未加载时选择器禁用走默认) */
 const aiConfig = useAiConfigStore();
+const projects = useProjectsStore();
+const settings = useSettingsStore();
+const projectId = ref<number | null>(null);
+const wikiAutoUpdate = ref(false);
+const initialWikiAutoUpdate = ref(false);
 
 const open = computed({
   get: () => props.open,
@@ -99,6 +110,7 @@ watch(
     }
     void loadProjectConfig();
   },
+  { immediate: true },
 );
 
 async function loadProjectConfig() {
@@ -109,9 +121,20 @@ async function loadProjectConfig() {
   model.value = "";
   thinking.value = "";
   concurrency.value = 2;
+  projectId.value = null;
+  wikiAutoUpdate.value = false;
+  initialWikiAutoUpdate.value = false;
+  const projectPath = props.projectPath;
   try {
-    const config = await loadWikiConfig(props.projectPath);
+    const [config, allProjects] = await Promise.all([
+      loadWikiConfig(projectPath),
+      cmd<Project[]>("list_projects", { query: null, tagIds: null }),
+    ]);
     if (sequence !== loadSequence || !props.open) return;
+    const project = allProjects.find((p) => toForwardSlash(p.path) === toForwardSlash(projectPath));
+    projectId.value = project?.id ?? null;
+    wikiAutoUpdate.value = project?.wiki_auto_update ?? false;
+    initialWikiAutoUpdate.value = wikiAutoUpdate.value;
     if (config.backend.kind === "builtin") {
       backend.value = "builtin";
       model.value = config.backend.model ?? "";
@@ -316,7 +339,12 @@ const confirmLabel = computed(() =>
 );
 
 async function confirm() {
+  if (configLoading.value || configSaving.value) return;
   const projectPath = props.projectPath;
+  const id = projectId.value;
+  const autoUpdate = wikiAutoUpdate.value;
+  const shouldSaveAutoUpdate =
+    !settings.wikiAutoUpdate && autoUpdate !== initialWikiAutoUpdate.value;
   const selectedBackend: WikiGenBackend =
     backend.value === "builtin"
       ? {
@@ -341,6 +369,10 @@ async function confirm() {
   configError.value = "";
   try {
     await saveWikiConfig(projectPath, config);
+    if (id !== null && shouldSaveAutoUpdate) {
+      await projects.setWikiAutoUpdate(id, autoUpdate);
+      initialWikiAutoUpdate.value = autoUpdate;
+    }
     if (props.open && props.projectPath === projectPath) emit("confirm");
   } catch (error) {
     configError.value = error instanceof Error ? error.message : String(error);
@@ -457,6 +489,28 @@ async function confirm() {
           <Loader2 v-if="probeLoading" class="h-3 w-3 animate-spin" />
           {{ probeHint }}
         </p>
+      </div>
+
+      <div class="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5">
+        <div class="min-w-0 flex-1">
+          <label for="wiki-generation-auto-update" class="text-sm font-medium">
+            {{ t("settings.tracking.wikiAutoUpdateLabel") }}
+          </label>
+          <p class="mt-0.5 text-xs text-muted-foreground">
+            {{
+              settings.wikiAutoUpdate
+                ? t("settings.tracking.wikiToggleGloballyOn")
+                : t("settings.tracking.wikiToggleHint")
+            }}
+          </p>
+        </div>
+        <Switch
+          id="wiki-generation-auto-update"
+          class="shrink-0"
+          :model-value="settings.wikiAutoUpdate || wikiAutoUpdate"
+          :disabled="configLoading || configSaving || settings.wikiAutoUpdate || projectId === null"
+          @update:model-value="wikiAutoUpdate = $event"
+        />
       </div>
 
       <p v-if="configError" class="text-xs text-destructive">
