@@ -37,7 +37,7 @@ pub async fn ai_translate_markdown(
         .as_deref()
         .map(|id| RegisteredRun::new(id.to_string()));
     let system_prompt = fixed_system_prompt(DEFAULT_TRANSLATE_PROMPT, &request.language);
-    let config = sdk::load_config(&app);
+    let config = sdk::load_config_for(&app, "translation");
     let started = Instant::now();
     let output = match sdk::chat(
         &config,

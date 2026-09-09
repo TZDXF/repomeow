@@ -324,7 +324,7 @@ async function startBatch() {
   }
   // 默认模型(厂商 baseUrl/apiKey 齐)就绪才允许批量生成
   await aiConfig.ensureLoaded();
-  if (!aiConfig.defaultReady) {
+  if (!aiConfig.reportReady) {
     toast.error(t("ai.notConfigured"));
     return;
   }

@@ -176,7 +176,7 @@ pub async fn ai_generate_commit_message(
     );
     let system_prompt =
         effective_system_prompt(&app, "commit.md", DEFAULT_COMMIT_PROMPT, &request.language);
-    let config = sdk::load_config(&app);
+    let config = sdk::load_config_for(&app, "commit");
     let started = Instant::now();
     let output = match sdk::chat(
         &config,

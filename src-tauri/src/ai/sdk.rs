@@ -111,9 +111,14 @@ pub fn load_config(app: &AppHandle) -> AiConfig {
     crate::ai::catalog::legacy_ai_config(&file).normalized()
 }
 
-pub fn load_config_at(data_dir: &std::path::Path) -> AiConfig {
+pub fn load_config_for(app: &AppHandle, purpose: &str) -> AiConfig {
+    let file = crate::ai::catalog::load_ai_config_file(app);
+    crate::ai::catalog::legacy_ai_config_for(&file, purpose).normalized()
+}
+
+pub fn load_config_at(data_dir: &std::path::Path, purpose: &str) -> AiConfig {
     let file = crate::ai::catalog::load_ai_config_file_at(data_dir);
-    crate::ai::catalog::legacy_ai_config(&file).normalized()
+    crate::ai::catalog::legacy_ai_config_for(&file, purpose).normalized()
 }
 
 fn map_assistant_error(message: &str) -> AppError {

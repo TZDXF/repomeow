@@ -10,8 +10,7 @@ use crate::models::GitCommitInfo;
 pub(crate) type AiConfig = sdk::AiConfig;
 
 pub(crate) fn load_ai_config(data_dir: &PathBuf) -> AiConfig {
-    crate::ai::catalog::legacy_ai_config(&crate::ai::catalog::load_ai_config_file_at(data_dir))
-        .normalized()
+    sdk::load_config_at(data_dir, "report")
 }
 
 /// 从 settings.json 读取界面语言(报告语言与其保持一致),默认 zh-CN

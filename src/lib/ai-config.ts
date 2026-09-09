@@ -134,6 +134,9 @@ export interface ChatPrefs {
   permission: ChatPermission;
 }
 
+export type AiModelPurpose = "commit" | "report" | "translation";
+export type AiTaskModels = Partial<Record<AiModelPurpose, AiModelRef | null>>;
+
 /** 顶层配置文件 */
 export interface AiConfigFile {
   version: number;
@@ -141,6 +144,7 @@ export interface AiConfigFile {
   /** commit/报告/Wiki/测试连接使用的默认模型 */
   defaultModel: AiModelRef | null;
   chat: ChatPrefs;
+  taskModels?: AiTaskModels;
 }
 
 /** 创建一份带默认值的空 chat 偏好(配置损坏回退用) */

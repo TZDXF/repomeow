@@ -136,7 +136,7 @@ async fn generate_report_text(
         "Time range: {}.\n\nCommit records:\n{sections}",
         range_label
     );
-    let config = sdk::load_config_at(data_dir);
+    let config = sdk::load_config_at(data_dir, "report");
     let started = Instant::now();
     let output = sdk::chat(
         &config,

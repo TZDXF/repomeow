@@ -92,6 +92,13 @@ export const useAiConfigStore = defineStore("ai-config", () => {
     Boolean(defaultModel.value?.provider.baseUrl && defaultModel.value?.provider.apiKey),
   );
 
+  const reportReady = computed(() => {
+    const c = config.value;
+    if (!c) return false;
+    const resolved = resolveRef(c, c.taskModels?.report ?? null) ?? resolveRef(c, c.defaultModel);
+    return Boolean(resolved?.provider.baseUrl && resolved?.provider.apiKey);
+  });
+
   /** chat 模型的选择器复合值 "providerId/modelId" */
   const chatModelValue = computed(() =>
     chatModel.value
@@ -148,6 +155,7 @@ export const useAiConfigStore = defineStore("ai-config", () => {
     defaultModel,
     chatReady,
     defaultReady,
+    reportReady,
     chatModelValue,
     chatThinking,
     chatPermission,
