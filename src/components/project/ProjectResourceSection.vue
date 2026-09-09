@@ -25,6 +25,7 @@ import {
   removeProjectResource,
   resourceTree,
   type ProjectAiTarget,
+  type ResourceTreeGroup,
   type ProjectResourceKind,
   type ProjectResourceSnapshot,
   type ResourceChoice,
@@ -130,26 +131,6 @@ const listed = computed(() => {
   }
   return resources;
 });
-/** 分组只作为筛选维度(skills):用户分组与市场来源(owner/repo)并列。 */
-const tree = computed(() =>
-  resourceTree(
-    props.kind === "skills" ? (data.value?.groups ?? []) : [],
-    listed.value,
-    t("projectAi.ungrouped"),
-  ).filter((g) => g.resources.length),
-);
-const filters = computed(() => (props.kind === "skills" ? tree.value : []));
-const filtered = computed(() => {
-  if (!activeFilter.value) {
-    return listed.value;
-  }
-  return tree.value.find((g) => g.id === activeFilter.value)?.resources ?? [];
-});
-watch(filters, (next) => {
-  if (activeFilter.value && !next.some((g) => g.id === activeFilter.value)) {
-    activeFilter.value = "";
-  }
-});
 const unmanagedSkills = computed(
   () =>
     assetsSnapshot.value?.skills.filter(
@@ -189,6 +170,47 @@ const unmanaged = computed<UnmanagedItem[]>(() =>
         source: s.path,
       })),
 );
+/** 分组只作为筛选维度(skills):用户分组与市场来源(owner/repo)并列。 */
+const tree = computed(() =>
+  resourceTree(
+    props.kind === "skills" ? (data.value?.groups ?? []) : [],
+    listed.value,
+    t("projectAi.ungrouped"),
+  ).filter((g) => g.resources.length),
+);
+/** 未入库条目不单独区分:无未分组桶时补一个,使其计入筛选。 */
+const UNGROUPED_FILTER = "__ungrouped";
+const filters = computed(() => {
+  if (props.kind !== "skills") {
+    return [];
+  }
+  const groups = tree.value;
+  if (unmanaged.value.length && !groups.some((g) => g.id === UNGROUPED_FILTER)) {
+    return [...groups, { id: UNGROUPED_FILTER, name: t("projectAi.ungrouped"), resources: [] }];
+  }
+  return groups;
+});
+const filtered = computed(() => {
+  if (!activeFilter.value) {
+    return listed.value;
+  }
+  return tree.value.find((g) => g.id === activeFilter.value)?.resources ?? [];
+});
+watch(filters, (next) => {
+  if (activeFilter.value && !next.some((g) => g.id === activeFilter.value)) {
+    activeFilter.value = "";
+  }
+});
+/** 当前筛选下可见的未入库条目:全部与未分组筛选均展示。 */
+const filteredUnmanaged = computed(() =>
+  !activeFilter.value || activeFilter.value === UNGROUPED_FILTER ? unmanaged.value : [],
+);
+/** 分组计数:未分组桶并入未入库条目数。 */
+function groupCount(group: ResourceTreeGroup) {
+  return group.id === UNGROUPED_FILTER
+    ? group.resources.length + unmanaged.value.length
+    : group.resources.length;
+}
 function records(id: string) {
   return data.value?.deployments.filter((d) => d.resourceId === id) ?? [];
 }
@@ -511,7 +533,7 @@ function changed() {
       <h3 class="mr-auto flex items-center gap-2 text-sm font-medium">
         <Package v-if="kind === 'skills'" class="size-4" /><Plug v-else class="size-4" />{{
           kind === "skills" ? "Skills" : "MCP"
-        }}<span class="text-xs text-muted-foreground">{{ listed.length }}</span
+        }}<span class="text-xs text-muted-foreground">{{ listed.length + unmanaged.length }}</span
         ><LoaderCircle v-if="loading" class="size-3 animate-spin" />
       </h3>
       <Button variant="outline" size="sm" class="h-7 px-2 text-xs" @click="addOpen = true"
@@ -536,7 +558,7 @@ function changed() {
         @click="activeFilter = ''"
       >
         {{ t("projectAi.filterAll") }}
-        <span class="text-muted-foreground">({{ listed.length }})</span>
+        <span class="text-muted-foreground">({{ listed.length + unmanaged.length }})</span>
       </button>
       <button
         v-for="group in filters"
@@ -550,7 +572,7 @@ function changed() {
         @click="activeFilter = group.id"
       >
         {{ group.name }}
-        <span class="text-muted-foreground">({{ group.resources.length }})</span>
+        <span class="text-muted-foreground">({{ groupCount(group) }})</span>
       </button>
       <Button
         variant="outline"
@@ -576,12 +598,12 @@ function changed() {
       {{ t("projectAi.projectEmpty") }}
     </p>
     <p
-      v-else-if="activeFilter && !filtered.length"
+      v-else-if="activeFilter && !filtered.length && !filteredUnmanaged.length"
       class="rounded-md border border-dashed p-5 text-center text-xs text-muted-foreground"
     >
       {{ t("projectAi.noResults") }}
     </p>
-    <template v-if="filtered.length || (!activeFilter && unmanaged.length)">
+    <template v-if="filtered.length || filteredUnmanaged.length">
       <div class="divide-y rounded-md border">
         <div
           v-for="resource in filtered"
@@ -651,7 +673,7 @@ function changed() {
           /></Button>
         </div>
         <div
-          v-for="item in activeFilter ? [] : unmanaged"
+          v-for="item in filteredUnmanaged"
           :key="item.key"
           class="flex flex-wrap items-center gap-2 px-3 py-2.5"
         >
