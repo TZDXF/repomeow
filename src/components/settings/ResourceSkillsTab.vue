@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   checkResourceMarketplaceUpdates,
   collectSkillSources,
@@ -516,7 +517,7 @@ async function confirmDelete() {
               spellcheck="false"
             />
           </div>
-          <div class="mt-1 max-h-56 overflow-y-auto">
+          <ScrollArea class="mt-1 max-h-56">
             <button
               v-for="option in searchedFilters"
               :key="option.key"
@@ -541,7 +542,7 @@ async function confirmDelete() {
             <p v-if="!searchedFilters.length" class="px-2 py-2 text-xs text-muted-foreground">
               {{ t("settings.resources.skills.noMatchingFilters") }}
             </p>
-          </div>
+          </ScrollArea>
         </PopoverContent>
       </Popover>
     </div>

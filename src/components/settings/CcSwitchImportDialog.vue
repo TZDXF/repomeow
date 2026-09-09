@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { Check, Loader2 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Dialog,
   DialogContent,
@@ -133,60 +134,62 @@ function confirmCcSwitchImport() {
             }}
           </Button>
         </div>
-        <div class="flex max-h-72 flex-col gap-1.5 overflow-y-auto py-1">
-          <button
-            v-for="provider in ccSwitchScan.providers"
-            :key="ccSwitchKey(provider)"
-            type="button"
-            class="hover:bg-accent flex items-center gap-2 rounded-md border px-2 py-1.5 text-left"
-            :class="
-              ccSwitchChecked.has(ccSwitchKey(provider)) ? 'border-primary/50 bg-primary/5' : ''
-            "
-            @click="toggleCcSwitchProvider(provider)"
-          >
-            <span
-              class="flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border"
+        <ScrollArea class="max-h-72 py-1">
+          <div class="flex flex-col gap-1.5">
+            <button
+              v-for="provider in ccSwitchScan.providers"
+              :key="ccSwitchKey(provider)"
+              type="button"
+              class="hover:bg-accent flex items-center gap-2 rounded-md border px-2 py-1.5 text-left"
               :class="
-                ccSwitchChecked.has(ccSwitchKey(provider))
-                  ? 'border-primary bg-primary text-primary-foreground'
-                  : 'border-input'
+                ccSwitchChecked.has(ccSwitchKey(provider)) ? 'border-primary/50 bg-primary/5' : ''
               "
+              @click="toggleCcSwitchProvider(provider)"
             >
-              <Check v-if="ccSwitchChecked.has(ccSwitchKey(provider))" class="h-3 w-3" />
-            </span>
-            <span class="flex min-w-0 flex-1 flex-col">
-              <span class="flex items-center gap-1.5">
-                <span class="truncate text-sm font-medium">
-                  {{ provider.name.trim() || provider.id }}
-                </span>
-                <span
-                  class="bg-muted text-muted-foreground shrink-0 rounded-full px-1.5 py-px text-[10px]"
-                >
-                  {{ provider.app }}
-                </span>
-                <span
-                  class="text-muted-foreground shrink-0 rounded-full border px-1.5 py-px text-[10px]"
-                >
-                  {{ t(`settings.ai.apiTypes.${provider.api}`) }}
-                </span>
-                <span
-                  v-if="provider.current"
-                  class="bg-primary/10 text-primary shrink-0 rounded-full px-1.5 py-px text-[10px]"
-                >
-                  {{ t("settings.ai.ccSwitchCurrent") }}
-                </span>
+              <span
+                class="flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border"
+                :class="
+                  ccSwitchChecked.has(ccSwitchKey(provider))
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-input'
+                "
+              >
+                <Check v-if="ccSwitchChecked.has(ccSwitchKey(provider))" class="h-3 w-3" />
               </span>
-              <span class="text-muted-foreground truncate text-xs">{{ provider.baseUrl }}</span>
-            </span>
-            <span class="text-muted-foreground shrink-0 text-xs">
-              {{
-                provider.apiKey
-                  ? t("settings.ai.modelCount", { count: provider.models.length })
-                  : t("settings.ai.ccSwitchNoKey")
-              }}
-            </span>
-          </button>
-        </div>
+              <span class="flex min-w-0 flex-1 flex-col">
+                <span class="flex items-center gap-1.5">
+                  <span class="truncate text-sm font-medium">
+                    {{ provider.name.trim() || provider.id }}
+                  </span>
+                  <span
+                    class="bg-muted text-muted-foreground shrink-0 rounded-full px-1.5 py-px text-[10px]"
+                  >
+                    {{ provider.app }}
+                  </span>
+                  <span
+                    class="text-muted-foreground shrink-0 rounded-full border px-1.5 py-px text-[10px]"
+                  >
+                    {{ t(`settings.ai.apiTypes.${provider.api}`) }}
+                  </span>
+                  <span
+                    v-if="provider.current"
+                    class="bg-primary/10 text-primary shrink-0 rounded-full px-1.5 py-px text-[10px]"
+                  >
+                    {{ t("settings.ai.ccSwitchCurrent") }}
+                  </span>
+                </span>
+                <span class="text-muted-foreground truncate text-xs">{{ provider.baseUrl }}</span>
+              </span>
+              <span class="text-muted-foreground shrink-0 text-xs">
+                {{
+                  provider.apiKey
+                    ? t("settings.ai.modelCount", { count: provider.models.length })
+                    : t("settings.ai.ccSwitchNoKey")
+                }}
+              </span>
+            </button>
+          </div>
+        </ScrollArea>
       </template>
 
       <DialogFooter>

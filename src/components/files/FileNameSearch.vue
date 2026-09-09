@@ -6,6 +6,7 @@ import { Icon } from "@iconify/vue";
 import { onClickOutside } from "@vueuse/core";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { fileIcon } from "@/lib/file-icons";
 import { cmd } from "@/lib/tauri";
 import { debounce } from "@/lib/utils";
@@ -142,9 +143,9 @@ onClickOutside(box, close, { ignore: [trigger] });
       class="h-8 bg-background pl-8 text-sm"
       @keydown="onKeydown"
     />
-    <div
+    <ScrollArea
       v-if="text.trim()"
-      class="absolute left-0 right-0 top-full mt-1 max-h-80 overflow-auto rounded-md border bg-popover p-1 shadow-md"
+      class="absolute left-0 right-0 top-full mt-1 max-h-80 rounded-md border bg-popover p-1 shadow-md"
     >
       <p v-if="!results.length" class="px-2 py-3 text-center text-xs text-muted-foreground">
         {{ t("files.noMatch") }}
@@ -170,7 +171,7 @@ onClickOutside(box, close, { ignore: [trigger] });
           {{ t("files.searchLimited", { count: FILE_SEARCH_LIMIT }) }}
         </p>
       </template>
-    </div>
+    </ScrollArea>
   </div>
   <Button
     ref="trigger"

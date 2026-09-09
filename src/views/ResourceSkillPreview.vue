@@ -1174,7 +1174,7 @@ const llmNotice = computed(() => {
           </DialogDescription>
         </DialogHeader>
 
-        <div class="max-h-64 overflow-y-auto">
+        <ScrollArea class="max-h-64">
           <button
             v-for="group in allGroups"
             :key="group.id"
@@ -1212,7 +1212,7 @@ const llmNotice = computed(() => {
           <p v-if="!allGroups.length" class="px-2 py-6 text-center text-xs text-muted-foreground">
             {{ t("settings.resources.skills.previewPage.groups.empty") }}
           </p>
-        </div>
+        </ScrollArea>
 
         <DialogFooter>
           <Button variant="outline" :disabled="savingGroups" @click="groupsDialogOpen = false">

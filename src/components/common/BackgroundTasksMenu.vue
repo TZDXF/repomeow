@@ -15,6 +15,7 @@ import {
   Trash2,
 } from "@lucide/vue";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatRelativeTime } from "@/lib/format";
 import {
   useBackgroundTasksStore,
@@ -187,7 +188,7 @@ async function openTask(task: BackgroundTaskItem) {
         </span>
       </div>
 
-      <div class="max-h-96 overflow-y-auto p-2">
+      <ScrollArea class="max-h-96 p-2">
         <section v-if="store.tasks.length">
           <h3 class="px-1 pb-1.5 text-xs font-medium text-muted-foreground">
             {{ t("titleBar.activeTasks") }}
@@ -265,7 +266,7 @@ async function openTask(task: BackgroundTaskItem) {
             <ChevronRight v-if="task.target" class="h-4 w-4 shrink-0 text-muted-foreground" />
           </button>
         </section>
-      </div>
+      </ScrollArea>
     </PopoverContent>
   </Popover>
 </template>

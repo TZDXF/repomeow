@@ -26,6 +26,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -405,31 +406,30 @@ onMounted(() => {
                 <p v-if="!filteredRemote(tool).length" class="text-xs text-muted-foreground">
                   {{ t("settings.devEnv.versionEmpty") }}
                 </p>
-                <div
-                  v-else
-                  class="flex max-h-40 flex-col gap-0.5 overflow-y-auto rounded-md border p-1"
-                >
-                  <button
-                    v-for="v in filteredRemote(tool).slice(0, 200)"
-                    :key="v.name"
-                    type="button"
-                    class="flex items-center justify-between gap-2 rounded px-2 py-1 text-left font-mono text-xs hover:bg-accent"
-                    @click="run(tool.id, 'install_version', v.name)"
-                  >
-                    <span class="flex items-center gap-1.5">
-                      {{ v.name }}
-                      <!-- 标记文字直接取自数据源(nvm 表格列头 / vp 的 LTS·Current) -->
-                      <Badge
-                        v-if="v.tag"
-                        :variant="v.tag === 'LTS' ? 'secondary' : 'outline'"
-                        class="h-4 px-1 text-[10px]"
-                      >
-                        {{ v.tag }}
-                      </Badge>
-                    </span>
-                    <Plus class="h-3 w-3 shrink-0 text-muted-foreground" />
-                  </button>
-                </div>
+                <ScrollArea v-else class="max-h-40 rounded-md border">
+                  <div class="flex flex-col gap-0.5 p-1">
+                    <button
+                      v-for="v in filteredRemote(tool).slice(0, 200)"
+                      :key="v.name"
+                      type="button"
+                      class="flex items-center justify-between gap-2 rounded px-2 py-1 text-left font-mono text-xs hover:bg-accent"
+                      @click="run(tool.id, 'install_version', v.name)"
+                    >
+                      <span class="flex items-center gap-1.5">
+                        {{ v.name }}
+                        <!-- 标记文字直接取自数据源(nvm 表格列头 / vp 的 LTS·Current) -->
+                        <Badge
+                          v-if="v.tag"
+                          :variant="v.tag === 'LTS' ? 'secondary' : 'outline'"
+                          class="h-4 px-1 text-[10px]"
+                        >
+                          {{ v.tag }}
+                        </Badge>
+                      </span>
+                      <Plus class="h-3 w-3 shrink-0 text-muted-foreground" />
+                    </button>
+                  </div>
+                </ScrollArea>
               </template>
             </div>
           </div>

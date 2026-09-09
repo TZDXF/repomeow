@@ -14,6 +14,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cmd } from "@/lib/tauri";
 import { toForwardSlash } from "@/lib/path";
 import { useProjectsStore } from "@/stores/projects";
@@ -390,106 +391,108 @@ async function confirm() {
         <p class="mt-1 text-xs text-muted-foreground">{{ t("wiki.genConfigDesc") }}</p>
       </DialogHeader>
 
-      <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto py-2">
-        <!-- 后端:内置 Agent + 已安装的精选 agent(未安装/自定义不展示) -->
-        <div class="flex flex-col gap-1.5">
-          <label class="text-sm font-medium">{{ t("wiki.genBackend") }}</label>
-          <Select
-            :model-value="backend"
-            :disabled="configLoading || configSaving"
-            @update:model-value="onBackendChange"
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value="builtin">{{ t("wiki.genBuiltin") }}</SelectItem>
-                <SelectItem v-for="a in installedAgents" :key="a.id" :value="a.id">
-                  {{ a.name }}
-                </SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </div>
+      <ScrollArea class="min-h-0 flex-1 py-2">
+        <div class="flex flex-col gap-4">
+          <!-- 后端:内置 Agent + 已安装的精选 agent(未安装/自定义不展示) -->
+          <div class="flex flex-col gap-1.5">
+            <label class="text-sm font-medium">{{ t("wiki.genBackend") }}</label>
+            <Select
+              :model-value="backend"
+              :disabled="configLoading || configSaving"
+              @update:model-value="onBackendChange"
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="builtin">{{ t("wiki.genBuiltin") }}</SelectItem>
+                  <SelectItem v-for="a in installedAgents" :key="a.id" :value="a.id">
+                    {{ a.name }}
+                  </SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
 
-        <!-- 模型(内置按厂商列 ai-config 全部模型 / agent 用探测清单)/ 思考强度 / 并发数 -->
-        <div class="grid gap-3">
-          <div class="flex min-w-0 flex-col gap-1.5">
-            <label class="text-sm font-medium">{{ t("wiki.agentModel") }}</label>
-            <ModelSelector
-              v-if="backend === 'builtin'"
-              :model-value="model"
-              :groups="builtinModelGroups"
-              :placeholder="t('wiki.builtinModelDefault')"
-              :disabled="configLoading || configSaving"
-              size="default"
-              trigger-class="min-w-0 w-full"
-              @update:model-value="onBuiltinModelChange"
-            />
-            <Select
-              v-else
-              :model-value="model || DEFAULT_VALUE"
-              :disabled="configLoading || configSaving || probeLoading"
-              @update:model-value="onModelChange"
-            >
-              <SelectTrigger class="min-w-0 w-full">
-                <SelectValue class="min-w-0 flex-1 truncate text-left" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem :value="DEFAULT_VALUE">
-                  {{ t("wiki.agentModelDefault") }}
-                </SelectItem>
-                <SelectItem v-for="c in modelOptions" :key="c.id" :value="c.id">
-                  {{ c.name }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+          <!-- 模型(内置按厂商列 ai-config 全部模型 / agent 用探测清单)/ 思考强度 / 并发数 -->
+          <div class="grid gap-3">
+            <div class="flex min-w-0 flex-col gap-1.5">
+              <label class="text-sm font-medium">{{ t("wiki.agentModel") }}</label>
+              <ModelSelector
+                v-if="backend === 'builtin'"
+                :model-value="model"
+                :groups="builtinModelGroups"
+                :placeholder="t('wiki.builtinModelDefault')"
+                :disabled="configLoading || configSaving"
+                size="default"
+                trigger-class="min-w-0 w-full"
+                @update:model-value="onBuiltinModelChange"
+              />
+              <Select
+                v-else
+                :model-value="model || DEFAULT_VALUE"
+                :disabled="configLoading || configSaving || probeLoading"
+                @update:model-value="onModelChange"
+              >
+                <SelectTrigger class="min-w-0 w-full">
+                  <SelectValue class="min-w-0 flex-1 truncate text-left" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem :value="DEFAULT_VALUE">
+                    {{ t("wiki.agentModelDefault") }}
+                  </SelectItem>
+                  <SelectItem v-for="c in modelOptions" :key="c.id" :value="c.id">
+                    {{ c.name }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="flex min-w-0 flex-col gap-1.5">
+              <label class="text-sm font-medium">{{ t("wiki.agentThinking") }}</label>
+              <Select
+                :model-value="thinking || DEFAULT_VALUE"
+                :disabled="
+                  configLoading ||
+                  configSaving ||
+                  (backend !== 'builtin' && (probeLoading || thinkingChoices.length === 0))
+                "
+                @update:model-value="onThinkingChange"
+              >
+                <SelectTrigger class="min-w-0 w-full">
+                  <SelectValue class="min-w-0 flex-1 truncate text-left" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem :value="DEFAULT_VALUE">{{ thinkingDefaultLabel }}</SelectItem>
+                  <SelectItem v-for="c in thinkingSelectOptions" :key="c.id" :value="c.id">
+                    {{ c.name }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="flex min-w-0 flex-col gap-1.5">
+              <label class="text-sm font-medium">{{ t("wiki.agentConcurrency") }}</label>
+              <Input
+                v-model.number="concurrency"
+                type="number"
+                min="1"
+                max="8"
+                :placeholder="backend === 'builtin' ? t('wiki.builtinConcurrencyPlaceholder') : ''"
+                :disabled="configLoading || configSaving"
+              />
+              <p class="text-xs text-muted-foreground">{{ concurrencyHint }}</p>
+            </div>
           </div>
-          <div class="flex min-w-0 flex-col gap-1.5">
-            <label class="text-sm font-medium">{{ t("wiki.agentThinking") }}</label>
-            <Select
-              :model-value="thinking || DEFAULT_VALUE"
-              :disabled="
-                configLoading ||
-                configSaving ||
-                (backend !== 'builtin' && (probeLoading || thinkingChoices.length === 0))
-              "
-              @update:model-value="onThinkingChange"
-            >
-              <SelectTrigger class="min-w-0 w-full">
-                <SelectValue class="min-w-0 flex-1 truncate text-left" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem :value="DEFAULT_VALUE">{{ thinkingDefaultLabel }}</SelectItem>
-                <SelectItem v-for="c in thinkingSelectOptions" :key="c.id" :value="c.id">
-                  {{ c.name }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div class="flex min-w-0 flex-col gap-1.5">
-            <label class="text-sm font-medium">{{ t("wiki.agentConcurrency") }}</label>
-            <Input
-              v-model.number="concurrency"
-              type="number"
-              min="1"
-              max="8"
-              :placeholder="backend === 'builtin' ? t('wiki.builtinConcurrencyPlaceholder') : ''"
-              :disabled="configLoading || configSaving"
-            />
-            <p class="text-xs text-muted-foreground">{{ concurrencyHint }}</p>
-          </div>
+          <p
+            v-if="backend !== 'builtin' && probeHint"
+            class="flex items-center gap-1.5 text-xs"
+            :class="probeFailed ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'"
+          >
+            <Loader2 v-if="probeLoading" class="h-3 w-3 animate-spin" />
+            {{ probeHint }}
+          </p>
         </div>
-        <p
-          v-if="backend !== 'builtin' && probeHint"
-          class="flex items-center gap-1.5 text-xs"
-          :class="probeFailed ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'"
-        >
-          <Loader2 v-if="probeLoading" class="h-3 w-3 animate-spin" />
-          {{ probeHint }}
-        </p>
-      </div>
+      </ScrollArea>
 
       <div class="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5">
         <div class="min-w-0 flex-1">

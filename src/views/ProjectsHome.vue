@@ -26,6 +26,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import AddProjectDialog from "@/components/project/AddProjectDialog.vue";
 import ProjectCard from "@/components/project/ProjectCard.vue";
 import ProjectTable from "@/components/project/ProjectTable.vue";
@@ -221,7 +222,7 @@ const sortedProjects = computed(() => {
       </div>
     </header>
 
-    <div class="flex-1 overflow-y-auto">
+    <ScrollArea class="min-h-0 flex-1">
       <div
         v-if="viewMode === 'grid'"
         class="grid gap-3 p-4 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]"
@@ -236,6 +237,6 @@ const sortedProjects = computed(() => {
             : t("projects.home.emptyAll")
         }}
       </p>
-    </div>
+    </ScrollArea>
   </div>
 </template>

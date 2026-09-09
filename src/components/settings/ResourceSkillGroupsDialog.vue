@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   createResourceSkillGroup,
   deleteResourceSkillGroup,
@@ -437,7 +438,7 @@ async function savePicker() {
         />
       </div>
 
-      <div class="max-h-64 overflow-y-auto">
+      <ScrollArea class="max-h-64">
         <button
           v-for="skill in pickerFiltered"
           :key="skill.id"
@@ -472,7 +473,7 @@ async function savePicker() {
               : t("settings.resources.skills.empty")
           }}
         </p>
-      </div>
+      </ScrollArea>
 
       <DialogFooter>
         <Button variant="outline" :disabled="savingPicker" @click="pickerOpen = false">

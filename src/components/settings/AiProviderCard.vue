@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -364,7 +365,7 @@ function pickModelId(model: ModelDraft, id: string) {
                     spellcheck="false"
                     @update:model-value="suggestionQuery[model.key] = String($event)"
                   />
-                  <div class="max-h-56 overflow-y-auto">
+                  <ScrollArea class="max-h-56">
                     <button
                       v-for="option in modelSuggestions(model)"
                       :key="option"
@@ -380,7 +381,7 @@ function pickModelId(model: ModelDraft, id: string) {
                     >
                       {{ t("settings.ai.noMatchedModels") }}
                     </p>
-                  </div>
+                  </ScrollArea>
                 </PopoverContent>
               </Popover>
               <div class="grid grid-cols-4 gap-1.5">

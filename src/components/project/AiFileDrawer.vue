@@ -16,6 +16,7 @@ import {
 } from "@lucide/vue";
 import { Markdown } from "vue-stream-markdown";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import CodeViewer from "@/components/files/CodeViewer.vue";
 import { cmd } from "@/lib/tauri";
 import { joinPath } from "@/lib/path";
@@ -443,19 +444,16 @@ function onMarkdownClick(e: MouseEvent) {
               :editable="editing"
             />
           </div>
-          <div
-            v-else
-            ref="mdBody"
-            class="min-h-0 flex-1 overflow-y-auto px-6 py-4"
-            @click="onMarkdownClick"
-          >
-            <Markdown
-              mode="static"
-              :content="displayContent"
-              :locale="settingsStore.language"
-              :theme-element="themeElement"
-            />
-          </div>
+          <ScrollArea v-else class="min-h-0 flex-1">
+            <div ref="mdBody" class="px-6 py-4" @click="onMarkdownClick">
+              <Markdown
+                mode="static"
+                :content="displayContent"
+                :locale="settingsStore.language"
+                :theme-element="themeElement"
+              />
+            </div>
+          </ScrollArea>
         </aside>
       </div>
     </Transition>

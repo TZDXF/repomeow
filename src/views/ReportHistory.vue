@@ -549,7 +549,7 @@ watch(
                     />
                   </div>
                 </div>
-                <div class="max-h-56 overflow-y-auto">
+                <ScrollArea class="max-h-56">
                   <div
                     v-for="p in filteredProjects"
                     :key="p.id"
@@ -578,7 +578,7 @@ watch(
                   >
                     {{ t("projects.home.emptyFiltered") }}
                   </p>
-                </div>
+                </ScrollArea>
               </DropdownMenuContent>
             </DropdownMenu>
             <div v-if="selectedProjects.length" class="mt-1.5 flex flex-wrap gap-1">
@@ -848,7 +848,7 @@ watch(
                           <span class="shrink-0 text-muted-foreground">{{ c.commits.length }}</span>
                         </CollapsibleTrigger>
                         <CollapsibleContent>
-                          <div class="ml-5 max-h-40 overflow-y-auto border-l">
+                          <ScrollArea class="ml-5 max-h-40 border-l">
                             <div
                               v-for="commit in c.commits"
                               :key="commit.hash + commit.date"
@@ -866,7 +866,7 @@ watch(
                                 {{ formatCommitTime(commit.date) }}
                               </span>
                             </div>
-                          </div>
+                          </ScrollArea>
                         </CollapsibleContent>
                       </Collapsible>
                     </div>

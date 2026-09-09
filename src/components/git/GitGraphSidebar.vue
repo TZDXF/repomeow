@@ -23,6 +23,7 @@ import {
 import { buildBranchTree, type BranchTreeNode } from "@/lib/branch-tree";
 import type { GitBranches, GitBranchTrack } from "@/types";
 import GitBranchTrackBadges from "./GitBranchTrackBadges.vue";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface BranchTreeRow {
   node: BranchTreeNode;
@@ -117,163 +118,165 @@ function onBranchRowClick(prefix: string, row: BranchTreeRow) {
         <PanelLeftClose class="h-3.5 w-3.5" />
       </button>
     </div>
-    <div class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 pt-1 pb-2">
-      <template v-if="branches.local.length">
-        <button
-          class="flex items-center gap-1 px-1 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase transition-colors hover:text-foreground"
-          @click="toggleSection('local')"
-        >
-          <ChevronRight
-            class="h-3 w-3 transition-transform"
-            :class="collapsedSections.has('local') ? '' : 'rotate-90'"
-          />
-          {{ t("git.branch.local") }}
-        </button>
-        <template v-if="!collapsedSections.has('local')">
-          <ContextMenu v-for="row in localRows" :key="`local:${row.node.fullPath}`">
-            <ContextMenuTrigger as-child :disabled="!row.node.branch">
-              <button
-                class="flex w-full items-center gap-1.5 rounded-sm py-1 pr-2 text-left text-xs transition-colors hover:bg-accent"
-                :class="[
-                  row.node.branch === currentBranch ? 'font-semibold' : '',
-                  row.node.branch && selectedBranch === row.node.branch ? 'bg-accent' : '',
-                ]"
-                :style="{ paddingLeft: `${8 + row.depth * 12}px` }"
-                @click="onBranchRowClick('local', row)"
-              >
-                <span
-                  v-if="row.node.children.length"
-                  class="shrink-0 text-muted-foreground"
-                  @click.stop="toggleFolder(`local:${row.node.fullPath}`)"
+    <ScrollArea class="min-h-0 flex-1 px-2 pt-1 pb-2">
+      <div class="flex flex-col gap-0.5">
+        <template v-if="branches.local.length">
+          <button
+            class="flex items-center gap-1 px-1 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase transition-colors hover:text-foreground"
+            @click="toggleSection('local')"
+          >
+            <ChevronRight
+              class="h-3 w-3 transition-transform"
+              :class="collapsedSections.has('local') ? '' : 'rotate-90'"
+            />
+            {{ t("git.branch.local") }}
+          </button>
+          <template v-if="!collapsedSections.has('local')">
+            <ContextMenu v-for="row in localRows" :key="`local:${row.node.fullPath}`">
+              <ContextMenuTrigger as-child :disabled="!row.node.branch">
+                <button
+                  class="flex w-full items-center gap-1.5 rounded-sm py-1 pr-2 text-left text-xs transition-colors hover:bg-accent"
+                  :class="[
+                    row.node.branch === currentBranch ? 'font-semibold' : '',
+                    row.node.branch && selectedBranch === row.node.branch ? 'bg-accent' : '',
+                  ]"
+                  :style="{ paddingLeft: `${8 + row.depth * 12}px` }"
+                  @click="onBranchRowClick('local', row)"
                 >
-                  <ChevronRight
-                    class="h-3 w-3 transition-transform"
-                    :class="collapsedFolders.has(`local:${row.node.fullPath}`) ? '' : 'rotate-90'"
-                  />
-                </span>
-                <span v-else class="w-3 shrink-0" />
-                <Folder
-                  v-if="row.node.children.length"
-                  class="h-3 w-3 shrink-0 text-muted-foreground"
-                />
-                <GitBranch v-else class="h-3 w-3 shrink-0 text-muted-foreground" />
-                <span class="truncate">{{ row.node.name }}</span>
-                <span class="ml-auto flex shrink-0 items-center gap-1.5">
-                  <Loader2
-                    v-if="branchOp?.branch === row.node.branch"
-                    class="h-3 w-3 animate-spin text-muted-foreground"
-                  />
-                  <GitBranchTrackBadges
-                    :ahead="trackOf(row.node.branch)?.ahead ?? 0"
-                    :behind="trackOf(row.node.branch)?.behind ?? 0"
-                  />
                   <span
-                    v-if="row.node.branch === currentBranch"
-                    class="h-1.5 w-1.5 shrink-0 rounded-full bg-green-500"
+                    v-if="row.node.children.length"
+                    class="shrink-0 text-muted-foreground"
+                    @click.stop="toggleFolder(`local:${row.node.fullPath}`)"
+                  >
+                    <ChevronRight
+                      class="h-3 w-3 transition-transform"
+                      :class="collapsedFolders.has(`local:${row.node.fullPath}`) ? '' : 'rotate-90'"
+                    />
+                  </span>
+                  <span v-else class="w-3 shrink-0" />
+                  <Folder
+                    v-if="row.node.children.length"
+                    class="h-3 w-3 shrink-0 text-muted-foreground"
                   />
-                </span>
-              </button>
-            </ContextMenuTrigger>
-            <ContextMenuContent v-if="row.node.branch" class="w-40">
-              <ContextMenuItem
-                class="gap-2 text-xs"
-                :disabled="!!branchOp"
-                @click="emit('pullBranch', row.node.branch!)"
-              >
-                <ArrowDownToLine class="h-3.5 w-3.5" />
-                {{ t("git.actions.pull") }}
-              </ContextMenuItem>
-              <ContextMenuItem
-                class="gap-2 text-xs"
-                :disabled="!!branchOp"
-                @click="emit('pushBranch', row.node.branch!)"
-              >
-                <ArrowUpToLine class="h-3.5 w-3.5" />
-                {{ t("git.actions.push") }}
-              </ContextMenuItem>
-              <ContextMenuItem
-                class="gap-2 text-xs"
-                variant="destructive"
-                :disabled="!!branchOp || row.node.branch === currentBranch"
-                @click="emit('deleteBranch', row.node.branch!)"
-              >
-                <Trash2 class="h-3.5 w-3.5" />
-                {{ t("git.branch.delete") }}
-              </ContextMenuItem>
-            </ContextMenuContent>
-          </ContextMenu>
+                  <GitBranch v-else class="h-3 w-3 shrink-0 text-muted-foreground" />
+                  <span class="truncate">{{ row.node.name }}</span>
+                  <span class="ml-auto flex shrink-0 items-center gap-1.5">
+                    <Loader2
+                      v-if="branchOp?.branch === row.node.branch"
+                      class="h-3 w-3 animate-spin text-muted-foreground"
+                    />
+                    <GitBranchTrackBadges
+                      :ahead="trackOf(row.node.branch)?.ahead ?? 0"
+                      :behind="trackOf(row.node.branch)?.behind ?? 0"
+                    />
+                    <span
+                      v-if="row.node.branch === currentBranch"
+                      class="h-1.5 w-1.5 shrink-0 rounded-full bg-green-500"
+                    />
+                  </span>
+                </button>
+              </ContextMenuTrigger>
+              <ContextMenuContent v-if="row.node.branch" class="w-40">
+                <ContextMenuItem
+                  class="gap-2 text-xs"
+                  :disabled="!!branchOp"
+                  @click="emit('pullBranch', row.node.branch!)"
+                >
+                  <ArrowDownToLine class="h-3.5 w-3.5" />
+                  {{ t("git.actions.pull") }}
+                </ContextMenuItem>
+                <ContextMenuItem
+                  class="gap-2 text-xs"
+                  :disabled="!!branchOp"
+                  @click="emit('pushBranch', row.node.branch!)"
+                >
+                  <ArrowUpToLine class="h-3.5 w-3.5" />
+                  {{ t("git.actions.push") }}
+                </ContextMenuItem>
+                <ContextMenuItem
+                  class="gap-2 text-xs"
+                  variant="destructive"
+                  :disabled="!!branchOp || row.node.branch === currentBranch"
+                  @click="emit('deleteBranch', row.node.branch!)"
+                >
+                  <Trash2 class="h-3.5 w-3.5" />
+                  {{ t("git.branch.delete") }}
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
+          </template>
         </template>
-      </template>
 
-      <template v-if="branches.remote.length">
-        <button
-          class="flex items-center gap-1 px-1 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase transition-colors hover:text-foreground"
-          @click="toggleSection('remote')"
-        >
-          <ChevronRight
-            class="h-3 w-3 transition-transform"
-            :class="collapsedSections.has('remote') ? '' : 'rotate-90'"
-          />
-          {{ t("git.branch.remote") }}
-        </button>
-        <template v-if="!collapsedSections.has('remote')">
+        <template v-if="branches.remote.length">
           <button
-            v-for="row in remoteRows"
-            :key="`remote:${row.node.fullPath}`"
-            class="flex items-center gap-1.5 rounded-sm py-1 pr-2 text-left text-xs transition-colors hover:bg-accent"
-            :class="row.node.branch && selectedBranch === row.node.branch ? 'bg-accent' : ''"
-            :style="{ paddingLeft: `${8 + row.depth * 12}px` }"
-            @click="onBranchRowClick('remote', row)"
+            class="flex items-center gap-1 px-1 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase transition-colors hover:text-foreground"
+            @click="toggleSection('remote')"
           >
-            <span
-              v-if="row.node.children.length"
-              class="shrink-0 text-muted-foreground"
-              @click.stop="toggleFolder(`remote:${row.node.fullPath}`)"
+            <ChevronRight
+              class="h-3 w-3 transition-transform"
+              :class="collapsedSections.has('remote') ? '' : 'rotate-90'"
+            />
+            {{ t("git.branch.remote") }}
+          </button>
+          <template v-if="!collapsedSections.has('remote')">
+            <button
+              v-for="row in remoteRows"
+              :key="`remote:${row.node.fullPath}`"
+              class="flex items-center gap-1.5 rounded-sm py-1 pr-2 text-left text-xs transition-colors hover:bg-accent"
+              :class="row.node.branch && selectedBranch === row.node.branch ? 'bg-accent' : ''"
+              :style="{ paddingLeft: `${8 + row.depth * 12}px` }"
+              @click="onBranchRowClick('remote', row)"
             >
-              <ChevronRight
-                class="h-3 w-3 transition-transform"
-                :class="collapsedFolders.has(`remote:${row.node.fullPath}`) ? '' : 'rotate-90'"
+              <span
+                v-if="row.node.children.length"
+                class="shrink-0 text-muted-foreground"
+                @click.stop="toggleFolder(`remote:${row.node.fullPath}`)"
+              >
+                <ChevronRight
+                  class="h-3 w-3 transition-transform"
+                  :class="collapsedFolders.has(`remote:${row.node.fullPath}`) ? '' : 'rotate-90'"
+                />
+              </span>
+              <span v-else class="w-3 shrink-0" />
+              <Globe
+                v-if="row.node.children.length && row.depth === 0"
+                class="h-3 w-3 shrink-0 text-muted-foreground"
               />
-            </span>
-            <span v-else class="w-3 shrink-0" />
-            <Globe
-              v-if="row.node.children.length && row.depth === 0"
-              class="h-3 w-3 shrink-0 text-muted-foreground"
-            />
-            <Folder
-              v-else-if="row.node.children.length"
-              class="h-3 w-3 shrink-0 text-muted-foreground"
-            />
-            <GitBranch v-else class="h-3 w-3 shrink-0 text-muted-foreground" />
-            <span class="truncate">{{ row.node.name }}</span>
-          </button>
+              <Folder
+                v-else-if="row.node.children.length"
+                class="h-3 w-3 shrink-0 text-muted-foreground"
+              />
+              <GitBranch v-else class="h-3 w-3 shrink-0 text-muted-foreground" />
+              <span class="truncate">{{ row.node.name }}</span>
+            </button>
+          </template>
         </template>
-      </template>
 
-      <template v-if="tags.length">
-        <button
-          class="flex items-center gap-1 px-1 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase transition-colors hover:text-foreground"
-          @click="toggleSection('tags')"
-        >
-          <ChevronRight
-            class="h-3 w-3 transition-transform"
-            :class="collapsedSections.has('tags') ? '' : 'rotate-90'"
-          />
-          {{ t("git.graph.tags") }}
-        </button>
-        <template v-if="!collapsedSections.has('tags')">
+        <template v-if="tags.length">
           <button
-            v-for="tag in tags"
-            :key="tag"
-            class="flex items-center gap-1.5 rounded-sm px-2 py-1 text-left text-xs transition-colors hover:bg-accent"
-            @click="emit('locateTag', tag)"
+            class="flex items-center gap-1 px-1 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase transition-colors hover:text-foreground"
+            @click="toggleSection('tags')"
           >
-            <TagIcon class="h-3 w-3 shrink-0 text-amber-600 dark:text-amber-400" />
-            <span class="truncate">{{ tag }}</span>
+            <ChevronRight
+              class="h-3 w-3 transition-transform"
+              :class="collapsedSections.has('tags') ? '' : 'rotate-90'"
+            />
+            {{ t("git.graph.tags") }}
           </button>
+          <template v-if="!collapsedSections.has('tags')">
+            <button
+              v-for="tag in tags"
+              :key="tag"
+              class="flex items-center gap-1.5 rounded-sm px-2 py-1 text-left text-xs transition-colors hover:bg-accent"
+              @click="emit('locateTag', tag)"
+            >
+              <TagIcon class="h-3 w-3 shrink-0 text-amber-600 dark:text-amber-400" />
+              <span class="truncate">{{ tag }}</span>
+            </button>
+          </template>
         </template>
-      </template>
-    </div>
+      </div>
+    </ScrollArea>
   </aside>
 
   <button

@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import type { GitGraphCommit } from "@/types";
 
@@ -95,9 +96,9 @@ function shortHash(hash: string) {
         >
           <X class="h-3.5 w-3.5" />
         </button>
-        <div
+        <ScrollArea
           v-if="searchQuery.trim()"
-          class="absolute top-full right-0 z-50 mt-1 max-h-72 w-80 overflow-auto rounded-md border bg-popover p-1 shadow-md"
+          class="absolute top-full right-0 z-50 mt-1 max-h-72 w-80 rounded-md border bg-popover p-1 shadow-md"
         >
           <p v-if="!searchResults.length" class="px-2 py-1.5 text-xs text-muted-foreground">
             {{ t("git.graph.searchEmpty") }}
@@ -113,7 +114,7 @@ function shortHash(hash: string) {
               {{ shortHash(commit.hash) }} · {{ commit.author }} · {{ commit.date }}
             </span>
           </button>
-        </div>
+        </ScrollArea>
       </div>
 
       <DropdownMenu v-if="isGraph">

@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   filterMarketplaceSkills,
   installResourceMarketplaceSkill,
@@ -269,7 +270,7 @@ async function openSkillPage(skill: ResourceMarketplaceSkill) {
               spellcheck="false"
             />
           </div>
-          <div class="mt-1 max-h-56 overflow-y-auto">
+          <ScrollArea class="mt-1 max-h-56">
             <button
               v-for="source in searchedSources"
               :key="source.id"
@@ -284,7 +285,7 @@ async function openSkillPage(skill: ResourceMarketplaceSkill) {
             <p v-if="!searchedSources.length" class="px-2 py-2 text-xs text-muted-foreground">
               {{ t("settings.resources.market.noMatchingSources") }}
             </p>
-          </div>
+          </ScrollArea>
         </PopoverContent>
       </Popover>
     </div>

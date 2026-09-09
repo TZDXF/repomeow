@@ -16,6 +16,7 @@ import {
 } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import FileTreeList from "@/components/common/FileTreeList.vue";
 import DiffViewer from "@/components/git/DiffViewer.vue";
 import ImageDiffPreview from "@/components/git/ImageDiffPreview.vue";
@@ -341,9 +342,9 @@ onBeforeUnmount(() => {
     <!-- 提交信息 -->
     <div class="shrink-0 border-b px-3 py-2.5">
       <div class="flex items-start justify-between gap-2">
-        <p class="max-h-15 min-w-0 overflow-y-auto text-sm font-medium break-all">
-          {{ commit.subject }}
-        </p>
+        <ScrollArea class="max-h-15 min-w-0">
+          <p class="text-sm font-medium break-all">{{ commit.subject }}</p>
+        </ScrollArea>
         <Button
           variant="ghost"
           size="sm"
@@ -428,8 +429,8 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="min-h-0 flex-1 overflow-auto py-1">
-          <div v-if="filesLoading" class="flex h-full items-center justify-center">
+        <ScrollArea class="min-h-0 flex-1 py-1">
+          <div v-if="filesLoading" class="flex min-h-24 items-center justify-center">
             <Loader2 class="h-4 w-4 animate-spin text-muted-foreground" />
           </div>
           <p v-else-if="filesError" class="px-3 py-2 text-xs text-destructive">
@@ -495,7 +496,7 @@ onBeforeUnmount(() => {
               </template>
             </template>
           </FileTreeList>
-        </div>
+        </ScrollArea>
       </div>
 
       <!-- 列表 / diff 分隔拖拽条:上下布局横条调高,左右布局竖条调宽 -->

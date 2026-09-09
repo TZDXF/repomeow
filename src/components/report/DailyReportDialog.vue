@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { Loader2, Sparkles } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Dialog,
   DialogContent,
@@ -391,79 +392,78 @@ async function startBatch() {
            item 的 min-width:auto 会按内容 min-content 撑破弹窗(如长 URL/英文串),
            min-w-0 解除该自动最小宽度;min-h-0 同理,是限高下内部滚动生效的关键 -->
       <div class="flex min-h-0 min-w-0 flex-1 gap-4">
-        <div
-          class="flex min-h-0 flex-col gap-4 overflow-y-auto pr-1"
-          :class="result || generating ? 'w-72 shrink-0' : 'flex-1'"
-        >
-          <ReportProjectSelector
-            v-if="!locked"
-            v-model="selectedIds"
-            :projects="activeProjects"
-            :tags="tagsStore.tags"
-          />
+        <ScrollArea class="min-h-0 pr-1" :class="result || generating ? 'w-72 shrink-0' : 'flex-1'">
+          <div class="flex flex-col gap-4">
+            <ReportProjectSelector
+              v-if="!locked"
+              v-model="selectedIds"
+              :projects="activeProjects"
+              :tags="tagsStore.tags"
+            />
 
-          <ReportPeriodControls
-            v-model="period"
-            :language="settings.language"
-            :batch-running="batchStore.running"
-            :week-ranges="weekRanges"
-          />
+            <ReportPeriodControls
+              v-model="period"
+              :language="settings.language"
+              :batch-running="batchStore.running"
+              :week-ranges="weekRanges"
+            />
 
-          <div class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium">{{ t("report.author") }}</label>
-            <div class="flex flex-wrap items-center gap-1.5">
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">{{ t("report.author") }}</label>
+              <div class="flex flex-wrap items-center gap-1.5">
+                <Button
+                  v-for="opt in AUTHOR_OPTIONS"
+                  :key="opt.value"
+                  size="sm"
+                  :variant="authorMode === opt.value ? 'default' : 'outline'"
+                  class="h-7 max-w-64 px-2.5 text-xs"
+                  @click="authorMode = opt.value"
+                >
+                  <span class="truncate">
+                    {{
+                      opt.value === "me" && selfLabel
+                        ? t("report.authorMeNamed", { name: selfLabel })
+                        : t(opt.labelKey)
+                    }}
+                  </span>
+                </Button>
+              </div>
+            </div>
+
+            <ReportCommitList
+              v-if="!isBatch && (commitData.length || loadingCommits)"
+              :commit-data="commitData"
+              :loading="loadingCommits"
+            />
+
+            <!-- pb-0.5 预留按钮 active 态 translate-y-px 的下移空间,
+                 否则内容刚好撑满时按下按钮会瞬间撑出滚动条、布局位移导致 click 丢失 -->
+            <div class="flex justify-end pb-0.5">
               <Button
-                v-for="opt in AUTHOR_OPTIONS"
-                :key="opt.value"
+                v-if="isBatch"
                 size="sm"
-                :variant="authorMode === opt.value ? 'default' : 'outline'"
-                class="h-7 max-w-64 px-2.5 text-xs"
-                @click="authorMode = opt.value"
+                class="gap-1.5"
+                :disabled="batchStore.running || batchPlanning"
+                @click="startBatch"
               >
-                <span class="truncate">
-                  {{
-                    opt.value === "me" && selfLabel
-                      ? t("report.authorMeNamed", { name: selfLabel })
-                      : t(opt.labelKey)
-                  }}
-                </span>
+                <Loader2 v-if="batchPlanning" class="h-3.5 w-3.5 animate-spin" />
+                <Sparkles v-else class="h-3.5 w-3.5" />
+                {{ batchPlanning ? t("report.batchPlanning") : t("report.batchStart") }}
+              </Button>
+              <Button
+                v-else
+                size="sm"
+                class="gap-1.5"
+                :disabled="generating || loadingCommits"
+                @click="generate"
+              >
+                <Loader2 v-if="generating" class="h-3.5 w-3.5 animate-spin" />
+                <Sparkles v-else class="h-3.5 w-3.5" />
+                {{ generating ? t("report.generating") : t("report.generate") }}
               </Button>
             </div>
           </div>
-
-          <ReportCommitList
-            v-if="!isBatch && (commitData.length || loadingCommits)"
-            :commit-data="commitData"
-            :loading="loadingCommits"
-          />
-
-          <!-- pb-0.5 预留按钮 active 态 translate-y-px 的下移空间,
-               否则内容刚好撑满时按下按钮会瞬间撑出滚动条、布局位移导致 click 丢失 -->
-          <div class="flex justify-end pb-0.5">
-            <Button
-              v-if="isBatch"
-              size="sm"
-              class="gap-1.5"
-              :disabled="batchStore.running || batchPlanning"
-              @click="startBatch"
-            >
-              <Loader2 v-if="batchPlanning" class="h-3.5 w-3.5 animate-spin" />
-              <Sparkles v-else class="h-3.5 w-3.5" />
-              {{ batchPlanning ? t("report.batchPlanning") : t("report.batchStart") }}
-            </Button>
-            <Button
-              v-else
-              size="sm"
-              class="gap-1.5"
-              :disabled="generating || loadingCommits"
-              @click="generate"
-            >
-              <Loader2 v-if="generating" class="h-3.5 w-3.5 animate-spin" />
-              <Sparkles v-else class="h-3.5 w-3.5" />
-              {{ generating ? t("report.generating") : t("report.generate") }}
-            </Button>
-          </div>
-        </div>
+        </ScrollArea>
 
         <!-- 生成前不展示结果面板;生成中即显示以呈现进度反馈。
              批量进度不在此展示,由右下角浮窗(BatchProgressFloat)承载 -->

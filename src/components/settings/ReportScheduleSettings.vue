@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { TimeField } from "@/components/ui/time-field";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import TagCheckList from "@/components/tags/TagCheckList.vue";
 import { formatLocalDateTime } from "@/lib/format";
 import { cmd } from "@/lib/tauri";
@@ -868,26 +869,26 @@ watch(
                 <X class="h-2.5 w-2.5" />
               </button>
             </div>
-            <div
-              class="grid min-h-40 flex-1 grid-cols-1 content-start gap-x-2 overflow-y-auto rounded-md border p-2"
-            >
-              <label
-                v-for="p in visibleProjects"
-                :key="p.id"
-                class="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-accent"
-              >
-                <input
-                  type="checkbox"
-                  class="h-3.5 w-3.5 shrink-0 accent-primary"
-                  :checked="formProjectIds.includes(p.id)"
-                  @change="toggleProject(p.id)"
-                />
-                <span class="truncate" :title="p.path">{{ p.name }}</span>
-              </label>
-              <p v-if="!visibleProjects.length" class="px-1.5 py-2 text-xs text-muted-foreground">
-                {{ t("report.noMatch") }}
-              </p>
-            </div>
+            <ScrollArea class="min-h-40 flex-1 rounded-md border">
+              <div class="grid grid-cols-1 content-start gap-x-2 p-2">
+                <label
+                  v-for="p in visibleProjects"
+                  :key="p.id"
+                  class="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-accent"
+                >
+                  <input
+                    type="checkbox"
+                    class="h-3.5 w-3.5 shrink-0 accent-primary"
+                    :checked="formProjectIds.includes(p.id)"
+                    @change="toggleProject(p.id)"
+                  />
+                  <span class="truncate" :title="p.path">{{ p.name }}</span>
+                </label>
+                <p v-if="!visibleProjects.length" class="px-1.5 py-2 text-xs text-muted-foreground">
+                  {{ t("report.noMatch") }}
+                </p>
+              </div>
+            </ScrollArea>
           </div>
         </div>
 

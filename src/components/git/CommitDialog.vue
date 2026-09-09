@@ -5,6 +5,7 @@ import { toast } from "vue-sonner";
 import { useLocalStorage } from "@vueuse/core";
 import { ChevronDown, FileDiff, FolderTree, List, Loader2, Sparkles, Square } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Dialog,
   DialogContent,
@@ -492,8 +493,8 @@ function cancelGenerate() {
                 <FolderTree v-else class="h-3.5 w-3.5" />
               </button>
             </div>
-            <div class="min-h-0 flex-1 overflow-auto py-1">
-              <div v-if="filesLoading" class="flex h-full items-center justify-center">
+            <ScrollArea class="min-h-0 flex-1 py-1">
+              <div v-if="filesLoading" class="flex min-h-24 items-center justify-center">
                 <Loader2 class="h-4 w-4 animate-spin text-muted-foreground" />
               </div>
               <p v-else-if="filesError" class="px-3 py-2 text-xs text-destructive">
@@ -604,7 +605,7 @@ function cancelGenerate() {
                   </template>
                 </template>
               </FileTreeList>
-            </div>
+            </ScrollArea>
           </div>
 
           <!-- diff 区:与提交详情面板共用的 DiffViewer(解析/着色/折叠/并排/导航全在其内) -->

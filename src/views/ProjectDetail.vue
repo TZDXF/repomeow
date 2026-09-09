@@ -19,6 +19,7 @@ import {
 } from "@lucide/vue";
 import { useLocalStorage } from "@vueuse/core";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import GitStatusBar from "@/components/git/GitStatusBar.vue";
 import GitRemoteLink from "@/components/git/GitRemoteLink.vue";
 import WorktreePanel from "@/components/git/WorktreePanel.vue";
@@ -406,7 +407,7 @@ async function saveDesc() {
       </div>
     </header>
 
-    <div v-if="project.path_exists" class="min-h-0 flex-1 overflow-y-auto">
+    <ScrollArea v-if="project.path_exists" class="min-h-0 flex-1">
       <div
         v-if="detailView === 'overview'"
         class="grid items-start gap-4 p-6 [grid-template-columns:repeat(auto-fill,minmax(360px,1fr))]"
@@ -417,7 +418,7 @@ async function saveDesc() {
         <CustomCommands :project="worktreeProject ?? project" />
       </div>
       <AiAssetsView v-else :project="worktreeProject ?? project" />
-    </div>
+    </ScrollArea>
 
     <DailyReportDialog v-model:open="reportOpen" :preset-project-id="project.id" />
     <RelocateProjectDialog v-model:open="relocateOpen" :project="project" />

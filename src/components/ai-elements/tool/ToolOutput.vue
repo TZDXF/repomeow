@@ -2,6 +2,7 @@
 import type { HTMLAttributes } from "vue";
 import { cn } from "@/lib/utils";
 import { computed, isVNode } from "vue";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 // 改造说明:原实现用 CodeBlock 展示结果(JSON 高亮 + 标题栏),短结果也占一个大块。
 // 改为限高纯文本块(内部滚动、保留换行),错误态红底;结果多为自然语言摘要,
@@ -34,15 +35,15 @@ const text = computed(() => {
 
 <template>
   <div v-if="showOutput" :class="cn('px-2 pt-0.5 pb-1.5', props.class)" v-bind="$attrs">
-    <div
+    <ScrollArea
       :class="
         cn(
-          'max-h-48 overflow-y-auto rounded-md px-2 py-1.5 text-xs',
+          'max-h-48 rounded-md px-2 py-1.5 text-xs',
           errorText ? 'bg-destructive/10 text-destructive' : 'bg-muted/50 text-foreground/80',
         )
       "
     >
       <span class="whitespace-pre-wrap break-words">{{ text }}</span>
-    </div>
+    </ScrollArea>
   </div>
 </template>

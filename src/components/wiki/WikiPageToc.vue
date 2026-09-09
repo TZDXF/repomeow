@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { useElementSize } from "@vueuse/core";
 import { ListTree } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface TocEntry {
   el: HTMLElement;
@@ -181,7 +182,7 @@ watch(
         class="pointer-events-auto w-52 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md"
         :class="expanded ? 'ml-auto mr-4' : 'absolute right-4 top-8'"
       >
-        <div class="max-h-[60vh] overflow-y-auto p-1">
+        <ScrollArea class="max-h-[60vh] p-1">
           <button
             v-for="(entry, index) in entries"
             :key="index"
@@ -198,7 +199,7 @@ watch(
           >
             {{ entry.text }}
           </button>
-        </div>
+        </ScrollArea>
       </div>
     </template>
   </div>

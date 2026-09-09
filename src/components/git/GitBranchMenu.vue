@@ -30,6 +30,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -440,153 +441,173 @@ function onOpsChanged() {
     <DropdownMenuTrigger as-child>
       <slot :op="triggerOp" />
     </DropdownMenuTrigger>
-    <DropdownMenuContent align="start" class="max-h-96 w-60 overflow-y-auto">
-      <!-- 当前分支操作组:提交 / Stash / 拉取 / 推送 -->
-      <template v-if="git?.is_repo">
-        <DropdownMenuItem
-          class="gap-2 text-xs"
-          :disabled="opsLocked || !hasChanges"
-          :title="commitTitle"
-          @click="commitOpen = true"
-        >
-          <GitCommitHorizontal class="h-3.5 w-3.5" />
-          {{ t("git.actions.commit") }}
-          <span v-if="hasChanges" class="ml-auto flex items-center gap-1 text-[10px] leading-none">
-            <span v-if="staged > 0" class="flex items-center gap-0.5 font-medium text-emerald-600">
-              <span class="h-1.5 w-1.5 rounded-full bg-current" />{{ staged }}
-            </span>
-            <span v-if="modified > 0" class="flex items-center gap-0.5 font-medium text-amber-600">
-              <span class="h-1.5 w-1.5 rounded-full bg-current" />{{ modified }}
-            </span>
-            <span v-if="untracked > 0" class="flex items-center gap-0.5 font-medium text-sky-600">
-              <span class="h-1.5 w-1.5 rounded-full bg-current" />{{ untracked }}
-            </span>
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          class="gap-2 text-xs"
-          :disabled="opsLocked"
-          :title="behind > 0 ? t('git.behind') : undefined"
-          @click="pull"
-        >
-          <!-- 点击后菜单即关闭,loading 展示在外部触发按钮上(triggerOp) -->
-          <ArrowDownToLine class="h-3.5 w-3.5" />
-          {{ busy === "pull" ? t("git.pull.pulling") : t("git.actions.pull") }}
-          <span
-            v-if="behind > 0 && busy !== 'pull'"
-            class="ml-auto text-[10px] font-medium leading-none text-amber-600"
-            >{{ behind }}</span
-          >
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          class="gap-2 text-xs"
-          :disabled="opsLocked"
-          :title="ahead > 0 ? t('git.ahead') : undefined"
-          @click="push"
-        >
-          <ArrowUpToLine class="h-3.5 w-3.5" />
-          {{ busy === "push" ? t("git.push.pushing") : t("git.actions.push") }}
-          <span
-            v-if="ahead > 0 && busy !== 'push'"
-            class="ml-auto text-[10px] font-medium leading-none text-emerald-600"
-            >{{ ahead }}</span
-          >
-        </DropdownMenuItem>
-        <DropdownMenuItem class="gap-2 text-xs" :disabled="opsLocked" @click="emit('openStash')">
-          <ArchiveRestore class="h-3.5 w-3.5" />
-          {{ t("git.stash.manage") }}
-        </DropdownMenuItem>
-        <!-- 跟踪更新:按项目维度生效(worktree 视图隐藏,避免误以为只跟踪当前工作区) -->
-        <DropdownMenuItem
-          v-if="!currentWorktree"
-          class="gap-2 text-xs"
-          :disabled="opsLocked || trackingBusy"
-          :title="t('git.tracking.hint')"
-          @click="toggleTracking"
-        >
-          <Radar class="h-3.5 w-3.5" />
-          {{ tracked ? t("git.tracking.stop") : t("git.tracking.action") }}
-          <Check v-if="tracked" class="ml-auto h-3.5 w-3.5 text-emerald-600" />
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-      </template>
-
-      <!-- worktree 模式:当前目录是 linked worktree。签出其他分支会与占用的工作区
-           冲突,改为提供合回/变基;不展示新建分支与本地/远程分支列表 -->
-      <template v-if="currentWorktree">
-        <DropdownMenuItem
-          class="gap-2 text-xs"
-          :disabled="opsLocked || !currentWorktree.branch"
-          @click="openMerge"
-        >
-          <GitMerge class="h-3.5 w-3.5" />
-          {{ t("git.worktree.mergeBack") }}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          class="gap-2 text-xs"
-          :disabled="opsLocked || !currentWorktree.branch"
-          :title="
-            baseBehind > 0 ? t('git.worktree.rebaseUpdates', { count: baseBehind }) : undefined
-          "
-          @click="openRebase"
-        >
-          <ArrowUpToLine class="h-3.5 w-3.5" />
-          {{ t("git.worktree.rebase") }}
-          <span
-            v-if="baseBehind > 0"
-            class="ml-auto text-[10px] font-medium leading-none text-amber-600"
-            >{{ baseBehind }}</span
-          >
-        </DropdownMenuItem>
-      </template>
-      <template v-else>
-        <!-- 新建分支单独一组,紧随当前分支操作组 -->
-        <DropdownMenuItem class="gap-2 text-xs" @click="createOpen = true">
-          <GitBranchPlus class="h-3.5 w-3.5" />
-          {{ t("git.branch.newBranch") }}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator v-if="localTree.length || remoteTree.length || loading" />
-
-        <DropdownMenuItem v-if="loading" disabled class="gap-2 text-xs">
-          <Loader2 class="h-3.5 w-3.5 animate-spin" />
-          {{ t("common.loading") }}
-        </DropdownMenuItem>
-        <template v-else>
-          <template v-if="localTree.length">
-            <DropdownMenuLabel class="text-xs">{{ t("git.branch.local") }}</DropdownMenuLabel>
-            <GitBranchTreeItems
-              :nodes="localTree"
-              :current-branch="git?.branch ?? ''"
-              :track-by-name="trackByName"
-              :branch-op="branchOp"
-              :locked="opsLocked"
-              :collapsed="collapsedFolders"
-              @toggle-folder="toggleFolder"
-              @checkout="checkoutBranch"
-              @pull="pullBranch"
-              @push="pushBranch"
-              @remove="askDeleteBranch"
-            />
+    <DropdownMenuContent align="start" class="max-h-96 w-60 p-0">
+      <ScrollArea class="max-h-96">
+        <div class="p-1">
+          <!-- 当前分支操作组:提交 / Stash / 拉取 / 推送 -->
+          <template v-if="git?.is_repo">
+            <DropdownMenuItem
+              class="gap-2 text-xs"
+              :disabled="opsLocked || !hasChanges"
+              :title="commitTitle"
+              @click="commitOpen = true"
+            >
+              <GitCommitHorizontal class="h-3.5 w-3.5" />
+              {{ t("git.actions.commit") }}
+              <span
+                v-if="hasChanges"
+                class="ml-auto flex items-center gap-1 text-[10px] leading-none"
+              >
+                <span
+                  v-if="staged > 0"
+                  class="flex items-center gap-0.5 font-medium text-emerald-600"
+                >
+                  <span class="h-1.5 w-1.5 rounded-full bg-current" />{{ staged }}
+                </span>
+                <span
+                  v-if="modified > 0"
+                  class="flex items-center gap-0.5 font-medium text-amber-600"
+                >
+                  <span class="h-1.5 w-1.5 rounded-full bg-current" />{{ modified }}
+                </span>
+                <span
+                  v-if="untracked > 0"
+                  class="flex items-center gap-0.5 font-medium text-sky-600"
+                >
+                  <span class="h-1.5 w-1.5 rounded-full bg-current" />{{ untracked }}
+                </span>
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              class="gap-2 text-xs"
+              :disabled="opsLocked"
+              :title="behind > 0 ? t('git.behind') : undefined"
+              @click="pull"
+            >
+              <!-- 点击后菜单即关闭,loading 展示在外部触发按钮上(triggerOp) -->
+              <ArrowDownToLine class="h-3.5 w-3.5" />
+              {{ busy === "pull" ? t("git.pull.pulling") : t("git.actions.pull") }}
+              <span
+                v-if="behind > 0 && busy !== 'pull'"
+                class="ml-auto text-[10px] font-medium leading-none text-amber-600"
+                >{{ behind }}</span
+              >
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              class="gap-2 text-xs"
+              :disabled="opsLocked"
+              :title="ahead > 0 ? t('git.ahead') : undefined"
+              @click="push"
+            >
+              <ArrowUpToLine class="h-3.5 w-3.5" />
+              {{ busy === "push" ? t("git.push.pushing") : t("git.actions.push") }}
+              <span
+                v-if="ahead > 0 && busy !== 'push'"
+                class="ml-auto text-[10px] font-medium leading-none text-emerald-600"
+                >{{ ahead }}</span
+              >
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              class="gap-2 text-xs"
+              :disabled="opsLocked"
+              @click="emit('openStash')"
+            >
+              <ArchiveRestore class="h-3.5 w-3.5" />
+              {{ t("git.stash.manage") }}
+            </DropdownMenuItem>
+            <!-- 跟踪更新:按项目维度生效(worktree 视图隐藏,避免误以为只跟踪当前工作区) -->
+            <DropdownMenuItem
+              v-if="!currentWorktree"
+              class="gap-2 text-xs"
+              :disabled="opsLocked || trackingBusy"
+              :title="t('git.tracking.hint')"
+              @click="toggleTracking"
+            >
+              <Radar class="h-3.5 w-3.5" />
+              {{ tracked ? t("git.tracking.stop") : t("git.tracking.action") }}
+              <Check v-if="tracked" class="ml-auto h-3.5 w-3.5 text-emerald-600" />
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
           </template>
-          <template v-if="remoteTree.length">
-            <DropdownMenuSeparator v-if="localTree.length" />
-            <DropdownMenuLabel class="text-xs">{{ t("git.branch.remote") }}</DropdownMenuLabel>
-            <GitBranchTreeItems
-              :nodes="remoteTree"
-              remote
-              :current-branch="git?.branch ?? ''"
-              :branch-op="branchOp"
-              :locked="opsLocked"
-              :collapsed="collapsedFolders"
-              @toggle-folder="toggleFolder"
-              @checkout="checkoutBranch"
-              @pull="pullBranch"
-              @push="pushBranch"
-              @remove="askDeleteBranch"
-            />
+
+          <!-- worktree 模式:当前目录是 linked worktree。签出其他分支会与占用的工作区
+               冲突,改为提供合回/变基;不展示新建分支与本地/远程分支列表 -->
+          <template v-if="currentWorktree">
+            <DropdownMenuItem
+              class="gap-2 text-xs"
+              :disabled="opsLocked || !currentWorktree.branch"
+              @click="openMerge"
+            >
+              <GitMerge class="h-3.5 w-3.5" />
+              {{ t("git.worktree.mergeBack") }}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              class="gap-2 text-xs"
+              :disabled="opsLocked || !currentWorktree.branch"
+              :title="
+                baseBehind > 0 ? t('git.worktree.rebaseUpdates', { count: baseBehind }) : undefined
+              "
+              @click="openRebase"
+            >
+              <ArrowUpToLine class="h-3.5 w-3.5" />
+              {{ t("git.worktree.rebase") }}
+              <span
+                v-if="baseBehind > 0"
+                class="ml-auto text-[10px] font-medium leading-none text-amber-600"
+                >{{ baseBehind }}</span
+              >
+            </DropdownMenuItem>
           </template>
-        </template>
-      </template>
+          <template v-else>
+            <!-- 新建分支单独一组,紧随当前分支操作组 -->
+            <DropdownMenuItem class="gap-2 text-xs" @click="createOpen = true">
+              <GitBranchPlus class="h-3.5 w-3.5" />
+              {{ t("git.branch.newBranch") }}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator v-if="localTree.length || remoteTree.length || loading" />
+
+            <DropdownMenuItem v-if="loading" disabled class="gap-2 text-xs">
+              <Loader2 class="h-3.5 w-3.5 animate-spin" />
+              {{ t("common.loading") }}
+            </DropdownMenuItem>
+            <template v-else>
+              <template v-if="localTree.length">
+                <DropdownMenuLabel class="text-xs">{{ t("git.branch.local") }}</DropdownMenuLabel>
+                <GitBranchTreeItems
+                  :nodes="localTree"
+                  :current-branch="git?.branch ?? ''"
+                  :track-by-name="trackByName"
+                  :branch-op="branchOp"
+                  :locked="opsLocked"
+                  :collapsed="collapsedFolders"
+                  @toggle-folder="toggleFolder"
+                  @checkout="checkoutBranch"
+                  @pull="pullBranch"
+                  @push="pushBranch"
+                  @remove="askDeleteBranch"
+                />
+              </template>
+              <template v-if="remoteTree.length">
+                <DropdownMenuSeparator v-if="localTree.length" />
+                <DropdownMenuLabel class="text-xs">{{ t("git.branch.remote") }}</DropdownMenuLabel>
+                <GitBranchTreeItems
+                  :nodes="remoteTree"
+                  remote
+                  :current-branch="git?.branch ?? ''"
+                  :branch-op="branchOp"
+                  :locked="opsLocked"
+                  :collapsed="collapsedFolders"
+                  @toggle-folder="toggleFolder"
+                  @checkout="checkoutBranch"
+                  @pull="pullBranch"
+                  @push="pushBranch"
+                  @remove="askDeleteBranch"
+                />
+              </template>
+            </template>
+          </template>
+        </div>
+      </ScrollArea>
     </DropdownMenuContent>
   </DropdownMenu>
 

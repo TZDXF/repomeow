@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { ChevronRight, Loader2 } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatCommitTime } from "@/lib/format";
 import type { ProjectCommits } from "@/lib/ai";
 
@@ -51,10 +52,7 @@ const totalCommits = computed(() =>
           </span>
         </CollapsibleTrigger>
         <CollapsibleContent class="min-w-0 overflow-hidden">
-          <div
-            v-if="data.commits.length"
-            class="max-h-40 overflow-y-auto overflow-x-hidden border-t"
-          >
+          <ScrollArea v-if="data.commits.length" class="max-h-40 border-t">
             <div
               v-for="commit in data.commits"
               :key="commit.hash + commit.date"
@@ -76,7 +74,7 @@ const totalCommits = computed(() =>
                 {{ formatCommitTime(commit.date) }}
               </span>
             </div>
-          </div>
+          </ScrollArea>
           <p v-else class="border-t px-3 py-2 text-xs text-muted-foreground">
             {{ t("report.projectNoCommits") }}
           </p>

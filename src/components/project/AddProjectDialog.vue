@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   getGhCliAccount,
   listAccountRepos,
@@ -505,7 +506,7 @@ function switchMode(m: "local" | "clone" | "account") {
                   spellcheck="false"
                   class="mb-1"
                 />
-                <div class="max-h-56 overflow-y-auto">
+                <ScrollArea class="max-h-56">
                   <button
                     type="button"
                     class="flex w-full items-center gap-2 rounded-sm px-1.5 py-1.5 text-left text-sm hover:bg-accent"
@@ -533,11 +534,11 @@ function switchMode(m: "local" | "clone" | "account") {
                   >
                     {{ t("projects.add.ownerSearchEmpty") }}
                   </p>
-                </div>
+                </ScrollArea>
               </PopoverContent>
             </Popover>
           </div>
-          <div class="max-h-64 overflow-x-hidden overflow-y-auto rounded-md border">
+          <ScrollArea class="max-h-64 rounded-md border">
             <div
               v-if="reposLoading && repos.length === 0"
               class="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground"
@@ -579,7 +580,7 @@ function switchMode(m: "local" | "clone" | "account") {
                 {{ repo.description }}
               </p>
             </button>
-          </div>
+          </ScrollArea>
         </template>
       </div>
 

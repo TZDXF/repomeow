@@ -7,6 +7,7 @@ import { ArchiveRestore, FileDiff, Loader2, Plus, RefreshCw, Trash2 } from "@luc
 import DiffViewer from "@/components/git/DiffViewer.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Dialog,
   DialogContent,
@@ -292,66 +293,73 @@ async function confirmAction() {
           <p class="px-1 pb-2 text-xs font-medium text-muted-foreground">
             {{ t("git.stash.count", { count: stashes.length }) }}
           </p>
-          <ul class="max-h-[min(56vh,30rem)] divide-y overflow-y-auto rounded-lg border">
-            <li
-              v-for="stash in stashes"
-              :key="stash.oid"
-              class="flex items-center gap-3 px-3 py-3 transition-colors hover:bg-muted/25"
-            >
-              <div class="min-w-0 flex-1">
-                <div class="flex items-center gap-2">
-                  <code class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px]">
-                    {{ stashRef(stash) }}
-                  </code>
-                  <p class="truncate text-sm font-medium" :title="stash.message">
-                    {{ stash.message }}
+          <ScrollArea class="max-h-[min(56vh,30rem)] rounded-lg border">
+            <ul class="divide-y">
+              <li
+                v-for="stash in stashes"
+                :key="stash.oid"
+                class="flex items-center gap-3 px-3 py-3 transition-colors hover:bg-muted/25"
+              >
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-2">
+                    <code class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px]">
+                      {{ stashRef(stash) }}
+                    </code>
+                    <p class="truncate text-sm font-medium" :title="stash.message">
+                      {{ stash.message }}
+                    </p>
+                  </div>
+                  <p class="mt-1 truncate text-xs text-muted-foreground">
+                    <span v-if="stash.author">{{ stash.author }} · </span>
+                    <span :title="formatLocalDateTime(stash.created_at)">
+                      {{ formatLocalDateTime(stash.created_at) }}
+                    </span>
+                    · <span class="font-mono">{{ shortOid(stash.oid) }}</span>
                   </p>
                 </div>
-                <p class="mt-1 truncate text-xs text-muted-foreground">
-                  <span v-if="stash.author">{{ stash.author }} · </span>
-                  <span :title="formatLocalDateTime(stash.created_at)">
-                    {{ formatLocalDateTime(stash.created_at) }}
-                  </span>
-                  · <span class="font-mono">{{ shortOid(stash.oid) }}</span>
-                </p>
-              </div>
-              <div class="flex shrink-0 items-center gap-1.5">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  :disabled="!!busyKey || loading || creating"
-                  @click="openStashDiff(stash)"
-                >
-                  <FileDiff class="h-3.5 w-3.5" />
-                  {{ t("git.stash.diff") }}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  :disabled="!!busyKey || loading || creating"
-                  @click="requestAction('pop', stash)"
-                >
-                  <Loader2 v-if="busyKey === `pop:${stash.oid}`" class="h-3.5 w-3.5 animate-spin" />
-                  <ArchiveRestore v-else class="h-3.5 w-3.5" />
-                  {{ t(busyKey === `pop:${stash.oid}` ? "git.stash.popping" : "git.stash.pop") }}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  class="text-destructive hover:text-destructive"
-                  :disabled="!!busyKey || loading || creating"
-                  @click="requestAction('drop', stash)"
-                >
-                  <Loader2
-                    v-if="busyKey === `drop:${stash.oid}`"
-                    class="h-3.5 w-3.5 animate-spin"
-                  />
-                  <Trash2 v-else class="h-3.5 w-3.5" />
-                  {{ t(busyKey === `drop:${stash.oid}` ? "git.stash.dropping" : "git.stash.drop") }}
-                </Button>
-              </div>
-            </li>
-          </ul>
+                <div class="flex shrink-0 items-center gap-1.5">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    :disabled="!!busyKey || loading || creating"
+                    @click="openStashDiff(stash)"
+                  >
+                    <FileDiff class="h-3.5 w-3.5" />
+                    {{ t("git.stash.diff") }}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    :disabled="!!busyKey || loading || creating"
+                    @click="requestAction('pop', stash)"
+                  >
+                    <Loader2
+                      v-if="busyKey === `pop:${stash.oid}`"
+                      class="h-3.5 w-3.5 animate-spin"
+                    />
+                    <ArchiveRestore v-else class="h-3.5 w-3.5" />
+                    {{ t(busyKey === `pop:${stash.oid}` ? "git.stash.popping" : "git.stash.pop") }}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="text-destructive hover:text-destructive"
+                    :disabled="!!busyKey || loading || creating"
+                    @click="requestAction('drop', stash)"
+                  >
+                    <Loader2
+                      v-if="busyKey === `drop:${stash.oid}`"
+                      class="h-3.5 w-3.5 animate-spin"
+                    />
+                    <Trash2 v-else class="h-3.5 w-3.5" />
+                    {{
+                      t(busyKey === `drop:${stash.oid}` ? "git.stash.dropping" : "git.stash.drop")
+                    }}
+                  </Button>
+                </div>
+              </li>
+            </ul>
+          </ScrollArea>
         </div>
       </div>
     </DialogContent>
@@ -381,7 +389,7 @@ async function confirmAction() {
           <p v-else-if="!stashFiles.length" class="p-3 text-xs text-muted-foreground">
             {{ t("git.stash.diffEmpty") }}
           </p>
-          <div v-else class="min-h-0 flex-1 overflow-y-auto p-1.5">
+          <ScrollArea v-else class="min-h-0 flex-1 p-1.5">
             <button
               v-for="file in stashFiles"
               :key="`${file.status}:${file.path}`"
@@ -401,7 +409,7 @@ async function confirmAction() {
                 -{{ file.deletions }}
               </span>
             </button>
-          </div>
+          </ScrollArea>
         </aside>
         <DiffViewer
           v-model:ignore-ws="ignoreWs"

@@ -6,6 +6,7 @@ import { toast } from "vue-sonner";
 import { LoaderCircle } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Dialog,
   DialogContent,
@@ -191,77 +192,79 @@ function manage() {
         <LoaderCircle class="size-5 animate-spin" />
       </div>
       <p v-else-if="loadError" role="alert" class="text-sm text-destructive">{{ loadError }}</p>
-      <div v-else class="min-h-0 space-y-2 overflow-y-auto">
-        <p
-          v-if="data?.sourceError"
-          role="alert"
-          class="rounded-md border border-destructive/30 p-3 text-sm text-destructive"
-        >
-          {{ t(`errors.${data.sourceError}`) }} · {{ t("projectAi.sourceUnavailableHint") }}
-        </p>
-        <p
-          v-if="!candidates.length && !data?.sourceError"
-          class="py-6 text-center text-sm text-muted-foreground"
-        >
-          {{ data?.resources.length ? t("projectAi.allAdded") : t("projectAi.libraryEmpty") }}
-        </p>
-        <p
-          v-else-if="!filtered.length && candidates.length"
-          class="py-6 text-center text-sm text-muted-foreground"
-        >
-          {{ t("projectAi.noResults") }}
-        </p>
-        <details v-for="group in tree" :key="group.id" open class="rounded-md border">
-          <summary class="cursor-pointer px-3 py-2 text-sm font-medium">
-            {{ group.name }}
-            <span class="text-muted-foreground">({{ group.resources.length }})</span>
-          </summary>
-          <label class="flex items-center gap-2 border-t px-3 py-2 text-xs text-muted-foreground">
-            <input
-              type="checkbox"
-              class="accent-primary"
-              :checked="selectionState(ids(group.resources), selected) === 'all'"
-              :indeterminate="selectionState(ids(group.resources), selected) === 'some'"
-              :disabled="saving || !ids(group.resources).length"
-              @change="toggle(ids(group.resources), ($event.target as HTMLInputElement).checked)"
-            />
-            {{ t("projectAi.selectGroup") }}
-          </label>
-          <label
-            v-for="resource in group.resources"
-            :key="resource.id"
-            class="flex cursor-pointer items-start gap-3 border-t px-3 py-3 hover:bg-accent/50"
+      <ScrollArea v-else class="min-h-0">
+        <div class="space-y-2">
+          <p
+            v-if="data?.sourceError"
+            role="alert"
+            class="rounded-md border border-destructive/30 p-3 text-sm text-destructive"
           >
-            <input
-              type="checkbox"
-              class="mt-1 accent-primary"
-              :checked="selected.has(resource.id)"
-              :disabled="saving"
-              @change="toggle([resource.id], ($event.target as HTMLInputElement).checked)"
-            />
-            <div class="min-w-0 flex-1">
-              <p class="text-sm font-medium">{{ resource.name }}</p>
-              <p
-                v-if="resource.description"
-                class="mt-1 line-clamp-2 text-xs text-muted-foreground"
-              >
-                {{ resource.description }}
-              </p>
-            </div>
-          </label>
-        </details>
-        <div
-          v-if="failures.length"
-          role="alert"
-          class="space-y-2 rounded-md border border-destructive/30 p-3 text-xs text-destructive"
-        >
-          <p v-for="failure in failures" :key="failure.resourceId" class="break-words">
-            {{ failure.resourceId }}:
-            {{ t(`errors.${failure.code}`, { context: failure.message }) }}
-            <span v-if="failure.code !== 'project_ai_conflict'">{{ failure.message }}</span>
+            {{ t(`errors.${data.sourceError}`) }} · {{ t("projectAi.sourceUnavailableHint") }}
           </p>
+          <p
+            v-if="!candidates.length && !data?.sourceError"
+            class="py-6 text-center text-sm text-muted-foreground"
+          >
+            {{ data?.resources.length ? t("projectAi.allAdded") : t("projectAi.libraryEmpty") }}
+          </p>
+          <p
+            v-else-if="!filtered.length && candidates.length"
+            class="py-6 text-center text-sm text-muted-foreground"
+          >
+            {{ t("projectAi.noResults") }}
+          </p>
+          <details v-for="group in tree" :key="group.id" open class="rounded-md border">
+            <summary class="cursor-pointer px-3 py-2 text-sm font-medium">
+              {{ group.name }}
+              <span class="text-muted-foreground">({{ group.resources.length }})</span>
+            </summary>
+            <label class="flex items-center gap-2 border-t px-3 py-2 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                class="accent-primary"
+                :checked="selectionState(ids(group.resources), selected) === 'all'"
+                :indeterminate="selectionState(ids(group.resources), selected) === 'some'"
+                :disabled="saving || !ids(group.resources).length"
+                @change="toggle(ids(group.resources), ($event.target as HTMLInputElement).checked)"
+              />
+              {{ t("projectAi.selectGroup") }}
+            </label>
+            <label
+              v-for="resource in group.resources"
+              :key="resource.id"
+              class="flex cursor-pointer items-start gap-3 border-t px-3 py-3 hover:bg-accent/50"
+            >
+              <input
+                type="checkbox"
+                class="mt-1 accent-primary"
+                :checked="selected.has(resource.id)"
+                :disabled="saving"
+                @change="toggle([resource.id], ($event.target as HTMLInputElement).checked)"
+              />
+              <div class="min-w-0 flex-1">
+                <p class="text-sm font-medium">{{ resource.name }}</p>
+                <p
+                  v-if="resource.description"
+                  class="mt-1 line-clamp-2 text-xs text-muted-foreground"
+                >
+                  {{ resource.description }}
+                </p>
+              </div>
+            </label>
+          </details>
+          <div
+            v-if="failures.length"
+            role="alert"
+            class="space-y-2 rounded-md border border-destructive/30 p-3 text-xs text-destructive"
+          >
+            <p v-for="failure in failures" :key="failure.resourceId" class="break-words">
+              {{ failure.resourceId }}:
+              {{ t(`errors.${failure.code}`, { context: failure.message }) }}
+              <span v-if="failure.code !== 'project_ai_conflict'">{{ failure.message }}</span>
+            </p>
+          </div>
         </div>
-      </div>
+      </ScrollArea>
       <DialogFooter class="mt-2 flex-wrap items-center gap-2 border-t pt-4 sm:justify-between">
         <Button variant="ghost" size="sm" :disabled="saving" @click="manage">{{
           t("projectAi.manageLibrary")

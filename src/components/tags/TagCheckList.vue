@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { Search } from "@lucide/vue";
 import { DropdownMenuCheckboxItem } from "@/components/ui/dropdown-menu";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import type { Tag } from "@/types";
 
 const { t } = useI18n();
@@ -41,7 +42,7 @@ onMounted(() => {
       />
     </div>
   </div>
-  <div class="max-h-56 overflow-y-auto">
+  <ScrollArea class="max-h-56">
     <DropdownMenuCheckboxItem
       v-for="tag in filtered"
       :key="tag.id"
@@ -58,5 +59,5 @@ onMounted(() => {
     <p v-else-if="!filtered.length" class="px-2 py-1.5 text-xs text-muted-foreground">
       {{ t("tags.checkList.noMatch") }}
     </p>
-  </div>
+  </ScrollArea>
 </template>

@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Dialog,
   DialogContent,
@@ -37,9 +38,9 @@ const releaseNotes = computed(() => store.update?.body?.trim() || t("update.noNo
         </DialogDescription>
       </DialogHeader>
 
-      <div class="max-h-64 overflow-y-auto rounded-md border bg-muted/40 p-3">
+      <ScrollArea class="max-h-64 rounded-md border bg-muted/40 p-3">
         <p class="whitespace-pre-line text-sm text-muted-foreground">{{ releaseNotes }}</p>
-      </div>
+      </ScrollArea>
 
       <div v-if="store.status === 'downloading'" class="flex flex-col gap-1.5">
         <div class="h-2 w-full overflow-hidden rounded-full bg-muted">
