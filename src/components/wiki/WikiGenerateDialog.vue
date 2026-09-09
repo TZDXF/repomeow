@@ -16,7 +16,6 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cmd } from "@/lib/tauri";
-import { toForwardSlash } from "@/lib/path";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
 import type { Project } from "@/types";
@@ -127,12 +126,11 @@ async function loadProjectConfig() {
   initialWikiAutoUpdate.value = false;
   const projectPath = props.projectPath;
   try {
-    const [config, allProjects] = await Promise.all([
+    const [config, project] = await Promise.all([
       loadWikiConfig(projectPath),
-      cmd<Project[]>("list_projects", { query: null, tagIds: null }),
+      cmd<Project | null>("get_project_by_path", { path: projectPath }),
     ]);
     if (sequence !== loadSequence || !props.open) return;
-    const project = allProjects.find((p) => toForwardSlash(p.path) === toForwardSlash(projectPath));
     projectId.value = project?.id ?? null;
     wikiAutoUpdate.value = project?.wiki_auto_update ?? false;
     initialWikiAutoUpdate.value = wikiAutoUpdate.value;

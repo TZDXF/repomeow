@@ -13,8 +13,8 @@ pub use repository::normalize_stored_paths;
 pub use move_dir::move_dir;
 #[cfg(test)]
 pub use repository::{
-    add, archive, get, list, list_archived, load_tags, remove, set_auto_pull, set_favorite,
-    set_wiki_auto_update, unarchive, update, update_path,
+    add, archive, get, get_by_path, list, list_archived, load_tags, remove, set_auto_pull,
+    set_favorite, set_wiki_auto_update, unarchive, update, update_path,
 };
 
 #[cfg(test)]

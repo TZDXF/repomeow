@@ -165,6 +165,19 @@ pub fn get(conn: &Connection, id: i64) -> AppResult<Project> {
     }
 }
 
+/// 按登记路径查单个未归档项目;路径先按入库规则归一化再精确匹配,
+/// 供「只知路径、需反查 project id」的场景使用,避免前端拉全量列表
+pub fn get_by_path(conn: &Connection, path: &str) -> AppResult<Option<Project>> {
+    let path = crate::path_util::clean_str(path);
+    let sql =
+        format!("SELECT {PROJECT_COLS} FROM projects WHERE path = ?1 AND archived_at IS NULL");
+    let row = conn.query_row(&sql, params![path], map_row).optional()?;
+    match row {
+        Some(r) => Ok(Some(with_tags(conn, r)?)),
+        None => Ok(None),
+    }
+}
+
 pub fn list(
     conn: &Connection,
     query: Option<String>,

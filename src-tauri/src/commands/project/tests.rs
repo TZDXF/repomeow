@@ -164,6 +164,25 @@ fn add_normalizes_path_style_before_insert() {
 }
 
 #[test]
+fn get_by_path_normalizes_and_skips_archived() {
+    let conn = test_conn();
+    let dir = std::env::temp_dir();
+    let p = add(&conn, &dir.to_string_lossy(), "a", "").unwrap();
+    // 正斜杠 + 尾斜杠写法也能命中同一登记路径
+    let styled = format!("{}/", crate::path_util::to_forward_slash(&dir));
+    let found = get_by_path(&conn, &styled).unwrap().unwrap();
+    assert_eq!(found.id, p.id);
+    assert!(get_by_path(&conn, "C:/definitely/not/registered")
+        .unwrap()
+        .is_none());
+    // 归档后不再命中(与 list 行为一致)
+    archive(&conn, p.id).unwrap();
+    assert!(get_by_path(&conn, &dir.to_string_lossy())
+        .unwrap()
+        .is_none());
+}
+
+#[test]
 fn normalize_stored_paths_cleans_legacy_rows() {
     let conn = test_conn();
     let dir = std::env::temp_dir();

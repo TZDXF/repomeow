@@ -2,7 +2,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use super::move_dir::{apply_move, move_folder, prepare_move};
 use super::repository::{
-    add, archive, get, list, list_archived, remove, set_auto_pull, set_favorite,
+    add, archive, get, get_by_path, list, list_archived, remove, set_auto_pull, set_favorite,
     set_wiki_auto_update, unarchive, update, update_path,
 };
 use crate::db::Db;
@@ -34,6 +34,12 @@ pub fn list_projects(
 pub fn get_project(db: State<'_, Db>, id: i64) -> AppResult<Project> {
     let conn = db.0.lock().unwrap();
     get(&conn, id)
+}
+
+#[tauri::command]
+pub fn get_project_by_path(db: State<'_, Db>, path: String) -> AppResult<Option<Project>> {
+    let conn = db.0.lock().unwrap();
+    get_by_path(&conn, &path)
 }
 
 #[tauri::command]

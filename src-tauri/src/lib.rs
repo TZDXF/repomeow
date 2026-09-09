@@ -146,6 +146,7 @@ pub fn run() {
             commands::project::add_project,
             commands::project::list_projects,
             commands::project::get_project,
+            commands::project::get_project_by_path,
             commands::project::update_project,
             commands::project::update_project_path,
             commands::project::move_project_dir,
