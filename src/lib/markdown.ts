@@ -51,3 +51,24 @@ export function resolvePath(base: string, rel: string): string {
   const joined = `${root}${/[\\/]$/.test(root) ? "" : "/"}${clean.replace(/^[\\/]+/, "")}`;
   return normalizeSegments(joined);
 }
+
+/** 允许作为外链直接打开的协议白名单 */
+const SAFE_LINK_SCHEMES = new Set(["http:", "https:", "mailto:"]);
+
+/**
+ * 链接 href 白名单校验(自定义 MdLink 渲染器会绕过库内置 harden,需自行把关):
+ * - 允许 http/https/mailto、页内锚点(#)、相对路径与本地绝对路径
+ * - 其余协议(javascript:、data:、file:、vbscript: 等)返回 null,调用方应降级为纯文本
+ * 判定前剔除 ASCII 空白/控制符,防 "java\tscript:" 之类绕过(浏览器解析 URL 时会忽略这些字符)
+ */
+export function safeLinkHref(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("#")) return trimmed;
+  // eslint-disable-next-line no-control-regex -- 故意匹配控制符:浏览器解析 URL 会忽略它们,需在判定前剔除
+  const compact = trimmed.replace(/[\u0000-\u0020]/g, "");
+  if (!hasScheme(compact)) return trimmed;
+  const scheme = compact.slice(0, compact.indexOf(":") + 1).toLowerCase();
+  return SAFE_LINK_SCHEMES.has(scheme) ? trimmed : null;
+}

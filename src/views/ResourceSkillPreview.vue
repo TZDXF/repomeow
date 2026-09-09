@@ -32,7 +32,7 @@ import type { SupportedLocale } from "@/i18n";
 import { buildFileTree, flattenVisibleTree, type FileTreeRow } from "@/lib/file-tree";
 import { formatRelativeTime } from "@/lib/format";
 import { createBeforeDownload } from "@/lib/markdown-download";
-import { hasScheme, resolvePath } from "@/lib/markdown";
+import { hasScheme, resolvePath, safeLinkHref } from "@/lib/markdown";
 import { extOf, IMAGE_EXTS } from "@/lib/file-kind";
 import { joinPath } from "@/lib/path";
 import { useImagePreview } from "@/composables/files/useImagePreview";
@@ -401,13 +401,15 @@ function scrollToAnchor(hash: string) {
 async function onMarkdownClick(e: MouseEvent) {
   const a = (e.target as HTMLElement).closest("a");
   if (!a) return;
-  const href = a.getAttribute("href");
+  // MdLink 已按协议白名单过滤,这里再过一遍 safeLinkHref 兜底(防其他来源的 <a>)
+  const href = safeLinkHref(a.getAttribute("href"));
   e.preventDefault();
   if (!href) return;
   if (href.startsWith("#")) {
     scrollToAnchor(href.slice(1));
     return;
   }
+  // safeLinkHref 放行后即只剩白名单协议(http/https/mailto),可安全交系统浏览器
   if (hasScheme(href)) {
     await openUrl(href).catch(() => {});
     return;

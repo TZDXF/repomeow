@@ -30,7 +30,7 @@ import ImageViewer from "@/components/files/ImageViewer.vue";
 import { cmd, onListen } from "@/lib/tauri";
 import { extOf, IMAGE_EXTS } from "@/lib/file-kind";
 import { invalidateSemanticCache } from "@/lib/semantic";
-import { hasScheme, resolvePath } from "@/lib/markdown";
+import { hasScheme, resolvePath, safeLinkHref } from "@/lib/markdown";
 import { openPathWith, sortOpenWithOptions } from "@/lib/open-with";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
 import type { FindQuery } from "@/lib/text-search";
@@ -376,10 +376,12 @@ const themeElement = () => detachedThemeEl;
 async function onBodyClick(e: MouseEvent) {
   const a = (e.target as HTMLElement).closest("a");
   if (!a) return;
-  const href = a.getAttribute("href");
+  // MdLink 已按协议白名单过滤,这里再过一遍 safeLinkHref 兜底(防其他来源的 <a>)
+  const href = safeLinkHref(a.getAttribute("href"));
   e.preventDefault();
   if (!href || href.startsWith("#")) return;
   try {
+    // safeLinkHref 放行后即只剩白名单协议(http/https/mailto),可安全交系统浏览器
     if (hasScheme(href)) {
       await openUrl(href);
     } else {
