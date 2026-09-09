@@ -689,3 +689,18 @@ body.tray-popup-window {
   border-width: 2px;
   box-shadow: 4px 4px 0 0 var(--pixel-shadow);
 }
+
+/* 视图切换(项目详情「执行/AI」等原生 button 分段控件,无 data-slot 不走按钮覆盖):
+   容器粗描边;选中项亮底 + 硬边投影,未选中悬停 Palette Swap 黄,保证亮/暗色下选中态可辨 */
+[data-theme="pixel"] .view-toggle {
+  border: 2px solid var(--pixel-shadow);
+}
+[data-theme="pixel"] .view-toggle-btn[data-active] {
+  background-color: var(--card);
+  color: var(--card-foreground);
+  box-shadow: 2px 2px 0 0 var(--pixel-shadow);
+}
+[data-theme="pixel"] .view-toggle-btn:not([data-active]):hover {
+  background-color: #ffec27;
+  color: #1a1c2c;
+}

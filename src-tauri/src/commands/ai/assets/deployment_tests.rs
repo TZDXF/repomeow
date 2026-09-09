@@ -688,3 +688,33 @@ fn claim_local_mcp_deploys_translated_and_preserves_origin() {
     assert!(snap.deployments.is_empty());
     assert!(snap.resources.is_empty());
 }
+
+#[test]
+fn delete_unmanaged_removes_files_and_rejects_managed() {
+    let f = Fixture::new();
+    // skills:未托管目录整体删除
+    fs::create_dir_all(f.root.join(".claude/skills/local-skill")).unwrap();
+    fs::write(f.root.join(".claude/skills/local-skill/SKILL.md"), "body").unwrap();
+    delete_unmanaged(&f.library, &f.root, "skills", ".claude/skills/local-skill", None).unwrap();
+    assert!(!f.root.join(".claude/skills/local-skill").exists());
+    // 路径不在任何 Agent skills 目录下 → 拒绝
+    assert!(delete_unmanaged(&f.library, &f.root, "skills", "docs/guide", None).is_err());
+    // mcp:仅从配置文件中移除指定条目,其余保留
+    fs::write(
+        f.root.join(".mcp.json"),
+        json!({"mcpServers": {"orphan": {"command": "node"}, "keep": {"command": "node"}}})
+            .to_string(),
+    )
+    .unwrap();
+    delete_unmanaged(&f.library, &f.root, "mcp", ".mcp.json", Some("orphan")).unwrap();
+    let text = fs::read_to_string(f.root.join(".mcp.json")).unwrap();
+    assert!(!text.contains("orphan"));
+    assert!(text.contains("keep"));
+    // 已部署(托管)的路径/条目 → 拒绝
+    f.skill("s1", "review", "v1");
+    f.apply("skills", "claude", &["s1"]);
+    assert!(delete_unmanaged(&f.library, &f.root, "skills", ".claude/skills/review", None).is_err());
+    f.mcp();
+    f.apply("mcp", "claude", &["m1"]);
+    assert!(delete_unmanaged(&f.library, &f.root, "mcp", ".mcp.json", Some("context")).is_err());
+}

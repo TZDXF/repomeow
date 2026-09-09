@@ -1123,6 +1123,76 @@ fn claim_local(
     Ok(ClaimOutcome { resource_id })
 }
 
+/// 删除非托管资源:skills 删除整个技能目录,mcp 从配置文件中移除服务器条目。
+/// 仅允许删除 manifest 未托管的路径/条目,避免误删已认领或已部署内容。
+#[tauri::command]
+pub async fn project_ai_delete_unmanaged(
+    app: AppHandle,
+    path: String,
+    kind: String,
+    source: String,
+    name: Option<String>,
+    expected_revision: String,
+) -> RlResult<()> {
+    tokio::task::spawn_blocking(move || {
+        let _guard = lock_op();
+        let (library, root) = prepare(&app, &path, &kind, &expected_revision)?;
+        delete_unmanaged(&library, &root, &kind, &source, name.as_deref())
+    })
+    .await
+    .map_err(|e| problem(e.to_string()))?
+}
+
+fn delete_unmanaged(
+    library: &Library,
+    root: &Path,
+    kind: &str,
+    source: &str,
+    name: Option<&str>,
+) -> RlResult<()> {
+    let state = read_manifest(&manifest_file(library, root), root)?;
+    if kind == "skills" {
+        // source 必须位于某个 Agent skills 目录下,且目录名为安全名(与认领同一套校验)。
+        let valid = TARGETS.iter().any(|t| {
+            let prefix = format!("{}/", t.skill_path);
+            source
+                .strip_prefix(&prefix)
+                .filter(|rest| is_safe_directory(rest))
+                .is_some()
+        });
+        if !valid {
+            return Err(problem(source));
+        }
+        if state
+            .entries
+            .iter()
+            .any(|e| e.kind == kind && e.path == source)
+        {
+            return Err(problem(format!("managed resource: {source}")));
+        }
+        replace_tree(root, source, None)
+    } else {
+        let name = name.ok_or_else(|| problem("MCP server name required"))?;
+        let target = MCP_TARGETS
+            .iter()
+            .find(|t| t.path == source)
+            .ok_or_else(|| problem(source))?;
+        if state
+            .entries
+            .iter()
+            .any(|e| e.kind == kind && e.path == source && e.name == name)
+        {
+            return Err(problem(format!("managed resource: {name}")));
+        }
+        let doc = McpDocument::read(root, target)?;
+        if doc.entry(target, name)?.is_none() {
+            return Err(problem(name));
+        }
+        let bytes = doc.edit(target, name, None)?;
+        atomic_write(&safe_path(root, source)?, &bytes)
+    }
+}
+
 /// selectedIds 是指定 Agent/种类的完整选择集;仅测试引用,命令面为 add/assign/remove。
 #[cfg(test)]
 fn apply(

@@ -309,6 +309,7 @@ export default {
       "将当前分类的 {count} 项从项目资源列表移除,并解除所有 Agent 的托管配置;共享路径仍有其他引用时文件会保留。",
     removedCount: "已移除 {count} 项",
     removeTitle: "移除资源",
+    unmanagedRemoveHint: "将从项目中永久删除「{name}」的文件或配置条目,此操作不可恢复。",
     removeHint:
       "将「{name}」从项目资源列表移除,并解除所有 Agent 的托管配置;共享路径仍有其他引用时文件会保留。",
     removed: "已移除「{name}」",
@@ -319,8 +320,6 @@ export default {
     projectEmpty: "尚未添加资源,点击上方「添加」按钮从资源库选择。",
     noAgents: "所有配置目标均已隐藏,请前往资源管理的 Agent 工具中启用。",
     preview: "预览项目中的配置(只读)",
-    unmanaged: "非托管配置",
-    unmanagedHint: "项目原有或手动添加的资源;点击「导入」收入资源库并认领为托管配置。",
     states: {
       configured: "已配置",
       update: "可更新",

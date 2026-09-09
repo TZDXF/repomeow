@@ -19,6 +19,7 @@ import { useSettingsStore } from "@/stores/settings";
 import {
   assignProjectResource,
   claimLocalProjectResource,
+  deleteUnmanagedProjectResource,
   importProjectResource,
   loadProjectResources,
   removeProjectResource,
@@ -52,6 +53,8 @@ const error = ref("");
 const addOpen = ref(false);
 const removeTargets = ref<ResourceChoice[]>([]);
 const removing = ref(false);
+const unmanagedRemoveTarget = ref<UnmanagedItem | null>(null);
+const removingUnmanaged = ref(false);
 const importing = ref<string | null>(null);
 const toggling = ref("");
 const activeFilter = ref("");
@@ -98,6 +101,7 @@ watch(
     assetsSnapshot.value = null;
     addOpen.value = false;
     removeTargets.value = [];
+    unmanagedRemoveTarget.value = null;
     activeFilter.value = "";
     toggling.value = "";
   },
@@ -429,6 +433,30 @@ async function importUnmanaged(item: UnmanagedItem) {
     importing.value = null;
   }
 }
+/** 删除非托管资源:经后端校验未托管后直接清理磁盘文件/配置条目,成功后走父组件统一刷新。 */
+async function confirmRemoveUnmanaged() {
+  const target = unmanagedRemoveTarget.value;
+  if (!target || !data.value || removingUnmanaged.value) {
+    return;
+  }
+  removingUnmanaged.value = true;
+  try {
+    await deleteUnmanagedProjectResource({
+      path: props.projectPath,
+      kind: props.kind,
+      source: target.source,
+      name: props.kind === "mcp" ? target.name : undefined,
+      expectedRevision: data.value.revision,
+    });
+    toast.success(t("projectAi.removed", { name: target.name }));
+    unmanagedRemoveTarget.value = null;
+    changed();
+  } catch (e) {
+    toast.error(String(e));
+  } finally {
+    removingUnmanaged.value = false;
+  }
+}
 /** 批量移除:逐项执行,每项执行前重取快照拿到最新 revision(上一次移除会使其失效)。 */
 async function confirmRemove() {
   const targets = removeTargets.value;
@@ -622,13 +650,6 @@ function changed() {
             ><Trash2 class="size-3.5"
           /></Button>
         </div>
-        <p
-          v-if="!activeFilter && unmanaged.length"
-          class="bg-muted/40 px-3 py-1.5 text-[10px] text-muted-foreground"
-          :title="t('projectAi.unmanagedHint')"
-        >
-          {{ t("projectAi.unmanaged") }}
-        </p>
         <div
           v-for="item in activeFilter ? [] : unmanaged"
           :key="item.key"
@@ -640,25 +661,11 @@ function changed() {
             :title="t('projectAi.preview')"
             @click="previewUnmanaged(item)"
           >
-            <p class="truncate text-xs font-medium">
-              {{ item.name
-              }}<span
-                class="ml-1.5 rounded bg-muted px-1.5 py-0.5 align-middle text-[10px] font-normal text-muted-foreground"
-                :title="t('projectAi.unmanagedHint')"
-                >{{ t("projectAi.unmanaged") }}</span
-              >
-            </p>
+            <p class="truncate text-xs font-medium">{{ item.name }}</p>
             <p class="mt-1 truncate font-mono text-[10px] text-muted-foreground">{{ item.path }}</p>
           </button>
           <div v-else class="min-w-0 flex-1">
-            <p class="truncate text-xs font-medium">
-              {{ item.name
-              }}<span
-                class="ml-1.5 rounded bg-muted px-1.5 py-0.5 align-middle text-[10px] font-normal text-muted-foreground"
-                :title="t('projectAi.unmanagedHint')"
-                >{{ t("projectAi.unmanaged") }}</span
-              >
-            </p>
+            <p class="truncate text-xs font-medium">{{ item.name }}</p>
             <p class="mt-1 truncate font-mono text-[10px] text-muted-foreground">{{ item.path }}</p>
           </div>
           <div class="flex flex-wrap gap-1">
@@ -699,6 +706,14 @@ function changed() {
               class="size-3.5"
             />{{ t("projectAi.import") }}</Button
           >
+          <Button
+            variant="ghost"
+            size="icon"
+            class="size-7 text-destructive hover:text-destructive"
+            :title="t('projectAi.remove')"
+            @click="unmanagedRemoveTarget = item"
+            ><Trash2 class="size-3.5"
+          /></Button>
         </div>
       </div>
     </template>
@@ -735,6 +750,33 @@ function changed() {
           }}</Button>
           <Button variant="destructive" :disabled="removing" @click="confirmRemove"
             ><LoaderCircle v-if="removing" class="size-4 animate-spin" />{{
+              t("projectAi.remove")
+            }}</Button
+          >
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Dialog
+      :open="!!unmanagedRemoveTarget"
+      @update:open="
+        (value) => {
+          if (!removingUnmanaged && !value) unmanagedRemoveTarget = null;
+        }
+      "
+    >
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{{ t("projectAi.removeTitle") }}</DialogTitle>
+          <DialogDescription>{{
+            t("projectAi.unmanagedRemoveHint", { name: unmanagedRemoveTarget?.name })
+          }}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="ghost" :disabled="removingUnmanaged" @click="unmanagedRemoveTarget = null">{{
+            t("common.cancel")
+          }}</Button>
+          <Button variant="destructive" :disabled="removingUnmanaged" @click="confirmRemoveUnmanaged"
+            ><LoaderCircle v-if="removingUnmanaged" class="size-4 animate-spin" />{{
               t("projectAi.remove")
             }}</Button
           >

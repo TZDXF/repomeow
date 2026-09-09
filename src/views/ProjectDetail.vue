@@ -372,15 +372,16 @@ async function saveDesc() {
             {{ t("git.graph.title") }}
           </Button>
           <!-- 视图切换:执行(卡片网格)/ AI(全宽非卡片),固定在头部右下角 -->
-          <div class="ml-auto flex gap-1 rounded-lg bg-muted p-1">
+          <div class="view-toggle ml-auto flex gap-1 rounded-lg bg-muted p-1">
             <button
               type="button"
-              class="flex items-center gap-1.5 rounded-md px-3 py-1 text-sm transition-colors"
+              class="view-toggle-btn flex items-center gap-1.5 rounded-md px-3 py-1 text-sm transition-colors"
               :class="
                 detailView === 'overview'
                   ? 'bg-background shadow-sm'
                   : 'text-muted-foreground hover:text-foreground'
               "
+              :data-active="detailView === 'overview' || undefined"
               @click="detailView = 'overview'"
             >
               <LayoutGrid class="h-3.5 w-3.5" />
@@ -388,12 +389,13 @@ async function saveDesc() {
             </button>
             <button
               type="button"
-              class="flex items-center gap-1.5 rounded-md px-3 py-1 text-sm transition-colors"
+              class="view-toggle-btn flex items-center gap-1.5 rounded-md px-3 py-1 text-sm transition-colors"
               :class="
                 detailView === 'ai'
                   ? 'bg-background shadow-sm'
                   : 'text-muted-foreground hover:text-foreground'
               "
+              :data-active="detailView === 'ai' || undefined"
               @click="detailView = 'ai'"
             >
               <Bot class="h-3.5 w-3.5" />

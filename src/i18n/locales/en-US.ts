@@ -329,6 +329,8 @@ export default {
       "Remove all {count} resources in the current category from the project list and undeploy them from every agent. Shared files are kept while another target references them.",
     removedCount: "Removed {count} resources",
     removeTitle: "Remove resource",
+    unmanagedRemoveHint:
+      "Permanently deletes the files or config entry of \"{name}\" from the project. This cannot be undone.",
     removeHint:
       "Remove “{name}” from the project resource list and undeploy it from every agent. Shared files are kept while another target references them.",
     removed: "Removed “{name}”",
@@ -340,9 +342,6 @@ export default {
     projectEmpty: "No resources added yet. Click Add above to choose from the library.",
     noAgents: "All targets are hidden. Enable them in Resource management → Agent tools.",
     preview: "Preview project configuration (read-only)",
-    unmanaged: "Unmanaged configuration",
-    unmanagedHint:
-      "Existing or manually added project resources. Click Import to add them to the library and adopt them as managed configuration.",
     states: {
       configured: "Configured",
       update: "Update available",

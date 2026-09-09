@@ -117,6 +117,10 @@ export interface ResourceClaimOutcome {
 export const claimLocalProjectResource = (input: ResourceClaimInput) =>
   cmd<ResourceClaimOutcome>("project_ai_claim_local", { ...input });
 
+/** 删除非托管资源:skills 删除整个技能目录,mcp 从配置文件中移除服务器条目;已托管路径后端拒绝。 */
+export const deleteUnmanagedProjectResource = (input: ResourceClaimInput) =>
+  cmd<void>("project_ai_delete_unmanaged", { ...input });
+
 export interface ResourceTreeGroup {
   id: string;
   name: string;
