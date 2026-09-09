@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
-import { openPath } from "@tauri-apps/plugin-opener";
+import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { toast } from "vue-sonner";
 import {
   ArrowLeft,
@@ -14,7 +14,7 @@ import {
   ShieldAlert,
   ShieldCheck,
 } from "@lucide/vue";
-import { Markdown, type ControlsConfig } from "vue-stream-markdown";
+import { Markdown, type ControlsConfig, type NodeRenderers } from "vue-stream-markdown";
 import FileTreeList from "@/components/common/FileTreeList.vue";
 import {
   ModelSelector,
@@ -23,10 +23,12 @@ import {
   type ModelSelectorGroup,
 } from "@/components/ai-elements/model-selector";
 import CodeViewer from "@/components/files/CodeViewer.vue";
+import MdLink from "@/components/markdown/MdLink.vue";
 import type { SupportedLocale } from "@/i18n";
 import { buildFileTree, flattenVisibleTree, type FileTreeRow } from "@/lib/file-tree";
 import { formatRelativeTime } from "@/lib/format";
 import { createBeforeDownload } from "@/lib/markdown-download";
+import { hasScheme, resolvePath } from "@/lib/markdown";
 import { getCachedScanReport, putCachedScanReport } from "@/lib/scan-cache";
 import { cmd } from "@/lib/tauri";
 import { getCachedTranslation, putCachedTranslation } from "@/lib/translation-cache";
@@ -59,6 +61,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 const route = useRoute();
 const router = useRouter();
@@ -95,6 +98,9 @@ const beforeDownload = createBeforeDownload(t);
 // 传游离元素,避免 Markdown 库将 island/glass 的十六进制主题变量写成无效的 hsl(#…)
 const detachedThemeEl = document.createElement("div");
 const themeElement = () => detachedThemeEl;
+// 自定义链接渲染器:绕过库内置 harden(裸相对路径如 references/x.md 会被误判拦截),
+// 输出真实 href,点击行为统一由 onMarkdownClick 拦截(同 ProjectFiles)
+const nodeRenderers: NodeRenderers = { link: MdLink };
 
 onMounted(() => {
   void loadSkill();
@@ -304,6 +310,73 @@ function selectScan() {
   if (selected.value.kind === "scan") return;
   resetTranslation();
   selected.value = { kind: "scan" };
+}
+
+/** 相对链接解析基准 = 当前 md 文件所在目录(技能内相对路径,"." 表示技能根) */
+const mdBaseDir = computed(() =>
+  selected.value.kind === "file"
+    ? selected.value.path.split("/").slice(0, -1).join("/") || "."
+    : ".",
+);
+/** 技能目录内全部文件路径(链接跳转前的存在性校验) */
+const filePathSet = computed(() => new Set((tokens.value?.files ?? []).map((f) => f.path)));
+
+/** md 渲染容器(页内锚点滚动时限定查找范围) */
+const mdContainerRef = ref<HTMLElement | null>(null);
+
+/** GitHub 风格标题 slug:小写、去标点(保留中日韩等文字/数字/_/-)、空白转连字符 */
+function slugifyHeading(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}_\- ]/gu, "")
+    .replace(/\s+/g, "-");
+}
+
+/** 页内锚点:库渲染的标题不带 id,按 GitHub slug 规则(重名追加 -1/-2)匹配并滚动到位 */
+function scrollToAnchor(hash: string) {
+  const container = mdContainerRef.value;
+  if (!container) return;
+  let target = hash;
+  try {
+    target = decodeURIComponent(hash);
+  } catch {
+    // 含非法 % 序列时按原样匹配
+  }
+  target = target.toLowerCase();
+  const seen = new Map<string, number>();
+  for (const el of container.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6")) {
+    const base = slugifyHeading(el.textContent ?? "");
+    const count = seen.get(base) ?? 0;
+    seen.set(base, count + 1);
+    if ((count === 0 ? base : `${base}-${count}`) === target) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+  }
+}
+
+/** md 内链接点击:页内锚点滚动到对应标题;外链交系统浏览器;相对路径解析为技能内文件并在右侧切换查看 */
+async function onMarkdownClick(e: MouseEvent) {
+  const a = (e.target as HTMLElement).closest("a");
+  if (!a) return;
+  const href = a.getAttribute("href");
+  e.preventDefault();
+  if (!href) return;
+  if (href.startsWith("#")) {
+    scrollToAnchor(href.slice(1));
+    return;
+  }
+  if (hasScheme(href)) {
+    await openUrl(href).catch(() => {});
+    return;
+  }
+  const target = resolvePath(mdBaseDir.value, href);
+  if (filePathSet.value.has(target)) {
+    selectFile(target);
+  } else {
+    toast.error(t("settings.resources.skills.previewPage.linkTargetMissing", { path: target }));
+  }
 }
 
 // ── 右侧:翻译(md 文件;走设置页默认模型,经后端 ai_translate_markdown;译文按内容 hash 缓存 30 天)──
@@ -667,7 +740,7 @@ const llmNotice = computed(() => {
     <div class="flex min-h-0 flex-1">
       <!-- 左侧:文件树 + 安全扫描入口 -->
       <aside class="flex w-72 shrink-0 flex-col border-r">
-        <div class="min-h-0 flex-1 overflow-y-auto">
+        <ScrollArea class="min-h-0 flex-1">
           <p v-if="loadingTokens" class="px-3 py-4 text-center text-xs text-muted-foreground">
             {{ t("common.loading") }}
           </p>
@@ -710,7 +783,7 @@ const llmNotice = computed(() => {
               </span>
             </template>
           </FileTreeList>
-        </div>
+        </ScrollArea>
 
         <div class="shrink-0 border-t p-1.5">
           <button
@@ -821,7 +894,7 @@ const llmNotice = computed(() => {
           </div>
         </div>
 
-        <div class="min-h-0 flex-1 overflow-y-auto">
+        <ScrollArea class="min-h-0 flex-1">
           <!-- 安全扫描 -->
           <div v-if="selected.kind === 'scan'" class="mx-auto max-w-3xl space-y-3 p-4">
             <div v-if="scanning" class="flex flex-col items-center gap-4 px-6 py-16 text-center">
@@ -986,7 +1059,12 @@ const llmNotice = computed(() => {
             >
               {{ t("settings.resources.skills.previewPage.emptyFile") }}
             </p>
-            <div v-else-if="isMarkdown(selected.path)" class="mx-auto max-w-3xl p-4">
+            <div
+              v-else-if="isMarkdown(selected.path)"
+              ref="mdContainerRef"
+              class="mx-auto max-w-3xl p-4"
+              @click="onMarkdownClick"
+            >
               <Markdown
                 mode="static"
                 :content="displayContent"
@@ -994,13 +1072,14 @@ const llmNotice = computed(() => {
                 :theme-element="themeElement"
                 :locale="language"
                 :before-download="beforeDownload"
+                :node-renderers="nodeRenderers"
               />
             </div>
             <div v-else class="h-full">
               <CodeViewer :text="fileContent ?? ''" :path="selected.path" :wrap="true" />
             </div>
           </template>
-        </div>
+        </ScrollArea>
       </div>
     </div>
 
