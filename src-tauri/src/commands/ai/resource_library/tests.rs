@@ -558,7 +558,11 @@ fn mcp_import_skips_conflicts_and_invalid() {
         .collect();
     assert_eq!(
         reasons,
-        vec![("已有", "conflict"), ("新服务器", "conflict"), ("残缺", "invalid")]
+        vec![
+            ("已有", "conflict"),
+            ("新服务器", "conflict"),
+            ("残缺", "invalid")
+        ]
     );
     // 落盘 + 单次快照提交
     let list = ops::mcp_list(&t.lib).unwrap();
@@ -1159,6 +1163,52 @@ fn import_rejects_bad_sources_and_empty_archives() {
     let _ = fs::remove_file(&fake);
 }
 
+/// URL 导入 = git 浅克隆:本地 git 仓库模拟 GitHub 远端,
+/// 克隆后递归扫描 SKILL.md 导入,.git 不进入库内
+#[test]
+fn import_from_git_url_clones_and_scans() {
+    let t = temp_lib("imp-git");
+    // 源仓库:根目录无技能,子目录各含一个 SKILL.md(模拟技能集合仓)
+    let (_, parent) = temp_root("imp-git-src");
+    let src = parent.join("repo");
+    fs::create_dir_all(src.join("skills/one")).unwrap();
+    fs::create_dir_all(src.join("skills/two")).unwrap();
+    fs::write(
+        src.join("skills/one/SKILL.md"),
+        "---\nname: 仓库技能一\n---\n正文一",
+    )
+    .unwrap();
+    fs::write(
+        src.join("skills/two/SKILL.md"),
+        "---\nname: 仓库技能二\n---\n正文二",
+    )
+    .unwrap();
+    git_out(&parent, &["init", "repo"]);
+    git_out(&src, &["config", "user.name", "test"]);
+    git_out(&src, &["config", "user.email", "test@localhost"]);
+    git_out(&src, &["add", "-A"]);
+    git_out(
+        &src,
+        &["-c", "commit.gpgsign=false", "commit", "-m", "init"],
+    );
+
+    let outcome = import::clone_and_import(&t.lib, &to_forward_slash(&src)).unwrap();
+    let mut names: Vec<&str> = outcome.imported.iter().map(|s| s.name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(names, vec!["仓库技能一", "仓库技能二"]);
+    assert!(outcome.skipped.is_empty());
+    // .git 不得被当作技能内容复制进库
+    let dir = &outcome.imported[0].directory;
+    assert!(!t.root.join(DIR_SKILLS).join(dir).join(".git").exists());
+
+    // 非 git 地址:克隆失败且不留临时目录
+    let not_repo = parent.join("not-repo");
+    fs::create_dir_all(&not_repo).unwrap();
+    let err = import::clone_and_import(&t.lib, &to_forward_slash(&not_repo)).unwrap_err();
+    assert_eq!(err.code(), "git_command_failed");
+    let _ = remove_dir_tolerating_readonly(&parent);
+}
+
 #[test]
 fn slugify_directory_keeps_safe_ascii_and_drops_unmappable_names() {
     assert_eq!(ops::slugify_directory("Find Skills"), "find-skills");
@@ -1420,7 +1470,13 @@ fn skill_dir_local_mode() {
     assert_eq!(report.description, "本地目录描述");
     assert!(report.description_tokens > 0);
     assert_eq!(report.files[0].path, "SKILL.md");
-    assert!(report.files.iter().find(|f| f.path == "logo.png").unwrap().tokens.is_none());
+    assert!(report
+        .files
+        .iter()
+        .find(|f| f.path == "logo.png")
+        .unwrap()
+        .tokens
+        .is_none());
 
     // frontmatter 缺 name 时回退目录名
     fs::write(root.join("SKILL.md"), "# 无 frontmatter\n").unwrap();
@@ -1527,7 +1583,11 @@ fn scan_model_resolves_explicit_choice_and_falls_back_to_default() {
     let mut config = AiConfigFile::default();
     config.providers.insert(
         "openai".to_string(),
-        provider("https://api.openai.com/v1", "sk-openai", vec![model("gpt-x")]),
+        provider(
+            "https://api.openai.com/v1",
+            "sk-openai",
+            vec![model("gpt-x")],
+        ),
     );
     config.providers.insert(
         "deepseek".to_string(),
@@ -1561,8 +1621,7 @@ fn scan_model_resolves_explicit_choice_and_falls_back_to_default() {
         (Some("openai"), Some("nope")),
         (Some("  "), Some(" ")),
     ] {
-        let (model, api_key) =
-            super::resolve_scan_model(&config, provider_id, model_id).unwrap();
+        let (model, api_key) = super::resolve_scan_model(&config, provider_id, model_id).unwrap();
         assert_eq!(model.id, "gpt-x", "{provider_id:?}/{model_id:?}");
         assert_eq!(api_key, "sk-openai");
     }

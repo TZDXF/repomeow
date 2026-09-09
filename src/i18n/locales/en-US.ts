@@ -154,7 +154,6 @@ export default {
     resource_library_archive_invalid: "The archive is not a valid zip file or is corrupted",
     resource_library_archive_too_large: "The archive exceeds the size limit",
     resource_library_url_invalid: "URL must start with http:// or https://",
-    resource_library_download_failed: "Failed to download the archive",
     // account
     account_not_found: "Account not found",
     account_unsupported_provider: "Unsupported provider",
@@ -330,7 +329,7 @@ export default {
     removedCount: "Removed {count} resources",
     removeTitle: "Remove resource",
     unmanagedRemoveHint:
-      "Permanently deletes the files or config entry of \"{name}\" from the project. This cannot be undone.",
+      'Permanently deletes the files or config entry of "{name}" from the project. This cannot be undone.',
     removeHint:
       "Remove “{name}” from the project resource list and undeploy it from every agent. Shared files are kept while another target references them.",
     removed: "Removed “{name}”",
@@ -1730,7 +1729,8 @@ export default {
       concurrency: "Concurrency limit",
       concurrencyHint: "Maximum concurrent AI requests (1-5). Lower this if the API rate-limits.",
       moreModelSettings: "More model settings",
-      taskModelHint: "Follow the default unless overridden. Deleted models fall back to the default.",
+      taskModelHint:
+        "Follow the default unless overridden. Deleted models fall back to the default.",
       taskModel_commit: "Commit messages",
       taskModel_report: "Daily / weekly reports",
       taskModel_translation: "Translation",
@@ -1965,9 +1965,9 @@ export default {
           url: "Import from URL...",
           urlTitle: "Import skill from URL",
           urlDescription:
-            "Download a zip archive and import the skill folders inside that contain SKILL.md",
-          urlPlaceholder: "https://example.com/skill.zip",
-          urlConfirm: "Download and import",
+            "Clone a Git repository (e.g. a GitHub repo) and import the skill folders inside that contain SKILL.md",
+          urlPlaceholder: "https://github.com/user/repo.git",
+          urlConfirm: "Clone and import",
           urlInvalid: "URL must start with http:// or https://",
           imported: "Imported {count} skill(s)",
           skipConflict: 'Skipped "{name}": a skill with the same name already exists',

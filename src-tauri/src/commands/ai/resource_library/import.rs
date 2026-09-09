@@ -1,4 +1,4 @@
-//! 技能导入:本地文件夹 / zip 压缩包 / URL 三种来源。
+//! 技能导入:本地文件夹 / zip 压缩包 / Git 仓库 URL 三种来源。
 //!
 //! 「一个技能」的定义:包含 SKILL.md 的目录,SKILL.md frontmatter 的
 //! `name` 为技能名称事实源。压缩包与文件夹都递归扫描 SKILL.md——单技能
@@ -7,9 +7,8 @@
 
 use std::collections::HashSet;
 use std::fs;
-use std::io::{Cursor, Read};
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use super::errors::{codes, RlError, RlResult};
 use super::frontmatter as fm;
@@ -17,6 +16,7 @@ use super::git;
 use super::models::{Skill, SkillImportOutcome, SkillImportSkip, SkillLibrary};
 use super::ops::{new_id, pick_skill_directory};
 use super::store::{remove_dir_tolerating_readonly, Library, DIR_SKILLS, FILE_SKILLS};
+use crate::commands::git::run_git;
 use crate::time_util::{now_ts, now_ts_nanos};
 
 /// 归档文件下载/读取上限;解压后总字节另计
@@ -249,44 +249,39 @@ pub(super) fn skill_import_archive(lib: &Library, path: &str) -> RlResult<SkillI
     import_archive_bytes(lib, &bytes)
 }
 
-fn download_limited(url: &str) -> RlResult<Vec<u8>> {
-    let response = reqwest::blocking::Client::builder()
-        .user_agent("RepoMeow resource library")
-        .timeout(Duration::from_secs(120))
-        .build()
-        .map_err(|e| RlError::coded(codes::DOWNLOAD_FAILED, e.to_string()))?
-        .get(url)
-        .send()
-        .map_err(|e| RlError::coded(codes::DOWNLOAD_FAILED, e.to_string()))?;
-    if !response.status().is_success() {
-        return Err(RlError::coded(
-            codes::DOWNLOAD_FAILED,
-            format!("{} {url}", response.status()),
-        ));
-    }
-    if response
-        .content_length()
-        .is_some_and(|len| len > MAX_ARCHIVE_BYTES)
-    {
-        return Err(RlError::coded(codes::ARCHIVE_TOO_LARGE, "content-length"));
-    }
-    let mut out = Vec::new();
-    response
-        .take(MAX_ARCHIVE_BYTES + 1)
-        .read_to_end(&mut out)
-        .map_err(|e| RlError::coded(codes::DOWNLOAD_FAILED, e.to_string()))?;
-    if out.len() as u64 > MAX_ARCHIVE_BYTES {
-        return Err(RlError::coded(codes::ARCHIVE_TOO_LARGE, "body"));
-    }
-    Ok(out)
+/// 浅克隆 Git 仓库到临时目录并导入(与 URL 校验分离,测试可用本地仓库路径)。
+/// 克隆完成后移除 .git(无导入价值且拖慢 SKILL.md 扫描),无论成败都清理临时目录。
+pub(super) fn clone_and_import(lib: &Library, url: &str) -> RlResult<SkillImportOutcome> {
+    let parent = std::env::temp_dir();
+    let temp = parent.join(format!(
+        "repomeow-skill-clone-{}-{}",
+        std::process::id(),
+        now_ts_nanos()
+    ));
+    let result = (|| -> RlResult<SkillImportOutcome> {
+        let dir = parent.to_string_lossy().into_owned();
+        let target = temp.to_string_lossy().into_owned();
+        run_git(&dir, &["clone", "--depth", "1", url, &target])?;
+        let git_dir = temp.join(".git");
+        if git_dir.exists() {
+            remove_dir_tolerating_readonly(&git_dir)?;
+        }
+        let mut roots = Vec::new();
+        collect_skill_roots(&temp, &mut roots, 0);
+        if roots.is_empty() {
+            return Err(RlError::coded(codes::SKILL_IMPORT_EMPTY, url));
+        }
+        import_from_roots(lib, &roots)
+    })();
+    remove_dir_tolerating_readonly(&temp)?;
+    result
 }
 
-/// 从 URL 下载 zip 压缩包导入(仅 http/https)
+/// 从 Git 仓库 URL(如 GitHub 仓库地址)克隆代码并导入其中的技能(仅 http/https)
 pub(super) fn skill_import_url(lib: &Library, url: &str) -> RlResult<SkillImportOutcome> {
     let url = url.trim();
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return Err(RlError::coded(codes::URL_INVALID, url));
     }
-    let bytes = download_limited(url)?;
-    import_archive_bytes(lib, &bytes)
+    clone_and_import(lib, url)
 }
