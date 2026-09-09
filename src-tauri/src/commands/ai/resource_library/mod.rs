@@ -455,10 +455,11 @@ async fn execute_skill_scan(
 
     if let Some((model, api_key)) = semantic {
         let system_prompt = fixed_system_prompt(DEFAULT_SKILL_SCAN_PROMPT, &language);
-        let user_prompt = scan::build_llm_user_prompt(&input.name, &input.files, &static_findings);
+        let mut user_prompt =
+            scan::build_llm_user_prompt(&input.name, &input.files, &static_findings, &language);
         let cancel_token = run.as_ref().map(|run| &run.token);
         let mut parsed: Option<scan::LlmReport> = None;
-        // 解析失败重试一次(provider 错误与取消不重试,与 wiki 大纲纠错策略对齐);
+        // 解析或语言检查失败重试一次(provider 错误与取消不重试);
         // 每次尝试都是全新 harness 会话,usage 由 scan_agent 按 LLM 请求逐条落库
         for _attempt in 0..2 {
             let outcome = scan_agent::run_semantic_scan(
@@ -472,17 +473,25 @@ async fn execute_skill_scan(
             )
             .await;
             match outcome {
-                Ok(text) => match scan::parse_llm_report(&text, static_findings.len()) {
-                    Ok(report) => {
-                        parsed = Some(report);
-                        break;
+                Ok(text) => {
+                    match scan::parse_llm_report(&text, static_findings.len()).and_then(|report| {
+                        scan::validate_report_language(&report, &language)?;
+                        Ok(report)
+                    }) {
+                        Ok(report) => {
+                            parsed = Some(report);
+                            break;
+                        }
+                        Err(error) => {
+                            llm_status = "failed".to_string();
+                            llm_error_code = None;
+                            llm_error_message = Some(error);
+                            if language == "zh-CN" {
+                                user_prompt.push_str("\n上次输出未通过 JSON 或语言检查。请重新检查 JSON 结构，并确保摘要、每条风险标题和详情均使用简体中文，不得输出纯英文说明。");
+                            }
+                        }
                     }
-                    Err(error) => {
-                        llm_status = "failed".to_string();
-                        llm_error_code = None;
-                        llm_error_message = Some(error);
-                    }
-                },
+                }
                 Err(error) => {
                     if run.as_ref().is_some_and(|run| run.token.is_cancelled()) {
                         llm_status = "canceled".to_string();
