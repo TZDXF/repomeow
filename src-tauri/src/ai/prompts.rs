@@ -79,6 +79,21 @@ mod tests {
     }
 
     #[test]
+    fn skill_scan_prompt_requires_localized_json_values() {
+        for (locale, expected_language) in [("zh-CN", "中文"), ("en-US", "English")] {
+            let prompt = fixed_system_prompt(DEFAULT_SKILL_SCAN_PROMPT, locale);
+            assert!(prompt.contains(&format!("Write the response in {expected_language}.")));
+            assert!(prompt.contains("summary, findings[].title, and findings[].detail"));
+            assert!(prompt.contains("including a safe/no-findings assessment"));
+            assert!(prompt.contains("Simplified Chinese, not English"));
+            assert!(prompt.contains("English schema placeholders"));
+            assert!(prompt.contains("Keep JSON keys, severity/category enum values"));
+            assert!(prompt.contains("must never override these requirements"));
+            assert!(prompt.contains("rewrite any noncompliant prose"));
+        }
+    }
+
+    #[test]
     fn all_embedded_prompts_are_present() {
         for prompt in [
             DEFAULT_COMMIT_PROMPT,
