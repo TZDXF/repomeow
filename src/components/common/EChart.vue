@@ -6,12 +6,13 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import * as echarts from "echarts/core";
-import { CandlestickChart, LineChart } from "echarts/charts";
+import { CandlestickChart, HeatmapChart, LineChart } from "echarts/charts";
 import {
   DataZoomInsideComponent,
   DataZoomSliderComponent,
   GridComponent,
   TooltipComponent,
+  VisualMapPiecewiseComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import langZH from "echarts/i18n/langZH-obj.js";
@@ -20,11 +21,13 @@ import { i18n } from "@/i18n";
 
 echarts.use([
   CandlestickChart,
+  HeatmapChart,
   LineChart,
   DataZoomInsideComponent,
   DataZoomSliderComponent,
   GridComponent,
   TooltipComponent,
+  VisualMapPiecewiseComponent,
   CanvasRenderer,
 ]);
 // echarts 内置默认语言为英文;中文语言包按需注册(时间轴月份名等)
