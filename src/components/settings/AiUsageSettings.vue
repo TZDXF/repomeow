@@ -216,7 +216,6 @@ function ioTitle(entry: AiUsageEntry): string {
         <RefreshCw v-else class="h-3.5 w-3.5" />
       </Button>
     </div>
-    <p class="mt-1 text-sm text-muted-foreground">{{ t("settings.usage.description") }}</p>
 
     <template v-if="summary">
       <!-- 汇总五格 -->

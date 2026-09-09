@@ -28,6 +28,7 @@ import {
   type AiModelCompat,
   type AiModelDef,
   type AiModelRef,
+  type AiTaskModels,
   type AiProvider,
   type CcSwitchProvider,
 } from "@/lib/ai-config";
@@ -43,6 +44,8 @@ const settings = useSettingsStore();
 const drafts = ref<ProviderDraft[]>([]);
 const defaultRef = ref<AiModelRef | null>(null);
 const chatPrefs = ref(emptyChatPrefs());
+const taskModels = ref<AiTaskModels>({});
+const modelPurposes = ["commit", "report", "translation"] as const;
 const loading = ref(false);
 const saving = ref(false);
 const testing = ref(false);
@@ -69,6 +72,7 @@ onMounted(async () => {
     // force:设置页打开即拉取最新配置,覆盖外部对配置文件的修改
     const config = await store.ensureLoaded(true);
     defaultRef.value = config.defaultModel;
+    taskModels.value = { ...config.taskModels };
     chatPrefs.value = { ...emptyChatPrefs(), ...config.chat };
     drafts.value = Object.entries(config.providers).map(([id, provider]) =>
       draftProvider(id, provider),
@@ -294,10 +298,12 @@ async function save(): Promise<void> {
       providers,
       defaultModel: defaultRef.value,
       chat: { ...chatPrefs.value },
+      taskModels: { ...taskModels.value },
     });
     // 按后端归一化结果刷新本地副本(悬空引用会被清掉,模型行重排)
     const fresh = await store.reload();
     defaultRef.value = fresh.defaultModel;
+    taskModels.value = { ...fresh.taskModels };
     chatPrefs.value = { ...emptyChatPrefs(), ...fresh.chat };
     drafts.value = Object.entries(fresh.providers).map(([id, provider]) =>
       draftProvider(id, provider),
@@ -342,8 +348,6 @@ const CONCURRENCY_OPTIONS = [1, 2, 3, 4, 5];
 <template>
   <section>
     <h2 class="text-base font-semibold">{{ t("settings.ai.title") }}</h2>
-    <p class="text-muted-foreground mt-1 text-sm">{{ t("settings.ai.description") }}</p>
-
     <div class="mt-4 flex flex-col gap-4">
       <!-- 默认模型 -->
       <div class="flex flex-col gap-1.5">
@@ -357,8 +361,32 @@ const CONCURRENCY_OPTIONS = [1, 2, 3, 4, 5];
           :disabled="loading"
           @update:model-value="onDefaultModelChange"
         />
-        <p class="text-muted-foreground text-xs">{{ t("settings.ai.defaultModelHint") }}</p>
       </div>
+
+      <details class="rounded-lg border p-3">
+        <summary class="cursor-pointer text-sm font-medium">
+          {{ t("settings.ai.moreModelSettings") }}
+        </summary>
+        <div class="mt-3 flex flex-col gap-3">
+          <p class="text-muted-foreground text-xs">{{ t("settings.ai.taskModelHint") }}</p>
+          <div v-for="purpose in modelPurposes" :key="purpose" class="flex flex-col gap-1.5">
+            <label class="text-sm font-medium">{{ t(`settings.ai.taskModel_${purpose}`) }}</label>
+            <ModelSelector
+              :model-value="
+                taskModels[purpose]
+                  ? modelOptionValue(taskModels[purpose]!.providerId, taskModels[purpose]!.modelId)
+                  : 'follow'
+              "
+              :groups="modelGroups"
+              :generic-option="{ value: 'follow', label: t('settings.ai.followDefaultModel') }"
+              size="default"
+              trigger-class="w-full justify-between"
+              :disabled="loading"
+              @update:model-value="taskModels[purpose] = parseModelOptionValue($event)"
+            />
+          </div>
+        </div>
+      </details>
 
       <!-- 厂商列表 -->
       <div class="flex flex-col gap-1.5">

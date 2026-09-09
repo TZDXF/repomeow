@@ -1712,8 +1712,6 @@ export default {
     },
     ai: {
       title: "AI integration",
-      description:
-        "Connect multiple OpenAI-compatible providers; the default model powers commits, reports and Wiki",
       baseUrl: "Base URL",
       baseUrlPlaceholder: "https://api.deepseek.com/v1",
       apiKey: "API Key",
@@ -1731,10 +1729,14 @@ export default {
       saved: "AI settings saved",
       concurrency: "Concurrency limit",
       concurrencyHint: "Maximum concurrent AI requests (1-5). Lower this if the API rate-limits.",
+      moreModelSettings: "More model settings",
+      taskModelHint: "Follow the default unless overridden. Deleted models fall back to the default.",
+      taskModel_commit: "Commit messages",
+      taskModel_report: "Daily / weekly reports",
+      taskModel_translation: "Translation",
+      followDefaultModel: "Follow default model",
       defaultModel: "Default model",
       defaultModelPlaceholder: "Choose the default model",
-      defaultModelHint:
-        "Used by commit messages, daily/weekly reports, Wiki and the connection test; the Q&A panel can pick its own model",
       providers: "AI providers",
       addProvider: "Add provider",
       importCcSwitch: "Import from CC Switch",
@@ -1809,8 +1811,6 @@ export default {
     },
     usage: {
       title: "AI Usage",
-      description:
-        "Token consumption statistics and logs for model calls, recorded per task type (data stays in the local database)",
       calls: "Calls",
       inputTokens: "Input tokens",
       outputTokens: "Output tokens",
@@ -2035,6 +2035,7 @@ export default {
             updated: "Group membership updated",
           },
           readFailed: "Failed to read file: {error}",
+          linkTargetMissing: "Linked file does not exist: {path}",
           fileBinary: "Binary file — text preview is not available",
           emptyFile: "This file has no content",
           filesEmpty: "No files in the skill folder yet",
