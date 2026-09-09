@@ -58,6 +58,8 @@ pub mod codes {
     pub const ARCHIVE_INVALID: &str = "resource_library_archive_invalid";
     pub const ARCHIVE_TOO_LARGE: &str = "resource_library_archive_too_large";
     pub const URL_INVALID: &str = "resource_library_url_invalid";
+    pub const CLONE_TIMEOUT: &str = "resource_library_clone_timeout";
+    pub const REPO_TOO_LARGE: &str = "resource_library_repo_too_large";
 }
 
 /// 资源库错误。三类构成:

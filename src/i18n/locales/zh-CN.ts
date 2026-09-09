@@ -139,6 +139,8 @@ export default {
     resource_library_archive_invalid: "压缩包不是有效的 zip 文件或已损坏",
     resource_library_archive_too_large: "压缩包超过大小上限",
     resource_library_url_invalid: "URL 必须以 http:// 或 https:// 开头",
+    resource_library_clone_timeout: "克隆仓库超时:请检查网络连接,或仓库体量过大",
+    resource_library_repo_too_large: "仓库内容超过大小上限",
     // 账号
     account_not_found: "账号不存在",
     account_unsupported_provider: "不支持的平台",

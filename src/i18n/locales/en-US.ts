@@ -154,6 +154,9 @@ export default {
     resource_library_archive_invalid: "The archive is not a valid zip file or is corrupted",
     resource_library_archive_too_large: "The archive exceeds the size limit",
     resource_library_url_invalid: "URL must start with http:// or https://",
+    resource_library_clone_timeout:
+      "Cloning timed out: check your network connection, or the repository is too large",
+    resource_library_repo_too_large: "The repository content exceeds the size limit",
     // account
     account_not_found: "Account not found",
     account_unsupported_provider: "Unsupported provider",

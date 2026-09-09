@@ -60,7 +60,7 @@ pub struct GitProjectChangedPayload {
 
 mod process;
 use process::*;
-pub(crate) use process::{git_command, run_git};
+pub(crate) use process::{friendly_git_error, git_command, run_git};
 // ── git2(libgit2)读操作层 ────────────────────────────────────────────────
 // 所有只读查询(status/分支/log/diff 等)走 libgit2,避免每次查询创建 git 子进程
 // (Windows 上进程创建约 10-30ms,批量状态/图谱等高频路径收益显著);

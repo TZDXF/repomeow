@@ -1002,6 +1002,7 @@ fn library_info_reports_counts_and_git_state() {
 
 use std::io::Cursor;
 use std::io::Write as _;
+use std::time::Duration;
 
 use super::import;
 use super::store::DIR_SKILLS;
@@ -1206,6 +1207,39 @@ fn import_from_git_url_clones_and_scans() {
     fs::create_dir_all(&not_repo).unwrap();
     let err = import::clone_and_import(&t.lib, &to_forward_slash(&not_repo)).unwrap_err();
     assert_eq!(err.code(), "git_command_failed");
+    let _ = remove_dir_tolerating_readonly(&parent);
+}
+
+/// 克隆导入的体量与超时保护:工作区超限报 REPO_TOO_LARGE 且不导入;
+/// 超时杀掉克隆进程并报 CLONE_TIMEOUT(巨型/缓慢仓库不得长期占用全局锁)
+#[test]
+fn import_from_git_url_enforces_limits() {
+    let t = temp_lib("imp-git-limits");
+    let (_, parent) = temp_root("imp-git-limits-src");
+    let src = parent.join("repo");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(src.join("SKILL.md"), "---\nname: 限量技能\n---\n正文").unwrap();
+    git_out(&parent, &["init", "repo"]);
+    git_out(&src, &["config", "user.name", "test"]);
+    git_out(&src, &["config", "user.email", "test@localhost"]);
+    git_out(&src, &["add", "-A"]);
+    git_out(
+        &src,
+        &["-c", "commit.gpgsign=false", "commit", "-m", "init"],
+    );
+    let url = to_forward_slash(&src);
+
+    // 工作区总字节超过上限 → 拒绝导入,技能未入库
+    let err =
+        import::clone_and_import_with_limits(&t.lib, &url, Duration::from_secs(60), 1).unwrap_err();
+    assert_eq!(err.code(), codes::REPO_TOO_LARGE);
+    assert!(ops::skill_list(&t.lib).unwrap().skills.is_empty());
+
+    // 超时为 0 → 克隆立即被杀并报超时
+    let err =
+        import::clone_and_import_with_limits(&t.lib, &url, Duration::ZERO, u64::MAX).unwrap_err();
+    assert_eq!(err.code(), codes::CLONE_TIMEOUT);
+    assert!(ops::skill_list(&t.lib).unwrap().skills.is_empty());
     let _ = remove_dir_tolerating_readonly(&parent);
 }
 

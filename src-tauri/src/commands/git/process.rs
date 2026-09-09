@@ -44,7 +44,7 @@ pub(crate) fn run_git(path: &str, args: &[&str]) -> AppResult<Output> {
 ///    此处 message 仅保留技术上下文);未识别时返回清理后的原文(External→Coded)
 ///
 /// 注意:`push_blocking` 依赖原文匹配 "no upstream branch",映射规则不得覆盖该短语
-pub(super) fn friendly_git_error(raw: &str) -> AppError {
+pub(crate) fn friendly_git_error(raw: &str) -> AppError {
     use crate::error::ErrorCode;
 
     // 噪音行:SSH/网络层打印的警告,与 git 操作结果无关
