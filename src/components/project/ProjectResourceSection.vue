@@ -256,6 +256,14 @@ async function toggleAgent(resource: ResourceChoice, agent: ProjectAiTarget) {
     toggling.value = "";
   }
 }
+/** 技能预览页需要绝对目录:部署记录与资产扫描给出的都是项目相对路径,这里拼上项目根 */
+function absoluteSkillDir(dir: string): string {
+  // 已是绝对路径(盘符/UNC/POSIX 根)时原样返回,防御未来来源变化
+  if (/^([A-Za-z]:[\\/]|\\\\|\/)/.test(dir)) {
+    return dir;
+  }
+  return joinPath(props.projectPath, dir);
+}
 function preview(resource: ResourceChoice) {
   // skills 统一走技能预览页(库技能按 id,本地来源按目录);MCP 保持抽屉只读预览
   if (props.kind === "skills") {
@@ -265,7 +273,7 @@ function preview(resource: ResourceChoice) {
         void router.push({
           name: "resource-skill",
           params: { id: "local" },
-          query: { dir, from: props.from },
+          query: { dir: absoluteSkillDir(dir), from: props.from },
         });
       }
       return;
@@ -288,7 +296,7 @@ function previewUnmanaged(item: UnmanagedItem) {
     void router.push({
       name: "resource-skill",
       params: { id: "local" },
-      query: { dir: item.source, from: props.from },
+      query: { dir: absoluteSkillDir(item.source), from: props.from },
     });
     return;
   }
