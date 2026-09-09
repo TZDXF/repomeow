@@ -333,7 +333,6 @@ export default {
   },
   aiAssets: {
     title: "AI 资产",
-    refresh: "刷新",
     importCc: "从 CC Switch 导入",
     files: "指令与规则",
     mcp: "MCP 配置",

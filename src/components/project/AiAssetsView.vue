@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { toast } from "vue-sonner";
-import { Bot, FileCode, FileText, LoaderCircle, RefreshCw, Settings2 } from "@lucide/vue";
+import { Bot, FileCode, FileText, LoaderCircle, Settings2 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import AiFileDrawer from "./AiFileDrawer.vue";
 import ProjectResourceSection from "./ProjectResourceSection.vue";
@@ -62,10 +62,6 @@ function preview(path: string, readOnly = true) {
   drawerReadOnly.value = readOnly;
   drawerPath.value = path;
 }
-function refresh() {
-  revision.value++;
-  void load();
-}
 /** 资源区变更:先重扫 assets(非托管检测的数据源),完成后再 bump revision 让资源区静默刷新,保证两侧状态一致、不闪烁。 */
 async function resourcesChanged() {
   try {
@@ -90,14 +86,6 @@ async function resourcesChanged() {
           @click="router.push({ name: 'settings', query: { category: 'resources' } })"
           ><Settings2 class="size-4" />{{ t("projectAi.manageLibrary") }}</Button
         >
-        <Button
-          size="sm"
-          variant="ghost"
-          :title="t('aiAssets.refresh')"
-          :disabled="loading"
-          @click="refresh"
-          ><RefreshCw class="size-4"
-        /></Button>
       </div>
     </div>
     <ProjectResourceSection

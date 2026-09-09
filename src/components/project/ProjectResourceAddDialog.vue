@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { toast } from "vue-sonner";
-import { LoaderCircle, RefreshCw } from "@lucide/vue";
+import { LoaderCircle } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -186,14 +186,6 @@ function manage() {
       </DialogHeader>
       <div class="flex items-center gap-2">
         <Input v-model="query" :placeholder="t('projectAi.search')" :disabled="saving || loading" />
-        <Button
-          variant="ghost"
-          size="icon"
-          :title="t('aiAssets.refresh')"
-          :disabled="saving || loading"
-          @click="load"
-          ><RefreshCw class="size-4"
-        /></Button>
       </div>
       <div v-if="loading" class="flex justify-center py-10">
         <LoaderCircle class="size-5 animate-spin" />

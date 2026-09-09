@@ -4,7 +4,7 @@ import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { toast } from "vue-sonner";
 import { Icon } from "@iconify/vue";
-import { Bot, Import, LoaderCircle, Package, Plug, Plus, RefreshCw, Trash2 } from "@lucide/vue";
+import { Bot, Import, LoaderCircle, Package, Plug, Plus, Trash2 } from "@lucide/vue";
 import { agentBrandIcon } from "@/lib/agent-icons";
 import { Button } from "@/components/ui/button";
 import {
@@ -446,15 +446,6 @@ function changed() {
       <Button variant="outline" size="sm" class="h-7 px-2 text-xs" @click="addOpen = true"
         ><Plus class="size-3.5" />{{ t("projectAi.add") }}</Button
       >
-      <Button
-        variant="ghost"
-        size="icon"
-        class="size-7"
-        :title="t('aiAssets.refresh')"
-        :disabled="loading"
-        @click="load"
-        ><RefreshCw class="size-3.5"
-      /></Button>
     </div>
     <p class="text-xs text-muted-foreground">{{ t("projectAi.sectionHint") }}</p>
     <p

@@ -355,7 +355,6 @@ export default {
   },
   aiAssets: {
     title: "AI Assets",
-    refresh: "Refresh",
     importCc: "Import from CC Switch",
     files: "Instructions & Rules",
     mcp: "MCP Configs",
