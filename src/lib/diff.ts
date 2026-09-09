@@ -46,9 +46,13 @@ export function parseDiff(text: string): DiffLine[] {
       out.push({ kind: "hunk", text: raw, oldLine: null, newLine: null });
       continue;
     }
-    // 首个 hunk 之前是文件头(diff --git / index / --- / +++ 等),仅保留二进制提示
+    // 首个 hunk 之前是文件头(diff --git / index / --- / +++ 等),保留权限、重命名、空文件及二进制等实际变更信息
     if (!seenHunk) {
-      if (raw.startsWith("Binary files")) {
+      if (
+        /^(?:Binary files |old mode |new mode |new file mode |deleted file mode |similarity index |dissimilarity index |rename from |rename to |copy from |copy to )/.test(
+          raw,
+        )
+      ) {
         out.push({ kind: "meta", text: raw, oldLine: null, newLine: null });
       }
       continue;

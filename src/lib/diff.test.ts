@@ -2,6 +2,27 @@ import { describe, expect, it } from "vitest";
 import { intralineRanges, parseDiff, toSideBySideRows, type DiffFold, type DiffLine } from "./diff";
 
 describe("parseDiff", () => {
+  it.each([
+    ["old mode 100644", "new mode 100755"],
+    ["similarity index 100%", "rename from old.css", "rename to new.css"],
+    ["new file mode 100644"],
+    ["deleted file mode 100644"],
+    ["copy from old.css", "copy to new.css"],
+  ])("保留没有文本增删的补丁元数据 %s", (...metadata) => {
+    const lines = parseDiff(
+      ["diff --git a/old.css b/new.css", ...metadata, "index 123..456"].join("\n"),
+    );
+    expect(lines.map((line) => line.text)).toEqual(metadata);
+    expect(
+      lines.every((line) => line.kind === "meta" && line.oldLine === null && line.newLine === null),
+    ).toBe(true);
+    expect(toSideBySideRows(lines).map((row) => row.text)).toEqual(metadata);
+  });
+
+  it("空补丁没有可渲染行", () => {
+    expect(parseDiff("")).toEqual([]);
+  });
+
   it("忽略 hunk 之前的文件头(diff --git / index / --- /+++/空行),首个 hunk 之后的 hunk 头保留", () => {
     const text = [
       "diff --git a/a.txt b/a.txt",

@@ -417,7 +417,7 @@ watch(
     </div>
 
     <SplitDiffView
-      v-if="splitActive && !loading && !error && filePath"
+      v-if="splitActive && !loading && !error && filePath && displayLines.length > 0"
       ref="splitViewEl"
       v-model:split-ratio="splitRatio"
       v-model:current-row-pos="currentRowPos"
@@ -442,6 +442,28 @@ watch(
       >
         {{ t("git.graph.detail.selectFile") }}
       </p>
+
+      <div
+        v-else-if="landedDiff && displayLines.length === 0"
+        class="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-xs text-muted-foreground"
+      >
+        <p>
+          {{
+            t(
+              ignoreWs === "none"
+                ? "git.graph.detail.diffEmpty"
+                : "git.graph.detail.diffEmptyFiltered",
+            )
+          }}
+        </p>
+        <button
+          v-if="ignoreWs !== 'none'"
+          class="text-primary hover:underline"
+          @click="ignoreWs = 'none'"
+        >
+          {{ t("git.graph.detail.diffShowAll") }}
+        </button>
+      </div>
 
       <!-- 逐行(unified)视图 -->
       <div v-else class="diff-code min-w-max py-1 text-xs leading-5">
