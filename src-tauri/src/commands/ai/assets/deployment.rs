@@ -1,5 +1,5 @@
-//! 全局资源库 → 项目配置。只接受资源 ID;部署记录位于应用数据目录,不污染项目。
-//! 分组是选择快捷方式而非动态订阅;更新仅由用户手动应用。
+//! 全局资源库 → 项目配置;非托管目录/服务器也可认领为本地来源(记录来源路径,不入库)。
+//! 部署记录位于应用数据目录,不污染项目。分组是选择快捷方式而非动态订阅;更新仅由用户手动应用。
 use super::super::resource_library::{
     store::{is_safe_directory, lock_op, Library, DIR_SKILLS, FILE_SKILLS},
     McpServer, RlResult, Skill, SkillGroup, SkillLibrary,
@@ -111,6 +111,24 @@ pub struct ShortlistEntry {
     kind: String,
     resource_id: String,
 }
+/// 本地来源资源 ID 前缀,与资源库 ID 区分。
+const LOCAL_PREFIX: &str = "local:";
+
+/// 本地来源(非托管认领):记录 skills/mcp 的来源路径与归属 Agent,不进全局资源库。
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalResource {
+    kind: String,
+    /// `local:skills:<目录>` / `local:mcp:<配置文件>#<服务器名>`。
+    id: String,
+    name: String,
+    #[serde(default)]
+    description: String,
+    /// 来源位置:skills = 技能目录;mcp = 配置文件路径。
+    source_path: String,
+    /// 来源路径归属的 Agent(该 Agent 只登记记录,文件保持原样)。
+    origin_agent: String,
+}
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Manifest {
@@ -119,6 +137,8 @@ struct Manifest {
     entries: Vec<Deployment>,
     #[serde(default)]
     shortlist: Vec<ShortlistEntry>,
+    #[serde(default)]
+    locals: Vec<LocalResource>,
 }
 
 fn manifest_file(library: &Library, root: &Path) -> PathBuf {
@@ -141,6 +161,7 @@ fn read_manifest(path: &Path, root: &Path) -> RlResult<Manifest> {
             project_path: project_path.clone(),
             entries: vec![],
             shortlist: vec![],
+            locals: vec![],
         },
         Err(e) => return Err(e.into()),
     };
@@ -161,6 +182,25 @@ fn read_manifest(path: &Path, root: &Path) -> RlResult<Manifest> {
         };
         if !valid || !keys.insert((&entry.kind, &entry.agent_id, &entry.resource_id)) {
             return Err(problem("invalid deployment record"));
+        }
+    }
+    let mut local_ids = HashSet::new();
+    for local in &manifest.locals {
+        let agent = target(&local.origin_agent)?;
+        let valid = if local.kind == "skills" {
+            let p = Path::new(&local.source_path);
+            p.parent() == Some(Path::new(agent.skill_path))
+                && p
+                    .file_name()
+                    .is_some_and(|n| is_safe_directory(&n.to_string_lossy()))
+        } else {
+            local.kind == "mcp" && local.source_path == agent.mcp_path && !local.name.is_empty()
+        };
+        if !local.id.starts_with(LOCAL_PREFIX)
+            || !valid
+            || !local_ids.insert((&local.kind, &local.id))
+        {
+            return Err(problem("invalid local resource record"));
         }
     }
     let mut shortlisted = HashSet::new();
@@ -201,12 +241,17 @@ pub struct ResourceChoice {
 enum Source {
     Skill(Skill),
     Mcp(McpServer),
+    /// 本地来源技能:内容以项目内来源目录为准。
+    LocalSkill(LocalResource),
+    /// 本地来源 MCP:附带来源配置解析出的通用定义。
+    LocalMcp(LocalResource, McpServer),
 }
 impl Source {
     fn id(&self) -> &str {
         match self {
             Self::Skill(s) => &s.id,
             Self::Mcp(s) => &s.id,
+            Self::LocalSkill(l) | Self::LocalMcp(l, _) => &l.id,
         }
     }
     fn choice(&self) -> ResourceChoice {
@@ -227,6 +272,26 @@ impl Source {
                 supported_agents: MCP_TARGETS
                     .iter()
                     .filter(|t| definition(s, t).is_ok())
+                    .flat_map(|t| t.agents.iter().map(|a| a.to_string()))
+                    .collect(),
+                source: None,
+            },
+            Self::LocalSkill(l) => ResourceChoice {
+                id: l.id.clone(),
+                name: l.name.clone(),
+                description: l.description.clone(),
+                group_ids: vec![],
+                supported_agents: TARGETS.iter().map(|t| t.id.to_string()).collect(),
+                source: None,
+            },
+            Self::LocalMcp(l, server) => ResourceChoice {
+                id: l.id.clone(),
+                name: l.name.clone(),
+                description: server.description.clone().unwrap_or_default(),
+                group_ids: vec![],
+                supported_agents: MCP_TARGETS
+                    .iter()
+                    .filter(|t| definition(server, t).is_ok())
                     .flat_map(|t| t.agents.iter().map(|a| a.to_string()))
                     .collect(),
                 source: None,
@@ -261,7 +326,12 @@ impl Content {
         }
     }
 }
-fn source_content(library: &Library, source: &Source, agent: &str) -> RlResult<Content> {
+fn source_content(
+    library: &Library,
+    root: &Path,
+    source: &Source,
+    agent: &str,
+) -> RlResult<Content> {
     match source {
         Source::Skill(skill) => {
             if !is_safe_directory(&skill.directory) {
@@ -275,7 +345,59 @@ fn source_content(library: &Library, source: &Source, agent: &str) -> RlResult<C
             Ok(Content::Skill(tree))
         }
         Source::Mcp(server) => Ok(Content::Mcp(definition(server, mcp_target(agent)?)?)),
+        Source::LocalSkill(local) => Ok(Content::Skill(read_tree(&safe_path(
+            root,
+            &local.source_path,
+        )?)?)),
+        Source::LocalMcp(_, server) => Ok(Content::Mcp(definition(server, mcp_target(agent)?)?)),
     }
+}
+
+/// 本地来源(非托管认领)解析为与库资源同构的 Source;来源缺失/不可解析时跳过(状态落 sourceMissing)。
+fn local_sources(root: &Path, manifest: &Manifest, kind: &str) -> Vec<Source> {
+    manifest
+        .locals
+        .iter()
+        .filter(|l| l.kind == kind)
+        .filter_map(|local| {
+            if kind == "skills" {
+                let path = safe_path(root, &local.source_path).ok()?;
+                if !path.is_dir() {
+                    return None;
+                }
+                let mut local = local.clone();
+                if let Ok(content) = fs::read_to_string(path.join("SKILL.md")) {
+                    local.description =
+                        super::parse_skill_frontmatter(&content).1.unwrap_or_default();
+                }
+                Some(Source::LocalSkill(local))
+            } else {
+                let target = mcp_target(&local.origin_agent).ok()?;
+                let value = McpDocument::read(root, target)
+                    .ok()?
+                    .entry(target, &local.name)
+                    .ok()??;
+                let input = parse_server_value(target, &local.name, &value).ok()?;
+                Some(Source::LocalMcp(
+                    local.clone(),
+                    McpServer {
+                        id: local.id.clone(),
+                        name: input.name,
+                        description: input.description,
+                        transport: input.transport,
+                        command: input.command,
+                        args: input.args,
+                        env: input.env,
+                        url: input.url,
+                        headers: input.headers,
+                        enabled: input.enabled,
+                        created_at: 0,
+                        updated_at: 0,
+                    },
+                ))
+            }
+        })
+        .collect()
 }
 fn current_hash(root: &Path, entry: &Deployment) -> RlResult<Option<String>> {
     let path = safe_path(root, &entry.path)?;
@@ -324,6 +446,10 @@ fn snapshot(library: &Library, root: &Path, kind: &str) -> RlResult<ProjectResou
         Ok((groups, sources)) => (groups, sources, None),
         Err(e) => (vec![], vec![], Some(e.code().to_string())),
     };
+    let all: Vec<Source> = choices
+        .into_iter()
+        .chain(local_sources(root, &manifest, kind))
+        .collect();
     let deployments = manifest
         .entries
         .into_iter()
@@ -334,12 +460,12 @@ fn snapshot(library: &Library, root: &Path, kind: &str) -> RlResult<ProjectResou
                 Ok(None) => "missing",
                 Ok(Some(hash)) if hash != entry.fingerprint => "modified",
                 Ok(Some(_)) => {
-                    if source_error.is_some() {
+                    if source_error.is_some() && !entry.resource_id.starts_with(LOCAL_PREFIX) {
                         "sourceUnavailable"
                     } else if let Some(source) =
-                        choices.iter().find(|s| s.id() == entry.resource_id)
+                        all.iter().find(|s| s.id() == entry.resource_id)
                     {
-                        match source_content(library, source, &entry.agent_id) {
+                        match source_content(library, root, source, &entry.agent_id) {
                             Ok(content) if content.fingerprint() == entry.fingerprint => {
                                 "configured"
                             }
@@ -360,7 +486,7 @@ fn snapshot(library: &Library, root: &Path, kind: &str) -> RlResult<ProjectResou
     Ok(ProjectResourceSnapshot {
         revision,
         groups,
-        resources: choices.iter().map(Source::choice).collect(),
+        resources: all.iter().map(Source::choice).collect(),
         deployments,
         shortlist,
         source_error,
@@ -532,7 +658,11 @@ fn assign(
     let mut state = read_manifest(&state_path, root)?;
     // 来源被删除/上锁时仍允许解除配置;新增配置由 apply_one 拒绝。
     let list = sources(library, kind).ok().map(|(_, list)| list);
-    let source = list.as_ref().and_then(|list| list.iter().find(|s| s.id() == id));
+    let locals = local_sources(root, &state, kind);
+    let source = list
+        .as_ref()
+        .and_then(|list| list.iter().find(|s| s.id() == id))
+        .or_else(|| locals.iter().find(|s| s.id() == id));
     let wanted: HashSet<&str> = agent_ids.iter().map(String::as_str).collect();
     let mut result = AssignResult::default();
     for agent in TARGETS {
@@ -555,8 +685,9 @@ fn assign(
             }),
         }
     }
-    // 配置过的资源视为已加入项目列表。
+    // 配置过的资源视为已加入项目列表(本地来源由 locals 记录,不进 shortlist)。
     if source.is_some()
+        && !id.starts_with(LOCAL_PREFIX)
         && !state
             .shortlist
             .iter()
@@ -593,7 +724,11 @@ fn remove_resource(library: &Library, root: &Path, kind: &str, id: &str) -> RlRe
     let state_path = manifest_file(library, root);
     let mut state = read_manifest(&state_path, root)?;
     let list = sources(library, kind).ok().map(|(_, list)| list);
-    let source = list.as_ref().and_then(|list| list.iter().find(|s| s.id() == id));
+    let locals = local_sources(root, &state, kind);
+    let source = list
+        .as_ref()
+        .and_then(|list| list.iter().find(|s| s.id() == id))
+        .or_else(|| locals.iter().find(|s| s.id() == id));
     let agents: Vec<String> = state
         .entries
         .iter()
@@ -618,7 +753,9 @@ fn remove_resource(library: &Library, root: &Path, kind: &str, id: &str) -> RlRe
         state
             .shortlist
             .retain(|s| !(s.kind == kind && s.resource_id == id));
-        if state.shortlist.len() != before {
+        let before_locals = state.locals.len();
+        state.locals.retain(|l| !(l.kind == kind && l.id == id));
+        if state.shortlist.len() != before || state.locals.len() != before_locals {
             save_manifest(&state_path, &state)?;
         }
     }
@@ -735,6 +872,7 @@ fn import_skill(library: &Library, root: &Path, source: &str) -> RlResult<Import
         }
         (skill, false)
     };
+    migrate_local(&manifest_file(library, root), root, "skills", source, None, &skill.id)?;
     enlist(
         library,
         root,
@@ -770,6 +908,7 @@ fn import_mcp(library: &Library, root: &Path, source: &str, name: &str) -> RlRes
     } else {
         (crate::commands::ai::resource_library::import_mcp(library, &def)?, false)
     };
+    migrate_local(&manifest_file(library, root), root, "mcp", source, Some(name), &server.id)?;
     enlist(
         library,
         root,
@@ -786,6 +925,202 @@ fn import_mcp(library: &Library, root: &Path, source: &str, name: &str) -> RlRes
         resource_id: server.id,
         existed,
     })
+}
+
+/// 已认领的本地来源再导入资源库:部署条目改挂库资源 ID,移除本地来源记录。
+fn migrate_local(
+    state_path: &Path,
+    root: &Path,
+    kind: &str,
+    source_path: &str,
+    name: Option<&str>,
+    new_id: &str,
+) -> RlResult<()> {
+    let mut state = read_manifest(state_path, root)?;
+    let Some(pos) = state.locals.iter().position(|l| {
+        l.kind == kind
+            && l.source_path == source_path
+            && (kind == "skills" || l.name == name.unwrap_or_default())
+    }) else {
+        return Ok(());
+    };
+    let local = state.locals.remove(pos);
+    for entry in &mut state.entries {
+        if entry.kind == kind && entry.resource_id == local.id {
+            entry.resource_id = new_id.to_string();
+        }
+    }
+    save_manifest(state_path, &state)
+}
+
+/// 本地来源的来源 Agent 只登记/解除记录:文件是用户原始内容,认领取现状指纹,
+/// 解除保留文件;最后一个部署解除时连同本地记录清理,目录回到非托管。
+fn apply_local_origin(
+    root: &Path,
+    state_path: &Path,
+    state: &mut Manifest,
+    local: &LocalResource,
+    agent: &str,
+    selected: bool,
+) -> RlResult<bool> {
+    let existed = state.entries.iter().any(|e| {
+        e.kind == local.kind && e.agent_id == agent && e.resource_id == local.id
+    });
+    if selected == existed {
+        return Ok(false);
+    }
+    let mut next = state.clone();
+    next.entries.retain(|e| {
+        !(e.kind == local.kind && e.agent_id == agent && e.resource_id == local.id)
+    });
+    if selected {
+        let mut entry = Deployment {
+            kind: local.kind.clone(),
+            agent_id: agent.to_string(),
+            resource_id: local.id.clone(),
+            name: local.name.clone(),
+            path: local.source_path.clone(),
+            fingerprint: String::new(),
+        };
+        entry.fingerprint =
+            current_hash(root, &entry)?.ok_or_else(|| problem("local source missing"))?;
+        next.entries.push(entry);
+    } else if !next.entries.iter().any(|e| e.resource_id == local.id) {
+        next.locals
+            .retain(|l| !(l.kind == local.kind && l.id == local.id));
+    }
+    save_manifest(state_path, &next)?;
+    *state = next;
+    Ok(true)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaimOutcome {
+    resource_id: String,
+}
+
+/// 认领非托管资源为项目本地来源(不进资源库):记录来源路径,来源 Agent 按现状登记为已配置。
+/// skills: source = 项目内技能目录;mcp: source = 配置文件路径、name = 服务器名。
+#[tauri::command]
+pub async fn project_ai_claim_local(
+    app: AppHandle,
+    path: String,
+    kind: String,
+    source: String,
+    name: Option<String>,
+    expected_revision: String,
+) -> RlResult<ClaimOutcome> {
+    tokio::task::spawn_blocking(move || {
+        let _guard = lock_op();
+        let (library, root) = prepare(&app, &path, &kind, &expected_revision)?;
+        claim_local(&library, &root, &kind, &source, name.as_deref())
+    })
+    .await
+    .map_err(|e| problem(e.to_string()))?
+}
+
+fn claim_local(
+    library: &Library,
+    root: &Path,
+    kind: &str,
+    source: &str,
+    name: Option<&str>,
+) -> RlResult<ClaimOutcome> {
+    validate_kind(kind)?;
+    let state_path = manifest_file(library, root);
+    let mut state = read_manifest(&state_path, root)?;
+    let (entry, local) = if kind == "skills" {
+        // source 必须是某个 Agent skills 目录下的安全目录名,据此归属来源 Agent。
+        let origin = TARGETS
+            .iter()
+            .find_map(|t| {
+                let prefix = format!("{}/", t.skill_path);
+                source
+                    .strip_prefix(&prefix)
+                    .filter(|rest| is_safe_directory(rest))
+                    .map(|_| t)
+            })
+            .ok_or_else(|| problem(source))?;
+        let tree = read_tree(&safe_path(root, source)?)?;
+        let body = tree
+            .get("SKILL.md")
+            .ok_or_else(|| problem("SKILL.md missing"))?;
+        let body = std::str::from_utf8(&body.bytes).map_err(|e| problem(e.to_string()))?;
+        let (name, description) = super::parse_skill_frontmatter(body);
+        let name = name
+            .filter(|n| !n.trim().is_empty())
+            .ok_or_else(|| problem(source))?;
+        let id = format!("{LOCAL_PREFIX}skills:{source}");
+        (
+            Deployment {
+                kind: kind.to_string(),
+                agent_id: origin.id.to_string(),
+                resource_id: id.clone(),
+                name: name.clone(),
+                path: source.to_string(),
+                fingerprint: tree_hash(&tree),
+            },
+            LocalResource {
+                kind: kind.to_string(),
+                id,
+                name,
+                description: description.unwrap_or_default(),
+                source_path: source.to_string(),
+                origin_agent: origin.id.to_string(),
+            },
+        )
+    } else {
+        let name = name.ok_or_else(|| problem("MCP server name required"))?;
+        let target = MCP_TARGETS
+            .iter()
+            .find(|t| t.path == source)
+            .ok_or_else(|| problem(source))?;
+        let value = McpDocument::read(root, target)?
+            .entry(target, name)?
+            .ok_or_else(|| problem(name))?;
+        // 认领时校验可转换为通用定义,之后才能部署到其他 Agent。
+        parse_server_value(target, name, &value)?;
+        let id = format!("{LOCAL_PREFIX}mcp:{source}#{name}");
+        (
+            Deployment {
+                kind: kind.to_string(),
+                agent_id: target.agents[0].to_string(),
+                resource_id: id.clone(),
+                name: name.to_string(),
+                path: source.to_string(),
+                fingerprint: json_hash(&value),
+            },
+            LocalResource {
+                kind: kind.to_string(),
+                id,
+                name: name.to_string(),
+                description: String::new(),
+                source_path: source.to_string(),
+                origin_agent: target.agents[0].to_string(),
+            },
+        )
+    };
+    // 幂等:已认领直接返回,由调用方继续 assign 目标 Agent。
+    if state
+        .locals
+        .iter()
+        .any(|l| l.kind == kind && l.id == local.id)
+    {
+        return Ok(ClaimOutcome {
+            resource_id: local.id,
+        });
+    }
+    if state.entries.iter().any(|e| {
+        e.kind == kind && e.path == entry.path && (kind == "skills" || e.name == entry.name)
+    }) {
+        return Err(problem(format!("resource collision: {}", entry.path)));
+    }
+    let resource_id = local.id.clone();
+    state.locals.push(local);
+    state.entries.push(entry);
+    save_manifest(&state_path, &state)?;
+    Ok(ClaimOutcome { resource_id })
 }
 
 /// selectedIds 是指定 Agent/种类的完整选择集;仅测试引用,命令面为 add/assign/remove。
@@ -859,6 +1194,17 @@ fn apply_one(
         .iter()
         .find(|e| e.kind == kind && e.agent_id == agent && e.resource_id == id)
         .cloned();
+    // 本地来源(非托管认领)的来源 Agent:认领取现状指纹,解除仅删记录保留文件。
+    if let Some(local) = state
+        .locals
+        .iter()
+        .find(|l| l.kind == kind && l.id == id)
+        .cloned()
+    {
+        if agent == local.origin_agent {
+            return apply_local_origin(root, state_path, state, &local, agent, selected);
+        }
+    }
     // 来源被删除/上锁时保留已配置项,不把空来源列表当成卸载指令。
     if selected && source.is_none() {
         return if existing.is_some() {
@@ -878,7 +1224,16 @@ fn apply_one(
                 }
                 format!("{}/{}", target(agent)?.skill_path, skill.directory)
             }
-            Source::Mcp(_) => target(agent)?.mcp_path.to_string(),
+            Source::Mcp(_) | Source::LocalMcp(..) => target(agent)?.mcp_path.to_string(),
+            Source::LocalSkill(local) => {
+                let dir = local
+                    .source_path
+                    .rsplit('/')
+                    .next()
+                    .filter(|d| is_safe_directory(d))
+                    .ok_or_else(|| problem(&local.source_path))?;
+                format!("{}/{}", target(agent)?.skill_path, dir)
+            }
         };
         Deployment {
             kind: kind.to_string(),
@@ -922,7 +1277,7 @@ fn apply_one(
         }
     }
     let content = if selected {
-        Some(source_content(library, source.unwrap(), agent)?)
+        Some(source_content(library, root, source.unwrap(), agent)?)
     } else {
         None
     };

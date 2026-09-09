@@ -18,6 +18,7 @@ import {
 import { useSettingsStore } from "@/stores/settings";
 import {
   assignProjectResource,
+  claimLocalProjectResource,
   importProjectResource,
   loadProjectResources,
   removeProjectResource,
@@ -256,8 +257,19 @@ async function toggleAgent(resource: ResourceChoice, agent: ProjectAiTarget) {
   }
 }
 function preview(resource: ResourceChoice) {
-  // skills 统一走技能预览页(库技能按 id);MCP 保持抽屉只读预览
+  // skills 统一走技能预览页(库技能按 id,本地来源按目录);MCP 保持抽屉只读预览
   if (props.kind === "skills") {
+    if (resource.id.startsWith("local:")) {
+      const dir = records(resource.id)[0]?.path;
+      if (dir) {
+        void router.push({
+          name: "resource-skill",
+          params: { id: "local" },
+          query: { dir, from: props.from },
+        });
+      }
+      return;
+    }
     void router.push({
       name: "resource-skill",
       params: { id: resource.id },
@@ -282,13 +294,29 @@ function previewUnmanaged(item: UnmanagedItem) {
   }
   emit("preview", item.path);
 }
-/** 非托管行可见 Agent:设置页未隐藏的全部目标(skills 所有目标均支持) */
-const unmanagedAgents = computed(() =>
-  props.targets.filter((a) => !settings.hiddenResourceAgents.includes(a.id)),
-);
+/** 非托管行的归属 Agent:skills 按目录前缀、mcp 按配置文件路径判定。 */
+function unmanagedOwner(item: UnmanagedItem): string {
+  const owner =
+    props.kind === "skills"
+      ? props.targets.find((a) => item.source.startsWith(`${a.skillPath}/`))
+      : props.targets.find((a) => a.mcpPath === item.source);
+  return owner?.id ?? "";
+}
+/** 非托管行可见 Agent:未隐藏目标 ∪ 归属 Agent(即使隐藏也展示其现状)。 */
+function unmanagedChips(item: UnmanagedItem) {
+  return props.targets.filter(
+    (a) => !settings.hiddenResourceAgents.includes(a.id) || a.id === unmanagedOwner(item),
+  );
+}
+function unmanagedChipTitle(item: UnmanagedItem, agent: ProjectAiTarget) {
+  if (unmanagedOwner(item) === agent.id) {
+    return `${agent.name} · ${item.source} · ${t("projectAi.states.configured")}`;
+  }
+  return `${agent.name} · ${props.kind === "skills" ? agent.skillPath : agent.mcpPath}`;
+}
 /**
- * 非托管技能直接配置 Agent:先认领入库(同名复用库条目,来源 Agent 按现状
- * 认领为托管配置),再把目标集合设为「现状 ∪ 点击的 Agent」一次 assign。
+ * 非托管资源直接配置 Agent:先认领为项目本地来源(记录来源、不入库,
+ * 来源 Agent 按现状登记),再把目标集合设为「现状 ∪ 点击的 Agent」一次 assign。
  */
 async function configureUnmanaged(item: UnmanagedItem, agent: ProjectAiTarget) {
   if (!data.value || toggling.value) {
@@ -296,7 +324,7 @@ async function configureUnmanaged(item: UnmanagedItem, agent: ProjectAiTarget) {
   }
   toggling.value = `${item.key}:${agent.id}`;
   try {
-    const outcome = await importProjectResource({
+    const outcome = await claimLocalProjectResource({
       path: props.projectPath,
       kind: props.kind,
       source: item.source,
@@ -578,13 +606,18 @@ function changed() {
             </p>
             <p class="mt-1 truncate font-mono text-[10px] text-muted-foreground">{{ item.path }}</p>
           </div>
-          <div v-if="kind === 'skills'" class="flex flex-wrap gap-1">
+          <div class="flex flex-wrap gap-1">
             <button
-              v-for="agent in unmanagedAgents"
+              v-for="agent in unmanagedChips(item)"
               :key="agent.id"
-              class="flex size-6 items-center justify-center rounded border text-muted-foreground hover:bg-accent hover:text-foreground"
-              :disabled="!!toggling"
-              :title="`${agent.name} · ${agent.skillPath}`"
+              class="flex size-6 items-center justify-center rounded border"
+              :class="
+                unmanagedOwner(item) === agent.id
+                  ? 'border-primary/40 bg-primary/10 text-primary'
+                  : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+              "
+              :disabled="!!toggling || unmanagedOwner(item) === agent.id"
+              :title="unmanagedChipTitle(item, agent)"
               @click="configureUnmanaged(item, agent)"
             >
               <LoaderCircle

@@ -101,6 +101,22 @@ export interface ResourceImportResult {
 export const importProjectResource = (input: ResourceImportInput) =>
   cmd<ResourceImportResult>("project_ai_import", { ...input });
 
+export interface ResourceClaimInput {
+  path: string;
+  kind: ProjectResourceKind;
+  /** skills: 项目内技能目录(如 .claude/skills/foo);mcp: 配置文件路径。 */
+  source: string;
+  /** mcp 专用:服务器名。 */
+  name?: string;
+  expectedRevision: string;
+}
+export interface ResourceClaimOutcome {
+  resourceId: string;
+}
+/** 认领非托管资源为项目本地来源(记录来源、不进资源库),来源 Agent 按现状登记为已配置。 */
+export const claimLocalProjectResource = (input: ResourceClaimInput) =>
+  cmd<ResourceClaimOutcome>("project_ai_claim_local", { ...input });
+
 export interface ResourceTreeGroup {
   id: string;
   name: string;

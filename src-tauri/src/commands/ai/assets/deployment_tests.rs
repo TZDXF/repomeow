@@ -562,3 +562,129 @@ fn parse_server_value_covers_project_dialects() {
     assert!(parse_server_value(claude, "s", &json!({})).is_err());
     assert!(parse_server_value(opencode, "s", &json!({"type": "local"})).is_err());
 }
+
+#[test]
+fn claim_local_skill_configures_agents_without_library_import() {
+    let f = Fixture::new();
+    let dir = f.root.join(".zcode/skills/release-tagger");
+    fs::create_dir_all(&dir).unwrap();
+    let body = "---\nname: release-tagger\ndescription: 打 tag\n---\nv1\n";
+    fs::write(dir.join("SKILL.md"), body).unwrap();
+
+    // 认领:不入库,来源 Agent(zcode)按现状登记为已配置。
+    let outcome = claim_local(&f.library, &f.root, "skills", ".zcode/skills/release-tagger", None).unwrap();
+    assert_eq!(outcome.resource_id, "local:skills:.zcode/skills/release-tagger");
+    let data: SkillLibrary = f.library.read_plain_json(FILE_SKILLS).unwrap();
+    assert!(data.skills.is_empty());
+    // 幂等:重复认领返回同一 ID,不产生重复记录。
+    let again = claim_local(&f.library, &f.root, "skills", ".zcode/skills/release-tagger", None).unwrap();
+    assert_eq!(again.resource_id, outcome.resource_id);
+    let snap = snapshot(&f.library, &f.root, "skills").unwrap();
+    assert_eq!(snap.resources.len(), 1);
+    assert_eq!(snap.resources[0].name, "release-tagger");
+    assert_eq!(snap.deployments.len(), 1);
+    assert_eq!(snap.deployments[0].entry.agent_id, "zcode");
+    assert_eq!(snap.deployments[0].status, "configured");
+
+    // 配置到 claude:复制内容;解除 claude:删除副本,来源不动。
+    let r = assign(
+        &f.library,
+        &f.root,
+        "skills",
+        &outcome.resource_id,
+        &["zcode".to_string(), "claude".to_string()],
+    )
+    .unwrap();
+    assert!(r.failures.is_empty());
+    assert_eq!(r.applied, 1);
+    assert_eq!(
+        fs::read_to_string(f.root.join(".claude/skills/release-tagger/SKILL.md")).unwrap(),
+        body
+    );
+
+    // 来源编辑后:来源 Agent 显示 modified,其他 Agent 显示 update,重新 assign 应用更新。
+    let body_v2 = body.replace("v1", "v2");
+    fs::write(dir.join("SKILL.md"), &body_v2).unwrap();
+    let snap = snapshot(&f.library, &f.root, "skills").unwrap();
+    let status = |agent: &str| {
+        snap.deployments
+            .iter()
+            .find(|d| d.entry.agent_id == agent)
+            .unwrap()
+            .status
+            .clone()
+    };
+    assert_eq!(status("zcode"), "modified");
+    assert_eq!(status("claude"), "update");
+    let r = assign(
+        &f.library,
+        &f.root,
+        "skills",
+        &outcome.resource_id,
+        &["zcode".to_string(), "claude".to_string()],
+    )
+    .unwrap();
+    assert_eq!(r.applied, 1);
+    assert_eq!(
+        fs::read_to_string(f.root.join(".claude/skills/release-tagger/SKILL.md")).unwrap(),
+        body_v2
+    );
+
+    let r = assign(&f.library, &f.root, "skills", &outcome.resource_id, &["zcode".to_string()]).unwrap();
+    assert_eq!(r.applied, 1);
+    assert!(!f.root.join(".claude/skills/release-tagger").exists());
+    assert!(dir.join("SKILL.md").exists());
+
+    // 解除来源 Agent:仅删记录保留文件;最后一个部署解除时清理本地记录,回到非托管。
+    let r = assign(&f.library, &f.root, "skills", &outcome.resource_id, &[]).unwrap();
+    assert_eq!(r.applied, 1);
+    assert!(dir.join("SKILL.md").exists());
+    let snap = snapshot(&f.library, &f.root, "skills").unwrap();
+    assert!(snap.deployments.is_empty());
+    assert!(snap.resources.is_empty());
+}
+
+#[test]
+fn claim_local_mcp_deploys_translated_and_preserves_origin() {
+    let f = Fixture::new();
+    fs::create_dir_all(f.root.join(".zcode")).unwrap();
+    fs::write(
+        f.root.join(".zcode/config.json"),
+        json!({ "mcp": { "servers": { "ctx": { "command": "node", "args": ["s.js"] } } } })
+            .to_string(),
+    )
+    .unwrap();
+    let outcome =
+        claim_local(&f.library, &f.root, "mcp", ".zcode/config.json", Some("ctx")).unwrap();
+    assert_eq!(outcome.resource_id, "local:mcp:.zcode/config.json#ctx");
+    // 不入库
+    let servers: Vec<McpServer> = f.library.read_mcp_json().unwrap();
+    assert!(servers.is_empty());
+
+    let r = assign(
+        &f.library,
+        &f.root,
+        "mcp",
+        &outcome.resource_id,
+        &["zcode".to_string(), "claude".to_string()],
+    )
+    .unwrap();
+    assert!(r.failures.is_empty());
+    let doc: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(f.root.join(".mcp.json")).unwrap()).unwrap();
+    assert_eq!(doc["mcpServers"]["ctx"]["command"], "node");
+
+    // 移除:副本删除,来源文件保持原样,本地记录清理。
+    let r = remove_resource(&f.library, &f.root, "mcp", &outcome.resource_id).unwrap();
+    assert!(r.failures.is_empty());
+    let doc: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(f.root.join(".mcp.json")).unwrap()).unwrap();
+    assert!(doc["mcpServers"].get("ctx").is_none());
+    let origin: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(f.root.join(".zcode/config.json")).unwrap())
+            .unwrap();
+    assert_eq!(origin["mcp"]["servers"]["ctx"]["command"], "node");
+    let snap = snapshot(&f.library, &f.root, "mcp").unwrap();
+    assert!(snap.deployments.is_empty());
+    assert!(snap.resources.is_empty());
+}

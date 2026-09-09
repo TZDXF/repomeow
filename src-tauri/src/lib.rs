@@ -290,6 +290,7 @@ pub fn run() {
             commands::ai::project_ai_assign,
             commands::ai::project_ai_remove,
             commands::ai::project_ai_import,
+            commands::ai::project_ai_claim_local,
             commands::ai::rl_library_info,
             commands::ai::rl_library_open_dir,
             commands::ai::rl_skill_list,
