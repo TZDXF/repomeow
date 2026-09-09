@@ -365,6 +365,49 @@ async function configureUnmanaged(item: UnmanagedItem, agent: ProjectAiTarget) {
     toggling.value = "";
   }
 }
+/**
+ * 已认领的本地来源(配置到其他 Agent 后进入托管列表的 local: 资源)仍可随时收入资源库:
+ * 后端 import 会经 migrate_local 把部署记录改挂到库资源 ID,本地来源记录随之清除。
+ * 来源与名称优先取部署记录;无部署记录时从 local id 解析(local:skills:<dir> / local:mcp:<path>#<name>)。
+ */
+function localImportTarget(resource: ResourceChoice): { source: string; name?: string } | null {
+  if (!resource.id.startsWith("local:")) {
+    return null;
+  }
+  const record = records(resource.id)[0];
+  if (record) {
+    return { source: record.path, name: props.kind === "mcp" ? record.name : undefined };
+  }
+  const rest = resource.id.slice(`local:${props.kind}:`.length);
+  if (props.kind === "skills") {
+    return rest ? { source: rest } : null;
+  }
+  const hash = rest.lastIndexOf("#");
+  return hash > 0 ? { source: rest.slice(0, hash), name: rest.slice(hash + 1) } : null;
+}
+async function importLocal(resource: ResourceChoice) {
+  const target = localImportTarget(resource);
+  if (!data.value || importing.value || !target) {
+    return;
+  }
+  importing.value = resource.id;
+  try {
+    await importProjectResource({
+      path: props.projectPath,
+      kind: props.kind,
+      source: target.source,
+      name: target.name,
+      expectedRevision: data.value.revision,
+    });
+    toast.success(t("projectAi.imported", { name: resource.name }));
+    changed();
+  } catch (e) {
+    toast.error(String(e));
+  } finally {
+    importing.value = null;
+  }
+}
+
 async function importUnmanaged(item: UnmanagedItem) {
   if (!data.value || importing.value) {
     return;
@@ -557,6 +600,19 @@ function changed() {
               >{{ t("projectAi.noAgents") }}</span
             >
           </div>
+          <Button
+            v-if="localImportTarget(resource)"
+            variant="outline"
+            size="sm"
+            class="h-7 px-2 text-xs"
+            :disabled="importing === resource.id"
+            :title="t('projectAi.importHint')"
+            @click="importLocal(resource)"
+            ><LoaderCircle v-if="importing === resource.id" class="size-3.5 animate-spin" /><Import
+              v-else
+              class="size-3.5"
+            />{{ t("projectAi.import") }}</Button
+          >
           <Button
             variant="ghost"
             size="icon"
