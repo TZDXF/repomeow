@@ -18,6 +18,7 @@ import { Markdown, type ControlsConfig } from "vue-stream-markdown";
 import FileTreeList from "@/components/common/FileTreeList.vue";
 import {
   ModelSelector,
+  modelDisplayName,
   parseModelOptionValue,
   type ModelSelectorGroup,
 } from "@/components/ai-elements/model-selector";
@@ -436,6 +437,15 @@ const SCAN_MODEL_STORAGE_KEY = "repomeow.rl-scan-model";
 const SCAN_MODEL_DEFAULT = "default";
 const scanModelValue = ref(localStorage.getItem(SCAN_MODEL_STORAGE_KEY) ?? SCAN_MODEL_DEFAULT);
 
+const scanDefaultModelLabel = computed(() => {
+  const model = aiConfig.defaultModel?.model;
+  return model
+    ? t("settings.resources.skills.previewPage.scan.modelDefaultNamed", {
+        model: modelDisplayName(model),
+      })
+    : t("settings.resources.skills.previewPage.scan.modelDefault");
+});
+
 const scanModelGroups = computed<ModelSelectorGroup[]>(() => {
   const config = aiConfig.config;
   if (!config) return [];
@@ -786,9 +796,9 @@ const llmNotice = computed(() => {
                 :disabled="scanning"
                 :generic-option="{
                   value: SCAN_MODEL_DEFAULT,
-                  label: t('settings.resources.skills.previewPage.scan.modelDefault'),
+                  label: scanDefaultModelLabel,
                 }"
-                trigger-class="text-muted-foreground min-w-0 max-w-44"
+                trigger-class="text-muted-foreground min-w-0 max-w-96"
               />
             </span>
             <Button

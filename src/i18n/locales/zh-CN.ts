@@ -1965,6 +1965,7 @@ export default {
             cancel: "取消",
             modelLabel: "语义分析使用的模型",
             modelDefault: "默认模型",
+            modelDefaultNamed: "{model}（默认）",
             notScanned: "尚未扫描,点击「开始扫描」获取风险报告",
             summary: "AI 摘要:",
             filesScanned: "已扫描 {count} 个文件",

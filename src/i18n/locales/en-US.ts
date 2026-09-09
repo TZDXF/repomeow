@@ -2058,6 +2058,7 @@ export default {
             cancel: "Cancel",
             modelLabel: "Model used for semantic analysis",
             modelDefault: "Default model",
+            modelDefaultNamed: "{model} (default)",
             notScanned: 'Not scanned yet. Click "Start scan" to get a risk report',
             summary: "AI summary:",
             filesScanned: "{count} files scanned",
