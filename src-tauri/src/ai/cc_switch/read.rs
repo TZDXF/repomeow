@@ -22,7 +22,10 @@ pub(super) struct RawProvider {
 
 /// CC Switch 可能正在运行并持有数据库;复制(含 WAL 侧车文件)到临时目录再打开,
 /// 避免锁冲突,也能读到 WAL 中已提交的最新数据。回调拿到的是临时副本路径。
-pub(super) fn with_staged_db<T>(db_path: &Path, f: impl FnOnce(&Path) -> AppResult<T>) -> AppResult<T> {
+pub(super) fn with_staged_db<T>(
+    db_path: &Path,
+    f: impl FnOnce(&Path) -> AppResult<T>,
+) -> AppResult<T> {
     let staging = std::env::temp_dir().join(format!("repomeow-cc-switch-{}", now_ts_nanos()));
     fs::create_dir_all(&staging)?;
     let result = (|| {
@@ -77,7 +80,8 @@ fn query_providers(path: &Path) -> AppResult<Vec<RawProvider>> {
 
 /// 旧版 CC Switch(<3.x)的 `config.json`:`{ apps: { <app>: { providers: {id: Provider}, current } } }`。
 /// 解析失败按无供应商处理(不阻断,数据库才是新版事实源)。
-pub(super) fn read_legacy_config(path: &Path) -> Vec<RawProvider> {    let Ok(raw) = fs::read_to_string(path) else {
+pub(super) fn read_legacy_config(path: &Path) -> Vec<RawProvider> {
+    let Ok(raw) = fs::read_to_string(path) else {
         return Vec::new();
     };
     let Ok(value) = serde_json::from_str::<Value>(&raw) else {

@@ -237,4 +237,3 @@ fn commit_with_untracked_skips_nested_repo() {
 
     let _ = fs::remove_dir_all(&dir);
 }
-

@@ -1,12 +1,15 @@
-use serde_json::{json};
-use tauri::ipc::Channel;
-use tauri::{AppHandle, Manager};
+use super::*;
 use crate::agent::types::{AgentTool, AgentToolResult};
-use crate::commands::ai::{ai_generate_wiki, ai_update_wiki, GenerateWikiRequest, UpdateWikiRequest, WikiGenerationBackend, WikiGenerationEvent, WikiUpdateEvent};
+use crate::commands::ai::{
+    ai_generate_wiki, ai_update_wiki, GenerateWikiRequest, UpdateWikiRequest,
+    WikiGenerationBackend, WikiGenerationEvent, WikiUpdateEvent,
+};
 use crate::commands::wiki::{load_wiki, load_wiki_config_internal, WikiOutlinePage};
 use crate::db::Db;
 use crate::error::{AppError, ErrorCode};
-use super::*;
+use serde_json::json;
+use tauri::ipc::Channel;
+use tauri::{AppHandle, Manager};
 
 // ── Wiki ─────────────────────────────────────────────────────────────
 
@@ -212,5 +215,3 @@ pub(super) fn regenerate_wiki_tool(app: &AppHandle, ctx: &ChatToolContext) -> Ag
         },
     )
 }
-
-

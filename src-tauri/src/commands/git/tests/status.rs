@@ -228,4 +228,3 @@ fn worktree_files_include_untracked_on_unborn_head() {
 
     let _ = fs::remove_dir_all(&dir);
 }
-

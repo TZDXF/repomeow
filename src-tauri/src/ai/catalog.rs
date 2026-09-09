@@ -365,7 +365,10 @@ pub fn normalize(config: &mut AiConfigFile) {
     config.task_models = std::mem::take(&mut config.task_models)
         .into_iter()
         .map(|(purpose, reference)| {
-            (purpose, reference.filter(|r| model_exists(config, &r.provider_id, &r.model_id)))
+            (
+                purpose,
+                reference.filter(|r| model_exists(config, &r.provider_id, &r.model_id)),
+            )
         })
         .collect();
     let chat_model_valid = config
@@ -506,13 +509,19 @@ pub fn legacy_ai_config(config: &AiConfigFile) -> crate::ai::sdk::AiConfig {
 
 /// 场景模型未指定或引用失效时跟随默认模型。
 pub fn legacy_ai_config_for(config: &AiConfigFile, purpose: &str) -> crate::ai::sdk::AiConfig {
-    let reference = config.task_models.get(purpose).and_then(Option::as_ref)
+    let reference = config
+        .task_models
+        .get(purpose)
+        .and_then(Option::as_ref)
         .filter(|r| model_exists(config, &r.provider_id, &r.model_id))
         .or(config.default_model.as_ref());
     project_ai_config(config, reference)
 }
 
-fn project_ai_config(config: &AiConfigFile, reference: Option<&ModelRef>) -> crate::ai::sdk::AiConfig {
+fn project_ai_config(
+    config: &AiConfigFile,
+    reference: Option<&ModelRef>,
+) -> crate::ai::sdk::AiConfig {
     let empty = crate::ai::sdk::AiConfig::default();
     let Some(reference) = reference else {
         return empty;
@@ -608,21 +617,37 @@ mod tests {
         };
         config.default_model = Some(reference.clone());
         for purpose in ["commit", "report", "translation"] {
-            assert_eq!(legacy_ai_config_for(&config, purpose).ai_model, reference.model_id);
-            config.task_models.insert(purpose.into(), Some(reference.clone()));
+            assert_eq!(
+                legacy_ai_config_for(&config, purpose).ai_model,
+                reference.model_id
+            );
+            config
+                .task_models
+                .insert(purpose.into(), Some(reference.clone()));
         }
         config.default_model = None;
         for purpose in ["commit", "report", "translation"] {
-            assert_eq!(legacy_ai_config_for(&config, purpose).ai_model, reference.model_id);
+            assert_eq!(
+                legacy_ai_config_for(&config, purpose).ai_model,
+                reference.model_id
+            );
         }
         config.default_model = Some(reference.clone());
-        config.task_models.insert("report".into(), Some(ModelRef {
-            provider_id: "deleted".into(), model_id: "deleted".into(),
-        }));
-        assert_eq!(legacy_ai_config_for(&config, "report").ai_model, reference.model_id);
+        config.task_models.insert(
+            "report".into(),
+            Some(ModelRef {
+                provider_id: "deleted".into(),
+                model_id: "deleted".into(),
+            }),
+        );
+        assert_eq!(
+            legacy_ai_config_for(&config, "report").ai_model,
+            reference.model_id
+        );
         normalize(&mut config);
         assert_eq!(config.task_models.get("report"), Some(&None));
-        let roundtrip: AiConfigFile = serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
+        let roundtrip: AiConfigFile =
+            serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
         assert_eq!(roundtrip.task_models, config.task_models);
         let old: AiConfigFile = serde_json::from_str("{}").unwrap();
         assert!(old.task_models.is_empty());
@@ -671,7 +696,10 @@ mod tests {
             resolve_model(&config, "mixed", "chat").unwrap().api,
             API_OPENAI_COMPLETIONS
         );
-        assert_eq!(config.providers["mixed"].models[1].api.as_deref(), Some("future-wire"));
+        assert_eq!(
+            config.providers["mixed"].models[1].api.as_deref(),
+            Some("future-wire")
+        );
         assert!(resolve_model(&config, "mixed", "future").is_err());
     }
 

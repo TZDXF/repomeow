@@ -37,4 +37,3 @@ fn observe_head_only_reports_real_changes_after_initial_snapshot() {
     let forced = format!("observe-head-forced-{}", crate::time_util::now_ts_nanos());
     assert!(observe_head(&forced, Some("a".into()), true));
 }
-

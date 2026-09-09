@@ -1,10 +1,12 @@
-use std::sync::Arc;
-use serde::Serialize;
-use serde_json::{Value};
-use crate::agent::types::{AgentTool, AgentToolResult, AgentToolUpdateCallback, ToolExecutionError, ToolExecutionMode};
+use super::*;
+use crate::agent::types::{
+    AgentTool, AgentToolResult, AgentToolUpdateCallback, ToolExecutionError, ToolExecutionMode,
+};
 use crate::error::{AppError, ErrorCode};
 use crate::time_util::now_ts_nanos;
-use super::*;
+use serde::Serialize;
+use serde_json::Value;
+use std::sync::Arc;
 
 // ── 组装辅助 ─────────────────────────────────────────────────────────
 
@@ -112,5 +114,3 @@ pub(super) fn pseudo_request_id() -> String {
         lo & 0xffff_ffff_ffff,
     )
 }
-
-

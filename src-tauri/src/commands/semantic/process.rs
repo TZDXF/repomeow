@@ -95,9 +95,9 @@ pub(crate) fn resolve_sem_binary() -> AppResult<PathBuf> {
     let entries = std::fs::read_dir(dir).map_err(|error| missing(error.to_string()))?;
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        let is_sidecar = name.strip_prefix("sem-").is_some_and(|rest| {
-            !rest.is_empty() && (!cfg!(windows) || rest.ends_with(".exe"))
-        });
+        let is_sidecar = name
+            .strip_prefix("sem-")
+            .is_some_and(|rest| !rest.is_empty() && (!cfg!(windows) || rest.ends_with(".exe")));
         if is_sidecar && entry.file_type().is_ok_and(|kind| kind.is_file()) {
             triple_named = Some(entry.path());
             break;

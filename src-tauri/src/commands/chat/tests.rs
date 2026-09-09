@@ -427,10 +427,7 @@ fn permission_context(id: &str, tool_name: &str) -> BeforeToolCallContext {
     }
 }
 
-async fn wait_for_pending(
-    pending: &Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
-    id: &str,
-) {
+async fn wait_for_pending(pending: &Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>, id: &str) {
     for _ in 0..200 {
         if pending.lock().unwrap().contains_key(id) {
             return;

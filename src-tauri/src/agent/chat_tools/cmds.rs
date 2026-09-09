@@ -1,10 +1,10 @@
-use serde_json::json;
-use tauri::{AppHandle, Manager};
+use super::*;
 use crate::agent::types::AgentTool;
 use crate::commands::script;
 use crate::db::Db;
 use crate::error::{AppError, ErrorCode};
-use super::*;
+use serde_json::json;
+use tauri::{AppHandle, Manager};
 
 // ── 自定义命令 ───────────────────────────────────────────────────────
 
@@ -120,5 +120,3 @@ pub(super) fn add_custom_command_tool(app: &AppHandle, ctx: &ChatToolContext) ->
         },
     )
 }
-
-

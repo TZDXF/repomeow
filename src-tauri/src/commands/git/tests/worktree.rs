@@ -287,4 +287,3 @@ fn worktree_add_remote_branch_tracks_or_aligns_local() {
     let _ = fs::remove_dir_all(&clone_a);
     let _ = fs::remove_dir_all(&clone_b);
 }
-

@@ -391,14 +391,7 @@ fn shortlist_add_assign_remove_flow() {
     assert_eq!(snap.shortlist, vec!["s1".to_string()]);
     assert!(snap.deployments.is_empty());
     // 移除出列表;已部署资源移除时会先解除全部 Agent 配置。
-    assign(
-        &f.library,
-        &f.root,
-        "skills",
-        "s1",
-        &["claude".to_string()],
-    )
-    .unwrap();
+    assign(&f.library, &f.root, "skills", "s1", &["claude".to_string()]).unwrap();
     remove_resource(&f.library, &f.root, "skills", "s1").unwrap();
     let snap = snapshot(&f.library, &f.root, "skills").unwrap();
     assert!(snap.shortlist.is_empty());
@@ -411,14 +404,7 @@ fn assign_auto_enlists_deployed_resource_and_rejects_unknown_agent() {
     let f = Fixture::new();
     f.skill("s1", "review", "v1");
     // 未先添加、直接配置:自动加入项目列表。
-    assign(
-        &f.library,
-        &f.root,
-        "skills",
-        "s1",
-        &["claude".to_string()],
-    )
-    .unwrap();
+    assign(&f.library, &f.root, "skills", "s1", &["claude".to_string()]).unwrap();
     assert_eq!(
         snapshot(&f.library, &f.root, "skills").unwrap().shortlist,
         vec!["s1".to_string()]
@@ -449,7 +435,11 @@ fn import_unmanaged_skill_enlists_with_current_content() {
     // 项目里手写的技能(非托管):含 SKILL.md 之外的文件
     let dir = f.root.join(".claude/skills/manual");
     fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("SKILL.md"), "---\nname: manual\ndescription: 手写\n---\nbody").unwrap();
+    fs::write(
+        dir.join("SKILL.md"),
+        "---\nname: manual\ndescription: 手写\n---\nbody",
+    )
+    .unwrap();
     fs::write(dir.join("extra.txt"), "x").unwrap();
     let outcome = import_skill(&f.library, &f.root, ".claude/skills/manual").unwrap();
     assert!(!outcome.existed);
@@ -547,13 +537,15 @@ fn parse_server_value_covers_project_dialects() {
     assert_eq!(def.args, vec!["srv".to_string(), "--x".to_string()]);
     assert_eq!(def.env.get("K").map(String::as_str), Some("v"));
     let codex = MCP_TARGETS.iter().find(|t| t.dialect == "codex").unwrap();
-    let def = parse_server_value(codex, "s", &json!({"url": "https://x", "http_headers": {"A": "b"}})).unwrap();
+    let def = parse_server_value(
+        codex,
+        "s",
+        &json!({"url": "https://x", "http_headers": {"A": "b"}}),
+    )
+    .unwrap();
     assert_eq!(def.transport, "http");
     assert_eq!(def.headers.get("A").map(String::as_str), Some("b"));
-    let gemini = MCP_TARGETS
-        .iter()
-        .find(|t| t.dialect == "gemini")
-        .unwrap();
+    let gemini = MCP_TARGETS.iter().find(|t| t.dialect == "gemini").unwrap();
     let def = parse_server_value(gemini, "s", &json!({"httpUrl": "https://x"})).unwrap();
     assert_eq!(def.transport, "http");
     let def = parse_server_value(gemini, "s", &json!({"url": "https://x"})).unwrap();
@@ -572,12 +564,29 @@ fn claim_local_skill_configures_agents_without_library_import() {
     fs::write(dir.join("SKILL.md"), body).unwrap();
 
     // 认领:不入库,来源 Agent(zcode)按现状登记为已配置。
-    let outcome = claim_local(&f.library, &f.root, "skills", ".zcode/skills/release-tagger", None).unwrap();
-    assert_eq!(outcome.resource_id, "local:skills:.zcode/skills/release-tagger");
+    let outcome = claim_local(
+        &f.library,
+        &f.root,
+        "skills",
+        ".zcode/skills/release-tagger",
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        outcome.resource_id,
+        "local:skills:.zcode/skills/release-tagger"
+    );
     let data: SkillLibrary = f.library.read_plain_json(FILE_SKILLS).unwrap();
     assert!(data.skills.is_empty());
     // 幂等:重复认领返回同一 ID,不产生重复记录。
-    let again = claim_local(&f.library, &f.root, "skills", ".zcode/skills/release-tagger", None).unwrap();
+    let again = claim_local(
+        &f.library,
+        &f.root,
+        "skills",
+        ".zcode/skills/release-tagger",
+        None,
+    )
+    .unwrap();
     assert_eq!(again.resource_id, outcome.resource_id);
     let snap = snapshot(&f.library, &f.root, "skills").unwrap();
     assert_eq!(snap.resources.len(), 1);
@@ -630,7 +639,14 @@ fn claim_local_skill_configures_agents_without_library_import() {
         body_v2
     );
 
-    let r = assign(&f.library, &f.root, "skills", &outcome.resource_id, &["zcode".to_string()]).unwrap();
+    let r = assign(
+        &f.library,
+        &f.root,
+        "skills",
+        &outcome.resource_id,
+        &["zcode".to_string()],
+    )
+    .unwrap();
     assert_eq!(r.applied, 1);
     assert!(!f.root.join(".claude/skills/release-tagger").exists());
     assert!(dir.join("SKILL.md").exists());
@@ -654,8 +670,14 @@ fn claim_local_mcp_deploys_translated_and_preserves_origin() {
             .to_string(),
     )
     .unwrap();
-    let outcome =
-        claim_local(&f.library, &f.root, "mcp", ".zcode/config.json", Some("ctx")).unwrap();
+    let outcome = claim_local(
+        &f.library,
+        &f.root,
+        "mcp",
+        ".zcode/config.json",
+        Some("ctx"),
+    )
+    .unwrap();
     assert_eq!(outcome.resource_id, "local:mcp:.zcode/config.json#ctx");
     // 不入库
     let servers: Vec<McpServer> = f.library.read_mcp_json().unwrap();
@@ -695,7 +717,14 @@ fn delete_unmanaged_removes_files_and_rejects_managed() {
     // skills:未托管目录整体删除
     fs::create_dir_all(f.root.join(".claude/skills/local-skill")).unwrap();
     fs::write(f.root.join(".claude/skills/local-skill/SKILL.md"), "body").unwrap();
-    delete_unmanaged(&f.library, &f.root, "skills", ".claude/skills/local-skill", None).unwrap();
+    delete_unmanaged(
+        &f.library,
+        &f.root,
+        "skills",
+        ".claude/skills/local-skill",
+        None,
+    )
+    .unwrap();
     assert!(!f.root.join(".claude/skills/local-skill").exists());
     // 路径不在任何 Agent skills 目录下 → 拒绝
     assert!(delete_unmanaged(&f.library, &f.root, "skills", "docs/guide", None).is_err());
@@ -713,7 +742,9 @@ fn delete_unmanaged_removes_files_and_rejects_managed() {
     // 已部署(托管)的路径/条目 → 拒绝
     f.skill("s1", "review", "v1");
     f.apply("skills", "claude", &["s1"]);
-    assert!(delete_unmanaged(&f.library, &f.root, "skills", ".claude/skills/review", None).is_err());
+    assert!(
+        delete_unmanaged(&f.library, &f.root, "skills", ".claude/skills/review", None).is_err()
+    );
     f.mcp();
     f.apply("mcp", "claude", &["m1"]);
     assert!(delete_unmanaged(&f.library, &f.root, "mcp", ".mcp.json", Some("context")).is_err());

@@ -1,12 +1,11 @@
-use std::collections::{HashMap};
+use super::*;
+use crate::agent::types::{BeforeToolCallHookFn, BeforeToolCallResult};
+use crate::ai::catalog::ChatPermission;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration};
+use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
-use crate::agent::types::{BeforeToolCallHookFn, BeforeToolCallResult};
-use crate::ai::catalog::{ChatPermission};
-use super::*;
-
 
 /// ask 权限下执行前需用户硬确认的工具(有副作用:写入 wiki / 自定义命令 /
 /// 生成报告 / 修改 wiki 生成配置)。
@@ -125,4 +124,3 @@ pub(super) fn build_permission_hook(
         })
     })
 }
-

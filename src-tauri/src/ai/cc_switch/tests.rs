@@ -1,9 +1,9 @@
 use std::fs;
 
-use crate::time_util::now_ts_nanos;
 use super::parse::*;
 use super::read::*;
 use super::*;
+use crate::time_util::now_ts_nanos;
 use serde_json::json;
 
 fn raw(app: &str, settings_config: Value) -> RawProvider {
@@ -133,7 +133,9 @@ fn opencode_npm_maps_adapter() {
         "anthropic-messages"
     );
     assert_eq!(
-        convert_app("opencode", settings("@ai-sdk/google")).expect("google 包应可导入").api,
+        convert_app("opencode", settings("@ai-sdk/google"))
+            .expect("google 包应可导入")
+            .api,
         "google-generative-ai"
     );
     assert_eq!(

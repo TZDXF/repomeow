@@ -1,14 +1,16 @@
-use std::sync::{Arc, Mutex};
-use tauri::{AppHandle};
-use tokio_util::sync::CancellationToken;
+use super::*;
 use crate::agent::llm::{AssistantMessage, AssistantMessageEvent, StopReason, Usage};
-use crate::agent::types::{AgentEvent, AgentListener, AgentMessage, AgentToolResult, TextOrImageContent, TypedMessage};
+use crate::agent::types::{
+    AgentEvent, AgentListener, AgentMessage, AgentToolResult, TextOrImageContent, TypedMessage,
+};
 use crate::ai::catalog::{self};
-use crate::commands::usage::{insert_usage_row};
+use crate::commands::usage::insert_usage_row;
 use crate::db::Db;
 use crate::models::AiUsageRecord;
-use crate::time_util::{now_ts};
-use super::*;
+use crate::time_util::now_ts;
+use std::sync::{Arc, Mutex};
+use tauri::AppHandle;
+use tokio_util::sync::CancellationToken;
 
 // ── 事件监听与用量聚合 ───────────────────────────────────────────────
 

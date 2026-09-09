@@ -184,7 +184,9 @@ pub(super) fn parse_server_value(
             },
         ),
     };
-    let url = url.filter(|s| !s.trim().is_empty()).ok_or_else(|| problem(name))?;
+    let url = url
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| problem(name))?;
     let headers_key = if target.dialect == "codex" {
         "http_headers"
     } else {

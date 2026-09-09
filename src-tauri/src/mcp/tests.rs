@@ -193,7 +193,11 @@ fn seed_wiki(data_root: &Path, project_path: &str) {
         r#"{"status":"completed","version":1,"generatedAt":"2026-09-01 10:00","outline":[{"id":"overview","file":"01-overview.md","title":"总览","description":"项目总览","relevantFiles":["src/main.ts"]}]}"#,
     )
     .unwrap();
-    fs::write(dir.join("pages").join("01-overview.md"), "# 总览\n\n这是内容。\n").unwrap();
+    fs::write(
+        dir.join("pages").join("01-overview.md"),
+        "# 总览\n\n这是内容。\n",
+    )
+    .unwrap();
 }
 
 #[test]

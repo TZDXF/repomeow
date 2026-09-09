@@ -1,10 +1,10 @@
+use super::*;
+use crate::agent::types::AgentTool;
+use crate::commands::ai::WikiGenerationBackend;
+use crate::commands::wiki::load_wiki_config_internal;
+use crate::error::{AppError, ErrorCode};
 use serde_json::{json, Value};
 use tauri::AppHandle;
-use crate::agent::types::{AgentTool};
-use crate::commands::ai::{WikiGenerationBackend};
-use crate::commands::wiki::{load_wiki_config_internal};
-use crate::error::{AppError, ErrorCode};
-use super::*;
 
 // ── AI 配置与 Wiki 模型 ──────────────────────────────────────────────
 
@@ -27,10 +27,11 @@ pub(super) fn builtin_model_status(
     };
     let result = match crate::ai::catalog::resolve_model(config, provider_id, model_id) {
         Err(error) => Err(format!("配置的模型不存在:{reference}({error})")),
-        Ok(_) if config
-            .providers
-            .get(provider_id)
-            .is_none_or(|provider| provider.api_key.trim().is_empty()) =>
+        Ok(_)
+            if config
+                .providers
+                .get(provider_id)
+                .is_none_or(|provider| provider.api_key.trim().is_empty()) =>
         {
             Err(format!("厂商 {provider_id} 未配置 API Key"))
         }
@@ -211,5 +212,3 @@ pub(super) fn set_wiki_model_tool(app: &AppHandle, ctx: &ChatToolContext) -> Age
         },
     )
 }
-
-

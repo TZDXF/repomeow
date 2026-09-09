@@ -16,8 +16,8 @@ pub use types::*;
 
 use tokio_util::sync::CancellationToken;
 
-use event_stream::event_stream;
 use crate::time_util::now_ts_nanos;
+use event_stream::event_stream;
 
 /// 按 `Model.api` 分派到与 pi 对齐的 `streamSimple` adapter。
 pub fn stream_simple(
@@ -27,18 +27,18 @@ pub fn stream_simple(
     signal: Option<CancellationToken>,
 ) -> AssistantMessageEventStream {
     match model.api.as_str() {
-        API_OPENAI_COMPLETIONS => openai_completions::stream_openai_completions(
-            model, context, options, signal,
-        ),
-        API_OPENAI_RESPONSES => openai_responses::stream_openai_responses(
-            model, context, options, signal,
-        ),
-        API_ANTHROPIC_MESSAGES => anthropic_messages::stream_anthropic_messages(
-            model, context, options, signal,
-        ),
-        API_GOOGLE_GENERATIVE_AI => google_generative_ai::stream_google_generative_ai(
-            model, context, options, signal,
-        ),
+        API_OPENAI_COMPLETIONS => {
+            openai_completions::stream_openai_completions(model, context, options, signal)
+        }
+        API_OPENAI_RESPONSES => {
+            openai_responses::stream_openai_responses(model, context, options, signal)
+        }
+        API_ANTHROPIC_MESSAGES => {
+            anthropic_messages::stream_anthropic_messages(model, context, options, signal)
+        }
+        API_GOOGLE_GENERATIVE_AI => {
+            google_generative_ai::stream_google_generative_ai(model, context, options, signal)
+        }
         _ => unsupported_api_stream(model),
     }
 }

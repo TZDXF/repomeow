@@ -1,6 +1,5 @@
-
-use crate::error::{AppError, AppResult, ErrorCode};
 use super::*;
+use crate::error::{AppError, AppResult, ErrorCode};
 
 pub(super) fn http_client() -> reqwest::Client {
     reqwest::Client::builder()
@@ -73,7 +72,11 @@ pub(super) async fn send(req: reqwest::RequestBuilder) -> AppResult<reqwest::Res
 }
 
 /// 调用平台 /user 端点验证 token 并取用户名
-pub(super) async fn fetch_username(provider: &str, base_url: &str, token: &str) -> AppResult<String> {
+pub(super) async fn fetch_username(
+    provider: &str,
+    base_url: &str,
+    token: &str,
+) -> AppResult<String> {
     let api = api_base(provider, base_url);
     let url = match provider {
         "gitee" => format!("{api}/user?access_token={token}"),
@@ -277,4 +280,3 @@ pub(super) async fn fetch_gitee_org_repos_page(
     let items = fetch_json_array(&url, "gitee", &row.token).await?;
     Ok(parse_repos("gitee", &items))
 }
-

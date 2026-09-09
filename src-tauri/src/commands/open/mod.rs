@@ -11,12 +11,12 @@ mod terminal;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use editor::open_explorer;
 pub use editor::*;
 pub use shell::*;
-pub use terminal::*;
-pub(crate) use editor::open_explorer;
 pub(crate) use shell::{resolve_shell, ShellKind};
 pub(crate) use terminal::find_wt;
+pub use terminal::*;
 
 /// detect_editors 结果在 settings 表中的缓存 key(JSON: { "<kind>": bool })
 const EDITORS_SETTING_KEY: &str = "editors_available";
@@ -56,4 +56,3 @@ pub(crate) fn hidden(#[allow(unused_mut)] mut cmd: Command) -> Command {
     }
     cmd
 }
-

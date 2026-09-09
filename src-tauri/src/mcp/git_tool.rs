@@ -66,7 +66,9 @@ pub(super) fn commit_code_impl(input: CommitCodeInput) -> Result<CommitCodeOutpu
     })
 }
 
-pub(super) fn normalize_commit_paths(files: Option<Vec<String>>) -> Result<Option<Vec<String>>, ToolFailure> {
+pub(super) fn normalize_commit_paths(
+    files: Option<Vec<String>>,
+) -> Result<Option<Vec<String>>, ToolFailure> {
     let Some(files) = files else {
         return Ok(None);
     };

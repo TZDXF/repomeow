@@ -61,7 +61,11 @@ pub(crate) fn builtin_stream_fn(api_key: String, cancel: CancellationToken) -> S
     })
 }
 
-fn budget_tool(tool: AgentTool, budget: Arc<std::sync::atomic::AtomicUsize>, limit: usize) -> AgentTool {
+fn budget_tool(
+    tool: AgentTool,
+    budget: Arc<std::sync::atomic::AtomicUsize>,
+    limit: usize,
+) -> AgentTool {
     use std::sync::atomic::Ordering;
 
     let execute = tool.execute.clone();
@@ -237,9 +241,7 @@ pub(crate) async fn prompt_with_timeout(
     }
 }
 
-pub(crate) async fn collect_usage_events(
-    harness: &AgentHarness,
-) -> Arc<Mutex<Vec<UsageEvent>>> {
+pub(crate) async fn collect_usage_events(harness: &AgentHarness) -> Arc<Mutex<Vec<UsageEvent>>> {
     let usages = Arc::new(Mutex::new(Vec::<UsageEvent>::new()));
     let listener = usages.clone();
     let _subscription = harness.on_event(

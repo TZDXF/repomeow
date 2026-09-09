@@ -1,13 +1,16 @@
-use std::sync::{Arc, Mutex};
-use tauri::{AppHandle};
-use crate::agent::llm::event_stream::event_stream;
-use crate::agent::llm::{stream_simple, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, Context, Model, SimpleStreamOptions, StopReason, Usage};
-use crate::agent::types::{StreamFn};
-use crate::ai::catalog::{self};
-use crate::commands::usage::{estimate_text_tokens};
-use crate::error::{AppResult};
-use crate::time_util::{now_ts_nanos};
 use super::*;
+use crate::agent::llm::event_stream::event_stream;
+use crate::agent::llm::{
+    stream_simple, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, Context,
+    Model, SimpleStreamOptions, StopReason, Usage,
+};
+use crate::agent::types::StreamFn;
+use crate::ai::catalog::{self};
+use crate::commands::usage::estimate_text_tokens;
+use crate::error::AppResult;
+use crate::time_util::now_ts_nanos;
+use std::sync::{Arc, Mutex};
+use tauri::AppHandle;
 
 /// StreamFn 包装:每次 LLM 调用时重读 AI 配置(模型/密钥可热更新),
 /// 并在发起请求前把上下文构成估算写入会话槽;配置缺失时按流契约把失败
@@ -44,7 +47,10 @@ pub(super) fn chat_stream_fn(
 /// 上下文构成估算:system prompt 按原文、工具定义与消息按 JSON 序列化文本
 /// 计量(复用 ACP 用量兜底的 tiktoken 口径:已知模型选对应编码器,其余
 /// 回退 o200k_base)。是占比展示用的近似值,不用于计费。
-pub(super) fn estimate_context_breakdown(model_id: &str, context: &Context) -> ChatContextBreakdown {
+pub(super) fn estimate_context_breakdown(
+    model_id: &str,
+    context: &Context,
+) -> ChatContextBreakdown {
     let system_prompt = context
         .system_prompt
         .as_deref()
@@ -113,4 +119,3 @@ pub(super) fn error_assistant_message(model: &Model, message: &str) -> Assistant
         timestamp: now_ts_nanos() / 1_000_000,
     }
 }
-

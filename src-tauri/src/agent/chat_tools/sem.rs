@@ -1,8 +1,11 @@
+use super::*;
+use crate::agent::types::AgentTool;
+use crate::commands::semantic::{
+    semantic_entity_callers, semantic_entity_context, semantic_entity_refs, semantic_find_entities,
+    semantic_worktree_diff,
+};
 use serde_json::{json, Value};
 use tauri::AppHandle;
-use crate::agent::types::{AgentTool};
-use crate::commands::semantic::{semantic_entity_callers, semantic_entity_context, semantic_entity_refs, semantic_find_entities, semantic_worktree_diff};
-use super::*;
 
 // ── 语义分析 ─────────────────────────────────────────────────────────
 
@@ -191,5 +194,3 @@ pub(super) fn sem_diff_tool(app: &AppHandle, ctx: &ChatToolContext) -> AgentTool
         },
     )
 }
-
-

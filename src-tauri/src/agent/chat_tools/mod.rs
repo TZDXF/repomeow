@@ -28,7 +28,6 @@ use sem::*;
 use util::*;
 use wiki::*;
 
-
 /// 普通工具结果的字节上限。
 const TOOL_RESULT_MAX_BYTES: usize = 16 * 1024;
 /// read_wiki 单页正文的字节上限。
@@ -80,4 +79,3 @@ pub fn chat_tools(app: AppHandle, ctx: ChatToolContext) -> Vec<AgentTool> {
         set_wiki_model_tool(&app, &ctx),
     ]
 }
-

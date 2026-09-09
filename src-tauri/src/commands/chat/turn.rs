@@ -1,10 +1,12 @@
-use tauri::ipc::Channel;
-use tokio_util::sync::CancellationToken;
-use crate::agent::llm::retry::{is_retryable_assistant_error, retry_delay_ms, sleep_with_cancel, DEFAULT_BASE_DELAY_MS};
+use super::*;
+use crate::agent::llm::retry::{
+    is_retryable_assistant_error, retry_delay_ms, sleep_with_cancel, DEFAULT_BASE_DELAY_MS,
+};
 use crate::agent::llm::{AssistantMessage, StopReason};
 use crate::agent::types::{AgentMessage, TypedMessage};
 use crate::agent::Agent;
-use super::*;
+use tauri::ipc::Channel;
+use tokio_util::sync::CancellationToken;
 
 /// 项目问答回合的自动重试次数上限(provider/transport 瞬态错误,指数退避;
 /// 蓝本 pi 默认 3 次,见 agent::llm::retry::DEFAULT_MAX_RETRIES)。
@@ -100,4 +102,3 @@ pub(super) fn remove_last_failed_assistant(agent: &Agent) {
         agent.set_messages(messages);
     }
 }
-

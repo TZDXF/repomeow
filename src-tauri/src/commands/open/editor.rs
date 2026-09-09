@@ -1,10 +1,10 @@
-use std::collections::HashMap;
-use std::process::Command;
-use tauri::{AppHandle, State};
+use super::*;
 use crate::db::{self, Db};
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::EditorKind;
-use super::*;
+use std::collections::HashMap;
+use std::process::Command;
+use tauri::{AppHandle, State};
 /// 通过编辑器 CLI 打开目录(命令需在 PATH 中)
 pub(super) fn open_editor(cli: &str, path: &str) -> AppResult<()> {
     #[cfg(windows)]
@@ -233,4 +233,3 @@ pub fn detect_editors(db: State<'_, Db>) -> AppResult<HashMap<String, bool>> {
     db::set_setting(&conn, EDITORS_SETTING_KEY, &json)?;
     Ok(map)
 }
-

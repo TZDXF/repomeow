@@ -9,6 +9,7 @@ import {
   Check,
   Code,
   Eye,
+  ExternalLink,
   FolderOpen,
   Languages,
   ListPlus,
@@ -188,6 +189,13 @@ function goBack() {
     return;
   }
   void router.push({ path: "/settings", query: { category: "resources" } });
+}
+
+function openSourcePage() {
+  const url = skill.value?.marketplace?.url;
+  if (url) {
+    openUrl(url).catch((e) => toast.error(String(e)));
+  }
 }
 
 async function openDir() {
@@ -749,9 +757,18 @@ const llmNotice = computed(() => {
         </div>
       </div>
       <div class="ml-auto flex shrink-0 items-center gap-1.5">
-        <Badge v-if="skill?.marketplace" variant="secondary" :title="skill.marketplace.url">
+        <Button
+          v-if="skill?.marketplace"
+          variant="secondary"
+          size="sm"
+          class="h-8 gap-1.5"
+          :disabled="!skill.marketplace.url"
+          :title="t('settings.resources.skills.openSource', { source: skill.marketplace.source })"
+          @click="openSourcePage"
+        >
+          <ExternalLink class="h-3.5 w-3.5" />
           {{ skill.marketplace.source }}
-        </Badge>
+        </Button>
         <Button
           v-if="!isLocal"
           variant="ghost"

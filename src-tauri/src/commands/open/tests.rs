@@ -1,8 +1,8 @@
-use crate::db;
 use super::editor::*;
 use super::shell::*;
 use super::terminal::*;
 use super::*;
+use crate::db;
 use rusqlite::Connection;
 
 #[cfg(windows)]

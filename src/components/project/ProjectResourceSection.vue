@@ -794,10 +794,16 @@ function changed() {
           }}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="ghost" :disabled="removingUnmanaged" @click="unmanagedRemoveTarget = null">{{
-            t("common.cancel")
-          }}</Button>
-          <Button variant="destructive" :disabled="removingUnmanaged" @click="confirmRemoveUnmanaged"
+          <Button
+            variant="ghost"
+            :disabled="removingUnmanaged"
+            @click="unmanagedRemoveTarget = null"
+            >{{ t("common.cancel") }}</Button
+          >
+          <Button
+            variant="destructive"
+            :disabled="removingUnmanaged"
+            @click="confirmRemoveUnmanaged"
             ><LoaderCircle v-if="removingUnmanaged" class="size-4 animate-spin" />{{
               t("projectAi.remove")
             }}</Button

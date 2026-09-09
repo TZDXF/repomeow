@@ -409,4 +409,3 @@ fn truncate_last_user_turn(agent: &Agent) -> bool {
     agent.set_messages(messages);
     true
 }
-

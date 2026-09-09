@@ -85,4 +85,3 @@ fn scan_at(dir: &Path) -> AppResult<CcSwitchScan> {
         providers,
     })
 }
-

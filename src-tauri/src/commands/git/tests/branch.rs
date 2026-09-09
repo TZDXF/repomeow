@@ -376,4 +376,3 @@ fn list_branches_reports_upstream_tracking() {
     let _ = fs::remove_dir_all(&clone_a);
     let _ = fs::remove_dir_all(&clone_b);
 }
-

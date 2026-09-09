@@ -144,4 +144,3 @@ fn friendly_error_maps_remote_branch_gone() {
         );
     }
 }
-

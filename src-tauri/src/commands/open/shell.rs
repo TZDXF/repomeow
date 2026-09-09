@@ -1,7 +1,7 @@
-use serde::Serialize;
-use tauri::{AppHandle};
-use crate::error::{AppResult};
 use super::*;
+use crate::error::AppResult;
+use serde::Serialize;
+use tauri::AppHandle;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum ShellKind {
@@ -116,4 +116,3 @@ pub fn detect_terminal_capabilities() -> AppResult<TerminalCapabilities> {
 
     Ok(capabilities)
 }
-

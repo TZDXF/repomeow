@@ -190,8 +190,7 @@ fn read_manifest(path: &Path, root: &Path) -> RlResult<Manifest> {
         let valid = if local.kind == "skills" {
             let p = Path::new(&local.source_path);
             p.parent() == Some(Path::new(agent.skill_path))
-                && p
-                    .file_name()
+                && p.file_name()
                     .is_some_and(|n| is_safe_directory(&n.to_string_lossy()))
         } else {
             local.kind == "mcp" && local.source_path == agent.mcp_path && !local.name.is_empty()
@@ -206,9 +205,7 @@ fn read_manifest(path: &Path, root: &Path) -> RlResult<Manifest> {
     let mut shortlisted = HashSet::new();
     for item in &manifest.shortlist {
         validate_kind(&item.kind)?;
-        if item.resource_id.is_empty()
-            || !shortlisted.insert((&item.kind, &item.resource_id))
-        {
+        if item.resource_id.is_empty() || !shortlisted.insert((&item.kind, &item.resource_id)) {
             return Err(problem("invalid shortlist record"));
         }
     }
@@ -367,8 +364,9 @@ fn local_sources(root: &Path, manifest: &Manifest, kind: &str) -> Vec<Source> {
                 }
                 let mut local = local.clone();
                 if let Ok(content) = fs::read_to_string(path.join("SKILL.md")) {
-                    local.description =
-                        super::parse_skill_frontmatter(&content).1.unwrap_or_default();
+                    local.description = super::parse_skill_frontmatter(&content)
+                        .1
+                        .unwrap_or_default();
                 }
                 Some(Source::LocalSkill(local))
             } else {
@@ -462,9 +460,7 @@ fn snapshot(library: &Library, root: &Path, kind: &str) -> RlResult<ProjectResou
                 Ok(Some(_)) => {
                     if source_error.is_some() && !entry.resource_id.starts_with(LOCAL_PREFIX) {
                         "sourceUnavailable"
-                    } else if let Some(source) =
-                        all.iter().find(|s| s.id() == entry.resource_id)
-                    {
+                    } else if let Some(source) = all.iter().find(|s| s.id() == entry.resource_id) {
                         match source_content(library, root, source, &entry.agent_id) {
                             Ok(content) if content.fingerprint() == entry.fingerprint => {
                                 "configured"
@@ -675,7 +671,15 @@ fn assign(
             continue;
         }
         match apply_one(
-            library, root, &state_path, &mut state, kind, agent.id, id, selected, source,
+            library,
+            root,
+            &state_path,
+            &mut state,
+            kind,
+            agent.id,
+            id,
+            selected,
+            source,
         ) {
             Ok(changed) => result.applied += usize::from(changed),
             Err(e) => result.failures.push(AssignFailure {
@@ -738,7 +742,15 @@ fn remove_resource(library: &Library, root: &Path, kind: &str, id: &str) -> RlRe
     let mut result = AssignResult::default();
     for agent in agents {
         match apply_one(
-            library, root, &state_path, &mut state, kind, &agent, id, false, source,
+            library,
+            root,
+            &state_path,
+            &mut state,
+            kind,
+            &agent,
+            id,
+            false,
+            source,
         ) {
             Ok(changed) => result.applied += usize::from(changed),
             Err(e) => result.failures.push(AssignFailure {
@@ -796,11 +808,7 @@ pub async fn project_ai_import(
 }
 
 /// 认领入库:部署记录指纹取项目现状,来源与现状不一致时自然落「可更新」。
-fn enlist(
-    library: &Library,
-    root: &Path,
-    entry: Deployment,
-) -> RlResult<()> {
+fn enlist(library: &Library, root: &Path, entry: Deployment) -> RlResult<()> {
     let state_path = manifest_file(library, root);
     let mut state = read_manifest(&state_path, root)?;
     let collided = state.entries.iter().any(|e| {
@@ -813,7 +821,9 @@ fn enlist(
         return Err(problem(format!("resource collision: {}", entry.path)));
     }
     state.entries.retain(|e| {
-        !(e.kind == entry.kind && e.agent_id == entry.agent_id && e.resource_id == entry.resource_id)
+        !(e.kind == entry.kind
+            && e.agent_id == entry.agent_id
+            && e.resource_id == entry.resource_id)
     });
     if !state
         .shortlist
@@ -872,7 +882,14 @@ fn import_skill(library: &Library, root: &Path, source: &str) -> RlResult<Import
         }
         (skill, false)
     };
-    migrate_local(&manifest_file(library, root), root, "skills", source, None, &skill.id)?;
+    migrate_local(
+        &manifest_file(library, root),
+        root,
+        "skills",
+        source,
+        None,
+        &skill.id,
+    )?;
     enlist(
         library,
         root,
@@ -906,9 +923,19 @@ fn import_mcp(library: &Library, root: &Path, source: &str, name: &str) -> RlRes
     let (server, existed) = if let Some(existing) = list.iter().find(|m| m.name == def.name) {
         (existing.clone(), true)
     } else {
-        (crate::commands::ai::resource_library::import_mcp(library, &def)?, false)
+        (
+            crate::commands::ai::resource_library::import_mcp(library, &def)?,
+            false,
+        )
     };
-    migrate_local(&manifest_file(library, root), root, "mcp", source, Some(name), &server.id)?;
+    migrate_local(
+        &manifest_file(library, root),
+        root,
+        "mcp",
+        source,
+        Some(name),
+        &server.id,
+    )?;
     enlist(
         library,
         root,
@@ -963,16 +990,16 @@ fn apply_local_origin(
     agent: &str,
     selected: bool,
 ) -> RlResult<bool> {
-    let existed = state.entries.iter().any(|e| {
-        e.kind == local.kind && e.agent_id == agent && e.resource_id == local.id
-    });
+    let existed = state
+        .entries
+        .iter()
+        .any(|e| e.kind == local.kind && e.agent_id == agent && e.resource_id == local.id);
     if selected == existed {
         return Ok(false);
     }
     let mut next = state.clone();
-    next.entries.retain(|e| {
-        !(e.kind == local.kind && e.agent_id == agent && e.resource_id == local.id)
-    });
+    next.entries
+        .retain(|e| !(e.kind == local.kind && e.agent_id == agent && e.resource_id == local.id));
     if selected {
         let mut entry = Deployment {
             kind: local.kind.clone(),

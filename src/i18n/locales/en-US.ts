@@ -1977,6 +1977,8 @@ export default {
           skipInvalid: 'Skipped "{name}": SKILL.md has no frontmatter name',
         },
         searchPlaceholder: "Search skill name or description...",
+        searchFilters: "Search groups and sources",
+        noMatchingFilters: "No matching groups or sources",
         allGroups: "All",
         manageGroups: "Manage groups",
         checkUpdates: "Check updates",

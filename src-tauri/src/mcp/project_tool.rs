@@ -6,7 +6,9 @@ use crate::commands::files::read_file_preview;
 use crate::commands::report::list_report_history_impl;
 use crate::commands::script;
 
-use super::types::{ListReportsInput, ProjectDirectoryInput, ProjectFileOutput, ReadProjectFileInput};
+use super::types::{
+    ListReportsInput, ProjectDirectoryInput, ProjectFileOutput, ReadProjectFileInput,
+};
 use super::util::{data_root_or_default, open_db, require_project_id, ToolFailure};
 use crate::path_util::{clean_str, to_forward_slash_str};
 
@@ -16,7 +18,9 @@ const READ_FILE_MAX_LINES: u64 = 5000;
 
 // ── 项目洞察 ──────────────────────────────────────────────────────────
 
-pub(super) fn read_project_file_impl(input: ReadProjectFileInput) -> Result<ProjectFileOutput, ToolFailure> {
+pub(super) fn read_project_file_impl(
+    input: ReadProjectFileInput,
+) -> Result<ProjectFileOutput, ToolFailure> {
     let root = clean_str(&input.project_directory);
     if root.is_empty() {
         return Err(ToolFailure::new(

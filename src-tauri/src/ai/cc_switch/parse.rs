@@ -5,9 +5,9 @@ use crate::agent::llm::types::{
     API_OPENAI_RESPONSES,
 };
 
-use crate::ai::catalog::AiModelDef;
 use super::read::RawProvider;
 use super::CcSwitchProvider;
+use crate::ai::catalog::AiModelDef;
 
 // ── 按应用类型解析 settings_config ──────────────────────────────────
 
@@ -35,21 +35,41 @@ pub(super) fn convert(raw: &RawProvider) -> Option<CcSwitchProvider> {
         "opencode" => parse_opencode(&raw.settings_config)?,
         "claude" | "claude-desktop" => {
             let (base_url, api_key, models) = parse_claude(&raw.settings_config)?;
-            (base_url, api_key, API_ANTHROPIC_MESSAGES.to_string(), models)
+            (
+                base_url,
+                api_key,
+                API_ANTHROPIC_MESSAGES.to_string(),
+                models,
+            )
         }
         "gemini" => {
             let (base_url, api_key, models) = parse_gemini(&raw.settings_config)?;
-            (base_url, api_key, API_GOOGLE_GENERATIVE_AI.to_string(), models)
+            (
+                base_url,
+                api_key,
+                API_GOOGLE_GENERATIVE_AI.to_string(),
+                models,
+            )
         }
         "openclaw" => parse_openclaw(&raw.settings_config)?,
         "pi" => parse_pi(&raw.settings_config)?,
         "hermes" => {
             let (base_url, api_key, models) = parse_hermes(&raw.settings_config)?;
-            (base_url, api_key, API_OPENAI_COMPLETIONS.to_string(), models)
+            (
+                base_url,
+                api_key,
+                API_OPENAI_COMPLETIONS.to_string(),
+                models,
+            )
         }
         "grokbuild" => {
             let (base_url, api_key, models) = parse_grokbuild(&raw.settings_config)?;
-            (base_url, api_key, API_OPENAI_COMPLETIONS.to_string(), models)
+            (
+                base_url,
+                api_key,
+                API_OPENAI_COMPLETIONS.to_string(),
+                models,
+            )
         }
         _ => return None,
     };
@@ -447,4 +467,3 @@ fn parse_grokbuild(config: &Value) -> Option<(String, String, Vec<AiModelDef>)> 
     };
     Some((base_url, api_key, models))
 }
-

@@ -47,10 +47,10 @@ const sourceNameMap = computed(
 );
 const visibleSources = computed(() => sources.value.slice(0, MAX_VISIBLE_SOURCES));
 const hiddenSources = computed(() => sources.value.slice(MAX_VISIBLE_SOURCES));
-const searchedHiddenSources = computed(() => {
+const searchedSources = computed(() => {
   const normalized = sourcePickerQuery.value.trim().toLowerCase();
-  if (!normalized) return hiddenSources.value;
-  return hiddenSources.value.filter((source) => source.name.toLowerCase().includes(normalized));
+  if (!normalized) return sources.value;
+  return sources.value.filter((source) => source.name.toLowerCase().includes(normalized));
 });
 
 function sourceName(sourceId?: string): string {
@@ -271,7 +271,7 @@ async function openSkillPage(skill: ResourceMarketplaceSkill) {
           </div>
           <div class="mt-1 max-h-56 overflow-y-auto">
             <button
-              v-for="source in searchedHiddenSources"
+              v-for="source in searchedSources"
               :key="source.id"
               type="button"
               class="hover:bg-accent w-full truncate rounded-sm px-2 py-1.5 text-left text-xs"
@@ -281,7 +281,7 @@ async function openSkillPage(skill: ResourceMarketplaceSkill) {
             >
               {{ source.name }}
             </button>
-            <p v-if="!searchedHiddenSources.length" class="px-2 py-2 text-xs text-muted-foreground">
+            <p v-if="!searchedSources.length" class="px-2 py-2 text-xs text-muted-foreground">
               {{ t("settings.resources.market.noMatchingSources") }}
             </p>
           </div>

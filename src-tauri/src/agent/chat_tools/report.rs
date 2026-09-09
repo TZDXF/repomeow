@@ -1,12 +1,12 @@
-use chrono::{Local, TimeZone};
-use serde_json::{json};
-use tauri::{AppHandle, Manager};
+use super::*;
 use crate::agent::types::{AgentTool, AgentToolResult};
 use crate::commands::ai::{ai_generate_and_save_report, GenerateAndSaveReportRequest};
 use crate::commands::report;
 use crate::db::Db;
 use crate::error::{AppError, ErrorCode};
-use super::*;
+use chrono::{Local, TimeZone};
+use serde_json::json;
+use tauri::{AppHandle, Manager};
 
 // ── 报告 ─────────────────────────────────────────────────────────────
 
@@ -177,5 +177,3 @@ pub(super) fn list_reports_tool(app: &AppHandle, ctx: &ChatToolContext) -> Agent
         },
     )
 }
-
-

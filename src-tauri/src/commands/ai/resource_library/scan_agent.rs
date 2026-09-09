@@ -48,9 +48,13 @@ pub(super) async fn run_semantic_scan(
     );
     let usages = collect_usage_events(&harness).await;
     let request_cancel = cancel.child_token();
-    let result =
-        prompt_with_timeout(harness.clone(), user_prompt.to_string(), cancel, &request_cancel)
-            .await;
+    let result = prompt_with_timeout(
+        harness.clone(),
+        user_prompt.to_string(),
+        cancel,
+        &request_cancel,
+    )
+    .await;
     record_collected_usage(db, "scan", &model.id, &usages.lock().unwrap());
     let message = result?;
     Ok(crate::ai::sdk::strip_thinking(&assistant_text(&message)))

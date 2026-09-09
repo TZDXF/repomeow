@@ -1892,6 +1892,8 @@ export default {
           skipInvalid: "跳过「{name}」:SKILL.md 缺少 frontmatter name",
         },
         searchPlaceholder: "搜索技能名称或描述...",
+        searchFilters: "搜索分组和来源",
+        noMatchingFilters: "没有匹配的分组或来源",
         allGroups: "全部",
         manageGroups: "管理分组",
         checkUpdates: "检查更新",

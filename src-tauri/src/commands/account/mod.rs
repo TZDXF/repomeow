@@ -10,8 +10,8 @@ mod http;
 #[cfg(test)]
 mod tests;
 
-pub use gh::*;
 pub(crate) use gh::gh_cli_git_credentials;
+pub use gh::*;
 use http::*;
 
 #[derive(Debug, Clone, Serialize)]
@@ -181,7 +181,6 @@ pub(crate) fn build_authed_url(provider: &str, username: &str, token: &str, url:
         url.to_string()
     }
 }
-
 
 #[tauri::command]
 pub fn list_git_accounts(db: State<'_, Db>) -> AppResult<Vec<GitAccount>> {
@@ -355,4 +354,3 @@ pub async fn list_account_repos(db: State<'_, Db>, account_id: i64) -> AppResult
     }
     result
 }
-

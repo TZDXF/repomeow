@@ -1,6 +1,5 @@
-
-use crate::error::{AppError, AppResult, ErrorCode};
 use super::*;
+use crate::error::{AppError, AppResult, ErrorCode};
 
 // ── GitHub CLI(gh)虚拟账号 ─────────────────────────────────
 // 不落库、不出现在设置页账号列表;前端在「账号仓库」下拉中并入,
@@ -79,4 +78,3 @@ pub(crate) async fn gh_cli_git_credentials() -> AppResult<(String, String, Strin
     .await
     .map_err(|e| AppError::coded(ErrorCode::GhCliCredentialsFailed, e.to_string()))?
 }
-

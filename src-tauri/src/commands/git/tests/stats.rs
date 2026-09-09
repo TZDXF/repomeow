@@ -113,4 +113,3 @@ fn project_stats_merges_authors_by_email_case_insensitive() {
     assert_eq!(stats.authors[0].name, "Test Renamed");
     let _ = fs::remove_dir_all(&dir);
 }
-

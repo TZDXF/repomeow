@@ -296,7 +296,8 @@ fn run_docker_streaming(
         let _ = std::fs::remove_file(dest);
         return Err(AppError::coded(ErrorCode::DockerSaveFailed, e.to_string()));
     }
-    let status = wait_result.map_err(|e| AppError::coded(ErrorCode::DockerExecFailed, e.to_string()))?;
+    let status =
+        wait_result.map_err(|e| AppError::coded(ErrorCode::DockerExecFailed, e.to_string()))?;
     if !status.success() {
         let _ = std::fs::remove_file(dest);
         return Err(AppError::coded(
@@ -549,12 +550,13 @@ fn export_containers_merged(
     let mut images: Vec<String> = Vec::with_capacity(containers.len());
     for (service, id) in containers {
         let image = format!("repomeow-export-{}:{}", sanitize_repo_name(service), ts);
-        let committed = run_docker(dir, &["commit", "--pause=false", id.as_str(), &image]).and_then(|out| {
-            ensure_ok(
-                docker_action_label("提交临时镜像", "commit temporary image", language),
-                out,
-            )
-        });
+        let committed = run_docker(dir, &["commit", "--pause=false", id.as_str(), &image])
+            .and_then(|out| {
+                ensure_ok(
+                    docker_action_label("提交临时镜像", "commit temporary image", language),
+                    out,
+                )
+            });
         if let Err(e) = committed {
             // commit 失败时清掉已提交的临时镜像,不残留半成品
             for committed_image in &images {
@@ -601,7 +603,15 @@ pub async fn compose_export(
             export_all(dir, &file, &kind, &dest, merge, compress, &language)
         } else {
             // 单服务导出没有「合并」语义,merge 仅批量导出使用,此处忽略
-            export_one(dir, &file, &service, &kind, Path::new(&dest), compress, &language)
+            export_one(
+                dir,
+                &file,
+                &service,
+                &kind,
+                Path::new(&dest),
+                compress,
+                &language,
+            )
         }
     })
     .await

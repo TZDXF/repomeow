@@ -14,11 +14,11 @@ use crate::path_util::clean_str;
 mod git_tool;
 mod project_tool;
 mod report_tool;
+#[cfg(test)]
+mod tests;
 mod types;
 mod util;
 mod wiki_tool;
-#[cfg(test)]
-mod tests;
 
 use git_tool::*;
 use project_tool::*;
@@ -146,10 +146,8 @@ impl RepoMeowMcpServer {
         Parameters(input): Parameters<GitStatusInput>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let directory = clean_str(&input.directory);
-        let result = tokio::task::spawn_blocking(move || {
-            crate::commands::git::status(&directory)
-        })
-        .await;
+        let result =
+            tokio::task::spawn_blocking(move || crate::commands::git::status(&directory)).await;
         Ok(match result {
             Ok(Ok(status)) => CallToolResult::structured(json!(status)),
             Ok(Err(error)) => ToolFailure::from_app("读取 Git 状态失败", error).into_result(),
@@ -473,4 +471,3 @@ fn setting_bool(settings: &Value, key: &str) -> bool {
         _ => false,
     }
 }
-

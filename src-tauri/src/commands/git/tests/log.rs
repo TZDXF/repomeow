@@ -179,4 +179,3 @@ fn graph_log_excludes_remote_refs_when_disabled() {
     let _ = fs::remove_dir_all(&origin);
     let _ = fs::remove_dir_all(&clone_b);
 }
-

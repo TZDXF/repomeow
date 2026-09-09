@@ -87,4 +87,3 @@ fn commit_paths_partial_selection() {
 
     let _ = fs::remove_dir_all(&dir);
 }
-

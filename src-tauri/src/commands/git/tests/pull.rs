@@ -212,4 +212,3 @@ fn pull_reports_conflicts() {
     let _ = fs::remove_dir_all(&clone_a);
     let _ = fs::remove_dir_all(&clone_b);
 }
-

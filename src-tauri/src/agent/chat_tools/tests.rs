@@ -1,14 +1,9 @@
 use super::*;
 
-
 /// 内置目录 + 给 deepseek 配上密钥的测试配置。
 fn test_config() -> crate::ai::catalog::AiConfigFile {
     let mut config = crate::ai::catalog::builtin_config();
-    config
-        .providers
-        .get_mut("deepseek")
-        .unwrap()
-        .api_key = "sk-test".to_string();
+    config.providers.get_mut("deepseek").unwrap().api_key = "sk-test".to_string();
     config
 }
 

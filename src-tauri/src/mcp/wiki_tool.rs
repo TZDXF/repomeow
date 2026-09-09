@@ -4,8 +4,14 @@ use serde_json::{json, Value};
 
 use crate::commands::wiki::{load_wiki_at, wiki_dir_in};
 
-use super::types::{GetWikiDirectoryInput, ProjectDirectoryInput, ReadWikiPageInput, WikiDirectoryOutput, WikiPageOutput, WikiPagesOutput};
-use super::util::{data_root_or_default, repomeow_data_root, truncate_text, ToolFailure, WIKI_DIR_NAME, WIKI_META_FILE};
+use super::types::{
+    GetWikiDirectoryInput, ProjectDirectoryInput, ReadWikiPageInput, WikiDirectoryOutput,
+    WikiPageOutput, WikiPagesOutput,
+};
+use super::util::{
+    data_root_or_default, repomeow_data_root, truncate_text, ToolFailure, WIKI_DIR_NAME,
+    WIKI_META_FILE,
+};
 use crate::path_util::clean_str;
 use std::fs;
 
@@ -73,7 +79,10 @@ pub(super) fn load_project_wiki(
     }
     let data_root = data_root_or_default(data_root)?;
     let data = load_wiki_at(&data_root, &project_directory).ok_or_else(|| {
-        ToolFailure::new("wiki_not_generated", "该项目尚未生成 Wiki(或 Wiki 未生成完成)")
+        ToolFailure::new(
+            "wiki_not_generated",
+            "该项目尚未生成 Wiki(或 Wiki 未生成完成)",
+        )
     })?;
     Ok((project_directory, data))
 }

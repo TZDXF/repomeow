@@ -74,4 +74,3 @@ pub(super) fn init_nested_repo(dir: &PathBuf, name: &str) -> PathBuf {
     git(&nested, &["commit", "-m", "nested init"]);
     nested
 }
-

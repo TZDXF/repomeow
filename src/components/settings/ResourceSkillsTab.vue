@@ -34,6 +34,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   checkResourceMarketplaceUpdates,
   collectSkillSources,
@@ -188,6 +189,38 @@ const filtered = computed(() =>
 );
 const groupMap = computed(() => new Map(groups.value.map((g) => [g.id, g])));
 const sources = computed(() => collectSkillSources(skills.value));
+const filterPickerOpen = ref(false);
+const filterPickerQuery = ref("");
+const filterOptions = computed(() => [
+  ...groups.value.map((group) => ({
+    key: `group:${group.id}`,
+    id: group.id,
+    name: group.name,
+    kind: "group" as const,
+    color: group.color,
+    title: group.description || group.name,
+  })),
+  ...sources.value.map((source) => ({
+    key: `source:${source}`,
+    id: source,
+    name: source,
+    kind: "source" as const,
+    color: null,
+    title: source,
+  })),
+]);
+const visibleFilters = computed(() => filterOptions.value.slice(0, 4));
+const searchedFilters = computed(() => {
+  const normalized = filterPickerQuery.value.trim().toLowerCase();
+  return filterOptions.value.filter((option) => option.name.toLowerCase().includes(normalized));
+});
+
+function selectFilter(option: (typeof filterOptions.value)[number]) {
+  if (option.kind === "group") selectGroup(option.id);
+  else selectSource(option.id);
+  filterPickerOpen.value = false;
+  filterPickerQuery.value = "";
+}
 
 /** 分组与来源两个筛选维度互斥:选中任一分组/来源即清空另一维度 */
 function selectGroup(id: string | null) {
@@ -411,16 +444,16 @@ async function confirmDelete() {
             {{ t("settings.resources.skills.import.trigger") }}
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem class="gap-2" @click="importArchive">
+        <DropdownMenuContent align="end" class="w-auto">
+          <DropdownMenuItem class="gap-2 whitespace-nowrap" @click="importArchive">
             <FileArchive class="h-3.5 w-3.5" />
             {{ t("settings.resources.skills.import.archive") }}
           </DropdownMenuItem>
-          <DropdownMenuItem class="gap-2" @click="importFolder">
+          <DropdownMenuItem class="gap-2 whitespace-nowrap" @click="importFolder">
             <FolderOpen class="h-3.5 w-3.5" />
             {{ t("settings.resources.skills.import.folder") }}
           </DropdownMenuItem>
-          <DropdownMenuItem class="gap-2" @click="urlDialogOpen = true">
+          <DropdownMenuItem class="gap-2 whitespace-nowrap" @click="urlDialogOpen = true">
             <Link2 class="h-3.5 w-3.5" />
             {{ t("settings.resources.skills.import.url") }}
           </DropdownMenuItem>
@@ -428,55 +461,89 @@ async function confirmDelete() {
       </DropdownMenu>
     </div>
 
-    <div v-if="groups.length || sources.length" class="mt-3 flex flex-wrap items-center gap-1.5">
-      <button
-        type="button"
-        class="rounded-full border px-2.5 py-1 text-xs transition-colors"
-        :class="
-          activeGroupId === null && activeSourceId === null
-            ? 'border-foreground bg-foreground text-background'
-            : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-        "
-        @click="selectGroup(null)"
-      >
-        {{ t("settings.resources.skills.allGroups") }}
-      </button>
-      <button
-        v-for="group in groups"
-        :key="group.id"
-        type="button"
-        class="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors"
-        :class="
-          activeGroupId === group.id
-            ? 'border-foreground bg-foreground text-background'
-            : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-        "
-        :title="group.description || group.name"
-        @click="selectGroup(group.id)"
-      >
-        <span
-          class="h-2 w-2 rounded-full"
-          :style="{ backgroundColor: group.color ?? 'var(--muted-foreground)' }"
-        />
-        {{ group.name }}
-      </button>
-      <!-- 来源特殊分组:由市场技能自动派生,无颜色点,用 ExternalLink 图标与普通分组区分 -->
-      <button
-        v-for="source in sources"
-        :key="`source:${source}`"
-        type="button"
-        class="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors"
-        :class="
-          activeSourceId === source
-            ? 'border-foreground bg-foreground text-background'
-            : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-        "
-        :title="t('settings.resources.skills.sourceFilterHint')"
-        @click="selectSource(source)"
-      >
-        <ExternalLink class="h-3 w-3" />
-        {{ source }}
-      </button>
+    <div v-if="filterOptions.length" class="mt-3 flex min-w-0 items-center gap-1.5">
+      <div class="flex min-w-0 items-center gap-1.5 overflow-hidden">
+        <button
+          type="button"
+          class="shrink-0 rounded-full border px-2.5 py-1 text-xs transition-colors"
+          :class="
+            activeGroupId === null && activeSourceId === null
+              ? 'border-foreground bg-foreground text-background'
+              : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+          "
+          @click="selectGroup(null)"
+        >
+          {{ t("settings.resources.skills.allGroups") }}
+        </button>
+        <button
+          v-for="option in visibleFilters"
+          :key="option.key"
+          type="button"
+          class="flex max-w-40 shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors"
+          :class="
+            (option.kind === 'group' ? activeGroupId : activeSourceId) === option.id
+              ? 'border-foreground bg-foreground text-background'
+              : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+          "
+          :title="option.title"
+          @click="selectFilter(option)"
+        >
+          <ExternalLink v-if="option.kind === 'source'" class="h-3 w-3 shrink-0" />
+          <span
+            v-else
+            class="h-2 w-2 shrink-0 rounded-full"
+            :style="{ backgroundColor: option.color ?? 'var(--muted-foreground)' }"
+          />
+          <span class="truncate">{{ option.name }}</span>
+        </button>
+      </div>
+      <Popover v-model:open="filterPickerOpen">
+        <PopoverTrigger as-child>
+          <Button variant="outline" size="sm" class="h-7 shrink-0 gap-1 rounded-full px-2 text-xs">
+            <Search class="h-3 w-3" />
+            {{ t("settings.resources.skills.searchFilters") }}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent class="w-72 p-2" align="start" @open-auto-focus.prevent>
+          <div class="relative">
+            <Search
+              class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              v-model="filterPickerQuery"
+              class="h-8 pl-8 text-xs"
+              :placeholder="t('settings.resources.skills.searchFilters')"
+              spellcheck="false"
+            />
+          </div>
+          <div class="mt-1 max-h-56 overflow-y-auto">
+            <button
+              v-for="option in searchedFilters"
+              :key="option.key"
+              type="button"
+              class="hover:bg-accent flex w-full items-center gap-1.5 rounded-sm px-2 py-1.5 text-left text-xs"
+              :class="
+                (option.kind === 'group' ? activeGroupId : activeSourceId) === option.id
+                  ? 'bg-accent text-foreground'
+                  : ''
+              "
+              :title="option.title"
+              @click="selectFilter(option)"
+            >
+              <ExternalLink v-if="option.kind === 'source'" class="h-3 w-3 shrink-0" />
+              <span
+                v-else
+                class="h-2 w-2 shrink-0 rounded-full"
+                :style="{ backgroundColor: option.color ?? 'var(--muted-foreground)' }"
+              />
+              <span class="truncate">{{ option.name }}</span>
+            </button>
+            <p v-if="!searchedFilters.length" class="px-2 py-2 text-xs text-muted-foreground">
+              {{ t("settings.resources.skills.noMatchingFilters") }}
+            </p>
+          </div>
+        </PopoverContent>
+      </Popover>
     </div>
 
     <p v-if="loading" class="mt-6 text-center text-xs text-muted-foreground">

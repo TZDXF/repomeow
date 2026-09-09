@@ -1,8 +1,8 @@
-use std::process::Command;
+use super::*;
+use crate::error::AppResult;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
-use crate::error::AppResult;
-use super::*;
+use std::process::Command;
 
 /// spawn_terminal 一次执行所需的 shell 解析结果(种类之外的附属信息)
 #[cfg(windows)]
@@ -131,7 +131,10 @@ pub(super) fn build_start_cmdline(
 /// 回车:前一条失败不阻断后续(故不用 `&&`)。
 /// 单行命令原样借用返回,不产生分配。
 #[cfg(any(windows, target_os = "macos"))]
-pub(super) fn flatten_multiline<'a>(command: Option<&'a str>, sep: &str) -> Option<std::borrow::Cow<'a, str>> {
+pub(super) fn flatten_multiline<'a>(
+    command: Option<&'a str>,
+    sep: &str,
+) -> Option<std::borrow::Cow<'a, str>> {
     use std::borrow::Cow;
     let c = command?;
     if !c.contains(['\n', '\r']) {
@@ -378,4 +381,3 @@ pub fn spawn_terminal(
 ) -> AppResult<()> {
     Err(AppError::coded(ErrorCode::TerminalNotSupported, ""))
 }
-

@@ -1,8 +1,8 @@
-use serde_json::{json};
-use crate::agent::types::{AgentTool};
+use super::*;
+use crate::agent::types::AgentTool;
 use crate::commands::files::read_file_preview;
 use crate::path_util::to_forward_slash_str;
-use super::*;
+use serde_json::json;
 
 // ── 文件读取 ─────────────────────────────────────────────────────────
 
@@ -83,5 +83,3 @@ pub(super) fn read_project_file_tool(ctx: &ChatToolContext) -> AgentTool {
         },
     )
 }
-
-

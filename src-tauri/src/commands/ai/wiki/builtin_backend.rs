@@ -7,7 +7,9 @@ use crate::agent::harness::events::{HarnessEvent, HarnessEventType, ToolEventPha
 use crate::agent::harness::restricted_env::RestrictedEnv;
 use crate::agent::harness::runtime::harness_tool_from_core;
 use crate::agent::harness::tools::index::{create_edit_tool, create_write_tool};
-use crate::agent::llm::types::{AssistantContent, AssistantMessageEvent, Model, ModelThinkingLevel};
+use crate::agent::llm::types::{
+    AssistantContent, AssistantMessageEvent, Model, ModelThinkingLevel,
+};
 use crate::agent::types::StreamFn;
 use crate::commands::ai::harness_support::{
     assistant_text, builtin_stream_fn, collect_usage_events, create_harness, prompt_with_timeout,

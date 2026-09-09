@@ -1,17 +1,20 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool};
-use std::sync::{Arc, Mutex};
-use tauri::{AppHandle};
-use tokio::sync::oneshot;
+use super::*;
 use crate::agent::chat_tools::{chat_tools, ChatToolContext};
 use crate::agent::llm::{Model, SimpleStreamOptions, Usage};
-use crate::agent::types::{AgentLoopConfig, AgentMessage, AgentState, ConvertToLlmFn, Message, ToolExecutionMode, TypedMessage};
+use crate::agent::types::{
+    AgentLoopConfig, AgentMessage, AgentState, ConvertToLlmFn, Message, ToolExecutionMode,
+    TypedMessage,
+};
 use crate::agent::Agent;
 use crate::ai::catalog::{self, ChatPermission, ModelRef};
 use crate::db::Db;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::path_util::clean_str;
-use super::*;
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
+use tauri::AppHandle;
+use tokio::sync::oneshot;
 
 /// 已解析的 chat 偏好快照(会话内缓存,变化才热切换)。
 #[derive(Clone, Debug, PartialEq)]
@@ -23,7 +26,9 @@ pub(super) struct ResolvedPrefs {
 
 /// 解析当前 chat 偏好 → (模型元数据, 快照, 厂商 api_key)。
 /// 未配置/引用失效时返回 AiNotConfigured。
-pub(super) fn resolve_prefs(config_file: &catalog::AiConfigFile) -> AppResult<(Model, ResolvedPrefs, String)> {
+pub(super) fn resolve_prefs(
+    config_file: &catalog::AiConfigFile,
+) -> AppResult<(Model, ResolvedPrefs, String)> {
     let Some((reference, prefs)) = catalog::resolve_chat_prefs(config_file) else {
         return Err(AppError::coded(ErrorCode::AiNotConfigured, ""));
     };
@@ -188,4 +193,3 @@ pub(super) fn default_convert_to_llm() -> ConvertToLlmFn {
         })
     })
 }
-

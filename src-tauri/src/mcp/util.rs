@@ -53,7 +53,6 @@ impl ToolFailure {
     }
 }
 
-
 pub(super) fn repomeow_data_root() -> Result<PathBuf, ToolFailure> {
     if let Some(path) = env::var_os(DATA_DIR_ENV).filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(path));
@@ -103,7 +102,10 @@ pub(super) fn open_db(data_root: &Path) -> Result<Db, ToolFailure> {
 }
 
 /// 按登记目录(归一化后)定位未归档项目 id。
-pub(super) fn resolve_project_id(conn: &Connection, directory: &str) -> Result<Option<i64>, ToolFailure> {
+pub(super) fn resolve_project_id(
+    conn: &Connection,
+    directory: &str,
+) -> Result<Option<i64>, ToolFailure> {
     let path = clean_str(directory);
     conn.query_row(
         "SELECT id FROM projects WHERE path = ?1 AND archived_at IS NULL",
@@ -122,8 +124,6 @@ pub(super) fn require_project_id(conn: &Connection, directory: &str) -> Result<i
             .with_detail(clean_str(directory))
     })
 }
-
-
 
 #[cfg(windows)]
 pub(super) fn home_dir() -> Option<PathBuf> {
