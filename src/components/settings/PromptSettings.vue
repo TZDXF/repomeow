@@ -128,7 +128,7 @@ async function openDir() {
           :placeholder="defaultCommitPrompt"
           rows="18"
           spellcheck="false"
-          class="mt-3 min-h-96 resize-y font-mono text-xs"
+          class="mt-3 min-h-96 max-h-[480px] resize-y overflow-y-auto font-mono text-xs"
         />
       </template>
 
@@ -157,7 +157,7 @@ async function openDir() {
           :placeholder="defaultReportPrompt"
           rows="18"
           spellcheck="false"
-          class="mt-3 min-h-96 resize-y font-mono text-xs"
+          class="mt-3 min-h-96 max-h-[480px] resize-y overflow-y-auto font-mono text-xs"
         />
       </template>
 
@@ -186,7 +186,7 @@ async function openDir() {
           :placeholder="defaultWeeklyReportPrompt"
           rows="18"
           spellcheck="false"
-          class="mt-3 min-h-96 resize-y font-mono text-xs"
+          class="mt-3 min-h-96 max-h-[480px] resize-y overflow-y-auto font-mono text-xs"
         />
       </template>
     </div>
