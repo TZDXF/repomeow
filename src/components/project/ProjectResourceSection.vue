@@ -4,7 +4,7 @@ import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { toast } from "vue-sonner";
 import { Icon } from "@iconify/vue";
-import { Bot, Import, LoaderCircle, Package, Plug, Plus, Trash2 } from "@lucide/vue";
+import { Bot, Import, LoaderCircle, Package, Plug, Plus, Trash2, Wrench } from "@lucide/vue";
 import { agentBrandIcon } from "@/lib/agent-icons";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,7 +23,9 @@ import {
   importProjectResource,
   loadProjectResources,
   removeProjectResource,
+  repairProjectResource,
   resourceTree,
+  type RepairAction,
   type ProjectAiTarget,
   type ResourceTreeGroup,
   type ProjectResourceKind,
@@ -521,6 +523,81 @@ async function confirmRemove() {
     removing.value = false;
   }
 }
+/** 有明确修复出路的异常状态:应用更新(可更新/缺失)、覆盖更新或强制解除(本地已修改)、强制解除(需检查配置)。 */
+const REPAIRABLE: ResourceDeployment["status"][] = ["update", "modified", "missing", "conflict"];
+function repairableRecords(id: string) {
+  return records(id).filter((d) => REPAIRABLE.includes(d.status));
+}
+const repairResource = ref<ResourceChoice | null>(null);
+const repairing = ref("");
+const repairRecords = computed(() =>
+  repairResource.value ? repairableRecords(repairResource.value.id) : [],
+);
+watch(repairRecords, (next) => {
+  if (repairResource.value && !next.length) {
+    repairResource.value = null;
+  }
+});
+function repairAgentName(agentId: string) {
+  return props.targets.find((a) => a.id === agentId)?.name ?? agentId;
+}
+/** 「可更新/缺失」的修复:以完整目标集合再 assign 一次,走正常部署管线写入来源最新定义。 */
+async function applyUpdate(record: ResourceDeployment) {
+  const resource = repairResource.value;
+  if (!resource || !data.value || repairing.value) {
+    return;
+  }
+  repairing.value = `${record.resourceId}:${record.agentId}:update`;
+  try {
+    const current = new Set(records(resource.id).map((d) => d.agentId));
+    const result = await assignProjectResource({
+      path: props.projectPath,
+      kind: props.kind,
+      resourceId: resource.id,
+      agentIds: [...current],
+      expectedRevision: data.value.revision,
+    });
+    if (result.failures.length) {
+      toast.error(
+        t("projectAi.partial", { count: result.applied, failed: result.failures.length }),
+      );
+    } else {
+      toast.success(t("projectAi.applied", { count: result.applied }));
+    }
+    changed();
+  } catch (e) {
+    toast.error(String(e));
+  } finally {
+    repairing.value = "";
+  }
+}
+/** 「本地已修改/需检查配置」的修复:reapply 覆盖更新(丢弃本地修改),detach 仅解除托管记录、保留项目文件。 */
+async function repairRecord(record: ResourceDeployment, action: RepairAction) {
+  if (!data.value || repairing.value) {
+    return;
+  }
+  repairing.value = `${record.resourceId}:${record.agentId}:${action}`;
+  try {
+    await repairProjectResource({
+      path: props.projectPath,
+      kind: props.kind,
+      resourceId: record.resourceId,
+      agentId: record.agentId,
+      action,
+      expectedRevision: data.value.revision,
+    });
+    toast.success(
+      t(action === "reapply" ? "projectAi.reapplied" : "projectAi.detached", {
+        name: record.name,
+      }),
+    );
+    changed();
+  } catch (e) {
+    toast.error(String(e));
+  } finally {
+    repairing.value = "";
+  }
+}
 /** 变更后不自行刷新:通知父组件先重扫 assets,再由 revision 驱动本区静默刷新,避免托管/非托管数据错位导致的闪烁。 */
 function changed() {
   emit("changed");
@@ -650,6 +727,15 @@ function changed() {
               >{{ t("projectAi.noAgents") }}</span
             >
           </div>
+          <Button
+            v-if="repairableRecords(resource.id).length"
+            variant="outline"
+            size="sm"
+            class="h-7 px-2 text-xs text-amber-600 hover:text-amber-600 dark:text-amber-400 dark:hover:text-amber-400"
+            :title="t('projectAi.repairHint')"
+            @click="repairResource = resource"
+            ><Wrench class="size-3.5" />{{ t("projectAi.repair") }}</Button
+          >
           <Button
             v-if="localImportTarget(resource)"
             variant="outline"
@@ -808,6 +894,96 @@ function changed() {
               t("projectAi.remove")
             }}</Button
           >
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Dialog
+      :open="!!repairResource"
+      @update:open="
+        (value) => {
+          if (!repairing && !value) repairResource = null;
+        }
+      "
+    >
+      <DialogContent class="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{{
+            t("projectAi.repairTitle", { name: repairResource?.name })
+          }}</DialogTitle>
+          <DialogDescription>{{ t("projectAi.repairHint") }}</DialogDescription>
+        </DialogHeader>
+        <div class="divide-y rounded-md border">
+          <div
+            v-for="record in repairRecords"
+            :key="record.agentId"
+            class="flex flex-wrap items-center gap-2 px-3 py-2.5"
+          >
+            <span
+              class="flex size-6 shrink-0 items-center justify-center rounded border text-muted-foreground"
+            >
+              <Icon
+                v-if="agentBrandIcon(record.agentId)"
+                :icon="agentBrandIcon(record.agentId)!"
+                class="size-3.5"
+              />
+              <Bot v-else class="size-3.5" />
+            </span>
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-xs font-medium">
+                {{ repairAgentName(record.agentId) }} ·
+                <span class="text-amber-600 dark:text-amber-400">{{
+                  t(`projectAi.states.${record.status}`)
+                }}</span>
+              </p>
+              <p class="mt-1 truncate font-mono text-[10px] text-muted-foreground">
+                {{ record.path }}
+              </p>
+            </div>
+            <div class="flex gap-1">
+              <Button
+                v-if="record.status === 'update' || record.status === 'missing'"
+                size="sm"
+                class="h-7 px-2 text-xs"
+                :disabled="!!repairing"
+                :title="t('projectAi.applyUpdateHint')"
+                @click="applyUpdate(record)"
+                ><LoaderCircle
+                  v-if="repairing === `${record.resourceId}:${record.agentId}:update`"
+                  class="size-3.5 animate-spin"
+                />{{ t("projectAi.applyUpdate") }}</Button
+              >
+              <Button
+                v-if="record.status === 'modified'"
+                size="sm"
+                class="h-7 px-2 text-xs"
+                :disabled="!!repairing"
+                :title="t('projectAi.forceApplyHint')"
+                @click="repairRecord(record, 'reapply')"
+                ><LoaderCircle
+                  v-if="repairing === `${record.resourceId}:${record.agentId}:reapply`"
+                  class="size-3.5 animate-spin"
+                />{{ t("projectAi.forceApply") }}</Button
+              >
+              <Button
+                v-if="record.status === 'modified' || record.status === 'conflict'"
+                variant="outline"
+                size="sm"
+                class="h-7 px-2 text-xs"
+                :disabled="!!repairing"
+                :title="t('projectAi.detachHint')"
+                @click="repairRecord(record, 'detach')"
+                ><LoaderCircle
+                  v-if="repairing === `${record.resourceId}:${record.agentId}:detach`"
+                  class="size-3.5 animate-spin"
+                />{{ t("projectAi.detach") }}</Button
+              >
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" :disabled="!!repairing" @click="repairResource = null">{{
+            t("common.cancel")
+          }}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

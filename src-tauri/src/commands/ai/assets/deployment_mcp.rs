@@ -2,7 +2,7 @@
 use super::super::resource_library::{McpServer, McpServerInput, RlResult};
 use super::{
     deployment_io::{problem, safe_path},
-    mcp_formats::json_to_toml_item,
+    mcp_formats::{json_to_toml_item, parse_jsonc},
     McpTarget,
 };
 use serde_json::{json, Value};
@@ -235,8 +235,16 @@ impl McpDocument {
                 toml: Some(doc),
             })
         } else {
+            // VS Code `.vscode/mcp.json` 为 JSONC(允许注释/尾逗号),读侧容忍;
+            // 写回(edit)仍输出纯 JSON,注释不保留。
             let value = text
-                .map(serde_json::from_str::<Value>)
+                .map(|text| {
+                    if target.jsonc() {
+                        parse_jsonc(text)
+                    } else {
+                        serde_json::from_str::<Value>(text)
+                    }
+                })
                 .transpose()
                 .map_err(|e| problem(e.to_string()))?
                 .unwrap_or(json!({}));

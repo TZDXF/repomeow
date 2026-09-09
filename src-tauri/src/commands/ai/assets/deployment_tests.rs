@@ -221,7 +221,8 @@ fn unsupported_sse_and_shared_reference_removal_are_safe() {
         "claude",
         "s1",
         false,
-        None
+        None,
+        false
     )
     .unwrap());
     assert!(f.root.join(".claude/skills/review/SKILL.md").exists());
@@ -748,4 +749,161 @@ fn delete_unmanaged_removes_files_and_rejects_managed() {
     f.mcp();
     f.apply("mcp", "claude", &["m1"]);
     assert!(delete_unmanaged(&f.library, &f.root, "mcp", ".mcp.json", Some("context")).is_err());
+}
+
+#[test]
+fn repair_reapply_overwrites_local_modifications() {
+    let f = Fixture::new();
+    f.skill("s1", "review", "v1");
+    f.apply("skills", "claude", &["s1"]);
+    // 本地手工改动 → modified,常规解除被拒。
+    fs::write(f.root.join(".claude/skills/review/SKILL.md"), "local edit").unwrap();
+    assert_eq!(
+        snapshot(&f.library, &f.root, "skills").unwrap().deployments[0].status,
+        "modified"
+    );
+    assert_eq!(f.apply("skills", "claude", &[]).failures.len(), 1);
+    repair(&f.library, &f.root, "skills", "s1", "claude", "reapply").unwrap();
+    assert_eq!(
+        fs::read_to_string(f.root.join(".claude/skills/review/SKILL.md")).unwrap(),
+        "v1"
+    );
+    assert_eq!(
+        snapshot(&f.library, &f.root, "skills").unwrap().deployments[0].status,
+        "configured"
+    );
+}
+
+#[test]
+fn repair_detach_keeps_files_and_releases_record() {
+    let f = Fixture::new();
+    f.skill("s1", "review", "v1");
+    f.apply("skills", "claude", &["s1"]);
+    let edited = "---\nname: review\n---\nlocal edit";
+    fs::write(f.root.join(".claude/skills/review/SKILL.md"), edited).unwrap();
+    repair(&f.library, &f.root, "skills", "s1", "claude", "detach").unwrap();
+    // 文件保留、记录解除;路径回到非托管,可重新认领。
+    assert_eq!(
+        fs::read_to_string(f.root.join(".claude/skills/review/SKILL.md")).unwrap(),
+        edited
+    );
+    assert!(
+        snapshot(&f.library, &f.root, "skills")
+            .unwrap()
+            .deployments
+            .is_empty()
+    );
+    claim_local(&f.library, &f.root, "skills", ".claude/skills/review", None).unwrap();
+    // 未部署的记录不允许修复;未知动作报错。
+    assert!(repair(&f.library, &f.root, "skills", "s1", "gemini", "detach").is_err());
+    assert!(repair(&f.library, &f.root, "skills", "s1", "claude", "bogus").is_err());
+}
+
+#[test]
+fn repair_reapply_adopts_local_origin_baseline() {
+    let f = Fixture::new();
+    fs::create_dir_all(f.root.join(".claude/skills/mine")).unwrap();
+    fs::write(f.root.join(".claude/skills/mine/SKILL.md"), "---\nname: mine\n---\nv1").unwrap();
+    let outcome = claim_local(&f.library, &f.root, "skills", ".claude/skills/mine", None).unwrap();
+    // 本地修改来源文件本身 → modified;来源 Agent 的 reapply 认领现状为新基线。
+    fs::write(f.root.join(".claude/skills/mine/SKILL.md"), "---\nname: mine\n---\nv2").unwrap();
+    assert_eq!(
+        snapshot(&f.library, &f.root, "skills").unwrap().deployments[0].status,
+        "modified"
+    );
+    repair(
+        &f.library,
+        &f.root,
+        "skills",
+        &outcome.resource_id,
+        "claude",
+        "reapply",
+    )
+    .unwrap();
+    assert_eq!(
+        snapshot(&f.library, &f.root, "skills").unwrap().deployments[0].status,
+        "configured"
+    );
+    assert_eq!(
+        fs::read_to_string(f.root.join(".claude/skills/mine/SKILL.md")).unwrap(),
+        "---\nname: mine\n---\nv2"
+    );
+}
+
+#[test]
+fn vscode_mcp_jsonc_is_readable_and_deployable() {
+    let f = Fixture::new();
+    f.mcp();
+    fs::create_dir_all(f.root.join(".vscode")).unwrap();
+    // VS Code 官方允许注释与尾逗号;此前整体解析失败落 conflict。
+    fs::write(
+        f.root.join(".vscode/mcp.json"),
+        "{\n  // 已有服务器\n  \"servers\": {\n    \"existing\": { \"command\": \"other\" },\n  },\n}\n",
+    )
+    .unwrap();
+    assert_eq!(f.apply("mcp", "copilot", &["m1"]).applied, 1);
+    let file = f.root.join(".vscode/mcp.json");
+    let doc: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    assert_eq!(doc["servers"]["existing"]["command"], "other");
+    assert_eq!(doc["servers"]["context"]["command"], "node");
+    assert_eq!(
+        snapshot(&f.library, &f.root, "mcp").unwrap().deployments[0].status,
+        "configured"
+    );
+    assert_eq!(f.apply("mcp", "copilot", &[]).applied, 1);
+    let doc: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    assert!(doc["servers"].get("context").is_none());
+    assert_eq!(doc["servers"]["existing"]["command"], "other");
+    // 纯 JSON 目标仍拒绝注释(不扩大方言)。
+    fs::write(f.root.join(".mcp.json"), "{ // nope\n}").unwrap();
+    assert_eq!(f.apply("mcp", "claude", &["m1"]).failures.len(), 1);
+}
+
+#[test]
+fn repair_reapply_restores_modified_mcp_entry() {
+    let f = Fixture::new();
+    f.mcp();
+    f.apply("mcp", "claude", &["m1"]);
+    // 本地改端口等字段 → modified;常规更新/解除均被拒。
+    let file = f.root.join(".mcp.json");
+    let mut doc: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    doc["mcpServers"]["context"]["command"] = json!("deno");
+    fs::write(&file, serde_json::to_vec_pretty(&doc).unwrap()).unwrap();
+    assert_eq!(
+        snapshot(&f.library, &f.root, "mcp").unwrap().deployments[0].status,
+        "modified"
+    );
+    repair(&f.library, &f.root, "mcp", "m1", "claude", "reapply").unwrap();
+    let doc: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    assert_eq!(doc["mcpServers"]["context"]["command"], "node");
+    assert_eq!(
+        snapshot(&f.library, &f.root, "mcp").unwrap().deployments[0].status,
+        "configured"
+    );
+    // detach:条目保留在文件中,记录解除。
+    let mut doc: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    doc["mcpServers"]["context"]["command"] = json!("deno");
+    fs::write(&file, serde_json::to_vec_pretty(&doc).unwrap()).unwrap();
+    repair(&f.library, &f.root, "mcp", "m1", "claude", "detach").unwrap();
+    let doc: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    assert_eq!(doc["mcpServers"]["context"]["command"], "deno");
+    assert!(
+        snapshot(&f.library, &f.root, "mcp")
+            .unwrap()
+            .deployments
+            .is_empty()
+    );
+}
+
+#[test]
+fn parse_jsonc_strips_comments_and_trailing_commas_but_keeps_strings() {
+    use super::super::mcp_formats::parse_jsonc;
+    let value = parse_jsonc(
+        "{\n  \"url\": \"https://a.test//keep\", // tail\n  \"esc\": \"a\\\"/*b*/\",\n  /* block\n  comment */\n  \"list\": [1, 2,],\n}\n",
+    )
+    .unwrap();
+    assert_eq!(value["url"], "https://a.test//keep");
+    assert_eq!(value["esc"], "a\"/*b*/");
+    assert_eq!(value["list"], json!([1, 2]));
+    assert!(parse_jsonc("{ broken").is_err());
 }

@@ -120,6 +120,19 @@ export const claimLocalProjectResource = (input: ResourceClaimInput) =>
 /** 删除非托管资源:skills 删除整个技能目录,mcp 从配置文件中移除服务器条目;已托管路径后端拒绝。 */
 export const deleteUnmanagedProjectResource = (input: ResourceClaimInput) =>
   cmd<void>("project_ai_delete_unmanaged", { ...input });
+export type RepairAction = "reapply" | "detach";
+export interface ResourceRepairInput {
+  path: string;
+  kind: ProjectResourceKind;
+  resourceId: string;
+  agentId: string;
+  /** reapply: 覆盖更新——以来源最新定义重写项目内容,丢弃本地修改;detach: 强制解除——仅删除托管记录,保留项目文件。 */
+  action: RepairAction;
+  expectedRevision: string;
+}
+/** 修复异常部署(modified/conflict 等)的兜底出口。 */
+export const repairProjectResource = (input: ResourceRepairInput) =>
+  cmd<void>("project_ai_repair", { ...input });
 
 export interface ResourceTreeGroup {
   id: string;

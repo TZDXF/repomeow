@@ -344,6 +344,20 @@ export default {
     projectEmpty: "No resources added yet. Click Add above to choose from the library.",
     noAgents: "All targets are hidden. Enable them in Resource management → Agent tools.",
     preview: "Preview project configuration (read-only)",
+    repair: "Repair",
+    repairTitle: "Repair “{name}”",
+    repairHint:
+      '"Update available" and "missing" entries can be reapplied directly. "Modified locally" entries can be overwritten (discarding local changes) or detached (record removed, files kept). For "check configuration", detach first and resolve the files manually.',
+    applyUpdate: "Apply update",
+    applyUpdateHint: "Write the latest source definition into the project",
+    forceApply: "Overwrite",
+    forceApplyHint:
+      "Discard local changes and overwrite project content with the latest source definition",
+    detach: "Detach (keep files)",
+    detachHint:
+      "Remove only the managed record; project files are kept and can be claimed or imported again as unmanaged resources",
+    reapplied: "Updated “{name}”",
+    detached: "Detached “{name}”; files were kept",
     states: {
       configured: "Configured",
       update: "Update available",
@@ -748,8 +762,10 @@ export default {
         mergeCommit: "Merge commit, no diff available",
         emptyFiles: "No changed files",
         filesLoadFailed: "Failed to load file list",
-        diffEmpty: "Git returned no text diff. The file may still be marked modified, for example due to line-ending normalization or index state changes; +0 -0 only means no text lines were added or deleted.",
-        diffEmptyFiltered: "No text diff is visible with the current whitespace filter. Disable it to check all differences.",
+        diffEmpty:
+          "Git returned no text diff. The file may still be marked modified, for example due to line-ending normalization or index state changes; +0 -0 only means no text lines were added or deleted.",
+        diffEmptyFiltered:
+          "No text diff is visible with the current whitespace filter. Disable it to check all differences.",
         diffShowAll: "Show all differences",
         diffLoadFailed: "Failed to load diff",
         imageOld: "Old version",

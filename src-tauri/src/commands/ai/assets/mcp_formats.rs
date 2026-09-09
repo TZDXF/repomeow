@@ -132,3 +132,69 @@ fn toml_value_to_json(value: &toml_edit::Value) -> Option<Value> {
         }
     }
 }
+/// VS Code 配置方言(JSONC):允许 `//` 与 `/* */` 注释、尾逗号。
+/// 仅用于读取;写回时统一输出纯 JSON(注释与尾逗号不保留,与 edit 的整体重写一致)。
+pub(super) fn parse_jsonc(text: &str) -> Result<Value, serde_json::Error> {
+    serde_json::from_str(&strip_jsonc(text))
+}
+
+/// 去掉字符串字面量之外的注释与尾逗号;换行保留以维持错误定位的大致行号。
+fn strip_jsonc(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    let mut in_string = false;
+    while let Some(c) = chars.next() {
+        if in_string {
+            out.push(c);
+            match c {
+                '\\' => {
+                    if let Some(escaped) = chars.next() {
+                        out.push(escaped);
+                    }
+                }
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match c {
+            '"' => {
+                in_string = true;
+                out.push(c);
+            }
+            '/' if chars.peek() == Some(&'/') => {
+                for c in chars.by_ref() {
+                    if c == '\n' {
+                        out.push('\n');
+                        break;
+                    }
+                }
+            }
+            '/' if chars.peek() == Some(&'*') => {
+                chars.next();
+                let mut prev = '\0';
+                for c in chars.by_ref() {
+                    if prev == '*' && c == '/' {
+                        break;
+                    }
+                    if c == '\n' {
+                        out.push('\n');
+                    }
+                    prev = c;
+                }
+            }
+            '}' | ']' => {
+                // 闭合括号前回溯去掉尾逗号(及其间的空白)。
+                while matches!(out.chars().last(), Some(c) if c.is_whitespace()) {
+                    out.pop();
+                }
+                if out.ends_with(',') {
+                    out.pop();
+                }
+                out.push(c);
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}

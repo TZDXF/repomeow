@@ -680,6 +680,7 @@ fn assign(
             id,
             selected,
             source,
+            false,
         ) {
             Ok(changed) => result.applied += usize::from(changed),
             Err(e) => result.failures.push(AssignFailure {
@@ -751,6 +752,7 @@ fn remove_resource(library: &Library, root: &Path, kind: &str, id: &str) -> RlRe
             id,
             false,
             source,
+            false,
         ) {
             Ok(changed) => result.applied += usize::from(changed),
             Err(e) => result.failures.push(AssignFailure {
@@ -774,6 +776,103 @@ fn remove_resource(library: &Library, root: &Path, kind: &str, id: &str) -> RlRe
     Ok(result)
 }
 
+/// 修复异常部署(modified/conflict 等)的兜底出口:
+/// - `reapply`:覆盖更新——以来源最新定义重写项目内容,**丢弃本地修改**(跳过基线校验);
+///   本地来源的来源 Agent 语义为把现状认领为新基线(来源即文件本身,无内容可写)。
+/// - `detach`:强制解除——仅删除托管记录,**保留项目文件**,之后可按非托管资源重新认领/导入。
+#[tauri::command]
+pub async fn project_ai_repair(
+    app: AppHandle,
+    path: String,
+    kind: String,
+    resource_id: String,
+    agent_id: String,
+    action: String,
+    expected_revision: String,
+) -> RlResult<()> {
+    tokio::task::spawn_blocking(move || {
+        let _guard = lock_op();
+        let (library, root) = prepare(&app, &path, &kind, &expected_revision)?;
+        repair(&library, &root, &kind, &resource_id, &agent_id, &action)
+    })
+    .await
+    .map_err(|e| problem(e.to_string()))?
+}
+
+fn repair(
+    library: &Library,
+    root: &Path,
+    kind: &str,
+    id: &str,
+    agent: &str,
+    action: &str,
+) -> RlResult<()> {
+    validate_kind(kind)?;
+    target(agent)?;
+    let state_path = manifest_file(library, root);
+    let mut state = read_manifest(&state_path, root)?;
+    if !state
+        .entries
+        .iter()
+        .any(|e| e.kind == kind && e.agent_id == agent && e.resource_id == id)
+    {
+        return Err(problem(format!("not deployed: {agent} / {id}")));
+    }
+    match action {
+        "detach" => {
+            let mut next = state.clone();
+            next.entries
+                .retain(|e| !(e.kind == kind && e.agent_id == agent && e.resource_id == id));
+            // 与 apply_local_origin 一致:本地来源最后一个部署解除时连同本地记录清理。
+            if id.starts_with(LOCAL_PREFIX) && !next.entries.iter().any(|e| e.resource_id == id) {
+                next.locals.retain(|l| !(l.kind == kind && l.id == id));
+            }
+            save_manifest(&state_path, &next)
+        }
+        "reapply" => {
+            // 本地来源的来源 Agent:来源即文件本身,修复 = 把现状认领为新基线。
+            if let Some(local) = state
+                .locals
+                .iter()
+                .find(|l| l.kind == kind && l.id == id)
+                .cloned()
+            {
+                if agent == local.origin_agent {
+                    let mut next = state.clone();
+                    let entry = next
+                        .entries
+                        .iter_mut()
+                        .find(|e| e.kind == kind && e.agent_id == agent && e.resource_id == id)
+                        .ok_or_else(|| problem(id))?;
+                    entry.fingerprint =
+                        current_hash(root, entry)?.ok_or_else(|| problem("local source missing"))?;
+                    return save_manifest(&state_path, &next);
+                }
+            }
+            let list = sources(library, kind).ok().map(|(_, list)| list);
+            let locals = local_sources(root, &state, kind);
+            let source = list
+                .as_ref()
+                .and_then(|list| list.iter().find(|s| s.id() == id))
+                .or_else(|| locals.iter().find(|s| s.id() == id))
+                .ok_or_else(|| problem("source unavailable; cannot reapply"))?;
+            apply_one(
+                library,
+                root,
+                &state_path,
+                &mut state,
+                kind,
+                agent,
+                id,
+                true,
+                Some(source),
+                true,
+            )?;
+            Ok(())
+        }
+        _ => Err(problem(format!("unknown repair action: {action}"))),
+    }
+}
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportOutcome {
@@ -1261,6 +1360,7 @@ fn apply(
             &id,
             selected.contains(&id),
             source,
+            false,
         );
         match outcome {
             Ok(changed) => result.applied += usize::from(changed),
@@ -1285,6 +1385,7 @@ fn apply_one(
     id: &str,
     selected: bool,
     source: Option<&Source>,
+    force: bool,
 ) -> RlResult<bool> {
     let existing = state
         .entries
@@ -1365,12 +1466,15 @@ fn apply_one(
     }
     let current = current_hash(root, &entry)?;
     let baseline = existing.as_ref().or_else(|| peers.first().copied());
-    if let Some(current) = &current {
-        if baseline.is_none_or(|previous| previous.fingerprint != *current) {
-            return Err(problem(format!(
-                "unmanaged or locally modified: {} / {}",
-                entry.path, entry.name
-            )));
+    // force(repair 的覆盖更新)跳过基线校验:用户显式确认丢弃本地修改。
+    if !force {
+        if let Some(current) = &current {
+            if baseline.is_none_or(|previous| previous.fingerprint != *current) {
+                return Err(problem(format!(
+                    "unmanaged or locally modified: {} / {}",
+                    entry.path, entry.name
+                )));
+            }
         }
     }
     let content = if selected {

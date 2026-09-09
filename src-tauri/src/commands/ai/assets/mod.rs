@@ -120,6 +120,14 @@ pub(super) struct McpTarget {
     pub agents: &'static [&'static str],
 }
 
+impl McpTarget {
+    /// VS Code 的 `.vscode/mcp.json` 官方允许注释与尾逗号(JSONC),读取需容忍;
+    /// 其余目标为纯 JSON / TOML,不受影响。
+    pub(super) fn jsonc(&self) -> bool {
+        self.path == ".vscode/mcp.json"
+    }
+}
+
 /// 项目内 MCP 管理目标(各 agent 的项目级 MCP 配置,按各家官方文档:
 /// claude=`.mcp.json`、cursor=`.cursor/mcp.json`、copilot=`.vscode/mcp.json`、
 /// gemini=`.gemini/settings.json` 的 mcpServers、codex=`.codex/config.toml` 的
@@ -271,7 +279,12 @@ fn read_mcp_servers(path: &Path, target: &McpTarget) -> Vec<McpServerEntry> {
     let Ok(raw) = fs::read_to_string(path) else {
         return Vec::new();
     };
-    let Ok(doc) = serde_json::from_str::<Value>(&raw) else {
+    let parsed = if target.jsonc() {
+        mcp_formats::parse_jsonc(&raw)
+    } else {
+        serde_json::from_str::<Value>(&raw)
+    };
+    let Ok(doc) = parsed else {
         return Vec::new();
     };
     let Some(servers) = get_json_path(&doc, target.key).and_then(Value::as_object) else {

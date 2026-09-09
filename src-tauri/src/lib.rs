@@ -290,6 +290,7 @@ pub fn run() {
             commands::ai::project_ai_add,
             commands::ai::project_ai_assign,
             commands::ai::project_ai_remove,
+            commands::ai::project_ai_repair,
             commands::ai::project_ai_import,
             commands::ai::project_ai_claim_local,
             commands::ai::project_ai_delete_unmanaged,

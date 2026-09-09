@@ -321,6 +321,18 @@ export default {
     projectEmpty: "尚未添加资源,点击上方「添加」按钮从资源库选择。",
     noAgents: "所有配置目标均已隐藏,请前往资源管理的 Agent 工具中启用。",
     preview: "预览项目中的配置(只读)",
+    repair: "修复",
+    repairTitle: "修复「{name}」",
+    repairHint:
+      "「可更新/缺失」可直接应用来源最新定义;「本地已修改」可覆盖更新(丢弃本地修改)或仅解除托管记录(保留文件);「需检查配置」建议解除后手动处理对应文件。",
+    applyUpdate: "应用更新",
+    applyUpdateHint: "将来源最新定义写入项目",
+    forceApply: "覆盖更新",
+    forceApplyHint: "丢弃本地修改,以来源最新定义覆盖项目内容",
+    detach: "保留文件解除",
+    detachHint: "仅解除托管记录,项目文件保留,之后可按非托管资源重新认领或导入",
+    reapplied: "已更新「{name}」",
+    detached: "已解除「{name}」的托管记录,文件已保留",
     states: {
       configured: "已配置",
       update: "可更新",
@@ -716,7 +728,8 @@ export default {
         mergeCommit: "合并提交,无差异内容",
         emptyFiles: "无变动文件",
         filesLoadFailed: "文件列表加载失败",
-        diffEmpty: "Git 未返回文本差异。文件仍可能被标记为修改，例如换行符规范化或索引状态变化；+0 -0 仅表示没有文本行增删。",
+        diffEmpty:
+          "Git 未返回文本差异。文件仍可能被标记为修改，例如换行符规范化或索引状态变化；+0 -0 仅表示没有文本行增删。",
         diffEmptyFiltered: "当前忽略空白设置下没有可显示的文本差异，可关闭过滤后查看。",
         diffShowAll: "显示全部差异",
         diffLoadFailed: "变动内容加载失败",
