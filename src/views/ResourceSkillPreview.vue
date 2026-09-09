@@ -7,6 +7,8 @@ import { toast } from "vue-sonner";
 import {
   ArrowLeft,
   Check,
+  Code,
+  Eye,
   FolderOpen,
   Languages,
   ListPlus,
@@ -23,12 +25,16 @@ import {
   type ModelSelectorGroup,
 } from "@/components/ai-elements/model-selector";
 import CodeViewer from "@/components/files/CodeViewer.vue";
+import ImageViewer from "@/components/files/ImageViewer.vue";
 import MdLink from "@/components/markdown/MdLink.vue";
 import type { SupportedLocale } from "@/i18n";
 import { buildFileTree, flattenVisibleTree, type FileTreeRow } from "@/lib/file-tree";
 import { formatRelativeTime } from "@/lib/format";
 import { createBeforeDownload } from "@/lib/markdown-download";
 import { hasScheme, resolvePath } from "@/lib/markdown";
+import { extOf, IMAGE_EXTS } from "@/lib/file-kind";
+import { joinPath } from "@/lib/path";
+import { useImagePreview } from "@/composables/files/useImagePreview";
 import { getCachedScanReport, putCachedScanReport } from "@/lib/scan-cache";
 import { cmd } from "@/lib/tauri";
 import { getCachedTranslation, putCachedTranslation } from "@/lib/translation-cache";
@@ -39,6 +45,7 @@ import {
   openResourceSkillDir,
   readResourceSkillFile,
   readResourceSkillTokens,
+  resourceSkillDirPath,
   readSkillDirFile,
   readSkillDirOverview,
   scanResourceSkill,
@@ -88,6 +95,20 @@ const loadingTokens = ref(false);
 type Selection = { kind: "file"; path: string } | { kind: "scan" };
 const selected = ref<Selection>({ kind: "file", path: "SKILL.md" });
 
+// ── 图片预览(与 ProjectFiles 共用 useImagePreview):asset 协议直显 ──
+const selectedFilePath = computed(() =>
+  selected.value.kind === "file" ? selected.value.path : null,
+);
+/** 资源库技能的磁盘目录(图片拼绝对路径用;本地模式直接用 localDir) */
+const librarySkillDir = ref<string | null>(null);
+const { isImage, isSvg, svgMode, svgSource, imageSrc, onSelectImage } = useImagePreview(
+  selectedFilePath,
+  (path) => {
+    const root = isLocal.value ? localDir.value : librarySkillDir.value;
+    return root ? joinPath(root, path) : null;
+  },
+);
+
 // ── Markdown 渲染(与 AI 抽屉同一套配置)────────────────────────────────
 const language = computed(() => locale.value as SupportedLocale);
 const controls: ControlsConfig = {
@@ -117,6 +138,7 @@ async function loadSkill() {
     const list = await listResourceSkills();
     allGroups.value = list.groups;
     skill.value = list.skills.find((s) => s.id === skillId.value) ?? null;
+    librarySkillDir.value = await resourceSkillDirPath(skillId.value);
   } catch (e) {
     toast.error(String(e));
   }
@@ -278,6 +300,11 @@ function syncContent() {
 }
 
 async function ensureFileContent(path: string) {
+  // 图片走 asset 协议直显,不读文本内容(svg 源码模式除外)
+  if (IMAGE_EXTS.has(extOf(path)) && !svgSource.value) {
+    fileContent.value = null;
+    return;
+  }
   if (fileCache.has(path)) {
     syncContent();
     return;
@@ -303,8 +330,14 @@ function selectFile(path: string) {
   if (selected.value.kind === "file" && selected.value.path === path) return;
   resetTranslation();
   selected.value = { kind: "file", path };
+  onSelectImage(path);
   void ensureFileContent(path);
 }
+
+// svg 预览/源码切换:源码模式需补读文本内容,切回预览时由 ensureFileContent 的守卫清空
+watch(svgSource, () => {
+  if (selected.value.kind === "file") void ensureFileContent(selected.value.path);
+});
 
 function selectScan() {
   if (selected.value.kind === "scan") return;
@@ -825,6 +858,31 @@ const llmNotice = computed(() => {
           <span v-else class="min-w-0 truncate text-xs font-medium">
             {{ t("settings.resources.skills.previewPage.scan.title") }}
           </span>
+          <div
+            v-if="selected.kind === 'file' && isSvg"
+            class="ml-auto flex shrink-0 items-center gap-1"
+          >
+            <Button
+              variant="ghost"
+              size="icon"
+              class="h-7 w-7"
+              :class="svgMode === 'preview' ? 'bg-accent' : ''"
+              :title="t('files.rendered')"
+              @click="svgMode = 'preview'"
+            >
+              <Eye class="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              class="h-7 w-7"
+              :class="svgMode === 'source' ? 'bg-accent' : ''"
+              :title="t('files.source')"
+              @click="svgMode = 'source'"
+            >
+              <Code class="h-3.5 w-3.5" />
+            </Button>
+          </div>
           <div v-if="isTranslatable" class="ml-auto flex shrink-0 items-center gap-1">
             <Button
               v-if="translatedFor !== null && !translating"
@@ -1047,6 +1105,12 @@ const llmNotice = computed(() => {
             >
               {{ t("common.loading") }}
             </p>
+            <div v-else-if="isImage && !svgSource" class="h-full min-h-0">
+              <ImageViewer v-if="imageSrc" :src="imageSrc" :svg="isSvg" :alt="selected.path" />
+              <p v-else class="px-3 py-8 text-center text-xs text-muted-foreground">
+                {{ t("settings.resources.skills.previewPage.fileBinary") }}
+              </p>
+            </div>
             <p
               v-else-if="fileContent === null"
               class="px-3 py-8 text-center text-xs text-muted-foreground"

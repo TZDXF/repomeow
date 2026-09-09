@@ -310,6 +310,7 @@ pub fn run() {
             commands::ai::rl_skill_body_read,
             commands::ai::rl_skill_body_write,
             commands::ai::rl_skill_tokens,
+            commands::ai::rl_skill_dir_path,
             commands::ai::rl_skill_file_read,
             commands::ai::rl_skill_scan,
             commands::ai::skill_dir_overview,

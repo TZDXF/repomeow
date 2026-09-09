@@ -2,7 +2,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { toast } from "vue-sonner";
 import {
@@ -36,6 +35,7 @@ import { openPathWith, sortOpenWithOptions } from "@/lib/open-with";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
 import type { FindQuery } from "@/lib/text-search";
 import { useFileFind } from "@/composables/files/useFileFind";
+import { useImagePreview } from "@/composables/files/useImagePreview";
 import { useLazyProjectFiles } from "@/composables/files/useLazyProjectFiles";
 import { useSettingsStore } from "@/stores/settings";
 import { useProjectsStore } from "@/stores/projects";
@@ -101,20 +101,10 @@ watch(rootPath, () => {
 
 const MD_EXTS = new Set(["md", "markdown"]);
 
-const selectedExt = computed(() => (selected.value ? extOf(selected.value) : ""));
-const isImage = computed(() => IMAGE_EXTS.has(selectedExt.value));
+// 图片预览公共逻辑(与 ResourceSkillPreview 共用):asset 直显 + svg 预览/源码切换
+const { selectedExt, isImage, isSvg, svgMode, svgSource, imageSrc, onSelectImage } =
+  useImagePreview(selected, (path) => (project.value ? resolvePath(rootPath.value, path) : null));
 const isMarkdown = computed(() => MD_EXTS.has(selectedExt.value));
-const isSvg = computed(() => selectedExt.value === "svg");
-
-// svg 兼具图像与文本两种形态:源码模式下按文本读取走代码视图,其余图片 asset 直显
-const svgMode = ref<"preview" | "source">("preview");
-const svgSource = computed(() => isSvg.value && svgMode.value === "source");
-
-const imageSrc = computed(() =>
-  selected.value && isImage.value && project.value
-    ? convertFileSrc(resolvePath(rootPath.value, selected.value))
-    : "",
-);
 
 // 切换文件不显示 loading:本地读取很快,loading 只会闪烁;
 // 保留旧内容直到新内容就位(序号防串台),仅错误/二进制等状态标记随切换即清
@@ -227,7 +217,7 @@ function onOutlineLocate(startLine: number, endLine: number) {
   if (!selected.value) return;
   // 渲染态(Markdown/SVG)没有代码视图,强制源码模式保证可定位
   if (MD_EXTS.has(extOf(selected.value))) mdMode.value = "source";
-  if (extOf(selected.value) === "svg") svgMode.value = "source";
+  onSelectImage(selected.value);
   void nextTick(() => codeViewer.value?.revealLines(startLine, endLine));
 }
 
@@ -237,7 +227,7 @@ const pendingReveal = ref<{ path: string; startLine: number; endLine: number } |
 function onSemanticOpen(path: string, startLine: number, endLine: number) {
   selected.value = path;
   if (MD_EXTS.has(extOf(path))) mdMode.value = "source";
-  if (extOf(path) === "svg") svgMode.value = "source";
+  onSelectImage(path);
   pendingReveal.value = { path, startLine, endLine };
   tryReveal();
 }
@@ -302,7 +292,7 @@ function onSearchOpen(path: string, line: number, query: FindQuery) {
   selected.value = path;
   // 渲染态(Markdown/SVG)没有代码视图,强制源码模式保证可定位
   if (MD_EXTS.has(extOf(path))) mdMode.value = "source";
-  if (extOf(path) === "svg") svgMode.value = "source";
+  onSelectImage(path);
   pendingJump.value = { path, line, query };
   tryJump();
 }

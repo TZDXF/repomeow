@@ -117,6 +117,11 @@ export function readResourceSkillTokens(id: string): Promise<ResourceSkillTokenR
   return cmd<ResourceSkillTokenReport>("rl_skill_tokens", { id });
 }
 
+/** 技能目录绝对路径(图片预览拼 asset URL 用;`/` 分隔) */
+export function resourceSkillDirPath(id: string): Promise<string> {
+  return cmd<string>("rl_skill_dir_path", { id });
+}
+
 /** 读取技能目录内单个文件;content 为 null = 二进制/超出上限,无法文本预览 */
 export function readResourceSkillFile(
   id: string,

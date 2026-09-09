@@ -334,6 +334,17 @@ pub async fn rl_skill_tokens(app: AppHandle, id: String) -> RlResult<SkillTokenR
     .await
 }
 
+/// 技能目录绝对路径(图片预览走 asset 协议,前端据此拼文件 URL;`/` 分隔)
+#[tauri::command]
+pub async fn rl_skill_dir_path(app: AppHandle, id: String) -> RlResult<String> {
+    let lib = Library::app(&app)?;
+    blocking(move || {
+        let _guard = lock_op();
+        ops::skill_dir_path(&lib, &id).map(|p| crate::path_util::to_forward_slash(&p))
+    })
+    .await
+}
+
 /// 读取技能目录内单个文件(预览用;路径白名单校验,二进制/超限 content 为 None)
 #[tauri::command]
 pub async fn rl_skill_file_read(
