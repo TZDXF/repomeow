@@ -1061,8 +1061,6 @@ export default {
     authorAll: "Everyone",
     commits: "Commits",
     commitCount: "{count} commits",
-    projectNoCommits: "No commits in this time range",
-    excludedNoCommits: "No commits, excluded",
     generate: "Generate report",
     generating: "Generating...",
     copy: "Copy Markdown",

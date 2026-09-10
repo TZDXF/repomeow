@@ -27,7 +27,8 @@ const totalCommits = computed(() =>
         {{ t("report.commitCount", { count: totalCommits }) }}
       </Badge>
     </div>
-    <div v-if="commitData.length" class="overflow-hidden rounded-md border">
+    <!-- max-h 限制整个提交列表高度:项目较多时走内部滚动,不再撑高左侧配置栏 -->
+    <ScrollArea v-if="commitData.length" class="max-h-72 rounded-md border">
       <Collapsible
         v-for="data in commitData"
         :key="data.projectName"
@@ -44,15 +45,11 @@ const totalCommits = computed(() =>
           />
           <span class="min-w-0 flex-1 truncate">{{ data.projectName }}</span>
           <span class="shrink-0 text-xs whitespace-nowrap text-muted-foreground">
-            {{
-              data.commits.length
-                ? t("report.commitCount", { count: data.commits.length })
-                : t("report.excludedNoCommits")
-            }}
+            {{ t("report.commitCount", { count: data.commits.length }) }}
           </span>
         </CollapsibleTrigger>
         <CollapsibleContent class="min-w-0 overflow-hidden">
-          <ScrollArea v-if="data.commits.length" class="max-h-40 border-t">
+          <ScrollArea class="max-h-40 border-t">
             <div
               v-for="commit in data.commits"
               :key="commit.hash + commit.date"
@@ -75,11 +72,8 @@ const totalCommits = computed(() =>
               </span>
             </div>
           </ScrollArea>
-          <p v-else class="border-t px-3 py-2 text-xs text-muted-foreground">
-            {{ t("report.projectNoCommits") }}
-          </p>
         </CollapsibleContent>
       </Collapsible>
-    </div>
+    </ScrollArea>
   </div>
 </template>

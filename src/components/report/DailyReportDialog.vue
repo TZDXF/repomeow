@@ -70,7 +70,7 @@ const savedHistoryId = ref<number | null>(null);
 const batchStore = useBatchReportStore();
 const isBatch = computed(() => period.value.execMode === "batch");
 const batchPlanning = ref(false);
-/** 本次拉取到的提交记录(驱动提交条数与可展开列表;生成前展示,AI 失败也保留) */
+/** 本次拉取到的提交记录(驱动提交条数与可展开列表;生成前展示,AI 失败也保留;已排除无提交的项目) */
 const commitData = ref<ProjectCommits[]>([]);
 
 /** 所选项目解析出的 git 用户名(项目 id → 显示名),驱动"仅我自己"按钮展示实际名称 */
@@ -237,7 +237,8 @@ async function loadCommits() {
       }),
     );
     if (stale()) return;
-    commitData.value = data;
+    // 排除时间范围内无提交的项目,提交列表只展示有内容的仓库
+    commitData.value = data.filter((d) => d.commits.length);
   } catch (e) {
     if (stale()) return;
     commitData.value = [];
@@ -297,7 +298,7 @@ async function generate() {
       return;
     }
     result.value = generated.result;
-    commitData.value = generated.commitData;
+    commitData.value = generated.commitData.filter((d) => d.commits.length);
     savedHistoryId.value = generated.historyId;
   } catch (e) {
     toast.error(e instanceof Error ? e.message : String(e));
@@ -466,15 +467,19 @@ async function startBatch() {
         </ScrollArea>
 
         <!-- 生成前不展示结果面板;生成中即显示以呈现进度反馈。
-             批量进度不在此展示,由右下角浮窗(BatchProgressFloat)承载 -->
-        <ReportResultPanel
-          v-if="result || generating"
-          :result="result"
-          :generating="generating"
-          :saved-history-id="savedHistoryId"
-          :language="settings.language"
-          @copy="copyResult"
-        />
+             批量进度不在此展示,由右下角浮窗(BatchProgressFloat)承载。
+             结果面板用 absolute 脱离文档流:行高只由左侧配置栏决定,
+             预览高度以左侧为准,Markdown 再长也只走面板内部滚动,不会撑高弹窗 -->
+        <div v-if="result || generating" class="relative min-h-0 min-w-0 flex-1">
+          <ReportResultPanel
+            class="absolute inset-0"
+            :result="result"
+            :generating="generating"
+            :saved-history-id="savedHistoryId"
+            :language="settings.language"
+            @copy="copyResult"
+          />
+        </div>
       </div>
     </DialogContent>
   </Dialog>
