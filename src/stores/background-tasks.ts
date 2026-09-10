@@ -2,7 +2,7 @@ import { computed, reactive, ref } from "vue";
 import { defineStore } from "pinia";
 import type { BackgroundTaskProgressPayload } from "@/types";
 
-export type BackgroundTaskKind = "report" | "wiki" | "conflict";
+export type BackgroundTaskKind = "report" | "wiki" | "conflict" | "agents-md";
 
 export type BackgroundTaskTarget =
   | { kind: "wiki"; projectId: number }
@@ -44,7 +44,7 @@ function storage(): Storage | null {
 }
 
 function isTaskKind(value: unknown): value is BackgroundTaskKind {
-  return value === "report" || value === "wiki" || value === "conflict";
+  return value === "report" || value === "wiki" || value === "conflict" || value === "agents-md";
 }
 
 function isTaskTarget(value: unknown): value is BackgroundTaskTarget {

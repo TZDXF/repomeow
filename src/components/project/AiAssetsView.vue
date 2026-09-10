@@ -9,7 +9,7 @@ import AiFileDrawer from "./AiFileDrawer.vue";
 import AgentsMdGenerateDialog from "./AgentsMdGenerateDialog.vue";
 import ProjectResourceSection from "./ProjectResourceSection.vue";
 import { listProjectAiTargets, type ProjectAiTarget } from "@/lib/project-ai-resources";
-import { generateAgentsMd } from "@/lib/ai";
+import { useAgentsMdStore } from "@/stores/agents-md";
 import { useSettingsStore } from "@/stores/settings";
 import { cmd } from "@/lib/tauri";
 import type { Project, ProjectAiAssets } from "@/types";
@@ -18,6 +18,7 @@ import type { Project, ProjectAiAssets } from "@/types";
 const props = defineProps<{ project: Project }>();
 const { t } = useI18n();
 const settings = useSettingsStore();
+const agentsMdStore = useAgentsMdStore();
 const router = useRouter();
 const assets = ref<ProjectAiAssets | null>(null);
 const targets = ref<ProjectAiTarget[]>([]);
@@ -65,43 +66,29 @@ const files = computed(
 /** 已存在 AGENTS.md 时按钮切换为「重新生成」语义(assets 未加载时按存在处理,避免文案闪烁) */
 const hasAgentsMd = computed(() => assets.value?.files.some((f) => f.path === "AGENTS.md") ?? true);
 const agentsMdDialogOpen = ref(false);
-const generatingAgentsMd = ref(false);
-let agentsMdController: AbortController | null = null;
-async function generateAgents(options: { model?: string; thinking?: string }) {
+/** 生成状态托管在 agents-md store:离开页面任务继续,回来即恢复进行态 */
+const generatingAgentsMd = computed(() => agentsMdStore.isGenerating(props.project.path));
+function generateAgents(options: { model?: string; thinking?: string }) {
   agentsMdDialogOpen.value = false;
-  if (generatingAgentsMd.value) {
-    return;
-  }
-  const controller = new AbortController();
-  agentsMdController = controller;
-  generatingAgentsMd.value = true;
-  try {
-    const result = await generateAgentsMd(props.project, settings.language, {
-      ...options,
-      signal: controller.signal,
-    });
-    if (!result) {
-      return; // 已取消,静默收场
-    }
-    let note = "";
-    if (result.claudeAction === "created") {
-      note = t("aiAssets.agentsMdClaudeCreated");
-    } else if (result.claudeAction === "aligned") {
-      note = t("aiAssets.agentsMdClaudeAligned");
-    }
-    toast.success(note ? `${t("aiAssets.agentsMdDone")} · ${note}` : t("aiAssets.agentsMdDone"));
-    await load();
-    preview("AGENTS.md");
-  } catch (e) {
-    toast.error(String(e));
-  } finally {
-    generatingAgentsMd.value = false;
-    agentsMdController = null;
-  }
+  // 结果 toast 由 store 负责(页面可能已离开);这里只触发,完成经下方 watch 联动
+  void agentsMdStore.generate(props.project, settings.language, options);
 }
 function cancelGenerateAgents() {
-  agentsMdController?.abort();
+  agentsMdStore.cancel(props.project.path);
 }
+// 页面仍打开时后台生成收敛:刷新资产列表,成功则预览产物
+watch(
+  () => agentsMdStore.generationFor(props.project.path)?.finishedAt,
+  async (finishedAt, previous) => {
+    if (!finishedAt || finishedAt === previous) {
+      return;
+    }
+    await load();
+    if (agentsMdStore.generationFor(props.project.path)?.status === "done") {
+      preview("AGENTS.md");
+    }
+  },
+);
 function preview(path: string, readOnly = true) {
   drawerReadOnly.value = readOnly;
   drawerPath.value = path;

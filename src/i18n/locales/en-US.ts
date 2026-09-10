@@ -279,6 +279,7 @@ export default {
     reportTask: "Reports",
     wikiTask: "Wiki",
     conflictTask: "Conflict resolution",
+    agentsMdTask: "AGENTS.md",
     running: "Running",
     taskCenter: "Background tasks",
     recentTasks: "Recent tasks: {count}",

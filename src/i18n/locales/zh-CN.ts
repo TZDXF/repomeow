@@ -262,6 +262,7 @@ export default {
     reportTask: "报告",
     wikiTask: "Wiki",
     conflictTask: "冲突解决",
+    agentsMdTask: "AGENTS.md",
     running: "进行中",
     taskCenter: "后台任务",
     recentTasks: "最近任务 {count}",

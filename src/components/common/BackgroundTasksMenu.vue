@@ -12,6 +12,7 @@ import {
   GitMerge,
   History,
   LoaderCircle,
+  Sparkles,
   Trash2,
 } from "@lucide/vue";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -23,12 +24,14 @@ import {
   type BackgroundTaskKind,
   type FrontendBackgroundTask,
 } from "@/stores/background-tasks";
+import { useAgentsMdStore } from "@/stores/agents-md";
 import { useBatchReportStore } from "@/stores/batch-report";
 import { useWikiStore } from "@/stores/wiki";
 
 const { t } = useI18n();
 const router = useRouter();
 const store = useBackgroundTasksStore();
+const agentsMdStore = useAgentsMdStore();
 const batchReportStore = useBatchReportStore();
 const wikiStore = useWikiStore();
 const open = ref(false);
@@ -44,6 +47,7 @@ const KIND_ICONS: Record<BackgroundTaskKind, Component> = {
   report: FileText,
   wiki: BookOpenText,
   conflict: GitMerge,
+  "agents-md": Sparkles,
 };
 
 function kindLabel(kind: BackgroundTaskKind): string {
@@ -51,6 +55,7 @@ function kindLabel(kind: BackgroundTaskKind): string {
     report: t("titleBar.reportTask"),
     wiki: t("titleBar.wikiTask"),
     conflict: t("titleBar.conflictTask"),
+    "agents-md": t("titleBar.agentsMdTask"),
   }[kind];
 }
 
@@ -67,6 +72,16 @@ const frontendTasks = computed<FrontendBackgroundTask[]>(() => {
       label: t("report.batchFloatTitle"),
       completed: batchReportStore.stats.finished,
       total: batchReportStore.stats.total,
+    });
+  }
+  for (const task of agentsMdStore.backgroundTasks) {
+    tasks.push({
+      id: task.id,
+      kind: "agents-md",
+      label: task.projectName,
+      completed: 0,
+      total: 0,
+      target: { kind: "project", projectId: task.projectId },
     });
   }
   for (const task of wikiStore.backgroundTasks) {
@@ -103,7 +118,7 @@ watch(open, (isOpen) => {
 });
 
 const taskGroups = computed<TaskGroup[]>(() => {
-  const kinds: BackgroundTaskKind[] = ["report", "wiki", "conflict"];
+  const kinds: BackgroundTaskKind[] = ["report", "wiki", "conflict", "agents-md"];
   return kinds.flatMap((kind) => {
     const tasks = store.tasks.filter((task) => task.kind === kind);
     if (!tasks.length) {
