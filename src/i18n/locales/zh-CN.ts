@@ -809,13 +809,11 @@ export default {
     conflict: {
       title: "存在合并冲突",
       description:
-        "操作产生了 {count} 个冲突文件。可交给本地 Agent 后台解决，也可使用 VS Code 或终端手工处理。",
+        "操作产生了 {count} 个冲突文件。可交给内置 Agent 后台解决，也可使用 VS Code 或终端手工处理。",
       files: "冲突文件",
-      agentLabel: "本地 Agent",
-      agentPlaceholder: "选择已安装的 Agent",
-      agentLoading: "正在检测本地 Agent...",
-      agentHint: "任务将在后台运行；Agent 会修改并暂存已解决的冲突文件。",
-      agentUnavailable: "未检测到可用的本地 Agent，请先安装并登录后再试。",
+      agentLabel: "内置 Agent 模型",
+      agentHint:
+        "直接修改并暂存指定文本冲突文件；禁止 Shell 和其他文件写入。完成后请审查 diff；二进制、删除等冲突需手动处理。",
       resolveWithAgent: "交给 Agent",
       agentStarting: "正在创建任务...",
       agentStarted: "已创建 Agent 冲突解决任务",
@@ -831,6 +829,8 @@ export default {
       count: "{count} 个",
       main: "主工作区",
       detached: "游离 HEAD",
+      missing: "目录已失效",
+      missingHint: "worktree 目录已被外部删除,仅剩登记记录,可直接移除",
       current: "当前",
       createFirst: "还没有 worktree,点击新建",
       create: "新建 worktree",
@@ -1810,6 +1810,8 @@ export default {
         chat: "项目问答",
         translate: "翻译",
         scan: "安全扫描",
+        "agents-md": "AGENTS.md 生成",
+        conflict: "冲突解决",
       },
     },
     accounts: {

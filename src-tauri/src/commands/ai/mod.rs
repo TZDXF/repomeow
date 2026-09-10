@@ -2,7 +2,7 @@ mod agents_md;
 mod assets;
 mod commit;
 mod config;
-mod harness_support;
+pub(crate) mod harness_support;
 mod report;
 mod resource_library;
 mod run;

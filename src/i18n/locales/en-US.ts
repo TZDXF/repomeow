@@ -845,13 +845,11 @@ export default {
     conflict: {
       title: "Merge conflicts",
       description:
-        "The operation produced {count} conflicted files. Let a local agent resolve them in the background, or handle them in VS Code or a terminal.",
+        "The operation produced {count} conflicted files. Let the built-in agent resolve them in the background, or handle them in VS Code or a terminal.",
       files: "Conflicted files",
-      agentLabel: "Local agent",
-      agentPlaceholder: "Select an installed agent",
-      agentLoading: "Detecting local agents...",
-      agentHint: "The task runs in the background. The agent will edit and stage resolved files.",
-      agentUnavailable: "No local agent is available. Install and sign in to one first.",
+      agentLabel: "Built-in agent model",
+      agentHint:
+        "Edits and stages only the specified text conflict files. Shell and other writes are blocked. Review the diff afterward; binary and deletion conflicts require manual resolution.",
       resolveWithAgent: "Use agent",
       agentStarting: "Creating task...",
       agentStarted: "Agent conflict-resolution task started",
@@ -867,6 +865,9 @@ export default {
       count: "{count}",
       main: "Main",
       detached: "Detached HEAD",
+      missing: "Directory missing",
+      missingHint:
+        "The worktree directory was deleted externally; only the registration remains and can be removed",
       current: "Current",
       createFirst: "No worktrees yet — click to create one",
       create: "New worktree",
@@ -1891,6 +1892,8 @@ export default {
         chat: "Project Q&A",
         translate: "Translate",
         scan: "Security scan",
+        "agents-md": "AGENTS.md generation",
+        conflict: "Conflict resolution",
       },
     },
     accounts: {

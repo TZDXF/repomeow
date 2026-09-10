@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { Bot, Code, Loader2, Terminal, TriangleAlert } from "@lucide/vue";
@@ -20,7 +20,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { agentList, type AgentInfo } from "@/lib/agent";
+import { ModelSelector } from "@/components/ai-elements/model-selector";
+import { useAiConfigStore } from "@/stores/ai-config";
+import { CHAT_THINKING_LEVELS } from "@/lib/ai-config";
 import { getEditorAvailability, isEditorUnavailable } from "@/lib/open-with";
 import type { EditorAvailability } from "@/lib/open-with";
 import { cmd } from "@/lib/tauri";
@@ -31,40 +33,32 @@ const { t } = useI18n();
 const props = defineProps<{ project: Project; conflicts: string[]; path?: string }>();
 const open = defineModel<boolean>("open", { required: true });
 
-const LAST_AGENT_KEY = "repomeow.conflict-agent";
 const availability = ref<EditorAvailability | null>(null);
-const installedAgents = ref<AgentInfo[]>([]);
+const aiConfig = useAiConfigStore();
+const model = ref("");
+const thinking = ref("__default__");
 const agentsLoading = ref(true);
-const selectedAgentId = ref("");
 const startingAgent = ref(false);
-
-function readLastAgent(): string {
-  try {
-    return globalThis.localStorage?.getItem(LAST_AGENT_KEY) ?? "";
-  } catch {
-    return "";
-  }
-}
-
+const modelGroups = computed(() =>
+  Object.entries(aiConfig.config?.providers ?? {}).map(([providerId, provider]) => ({
+    providerId,
+    providerName: provider.name || providerId,
+    models: provider.models,
+  })),
+);
 onMounted(async () => {
-  const availabilityPromise = getEditorAvailability().then((value) => {
-    availability.value = value;
-  });
+  void getEditorAvailability()
+    .then((value) => {
+      availability.value = value;
+    })
+    .catch(() => {});
   try {
-    const agents = (await agentList()).filter((agent) => agent.installed);
-    installedAgents.value = agents;
-    const remembered = readLastAgent();
-    selectedAgentId.value =
-      agents.find((agent) => agent.id === remembered)?.id ??
-      agents.find((agent) => agent.id === "codex")?.id ??
-      agents[0]?.id ??
-      "";
-  } catch {
-    installedAgents.value = [];
+    await aiConfig.ensureLoaded();
+  } catch (error) {
+    toast.error(String(error));
   } finally {
     agentsLoading.value = false;
   }
-  await availabilityPromise;
 });
 
 /** 冲突不在应用内手工解决:引导用户到更合适的工具中处理。 */
@@ -77,24 +71,20 @@ async function openIn(kind: EditorKind) {
   }
 }
 
-/** 创建独立后台任务，由显式选择的本地 ACP agent 修改并暂存冲突文件。 */
+/** 内置 Agent 受限修复；模型与思考强度传入后台任务。 */
 async function resolveWithAgent() {
-  if (!selectedAgentId.value || startingAgent.value) {
+  if (agentsLoading.value || startingAgent.value) {
     return;
   }
   startingAgent.value = true;
   try {
     await cmd<string>("resolve_git_conflicts_with_agent", {
-      agentId: selectedAgentId.value,
+      model: model.value || null,
+      thinking: thinking.value === "__default__" ? null : thinking.value,
       projectId: props.project.id,
       projectName: props.project.name,
       path: props.path ?? props.project.path,
     });
-    try {
-      globalThis.localStorage?.setItem(LAST_AGENT_KEY, selectedAgentId.value);
-    } catch {
-      // 偏好持久化失败不影响任务。
-    }
     toast.success(t("git.conflict.agentStarted"));
     open.value = false;
   } catch (error) {
@@ -129,28 +119,28 @@ async function resolveWithAgent() {
       </div>
       <div class="flex flex-col gap-1.5">
         <p class="text-sm font-medium">{{ t("git.conflict.agentLabel") }}</p>
-        <Select v-model="selectedAgentId" :disabled="agentsLoading || !installedAgents.length">
-          <SelectTrigger>
-            <SelectValue :placeholder="t('git.conflict.agentPlaceholder')" />
-          </SelectTrigger>
+        <ModelSelector
+          v-model="model"
+          :groups="modelGroups"
+          :disabled="agentsLoading || startingAgent"
+          :placeholder="t('wiki.builtinModelDefault')"
+          size="default"
+          trigger-class="w-full"
+        />
+        <p class="text-sm font-medium">{{ t("wiki.agentThinking") }}</p>
+        <Select v-model="thinking" :disabled="agentsLoading || startingAgent">
+          <SelectTrigger><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem v-for="agent in installedAgents" :key="agent.id" :value="agent.id">
-              {{ agent.name }}
+            <SelectItem value="__default__">{{ t("wiki.builtinThinkingDefault") }}</SelectItem>
+            <SelectItem v-for="level in CHAT_THINKING_LEVELS" :key="level" :value="level">
+              {{ t(`chat.thinkingLevels.${level}`) }}
             </SelectItem>
           </SelectContent>
         </Select>
-        <p class="text-xs text-muted-foreground">
-          {{
-            agentsLoading
-              ? t("git.conflict.agentLoading")
-              : installedAgents.length
-                ? t("git.conflict.agentHint")
-                : t("git.conflict.agentUnavailable")
-          }}
-        </p>
+        <p class="text-xs text-muted-foreground">{{ t("git.conflict.agentHint") }}</p>
       </div>
       <DialogFooter class="flex-wrap gap-2">
-        <Button :disabled="!selectedAgentId || startingAgent" @click="resolveWithAgent">
+        <Button :disabled="agentsLoading || startingAgent" @click="resolveWithAgent">
           <Loader2 v-if="startingAgent" class="h-4 w-4 animate-spin" />
           <Bot v-else class="h-4 w-4" />
           {{ startingAgent ? t("git.conflict.agentStarting") : t("git.conflict.resolveWithAgent") }}
