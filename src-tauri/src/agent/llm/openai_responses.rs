@@ -1470,6 +1470,26 @@ impl SseDecoder {
         }
         events
     }
+
+    /// 流结束:EOF 视为终结残留 SSE 帧——不足一行的残余字节按行处理,
+    /// 未以空行收尾的 data 缓冲照样分发(对齐 TS #9047 / 0.85.0:终态
+    /// response 事件可能不带尾部空行,丢弃会把成功流误判为错误)。
+    fn finish(&mut self) -> Vec<String> {
+        let mut events = Vec::new();
+        if !self.buffer.is_empty() {
+            let line_bytes = std::mem::take(&mut self.buffer);
+            let line = String::from_utf8_lossy(&line_bytes);
+            let line = line.trim_end_matches('\r');
+            if let Some(data) = line.strip_prefix("data:") {
+                self.data_lines
+                    .push(data.strip_prefix(' ').unwrap_or(data).to_string());
+            }
+        }
+        if !self.data_lines.is_empty() {
+            events.push(std::mem::take(&mut self.data_lines).join("\n"));
+        }
+        events
+    }
 }
 
 // ── 流聚合器(TS processResponsesStream) ──────────────────────────────
@@ -2435,7 +2455,27 @@ async fn run_stream(
                     }
                 }
             }
-            Ok(None) => break 'read,
+            Ok(None) => {
+                // 对齐 TS #9047:EOF 冲刷残余 SSE 帧(终态事件可能不带尾部空行)
+                for payload in decoder.finish() {
+                    // 忽略非 JSON data 行(如部分网关的 [DONE] 哨兵)
+                    let Ok(event) = serde_json::from_str::<Value>(&payload) else {
+                        continue;
+                    };
+                    match aggregator.apply_event(&event) {
+                        Ok(events) => {
+                            for event in events {
+                                writer.push(event);
+                            }
+                        }
+                        Err(message) => {
+                            stream_error = Some(message);
+                            break;
+                        }
+                    }
+                }
+                break 'read;
+            }
             Err(error) => {
                 stream_error = Some(error.to_string());
                 break 'read;
@@ -3469,6 +3509,28 @@ mod tests {
         let events =
             decoder.push(b": keep-alive\nevent: response.created\ndata: first\ndata: second\n\n");
         assert_eq!(events, vec!["first\nsecond"]);
+    }
+
+    #[test]
+    fn sse_decoder_finish_flushes_unterminated_terminal_event() {
+        // TS #9047:终态事件无尾部空行,EOF 时仍需分发
+        let mut decoder = SseDecoder::new();
+        let events = decoder.push(
+            b"data: {\"type\":\"response.created\"}\n\ndata: {\"type\":\"response.completed\"}\n",
+        );
+        assert_eq!(events, vec!["{\"type\":\"response.created\"}"]);
+        assert_eq!(
+            decoder.finish(),
+            vec!["{\"type\":\"response.completed\"}"]
+        );
+
+        // 残余不足一行(无换行结尾)同样冲刷;多行 data 以 \n 合并
+        let mut decoder = SseDecoder::new();
+        assert!(decoder.push(b"data: first\ndata: second").is_empty());
+        assert_eq!(decoder.finish(), vec!["first\nsecond"]);
+
+        // 空缓冲 / 无 data 行时不产出事件
+        assert!(SseDecoder::new().finish().is_empty());
     }
 
     // ── 流聚合器 ─────────────────────────────────────────────────────
