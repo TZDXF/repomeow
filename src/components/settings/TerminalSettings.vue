@@ -39,21 +39,6 @@ const OPTIONS: { value: TerminalKind; icon: typeof Terminal; labelKey: string; d
     <p class="mt-1 text-sm text-muted-foreground">
       {{ t("settings.terminal.description") }}
     </p>
-    <div class="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-      <span>{{ t("settings.terminal.windowsTerminalHost") }}</span>
-      <Badge
-        :variant="availability.windowsTerminal ? 'secondary' : 'outline'"
-        :class="!availability.windowsTerminal && 'text-muted-foreground'"
-      >
-        {{
-          t(
-            availability.windowsTerminal
-              ? "settings.terminal.available"
-              : "settings.terminal.notDetected",
-          )
-        }}
-      </Badge>
-    </div>
     <p
       v-if="store.terminal !== 'cmd' && !availability.shells[store.terminal]"
       class="mt-2 text-xs text-amber-600 dark:text-amber-400"

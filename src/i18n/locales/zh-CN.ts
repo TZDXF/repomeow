@@ -1640,9 +1640,7 @@ export default {
     },
     terminal: {
       title: "执行命令的终端",
-      description:
-        "运行 npm 脚本、自定义命令等操作所使用的终端;多行命令中 bash 风格的 \\ 续行会自动合并为单行执行",
-      windowsTerminalHost: "Windows Terminal 窗口宿主",
+      description: "运行 npm 脚本、自定义命令等操作所使用的终端",
       available: "可用",
       notDetected: "未检测到",
       selectedUnavailable: "当前选择未检测到,执行时将回退到 cmd",

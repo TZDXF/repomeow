@@ -1357,8 +1357,7 @@ export default {
         temporary:
           "The AI service is temporarily unavailable; retrying in {seconds}s ({attempt}/{max})",
       },
-      leaveHint:
-        "Generation may take a few minutes—leaving this page won't interrupt it.",
+      leaveHint: "Generation may take a few minutes—leaving this page won't interrupt it.",
     },
     phase: {
       collecting: "Collecting project files...",
@@ -1713,9 +1712,7 @@ export default {
     },
     terminal: {
       title: "Terminal for Commands",
-      description:
-        "The terminal used to run npm scripts, custom commands and more. A bash-style \\ continuation in a multi-line command is joined into a single line before execution",
-      windowsTerminalHost: "Windows Terminal window host",
+      description: "The terminal used to run npm scripts, custom commands and more",
       available: "Available",
       notDetected: "Not detected",
       selectedUnavailable: "The selected shell was not detected; commands will fall back to cmd",
