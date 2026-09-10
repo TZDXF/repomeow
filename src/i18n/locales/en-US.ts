@@ -1018,6 +1018,10 @@ export default {
       toolCount: "{count} tools",
     },
     retryScheduled: "Request failed temporarily. Retry {attempt}/{max} starts in {seconds}s",
+    compacting: "Context too large, auto-compacting…",
+    compactionDone: "Context auto-compacted ({before} → {after})",
+    compactionDoneTitle:
+      "Earlier messages were compacted into a summary; the conversation continues",
     notConfigured: "AI is not configured",
     goSettings: "Go to Settings",
     errors: {

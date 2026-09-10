@@ -8,6 +8,7 @@ import {
   Brain,
   Copy,
   Eye,
+  FoldVertical,
   Maximize2,
   MessageCircleMore,
   Minimize2,
@@ -66,7 +67,7 @@ import {
 import { Button } from "@/components/ui/button";
 import ChatTurnProcess from "@/components/chat/ChatTurnProcess.vue";
 import { CHAT_THINKING_LEVELS, type ChatPermission, type ChatThinkingLevel } from "@/lib/ai-config";
-import type { ChatProcessGroup, ChatToolRun } from "@/lib/chat";
+import { formatTokenCount, type ChatProcessGroup, type ChatToolRun } from "@/lib/chat";
 import { copyToClipboard } from "@/lib/utils";
 import { useAiConfigStore } from "@/stores/ai-config";
 import { useChatStore, type ChatRetryState } from "@/stores/chat";
@@ -387,9 +388,14 @@ interface TurnView {
   live: boolean;
   streamingText: string;
   retry: ChatRetryState | null;
+  /** 自动压缩进行中(替代 Loader 的状态行) */
+  compacting: boolean;
 }
 
-type TimelineView = { kind: "user"; key: string; content: string; editable: boolean } | TurnView;
+type TimelineView =
+  | { kind: "user"; key: string; content: string; editable: boolean }
+  | { kind: "compaction"; key: string; tokensBefore: number; tokensAfter: number }
+  | TurnView;
 
 function resolveRuns(runIds: string[], toolRuns: Record<string, ChatToolRun>) {
   return runIds.map((id) => toolRuns[id]).filter((run) => run != null);
@@ -405,6 +411,7 @@ function emptyTurn(key: string): TurnView {
     live: false,
     streamingText: "",
     retry: null,
+    compacting: false,
   };
 }
 
@@ -421,6 +428,16 @@ const timeline = computed<TimelineView[]>(() => {
     }
   }
   for (const message of s.messages) {
+    if (message.compaction) {
+      turn = null;
+      views.push({
+        kind: "compaction",
+        key: message.id,
+        tokensBefore: message.compaction.tokensBefore,
+        tokensAfter: message.compaction.tokensAfter,
+      });
+      continue;
+    }
     if (message.role === "user") {
       turn = null;
       views.push({
@@ -452,6 +469,7 @@ const timeline = computed<TimelineView[]>(() => {
     turn.live = true;
     turn.streamingText = s.streamingText;
     turn.retry = s.retry;
+    turn.compacting = s.compacting;
     turn.active = s.pendingToolRunIds.length > 0 || !s.streamingText.trim();
     const runs = resolveRuns(s.pendingToolRunIds, s.toolRuns);
     if (s.streamingThinking || runs.length > 0) {
@@ -614,6 +632,24 @@ const retrySeconds = computed(() => {
                     </MessageContent>
                   </template>
                 </Message>
+                <!-- 自动压缩时间线标记(分隔条样式,居中) -->
+                <div
+                  v-else-if="view.kind === 'compaction'"
+                  class="flex items-center gap-2 px-2 py-1 text-muted-foreground text-xs"
+                  :title="t('chat.compactionDoneTitle')"
+                >
+                  <div class="h-px flex-1 bg-border" />
+                  <FoldVertical class="size-3.5 shrink-0" />
+                  <span>
+                    {{
+                      t("chat.compactionDone", {
+                        before: formatTokenCount(view.tokensBefore),
+                        after: formatTokenCount(view.tokensAfter),
+                      })
+                    }}
+                  </span>
+                  <div class="h-px flex-1 bg-border" />
+                </div>
                 <!-- assistant 回合:思考与工具的统一折叠块 + 各段正文 -->
                 <Message v-else from="assistant" class="max-w-[90%]">
                   <div class="flex min-w-0 flex-col">
@@ -635,6 +671,13 @@ const retrySeconds = computed(() => {
                           :content="view.streamingText"
                           mode="streaming"
                         />
+                        <div
+                          v-else-if="view.compacting"
+                          class="flex items-center gap-2 text-muted-foreground text-xs"
+                        >
+                          <Loader />
+                          <span>{{ t("chat.compacting") }}</span>
+                        </div>
                         <div
                           v-else-if="view.retry"
                           class="flex items-center gap-2 text-muted-foreground text-xs"

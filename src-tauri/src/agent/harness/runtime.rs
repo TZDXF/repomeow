@@ -462,7 +462,9 @@ mod runtime_tests {
         EntryOrder, OperationIntent, OperationOutcome, OperationStartedRecord, RecordQuery,
         SessionMetadata,
     };
-    use crate::agent::llm::types::{AssistantContent, ModelThinkingLevel, StopReason, ToolCall};
+    use crate::agent::llm::types::{
+        AssistantContent, AssistantMessageEvent, ModelThinkingLevel, StopReason, ToolCall, Usage,
+    };
     use crate::agent::types::{AgentTool, AgentToolResult, ToolExecutionMode};
     use std::collections::HashMap as StdHashMap;
     use std::time::Duration;
@@ -1140,6 +1142,174 @@ mod runtime_tests {
         let stream_options = harness.get_stream_options().await;
         assert!(stream_options.headers.unwrap().is_empty());
         assert_eq!(stream_options.timeout_ms, Some(2_000));
+    }
+
+    /// mid-run 自动压缩(对齐 pi `_compactBeforeNextAssistantResponse`):
+    /// 工具回合结束后、下一次 assistant 调用前,上下文越阈值即压缩,
+    /// 后续 LLM 调用使用压缩后的上下文;run 末不得因旧 usage 重触发。
+    #[tokio::test]
+    async fn prompt_auto_compacts_mid_run_between_turns() {
+        let session = memory_session();
+        // 预置历史:usage 30(低于阈值 84,pre-prompt 不触发)。
+        let block = "x".repeat(400);
+        session
+            .append_message(user_message(&format!("q0 {block}"), 1))
+            .await
+            .unwrap();
+        let mut a0 = test_assistant(
+            vec![AssistantContent::text(&format!("a0 {block}"))],
+            StopReason::Stop,
+        );
+        a0.usage = Usage {
+            input: 30,
+            output: 1,
+            total_tokens: 31,
+            ..Usage::zero()
+        };
+        session
+            .append_message(AgentMessage::Message(TypedMessage::Assistant(a0)))
+            .await
+            .unwrap();
+
+        // 脚本:turn1 工具调用(usage 96,越阈值)→ 压缩摘要 → turn2 最终回答。
+        let mut turn1 = tool_call_script(
+            vec![crate::agent::agent_loop::testing::test_tool_call(
+                "tc1",
+                "noop",
+                serde_json::json!({}),
+            )],
+            "",
+        );
+        let big_usage = Usage {
+            input: 95,
+            output: 1,
+            total_tokens: 96,
+            ..Usage::zero()
+        };
+        turn1.result.usage = big_usage.clone();
+        for event in &mut turn1.events {
+            if let AssistantMessageEvent::Done { message, .. } = event {
+                message.usage = big_usage.clone();
+            }
+        }
+        let (stream_fn, calls) = scripted_stream_fn(vec![
+            turn1,
+            text_script("summary of history"),
+            text_script("final answer"),
+        ]);
+        let mut opts = options(
+            session.clone(),
+            stream_fn,
+            vec![harness_tool_from_core(noop_tool("noop"))],
+            None,
+        );
+        opts.model.context_window = 100;
+        opts.compaction = Some(
+            crate::agent::harness::compaction::compaction::CompactionSettings {
+                enabled: true,
+                reserve_tokens: 16,
+                keep_recent_tokens: 20,
+            },
+        );
+        let (harness, _) = AgentHarness::create(opts).await.unwrap();
+
+        let outcome = harness.prompt("go".to_string()).await.unwrap();
+        assert!(matches!(outcome, RunOutcome::Completed { .. }));
+
+        // 恰好 3 次 LLM 调用:turn1 → 摘要 → turn2(多一次说明重复触发)。
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 3);
+        // 第 2 次是摘要调用(单条 user 消息包裹 <conversation>)。
+        let summary_request = &calls[1].context.messages;
+        assert_eq!(summary_request.len(), 1);
+        let summary_text = serde_json::to_string(&summary_request[0]).unwrap();
+        assert!(summary_text.contains("<conversation>"), "{summary_text}");
+        // 第 3 次(turn2)上下文以压缩摘要开头。
+        let turn2_first = serde_json::to_string(&calls[2].context.messages[0]).unwrap();
+        assert!(
+            turn2_first.contains("The conversation history before this point was compacted"),
+            "{turn2_first}"
+        );
+        drop(calls);
+
+        // 压缩条目 + Threshold 记录。
+        let entries = branch_entries(&session).await.unwrap();
+        assert!(
+            entries
+                .iter()
+                .any(|entry| matches!(entry, Entry::Compaction(_))),
+            "expected a compaction entry on the branch"
+        );
+        let attempts = records_of(&session, "step_attempt").await;
+        assert!(attempts.iter().any(|record| matches!(
+            record,
+            LaneRecord::StepAttempt(record)
+                if record.step == StepKind::Compaction
+                    && record.compaction_reason
+                        == Some(crate::agent::harness::session::types::CompactionReason::Threshold)
+        )));
+    }
+
+    /// 自动压缩(对齐 pi `_checkCompaction` case 3):历史 usage 越过
+    /// context_window - reserve_tokens 时,prompt 前先压缩(Threshold),
+    /// 压缩后带旧 usage 的保留消息不得再次触发(防重触发守卫)。
+    #[tokio::test]
+    async fn prompt_auto_compacts_when_over_threshold() {
+        let session = memory_session();
+        let block = "x".repeat(400);
+        session
+            .append_message(user_message(&format!("q1 {block}"), 1))
+            .await
+            .unwrap();
+        let mut a1 = test_assistant(
+            vec![AssistantContent::text(&format!("a1 {block}"))],
+            StopReason::Stop,
+        );
+        a1.usage = Usage {
+            input: 90,
+            output: 5,
+            total_tokens: 95,
+            ..Usage::zero()
+        };
+        a1.timestamp = 2;
+        session
+            .append_message(AgentMessage::Message(TypedMessage::Assistant(a1)))
+            .await
+            .unwrap();
+        // 第一段脚本给摘要调用,第二段给正式 run;若压缩被重复触发,
+        // 脚本队列耗尽即 panic,测试随之失败。
+        let (stream_fn, _calls) =
+            scripted_stream_fn(vec![text_script("summary of history"), text_script("answer")]);
+        let mut opts = options(session.clone(), stream_fn, Vec::new(), None);
+        opts.model.context_window = 100;
+        opts.compaction = Some(
+            crate::agent::harness::compaction::compaction::CompactionSettings {
+                enabled: true,
+                reserve_tokens: 16,
+                keep_recent_tokens: 20,
+            },
+        );
+        let (harness, _) = AgentHarness::create(opts).await.unwrap();
+
+        let outcome = harness.prompt("q2".to_string()).await.unwrap();
+        assert!(matches!(outcome, RunOutcome::Completed { .. }));
+
+        // 压缩条目已写入分支,且 StepAttempt 标记为 Threshold(自动触发)。
+        let entries = branch_entries(&session).await.unwrap();
+        assert!(
+            entries
+                .iter()
+                .any(|entry| matches!(entry, Entry::Compaction(_))),
+            "expected a compaction entry on the branch"
+        );
+        let attempts = records_of(&session, "step_attempt").await;
+        assert!(attempts.iter().any(|record| matches!(
+            record,
+            LaneRecord::StepAttempt(record)
+                if record.step == StepKind::Compaction
+                    && record.compaction_reason
+                        == Some(crate::agent::harness::session::types::CompactionReason::Threshold)
+        )));
     }
 
     #[tokio::test]

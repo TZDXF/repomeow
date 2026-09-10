@@ -8,7 +8,7 @@
 //! 仍按蓝本 NotImplemented 的:skill/promptFromTemplate(资源未接线)、
 //! navigateTree、peekAction/executeAction(manual drive)、createLane(单 lane)。
 
-use crate::agent::agent::{default_convert_to_llm_fn, Agent};
+use crate::agent::agent::Agent;
 use crate::agent::agent_loop::now_ms;
 use crate::agent::harness::compaction::compaction::{self as compaction_mod, CompactionSettings};
 use crate::agent::harness::errors::{
@@ -38,10 +38,14 @@ use crate::agent::harness::types::{
     Result as ResultValue, ToolContext,
 };
 use crate::agent::harness::uuid::uuid_v7;
+use crate::agent::llm::overflow::{is_context_overflow, is_recoverable_length};
 use crate::agent::llm::retry::{is_retryable_assistant_error, retry_delay_ms, sleep_with_cancel};
-use crate::agent::llm::types::{AssistantMessage, Model, ModelThinkingLevel, StopReason, Usage};
+use crate::agent::llm::types::{
+    AssistantMessage, Model, ModelThinkingLevel, StopReason, ThinkingLevel, Usage,
+};
 use crate::agent::types::{
-    AgentLoopConfig, AgentMessage, AgentState, QueueMode, ToolExecutionMode, TypedMessage,
+    AgentContext, AgentLoopConfig, AgentLoopTurnUpdate, AgentMessage, AgentState,
+    PrepareNextTurnContext, PrepareNextTurnFn, QueueMode, StreamFn, ToolExecutionMode, TypedMessage,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -824,7 +828,7 @@ impl AgentHarness {
         }
 
         // 5. 历史(不含本次 prompt;prompt 由引擎经事件循环落库)。
-        let history = match build_history(&self.session).await {
+        let mut history = match build_history(&self.session).await {
             Ok(history) => history.messages,
             Err(error) => {
                 return Ok(RunOutcome::Failed {
@@ -835,6 +839,27 @@ impl AgentHarness {
                 });
             }
         };
+
+        // 5.5 pre-prompt 阈值压缩(对齐 pi `prompt()` 前置 `_checkCompaction`):
+        // 历史已越阈值时先压缩再组引擎。
+        let compaction_settings = { self.lock_state().compaction_settings };
+        if compaction_settings.enabled && snapshot.model.context_window > 0 {
+            let tokens =
+                guarded_context_tokens(&history, session_latest_compaction_timestamp(&self.session).await);
+            if tokens > 0
+                && compaction_mod::should_compact(
+                    tokens,
+                    snapshot.model.context_window,
+                    &compaction_settings,
+                )
+            {
+                self.auto_compact(CompactionReason::Threshold).await;
+                // 压缩后重建历史;失败则沿用旧历史继续(不阻断本次 run)
+                if let Ok(rebuilt) = build_history(&self.session).await {
+                    history = rebuilt.messages;
+                }
+            }
+        }
 
         // 6. 组装引擎 Agent。
         let (steering_mode, follow_up_mode) = {
@@ -860,14 +885,67 @@ impl AgentHarness {
                 )
             })
             .collect();
+        // mid-run 阈值压缩(对齐 pi `_compactBeforeNextAssistantResponse`):
+        // 回合间隙估算上下文,越阈值则压缩会话并用压缩后的历史替换下一回合上下文。
+        let prepare_next_turn: Option<PrepareNextTurnFn> = {
+            let session = self.session.clone();
+            let model = snapshot.model.clone();
+            let settings = { self.lock_state().compaction_settings };
+            let stream_fn = snapshot.stream_fn.clone();
+            let thinking_level = crate::agent::agent_loop::reasoning_from_thinking_level(
+                snapshot.thinking_level,
+            );
+            Some(std::sync::Arc::new(move |turn: PrepareNextTurnContext| {
+                let session = session.clone();
+                let model = model.clone();
+                let stream_fn = stream_fn.clone();
+                Box::pin(async move {
+                    if !settings.enabled || model.context_window <= 0 {
+                        return None;
+                    }
+                    let tokens = guarded_context_tokens(
+                        &turn.context.messages,
+                        session_latest_compaction_timestamp(&session).await,
+                    );
+                    if tokens == 0
+                        || !compaction_mod::should_compact(tokens, model.context_window, &settings)
+                    {
+                        return None;
+                    }
+                    run_auto_compaction(
+                        &session,
+                        settings,
+                        &model,
+                        thinking_level,
+                        &stream_fn,
+                        CompactionReason::Threshold,
+                    )
+                    .await
+                    .ok()?;
+                    let rebuilt = build_history(&session).await.ok()?;
+                    Some(AgentLoopTurnUpdate {
+                        context: Some(AgentContext {
+                            messages: rebuilt.messages,
+                            ..turn.context
+                        }),
+                        model: None,
+                        thinking_level: None,
+                    })
+                })
+            }))
+        };
         let loop_config = AgentLoopConfig {
             model: snapshot.model.clone(),
             stream: stream_options_to_simple(&snapshot.stream_options),
-            convert_to_llm: default_convert_to_llm_fn(),
+            // harness 版转换:识别 compactionSummary/branchSummary 等自定义消息
+            // (core 版会丢弃,压缩摘要将不进上下文)。
+            convert_to_llm: std::sync::Arc::new(|messages| {
+                Box::pin(async move { crate::agent::harness::messages::convert_to_llm(messages) })
+            }),
             transform_context: None,
             get_api_key: None,
             should_stop_after_turn: None,
-            prepare_next_turn: None,
+            prepare_next_turn,
             get_steering_messages: Some(make_queue_getter(
                 shared.clone(),
                 run_id.clone(),
@@ -950,6 +1028,9 @@ impl AgentHarness {
             });
         }
         let mut retry_attempt: u32 = 0;
+        // 溢出恢复(压缩 + 重试)每次 run 只尝试一次(对齐 pi
+        // `_overflowRecoveryAttempted`,防无限循环)。
+        let mut overflow_recovery_attempted = false;
         loop {
             if signal.is_cancelled() {
                 break;
@@ -958,6 +1039,39 @@ impl AgentHarness {
             let Some(AgentMessage::Message(TypedMessage::Assistant(assistant))) = last else {
                 break;
             };
+
+            // 溢出/可恢复截断优先于普通瞬态重试(对齐 pi `_checkCompaction`
+            // case 1:移除失败消息 → 压缩 → continue 一次)。
+            if matches!(assistant.stop_reason, StopReason::Error | StopReason::Length)
+                && !overflow_recovery_attempted
+            {
+                let same_model = assistant.provider == snapshot.model.provider
+                    && assistant.model == snapshot.model.id;
+                let overflow =
+                    same_model && is_context_overflow(&assistant, snapshot.model.context_window);
+                let recoverable = same_model
+                    && is_recoverable_length(&assistant, snapshot.model.max_tokens);
+                if overflow || recoverable {
+                    overflow_recovery_attempted = true;
+                    let mut messages = agent.messages();
+                    if matches!(
+                        messages.last(),
+                        Some(AgentMessage::Message(TypedMessage::Assistant(_)))
+                    ) {
+                        messages.pop();
+                    }
+                    agent.set_messages(messages);
+                    self.auto_compact(CompactionReason::Overflow).await;
+                    if signal.is_cancelled() {
+                        break;
+                    }
+                    if agent.continue_run().await.is_ok() {
+                        continue;
+                    }
+                    break;
+                }
+            }
+
             if assistant.stop_reason != StopReason::Error {
                 break;
             }
@@ -984,6 +1098,46 @@ impl AgentHarness {
             }
             if agent.continue_run().await.is_err() {
                 break;
+            }
+        }
+
+        // 7.5 run 末自动压缩检查(对齐 pi `_checkCompaction` case 2/3:只压缩不重试)。
+        if !signal.is_cancelled() {
+            let last = agent.messages().last().cloned();
+            if let Some(AgentMessage::Message(TypedMessage::Assistant(assistant))) = last {
+                if assistant.stop_reason != StopReason::Aborted {
+                    let settings = { self.lock_state().compaction_settings };
+                    let context_window = snapshot.model.context_window;
+                    let same_model = assistant.provider == snapshot.model.provider
+                        && assistant.model == snapshot.model.id;
+                    // 静默溢出(z.ai:stop 但 usage 超窗)按 overflow 压缩
+                    let silent_overflow = same_model
+                        && assistant.stop_reason == StopReason::Stop
+                        && is_context_overflow(&assistant, context_window);
+                    if settings.enabled && context_window > 0 {
+                        if silent_overflow {
+                            self.auto_compact(CompactionReason::Overflow).await;
+                        } else {
+                            let direct =
+                                compaction_mod::calculate_context_tokens(&assistant.usage);
+                            let tokens = if assistant.stop_reason == StopReason::Error || direct == 0
+                            {
+                                // 错误/零用量消息:按估算口径(带防重触发守卫)
+                                guarded_context_tokens(
+                                    &agent.messages(),
+                                    session_latest_compaction_timestamp(&self.session).await,
+                                )
+                            } else {
+                                direct
+                            };
+                            if tokens > 0
+                                && compaction_mod::should_compact(tokens, context_window, &settings)
+                            {
+                                self.auto_compact(CompactionReason::Threshold).await;
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -1073,6 +1227,38 @@ impl AgentHarness {
         _args: Option<Vec<String>>,
     ) -> Result<RunOutcome, HarnessUnavailable> {
         self.unavailable("promptFromTemplate")
+    }
+
+    /// 自动压缩(对齐 pi `_runAutoCompaction` 的默认摘要路径):
+    /// 快照当前设置后委托 [`run_auto_compaction`];失败仅记日志,不打断 run。
+    async fn auto_compact(&self, reason: CompactionReason) {
+        let (settings, model, thinking_level, stream_fn) = {
+            let state = self.lock_state();
+            if state.closed || !state.compaction_settings.enabled {
+                return;
+            }
+            (
+                state.compaction_settings,
+                state.model.clone(),
+                crate::agent::agent_loop::reasoning_from_thinking_level(state.thinking_level),
+                state
+                    .stream_fn
+                    .clone()
+                    .expect("stream_fn is set at create time"),
+            )
+        };
+        if let Err(error) = run_auto_compaction(
+            &self.session,
+            settings,
+            &model,
+            thinking_level,
+            &stream_fn,
+            reason,
+        )
+        .await
+        {
+            eprintln!("[harness] 自动压缩({})失败: {}", reason_str(reason), error.message);
+        }
     }
 
     /// 手动 compaction:接 compaction 模块(prepare → 摘要 → compaction 条目)。
@@ -2096,4 +2282,126 @@ pub enum ActionInfo {
     Sleep {
         delay_ms: i64,
     },
+}
+
+// ---------------------------------------------------------------------------
+// 自动压缩自由函数(prompt_input 的 mid-run/pre-prompt/run 末与 auto_compact 共用)
+// ---------------------------------------------------------------------------
+
+fn reason_str(reason: CompactionReason) -> &'static str {
+    match reason {
+        CompactionReason::Threshold => "threshold",
+        CompactionReason::Overflow => "overflow",
+        CompactionReason::Manual => "manual",
+    }
+}
+
+/// 最新 compaction 条目的时间戳(防重触发守卫;无则 None)。
+async fn session_latest_compaction_timestamp(session: &Session) -> Option<i64> {
+    let entries = branch_entries(session).await.ok()?;
+    entries.iter().rev().find_map(|entry| match entry {
+        Entry::Compaction(compaction) => Some(compaction.timestamp),
+        _ => None,
+    })
+}
+
+/// 阈值估算(对齐 pi 防重触发守卫:usage 来源消息早于最新压缩条目时,
+/// 其 usage 反映压缩前旧上下文,返回 0 跳过,等新鲜 usage 到达)。
+fn guarded_context_tokens(messages: &[AgentMessage], latest_compaction_ts: Option<i64>) -> i64 {
+    let estimate = compaction_mod::estimate_context_tokens(messages);
+    if let (Some(index), Some(ts)) = (estimate.last_usage_index, latest_compaction_ts) {
+        if messages[index].timestamp() <= ts {
+            return 0;
+        }
+    }
+    estimate.tokens
+}
+
+/// 自动压缩执行体(对齐 pi `_runAutoCompaction` 默认摘要路径):
+/// 不校验/注册 engine、不切换 busy、不落 Operation 记录;
+/// 压缩条目 + StepAttempt(带 reason)+ Usage 记录照常写入会话。
+async fn run_auto_compaction(
+    session: &Session,
+    settings: CompactionSettings,
+    model: &Model,
+    thinking_level: Option<ThinkingLevel>,
+    stream_fn: &StreamFn,
+    reason: CompactionReason,
+) -> Result<(), OperationError> {
+    if !settings.enabled {
+        return Ok(());
+    }
+    let result: Option<compaction_mod::CompactResult> = async {
+        let entries = branch_entries(session).await.map_err(operation_error)?;
+        let preparation = compaction_mod::prepare_compaction(&entries, settings).map_err(
+            |error| OperationError {
+                code: format!("compaction_{}", error.code),
+                message: error.message.clone(),
+            },
+        )?;
+        let Some(preparation) = preparation else {
+            return Ok(None);
+        };
+        let result = compaction_mod::compact(preparation, stream_fn, model, None, thinking_level)
+            .await
+            .map_err(|error| OperationError {
+                code: format!("compaction_{}", error.code),
+                message: error.message.clone(),
+            })?;
+        Ok(Some(result))
+    }
+    .await?;
+    let Some(result) = result else {
+        return Ok(());
+    };
+    let entry = session
+        .append_entry(
+            ProvisionedEntry::Compaction(
+                crate::agent::harness::session::types::ProvisionedCompactionEntry {
+                    id: uuid_v7(),
+                    summary: result.summary,
+                    retained_tail: result.retained_tail,
+                    tokens_before: result.tokens_before,
+                    details: Some(result.details),
+                    usage: Some(result.usage.clone()),
+                },
+            ),
+            "main".to_string(),
+        )
+        .await
+        .map_err(operation_error)?;
+    let Entry::Compaction(entry) = entry else {
+        unreachable!("compaction entry round-trips")
+    };
+    let run_id = uuid_v7();
+    let _ = session
+        .append_record(LaneRecord::StepAttempt(StepAttemptRecord {
+            id: uuid_v7(),
+            seq: 0,
+            lane: "main".to_string(),
+            timestamp: now_ms(),
+            run_id: run_id.clone(),
+            step: StepKind::Compaction,
+            attempt: 1,
+            result_entry_id: entry.id.clone(),
+            compaction_reason: Some(reason),
+        }))
+        .await;
+    let _ = session
+        .append_record(LaneRecord::Usage(UsageRecord {
+            id: uuid_v7(),
+            seq: 0,
+            lane: "main".to_string(),
+            timestamp: now_ms(),
+            usage: result.usage,
+            cause: UsageCauseKind::Compaction,
+            run_id: Some(run_id),
+            entry_id: Some(entry.id.clone()),
+            attempt: Some(1),
+            stop_reason: None,
+            tool_call_id: None,
+            details: None,
+        }))
+        .await;
+    Ok(())
 }

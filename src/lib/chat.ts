@@ -44,6 +44,10 @@ export type ChatEvent =
       message: string;
     }
   | { kind: "retryStarted"; attempt: number; maxAttempts: number }
+  /** 自动压缩开始(reason 为 "threshold" / "overflow") */
+  | { kind: "compactionStart"; reason: string }
+  /** 自动压缩结束;tokensAfter 为 null 表示压缩失败(会话继续,历史未变) */
+  | { kind: "compactionEnd"; reason: string; tokensBefore: number; tokensAfter: number | null }
   | { kind: "done"; usage: ChatUsageSummary | null }
   | { kind: "error"; code: string; message: string };
 
@@ -60,6 +64,8 @@ export interface ChatMessage {
   toolRunIds: string[];
   /** 该条消息是中止/异常时的残缺回复(仅展示标记) */
   partial?: boolean;
+  /** 自动压缩时间线标记(仅存在于压缩产生的占位消息,不参与正文渲染) */
+  compaction?: { tokensBefore: number; tokensAfter: number };
 }
 
 /** 工具权限审批状态:null = 无需审批(all 档直接执行) */

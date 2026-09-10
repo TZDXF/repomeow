@@ -155,6 +155,58 @@ describe("chat store", () => {
     expect(session.phase).toBe("idle");
   });
 
+  it("compactionStart/End 置位 compacting,成功时落时间线标记并回落上下文占用", async () => {
+    const store = useChatStore();
+    const run = store.send(PATH, PROJECT, "继续");
+    emit(PATH, { kind: "textDelta", delta: "回答" });
+    emit(PATH, { kind: "turnEnd", contextTokens: 150_000 });
+
+    const session = store.sessions[PATH];
+    expect(session.contextTokens).toBe(150_000);
+
+    emit(PATH, { kind: "compactionStart", reason: "threshold" });
+    expect(session.compacting).toBe(true);
+
+    emit(PATH, {
+      kind: "compactionEnd",
+      reason: "threshold",
+      tokensBefore: 150_000,
+      tokensAfter: 18_000,
+    });
+    expect(session.compacting).toBe(false);
+    expect(session.contextTokens).toBe(18_000);
+    const marker = session.messages[session.messages.length - 1];
+    expect(marker?.compaction).toEqual({ tokensBefore: 150_000, tokensAfter: 18_000 });
+    expect(marker?.content).toBe("");
+
+    finish(PATH, USAGE);
+    await run;
+    expect(session.compacting).toBe(false);
+  });
+
+  it("compactionEnd tokensAfter 为 null(压缩失败)时不落标记、不打断对话", async () => {
+    const store = useChatStore();
+    const run = store.send(PATH, PROJECT, "继续");
+    emit(PATH, { kind: "textDelta", delta: "回答" });
+    emit(PATH, { kind: "turnEnd", contextTokens: 150_000 });
+    emit(PATH, { kind: "compactionStart", reason: "overflow" });
+    expect(store.sessions[PATH].compacting).toBe(true);
+    emit(PATH, {
+      kind: "compactionEnd",
+      reason: "overflow",
+      tokensBefore: 150_000,
+      tokensAfter: null,
+    });
+
+    const session = store.sessions[PATH];
+    expect(session.compacting).toBe(false);
+    expect(session.contextTokens).toBe(150_000);
+    expect(session.messages.some((message) => message.compaction)).toBe(false);
+
+    finish(PATH, USAGE);
+    await run;
+  });
+
   it("thinkingDelta 累积思考流,turnEnd 随消息固化并清空", async () => {
     const store = useChatStore();
     const run = store.send(PATH, PROJECT, "分析一下");

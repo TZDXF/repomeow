@@ -132,7 +132,7 @@ async fn retries_transient_error_then_succeeds() {
     let signal = CancellationToken::new();
 
     let result =
-        run_chat_prompt_with_policy(&agent, AgentMessage::user_text("hi", 0), &signal, 3, 1, {
+        run_chat_prompt_with_policy(&agent, AgentMessage::user_text("hi", 0), &signal, 3, 1, None, {
             let events = events.clone();
             move |event: ChatEvent| events.lock().unwrap().push(event)
         })
@@ -181,7 +181,7 @@ async fn gives_up_after_max_retries_and_keeps_failed_attempt() {
     let signal = CancellationToken::new();
 
     let result =
-        run_chat_prompt_with_policy(&agent, AgentMessage::user_text("hi", 0), &signal, 2, 1, {
+        run_chat_prompt_with_policy(&agent, AgentMessage::user_text("hi", 0), &signal, 2, 1, None, {
             let events = events.clone();
             move |event: ChatEvent| events.lock().unwrap().push(event)
         })
@@ -218,7 +218,7 @@ async fn non_retryable_error_fails_fast_without_events() {
     let signal = CancellationToken::new();
 
     let result =
-        run_chat_prompt_with_policy(&agent, AgentMessage::user_text("hi", 0), &signal, 3, 1, {
+        run_chat_prompt_with_policy(&agent, AgentMessage::user_text("hi", 0), &signal, 3, 1, None, {
             let events = events.clone();
             move |event: ChatEvent| events.lock().unwrap().push(event)
         })
@@ -247,6 +247,7 @@ async fn cancel_during_backoff_skips_next_request() {
         &signal,
         3,
         60_000,
+        None,
         {
             let events = events.clone();
             let signal = signal.clone();

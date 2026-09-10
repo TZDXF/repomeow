@@ -8,6 +8,7 @@ pub mod event_stream;
 pub mod google_generative_ai;
 pub mod openai_completions;
 pub mod openai_responses;
+pub mod overflow;
 pub mod retry;
 pub mod types;
 pub mod validate;
@@ -70,3 +71,4 @@ fn unsupported_api_stream(model: Model) -> AssistantMessageEventStream {
     writer.end(error);
     stream
 }
+

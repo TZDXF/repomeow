@@ -38,6 +38,7 @@ use crate::db::Db;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::path_util::clean_str;
 use crate::time_util::now_ts_nanos;
+mod compaction;
 mod events;
 mod permission;
 mod session;
@@ -46,6 +47,7 @@ mod stream;
 mod tests;
 mod turn;
 
+use compaction::*;
 use events::*;
 use permission::*;
 use session::*;
@@ -101,6 +103,14 @@ pub enum ChatEvent {
     },
     /// 退避结束,即将开始下一次 assistant 调用。
     RetryStarted { attempt: u32, max_attempts: u32 },
+    /// 自动压缩开始(reason 为 "threshold" / "overflow",对齐 pi compaction_start)。
+    CompactionStart { reason: String },
+    /// 自动压缩结束;tokens_after 为 None 表示压缩失败(会话继续,历史未变)。
+    CompactionEnd {
+        reason: String,
+        tokens_before: i64,
+        tokens_after: Option<i64>,
+    },
     /// 回合正常结束,携带整个 prompt 的聚合用量。
     Done { usage: Option<ChatUsageSummary> },
     /// 失败/取消;code 取既有 ErrorCode 字符串。
@@ -196,6 +206,9 @@ struct ChatSession {
     prefs: Arc<Mutex<Option<ResolvedPrefs>>>,
     /// ask 权限下待确认工具调用的一次性决策通道(tool_call_id → 发送端)。
     pending: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
+    /// 最近一次自动压缩的 summary 消息时间戳(防重触发守卫,对齐 pi
+    /// `_checkCompaction` 的「早于最新 compaction 条目则跳过」)。
+    last_compaction_ts: Arc<Mutex<i64>>,
 }
 
 /// chat_send 期间注册在 CHAT_RUNS 的守卫,Drop 时移除。
@@ -274,10 +287,17 @@ pub async fn chat_send(
     *session.run_id.lock().unwrap() = run_id;
     *session.usage.lock().unwrap() = Usage::zero();
 
+    let compaction = ChatCompactionContext {
+        app: app.clone(),
+        cancel_cell: session.cancel_cell.clone(),
+        last_compaction_ts: session.last_compaction_ts.clone(),
+        context_tokens: session.context_tokens.clone(),
+    };
     let outcome = run_chat_prompt_with_retries(
         &session.agent,
         AgentMessage::user_text(message, now_ts_nanos() / 1_000_000),
         &run.token,
+        &compaction,
         &on_event,
     )
     .await;

@@ -976,6 +976,9 @@ export default {
       toolCount: "{count} 个工具",
     },
     retryScheduled: "请求暂时失败，第 {attempt}/{max} 次重试将在 {seconds} 秒后开始",
+    compacting: "上下文过长，正在自动压缩…",
+    compactionDone: "上下文已自动压缩({before} → {after})",
+    compactionDoneTitle: "历史消息已压缩为摘要,对话继续",
     notConfigured: "AI 尚未配置",
     goSettings: "前往设置",
     errors: {

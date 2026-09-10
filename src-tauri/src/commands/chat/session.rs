@@ -1,9 +1,12 @@
 use super::*;
 use crate::agent::chat_tools::{chat_tools, ChatToolContext};
+use crate::agent::harness::messages::{
+    CompactionSummaryMessage, COMPACTION_SUMMARY_PREFIX, COMPACTION_SUMMARY_SUFFIX,
+};
 use crate::agent::llm::{Model, SimpleStreamOptions, Usage};
 use crate::agent::types::{
-    AgentLoopConfig, AgentMessage, AgentState, ConvertToLlmFn, Message, ToolExecutionMode,
-    TypedMessage,
+    AgentContext, AgentLoopConfig, AgentLoopTurnUpdate, AgentMessage, AgentState, ConvertToLlmFn,
+    Message, PrepareNextTurnFn, ToolExecutionMode, TypedMessage,
 };
 use crate::agent::Agent;
 use crate::ai::catalog::{self, ChatPermission, ModelRef};
@@ -106,6 +109,64 @@ pub(super) fn build_session(
     let pending_cell: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>> =
         Arc::new(Mutex::new(HashMap::new()));
     let sink_cell: EventSink = Arc::new(Mutex::new(None));
+    let cancel_cell = CancelCell::default();
+    let breakdown_cell = Arc::new(Mutex::new(None));
+    let context_tokens_cell = Arc::new(Mutex::new(0));
+    let last_compaction_ts = Arc::new(Mutex::new(0));
+    // mid-run 压缩需要回拿 Agent(agent 在 loop_config 之后创建,用 Weak 槽晚绑定)。
+    let agent_slot: Arc<Mutex<Option<std::sync::Weak<Agent>>>> = Arc::new(Mutex::new(None));
+    // mid-run 阈值压缩(对齐 pi `_compactBeforeNextAssistantResponse`):
+    // 回合间隙估算上下文,越阈值则压缩历史并替换下一回合上下文。
+    let prepare_next_turn: PrepareNextTurnFn = {
+        let app = app.clone();
+        let agent_slot = agent_slot.clone();
+        let cancel_cell = cancel_cell.clone();
+        let context_tokens = context_tokens_cell.clone();
+        let last_compaction_ts = last_compaction_ts.clone();
+        let sink_cell = sink_cell.clone();
+        Arc::new(move |turn: crate::agent::types::PrepareNextTurnContext| {
+            let app = app.clone();
+            let agent_slot = agent_slot.clone();
+            let cancel_cell = cancel_cell.clone();
+            let context_tokens = context_tokens.clone();
+            let last_compaction_ts = last_compaction_ts.clone();
+            let sink_cell = sink_cell.clone();
+            Box::pin(async move {
+                let agent = agent_slot.lock().unwrap().as_ref()?.upgrade()?;
+                let model = agent.model();
+                let last_ts = *last_compaction_ts.lock().unwrap();
+                super::compaction::threshold_trigger_tokens(
+                    &turn.context.messages,
+                    model.context_window,
+                    last_ts,
+                )?;
+                let ctx = super::compaction::ChatCompactionContext {
+                    app,
+                    cancel_cell,
+                    last_compaction_ts,
+                    context_tokens,
+                };
+                let emit = move |event: ChatEvent| sink_send(&sink_cell, event);
+                super::compaction::compact_chat_history(
+                    &agent,
+                    &ctx,
+                    super::compaction::ChatCompactionReason::Threshold,
+                    &emit,
+                )
+                .await
+                .ok()?;
+                // 对齐 pi:messages = 压缩后的 agent.state.messages
+                Some(AgentLoopTurnUpdate {
+                    context: Some(AgentContext {
+                        messages: agent.messages(),
+                        ..turn.context
+                    }),
+                    model: None,
+                    thinking_level: None,
+                })
+            })
+        })
+    };
     let loop_config = AgentLoopConfig {
         model: model.clone(),
         stream: SimpleStreamOptions {
@@ -116,7 +177,7 @@ pub(super) fn build_session(
         transform_context: None,
         get_api_key: None,
         should_stop_after_turn: None,
-        prepare_next_turn: None,
+        prepare_next_turn: Some(prepare_next_turn),
         get_steering_messages: None,
         get_follow_up_messages: None,
         tool_execution: ToolExecutionMode::Parallel,
@@ -128,24 +189,24 @@ pub(super) fn build_session(
         )),
         after_tool_call: None,
     };
-    let cancel_cell = CancelCell::default();
-    let breakdown_cell = Arc::new(Mutex::new(None));
     let agent = Arc::new(Agent::new(
         state,
         loop_config,
         chat_stream_fn(app.clone(), cancel_cell.clone(), breakdown_cell.clone()),
     ));
+    *agent_slot.lock().unwrap() = Some(Arc::downgrade(&agent));
     let session = ChatSession {
         agent,
         cancel_cell,
         sink: sink_cell,
         usage: Arc::new(Mutex::new(Usage::zero())),
-        context_tokens: Arc::new(Mutex::new(0)),
+        context_tokens: context_tokens_cell,
         breakdown: breakdown_cell,
         busy: Arc::new(AtomicBool::new(false)),
         run_id: Arc::new(Mutex::new(String::new())),
         prefs: prefs_cell,
         pending: pending_cell,
+        last_compaction_ts,
     };
     // 订阅一次,随会话存活;事件经 sink 槽转发给当前 chat_send 的 Channel。
     session.agent.subscribe(chat_event_listener(
@@ -175,7 +236,9 @@ pub(super) fn lookup_project_id(db: &Db, project_path: &str) -> Option<i64> {
     .ok()
 }
 
-/// 对齐 agent.ts defaultConvertToLlm:已知 role 原样转换,Custom 全滤。
+/// 对齐 agent.ts defaultConvertToLlm:已知 role 原样转换;Custom 仅放行
+/// compactionSummary(自动压缩写入的会话摘要,按 harness 口径包装为 user
+/// 消息,对齐 harness::messages::convert_to_llm),其余 Custom 全滤。
 pub(super) fn default_convert_to_llm() -> ConvertToLlmFn {
     Arc::new(|messages: Vec<AgentMessage>| {
         Box::pin(async move {
@@ -187,9 +250,29 @@ pub(super) fn default_convert_to_llm() -> ConvertToLlmFn {
                         TypedMessage::Assistant(assistant) => Message::Assistant(assistant),
                         TypedMessage::ToolResult(result) => Message::ToolResult(result),
                     }),
-                    AgentMessage::Custom(_) => None,
+                    AgentMessage::Custom(map) => compaction_summary_to_llm(map),
                 })
                 .collect::<Vec<_>>()
         })
     })
+}
+
+/// compactionSummary 自定义消息 → user 消息(prefix/suffix 与 harness 一致)。
+fn compaction_summary_to_llm(map: serde_json::Map<String, serde_json::Value>) -> Option<Message> {
+    if map.get("role").and_then(serde_json::Value::as_str) != Some(CompactionSummaryMessage::ROLE)
+    {
+        return None;
+    }
+    let message: CompactionSummaryMessage =
+        serde_json::from_value(serde_json::Value::Object(map)).ok()?;
+    Some(Message::User(crate::agent::llm::UserMessage {
+        role: "user".to_string(),
+        content: crate::agent::llm::UserContent::Blocks(vec![
+            crate::agent::llm::TextOrImageContent::text(format!(
+                "{}{}{}",
+                COMPACTION_SUMMARY_PREFIX, message.summary, COMPACTION_SUMMARY_SUFFIX
+            )),
+        ]),
+        timestamp: message.timestamp,
+    }))
 }

@@ -47,6 +47,8 @@ export interface ChatSessionState {
   cacheHitCachedTokens: number;
   /** 瞬态错误后的退避等待状态；下一 attempt 开始后清空 */
   retry: ChatRetryState | null;
+  /** 自动压缩进行中(compactionStart/compactionEnd 之间) */
+  compacting: boolean;
 }
 
 interface ChatProject {
@@ -70,6 +72,7 @@ function defaultSession(): ChatSessionState {
     cacheHitInputTokens: 0,
     cacheHitCachedTokens: 0,
     retry: null,
+    compacting: false,
   };
 }
 
@@ -229,6 +232,30 @@ export const useChatStore = defineStore("chat", () => {
         }
         break;
       }
+      case "compactionStart":
+        session.compacting = true;
+        break;
+      case "compactionEnd": {
+        session.compacting = false;
+        // 压缩成功才落时间线标记;失败时历史未变,不打断对话流
+        if (event.tokensAfter != null) {
+          session.messages = [
+            ...session.messages,
+            {
+              id: messageId(),
+              role: "assistant",
+              content: "",
+              toolRunIds: [],
+              compaction: {
+                tokensBefore: event.tokensBefore,
+                tokensAfter: event.tokensAfter,
+              },
+            },
+          ];
+          session.contextTokens = event.tokensAfter;
+        }
+        break;
+      }
       case "retryScheduled":
         session.streamingText = "";
         session.streamingThinking = "";
@@ -275,6 +302,7 @@ export const useChatStore = defineStore("chat", () => {
     session.streamingThinking = "";
     session.pendingToolRunIds = [];
     session.retry = null;
+    session.compacting = false;
     session.lastUsage = null;
     session.messages = [
       ...session.messages,
@@ -317,6 +345,7 @@ export const useChatStore = defineStore("chat", () => {
         session.streamingText = "";
         session.streamingThinking = "";
         session.retry = null;
+        session.compacting = false;
         // 中止/异常退出后不可能再收到审批结果,清理未决审批状态
         resetApprovalStates(session);
         session.busy = false;
