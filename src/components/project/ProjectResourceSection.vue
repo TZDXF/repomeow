@@ -152,6 +152,8 @@ const unmanagedMcp = computed(
 interface UnmanagedItem {
   key: string;
   name: string;
+  /** 技能描述(仅 skills 有;mcp 为空串)。 */
+  description: string;
   /** 预览路径(skills 为 SKILL.md 路径,mcp 为配置文件路径)。 */
   path: string;
   /** 导入来源:skills = 技能目录;mcp = 配置文件路径。 */
@@ -164,12 +166,14 @@ const unmanaged = computed<UnmanagedItem[]>(() =>
         name: s.name,
         path: joinPath(s.dir, "SKILL.md"),
         source: s.dir,
+        description: s.description,
       }))
     : unmanagedMcp.value.map((s) => ({
         key: `mcp:${s.path}:${s.name}`,
         name: s.name,
         path: s.path,
         source: s.path,
+        description: "",
       })),
 );
 /** 分组只作为筛选维度(skills):用户分组与市场来源(owner/repo)并列。 */
@@ -770,7 +774,12 @@ function changed() {
             @click="previewUnmanaged(item)"
           >
             <p class="truncate text-xs font-medium">{{ item.name }}</p>
-            <p class="mt-1 truncate font-mono text-[10px] text-muted-foreground">{{ item.path }}</p>
+            <p v-if="item.description" class="mt-1 truncate text-xs text-muted-foreground">
+              {{ item.description }}
+            </p>
+            <p v-else class="mt-1 truncate font-mono text-[10px] text-muted-foreground">
+              {{ item.path }}
+            </p>
           </button>
           <div v-else class="min-w-0 flex-1">
             <p class="truncate text-xs font-medium">{{ item.name }}</p>

@@ -192,7 +192,7 @@ function manage() {
         <LoaderCircle class="size-5 animate-spin" />
       </div>
       <p v-else-if="loadError" role="alert" class="text-sm text-destructive">{{ loadError }}</p>
-      <ScrollArea v-else class="min-h-0">
+      <ScrollArea v-else class="min-h-0 flex-1">
         <div class="space-y-2">
           <p
             v-if="data?.sourceError"
