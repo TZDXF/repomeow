@@ -2527,102 +2527,7 @@ async fn run_stream(
         }
     }
 
-    let max_retries = options
-        .as_ref()
-        .and_then(|options| options.max_retries)
-        .unwrap_or(DEFAULT_MAX_RETRIES);
-    let max_retry_delay_ms = options
-        .as_ref()
-        .and_then(|options| options.max_retry_delay_ms)
-        .unwrap_or(DEFAULT_MAX_RETRY_DELAY_MS);
-    let connect = async {
-        let api_key = resolve_api_key(&model, options.as_ref()).map_err(|m| (m, false))?;
-        let http = build_http_client(options.as_ref()).map_err(|m| (m, false))?;
-        let compat = get_anthropic_compat(&model);
-        let beta_features = get_beta_features(
-            &model,
-            &context,
-            is_oauth,
-            resolve_stream_options(&model, &context, options.as_ref()).thinking_enabled,
-            options.as_ref(),
-        );
-        let retention = resolve_cache_retention(options.as_ref());
-        let session_affinity =
-            if retention != CacheRetention::None && compat.send_session_affinity_headers {
-                options
-                    .as_ref()
-                    .and_then(|options| options.session_id.as_deref())
-            } else {
-                None
-            };
-        let headers = build_request_headers(
-            &model,
-            options.as_ref(),
-            api_key.as_deref(),
-            is_oauth,
-            session_affinity,
-            &beta_features,
-        );
-        let payload = serde_json::to_vec(&body)
-            .map_err(|error| (format!("failed to serialize request body: {error}"), false))?;
-        // TS retryProviderRequest:每次重试都是全新请求(重建 future 并重发)
-        let mut retries_remaining = max_retries;
-        loop {
-            let outcome: Result<reqwest::Response, ProviderRequestError> = async {
-                let response = http
-                    .post(request_url(&model))
-                    .headers(headers.clone())
-                    .body(payload.clone())
-                    .send()
-                    .await
-                    .map_err(|error| ProviderRequestError {
-                        message: error.to_string(),
-                        status: None,
-                        headers: None,
-                    })?;
-                let status = response.status();
-                if !status.is_success() {
-                    // SDK 行为:非 2xx 抛带 status/headers 的 APIError,进入重试判定
-                    let response_headers = response.headers().clone();
-                    let text = response.text().await.unwrap_or_default();
-                    return Err(ProviderRequestError {
-                        message: format_http_error(status.as_u16(), &text),
-                        status: Some(status.as_u16()),
-                        headers: Some(response_headers),
-                    });
-                }
-                if let Some(on_response) = options
-                    .as_ref()
-                    .and_then(|options| options.on_response.as_ref())
-                {
-                    on_response(&ProviderResponse {
-                        status: status.as_u16(),
-                        headers: headers_to_map(response.headers()),
-                    });
-                }
-                Ok(response)
-            }
-            .await;
-            match outcome {
-                Ok(response) => {
-                    return Ok::<reqwest::Response, (String, bool)>(response);
-                }
-                Err(error) => {
-                    let retry_index = max_retries.saturating_sub(retries_remaining);
-                    match retry_decision(&error, retry_index, retries_remaining, max_retry_delay_ms)
-                    {
-                        // 退避期间取消由外层 select! 感知(connect future 被 drop)
-                        RetryDecision::Retry(delay_ms) => {
-                            retries_remaining -= 1;
-                            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-                        }
-                        RetryDecision::DelayExceeded(message) => return Err((message, false)),
-                        RetryDecision::NotRetryable => return Err((error.message, false)),
-                    }
-                }
-            }
-        }
-    };
+    let connect = send_with_retry(&model, &context, options.as_ref(), &body);
     let connected = if let Some(token) = &signal {
         tokio::select! {
             result = connect => result,
@@ -2729,6 +2634,325 @@ async fn run_stream(
     writer.end(message);
 }
 
+/// Provider 内层重试连接(TS retryProviderRequest):每次重试都重新发请求;
+/// 仅在重试收敛后的成功响应上回调一次 onResponse。
+/// 返回 Err((消息, 是否中止语义));重试退避期间的取消由外层 select! 感知。
+async fn send_with_retry(
+    model: &Model,
+    context: &Context,
+    options: Option<&SimpleStreamOptions>,
+    body: &Value,
+) -> Result<reqwest::Response, (String, bool)> {
+    let api_key = resolve_api_key(model, options).map_err(|m| (m, false))?;
+    let http = build_http_client(options).map_err(|m| (m, false))?;
+    let is_oauth = options
+        .and_then(|options| options.api_key.as_deref())
+        .is_some_and(is_oauth_token);
+    let compat = get_anthropic_compat(model);
+    let beta_features = get_beta_features(
+        model,
+        context,
+        is_oauth,
+        resolve_stream_options(model, context, options).thinking_enabled,
+        options,
+    );
+    let retention = resolve_cache_retention(options);
+    let session_affinity = if retention != CacheRetention::None && compat.send_session_affinity_headers
+    {
+        options.and_then(|options| options.session_id.as_deref())
+    } else {
+        None
+    };
+    let headers = build_request_headers(
+        model,
+        options,
+        api_key.as_deref(),
+        is_oauth,
+        session_affinity,
+        &beta_features,
+    );
+    let payload = serde_json::to_vec(body)
+        .map_err(|error| (format!("failed to serialize request body: {error}"), false))?;
+    let max_retries = options
+        .and_then(|options| options.max_retries)
+        .unwrap_or(DEFAULT_MAX_RETRIES);
+    let max_retry_delay_ms = options
+        .and_then(|options| options.max_retry_delay_ms)
+        .unwrap_or(DEFAULT_MAX_RETRY_DELAY_MS);
+    let mut retries_remaining = max_retries;
+    loop {
+        let outcome: Result<reqwest::Response, ProviderRequestError> = async {
+            let response = http
+                .post(request_url(model))
+                .headers(headers.clone())
+                .body(payload.clone())
+                .send()
+                .await
+                .map_err(|error| ProviderRequestError {
+                    message: error.to_string(),
+                    status: None,
+                    headers: None,
+                })?;
+            let status = response.status();
+            if !status.is_success() {
+                // SDK 行为:非 2xx 抛带 status/headers 的 APIError,进入重试判定
+                let response_headers = response.headers().clone();
+                let text = response.text().await.unwrap_or_default();
+                return Err(ProviderRequestError {
+                    message: format_http_error(status.as_u16(), &text),
+                    status: Some(status.as_u16()),
+                    headers: Some(response_headers),
+                });
+            }
+            if let Some(on_response) = options.and_then(|options| options.on_response.as_ref()) {
+                on_response(&ProviderResponse {
+                    status: status.as_u16(),
+                    headers: headers_to_map(response.headers()),
+                });
+            }
+            Ok(response)
+        }
+        .await;
+        match outcome {
+            Ok(response) => return Ok(response),
+            Err(error) => {
+                let retry_index = max_retries.saturating_sub(retries_remaining);
+                match retry_decision(&error, retry_index, retries_remaining, max_retry_delay_ms) {
+                    // 退避期间取消由外层 select! 感知(connect future 被 drop)
+                    RetryDecision::Retry(delay_ms) => {
+                        retries_remaining -= 1;
+                        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                    }
+                    RetryDecision::DelayExceeded(message) => return Err((message, false)),
+                    RetryDecision::NotRetryable => return Err((error.message, false)),
+                }
+            }
+        }
+    }
+}
+
+// ── 非流式入口 ────────────────────────────────────────────────────────
+
+/// Anthropic Messages 非流式生成:同一请求语义(`stream: false`),响应体一次性
+/// 读回解析为最终 [`AssistantMessage`],终态语义与流式终态消息一致;
+/// 失败/中止编码进消息,不 panic。
+pub async fn complete_anthropic_messages(
+    model: Model,
+    context: Context,
+    options: Option<SimpleStreamOptions>,
+    signal: Option<CancellationToken>,
+) -> AssistantMessage {
+    let mut message = new_assistant_message(&model);
+    macro_rules! finish {
+        ($reason:expr, $text:expr) => {{
+            message.stop_reason = $reason;
+            message.error_message = Some($text);
+            return message;
+        }};
+    }
+    if signal.as_ref().is_some_and(|token| token.is_cancelled()) {
+        finish!(StopReason::Aborted, "Request was aborted".to_string());
+    }
+
+    let mut body = build_request_body(&model, &context, options.as_ref());
+    if let Some(object) = body.as_object_mut() {
+        object.insert("stream".to_string(), json!(false));
+    }
+    if let Some(on_payload) = options
+        .as_ref()
+        .and_then(|options| options.on_payload.as_ref())
+    {
+        if let Some(next) = on_payload(body.clone()).await {
+            body = next;
+        }
+    }
+
+    let connected = if let Some(token) = &signal {
+        tokio::select! {
+            result = send_with_retry(&model, &context, options.as_ref(), &body) => result,
+            _ = token.cancelled() => Err(("Request was aborted".to_string(), true)),
+        }
+    } else {
+        send_with_retry(&model, &context, options.as_ref(), &body).await
+    };
+    let response = match connected {
+        Ok(response) => response,
+        Err((text, aborted)) => {
+            let reason = if aborted {
+                StopReason::Aborted
+            } else {
+                StopReason::Error
+            };
+            finish!(reason, text);
+        }
+    };
+
+    // 响应体一次性读回;读取期取消即时生效
+    let read = if let Some(token) = &signal {
+        tokio::select! {
+            result = response.json::<Value>() => result.map_err(|error| error.to_string()),
+            _ = token.cancelled() => Err("Request was aborted".to_string()),
+        }
+    } else {
+        response
+            .json::<Value>()
+            .await
+            .map_err(|error| error.to_string())
+    };
+    let payload = match read {
+        Ok(payload) => payload,
+        Err(text) => {
+            let reason = if signal.as_ref().is_some_and(|token| token.is_cancelled()) {
+                StopReason::Aborted
+            } else {
+                StopReason::Error
+            };
+            finish!(reason, text);
+        }
+    };
+    let is_oauth = options
+        .as_ref()
+        .and_then(|options| options.api_key.as_deref())
+        .is_some_and(is_oauth_token);
+    if let Err(text) = apply_message_response(&mut message, &model, &context, is_oauth, &payload) {
+        finish!(StopReason::Error, text);
+    }
+    message
+}
+
+/// 非流式 Messages 响应体 → 终态消息(字段语义与流式聚合一致)。
+fn apply_message_response(
+    message: &mut AssistantMessage,
+    model: &Model,
+    context: &Context,
+    is_oauth: bool,
+    response: &Value,
+) -> Result<(), String> {
+    if let Some(id) = response
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+    {
+        message.response_id = Some(id.to_string());
+    }
+    // TS 直接覆盖 output.model(响应模型即最终归属)
+    if let Some(model_id) = response
+        .get("model")
+        .and_then(Value::as_str)
+        .filter(|model_id| !model_id.is_empty())
+    {
+        message.model = model_id.to_string();
+    }
+
+    if let Some(blocks) = response.get("content").and_then(Value::as_array) {
+        for block in blocks {
+            match block.get("type").and_then(Value::as_str) {
+                Some("text") => {
+                    let text = block
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    if !text.is_empty() {
+                        message.content.push(AssistantContent::text(text));
+                    }
+                }
+                Some("thinking") => {
+                    message.content.push(AssistantContent::Thinking {
+                        thinking: block
+                            .get("thinking")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                        thinking_signature: block
+                            .get("signature")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        redacted: false,
+                    });
+                }
+                Some("redacted_thinking") => {
+                    message.content.push(AssistantContent::Thinking {
+                        thinking: String::new(),
+                        thinking_signature: block
+                            .get("data")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        redacted: true,
+                    });
+                }
+                Some("tool_use") => {
+                    let name = block
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    let name = if is_oauth {
+                        from_claude_code_name(name, &context.tools)
+                    } else {
+                        name.to_string()
+                    };
+                    message.content.push(AssistantContent::ToolCall(ToolCall {
+                        id: normalize_tool_call_id(
+                            block.get("id").and_then(Value::as_str).unwrap_or_default(),
+                        ),
+                        name,
+                        arguments: block
+                            .get("input")
+                            .and_then(Value::as_object)
+                            .cloned()
+                            .unwrap_or_default(),
+                        thought_signature: None,
+                        namespace: None,
+                    }));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // usage:与流式 message_start 投影一致
+    if let Some(usage) = response.get("usage").filter(|usage| usage.is_object()) {
+        let number_of = |key: &str| usage.get(key).and_then(Value::as_i64).unwrap_or(0);
+        message.usage.input = number_of("input_tokens");
+        message.usage.output = number_of("output_tokens");
+        message.usage.cache_read = number_of("cache_read_input_tokens");
+        message.usage.cache_write = number_of("cache_creation_input_tokens");
+        message.usage.cache_write_1h = Some(
+            usage
+                .get("cache_creation")
+                .and_then(|creation| creation.get("ephemeral_1h_input_tokens"))
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+        );
+        message.usage.total_tokens = message.usage.input
+            + message.usage.output
+            + message.usage.cache_read
+            + message.usage.cache_write;
+        calculate_cost(model, &mut message.usage);
+    }
+
+    let stop_reason = response.get("stop_reason").and_then(Value::as_str);
+    message.raw_stop_reason = stop_reason.map(str::to_string);
+    match stop_reason {
+        Some(reason) => {
+            let (mapped, error_message) = map_stop_reason(reason, response.get("stop_details"))?;
+            message.stop_reason = mapped;
+            message.error_message = error_message;
+        }
+        // 缺省 stop_reason 的代理:有工具调用视为 toolUse,否则 stop
+        None => {
+            message.stop_reason = if message
+                .content
+                .iter()
+                .any(|block| matches!(block, AssistantContent::ToolCall(_)))
+            {
+                StopReason::ToolUse
+            } else {
+                StopReason::Stop
+            };
+        }
+    }
+    Ok(())
+}
 // ── 单测 ─────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -4128,5 +4352,79 @@ mod tests {
         assert_eq!(error.error_message.as_deref(), Some("Request was aborted"));
         // message_start 已消费:response_id 在中止消息上可见
         assert_eq!(error.response_id.as_deref(), Some("m"));
+    }
+
+    // ── 非流式响应解析 ────────────────────────────────────────────────
+
+    #[test]
+    fn complete_response_parses_blocks_usage_and_stop() {
+        let model = anthropic_model("https://example.com");
+        let mut message = new_assistant_message(&model);
+        let context = context_of(vec![user_message("hi")]);
+        let response = json!({
+            "id": "msg_1",
+            "model": "claude-sonnet-4-5",
+            "content": [
+                {"type": "thinking", "thinking": "deep", "signature": "sig"},
+                {"type": "text", "text": "answer"}
+            ],
+            "stop_reason": "end_turn",
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 7,
+                "cache_read_input_tokens": 40,
+                "cache_creation_input_tokens": 10,
+                "cache_creation": { "ephemeral_1h_input_tokens": 6 }
+            }
+        });
+        apply_message_response(&mut message, &model, &context, false, &response).unwrap();
+        assert_eq!(message.response_id.as_deref(), Some("msg_1"));
+        assert_eq!(message.stop_reason, StopReason::Stop);
+        assert_eq!(message.usage.input, 100);
+        assert_eq!(message.usage.output, 7);
+        assert_eq!(message.usage.cache_read, 40);
+        assert_eq!(message.usage.cache_write, 10);
+        assert_eq!(message.usage.cache_write_1h, Some(6));
+        assert_eq!(message.usage.total_tokens, 157);
+        assert!(
+            matches!(&message.content[0], AssistantContent::Thinking { thinking, thinking_signature, redacted } if thinking == "deep" && thinking_signature.as_deref() == Some("sig") && !redacted)
+        );
+        assert!(matches!(&message.content[1], AssistantContent::Text { text, .. } if text == "answer"));
+    }
+
+    #[test]
+    fn complete_response_tool_use_maps_stop_reason() {
+        let model = anthropic_model("https://example.com");
+        let mut message = new_assistant_message(&model);
+        let context = context_of(vec![user_message("hi")]);
+        let response = json!({
+            "content": [
+                {"type": "tool_use", "id": "toolu_1", "name": "get_weather", "input": {"city": "Oslo"}}
+            ],
+            "stop_reason": "tool_use"
+        });
+        apply_message_response(&mut message, &model, &context, false, &response).unwrap();
+        assert_eq!(message.stop_reason, StopReason::ToolUse);
+        match &message.content[0] {
+            AssistantContent::ToolCall(call) => {
+                assert_eq!(call.name, "get_weather");
+                assert_eq!(
+                    call.arguments.get("city").and_then(Value::as_str),
+                    Some("Oslo")
+                );
+            }
+            other => panic!("expected tool call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn complete_response_unknown_stop_reason_is_error() {
+        let model = anthropic_model("https://example.com");
+        let mut message = new_assistant_message(&model);
+        let context = context_of(vec![user_message("hi")]);
+        let response = json!({"content": [], "stop_reason": "weird"});
+        let error =
+            apply_message_response(&mut message, &model, &context, false, &response).unwrap_err();
+        assert!(error.contains("Unhandled stop reason"));
     }
 }

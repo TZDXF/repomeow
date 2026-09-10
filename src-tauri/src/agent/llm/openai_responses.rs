@@ -2387,11 +2387,11 @@ async fn run_stream(
     // Provider 内层重试:每次重试重新发请求;取消可打断退避睡眠。
     let connected = if let Some(token) = &signal {
         tokio::select! {
-            result = send_with_retry(&model, options.as_ref(), &body, Some(token)) => result,
+            result = send_with_retry(&model, options.as_ref(), &body, Some(token), true) => result,
             _ = token.cancelled() => Err(("Request was aborted".to_string(), true)),
         }
     } else {
-        send_with_retry(&model, options.as_ref(), &body, None).await
+        send_with_retry(&model, options.as_ref(), &body, None, true).await
     };
     let mut response = match connected {
         Ok(response) => response,
@@ -2498,6 +2498,115 @@ async fn run_stream(
     let (event, message) = aggregator.finish(aborted, stream_error);
     writer.push(event);
     writer.end(message);
+}
+
+// ── 非流式入口 ────────────────────────────────────────────────────────
+
+/// OpenAI Responses 非流式生成:同一请求语义(`stream: false`),响应体一次性读回,
+/// 逐 output item 复用流式落槽逻辑,再按终态语义(usage / stopReason)收尾;
+/// 失败/中止编码进消息,不 panic。
+pub async fn complete_openai_responses(
+    model: Model,
+    context: Context,
+    options: Option<SimpleStreamOptions>,
+    signal: Option<CancellationToken>,
+) -> AssistantMessage {
+    let mut aggregator = ResponsesAggregator::new(&model);
+    if signal.as_ref().is_some_and(|token| token.is_cancelled()) {
+        let (_, message) = aggregator.finish(true, None);
+        return message;
+    }
+
+    let mut body = build_request_body(&model, &context, options.as_ref());
+    if let Some(object) = body.as_object_mut() {
+        object.insert("stream".to_string(), json!(false));
+    }
+    if let Some(on_payload) = options
+        .as_ref()
+        .and_then(|options| options.on_payload.as_ref())
+    {
+        if let Some(next) = on_payload(body.clone()).await {
+            body = next;
+        }
+    }
+
+    let connected = if let Some(token) = &signal {
+        tokio::select! {
+            result = send_with_retry(&model, options.as_ref(), &body, Some(token), false) => result,
+            _ = token.cancelled() => Err(("Request was aborted".to_string(), true)),
+        }
+    } else {
+        send_with_retry(&model, options.as_ref(), &body, None, false).await
+    };
+    let response = match connected {
+        Ok(response) => response,
+        Err((text, aborted)) => {
+            let (_, message) = aggregator.finish(aborted, Some(text));
+            return message;
+        }
+    };
+
+    // TS onResponse:仅在重试收敛后的最终成功响应上回调一次
+    if let Some(on_response) = options
+        .as_ref()
+        .and_then(|options| options.on_response.as_ref())
+    {
+        let mut headers = HashMap::new();
+        for (name, value) in response.headers() {
+            if let Ok(value) = value.to_str() {
+                headers.insert(name.as_str().to_string(), value.to_string());
+            }
+        }
+        on_response(&super::types::ProviderResponse {
+            status: response.status().as_u16(),
+            headers,
+        });
+    }
+
+    // 响应体一次性读回;读取期取消即时生效
+    let read = if let Some(token) = &signal {
+        tokio::select! {
+            result = response.json::<Value>() => result.map_err(|error| error.to_string()),
+            _ = token.cancelled() => Err("Request was aborted".to_string()),
+        }
+    } else {
+        response
+            .json::<Value>()
+            .await
+            .map_err(|error| error.to_string())
+    };
+    let payload = match read {
+        Ok(payload) => payload,
+        Err(text) => {
+            let aborted = signal.as_ref().is_some_and(|token| token.is_cancelled());
+            let (_, message) = aggregator.finish(aborted, Some(text));
+            return message;
+        }
+    };
+
+    // 非流式响应 = 单个 response 对象:逐 output item 落内容(与 output_item.done 同一语义)
+    if let Some(items) = payload.get("output").and_then(Value::as_array) {
+        let mut events = Vec::new();
+        for (index, item) in items.iter().enumerate() {
+            aggregator.finish_output_item(index as i64, item, &mut events);
+        }
+    }
+    let terminal_error = match aggregator.finalize_response(&payload) {
+        Ok(()) => {
+            // failed/cancelled 时带出 response.error.message(流式经 response.failed 事件得到)
+            if aggregator.output.stop_reason == StopReason::Error
+                && aggregator.output.error_message.is_none()
+            {
+                aggregator.output.error_message = payload
+                    .pointer("/error/message")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+            }
+            None
+        }
+        Err(text) => Some(text),
+    };
+    aggregator.finish(false, terminal_error).1
 }
 
 // ── Provider 内层重试(TS utils/provider-retry.ts) ────────────────────
@@ -2621,6 +2730,7 @@ async fn send_with_retry(
     options: Option<&SimpleStreamOptions>,
     body: &Value,
     signal: Option<&CancellationToken>,
+    streaming: bool,
 ) -> Result<reqwest::Response, (String, bool)> {
     let api_key = resolve_api_key(model, options).map_err(|message| (message, false))?;
     let max_retries = options
@@ -2631,7 +2741,7 @@ async fn send_with_retry(
     let mut retry_index: u32 = 0;
 
     loop {
-        match send_responses_request(model, options, body, &api_key).await {
+        match send_responses_request(model, options, body, &api_key, streaming).await {
             Ok(response) => return Ok(response),
             Err(failure) => {
                 if signal.is_some_and(|token| token.is_cancelled()) {
@@ -2669,6 +2779,7 @@ async fn send_responses_request(
     options: Option<&SimpleStreamOptions>,
     body: &Value,
     api_key: &str,
+    streaming: bool,
 ) -> Result<reqwest::Response, RequestFailure> {
     let failure = |message: String, retryable: bool| RequestFailure {
         message,
@@ -2683,7 +2794,11 @@ async fn send_responses_request(
     }
     headers.insert(
         reqwest::header::ACCEPT,
-        reqwest::header::HeaderValue::from_static("text/event-stream"),
+        if streaming {
+            reqwest::header::HeaderValue::from_static("text/event-stream")
+        } else {
+            reqwest::header::HeaderValue::from_static("application/json")
+        },
     );
     headers.insert(
         reqwest::header::USER_AGENT,
@@ -4496,5 +4611,82 @@ mod tests {
             }
             other => panic!("expected aborted, got {other:?}"),
         }
+    }
+
+    // ── 非流式响应收尾 ────────────────────────────────────────────────
+
+    #[test]
+    fn complete_response_finishes_from_output_items() {
+        let model = test_model("https://example.com");
+        let mut aggregator = ResponsesAggregator::new(&model);
+        let payload = json!({
+            "id": "resp_1",
+            "status": "completed",
+            "output": [
+                {"type": "reasoning", "id": "rs_1", "summary": [{"type": "summary_text", "text": "deep"}]},
+                {"type": "message", "id": "msg_1", "status": "completed", "role": "assistant",
+                 "content": [{"type": "output_text", "text": "answer"}]}
+            ],
+            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+        });
+        let mut events = Vec::new();
+        if let Some(items) = payload.get("output").and_then(Value::as_array) {
+            for (index, item) in items.iter().enumerate() {
+                aggregator.finish_output_item(index as i64, item, &mut events);
+            }
+        }
+        aggregator.finalize_response(&payload).unwrap();
+        let (_, message) = aggregator.finish(false, None);
+        assert_eq!(message.stop_reason, StopReason::Stop);
+        assert_eq!(message.response_id.as_deref(), Some("resp_1"));
+        assert_eq!(message.usage.input, 10);
+        assert_eq!(message.usage.output, 5);
+        assert_eq!(message.usage.total_tokens, 15);
+        assert!(
+            matches!(&message.content[0], AssistantContent::Thinking { thinking, .. } if thinking == "deep")
+        );
+        assert!(matches!(&message.content[1], AssistantContent::Text { text, .. } if text == "answer"));
+    }
+
+    #[test]
+    fn complete_response_incomplete_maps_length() {
+        let model = test_model("https://example.com");
+        let mut aggregator = ResponsesAggregator::new(&model);
+        let payload = json!({
+            "id": "resp_2",
+            "status": "incomplete",
+            "incomplete_details": {"reason": "max_output_tokens"},
+            "output": [
+                {"type": "message", "id": "msg_1", "status": "completed", "role": "assistant",
+                 "content": [{"type": "output_text", "text": "partial"}]}
+            ]
+        });
+        let mut events = Vec::new();
+        if let Some(items) = payload.get("output").and_then(Value::as_array) {
+            for (index, item) in items.iter().enumerate() {
+                aggregator.finish_output_item(index as i64, item, &mut events);
+            }
+        }
+        aggregator.finalize_response(&payload).unwrap();
+        let (_, message) = aggregator.finish(false, None);
+        assert_eq!(message.stop_reason, StopReason::Length);
+        assert!(matches!(&message.content[0], AssistantContent::Text { text, .. } if text == "partial"));
+    }
+
+    #[test]
+    fn complete_response_failed_status_is_error() {
+        let model = test_model("https://example.com");
+        let mut aggregator = ResponsesAggregator::new(&model);
+        let payload = json!({
+            "id": "resp_3",
+            "status": "failed",
+            "error": {"message": "provider exploded"},
+            "output": []
+        });
+        aggregator.finalize_response(&payload).unwrap();
+        assert_eq!(aggregator.output.stop_reason, StopReason::Error);
+        assert_eq!(aggregator.output.error_message, None);
+        let (_, message) = aggregator.finish(false, None);
+        assert_eq!(message.stop_reason, StopReason::Error);
     }
 }

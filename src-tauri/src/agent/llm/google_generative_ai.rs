@@ -1098,6 +1098,16 @@ fn build_stream_url(model: &Model) -> String {
     }
 }
 
+/// 非流式 generateContent 端点(与 [`build_stream_url`] 同一 base 规则)。
+fn build_generate_url(model: &Model) -> String {
+    let path = format!("models/{}:generateContent", model.id);
+    if model.base_url.trim().is_empty() {
+        format!("{GOOGLE_DEFAULT_BASE_URL}/{GOOGLE_DEFAULT_API_VERSION}/{path}")
+    } else {
+        format!("{}/{path}", model.base_url.trim_end_matches('/'))
+    }
+}
+
 /// 纯函数:构造 Gemini `generateContent` REST 请求体。
 /// `config`(GenerateContentConfig)按 SDK REST 序列化拆分:systemInstruction /
 /// tools / toolConfig 在顶层,temperature / maxOutputTokens / thinkingConfig 在
@@ -1870,56 +1880,7 @@ async fn run_stream(
     let url = build_stream_url(&model);
 
     // 初始请求重试(蓝本 retryGoogleRequest → retryProviderRequest)
-    let max_retries = options
-        .as_ref()
-        .and_then(|options| options.max_retries)
-        .unwrap_or(0);
-    let mut retries_remaining = max_retries;
-    let response = loop {
-        match send_attempt(&client, &url, &body, signal.as_ref()).await {
-            Ok(response) => break Ok(response),
-            Err(ConnectFailure::Aborted) => {
-                break Err(("Request was aborted".to_string(), true));
-            }
-            Err(ConnectFailure::Fatal(message)) => break Err((message, false)),
-            Err(ConnectFailure::Retryable { message, headers }) => {
-                if is_aborted() {
-                    break Err(("Request was aborted".to_string(), true));
-                }
-                if retries_remaining == 0 {
-                    break Err((message, false));
-                }
-                let retry_index = max_retries - retries_remaining;
-                retries_remaining -= 1;
-                let delay = match compute_retry_delay(
-                    headers.as_ref(),
-                    retry_index,
-                    options
-                        .as_ref()
-                        .and_then(|options| options.max_retry_delay_ms),
-                    &message,
-                ) {
-                    Ok(delay) => delay,
-                    Err(validation) => break Err((validation, false)),
-                };
-                let slept = match &signal {
-                    Some(token) => {
-                        tokio::select! {
-                            _ = tokio::time::sleep(Duration::from_millis(delay)) => true,
-                            _ = token.cancelled() => false,
-                        }
-                    }
-                    None => {
-                        tokio::time::sleep(Duration::from_millis(delay)).await;
-                        true
-                    }
-                };
-                if !slept {
-                    break Err(("Request was aborted".to_string(), true));
-                }
-            }
-        }
-    };
+    let response = send_with_retry(&client, &url, &body, options.as_ref(), signal.as_ref()).await;
     let mut response = match response {
         Ok(response) => response,
         Err((message, aborted)) => {
@@ -1992,6 +1953,146 @@ async fn run_stream(
     }
     writer.push(terminal);
     writer.end(message);
+}
+
+/// 初始请求重试(蓝本 retryGoogleRequest → retryProviderRequest):
+/// 每次重试都重新发请求;退避可被取消打断;Err((消息, 是否中止语义))。
+async fn send_with_retry(
+    client: &reqwest::Client,
+    url: &str,
+    body: &Value,
+    options: Option<&SimpleStreamOptions>,
+    signal: Option<&CancellationToken>,
+) -> Result<reqwest::Response, (String, bool)> {
+    let is_aborted = || signal.is_some_and(|token| token.is_cancelled());
+    let max_retries = options
+        .and_then(|options| options.max_retries)
+        .unwrap_or(0);
+    let mut retries_remaining = max_retries;
+    loop {
+        match send_attempt(client, url, body, signal).await {
+            Ok(response) => return Ok(response),
+            Err(ConnectFailure::Aborted) => {
+                return Err(("Request was aborted".to_string(), true));
+            }
+            Err(ConnectFailure::Fatal(message)) => return Err((message, false)),
+            Err(ConnectFailure::Retryable { message, headers }) => {
+                if is_aborted() {
+                    return Err(("Request was aborted".to_string(), true));
+                }
+                if retries_remaining == 0 {
+                    return Err((message, false));
+                }
+                let retry_index = max_retries - retries_remaining;
+                retries_remaining -= 1;
+                let delay = match compute_retry_delay(
+                    headers.as_ref(),
+                    retry_index,
+                    options.and_then(|options| options.max_retry_delay_ms),
+                    &message,
+                ) {
+                    Ok(delay) => delay,
+                    Err(validation) => return Err((validation, false)),
+                };
+                let slept = match signal {
+                    Some(token) => {
+                        tokio::select! {
+                            _ = tokio::time::sleep(Duration::from_millis(delay)) => true,
+                            _ = token.cancelled() => false,
+                        }
+                    }
+                    None => {
+                        tokio::time::sleep(Duration::from_millis(delay)).await;
+                        true
+                    }
+                };
+                if !slept {
+                    return Err(("Request was aborted".to_string(), true));
+                }
+            }
+        }
+    }
+}
+
+// ── 非流式入口 ────────────────────────────────────────────────────────
+
+/// Google Generative AI 非流式生成:`generateContent` 端点,响应体一次性读回,
+/// 复用流式 chunk 聚合与终态语义解析为最终 [`AssistantMessage`];
+/// 失败/中止编码进消息,不 panic。
+pub async fn complete_google_generative_ai(
+    model: Model,
+    context: Context,
+    options: Option<SimpleStreamOptions>,
+    signal: Option<CancellationToken>,
+) -> AssistantMessage {
+    let is_aborted = || signal.as_ref().is_some_and(|token| token.is_cancelled());
+    let mut aggregator = StreamAggregator::new(&model);
+    macro_rules! finish {
+        ($aborted:expr, $error:expr) => {{
+            let (_, message, _) = aggregator.finalize($aborted, $error);
+            return message;
+        }};
+    }
+    if is_aborted() {
+        finish!(true, None);
+    }
+
+    // TS 顺序:apiKey → client → buildParams → onPayload → 重试连接
+    let Some(api_key) = options
+        .as_ref()
+        .and_then(|options| options.api_key.clone())
+        .filter(|key| !key.is_empty())
+    else {
+        finish!(
+            false,
+            Some(format!("No API key for provider: {}", model.provider))
+        );
+    };
+    let client = match build_client(&model, options.as_ref(), &api_key) {
+        Ok(client) => client,
+        Err(text) => finish!(false, Some(text)),
+    };
+
+    let mut body = match build_request_body(&model, &context, options.as_ref()) {
+        Ok(body) => body,
+        Err(text) => finish!(false, Some(text)),
+    };
+    if let Some(on_payload) = options
+        .as_ref()
+        .and_then(|options| options.on_payload.as_ref())
+    {
+        if let Some(next) = on_payload(body.clone()).await {
+            body = next;
+        }
+    }
+    let url = build_generate_url(&model);
+
+    let response =
+        match send_with_retry(&client, &url, &body, options.as_ref(), signal.as_ref()).await {
+            Ok(response) => response,
+            Err((text, aborted)) => finish!(aborted, Some(text)),
+        };
+
+    // 非流式响应 = 单个 GenerateContentResponse 对象,按流式 chunk 同一语义聚合;
+    // 读取期取消即时生效
+    let read = if let Some(token) = &signal {
+        tokio::select! {
+            result = response.json::<Value>() => result.map_err(|error| error.to_string()),
+            _ = token.cancelled() => Err("Request was aborted".to_string()),
+        }
+    } else {
+        response
+            .json::<Value>()
+            .await
+            .map_err(|error| error.to_string())
+    };
+    match read {
+        Ok(payload) => {
+            aggregator.apply_chunk(&payload);
+            finish!(is_aborted(), None);
+        }
+        Err(text) => finish!(is_aborted(), Some(text)),
+    }
 }
 
 #[cfg(test)]
@@ -3159,5 +3260,59 @@ mod tests {
                 assert!(delay as f64 >= ceiling * 0.75, "{retry_index} {delay}");
             }
         }
+    }
+
+    // ── 非流式入口与响应聚合 ──────────────────────────────────────────
+
+    #[test]
+    fn generate_url_uses_non_streaming_endpoint() {
+        // base_url 非空:不追加默认版本路径(与 build_stream_url 同一规则)
+        let model = google_model("gemini-2.5-flash");
+        assert_eq!(
+            build_generate_url(&model),
+            "https://generativelanguage.googleapis.com/models/gemini-2.5-flash:generateContent"
+        );
+        let mut proxied = google_model("gemini-2.5-flash");
+        proxied.base_url = "https://proxy.example.com/v1beta/".to_string();
+        assert_eq!(
+            build_generate_url(&proxied),
+            "https://proxy.example.com/v1beta/models/gemini-2.5-flash:generateContent"
+        );
+        // base_url 为空:回退官方默认 base + v1beta
+        let mut fallback = google_model("gemini-2.5-flash");
+        fallback.base_url = String::new();
+        assert_eq!(
+            build_generate_url(&fallback),
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        );
+    }
+
+    #[test]
+    fn complete_response_aggregates_single_object() {
+        let model = google_model("gemini-2.5-flash");
+        let mut aggregator = StreamAggregator::new(&model);
+        let payload = json!({
+            "responseId": "r1",
+            "candidates": [{
+                "content": {"parts": [{"text": "deep", "thought": true}, {"text": "answer"}]},
+                "finishReason": "STOP"
+            }],
+            "usageMetadata": {
+                "promptTokenCount": 10,
+                "candidatesTokenCount": 5,
+                "totalTokenCount": 15
+            }
+        });
+        aggregator.apply_chunk(&payload);
+        let (_, message, _) = aggregator.finalize(false, None);
+        assert_eq!(message.stop_reason, StopReason::Stop);
+        assert_eq!(message.response_id.as_deref(), Some("r1"));
+        assert!(
+            matches!(&message.content[0], AssistantContent::Thinking { thinking, .. } if thinking == "deep")
+        );
+        assert!(matches!(&message.content[1], AssistantContent::Text { text, .. } if text == "answer"));
+        assert_eq!(message.usage.input, 10);
+        assert_eq!(message.usage.output, 5);
+        assert_eq!(message.usage.total_tokens, 15);
     }
 }

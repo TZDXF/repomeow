@@ -1,15 +1,15 @@
 use std::collections::HashSet;
 
-use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::AppHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::llm::{
-    stream_simple, AssistantContent, Context, InputKind, Message, Model, ModelCost, ModelCostRates,
-    SimpleStreamOptions, StopReason, UserContent, UserMessage, API_ANTHROPIC_MESSAGES,
-    API_GOOGLE_GENERATIVE_AI, API_OPENAI_COMPLETIONS, API_OPENAI_RESPONSES,
+    complete_simple, AssistantContent, Context, InputKind, Message, Model, ModelCost,
+    ModelCostRates, SimpleStreamOptions, StopReason, UserContent, UserMessage,
+    API_ANTHROPIC_MESSAGES, API_GOOGLE_GENERATIVE_AI, API_OPENAI_COMPLETIONS,
+    API_OPENAI_RESPONSES,
 };
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::time_util::now_ts_nanos;
@@ -181,9 +181,8 @@ pub async fn chat(
         reasoning: thinking_enabled.then_some(crate::agent::llm::ThinkingLevel::Medium),
         ..Default::default()
     };
-    let mut stream = stream_simple(model, context, Some(options), cancel.cloned());
-    while stream.next().await.is_some() {}
-    let assistant = stream.result().await;
+    // 翻译/提交信息/日报周报等单发调用走非流式(标准)请求,直接取最终消息
+    let assistant = complete_simple(model, context, Some(options), cancel.cloned()).await;
     if matches!(
         assistant.stop_reason,
         StopReason::Error | StopReason::Aborted

@@ -10,6 +10,9 @@
 //!   `max_retries` 缺省 2、x-should-retry 头优先、408/409/429/5xx 与传输错误可重试、
 //!   retry-after-ms/retry-after 服务端延迟(超 `max_retry_delay_ms` 缺省 60s 立即失败)、
 //!   指数退避 + 抖动,退避可被 `CancellationToken` 中断;每次重试都重新发请求。
+//! - [`complete_openai_completions`]:非流式入口,同一请求语义(`stream: false`、
+//!   无 `stream_options`),响应体一次性读回解析为最终消息;翻译/提交信息/报告等
+//!   无增量展示需求的单发调用使用。
 //! - [`SseDecoder`]:字节流 → SSE 事件的纯解码器,便于单测。
 //! - [`StreamAggregator`]:SSE chunk → 事件的纯聚合逻辑,便于单测。
 //! - [`crate::agent::llm::validate`] 的消费方(agent-loop)负责工具参数校验,本模块不重复。
@@ -2561,6 +2564,7 @@ async fn send_with_retry(
     options: Option<&SimpleStreamOptions>,
     body: &Value,
     signal: Option<&CancellationToken>,
+    streaming: bool,
 ) -> Result<reqwest::Response, (String, bool)> {
     let api_key = resolve_api_key(model, options).map_err(|message| (message, false))?;
     let max_retries = options
@@ -2571,7 +2575,7 @@ async fn send_with_retry(
     let mut retry_index: u32 = 0;
 
     loop {
-        match send_completions_request(model, options, body, &api_key).await {
+        match send_completions_request(model, options, body, &api_key, streaming).await {
             Ok(response) => return Ok(response),
             Err(failure) => {
                 if signal.is_some_and(|token| token.is_cancelled()) {
@@ -2609,6 +2613,7 @@ async fn send_completions_request(
     options: Option<&SimpleStreamOptions>,
     body: &Value,
     api_key: &str,
+    streaming: bool,
 ) -> Result<reqwest::Response, RequestFailure> {
     let failure = |message: String, retryable: bool| RequestFailure {
         message,
@@ -2622,7 +2627,11 @@ async fn send_completions_request(
     }
     headers.insert(
         reqwest::header::ACCEPT,
-        reqwest::header::HeaderValue::from_static("text/event-stream"),
+        if streaming {
+            reqwest::header::HeaderValue::from_static("text/event-stream")
+        } else {
+            reqwest::header::HeaderValue::from_static("application/json")
+        },
     );
     headers.insert(
         reqwest::header::USER_AGENT,
@@ -2849,11 +2858,11 @@ async fn run_stream(
     // Provider 内层重试:每次重试重新发请求;取消可打断退避睡眠
     let connected = if let Some(token) = &signal {
         tokio::select! {
-            result = send_with_retry(&model, options.as_ref(), &body, Some(token)) => result,
+            result = send_with_retry(&model, options.as_ref(), &body, Some(token), true) => result,
             _ = token.cancelled() => Err(("Request was aborted".to_string(), true)),
         }
     } else {
-        send_with_retry(&model, options.as_ref(), &body, None).await
+        send_with_retry(&model, options.as_ref(), &body, None, true).await
     };
     let mut response = match connected {
         Ok(response) => response,
@@ -2942,6 +2951,226 @@ async fn run_stream(
     }
     writer.push(terminal);
     writer.end(message);
+}
+
+// ── 非流式入口 ────────────────────────────────────────────────────────
+
+/// OpenAI 兼容非流式生成:与流式同一请求语义(`stream: false`、无 `stream_options`),
+/// 响应体一次性读回解析为最终 [`AssistantMessage`],终态语义(stopReason /
+/// errorMessage / usage)与流式终态消息一致;失败/中止编码进消息,不 panic。
+pub async fn complete_openai_completions(
+    model: Model,
+    context: Context,
+    options: Option<SimpleStreamOptions>,
+    signal: Option<CancellationToken>,
+) -> AssistantMessage {
+    let mut message = new_assistant_message(&model);
+    macro_rules! finish {
+        ($reason:expr, $text:expr) => {{
+            message.stop_reason = $reason;
+            message.error_message = Some($text);
+            return message;
+        }};
+    }
+    if signal.as_ref().is_some_and(|token| token.is_cancelled()) {
+        finish!(StopReason::Aborted, "Request was aborted".to_string());
+    }
+
+    let mut body = build_request_body(&model, &context, options.as_ref());
+    if let Some(object) = body.as_object_mut() {
+        object.insert("stream".to_string(), json!(false));
+        object.remove("stream_options");
+    }
+    if let Some(on_payload) = options
+        .as_ref()
+        .and_then(|options| options.on_payload.as_ref())
+    {
+        if let Some(next) = on_payload(body.clone()).await {
+            body = next;
+        }
+    }
+
+    let connected = if let Some(token) = &signal {
+        tokio::select! {
+            result = send_with_retry(&model, options.as_ref(), &body, Some(token), false) => result,
+            _ = token.cancelled() => Err(("Request was aborted".to_string(), true)),
+        }
+    } else {
+        send_with_retry(&model, options.as_ref(), &body, None, false).await
+    };
+    let response = match connected {
+        Ok(response) => response,
+        Err((text, aborted)) => {
+            let reason = if aborted {
+                StopReason::Aborted
+            } else {
+                StopReason::Error
+            };
+            finish!(reason, text);
+        }
+    };
+
+    // TS onResponse:仅在重试收敛后的最终成功响应上回调一次
+    if let Some(on_response) = options
+        .as_ref()
+        .and_then(|options| options.on_response.as_ref())
+    {
+        let mut headers = HashMap::new();
+        for (name, value) in response.headers() {
+            if let Ok(value) = value.to_str() {
+                headers.insert(name.as_str().to_string(), value.to_string());
+            }
+        }
+        on_response(&super::types::ProviderResponse {
+            status: response.status().as_u16(),
+            headers,
+        });
+    }
+
+    // 响应体一次性读回;读取期取消即时生效
+    let read = if let Some(token) = &signal {
+        tokio::select! {
+            result = response.json::<Value>() => result.map_err(|error| error.to_string()),
+            _ = token.cancelled() => Err("Request was aborted".to_string()),
+        }
+    } else {
+        response
+            .json::<Value>()
+            .await
+            .map_err(|error| error.to_string())
+    };
+    let payload = match read {
+        Ok(payload) => payload,
+        Err(text) => {
+            let reason = if signal.as_ref().is_some_and(|token| token.is_cancelled()) {
+                StopReason::Aborted
+            } else {
+                StopReason::Error
+            };
+            finish!(reason, text);
+        }
+    };
+    if let Err(text) = apply_completion_response(&mut message, &model, &payload) {
+        finish!(StopReason::Error, text);
+    }
+    message
+}
+
+/// 非流式 Chat Completions 响应体 → 终态消息(字段语义与流式聚合一致)。
+/// choices 缺失/为空视为响应错误。
+fn apply_completion_response(
+    message: &mut AssistantMessage,
+    model: &Model,
+    response: &Value,
+) -> Result<(), String> {
+    if let Some(id) = response
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+    {
+        message.response_id = Some(id.to_string());
+    }
+    if let Some(served) = response.get("model").and_then(Value::as_str) {
+        if !served.is_empty() && served != model.id {
+            message.response_model = Some(served.to_string());
+        }
+    }
+    if let Some(usage) = response.get("usage").filter(|usage| usage.is_object()) {
+        message.usage = parse_chunk_usage(usage, model);
+    }
+
+    let choice = response
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .ok_or_else(|| "response contained no choices".to_string())?;
+    let choice_message = choice.get("message").filter(|message| message.is_object());
+
+    // reasoning 先于正文(与流式事件顺序一致);不同网关字段名并存
+    if let Some(reasoning) = choice_message
+        .and_then(|message| {
+            message
+                .get("reasoning_content")
+                .or_else(|| message.get("reasoning"))
+        })
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty())
+    {
+        message.content.push(AssistantContent::Thinking {
+            thinking: reasoning.to_string(),
+            thinking_signature: None,
+            redacted: false,
+        });
+    }
+
+    let mut text = String::new();
+    if let Some(content) = choice_message.and_then(|message| message.get("content")) {
+        match content {
+            Value::String(content) => text.push_str(content),
+            Value::Array(parts) => {
+                for part in parts {
+                    if let Some(part_text) = part.get("text").and_then(Value::as_str) {
+                        text.push_str(part_text);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    if !text.is_empty() {
+        message.content.push(AssistantContent::text(text));
+    }
+
+    if let Some(tool_calls) = choice_message
+        .and_then(|message| message.get("tool_calls"))
+        .and_then(Value::as_array)
+    {
+        for tool_call in tool_calls {
+            let id = tool_call
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let name = tool_call
+                .pointer("/function/name")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let arguments = tool_call
+                .pointer("/function/arguments")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            message.content.push(AssistantContent::ToolCall(ToolCall {
+                id: normalize_tool_call_id(id, &model.provider),
+                name: name.to_string(),
+                arguments: parse_streaming_json_object(arguments),
+                thought_signature: None,
+                namespace: None,
+            }));
+        }
+    }
+
+    let finish_reason = choice.get("finish_reason").and_then(Value::as_str);
+    message.raw_stop_reason = finish_reason.map(str::to_string);
+    match finish_reason {
+        Some(reason) => {
+            let (stop_reason, error_message) = map_stop_reason(reason);
+            message.stop_reason = stop_reason;
+            message.error_message = error_message;
+        }
+        // 部分代理缺省 finish_reason:有工具调用视为 toolUse,否则 stop
+        // (对齐流式在 compat.supports_finish_reason = false 时的兜底)
+        None => {
+            message.stop_reason = if message
+                .content
+                .iter()
+                .any(|block| matches!(block, AssistantContent::ToolCall(_)))
+            {
+                StopReason::ToolUse
+            } else {
+                StopReason::Stop
+            };
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -4559,5 +4788,95 @@ mod tests {
             }
             other => panic!("expected aborted, got {other:?}"),
         }
+    }
+
+    // ── 非流式响应解析 ────────────────────────────────────────────────
+
+    #[test]
+    fn complete_response_parses_text_reasoning_usage_and_stop() {
+        let model = test_model("https://example.com");
+        let mut message = new_assistant_message(&model);
+        let response = json!({
+            "id": "chatcmpl-1",
+            "model": "gpt-test",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "reasoning_content": "deep",
+                    "content": "✨ feat: add dark mode"
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15
+            }
+        });
+        apply_completion_response(&mut message, &model, &response).unwrap();
+        assert_eq!(message.response_id.as_deref(), Some("chatcmpl-1"));
+        assert_eq!(message.response_model, None);
+        assert_eq!(message.stop_reason, StopReason::Stop);
+        assert_eq!(message.usage.input, 10);
+        assert_eq!(message.usage.output, 5);
+        assert_eq!(message.usage.total_tokens, 15);
+        assert!(
+            matches!(&message.content[0], AssistantContent::Thinking { thinking, .. } if thinking == "deep")
+        );
+        assert!(
+            matches!(&message.content[1], AssistantContent::Text { text, .. } if text == "✨ feat: add dark mode")
+        );
+    }
+
+    #[test]
+    fn complete_response_content_blocks_and_tool_calls() {
+        let model = test_model("https://example.com");
+        let mut message = new_assistant_message(&model);
+        let response = json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}],
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": "{\"city\":\"Oslo\"}"}
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        });
+        apply_completion_response(&mut message, &model, &response).unwrap();
+        assert_eq!(message.stop_reason, StopReason::ToolUse);
+        assert!(matches!(&message.content[0], AssistantContent::Text { text, .. } if text == "ab"));
+        match &message.content[1] {
+            AssistantContent::ToolCall(call) => {
+                assert_eq!(call.name, "get_weather");
+                assert_eq!(
+                    call.arguments.get("city").and_then(Value::as_str),
+                    Some("Oslo")
+                );
+            }
+            other => panic!("expected tool call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn complete_response_missing_choices_is_error() {
+        let model = test_model("https://example.com");
+        let mut message = new_assistant_message(&model);
+        let error = apply_completion_response(&mut message, &model, &json!({})).unwrap_err();
+        assert!(error.contains("no choices"));
+    }
+
+    #[test]
+    fn complete_response_missing_finish_reason_falls_back() {
+        let model = test_model("https://example.com");
+        let mut message = new_assistant_message(&model);
+        let response = json!({
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}]
+        });
+        apply_completion_response(&mut message, &model, &response).unwrap();
+        assert_eq!(message.stop_reason, StopReason::Stop);
     }
 }
