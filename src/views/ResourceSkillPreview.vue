@@ -437,12 +437,15 @@ const isTranslatable = computed(
   () => selected.value.kind === "file" && isMarkdown(selected.value.path),
 );
 
-const displayContent = computed(() => {
-  if (
-    showTranslated.value &&
+/** 当前选中文件是否已有译文(用于「重新翻译」按钮显隐) */
+const hasTranslation = computed(
+  () =>
     translatedText.value !== null &&
-    translatedFor.value === (selected.value.kind === "file" ? selected.value.path : null)
-  ) {
+    translatedFor.value === (selected.value.kind === "file" ? selected.value.path : null),
+);
+
+const displayContent = computed(() => {
+  if (showTranslated.value && hasTranslation.value && translatedText.value !== null) {
     return translatedText.value;
   }
   return fileContent.value ?? "";
@@ -477,18 +480,32 @@ async function toggleTranslate() {
     showTranslated.value = true;
     return;
   }
+  await runTranslation(path, text, false);
+}
+
+/** 重新翻译:跳过缓存强制再调 AI,成功后覆盖缓存 */
+async function retranslate() {
+  const path = selected.value.kind === "file" ? selected.value.path : null;
+  const text = fileContent.value;
+  if (!path || !text || translating.value) return;
+  await runTranslation(path, text, true);
+}
+
+async function runTranslation(path: string, text: string, skipCache: boolean) {
   const seq = ++translateSeq;
-  // 先查 IndexedDB 缓存(键 = 界面语言 + 正文内容 hash,保留 30 天):
-  // 命中直接展示、不再调 AI,未命中才走后端翻译并回填缓存
-  const cached = await getCachedTranslation(text, settingsStore.language);
-  if (seq !== translateSeq || selected.value.kind !== "file" || selected.value.path !== path) {
-    return;
-  }
-  if (cached !== null) {
-    translatedText.value = cached;
-    translatedFor.value = path;
-    showTranslated.value = true;
-    return;
+  if (!skipCache) {
+    // 先查 IndexedDB 缓存(键 = 界面语言 + 内容 hash,保留 30 天):
+    // 命中直接展示、不再调 AI,未命中才走后端翻译并回填缓存
+    const cached = await getCachedTranslation(text, settingsStore.language);
+    if (seq !== translateSeq || selected.value.kind !== "file" || selected.value.path !== path) {
+      return;
+    }
+    if (cached !== null) {
+      translatedText.value = cached;
+      translatedFor.value = path;
+      showTranslated.value = true;
+      return;
+    }
   }
   translating.value = true;
   const runId = `translate-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -903,6 +920,17 @@ const llmNotice = computed(() => {
             </Button>
           </div>
           <div v-if="isTranslatable" class="ml-auto flex shrink-0 items-center gap-1">
+            <Button
+              v-if="hasTranslation"
+              variant="ghost"
+              size="icon"
+              class="h-7 w-7"
+              :disabled="translating"
+              :title="t('settings.resources.skills.previewPage.translate.retranslate')"
+              @click="retranslate"
+            >
+              <RefreshCw class="h-3.5 w-3.5" />
+            </Button>
             <Button
               variant="ghost"
               size="sm"

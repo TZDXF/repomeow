@@ -385,6 +385,7 @@ export default {
       translating: "翻译中",
       translateCancel: "翻译中,点击取消",
       showOriginal: "原文",
+      retranslate: "重新翻译",
     },
     mcpForm: {
       addTitle: "添加 MCP 服务器",
@@ -1984,6 +1985,7 @@ export default {
             translating: "翻译中,点击取消",
             showTranslation: "查看译文",
             showOriginal: "查看原文",
+            retranslate: "重新翻译",
           },
           scan: {
             title: "安全扫描",

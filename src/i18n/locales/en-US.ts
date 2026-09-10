@@ -411,6 +411,7 @@ export default {
       translating: "Translating",
       translateCancel: "Translating — click to cancel",
       showOriginal: "Original",
+      retranslate: "Retranslate",
     },
     mcpForm: {
       addTitle: "Add MCP Server",
@@ -2079,6 +2080,7 @@ export default {
             translating: "Translating, click to cancel",
             showTranslation: "Show translation",
             showOriginal: "Show original",
+            retranslate: "Retranslate",
           },
           scan: {
             title: "Security scan",

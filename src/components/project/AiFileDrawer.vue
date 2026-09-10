@@ -10,6 +10,7 @@ import {
   Languages,
   LoaderCircle,
   Pencil,
+  RefreshCw,
   Save,
   Undo2,
   X,
@@ -261,15 +262,29 @@ async function toggleTranslate() {
   const rel = props.relPath;
   const text = preview.value?.text;
   if (!rel || !text) return;
+  await runTranslation(rel, text, false);
+}
+
+/** 重新翻译:跳过缓存强制再调 AI,成功后覆盖缓存 */
+async function retranslate() {
+  const rel = props.relPath;
+  const text = preview.value?.text;
+  if (!rel || !text || translating.value) return;
+  await runTranslation(rel, text, true);
+}
+
+async function runTranslation(rel: string, text: string, skipCache: boolean) {
   const seq = ++translateSeq;
-  // 先查 IndexedDB 缓存(键 = 界面语言 + 正文内容 hash,保留 30 天):
-  // 命中直接展示、不再调 AI,未命中才走后端翻译并回填缓存
-  const cached = await getCachedTranslation(text, settingsStore.language);
-  if (seq !== translateSeq || props.relPath !== rel) return;
-  if (cached !== null) {
-    translatedText.value = cached;
-    showTranslated.value = true;
-    return;
+  if (!skipCache) {
+    // 先查 IndexedDB 缓存(键 = 界面语言 + 正文内容 hash,保留 30 天):
+    // 命中直接展示、不再调 AI,未命中才走后端翻译并回填缓存
+    const cached = await getCachedTranslation(text, settingsStore.language);
+    if (seq !== translateSeq || props.relPath !== rel) return;
+    if (cached !== null) {
+      translatedText.value = cached;
+      showTranslated.value = true;
+      return;
+    }
   }
   translating.value = true;
   const runId = `translate-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -360,6 +375,16 @@ function onMarkdownClick(e: MouseEvent) {
                   : t("aiAssets.drawer.fileTokens", { count: formatTokenCount(preview.tokenCount) })
               }}
             </span>
+            <Button
+              v-if="isMarkdown && !editing && translatedText !== null"
+              size="sm"
+              variant="ghost"
+              :disabled="translating"
+              :title="t('aiAssets.drawer.retranslate')"
+              @click="retranslate"
+            >
+              <RefreshCw class="h-3.5 w-3.5" />
+            </Button>
             <Button
               v-if="isMarkdown && !editing && preview?.text"
               size="sm"

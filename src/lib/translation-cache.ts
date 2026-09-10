@@ -53,9 +53,12 @@ function openCacheDb(): Promise<CacheDb | null> {
   return dbPromise;
 }
 
-/** 缓存键:语言与 hash 用 `:` 分隔(两段内都不含冒号) */
+/** 缓存键版本:翻译提示词/输出校验升级时递增,让旧键下可能已污染的译文自然失效 */
+const CACHE_KEY_VERSION = "v2";
+
+/** 缓存键:语言、版本与 hash 用 `:` 分隔(各段内都不含冒号) */
 async function cacheKey(text: string, language: string): Promise<string> {
-  return `${language}:${await hashContent(text)}`;
+  return `${language}:${CACHE_KEY_VERSION}:${await hashContent(text)}`;
 }
 
 async function hashContent(text: string): Promise<string> {
@@ -99,7 +102,7 @@ export async function putCachedTranslation(
       translatedText,
       createdAt: Date.now(),
     };
-    await db.put(TRANSLATION_CACHE_STORE, entry, `${language}:${hash}`);
+    await db.put(TRANSLATION_CACHE_STORE, entry, `${language}:${CACHE_KEY_VERSION}:${hash}`);
   } catch {
     // 缓存写入失败不影响翻译结果
   }
