@@ -191,6 +191,7 @@ fn sink_send(sink: &EventSink, event: ChatEvent) {
 /// 一个项目的问答会话(全部字段 Arc 化,可整体 Clone 快照)。
 #[derive(Clone)]
 struct ChatSession {
+    all_tools: Vec<crate::agent::types::AgentTool>,
     agent: Arc<Agent>,
     cancel_cell: CancelCell,
     sink: EventSink,

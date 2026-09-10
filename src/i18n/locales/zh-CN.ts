@@ -906,6 +906,8 @@ export default {
       max: "最大",
     },
     permission: {
+      readOnly: "工具权限:只读(禁止写入类工具)",
+      readOnlyShort: "只读",
       all: "工具权限:全部(允许写入类工具)",
       ask: "工具权限:每次询问(写操作前确认)",
       allShort: "完全访问",

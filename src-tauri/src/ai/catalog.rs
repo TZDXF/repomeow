@@ -156,14 +156,14 @@ impl Default for ChatPrefs {
 ///   `set_wiki_model`)执行前由应用弹出硬确认(见 `commands/chat/permission.rs`
 ///   的 before_tool_call 门禁)。
 ///
-/// 旧值 `readOnly` 反序列化为 Ask(全部工具 + 执行前确认),保证旧配置平滑升级。
+/// - `readOnly`:仅允许无副作用工具,旧配置保留只读语义。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ChatPermission {
     #[default]
     All,
-    #[serde(alias = "readOnly")]
     Ask,
+    ReadOnly,
 }
 
 // ── 读写(原子写;缺/坏 → 播种) ──────────────────────────────────────
@@ -752,10 +752,10 @@ mod tests {
     }
 
     #[test]
-    fn chat_permission_accepts_legacy_readonly_and_serializes_as_ask() {
+    fn chat_permission_preserves_readonly_and_round_trips() {
         // 默认仍为 All。
         assert_eq!(ChatPermission::default(), ChatPermission::All);
-        // 当前取值 all / ask。
+        // 当前取值 all / ask / readOnly。
         assert_eq!(
             serde_json::from_str::<ChatPermission>("\"all\"").unwrap(),
             ChatPermission::All
@@ -764,17 +764,20 @@ mod tests {
             serde_json::from_str::<ChatPermission>("\"ask\"").unwrap(),
             ChatPermission::Ask
         );
-        // 旧值 readOnly 兼容反序列化为 Ask(全部工具 + 执行前确认)。
+        // 旧值 readOnly 保留只读语义。
         assert_eq!(
             serde_json::from_str::<ChatPermission>("\"readOnly\"").unwrap(),
-            ChatPermission::Ask
+            ChatPermission::ReadOnly
         );
-        // ChatPrefs 缺省 permission → All;旧 readOnly → Ask。
+        // ChatPrefs 缺省 permission → All;旧 readOnly 保持只读。
         let prefs: ChatPrefs = serde_json::from_str("{}").unwrap();
         assert_eq!(prefs.permission, ChatPermission::All);
         let prefs: ChatPrefs = serde_json::from_str(r#"{"permission":"readOnly"}"#).unwrap();
-        assert_eq!(prefs.permission, ChatPermission::Ask);
-        // 序列化只输出 all / ask,不再输出 readOnly。
+        assert_eq!(prefs.permission, ChatPermission::ReadOnly);
+        assert_eq!(
+            serde_json::to_string(&ChatPermission::ReadOnly).unwrap(),
+            "\"readOnly\""
+        );
         assert_eq!(
             serde_json::to_string(&ChatPermission::Ask).unwrap(),
             "\"ask\""

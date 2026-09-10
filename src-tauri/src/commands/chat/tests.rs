@@ -131,12 +131,19 @@ async fn retries_transient_error_then_succeeds() {
     let events = event_log();
     let signal = CancellationToken::new();
 
-    let result =
-        run_chat_prompt_with_policy(&agent, AgentMessage::user_text("hi", 0), &signal, 3, 1, None, {
+    let result = run_chat_prompt_with_policy(
+        &agent,
+        AgentMessage::user_text("hi", 0),
+        &signal,
+        3,
+        1,
+        None,
+        {
             let events = events.clone();
             move |event: ChatEvent| events.lock().unwrap().push(event)
-        })
-        .await;
+        },
+    )
+    .await;
 
     assert!(result.is_ok());
     let log = events.lock().unwrap();
@@ -180,12 +187,19 @@ async fn gives_up_after_max_retries_and_keeps_failed_attempt() {
     let events = event_log();
     let signal = CancellationToken::new();
 
-    let result =
-        run_chat_prompt_with_policy(&agent, AgentMessage::user_text("hi", 0), &signal, 2, 1, None, {
+    let result = run_chat_prompt_with_policy(
+        &agent,
+        AgentMessage::user_text("hi", 0),
+        &signal,
+        2,
+        1,
+        None,
+        {
             let events = events.clone();
             move |event: ChatEvent| events.lock().unwrap().push(event)
-        })
-        .await;
+        },
+    )
+    .await;
 
     assert_eq!(result.err().as_deref(), Some("503 service unavailable"));
     let log = events.lock().unwrap();
@@ -217,12 +231,19 @@ async fn non_retryable_error_fails_fast_without_events() {
     let events = event_log();
     let signal = CancellationToken::new();
 
-    let result =
-        run_chat_prompt_with_policy(&agent, AgentMessage::user_text("hi", 0), &signal, 3, 1, None, {
+    let result = run_chat_prompt_with_policy(
+        &agent,
+        AgentMessage::user_text("hi", 0),
+        &signal,
+        3,
+        1,
+        None,
+        {
             let events = events.clone();
             move |event: ChatEvent| events.lock().unwrap().push(event)
-        })
-        .await;
+        },
+    )
+    .await;
 
     assert_eq!(result.err().as_deref(), Some("429 insufficient_quota"));
     assert!(events.lock().unwrap().is_empty());
@@ -541,4 +562,71 @@ async fn permission_hook_allows_and_denies_gated_tools() {
         await_permission_decision(receiver, None, Duration::from_millis(20)).await,
         PermissionDecision::Block(PERMISSION_TIMEOUT_REASON)
     );
+}
+
+#[tokio::test]
+async fn readonly_permission_blocks_side_effects_without_confirmation() {
+    let pending = Arc::new(Mutex::new(HashMap::new()));
+    let prefs = ask_prefs(ChatPermission::ReadOnly);
+    let hook = build_permission_hook(pending.clone(), prefs.clone(), Arc::new(Mutex::new(None)));
+    for name in CONFIRM_REQUIRED_TOOLS
+        .into_iter()
+        .chain(["future_write_tool"])
+    {
+        assert!(!tool_allowed(ChatPermission::ReadOnly, name));
+        let result = hook(permission_context("readonly", name), None)
+            .await
+            .unwrap();
+        assert!(result.block);
+        assert!(pending.lock().unwrap().is_empty());
+    }
+    for name in [
+        "sem_find",
+        "sem_context",
+        "sem_relations",
+        "sem_diff",
+        "read_wiki",
+        "list_custom_commands",
+        "list_reports",
+        "read_project_file",
+        "get_ai_config",
+    ] {
+        assert!(tool_allowed(ChatPermission::ReadOnly, name));
+        assert!(hook(permission_context("read", name), None).await.is_none());
+    }
+    prefs.lock().unwrap().as_mut().unwrap().permission = ChatPermission::All;
+    assert!(hook(permission_context("all", "update_wiki"), None)
+        .await
+        .is_none());
+    prefs.lock().unwrap().as_mut().unwrap().permission = ChatPermission::ReadOnly;
+    assert!(
+        hook(permission_context("readonly_again", "update_wiki"), None)
+            .await
+            .unwrap()
+            .block
+    );
+}
+
+#[test]
+fn readonly_tool_filter_removes_writes_and_restores_full_set() {
+    let tools: Vec<crate::agent::types::AgentTool> = ["read_wiki", "update_wiki", "future_tool"]
+        .into_iter()
+        .map(|name| crate::agent::types::AgentTool {
+            name: name.to_string(),
+            label: name.to_string(),
+            description: String::new(),
+            parameters: serde_json::json!({}),
+            execution_mode: None,
+            prepare_arguments: None,
+            execute: Arc::new(|_, _, _, _| {
+                Box::pin(async { panic!("must not execute while filtering") })
+            }),
+        })
+        .collect();
+    let readonly = filter_tools(&tools, ChatPermission::ReadOnly);
+    assert_eq!(readonly.len(), 1);
+    assert_eq!(readonly[0].name, "read_wiki");
+    assert_eq!(filter_tools(&tools, ChatPermission::Ask).len(), 3);
+    assert_eq!(filter_tools(&tools, ChatPermission::All).len(), 3);
+    assert_eq!(filter_tools(&tools, ChatPermission::ReadOnly).len(), 1);
 }

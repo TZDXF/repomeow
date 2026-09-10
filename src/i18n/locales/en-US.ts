@@ -948,6 +948,8 @@ export default {
       max: "Max",
     },
     permission: {
+      readOnly: "Tool permission: read-only (write tools disabled)",
+      readOnlyShort: "Read-only",
       all: "Tool permission: full (write tools allowed)",
       ask: "Tool permission: ask each time (confirm before write actions)",
       allShort: "Full access",

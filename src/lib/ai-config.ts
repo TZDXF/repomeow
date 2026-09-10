@@ -20,8 +20,8 @@ export function isKnownAiApiType(value: string): value is KnownAiApiType {
   return (AI_API_TYPES as readonly string[]).includes(value);
 }
 
-/** 问答工具权限档位:all = 全部工具;ask = 写操作前询问确认 */
-export type ChatPermission = "all" | "ask";
+/** 问答工具权限档位:all = 全部工具;ask = 写操作前询问确认;readOnly = 仅只读工具 */
+export type ChatPermission = "all" | "ask" | "readOnly";
 
 /** 思考强度:off 关闭,其余对齐 pi 的 ThinkingLevel */
 export type ChatThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";

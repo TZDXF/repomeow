@@ -56,9 +56,7 @@ pub(super) fn resolve_prefs(
 }
 
 /// 把最新 chat 偏好热应用到会话:思考变化就地换 AgentState(历史保留),
-/// 模型元数据始终刷新;工具集与权限无关(All 与 Ask 均暴露全部工具,Ask 的
-/// 确认在 before_tool_call 门禁层完成),故不再随权限重建。StreamFn 每次调用
-/// 另行重读模型与密钥。
+/// 权限变化时重新筛选工具集,历史保持不变。
 pub(super) fn apply_prefs(app: &AppHandle, session: &ChatSession) -> AppResult<()> {
     let config_file = catalog::load_ai_config_file(app);
     let (model, resolved, _api_key) = resolve_prefs(&config_file)?;
@@ -74,6 +72,10 @@ pub(super) fn apply_prefs(app: &AppHandle, session: &ChatSession) -> AppResult<(
             .agent
             .set_thinking_level(catalog::parse_thinking_level(&resolved.thinking));
     }
+    session.agent.set_tools(super::permission::filter_tools(
+        &session.all_tools,
+        resolved.permission,
+    ));
     session.agent.set_model(model);
     *session.prefs.lock().unwrap() = Some(resolved);
     Ok(())
@@ -93,12 +95,12 @@ pub(super) fn build_session(
         project_id: lookup_project_id(db, project_path),
         worktree_path: None,
     };
+    let all_tools = chat_tools(app.clone(), context);
     let state = AgentState {
         system_prompt: build_system_prompt(project_name, project_path),
         model: model.clone(),
         thinking_level: catalog::parse_thinking_level(&resolved.thinking),
-        // All 与 Ask 均暴露全部工具;Ask 的确认在 before_tool_call 门禁完成。
-        tools: chat_tools(app.clone(), context.clone()),
+        tools: super::permission::filter_tools(&all_tools, resolved.permission),
         messages: Vec::new(),
         is_streaming: false,
         streaming_message: None,
@@ -196,6 +198,7 @@ pub(super) fn build_session(
     ));
     *agent_slot.lock().unwrap() = Some(Arc::downgrade(&agent));
     let session = ChatSession {
+        all_tools,
         agent,
         cancel_cell,
         sink: sink_cell,
@@ -259,8 +262,7 @@ pub(super) fn default_convert_to_llm() -> ConvertToLlmFn {
 
 /// compactionSummary 自定义消息 → user 消息(prefix/suffix 与 harness 一致)。
 fn compaction_summary_to_llm(map: serde_json::Map<String, serde_json::Value>) -> Option<Message> {
-    if map.get("role").and_then(serde_json::Value::as_str) != Some(CompactionSummaryMessage::ROLE)
-    {
+    if map.get("role").and_then(serde_json::Value::as_str) != Some(CompactionSummaryMessage::ROLE) {
         return None;
     }
     let message: CompactionSummaryMessage =

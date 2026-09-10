@@ -314,9 +314,7 @@ const thinkingTitle = computed(() =>
   thinkingDisabled.value ? t("chat.thinkingUnsupported") : t("chat.thinking"),
 );
 
-const permissionTitle = computed(() =>
-  aiConfig.chatPermission === "all" ? t("chat.permission.all") : t("chat.permission.ask"),
-);
+const permissionTitle = computed(() => t(`chat.permission.${aiConfig.chatPermission}`));
 
 /** 偏好写入失败统一 toast(落盘失败时 store 已回读后端真实状态) */
 function applyPref(action: () => Promise<void>) {
@@ -750,17 +748,20 @@ const retrySeconds = computed(() => {
                     class="text-muted-foreground h-7 gap-1 px-2 text-xs"
                     :title="permissionTitle"
                   >
-                    <Eye v-if="aiConfig.chatPermission === 'ask'" class="size-3.5 shrink-0" />
+                    <Eye v-if="aiConfig.chatPermission !== 'all'" class="size-3.5 shrink-0" />
                     <Wrench v-else class="size-3.5 shrink-0" />
                     <span>
-                      {{
-                        aiConfig.chatPermission === "all"
-                          ? t("chat.permission.allShort")
-                          : t("chat.permission.askShort")
-                      }}
+                      {{ t(`chat.permission.${aiConfig.chatPermission}Short`) }}
                     </span>
                   </SelectTrigger>
                   <SelectContent :disable-outside-pointer-events="false" :body-lock="false">
+                    <SelectItem
+                      value="readOnly"
+                      class="text-xs"
+                      :title="t('chat.permission.readOnly')"
+                    >
+                      {{ t("chat.permission.readOnlyShort") }}
+                    </SelectItem>
                     <SelectItem value="ask" class="text-xs" :title="t('chat.permission.ask')">
                       {{ t("chat.permission.askShort") }}
                     </SelectItem>

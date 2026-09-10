@@ -17,6 +17,34 @@ pub(super) const CONFIRM_REQUIRED_TOOLS: [&str; 5] = [
     "set_wiki_model",
 ];
 
+/// 只读采用允许名单:新增工具默认不可用,必须审核无副作用后加入。
+pub(super) fn tool_allowed(permission: ChatPermission, name: &str) -> bool {
+    permission != ChatPermission::ReadOnly
+        || matches!(
+            name,
+            "sem_find"
+                | "sem_context"
+                | "sem_relations"
+                | "sem_diff"
+                | "read_wiki"
+                | "list_custom_commands"
+                | "list_reports"
+                | "read_project_file"
+                | "get_ai_config"
+        )
+}
+
+pub(super) fn filter_tools(
+    tools: &[crate::agent::types::AgentTool],
+    permission: ChatPermission,
+) -> Vec<crate::agent::types::AgentTool> {
+    tools
+        .iter()
+        .filter(|tool| tool_allowed(permission, &tool.name))
+        .cloned()
+        .collect()
+}
+
 /// 确认等待的安全超时:超时按拒绝处理,避免会话永久挂起。
 pub(super) const PERMISSION_WAIT_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -75,7 +103,7 @@ pub(super) fn deliver_permission_decision(
 
 /// ask 权限下的 before_tool_call 门禁:命中确认名单时登记一次性决策通道、
 /// 推送 `ToolPermissionRequest` 并等待 `chat_tool_permission_respond` 决策。
-/// 权限非 Ask 或工具不在名单时直接放行(返回 None)。通用 agent core 不改动。
+/// ReadOnly 直接拒绝非只读工具;Ask 对副作用工具要求确认。
 pub(super) fn build_permission_hook(
     pending: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
     prefs: Arc<Mutex<Option<ResolvedPrefs>>>,
@@ -88,6 +116,13 @@ pub(super) fn build_permission_hook(
         Box::pin(async move {
             let tool_name = context.tool_call.name.as_str();
             let permission = prefs.lock().unwrap().as_ref().map(|prefs| prefs.permission);
+            if permission.is_some_and(|permission| !tool_allowed(permission, tool_name)) {
+                return Some(BeforeToolCallResult {
+                    block: true,
+                    reason: Some("Tool execution is disabled in read-only mode".to_string()),
+                    terminate: false,
+                });
+            }
             if permission != Some(ChatPermission::Ask)
                 || !CONFIRM_REQUIRED_TOOLS.contains(&tool_name)
             {
