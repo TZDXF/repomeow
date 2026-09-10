@@ -5,7 +5,7 @@ import { useRouter } from "vue-router";
 import { Loader2, RefreshCw } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import { useSemanticRequest } from "@/composables/useSemanticRequest";
 import { cmd } from "@/lib/tauri";
 import type { SemanticEntityLogResult, SemanticEntityRef } from "@/types";

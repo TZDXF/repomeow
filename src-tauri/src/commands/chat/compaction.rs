@@ -21,11 +21,12 @@ use crate::agent::harness::compaction::compaction::{
 use crate::agent::harness::messages::{
     create_compaction_summary_message, CompactionSummaryMessage,
 };
+use crate::agent::llm::types::Usage;
 use crate::agent::types::AgentMessage;
 use crate::agent::Agent;
 use crate::time_util::now_ts_nanos;
 
-use super::{ChatEvent, CancelCell};
+use super::{CancelCell, ChatEvent};
 
 /// 触发原因(对齐 pi `compaction_start` 事件的 reason)。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,6 +54,10 @@ pub(super) struct ChatCompactionContext {
     pub last_compaction_ts: Arc<Mutex<i64>>,
     /// 会话级上下文占用展示槽(压缩后立刻回落)。
     pub context_tokens: Arc<Mutex<i64>>,
+    /// 会话级聚合用量槽:摘要调用的 token 计入(对齐 harness 路径
+    /// `run_auto_compaction` 的 Usage(cause=Compaction) 记录),
+    /// 回合结束随 chat 聚合用量落 `ai_usage_log`,压缩成本在用量页可见。
+    pub usage: Arc<Mutex<Usage>>,
 }
 
 /// 阈值判定(对齐 pi `shouldCompact` 调用点 + 压缩时间戳守卫):
@@ -164,6 +169,8 @@ pub(super) async fn compact_chat_history(
 
     match result {
         Ok(summary) => {
+            // 摘要调用消耗的 token 计入会话聚合用量(随 chat 回合结束落库)。
+            ctx.usage.lock().unwrap().add(&summary.usage);
             let timestamp = now_ts_nanos() / 1_000_000;
             let mut next = Vec::with_capacity(messages.len() - compactable_start - cut + 1);
             next.push(create_compaction_summary_message(
@@ -260,7 +267,10 @@ mod tests {
             ..Usage::zero()
         };
         stale.timestamp = 50;
-        let messages = vec![summary, AgentMessage::Message(TypedMessage::Assistant(stale))];
+        let messages = vec![
+            summary,
+            AgentMessage::Message(TypedMessage::Assistant(stale)),
+        ];
         // 旧 usage 不可信 → 不触发(防压缩后立即重触发)
         assert_eq!(threshold_trigger_tokens(&messages, 128_000, 100), None);
         // 无守卫时 150k > 128k-16k 会触发

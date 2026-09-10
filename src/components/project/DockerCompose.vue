@@ -37,7 +37,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import { Switch } from "@/components/ui/switch";
 import { useCollapsibleOpen } from "@/composables/useCollapsibleOpen";
 import { cmd, runInTerminal } from "@/lib/tauri";

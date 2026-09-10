@@ -787,12 +787,10 @@ fn repair_detach_keeps_files_and_releases_record() {
         fs::read_to_string(f.root.join(".claude/skills/review/SKILL.md")).unwrap(),
         edited
     );
-    assert!(
-        snapshot(&f.library, &f.root, "skills")
-            .unwrap()
-            .deployments
-            .is_empty()
-    );
+    assert!(snapshot(&f.library, &f.root, "skills")
+        .unwrap()
+        .deployments
+        .is_empty());
     claim_local(&f.library, &f.root, "skills", ".claude/skills/review", None).unwrap();
     // 未部署的记录不允许修复;未知动作报错。
     assert!(repair(&f.library, &f.root, "skills", "s1", "gemini", "detach").is_err());
@@ -803,10 +801,18 @@ fn repair_detach_keeps_files_and_releases_record() {
 fn repair_reapply_adopts_local_origin_baseline() {
     let f = Fixture::new();
     fs::create_dir_all(f.root.join(".claude/skills/mine")).unwrap();
-    fs::write(f.root.join(".claude/skills/mine/SKILL.md"), "---\nname: mine\n---\nv1").unwrap();
+    fs::write(
+        f.root.join(".claude/skills/mine/SKILL.md"),
+        "---\nname: mine\n---\nv1",
+    )
+    .unwrap();
     let outcome = claim_local(&f.library, &f.root, "skills", ".claude/skills/mine", None).unwrap();
     // 本地修改来源文件本身 → modified;来源 Agent 的 reapply 认领现状为新基线。
-    fs::write(f.root.join(".claude/skills/mine/SKILL.md"), "---\nname: mine\n---\nv2").unwrap();
+    fs::write(
+        f.root.join(".claude/skills/mine/SKILL.md"),
+        "---\nname: mine\n---\nv2",
+    )
+    .unwrap();
     assert_eq!(
         snapshot(&f.library, &f.root, "skills").unwrap().deployments[0].status,
         "modified"
@@ -887,12 +893,10 @@ fn repair_reapply_restores_modified_mcp_entry() {
     repair(&f.library, &f.root, "mcp", "m1", "claude", "detach").unwrap();
     let doc: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
     assert_eq!(doc["mcpServers"]["context"]["command"], "deno");
-    assert!(
-        snapshot(&f.library, &f.root, "mcp")
-            .unwrap()
-            .deployments
-            .is_empty()
-    );
+    assert!(snapshot(&f.library, &f.root, "mcp")
+        .unwrap()
+        .deployments
+        .is_empty());
 }
 
 #[test]

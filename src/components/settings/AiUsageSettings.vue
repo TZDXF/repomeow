@@ -7,7 +7,7 @@ import CalendarHeatmap from "@/components/common/CalendarHeatmap.vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import {
   Select,
   SelectContent,

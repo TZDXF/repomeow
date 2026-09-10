@@ -4,7 +4,7 @@ import { useI18n } from "vue-i18n";
 import { useElementSize } from "@vueuse/core";
 import { ListTree } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 
 interface TocEntry {
   el: HTMLElement;

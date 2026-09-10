@@ -3,7 +3,7 @@ import { useI18n } from "vue-i18n";
 import { Copy } from "@lucide/vue";
 import { Markdown, type ControlsConfig } from "vue-stream-markdown";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
 import type { SupportedLocale } from "@/i18n";
 

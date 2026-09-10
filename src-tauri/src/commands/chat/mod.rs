@@ -293,6 +293,7 @@ pub async fn chat_send(
         cancel_cell: session.cancel_cell.clone(),
         last_compaction_ts: session.last_compaction_ts.clone(),
         context_tokens: session.context_tokens.clone(),
+        usage: session.usage.clone(),
     };
     let outcome = run_chat_prompt_with_retries(
         &session.agent,

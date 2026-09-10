@@ -34,7 +34,7 @@ src/                    Vue 3 前端(<script setup> SFC)
   views/                ProjectsHome / ProjectDetail / ProjectFiles / GitGraph
                         / ProjectWiki / ReportHistory / ResourceSkillPreview
                         / Settings / TrayPopup(托盘迷你弹窗)
-  components/           TitleBar.vue 在顶层;ui/ 为 shadcn-vue(reka-ui)生成组件,勿手改;
+  components/           TitleBar.vue 在顶层;ui/ 为 shadcn-vue(reka-ui)生成组件,勿手改(滚动容器用 common/ScrollArea.vue 包装组件,承载视口高度修复);
                         业务组件按域分目录:ai-elements / chat / common / files / git / icons
                         / java / markdown / open / project / report / scripts / semantic
                         / settings / tags / update / wiki

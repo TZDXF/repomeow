@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { Search } from "@lucide/vue";
 import { DropdownMenuCheckboxItem } from "@/components/ui/dropdown-menu";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import type { Tag } from "@/types";
 
 const { t } = useI18n();

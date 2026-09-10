@@ -1965,9 +1965,7 @@ async fn send_with_retry(
     signal: Option<&CancellationToken>,
 ) -> Result<reqwest::Response, (String, bool)> {
     let is_aborted = || signal.is_some_and(|token| token.is_cancelled());
-    let max_retries = options
-        .and_then(|options| options.max_retries)
-        .unwrap_or(0);
+    let max_retries = options.and_then(|options| options.max_retries).unwrap_or(0);
     let mut retries_remaining = max_retries;
     loop {
         match send_attempt(client, url, body, signal).await {
@@ -3310,7 +3308,9 @@ mod tests {
         assert!(
             matches!(&message.content[0], AssistantContent::Thinking { thinking, .. } if thinking == "deep")
         );
-        assert!(matches!(&message.content[1], AssistantContent::Text { text, .. } if text == "answer"));
+        assert!(
+            matches!(&message.content[1], AssistantContent::Text { text, .. } if text == "answer")
+        );
         assert_eq!(message.usage.input, 10);
         assert_eq!(message.usage.output, 5);
         assert_eq!(message.usage.total_tokens, 15);

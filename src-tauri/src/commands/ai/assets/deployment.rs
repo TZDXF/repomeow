@@ -844,8 +844,8 @@ fn repair(
                         .iter_mut()
                         .find(|e| e.kind == kind && e.agent_id == agent && e.resource_id == id)
                         .ok_or_else(|| problem(id))?;
-                    entry.fingerprint =
-                        current_hash(root, entry)?.ok_or_else(|| problem("local source missing"))?;
+                    entry.fingerprint = current_hash(root, entry)?
+                        .ok_or_else(|| problem("local source missing"))?;
                     return save_manifest(&state_path, &next);
                 }
             }

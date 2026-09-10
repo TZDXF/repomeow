@@ -7,7 +7,7 @@ import { useNow } from "@vueuse/core";
 import { BookOpenText, LoaderCircle, RefreshCw } from "@lucide/vue";
 import { Markdown, type ControlsConfig } from "vue-stream-markdown";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import WikiGenerateDialog from "@/components/wiki/WikiGenerateDialog.vue";
 import WikiHeader from "@/components/wiki/WikiHeader.vue";
 import WikiPageNavigation from "@/components/wiki/WikiPageNavigation.vue";

@@ -3634,10 +3634,7 @@ mod tests {
             b"data: {\"type\":\"response.created\"}\n\ndata: {\"type\":\"response.completed\"}\n",
         );
         assert_eq!(events, vec!["{\"type\":\"response.created\"}"]);
-        assert_eq!(
-            decoder.finish(),
-            vec!["{\"type\":\"response.completed\"}"]
-        );
+        assert_eq!(decoder.finish(), vec!["{\"type\":\"response.completed\"}"]);
 
         // 残余不足一行(无换行结尾)同样冲刷;多行 data 以 \n 合并
         let mut decoder = SseDecoder::new();
@@ -4645,7 +4642,9 @@ mod tests {
         assert!(
             matches!(&message.content[0], AssistantContent::Thinking { thinking, .. } if thinking == "deep")
         );
-        assert!(matches!(&message.content[1], AssistantContent::Text { text, .. } if text == "answer"));
+        assert!(
+            matches!(&message.content[1], AssistantContent::Text { text, .. } if text == "answer")
+        );
     }
 
     #[test]
@@ -4670,7 +4669,9 @@ mod tests {
         aggregator.finalize_response(&payload).unwrap();
         let (_, message) = aggregator.finish(false, None);
         assert_eq!(message.stop_reason, StopReason::Length);
-        assert!(matches!(&message.content[0], AssistantContent::Text { text, .. } if text == "partial"));
+        assert!(
+            matches!(&message.content[0], AssistantContent::Text { text, .. } if text == "partial")
+        );
     }
 
     #[test]

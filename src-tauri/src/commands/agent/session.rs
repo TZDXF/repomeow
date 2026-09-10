@@ -20,8 +20,8 @@ use super::config::{apply_session_config, session_options_snapshot};
 use super::process::{capture_stderr, kill_agent_pid, spawn_agent, tail_text};
 use super::registry::resolve_spawn;
 use super::{
-    agent_jobs, agent_pids, AcpHandshake, AcpPromptResult, AcpStartResult, AgentAccess,
-    AgentSession, JobMsg, SessionMode,
+    agent_jobs, agent_pids, AcpHandshake, AcpPromptResult, AcpStartResult, AgentSession, JobMsg,
+    SessionMode,
 };
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::time_util::now_ts_nanos;
@@ -56,13 +56,6 @@ pub(super) async fn run_session(
 
     agent_pids().lock().unwrap().insert(pid);
     let fs_root = PathBuf::from(&fs_root);
-    let allow_workspace_write = matches!(
-        &mode,
-        SessionMode::Generate {
-            access: AgentAccess::WorkspaceWrite,
-            ..
-        }
-    );
 
     {
         let run_id = run_id.clone();
@@ -95,7 +88,7 @@ pub(super) async fn run_session(
                         async move |req: RequestPermissionRequest, responder, _cx| {
                             let title = req.tool_call.fields.title.clone().unwrap_or_default();
                             let (allowed, outcome) =
-                                decide_permission(&req, allow_workspace_write);
+                                decide_permission(&req);
                             push_activity(
                                 &sink,
                                 if allowed {

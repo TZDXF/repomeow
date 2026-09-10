@@ -318,9 +318,7 @@ fn clone_repo(workdir: &Path, url: &str, target: &Path, timeout: Duration) -> Rl
     if status.success() {
         return Ok(());
     }
-    let stderr = drainer
-        .and_then(|t| t.join().ok())
-        .unwrap_or_default();
+    let stderr = drainer.and_then(|t| t.join().ok()).unwrap_or_default();
     let detail = String::from_utf8_lossy(&stderr).trim().to_string();
     Err(RlError::App(if detail.is_empty() {
         AppError::coded(

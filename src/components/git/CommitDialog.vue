@@ -5,7 +5,7 @@ import { toast } from "vue-sonner";
 import { useLocalStorage } from "@vueuse/core";
 import { ChevronDown, FileDiff, FolderTree, List, Loader2, Sparkles, Square } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import {
   Dialog,
   DialogContent,

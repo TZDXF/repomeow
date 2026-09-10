@@ -2657,12 +2657,12 @@ async fn send_with_retry(
         options,
     );
     let retention = resolve_cache_retention(options);
-    let session_affinity = if retention != CacheRetention::None && compat.send_session_affinity_headers
-    {
-        options.and_then(|options| options.session_id.as_deref())
-    } else {
-        None
-    };
+    let session_affinity =
+        if retention != CacheRetention::None && compat.send_session_affinity_headers {
+            options.and_then(|options| options.session_id.as_deref())
+        } else {
+            None
+        };
     let headers = build_request_headers(
         model,
         options,
@@ -4389,7 +4389,9 @@ mod tests {
         assert!(
             matches!(&message.content[0], AssistantContent::Thinking { thinking, thinking_signature, redacted } if thinking == "deep" && thinking_signature.as_deref() == Some("sig") && !redacted)
         );
-        assert!(matches!(&message.content[1], AssistantContent::Text { text, .. } if text == "answer"));
+        assert!(
+            matches!(&message.content[1], AssistantContent::Text { text, .. } if text == "answer")
+        );
     }
 
     #[test]

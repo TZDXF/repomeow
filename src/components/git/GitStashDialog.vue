@@ -7,7 +7,7 @@ import { ArchiveRestore, FileDiff, Loader2, Plus, RefreshCw, Trash2 } from "@luc
 import DiffViewer from "@/components/git/DiffViewer.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import {
   Dialog,
   DialogContent,

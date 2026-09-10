@@ -8,8 +8,7 @@ use tokio_util::sync::CancellationToken;
 use crate::agent::llm::{
     complete_simple, AssistantContent, Context, InputKind, Message, Model, ModelCost,
     ModelCostRates, SimpleStreamOptions, StopReason, UserContent, UserMessage,
-    API_ANTHROPIC_MESSAGES, API_GOOGLE_GENERATIVE_AI, API_OPENAI_COMPLETIONS,
-    API_OPENAI_RESPONSES,
+    API_ANTHROPIC_MESSAGES, API_GOOGLE_GENERATIVE_AI, API_OPENAI_COMPLETIONS, API_OPENAI_RESPONSES,
 };
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::time_util::now_ts_nanos;

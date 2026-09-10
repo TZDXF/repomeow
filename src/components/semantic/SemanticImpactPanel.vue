@@ -4,7 +4,7 @@ import { useI18n } from "vue-i18n";
 import { ClipboardCopy, Loader2, Network, RefreshCw, X } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import SemanticEntityList from "@/components/semantic/SemanticEntityList.vue";
 import SemanticMiniGraph from "@/components/semantic/SemanticMiniGraph.vue";
 import { useSemanticRequest } from "@/composables/useSemanticRequest";

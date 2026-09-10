@@ -114,7 +114,10 @@ fn thinking_level(model: &Model) -> ModelThinkingLevel {
 }
 
 /// 用户显式选择优先;None 回退模型默认(reasoning 中档 / 否则关闭)
-pub(crate) fn effective_thinking_level(model: &Model, configured: Option<&str>) -> ModelThinkingLevel {
+pub(crate) fn effective_thinking_level(
+    model: &Model,
+    configured: Option<&str>,
+) -> ModelThinkingLevel {
     configured
         .map(crate::ai::catalog::parse_thinking_level)
         .unwrap_or_else(|| thinking_level(model))

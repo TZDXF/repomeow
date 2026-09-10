@@ -7,7 +7,7 @@ import { useI18n } from "vue-i18n";
 import { Search, TerminalSquare } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import OpenWithMenu from "@/components/open/OpenWithMenu.vue";
 import FavoriteToggle from "@/components/project/FavoriteToggle.vue";
 import TrayPinnedCommands from "@/components/project/TrayPinnedCommands.vue";

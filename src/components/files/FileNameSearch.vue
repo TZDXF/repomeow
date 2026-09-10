@@ -6,7 +6,7 @@ import { Icon } from "@iconify/vue";
 import { onClickOutside } from "@vueuse/core";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import { fileIcon } from "@/lib/file-icons";
 import { cmd } from "@/lib/tauri";
 import { debounce } from "@/lib/utils";

@@ -115,6 +115,9 @@ pub(super) fn build_session(
     let breakdown_cell = Arc::new(Mutex::new(None));
     let context_tokens_cell = Arc::new(Mutex::new(0));
     let last_compaction_ts = Arc::new(Mutex::new(0));
+    // 聚合用量槽:prepare_next_turn 压缩闭包与 ChatSession 共享,
+    // 摘要调用的 token 计入后随 chat 回合结束落 `ai_usage_log`。
+    let usage_cell = Arc::new(Mutex::new(Usage::zero()));
     // mid-run 压缩需要回拿 Agent(agent 在 loop_config 之后创建,用 Weak 槽晚绑定)。
     let agent_slot: Arc<Mutex<Option<std::sync::Weak<Agent>>>> = Arc::new(Mutex::new(None));
     // mid-run 阈值压缩(对齐 pi `_compactBeforeNextAssistantResponse`):
@@ -126,6 +129,7 @@ pub(super) fn build_session(
         let context_tokens = context_tokens_cell.clone();
         let last_compaction_ts = last_compaction_ts.clone();
         let sink_cell = sink_cell.clone();
+        let usage_cell = usage_cell.clone();
         Arc::new(move |turn: crate::agent::types::PrepareNextTurnContext| {
             let app = app.clone();
             let agent_slot = agent_slot.clone();
@@ -133,6 +137,7 @@ pub(super) fn build_session(
             let context_tokens = context_tokens.clone();
             let last_compaction_ts = last_compaction_ts.clone();
             let sink_cell = sink_cell.clone();
+            let usage_cell = usage_cell.clone();
             Box::pin(async move {
                 let agent = agent_slot.lock().unwrap().as_ref()?.upgrade()?;
                 let model = agent.model();
@@ -147,6 +152,7 @@ pub(super) fn build_session(
                     cancel_cell,
                     last_compaction_ts,
                     context_tokens,
+                    usage: usage_cell,
                 };
                 let emit = move |event: ChatEvent| sink_send(&sink_cell, event);
                 super::compaction::compact_chat_history(
@@ -202,7 +208,7 @@ pub(super) fn build_session(
         agent,
         cancel_cell,
         sink: sink_cell,
-        usage: Arc::new(Mutex::new(Usage::zero())),
+        usage: usage_cell,
         context_tokens: context_tokens_cell,
         breakdown: breakdown_cell,
         busy: Arc::new(AtomicBool::new(false)),

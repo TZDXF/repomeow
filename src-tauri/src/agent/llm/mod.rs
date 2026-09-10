@@ -103,4 +103,3 @@ fn unsupported_api_stream(model: Model) -> AssistantMessageEventStream {
     writer.end(error);
     stream
 }
-

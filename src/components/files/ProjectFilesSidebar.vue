@@ -5,7 +5,7 @@ import { FolderTree, ListTree, Search } from "@lucide/vue";
 import FileTreeList from "@/components/common/FileTreeList.vue";
 import TextSearchPanel from "@/components/files/TextSearchPanel.vue";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import type { FileTreeRow } from "@/lib/file-tree";
 import type { FindQuery } from "@/lib/text-search";
 import type { ProjectFileEntry } from "@/types";

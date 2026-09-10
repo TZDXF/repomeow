@@ -15,7 +15,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import CommandEditor from "@/components/scripts/CommandEditor.vue";
 import ScriptItem from "@/components/scripts/ScriptItem.vue";
 import { COMMAND_ICONS } from "@/lib/command-icons";

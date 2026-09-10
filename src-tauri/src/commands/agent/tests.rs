@@ -107,15 +107,14 @@ fn tool_activity_summarizes_raw_input_inline() {
 }
 
 #[test]
-fn writable_sessions_allow_code_changes_but_not_mode_switches() {
-    assert!(!permission_allowed(Some(&ToolKind::Edit), false));
-    assert!(!permission_allowed(Some(&ToolKind::Execute), false));
-    assert!(permission_allowed(Some(&ToolKind::Edit), true));
-    assert!(permission_allowed(Some(&ToolKind::Delete), true));
-    assert!(permission_allowed(Some(&ToolKind::Move), true));
-    assert!(permission_allowed(Some(&ToolKind::Execute), true));
-    assert!(!permission_allowed(Some(&ToolKind::SwitchMode), true));
-    assert!(permission_allowed(None, true));
+fn read_only_sessions_reject_write_and_execute_tools() {
+    assert!(!permission_allowed(Some(&ToolKind::Edit)));
+    assert!(!permission_allowed(Some(&ToolKind::Delete)));
+    assert!(!permission_allowed(Some(&ToolKind::Move)));
+    assert!(!permission_allowed(Some(&ToolKind::Execute)));
+    assert!(!permission_allowed(Some(&ToolKind::SwitchMode)));
+    assert!(permission_allowed(Some(&ToolKind::Read)));
+    assert!(permission_allowed(None));
 }
 
 #[test]

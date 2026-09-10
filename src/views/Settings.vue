@@ -19,7 +19,7 @@ import {
   Tags,
 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import GeneralSettings from "@/components/settings/GeneralSettings.vue";
 import ToolchainPanel from "@/components/settings/ToolchainPanel.vue";
 import McpSettings from "@/components/settings/McpSettings.vue";

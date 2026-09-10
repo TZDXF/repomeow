@@ -16,7 +16,7 @@ import {
   Trash2,
 } from "@lucide/vue";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import { formatRelativeTime } from "@/lib/format";
 import {
   useBackgroundTasksStore,

@@ -16,7 +16,7 @@ import {
 } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import FileTreeList from "@/components/common/FileTreeList.vue";
 import DiffViewer from "@/components/git/DiffViewer.vue";
 import ImageDiffPreview from "@/components/git/ImageDiffPreview.vue";

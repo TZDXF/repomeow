@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { TimeField } from "@/components/ui/time-field";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import TagCheckList from "@/components/tags/TagCheckList.vue";
 import { formatLocalDateTime } from "@/lib/format";
 import { cmd } from "@/lib/tauri";

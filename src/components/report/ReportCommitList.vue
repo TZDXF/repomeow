@@ -4,7 +4,7 @@ import { useI18n } from "vue-i18n";
 import { ChevronRight, Loader2 } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import { formatCommitTime } from "@/lib/format";
 import type { ProjectCommits } from "@/lib/ai";
 

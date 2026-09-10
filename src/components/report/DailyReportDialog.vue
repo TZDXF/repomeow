@@ -4,7 +4,7 @@ import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { Loader2, Sparkles } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import {
   Dialog,
   DialogContent,

@@ -26,7 +26,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import AddProjectDialog from "@/components/project/AddProjectDialog.vue";
 import ProjectCard from "@/components/project/ProjectCard.vue";
 import ProjectTable from "@/components/project/ProjectTable.vue";

@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import AgentModelThinkingSelect from "@/components/ai-elements/AgentModelThinkingSelect.vue";
 import { useAiConfigStore } from "@/stores/ai-config";
 import { getEditorAvailability, isEditorUnavailable } from "@/lib/open-with";

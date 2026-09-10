@@ -15,7 +15,7 @@ import {
   XCircle,
 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import type { BatchItem } from "@/lib/batch-report";
 import { useBatchReportStore } from "@/stores/batch-report";
 

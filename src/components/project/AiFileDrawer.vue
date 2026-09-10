@@ -17,7 +17,7 @@ import {
 } from "@lucide/vue";
 import { Markdown } from "vue-stream-markdown";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import CodeViewer from "@/components/files/CodeViewer.vue";
 import { cmd } from "@/lib/tauri";
 import { joinPath } from "@/lib/path";

@@ -2,7 +2,7 @@
 import type { HTMLAttributes } from "vue";
 import { cn } from "@/lib/utils";
 import { computed, isVNode } from "vue";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 
 // 改造说明:原实现用 CodeBlock 展示结果(JSON 高亮 + 标题栏),短结果也占一个大块。
 // 改为限高纯文本块(内部滚动、保留换行),错误态红底;结果多为自然语言摘要,

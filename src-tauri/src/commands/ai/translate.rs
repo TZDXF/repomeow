@@ -204,7 +204,9 @@ mod tests {
             r#"[{"name": "a", "input": "x"}, {"name": "b", "parameters": {}}]"#
         ));
         // 多行 pretty JSON 对象
-        assert!(looks_like_tool_calls("{\n  \"name\": \"a\",\n  \"input\": \"x\"\n}"));
+        assert!(looks_like_tool_calls(
+            "{\n  \"name\": \"a\",\n  \"input\": \"x\"\n}"
+        ));
     }
 
     #[test]

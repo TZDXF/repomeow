@@ -148,9 +148,13 @@ pub(super) async fn run_chat_prompt_with_policy(
                     if threshold_trigger_tokens(&agent.messages(), model.context_window, last_ts)
                         .is_some()
                     {
-                        let _ =
-                            compact_chat_history(agent, ctx, ChatCompactionReason::Threshold, &emit)
-                                .await;
+                        let _ = compact_chat_history(
+                            agent,
+                            ctx,
+                            ChatCompactionReason::Threshold,
+                            &emit,
+                        )
+                        .await;
                     }
                 }
                 return Ok(());
@@ -171,8 +175,7 @@ async fn maybe_recover_overflow(
 ) -> OverflowAction {
     let model = agent.model();
     // 模型已切换时不按旧模型的溢出报错触发(对齐 pi sameModel 守卫)
-    let same_model =
-        last_assistant.provider == model.provider && last_assistant.model == model.id;
+    let same_model = last_assistant.provider == model.provider && last_assistant.model == model.id;
     let overflow = same_model && is_context_overflow(last_assistant, model.context_window);
     let recoverable = same_model && is_recoverable_length(last_assistant, model.max_tokens);
     if !overflow && !recoverable {

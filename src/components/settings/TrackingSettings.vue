@@ -5,7 +5,7 @@ import { toast } from "vue-sonner";
 import { Search } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import { Switch } from "@/components/ui/switch";
 import { cmd } from "@/lib/tauri";
 import { matchesTrackingProject } from "@/lib/tracking";

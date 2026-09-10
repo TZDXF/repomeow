@@ -27,7 +27,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import DailyReportDialog from "@/components/report/DailyReportDialog.vue";
 import ReportCalendar from "@/components/report/ReportCalendar.vue";
 import TagCheckList from "@/components/tags/TagCheckList.vue";

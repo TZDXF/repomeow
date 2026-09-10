@@ -23,7 +23,7 @@ import {
 import { buildBranchTree, type BranchTreeNode } from "@/lib/branch-tree";
 import type { GitBranches, GitBranchTrack } from "@/types";
 import GitBranchTrackBadges from "./GitBranchTrackBadges.vue";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 
 interface BranchTreeRow {
   node: BranchTreeNode;

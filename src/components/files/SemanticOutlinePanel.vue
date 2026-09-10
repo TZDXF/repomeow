@@ -4,7 +4,7 @@ import { useI18n } from "vue-i18n";
 import { ArrowLeft, Loader2, RefreshCw, Search, Users, X } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import SemanticEntitySearch from "@/components/files/SemanticEntitySearch.vue";
 import SemanticOutlineTree from "@/components/files/SemanticOutlineTree.vue";
 import SemanticRelationPanel from "@/components/files/SemanticRelationPanel.vue";

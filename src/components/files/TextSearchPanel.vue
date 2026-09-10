@@ -6,7 +6,7 @@ import { ChevronDown, ChevronRight, Loader2, Search } from "@lucide/vue";
 import { Icon } from "@iconify/vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import { cmd } from "@/lib/tauri";
 import { fileIcon } from "@/lib/file-icons";
 import { buildFindRegExp, type FindQuery } from "@/lib/text-search";

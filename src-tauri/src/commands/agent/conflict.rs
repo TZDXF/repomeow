@@ -293,7 +293,9 @@ fn git_error(error: git2::Error) -> AppError {
 
 fn has_conflict_markers(content: &str) -> bool {
     content.lines().any(|line| {
-        ["<<<<<<<", "=======", ">>>>>>>", "|||||||"]
+        // 独立的等号分隔线也可能是 Markdown setext 标题或 diff 内容，不能据此判定冲突。
+        // 完整冲突必然包含起止标记；同时保守拦截未成对的起止/base 残留标记。
+        ["<<<<<<<", ">>>>>>>", "|||||||"]
             .iter()
             .any(|marker| line.starts_with(marker))
     })
@@ -361,10 +363,35 @@ mod tests {
 
     #[test]
     fn detects_remaining_markers() {
-        for marker in ["<<<<<<< ours", "=======", ">>>>>>> theirs", "||||||| base"] {
+        for marker in ["<<<<<<< ours", ">>>>>>> theirs", "||||||| base"] {
             assert!(has_conflict_markers(&format!("code\n{marker}\n")));
         }
         assert!(!has_conflict_markers("const value = 1;\n"));
+    }
+
+    #[test]
+    fn detects_merge_and_diff3_conflicts() {
+        for content in [
+            "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> topic\n",
+            "<<<<<<< HEAD\nours\n||||||| base\noriginal\n=======\ntheirs\n>>>>>>> topic\n",
+            "<<<<<<< HEAD\r\nours\r\n=======\r\ntheirs\r\n>>>>>>> topic\r\n",
+            "<<<<<<<<< HEAD\nours\n=========\ntheirs\n>>>>>>>>> topic\n",
+        ] {
+            assert!(has_conflict_markers(content), "{content:?}");
+        }
+    }
+
+    #[test]
+    fn allows_setext_headings_and_diff_content() {
+        for content in [
+            "=======\n",
+            "标题\n=======\n正文\n",
+            "标题\r\n====================\r\n正文\r\n",
+            "```diff\nIndex: README.md\n=======\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new\n```\n",
+            "```diff\n-<<<<<<< HEAD\n-ours\n-=======\n-theirs\n->>>>>>> topic\n+resolved\n```\n",
+        ] {
+            assert!(!has_conflict_markers(content), "{content:?}");
+        }
     }
 
     #[test]

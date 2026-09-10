@@ -224,8 +224,17 @@ mod tests {
         assert!(AGENTS_MD_PROMPT.contains("analyze this codebase and create an AGENTS.md file"));
         assert!(AGENTS_MD_PROMPT.contains("Do not create or modify any other file"));
         // 只给生成指令:不含工作模式/预算/预注上下文类约束
-        for banned in ["at most", "Working mode", "file tree", "README:", "Manifest"] {
-            assert!(!AGENTS_MD_PROMPT.contains(banned), "prompt contains {banned}");
+        for banned in [
+            "at most",
+            "Working mode",
+            "file tree",
+            "README:",
+            "Manifest",
+        ] {
+            assert!(
+                !AGENTS_MD_PROMPT.contains(banned),
+                "prompt contains {banned}"
+            );
         }
         // 语言指令随请求注入
         assert!(agents_md_prompt("zh-CN").contains("Write the file in 中文."));

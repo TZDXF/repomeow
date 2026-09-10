@@ -6,7 +6,7 @@ import { ArchiveRestore, Search, Trash2 } from "@lucide/vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import { Switch } from "@/components/ui/switch";
 import { formatRelativeTime } from "@/lib/format";
 import { hasWiki } from "@/lib/wiki";

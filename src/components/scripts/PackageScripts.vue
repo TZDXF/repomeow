@@ -6,7 +6,7 @@ import { ChevronRight, Eye, EyeOff, Folder, Package } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import ScriptItem from "@/components/scripts/ScriptItem.vue";
 import { useCollapsibleOpen } from "@/composables/useCollapsibleOpen";
 import { cmd, runInTerminal } from "@/lib/tauri";

@@ -20,31 +20,31 @@ fn overflow_patterns() -> &'static [Regex] {
     static PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
     PATTERNS.get_or_init(|| {
         [
-            r"(?i)prompt is too long",                                  // Anthropic token 溢出
-            r"(?i)request_too_large", // Anthropic 请求字节溢出(HTTP 413)
+            r"(?i)prompt is too long",                    // Anthropic token 溢出
+            r"(?i)request_too_large",                     // Anthropic 请求字节溢出(HTTP 413)
             r"(?i)input is too long for requested model", // Amazon Bedrock
-            r"(?i)exceeds the context window", // OpenAI(Completions & Responses API)
+            r"(?i)exceeds the context window",            // OpenAI(Completions & Responses API)
             r"(?i)exceeds (?:the )?(?:model'?s )?maximum context length(?: of [\d,]+ tokens?|\s*\([\d,]+\))", // OpenAI 兼容代理(LiteLLM)
-            r"(?i)input token count.*exceeds the maximum",              // Google (Gemini)
-            r"(?i)maximum prompt length is \d+",                        // xAI (Grok)
-            r"(?i)reduce the length of the messages",                   // Groq
-            r"(?i)maximum context length is \d+ tokens", // OpenRouter(多数后端)
+            r"(?i)input token count.*exceeds the maximum", // Google (Gemini)
+            r"(?i)maximum prompt length is \d+",           // xAI (Grok)
+            r"(?i)reduce the length of the messages",      // Groq
+            r"(?i)maximum context length is \d+ tokens",   // OpenRouter(多数后端)
             r"(?i)exceeds (?:the )?maximum allowed input length of [\d,]+ tokens?", // OpenRouter/Poolside
             r"(?i)input \(\d+ tokens\) is longer than the model'?s context length \(\d+ tokens\)", // Together AI
-            r"(?i)exceeds the limit of \d+",                           // GitHub Copilot
-            r"(?i)exceeds the available context size",                 // llama.cpp server
-            r"(?i)greater than the context length",                    // LM Studio
-            r"(?i)context window exceeds limit",                       // MiniMax
-            r"(?i)exceeded model token limit",                         // Kimi For Coding
+            r"(?i)exceeds the limit of \d+", // GitHub Copilot
+            r"(?i)exceeds the available context size", // llama.cpp server
+            r"(?i)greater than the context length", // LM Studio
+            r"(?i)context window exceeds limit", // MiniMax
+            r"(?i)exceeded model token limit", // Kimi For Coding
             r"(?i)too large for model with \d+ maximum context length", // Mistral
             r"(?i)prompt has [\d,]+ tokens?, but the configured context size is [\d,]+ tokens?", // DS4 server
             r"(?i)model_context_window_exceeded", // z.ai 非标准 finish_reason 文本
             r"(?i)prompt too long; exceeded (?:max )?context length", // Ollama 显式溢出
-            r"(?i)range of input length should be",                   // DashScope / Qwen
-            r"(?i)context[_ ]length[_ ]exceeded",                     // 通用兜底
-            r"(?i)too many tokens",                                   // 通用兜底
-            r"(?i)token limit exceeded",                              // 通用兜底
-            r"(?i)^4(?:00|13)\s*(?:status code)?\s*\(no body\)",      // Cerebras: 400/413 无 body
+            r"(?i)range of input length should be", // DashScope / Qwen
+            r"(?i)context[_ ]length[_ ]exceeded", // 通用兜底
+            r"(?i)too many tokens",               // 通用兜底
+            r"(?i)token limit exceeded",          // 通用兜底
+            r"(?i)^4(?:00|13)\s*(?:status code)?\s*\(no body\)", // Cerebras: 400/413 无 body
         ]
         .iter()
         .map(|pattern| Regex::new(pattern).expect("overflow pattern must compile"))
@@ -90,7 +90,8 @@ pub fn is_context_overflow(message: &AssistantMessage, context_window: i64) -> b
     }
 
     // 3. 截断溢出(MiMo):length + output=0 + 输入填满窗口 ≥99%。
-    if context_window > 0 && message.stop_reason == StopReason::Length && message.usage.output == 0 {
+    if context_window > 0 && message.stop_reason == StopReason::Length && message.usage.output == 0
+    {
         let input_tokens = message.usage.input + message.usage.cache_read;
         if (input_tokens as f64) >= context_window as f64 * 0.99 {
             return true;

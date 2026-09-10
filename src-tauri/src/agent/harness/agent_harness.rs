@@ -45,7 +45,8 @@ use crate::agent::llm::types::{
 };
 use crate::agent::types::{
     AgentContext, AgentLoopConfig, AgentLoopTurnUpdate, AgentMessage, AgentState,
-    PrepareNextTurnContext, PrepareNextTurnFn, QueueMode, StreamFn, ToolExecutionMode, TypedMessage,
+    PrepareNextTurnContext, PrepareNextTurnFn, QueueMode, StreamFn, ToolExecutionMode,
+    TypedMessage,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -844,8 +845,10 @@ impl AgentHarness {
         // 历史已越阈值时先压缩再组引擎。
         let compaction_settings = { self.lock_state().compaction_settings };
         if compaction_settings.enabled && snapshot.model.context_window > 0 {
-            let tokens =
-                guarded_context_tokens(&history, session_latest_compaction_timestamp(&self.session).await);
+            let tokens = guarded_context_tokens(
+                &history,
+                session_latest_compaction_timestamp(&self.session).await,
+            );
             if tokens > 0
                 && compaction_mod::should_compact(
                     tokens,
@@ -892,9 +895,8 @@ impl AgentHarness {
             let model = snapshot.model.clone();
             let settings = { self.lock_state().compaction_settings };
             let stream_fn = snapshot.stream_fn.clone();
-            let thinking_level = crate::agent::agent_loop::reasoning_from_thinking_level(
-                snapshot.thinking_level,
-            );
+            let thinking_level =
+                crate::agent::agent_loop::reasoning_from_thinking_level(snapshot.thinking_level);
             Some(std::sync::Arc::new(move |turn: PrepareNextTurnContext| {
                 let session = session.clone();
                 let model = model.clone();
@@ -1042,15 +1044,17 @@ impl AgentHarness {
 
             // 溢出/可恢复截断优先于普通瞬态重试(对齐 pi `_checkCompaction`
             // case 1:移除失败消息 → 压缩 → continue 一次)。
-            if matches!(assistant.stop_reason, StopReason::Error | StopReason::Length)
-                && !overflow_recovery_attempted
+            if matches!(
+                assistant.stop_reason,
+                StopReason::Error | StopReason::Length
+            ) && !overflow_recovery_attempted
             {
                 let same_model = assistant.provider == snapshot.model.provider
                     && assistant.model == snapshot.model.id;
                 let overflow =
                     same_model && is_context_overflow(&assistant, snapshot.model.context_window);
-                let recoverable = same_model
-                    && is_recoverable_length(&assistant, snapshot.model.max_tokens);
+                let recoverable =
+                    same_model && is_recoverable_length(&assistant, snapshot.model.max_tokens);
                 if overflow || recoverable {
                     overflow_recovery_attempted = true;
                     let mut messages = agent.messages();
@@ -1118,18 +1122,17 @@ impl AgentHarness {
                         if silent_overflow {
                             self.auto_compact(CompactionReason::Overflow).await;
                         } else {
-                            let direct =
-                                compaction_mod::calculate_context_tokens(&assistant.usage);
-                            let tokens = if assistant.stop_reason == StopReason::Error || direct == 0
-                            {
-                                // 错误/零用量消息:按估算口径(带防重触发守卫)
-                                guarded_context_tokens(
-                                    &agent.messages(),
-                                    session_latest_compaction_timestamp(&self.session).await,
-                                )
-                            } else {
-                                direct
-                            };
+                            let direct = compaction_mod::calculate_context_tokens(&assistant.usage);
+                            let tokens =
+                                if assistant.stop_reason == StopReason::Error || direct == 0 {
+                                    // 错误/零用量消息:按估算口径(带防重触发守卫)
+                                    guarded_context_tokens(
+                                        &agent.messages(),
+                                        session_latest_compaction_timestamp(&self.session).await,
+                                    )
+                                } else {
+                                    direct
+                                };
                             if tokens > 0
                                 && compaction_mod::should_compact(tokens, context_window, &settings)
                             {
@@ -1257,7 +1260,11 @@ impl AgentHarness {
         )
         .await
         {
-            eprintln!("[harness] 自动压缩({})失败: {}", reason_str(reason), error.message);
+            eprintln!(
+                "[harness] 自动压缩({})失败: {}",
+                reason_str(reason),
+                error.message
+            );
         }
     }
 
@@ -2333,12 +2340,13 @@ async fn run_auto_compaction(
     }
     let result: Option<compaction_mod::CompactResult> = async {
         let entries = branch_entries(session).await.map_err(operation_error)?;
-        let preparation = compaction_mod::prepare_compaction(&entries, settings).map_err(
-            |error| OperationError {
-                code: format!("compaction_{}", error.code),
-                message: error.message.clone(),
-            },
-        )?;
+        let preparation =
+            compaction_mod::prepare_compaction(&entries, settings).map_err(|error| {
+                OperationError {
+                    code: format!("compaction_{}", error.code),
+                    message: error.message.clone(),
+                }
+            })?;
         let Some(preparation) = preparation else {
             return Ok(None);
         };

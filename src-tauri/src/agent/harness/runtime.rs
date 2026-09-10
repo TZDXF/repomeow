@@ -1278,8 +1278,10 @@ mod runtime_tests {
             .unwrap();
         // 第一段脚本给摘要调用,第二段给正式 run;若压缩被重复触发,
         // 脚本队列耗尽即 panic,测试随之失败。
-        let (stream_fn, _calls) =
-            scripted_stream_fn(vec![text_script("summary of history"), text_script("answer")]);
+        let (stream_fn, _calls) = scripted_stream_fn(vec![
+            text_script("summary of history"),
+            text_script("answer"),
+        ]);
         let mut opts = options(session.clone(), stream_fn, Vec::new(), None);
         opts.model.context_window = 100;
         opts.compaction = Some(
