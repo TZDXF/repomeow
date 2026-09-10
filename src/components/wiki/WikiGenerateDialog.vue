@@ -1,15 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { Loader2 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -18,9 +12,8 @@ import { cmd } from "@/lib/tauri";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
 import type { Project } from "@/types";
-import { CHAT_THINKING_LEVELS } from "@/lib/ai-config";
 import { loadWikiConfig, saveWikiConfig } from "@/lib/wiki";
-import { ModelSelector, type ModelSelectorGroup } from "@/components/ai-elements/model-selector";
+import AgentModelThinkingSelect from "@/components/ai-elements/AgentModelThinkingSelect.vue";
 import { useAiConfigStore } from "@/stores/ai-config";
 import type { WikiGenerationConfig } from "@/lib/wiki-generator";
 
@@ -58,11 +51,6 @@ const open = computed({
       emit("close");
     }
   },
-});
-
-onMounted(() => {
-  // 内置模型清单加载失败不阻塞对话框
-  aiConfig.ensureLoaded().catch(() => {});
 });
 
 // ── 本地副本:打开时从项目 config.json 同步,确认才写回 ────────────────────
@@ -119,18 +107,6 @@ async function loadProjectConfig() {
   }
 }
 
-// ── 模型清单(ai-config 全部厂商/模型,按厂商分组) ─────────────────────────
-
-const builtinModelGroups = computed<ModelSelectorGroup[]>(() => {
-  const config = aiConfig.config;
-  if (!config) return [];
-  return Object.entries(config.providers).map(([providerId, provider]) => ({
-    providerId,
-    providerName: provider.name || providerId,
-    models: provider.models,
-  }));
-});
-
 /** 已选模型引用是否仍指向现存厂商与模型 */
 function builtinModelExists(value: string): boolean {
   const separator = value.indexOf("/");
@@ -138,27 +114,6 @@ function builtinModelExists(value: string): boolean {
   const provider = aiConfig.config?.providers[value.slice(0, separator)];
   return Boolean(provider?.models.some((m) => m.id === value.slice(separator + 1)));
 }
-
-function onModelChange(value: unknown) {
-  if (typeof value === "string") {
-    model.value = value;
-  }
-}
-
-const DEFAULT_VALUE = "__default__";
-
-function onThinkingChange(value: unknown) {
-  if (typeof value === "string") {
-    thinking.value = value === DEFAULT_VALUE ? "" : value;
-  }
-}
-
-const thinkingOptions = computed(() =>
-  CHAT_THINKING_LEVELS.map((level) => ({
-    id: level,
-    name: t(`chat.thinkingLevels.${level}`),
-  })),
-);
 
 // ── 提交 ────────────────────────────────────────────────────────────────────
 
@@ -212,38 +167,11 @@ async function confirm() {
       <ScrollArea class="min-h-0 flex-1 py-2">
         <!-- 模型(按厂商列 ai-config 全部模型)/ 思考强度 / 并发数 -->
         <div class="grid gap-3">
-          <div class="flex min-w-0 flex-col gap-1.5">
-            <label class="text-sm font-medium">{{ t("wiki.agentModel") }}</label>
-            <ModelSelector
-              :model-value="model"
-              :groups="builtinModelGroups"
-              :placeholder="t('wiki.builtinModelDefault')"
-              :disabled="configLoading || configSaving"
-              size="default"
-              trigger-class="min-w-0 w-full"
-              @update:model-value="onModelChange"
-            />
-          </div>
-          <div class="flex min-w-0 flex-col gap-1.5">
-            <label class="text-sm font-medium">{{ t("wiki.agentThinking") }}</label>
-            <Select
-              :model-value="thinking || DEFAULT_VALUE"
-              :disabled="configLoading || configSaving"
-              @update:model-value="onThinkingChange"
-            >
-              <SelectTrigger class="min-w-0 w-full">
-                <SelectValue class="min-w-0 flex-1 truncate text-left" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem :value="DEFAULT_VALUE">
-                  {{ t("wiki.builtinThinkingDefault") }}
-                </SelectItem>
-                <SelectItem v-for="c in thinkingOptions" :key="c.id" :value="c.id">
-                  {{ c.name }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <AgentModelThinkingSelect
+            v-model:model="model"
+            v-model:thinking="thinking"
+            :disabled="configLoading || configSaving"
+          />
           <div class="flex min-w-0 flex-col gap-1.5">
             <label class="text-sm font-medium">{{ t("wiki.agentConcurrency") }}</label>
             <Input

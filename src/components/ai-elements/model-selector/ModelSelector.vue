@@ -30,6 +30,8 @@ const props = withDefaults(
     triggerClass?: string;
     /** 附加在所有分组之前的通用选项(value 不得含 "/",避免与复合值混淆) */
     genericOption?: { value: string; label: string };
+    /** 隐藏下拉项的「默认」徽标(触发器已展示默认模型名的场景用) */
+    hideDefaultTag?: boolean;
   }>(),
   {
     placeholder: "",
@@ -37,6 +39,7 @@ const props = withDefaults(
     size: "sm",
     triggerClass: "min-w-0 max-w-44",
     genericOption: undefined,
+    hideDefaultTag: false,
   },
 );
 
@@ -84,7 +87,14 @@ const hasAnyOption = computed(
             :value="`${group.providerId}/${model.id}`"
           >
             <span class="flex items-center gap-1.5 overflow-hidden">
-              <span class="truncate">{{ modelDisplayName(model) }}{{ isDefaultModel(group.providerId, model.id) ? ` (${t("chat.defaultTag")})` : "" }}</span>
+              <span class="truncate"
+                >{{ modelDisplayName(model)
+                }}{{
+                  !hideDefaultTag && isDefaultModel(group.providerId, model.id)
+                    ? ` (${t("chat.defaultTag")})`
+                    : ""
+                }}</span
+              >
               <Sparkles v-if="model.reasoning" class="size-3 shrink-0 text-muted-foreground" />
             </span>
           </SelectItem>

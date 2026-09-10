@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { Bot, Code, Loader2, Terminal, TriangleAlert } from "@lucide/vue";
@@ -13,16 +13,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { ModelSelector } from "@/components/ai-elements/model-selector";
+import AgentModelThinkingSelect from "@/components/ai-elements/AgentModelThinkingSelect.vue";
 import { useAiConfigStore } from "@/stores/ai-config";
-import { CHAT_THINKING_LEVELS } from "@/lib/ai-config";
 import { getEditorAvailability, isEditorUnavailable } from "@/lib/open-with";
 import type { EditorAvailability } from "@/lib/open-with";
 import { cmd } from "@/lib/tauri";
@@ -36,16 +28,10 @@ const open = defineModel<boolean>("open", { required: true });
 const availability = ref<EditorAvailability | null>(null);
 const aiConfig = useAiConfigStore();
 const model = ref("");
-const thinking = ref("__default__");
+const thinking = ref("");
 const agentsLoading = ref(true);
 const startingAgent = ref(false);
-const modelGroups = computed(() =>
-  Object.entries(aiConfig.config?.providers ?? {}).map(([providerId, provider]) => ({
-    providerId,
-    providerName: provider.name || providerId,
-    models: provider.models,
-  })),
-);
+
 onMounted(async () => {
   void getEditorAvailability()
     .then((value) => {
@@ -80,7 +66,7 @@ async function resolveWithAgent() {
   try {
     await cmd<string>("resolve_git_conflicts_with_agent", {
       model: model.value || null,
-      thinking: thinking.value === "__default__" ? null : thinking.value,
+      thinking: thinking.value || null,
       projectId: props.project.id,
       projectName: props.project.name,
       path: props.path ?? props.project.path,
@@ -119,24 +105,12 @@ async function resolveWithAgent() {
       </div>
       <div class="flex flex-col gap-1.5">
         <p class="text-sm font-medium">{{ t("git.conflict.agentLabel") }}</p>
-        <ModelSelector
-          v-model="model"
-          :groups="modelGroups"
+        <AgentModelThinkingSelect
+          v-model:model="model"
+          v-model:thinking="thinking"
           :disabled="agentsLoading || startingAgent"
-          :placeholder="t('wiki.builtinModelDefault')"
-          size="default"
           trigger-class="w-full"
         />
-        <p class="text-sm font-medium">{{ t("wiki.agentThinking") }}</p>
-        <Select v-model="thinking" :disabled="agentsLoading || startingAgent">
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__default__">{{ t("wiki.builtinThinkingDefault") }}</SelectItem>
-            <SelectItem v-for="level in CHAT_THINKING_LEVELS" :key="level" :value="level">
-              {{ t(`chat.thinkingLevels.${level}`) }}
-            </SelectItem>
-          </SelectContent>
-        </Select>
         <p class="text-xs text-muted-foreground">{{ t("git.conflict.agentHint") }}</p>
       </div>
       <DialogFooter class="flex-wrap gap-2">
