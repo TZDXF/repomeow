@@ -1020,6 +1020,7 @@ export default {
       running: "Thinking & working…",
       toolCount: "{count} tools",
     },
+    defaultTag: "Default",
     retryScheduled: "Request failed temporarily. Retry {attempt}/{max} starts in {seconds}s",
     compacting: "Context too large, auto-compacting…",
     compactionDone: "Context auto-compacted ({before} → {after})",

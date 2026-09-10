@@ -797,7 +797,7 @@ const retrySeconds = computed(() => {
                       :value="level"
                       class="text-xs"
                     >
-                      {{ t(`chat.thinkingLevels.${level}`) }}
+                      {{ t(`chat.thinkingLevels.${level}`) }}{{ level === "medium" ? ` (${t("chat.defaultTag")})` : "" }}
                     </SelectItem>
                   </SelectContent>
                 </Select>

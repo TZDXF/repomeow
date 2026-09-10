@@ -106,10 +106,10 @@ export const useAiConfigStore = defineStore("ai-config", () => {
       : "",
   );
 
-  /** 当前问答思考强度(chat 偏好;非法值回退 off) */
+  /** 当前问答思考强度(chat 偏好;非法值回退 medium) */
   const chatThinking = computed<ChatThinkingLevel>(() => {
     const value = config.value?.chat.thinking;
-    return isChatThinkingLevel(value) ? value : "off";
+    return isChatThinkingLevel(value) ? value : "medium";
   });
 
   /** 当前问答工具权限 */

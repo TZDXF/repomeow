@@ -10,6 +10,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useI18n } from "vue-i18n";
+import { useAiConfigStore } from "@/stores/ai-config";
 import { modelDisplayName, type ModelSelectorGroup } from "./types";
 
 /**
@@ -39,6 +41,15 @@ const props = withDefaults(
 );
 
 const emit = defineEmits<{ "update:modelValue": [value: string] }>();
+
+const { t } = useI18n();
+const aiConfig = useAiConfigStore();
+
+/** 是否为全局默认模型(AI 设置中的「默认模型」) */
+function isDefaultModel(providerId: string, modelId: string): boolean {
+  const reference = aiConfig.defaultModel?.reference;
+  return reference?.providerId === providerId && reference?.modelId === modelId;
+}
 
 const hasAnyOption = computed(
   () => Boolean(props.genericOption) || props.groups.some((group) => group.models.length > 0),
@@ -73,7 +84,7 @@ const hasAnyOption = computed(
             :value="`${group.providerId}/${model.id}`"
           >
             <span class="flex items-center gap-1.5 overflow-hidden">
-              <span class="truncate">{{ modelDisplayName(model) }}</span>
+              <span class="truncate">{{ modelDisplayName(model) }}{{ isDefaultModel(group.providerId, model.id) ? ` (${t("chat.defaultTag")})` : "" }}</span>
               <Sparkles v-if="model.reasoning" class="size-3 shrink-0 text-muted-foreground" />
             </span>
           </SelectItem>

@@ -62,7 +62,7 @@ fn default_api() -> String {
 }
 
 fn default_thinking() -> String {
-    "off".to_string()
+    "medium".to_string()
 }
 
 /// 一个厂商；`api` 决定默认 wire adapter。
@@ -667,7 +667,7 @@ mod tests {
         assert!(config.default_model.is_none());
         assert!(config.chat.provider_id.is_none());
         assert!(config.chat.model_id.is_none());
-        assert_eq!(config.chat.thinking, "off");
+        assert_eq!(config.chat.thinking, "medium");
         assert_eq!(config.chat.permission, ChatPermission::All);
         assert_eq!(config.providers["openai"].api, "openai-responses");
         assert_eq!(config.providers["deepseek"].api, API_OPENAI_COMPLETIONS);

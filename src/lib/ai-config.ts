@@ -149,7 +149,7 @@ export interface AiConfigFile {
 
 /** 创建一份带默认值的空 chat 偏好(配置损坏回退用) */
 export function emptyChatPrefs(): ChatPrefs {
-  return { providerId: null, modelId: null, thinking: "off", permission: "all" };
+  return { providerId: null, modelId: null, thinking: "medium", permission: "all" };
 }
 
 /** 读取配置;后端文件缺失时自动播种(含旧 settings.json 三键迁移) */

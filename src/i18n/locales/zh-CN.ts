@@ -977,6 +977,7 @@ export default {
       running: "正在思考与执行…",
       toolCount: "{count} 个工具",
     },
+    defaultTag: "默认",
     retryScheduled: "请求暂时失败，第 {attempt}/{max} 次重试将在 {seconds} 秒后开始",
     compacting: "上下文过长，正在自动压缩…",
     compactionDone: "上下文已自动压缩({before} → {after})",
