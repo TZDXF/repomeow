@@ -1301,7 +1301,7 @@ export default {
         rateLimited: "请求频率受限，{seconds} 秒后自动重试（{attempt}/{max}）",
         temporary: "AI 服务暂时异常，{seconds} 秒后自动重试（{attempt}/{max}）",
       },
-      leaveHint: "生成可能需要几分钟。你可以先去处理其他项目，离开此页面不会中断任务。",
+      leaveHint: "生成需要几分钟，离开此页面不会中断任务。",
     },
     phase: {
       collecting: "正在收集项目文件…",

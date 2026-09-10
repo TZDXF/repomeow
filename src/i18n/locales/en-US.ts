@@ -1357,7 +1357,7 @@ export default {
           "The AI service is temporarily unavailable; retrying in {seconds}s ({attempt}/{max})",
       },
       leaveHint:
-        "Generation may take a few minutes. You can work on another project—leaving this page will not interrupt it.",
+        "Generation may take a few minutes—leaving this page won't interrupt it.",
     },
     phase: {
       collecting: "Collecting project files...",
