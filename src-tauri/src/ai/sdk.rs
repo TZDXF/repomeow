@@ -64,7 +64,7 @@ impl AiConfig {
         Ok(())
     }
 
-    fn model(&self) -> Model {
+    pub(crate) fn model(&self) -> Model {
         self.resolved_model.clone().unwrap_or_else(|| Model {
             id: self.ai_model.clone(),
             name: self.ai_model.clone(),
@@ -149,8 +149,23 @@ pub async fn chat(
     max_output_tokens: Option<u32>,
     cancel: Option<&CancellationToken>,
 ) -> AppResult<ChatOutput> {
+    if cancel.is_some_and(CancellationToken::is_cancelled) {
+        return Err(AppError::coded(ErrorCode::AiResponseError, "生成已取消"));
+    }
     config.validate(true)?;
     let model = config.model();
+    let budget = super::budget::RequestBudget::new(
+        &model,
+        system_prompt.unwrap_or_default(),
+        "",
+        max_output_tokens,
+    )?;
+    if !budget.fits(user_prompt) {
+        return Err(AppError::coded(
+            ErrorCode::AiResponseError,
+            "请求超过模型上下文预算，请分块或汇总后重试",
+        ));
+    }
     let context = Context {
         system_prompt: system_prompt.map(str::to_string),
         messages: vec![Message::User(UserMessage {
@@ -162,7 +177,7 @@ pub async fn chat(
     };
     let options = SimpleStreamOptions {
         api_key: Some(config.ai_api_key.clone()),
-        max_tokens: max_output_tokens,
+        max_tokens: Some(budget.output),
         reasoning: thinking_enabled.then_some(crate::agent::llm::ThinkingLevel::Medium),
         ..Default::default()
     };
@@ -178,6 +193,12 @@ pub async fn chat(
                 .error_message
                 .as_deref()
                 .unwrap_or("AI request failed"),
+        ));
+    }
+    if assistant.stop_reason == StopReason::Length {
+        return Err(AppError::coded(
+            ErrorCode::AiResponseError,
+            "模型输出达到上限，生成结果不完整",
         ));
     }
     let text = assistant

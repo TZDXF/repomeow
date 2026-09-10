@@ -38,27 +38,40 @@ pub async fn ai_translate_markdown(
         .map(|id| RegisteredRun::new(id.to_string()));
     let system_prompt = fixed_system_prompt(DEFAULT_TRANSLATE_PROMPT, &request.language);
     let config = sdk::load_config_for(&app, "translation");
-    let started = Instant::now();
-    let output = match sdk::chat(
-        &config,
-        Some(&system_prompt),
+    let budget = crate::ai::budget::RequestBudget::new(&config.model(), &system_prompt, "", None)?;
+    // Translation can expand: reserve up to three output tokens per source token.
+    let chunks = budget.split(
         &request.text,
-        false,
-        None,
-        run.as_ref().map(|run| &run.token),
-    )
-    .await
-    {
-        Ok(output) => output,
-        Err(_) if run.as_ref().is_some_and(|run| run.token.is_cancelled()) => return Ok(None),
-        Err(error) => return Err(error),
-    };
-    record_usage(
-        &db,
-        "translate",
-        &config.ai_model,
-        &output,
-        started.elapsed().as_millis() as i64,
-    );
-    Ok(Some(output.text))
+        budget.input.min(i64::from(budget.output) / 3),
+    )?;
+    let mut translated = String::new();
+    for chunk in chunks {
+        let started = Instant::now();
+        let output = match sdk::chat(
+            &config,
+            Some(&system_prompt),
+            chunk,
+            false,
+            Some(budget.output),
+            run.as_ref().map(|run| &run.token),
+        )
+        .await
+        {
+            Ok(output) => output,
+            Err(_) if run.as_ref().is_some_and(|run| run.token.is_cancelled()) => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        record_usage(
+            &db,
+            "translate",
+            &config.ai_model,
+            &output,
+            started.elapsed().as_millis() as i64,
+        );
+        if !translated.is_empty() {
+            translated.push_str("\n\n");
+        }
+        translated.push_str(&output.text);
+    }
+    Ok(Some(translated))
 }

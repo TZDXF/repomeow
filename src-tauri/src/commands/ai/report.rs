@@ -107,7 +107,7 @@ async fn generate_report_text(
                 .iter()
                 .map(|commit| {
                     format!(
-                        "- [{}] {} ({}, {})",
+                        "- Project: {heading} | [{}] {} ({}, {})",
                         commit.date, commit.subject, commit.hash, commit.author
                     )
                 })
@@ -132,11 +132,52 @@ async fn generate_report_text(
         },
         language,
     );
-    let user_prompt = format!(
+    let mut user_prompt = format!(
         "Time range: {}.\n\nCommit records:\n{sections}",
         range_label
     );
     let config = sdk::load_config_at(data_dir, "report");
+    let budget = crate::ai::budget::RequestBudget::new(&config.model(), &system_prompt, "", None)?;
+    let summary_system = "Summarize these commit records or intermediate summaries. Preserve project names, dates, authors, commit identifiers and concrete changes. Do not invent facts. Return concise factual notes.";
+    let summary_budget =
+        crate::ai::budget::RequestBudget::new(&config.model(), summary_system, "", Some(1024))?;
+    for _ in 0..8 {
+        if budget.fits(&user_prompt) {
+            break;
+        }
+        let mut summaries = Vec::new();
+        for chunk in summary_budget.split(&user_prompt, summary_budget.input)? {
+            let started = Instant::now();
+            let output = sdk::chat(
+                &config,
+                Some(summary_system),
+                chunk,
+                false,
+                Some(1024),
+                Some(cancel),
+            )
+            .await?;
+            record_usage(
+                db,
+                "report",
+                &config.ai_model,
+                &output,
+                started.elapsed().as_millis() as i64,
+            );
+            summaries.push(output.text);
+        }
+        let reduced = format!(
+            "Time range: {range_label}.\n\nCommit summaries:\n{}",
+            summaries.join("\n\n")
+        );
+        if budget.tokens(&reduced) >= budget.tokens(&user_prompt) {
+            return Err(AppError::coded(
+                ErrorCode::AiResponseError,
+                "报告分阶段汇总未能缩减上下文，请缩小日期范围",
+            ));
+        }
+        user_prompt = reduced;
+    }
     let started = Instant::now();
     let output = sdk::chat(
         &config,

@@ -3,3 +3,5 @@ pub mod cc_switch;
 pub mod prompts;
 pub mod sdk;
 pub mod wiki_outline;
+
+pub mod budget;

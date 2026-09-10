@@ -177,6 +177,17 @@ pub async fn ai_generate_commit_message(
     let system_prompt =
         effective_system_prompt(&app, "commit.md", DEFAULT_COMMIT_PROMPT, &request.language);
     let config = sdk::load_config_for(&app, "commit");
+    let budget = crate::ai::budget::RequestBudget::new(&config.model(), &system_prompt, "", None)?;
+    let user_prompt = if budget.fits(&user_prompt) {
+        user_prompt
+    } else {
+        let marker = format!(
+            "\n[部分变更因模型上下文预算省略]\nWrite the commit message in {}.",
+            language_name(&request.language)
+        );
+        let chunks = budget.split(&user_prompt, budget.input - budget.tokens(&marker) - 32)?;
+        format!("{}{marker}", chunks.first().copied().unwrap_or_default())
+    };
     let started = Instant::now();
     let output = match sdk::chat(
         &config,

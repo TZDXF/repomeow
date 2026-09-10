@@ -209,7 +209,7 @@ pub(super) async fn generate_page_with(
 ) -> AppResult<String> {
     let usage_model = model.id.clone();
     let request_cancel = cancel.child_token();
-    let files = wiki::read_wiki_files_in(project_path, &page.relevant_files)?;
+    let mut files = wiki::read_wiki_files_in(project_path, &page.relevant_files)?;
     let draft_path = wiki::begin_wiki_page_staging_in(wiki_dir, run_id, page)?;
     let _staging_cleanup = StagingCleanup {
         wiki_dir: wiki_dir.to_path_buf(),
@@ -223,6 +223,51 @@ pub(super) async fn generate_page_with(
     let mut tools = read_tools(env.clone(), PAGE_READ_BUDGET);
     tools.push(harness_tool_from_core(create_write_tool(env.clone())));
     tools.push(harness_tool_from_core(create_edit_tool(env)));
+    let tool_schema = tools
+        .iter()
+        .map(|tool| {
+            serde_json::json!({
+                "name": tool.name, "description": tool.description, "parameters": tool.parameters,
+            })
+        })
+        .collect::<Vec<_>>();
+    let budget = crate::ai::budget::RequestBudget::new(
+        &model,
+        "You are RepoMeow's built-in coding agent for writing one Wiki page.",
+        &serde_json::Value::Array(tool_schema).to_string(),
+        None,
+    )?;
+    // Keep page instructions and paths intact; shrink only source bodies. Missing details
+    // remain accessible through the existing read tools and Harness compaction.
+    loop {
+        let candidate = builtin_agent_wiki_page_prompt(
+            page,
+            &files,
+            changed_files,
+            language,
+            &draft_path,
+            has_existing_draft,
+        );
+        if budget.fits(&candidate) {
+            break;
+        }
+        let Some(file) = files
+            .iter_mut()
+            .filter(|file| !file.content.is_empty())
+            .max_by_key(|file| file.content.len())
+        else {
+            return Err(AppError::coded(
+                ErrorCode::AiResponseError,
+                "Wiki 页面指令超过模型上下文预算",
+            ));
+        };
+        let mut end = file.content.len() / 2;
+        while !file.content.is_char_boundary(end) {
+            end -= 1;
+        }
+        file.content.truncate(end);
+        file.truncated = true;
+    }
     let harness = Arc::new(
         create_harness(
             model,
