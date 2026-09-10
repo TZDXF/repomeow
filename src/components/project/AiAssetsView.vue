@@ -3,17 +3,21 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { toast } from "vue-sonner";
-import { Bot, FileCode, FileText, LoaderCircle, Settings2 } from "@lucide/vue";
+import { Bot, FileCode, FileText, LoaderCircle, Settings2, Sparkles } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import AiFileDrawer from "./AiFileDrawer.vue";
+import AgentsMdGenerateDialog from "./AgentsMdGenerateDialog.vue";
 import ProjectResourceSection from "./ProjectResourceSection.vue";
 import { listProjectAiTargets, type ProjectAiTarget } from "@/lib/project-ai-resources";
+import { generateAgentsMd } from "@/lib/ai";
+import { useSettingsStore } from "@/stores/settings";
 import { cmd } from "@/lib/tauri";
 import type { Project, ProjectAiAssets } from "@/types";
 
 /** 资源内容仅在全局资源库维护;项目页负责从资源库添加、按 Agent 配置及安全移除。 */
 const props = defineProps<{ project: Project }>();
 const { t } = useI18n();
+const settings = useSettingsStore();
 const router = useRouter();
 const assets = ref<ProjectAiAssets | null>(null);
 const targets = ref<ProjectAiTarget[]>([]);
@@ -58,6 +62,46 @@ watch(
 const files = computed(
   () => assets.value?.files.filter((f) => !targets.value.some((a) => a.mcpPath === f.path)) ?? [],
 );
+/** 已存在 AGENTS.md 时按钮切换为「重新生成」语义(assets 未加载时按存在处理,避免文案闪烁) */
+const hasAgentsMd = computed(() => assets.value?.files.some((f) => f.path === "AGENTS.md") ?? true);
+const agentsMdDialogOpen = ref(false);
+const generatingAgentsMd = ref(false);
+let agentsMdController: AbortController | null = null;
+async function generateAgents(options: { model?: string; thinking?: string }) {
+  agentsMdDialogOpen.value = false;
+  if (generatingAgentsMd.value) {
+    return;
+  }
+  const controller = new AbortController();
+  agentsMdController = controller;
+  generatingAgentsMd.value = true;
+  try {
+    const result = await generateAgentsMd(props.project, settings.language, {
+      ...options,
+      signal: controller.signal,
+    });
+    if (!result) {
+      return; // 已取消,静默收场
+    }
+    let note = "";
+    if (result.claudeAction === "created") {
+      note = t("aiAssets.agentsMdClaudeCreated");
+    } else if (result.claudeAction === "aligned") {
+      note = t("aiAssets.agentsMdClaudeAligned");
+    }
+    toast.success(note ? `${t("aiAssets.agentsMdDone")} · ${note}` : t("aiAssets.agentsMdDone"));
+    await load();
+    preview("AGENTS.md");
+  } catch (e) {
+    toast.error(String(e));
+  } finally {
+    generatingAgentsMd.value = false;
+    agentsMdController = null;
+  }
+}
+function cancelGenerateAgents() {
+  agentsMdController?.abort();
+}
 function preview(path: string, readOnly = true) {
   drawerReadOnly.value = readOnly;
   drawerPath.value = path;
@@ -110,11 +154,32 @@ async function resourcesChanged() {
       @preview="preview"
       @changed="resourcesChanged"
     />
-    <section v-if="files.length">
-      <h3 class="mb-2 border-b pb-2 text-xs font-medium text-muted-foreground">
-        {{ t("aiAssets.files") }}
-      </h3>
-      <div class="grid gap-x-6 xl:grid-cols-2">
+    <section v-if="assets">
+      <div class="mb-2 flex items-center gap-2 border-b pb-2">
+        <h3 class="text-xs font-medium text-muted-foreground">{{ t("aiAssets.files") }}</h3>
+        <div class="ml-auto flex items-center gap-1.5">
+          <Button
+            v-if="!generatingAgentsMd"
+            size="sm"
+            variant="outline"
+            @click="agentsMdDialogOpen = true"
+            ><Sparkles class="size-4" />{{
+              hasAgentsMd ? t("aiAssets.regenerateAgentsMd") : t("aiAssets.generateAgentsMd")
+            }}</Button
+          >
+          <template v-else>
+            <Button size="sm" variant="outline" disabled
+              ><LoaderCircle class="size-4 animate-spin" />{{
+                t("aiAssets.generatingAgentsMd")
+              }}</Button
+            >
+            <Button size="sm" variant="ghost" @click="cancelGenerateAgents">{{
+              t("common.cancel")
+            }}</Button>
+          </template>
+        </div>
+      </div>
+      <div v-if="files.length" class="grid gap-x-6 xl:grid-cols-2">
         <button
           v-for="file in files"
           :key="file.path"
@@ -130,6 +195,12 @@ async function resourcesChanged() {
       </div>
     </section>
   </div>
+  <AgentsMdGenerateDialog
+    :open="agentsMdDialogOpen"
+    :regenerate="hasAgentsMd"
+    @close="agentsMdDialogOpen = false"
+    @confirm="generateAgents"
+  />
   <AiFileDrawer
     :root="project.path"
     :rel-path="drawerPath"

@@ -13,6 +13,8 @@ pub const AGENT_WIKI_PAGE_PROMPT: &str = include_str!("prompts/wiki-agent-page.m
 pub const BUILTIN_AGENT_WIKI_PAGE_PROMPT: &str = include_str!("prompts/wiki-builtin-agent-page.md");
 /// 翻译提示词:固定模板,不进提示词管理(输出结构强耦合 Markdown 渲染)。
 pub const DEFAULT_TRANSLATE_PROMPT: &str = include_str!("prompts/translate.md");
+/// AGENTS.md 生成提示词:固定模板(写权限面与产出校验强耦合,不开放自定义)。
+pub const AGENTS_MD_PROMPT: &str = include_str!("prompts/agents-md.md");
 /// 技能安全扫描的语义层提示词:固定模板(反越狱框架与 JSON 输出强耦合)。
 pub const DEFAULT_SKILL_SCAN_PROMPT: &str = include_str!("prompts/skill-scan.md");
 
@@ -103,6 +105,7 @@ mod tests {
             AGENT_WIKI_PAGE_PROMPT,
             BUILTIN_AGENT_WIKI_PAGE_PROMPT,
             DEFAULT_TRANSLATE_PROMPT,
+            AGENTS_MD_PROMPT,
         ] {
             assert!(!prompt.trim().is_empty());
         }

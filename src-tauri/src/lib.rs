@@ -341,6 +341,7 @@ pub fn run() {
             commands::ai::ai_test_connection,
             commands::ai::ai_translate_markdown,
             commands::ai::ai_generate_commit_message,
+            commands::ai::ai_generate_agents_md,
             commands::ai::ai_generate_and_save_report,
             commands::ai::ai_generate_batch_reports,
             commands::ai::ai_generate_wiki,

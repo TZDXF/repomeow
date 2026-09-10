@@ -1,3 +1,4 @@
+mod agents_md;
 mod assets;
 mod commit;
 mod config;
@@ -8,6 +9,7 @@ mod run;
 mod translate;
 mod wiki;
 
+pub use agents_md::*;
 pub use assets::*;
 pub use commit::*;
 pub use config::*;

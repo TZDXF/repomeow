@@ -22,7 +22,7 @@ use crate::agent::harness::types::{AgentHarnessTool, ExecutionEnv, SimpleError};
 use crate::agent::harness::uuid::uuid_v7;
 use crate::agent::llm::stream_simple;
 use crate::agent::llm::types::{
-    AssistantContent, AssistantMessage, Model, SimpleStreamOptions, StopReason,
+    AssistantContent, AssistantMessage, Model, ModelThinkingLevel, SimpleStreamOptions, StopReason,
 };
 use crate::agent::types::{AgentTool, QueueMode, StreamFn, ToolExecutionError, ToolExecutionMode};
 use crate::commands::usage::insert_usage_row;
@@ -59,6 +59,65 @@ pub(crate) fn builtin_stream_fn(api_key: String, cancel: CancellationToken) -> S
             )
         })
     })
+}
+
+/// 内置 Agent 模型解析结果
+pub(crate) struct BuiltinAgentModel {
+    pub model: Model,
+    pub api_key: String,
+}
+
+pub(crate) fn load_builtin_agent_model(
+    app: &tauri::AppHandle,
+    chosen: Option<&str>,
+) -> AppResult<BuiltinAgentModel> {
+    let file = crate::ai::catalog::load_ai_config_file(app);
+    resolve_builtin_model(&file, chosen)
+}
+
+/// 内置 Agent 模型解析:显式选择(复合值 "providerId/modelId",模型 id 自身可含
+/// "/",按首个 / 拆分)优先;None = 设置页默认模型。所选厂商密钥为空按未配置处理。
+pub(crate) fn resolve_builtin_model(
+    file: &crate::ai::catalog::AiConfigFile,
+    chosen: Option<&str>,
+) -> AppResult<BuiltinAgentModel> {
+    let (provider_id, model_id) = match chosen {
+        None => {
+            let (model, api_key) = crate::ai::catalog::resolve_default_model(file)?;
+            return Ok(BuiltinAgentModel { model, api_key });
+        }
+        Some(value) => value.split_once('/').ok_or_else(|| {
+            AppError::coded(
+                ErrorCode::AiNotConfigured,
+                format!("invalid model reference: {value}"),
+            )
+        })?,
+    };
+    let model = crate::ai::catalog::resolve_model(file, provider_id, model_id)?;
+    let api_key = file
+        .providers
+        .get(provider_id)
+        .map(|provider| provider.api_key.trim().to_string())
+        .unwrap_or_default();
+    if api_key.is_empty() {
+        return Err(AppError::coded(ErrorCode::AiNotConfigured, ""));
+    }
+    Ok(BuiltinAgentModel { model, api_key })
+}
+
+fn thinking_level(model: &Model) -> ModelThinkingLevel {
+    if model.reasoning {
+        ModelThinkingLevel::Medium
+    } else {
+        ModelThinkingLevel::Off
+    }
+}
+
+/// 用户显式选择优先;None 回退模型默认(reasoning 中档 / 否则关闭)
+pub(crate) fn effective_thinking_level(model: &Model, configured: Option<&str>) -> ModelThinkingLevel {
+    configured
+        .map(crate::ai::catalog::parse_thinking_level)
+        .unwrap_or_else(|| thinking_level(model))
 }
 
 fn budget_tool(
@@ -253,4 +312,93 @@ pub(crate) async fn collect_usage_events(harness: &AgentHarness) -> Arc<Mutex<Ve
         }),
     );
     usages
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configured_thinking_overrides_model_default() {
+        let mut model = crate::agent::agent_loop::testing::test_model();
+        assert!(!model.reasoning);
+        // 未配置:非 reasoning 模型默认关闭
+        assert_eq!(
+            effective_thinking_level(&model, None),
+            ModelThinkingLevel::Off
+        );
+        // 显式配置优先,未知值按 off 兜底
+        assert_eq!(
+            effective_thinking_level(&model, Some("high")),
+            ModelThinkingLevel::High
+        );
+        assert_eq!(
+            effective_thinking_level(&model, Some("bogus")),
+            ModelThinkingLevel::Off
+        );
+        // reasoning 模型未配置时回退中档
+        model.reasoning = true;
+        assert_eq!(
+            effective_thinking_level(&model, None),
+            ModelThinkingLevel::Medium
+        );
+    }
+
+    fn config_file() -> crate::ai::catalog::AiConfigFile {
+        serde_json::from_str::<crate::ai::catalog::AiConfigFile>(
+            r#"{
+                "version": 1,
+                "providers": {
+                    "deepseek": {
+                        "name": "DeepSeek",
+                        "baseUrl": "https://api.deepseek.com",
+                        "apiKey": " sk-a ",
+                        "api": "openai-completions",
+                        "models": [{
+                            "id": "deepseek-v4-pro",
+                            "name": "DeepSeek V4 Pro",
+                            "reasoning": true,
+                            "input": ["text"],
+                            "contextWindow": 128000,
+                            "maxTokens": 8192
+                        }]
+                    },
+                    "zhipuai": {
+                        "name": "Zhipu",
+                        "baseUrl": "https://open.bigmodel.cn",
+                        "apiKey": "sk-b",
+                        "api": "openai-completions",
+                        "models": [{
+                            "id": "glm/ultra",
+                            "name": "GLM Ultra",
+                            "reasoning": false,
+                            "input": ["text"],
+                            "contextWindow": 128000,
+                            "maxTokens": 8192
+                        }]
+                    }
+                },
+                "defaultModel": { "providerId": "deepseek", "modelId": "deepseek-v4-pro" }
+            }"#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn builtin_model_resolution_prefers_explicit_choice() {
+        let file = config_file();
+        // None → 设置页默认模型
+        let fallback = resolve_builtin_model(&file, None).unwrap();
+        assert_eq!(fallback.model.id, "deepseek-v4-pro");
+        assert_eq!(fallback.api_key, "sk-a");
+        // 显式复合值优先;模型 id 含 "/" 时按首个 / 拆分;密钥去空白
+        let chosen = resolve_builtin_model(&file, Some("zhipuai/glm/ultra")).unwrap();
+        assert_eq!(chosen.model.id, "glm/ultra");
+        assert_eq!(chosen.model.base_url, "https://open.bigmodel.cn");
+        assert_eq!(chosen.api_key, "sk-b");
+        // 缺 / 、未知厂商、未知模型都明确报错
+        assert!(resolve_builtin_model(&file, Some("no-slash")).is_err());
+        assert!(resolve_builtin_model(&file, Some("ghost/m")).is_err());
+        assert!(resolve_builtin_model(&file, Some("zhipuai/none")).is_err());
+    }
 }

@@ -12,8 +12,9 @@ use crate::agent::llm::types::{
 };
 use crate::agent::types::StreamFn;
 use crate::commands::ai::harness_support::{
-    assistant_text, builtin_stream_fn, collect_usage_events, create_harness, prompt_with_timeout,
-    read_tools, record_collected_usage,
+    assistant_text, builtin_stream_fn, collect_usage_events, create_harness,
+    effective_thinking_level, load_builtin_agent_model, prompt_with_timeout, read_tools,
+    record_collected_usage,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -24,61 +25,6 @@ const MAX_ATTEMPTS: usize = 3;
 type ProgressCallback = Arc<dyn Fn(String) + Send + Sync>;
 type ActivityCallback = Arc<dyn Fn(String) + Send + Sync>;
 type RetryCallback = Arc<dyn Fn(WikiRetryNotice) + Send + Sync>;
-
-struct BuiltinAgentModel {
-    model: Model,
-    api_key: String,
-}
-
-fn load_builtin_agent_model(app: &AppHandle, chosen: Option<&str>) -> AppResult<BuiltinAgentModel> {
-    let file = crate::ai::catalog::load_ai_config_file(app);
-    resolve_builtin_model(&file, chosen)
-}
-
-/// 内置 Agent 模型解析:显式选择(复合值 "providerId/modelId",模型 id 自身可含
-/// "/",按首个 / 拆分)优先;None = 设置页默认模型。所选厂商密钥为空按未配置处理。
-fn resolve_builtin_model(
-    file: &crate::ai::catalog::AiConfigFile,
-    chosen: Option<&str>,
-) -> AppResult<BuiltinAgentModel> {
-    let (provider_id, model_id) = match chosen {
-        None => {
-            let (model, api_key) = crate::ai::catalog::resolve_default_model(file)?;
-            return Ok(BuiltinAgentModel { model, api_key });
-        }
-        Some(value) => value.split_once('/').ok_or_else(|| {
-            AppError::coded(
-                ErrorCode::AiNotConfigured,
-                format!("invalid model reference: {value}"),
-            )
-        })?,
-    };
-    let model = crate::ai::catalog::resolve_model(file, provider_id, model_id)?;
-    let api_key = file
-        .providers
-        .get(provider_id)
-        .map(|provider| provider.api_key.trim().to_string())
-        .unwrap_or_default();
-    if api_key.is_empty() {
-        return Err(AppError::coded(ErrorCode::AiNotConfigured, ""));
-    }
-    Ok(BuiltinAgentModel { model, api_key })
-}
-
-fn thinking_level(model: &Model) -> ModelThinkingLevel {
-    if model.reasoning {
-        ModelThinkingLevel::Medium
-    } else {
-        ModelThinkingLevel::Off
-    }
-}
-
-/// 用户显式选择优先;None 回退模型默认(reasoning 中档 / 否则关闭)
-fn effective_thinking_level(model: &Model, configured: Option<&str>) -> ModelThinkingLevel {
-    configured
-        .map(crate::ai::catalog::parse_thinking_level)
-        .unwrap_or_else(|| thinking_level(model))
-}
 
 pub(super) async fn generate_builtin_outline_pages(
     app: &AppHandle,
@@ -410,94 +356,5 @@ async fn promote_with_repair(
             wiki::promote_wiki_page_staging_in(wiki_dir, project_path, run_id, page)
         }
         Err(error) => Err(error),
-    }
-}
-
-#[cfg(test)]
-mod thinking_level_tests {
-    use super::*;
-
-    #[test]
-    fn configured_thinking_overrides_model_default() {
-        let mut model = crate::agent::agent_loop::testing::test_model();
-        assert!(!model.reasoning);
-        // 未配置:非 reasoning 模型默认关闭
-        assert_eq!(
-            effective_thinking_level(&model, None),
-            ModelThinkingLevel::Off
-        );
-        // 显式配置优先,未知值按 off 兜底
-        assert_eq!(
-            effective_thinking_level(&model, Some("high")),
-            ModelThinkingLevel::High
-        );
-        assert_eq!(
-            effective_thinking_level(&model, Some("bogus")),
-            ModelThinkingLevel::Off
-        );
-        // reasoning 模型未配置时回退中档
-        model.reasoning = true;
-        assert_eq!(
-            effective_thinking_level(&model, None),
-            ModelThinkingLevel::Medium
-        );
-    }
-
-    fn config_file() -> crate::ai::catalog::AiConfigFile {
-        serde_json::from_str::<crate::ai::catalog::AiConfigFile>(
-            r#"{
-                "version": 1,
-                "providers": {
-                    "deepseek": {
-                        "name": "DeepSeek",
-                        "baseUrl": "https://api.deepseek.com",
-                        "apiKey": " sk-a ",
-                        "api": "openai-completions",
-                        "models": [{
-                            "id": "deepseek-v4-pro",
-                            "name": "DeepSeek V4 Pro",
-                            "reasoning": true,
-                            "input": ["text"],
-                            "contextWindow": 128000,
-                            "maxTokens": 8192
-                        }]
-                    },
-                    "zhipuai": {
-                        "name": "Zhipu",
-                        "baseUrl": "https://open.bigmodel.cn",
-                        "apiKey": "sk-b",
-                        "api": "openai-completions",
-                        "models": [{
-                            "id": "glm/ultra",
-                            "name": "GLM Ultra",
-                            "reasoning": false,
-                            "input": ["text"],
-                            "contextWindow": 128000,
-                            "maxTokens": 8192
-                        }]
-                    }
-                },
-                "defaultModel": { "providerId": "deepseek", "modelId": "deepseek-v4-pro" }
-            }"#,
-        )
-        .unwrap()
-    }
-
-    #[test]
-    fn builtin_model_resolution_prefers_explicit_choice() {
-        let file = config_file();
-        // None → 设置页默认模型
-        let fallback = resolve_builtin_model(&file, None).unwrap();
-        assert_eq!(fallback.model.id, "deepseek-v4-pro");
-        assert_eq!(fallback.api_key, "sk-a");
-        // 显式复合值优先;模型 id 含 "/" 时按首个 / 拆分;密钥去空白
-        let chosen = resolve_builtin_model(&file, Some("zhipuai/glm/ultra")).unwrap();
-        assert_eq!(chosen.model.id, "glm/ultra");
-        assert_eq!(chosen.model.base_url, "https://open.bigmodel.cn");
-        assert_eq!(chosen.api_key, "sk-b");
-        // 缺 / 、未知厂商、未知模型都明确报错
-        assert!(resolve_builtin_model(&file, Some("no-slash")).is_err());
-        assert!(resolve_builtin_model(&file, Some("ghost/m")).is_err());
-        assert!(resolve_builtin_model(&file, Some("zhipuai/none")).is_err());
     }
 }
