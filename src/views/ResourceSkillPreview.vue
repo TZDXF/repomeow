@@ -904,21 +904,6 @@ const llmNotice = computed(() => {
           </div>
           <div v-if="isTranslatable" class="ml-auto flex shrink-0 items-center gap-1">
             <Button
-              v-if="translatedFor !== null && !translating"
-              variant="ghost"
-              size="sm"
-              class="h-7 gap-1 px-2 text-xs"
-              @click="showTranslated = !showTranslated"
-            >
-              {{
-                t(
-                  showTranslated
-                    ? "settings.resources.skills.previewPage.translate.showOriginal"
-                    : "settings.resources.skills.previewPage.translate.showTranslation",
-                )
-              }}
-            </Button>
-            <Button
               variant="ghost"
               size="sm"
               class="h-7 gap-1 px-2 text-xs"
@@ -930,7 +915,11 @@ const llmNotice = computed(() => {
                 t(
                   translating
                     ? "settings.resources.skills.previewPage.translate.translating"
-                    : "settings.resources.skills.previewPage.translate.trigger",
+                    : showTranslated
+                      ? "settings.resources.skills.previewPage.translate.showOriginal"
+                      : translatedFor !== null
+                        ? "settings.resources.skills.previewPage.translate.showTranslation"
+                        : "settings.resources.skills.previewPage.translate.trigger",
                 )
               }}
             </Button>
