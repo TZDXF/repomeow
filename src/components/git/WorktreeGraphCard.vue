@@ -59,7 +59,15 @@ const rebaseTitle = computed(() =>
   >
     <div class="flex min-w-0 flex-1 items-center gap-1.5">
       <GitBranch class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-      <span class="truncate text-sm font-medium">{{ node.label }}</span>
+      <span v-if="node.label" class="truncate text-sm font-medium">{{ node.label }}</span>
+      <Badge
+        v-if="w.missing"
+        variant="outline"
+        class="shrink-0 border-amber-500/50 text-[10px] text-amber-600"
+        :title="t('git.worktree.missingHint')"
+      >
+        {{ t("git.worktree.missing") }}
+      </Badge>
       <Badge v-if="w.detached" variant="outline" class="shrink-0 text-[10px]">
         {{ t("git.worktree.detached") }}
       </Badge>

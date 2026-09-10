@@ -75,6 +75,9 @@ pub struct GitWorktree {
     pub is_main: bool,
     /// 是否 detached HEAD
     pub detached: bool,
+    /// worktree 目录已被外部删除(git 的 prunable 状态):登记残留,
+    /// 仅保留路径供面板移除;此时 branch/head 读不到,均为空
+    pub missing: bool,
     /// 创建来源分支:新建分支时记录在 `branch.<name>.repomeow-base`;
     /// 无记录时回退为上游跟踪分支(origin/x 形式);都没有则为 None
     pub base_branch: Option<String>,

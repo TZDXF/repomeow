@@ -59,6 +59,8 @@ export interface GitWorktree {
   is_main: boolean;
   /** 是否 detached HEAD */
   detached: boolean;
+  /** worktree 目录已被外部删除(prunable):登记残留,仅保留路径供移除;此时 branch/head 为空 */
+  missing: boolean;
   /** 创建来源分支(新建分支时记录;无记录回退上游跟踪分支,如 origin/x;都没有为 null) */
   base_branch: string | null;
   /** 来源分支领先 HEAD 的提交数(>0 表示变基可带入新提交;无来源或引用已删除为 null) */

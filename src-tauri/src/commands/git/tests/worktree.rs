@@ -287,3 +287,30 @@ fn worktree_add_remote_branch_tracks_or_aligns_local() {
     let _ = fs::remove_dir_all(&clone_a);
     let _ = fs::remove_dir_all(&clone_b);
 }
+
+#[test]
+fn list_worktrees_marks_missing_directory() {
+    let dir = temp_dir("worktree-missing-flag");
+    init_repo(&dir);
+    fs::write(dir.join("a.txt"), "hello").unwrap();
+    git(&dir, &["add", "."]);
+    git(&dir, &["commit", "-m", "init"]);
+    let path = dir.to_str().unwrap();
+
+    let added = worktree_add_blocking(path, ".worktrees/gone", "gone", true, None, None).unwrap();
+    assert!(added.iter().all(|w| !w.missing));
+    let wt = added.iter().find(|w| !w.is_main).unwrap();
+    fs::remove_dir_all(&wt.path).unwrap();
+
+    // 目录被外部删除(prunable):登记仍列出并标记 missing,branch/head 为空
+    let list = list_worktrees_blocking(path).unwrap();
+    let stale = list.iter().find(|w| !w.is_main).unwrap();
+    assert!(stale.missing);
+    assert_eq!(stale.path, wt.path);
+    assert_eq!(stale.branch, None);
+    assert!(stale.head.is_empty());
+    assert!(!list[0].missing);
+
+    let _ = worktree_remove_blocking(path, &wt.path, false, true, None).unwrap();
+    let _ = fs::remove_dir_all(&dir);
+}

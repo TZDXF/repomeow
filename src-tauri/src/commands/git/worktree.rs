@@ -11,6 +11,7 @@ pub(super) fn worktree_info_of(wt_repo: &Repository, wt_path: &Path, is_main: bo
         head: String::new(),
         is_main,
         detached: false,
+        missing: false,
         base_branch: None,
         base_behind: None,
     };
@@ -130,6 +131,7 @@ pub(super) fn list_worktrees_blocking(path: &str) -> AppResult<Vec<GitWorktree>>
                 head: String::new(),
                 is_main: false,
                 detached: false,
+                missing: true,
                 base_branch: None,
                 base_behind: None,
             }),
