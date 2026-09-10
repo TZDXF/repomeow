@@ -292,8 +292,8 @@ function openDir() {
 
 /**
  * 增量更新:只重生成受 headSha..HEAD 变更影响的页面。
- * 无 headSha(非 git 项目)、历史改写导致 diff 失败、或生成后端切换(generator 不一致)
- * 时退化为整本重生成
+ * 无 headSha(非 git 项目)、历史改写导致 diff 失败、或旧 Wiki 由已移除的三方
+ * agent 后端生成(generator 不一致)时退化为整本重生成
  */
 async function updateWiki() {
   const p = project.value;

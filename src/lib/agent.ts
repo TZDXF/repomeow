@@ -2,7 +2,7 @@ import { Channel } from "@tauri-apps/api/core";
 import { cmd } from "@/lib/tauri";
 
 /**
- * wiki agent 后端的前端桥:经 ACP 调用本地 coding agent CLI。
+ * 本地 coding agent(ACP)的前端桥:清单探测与会话调用。
  * Rust 侧(commands/agent/ 模块)负责进程与协议;这里只做类型化封装。
  */
 
@@ -133,28 +133,4 @@ export function acpTest(opts: {
     ...(opts.agentId ? { agentId: opts.agentId } : {}),
     ...(opts.customCommand ? { customCommand: opts.customCommand } : {}),
   });
-}
-
-/** 应用会话内的 acpTest 结果缓存:value 为进行中/已完成的 Promise(并发去重;失败不缓存) */
-const testCache = new Map<string, Promise<AcpTestResult>>();
-
-/**
- * 带缓存的 acpTest:同一 agent/命令在应用会话内只真实探测一次——生成配置对话框
- * 每次打开都会自动拉取模型清单,避免反复 spawn agent 进程。force = 忽略缓存重测。
- */
-export function acpTestCached(
-  key: string,
-  opts: { agentId?: string; customCommand?: string },
-  force = false,
-): Promise<AcpTestResult> {
-  if (!force) {
-    const hit = testCache.get(key);
-    if (hit) return hit;
-  }
-  const pending = acpTest(opts).catch((e) => {
-    testCache.delete(key);
-    throw e;
-  });
-  testCache.set(key, pending);
-  return pending;
 }

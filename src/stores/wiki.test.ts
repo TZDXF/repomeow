@@ -111,7 +111,7 @@ describe("wiki store generation concurrency", () => {
     await run;
 
     expect(store.generationFor(path)?.error).toBe(
-      "AI 返回的大纲格式不完整。请重试生成；如果多次失败，请更换模型或生成后端。",
+      "AI 返回的大纲格式不完整。请重试生成；如果多次失败，请更换模型。",
     );
   });
 

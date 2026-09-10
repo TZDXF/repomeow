@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -19,20 +18,18 @@ import { cmd } from "@/lib/tauri";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
 import type { Project } from "@/types";
-import { acpTestCached, agentList, type AcpTestResult } from "@/lib/agent";
 import { CHAT_THINKING_LEVELS } from "@/lib/ai-config";
 import { loadWikiConfig, saveWikiConfig } from "@/lib/wiki";
 import { ModelSelector, type ModelSelectorGroup } from "@/components/ai-elements/model-selector";
 import { useAiConfigStore } from "@/stores/ai-config";
-import type { WikiGenBackend, WikiGenerationConfig } from "@/lib/wiki-generator";
+import type { WikiGenerationConfig } from "@/lib/wiki-generator";
 
 /**
  * Wiki 生成配置对话框:点「生成/重新生成」(generate 模式)或 wiki 页右上角
- * 配置入口(edit 模式)时打开,选择后端(内置 Agent / 已安装的精选 agent)。
- * 内置 Agent 可按厂商列出 ai-config 全部模型并选思考强度/并发数(空 = 设置页
- * 默认模型与全局并发);agent 后端探测其上报的模型/思考强度清单(acpTestCached
- * 应用会话级缓存,不重复 spawn)。打开时读取当前项目 Wiki 目录的 config.json,
- * 确认才写回该项目;取消则丢弃改动。是否随之触发生成由调用方决定。
+ * 配置入口(edit 模式)时打开。生成始终使用内置 Agent,可按厂商列出 ai-config
+ * 全部模型并选思考强度/并发数(空 = 设置页默认模型与全局并发)。打开时读取
+ * 当前项目 Wiki 目录的 config.json,确认才写回该项目;取消则丢弃改动。
+ * 是否随之触发生成由调用方决定。
  */
 const props = defineProps<{
   /** false 表示关闭 */
@@ -46,7 +43,7 @@ const emit = defineEmits<{ close: []; confirm: [] }>();
 
 const { t } = useI18n();
 
-/** ai-config 配置副本:内置后端的模型清单来源(空/未加载时选择器禁用走默认) */
+/** ai-config 配置副本:模型清单来源(空/未加载时选择器禁用走默认) */
 const aiConfig = useAiConfigStore();
 const projects = useProjectsStore();
 const settings = useSettingsStore();
@@ -63,44 +60,21 @@ const open = computed({
   },
 });
 
-/** 已安装的精选 agent(未安装的不进下拉;挂载时探测一次,失败不阻塞) */
-const installedAgents = ref<Awaited<ReturnType<typeof agentList>>>([]);
-const agentsLoaded = ref(false);
 onMounted(() => {
-  // 内置模型清单与 agent 清单并行加载,失败均不阻塞对话框
+  // 内置模型清单加载失败不阻塞对话框
   aiConfig.ensureLoaded().catch(() => {});
-  agentList()
-    .then((list) => {
-      installedAgents.value = list.filter((a) => a.installed);
-      agentsLoaded.value = true;
-      // 清单晚于配置到达时,补一次归一(配置可能指向已卸载的 agent)
-      backend.value = normalizeBackend(backend.value);
-    })
-    .catch(() => {
-      agentsLoaded.value = true;
-      backend.value = normalizeBackend(backend.value);
-    });
 });
 
 // ── 本地副本:打开时从项目 config.json 同步,确认才写回 ────────────────────
 
-const backend = ref("builtin");
 const model = ref("");
 const thinking = ref("");
-/** 页面并发数(1-8;内置后端空 = 设置页全局 AI 并发,agent 后端空 = 默认 2) */
-const concurrency = ref<number | "">(2);
+/** 页面并发数(1-8;空 = 设置页全局 AI 并发) */
+const concurrency = ref<number | "">("");
 const configLoading = ref(false);
 const configSaving = ref(false);
 const configError = ref("");
 let loadSequence = 0;
-
-/** 归一后端选择:仅内置与已安装的精选 agent 合法,其余(含历史遗留的自定义)回退内置 */
-function normalizeBackend(value: string): string {
-  if (value === "builtin") return value;
-  if (value === "custom") return "builtin";
-  if (!agentsLoaded.value) return value;
-  return installedAgents.value.some((a) => a.id === value) ? value : "builtin";
-}
 
 watch(
   () => [props.open, props.projectPath] as const,
@@ -117,10 +91,9 @@ async function loadProjectConfig() {
   const sequence = ++loadSequence;
   configLoading.value = true;
   configError.value = "";
-  backend.value = "builtin";
   model.value = "";
   thinking.value = "";
-  concurrency.value = 2;
+  concurrency.value = "";
   projectId.value = null;
   wikiAutoUpdate.value = false;
   initialWikiAutoUpdate.value = false;
@@ -134,21 +107,9 @@ async function loadProjectConfig() {
     projectId.value = project?.id ?? null;
     wikiAutoUpdate.value = project?.wiki_auto_update ?? false;
     initialWikiAutoUpdate.value = wikiAutoUpdate.value;
-    if (config.backend.kind === "builtin") {
-      backend.value = "builtin";
-      model.value = config.backend.model ?? "";
-      thinking.value = config.backend.thinking ?? "";
-      concurrency.value = config.backend.concurrency
-        ? Math.min(8, Math.max(1, config.backend.concurrency))
-        : "";
-    } else {
-      backend.value = normalizeBackend(config.backend.agentId ?? "custom");
-      model.value = config.backend.model ?? "";
-      thinking.value = config.backend.thinking ?? "";
-      concurrency.value = Math.min(8, Math.max(1, config.backend.concurrency ?? 2));
-    }
-    // 已选中 agent 后端时立即自动获取模型清单(命中缓存则零开销)
-    void probeAgent();
+    model.value = config.model ?? "";
+    thinking.value = config.thinking ?? "";
+    concurrency.value = config.concurrency ? Math.min(8, Math.max(1, config.concurrency)) : "";
   } catch (error) {
     if (sequence === loadSequence) {
       configError.value = error instanceof Error ? error.message : String(error);
@@ -158,19 +119,8 @@ async function loadProjectConfig() {
   }
 }
 
-function onBackendChange(value: unknown) {
-  if (typeof value === "string" && value !== backend.value) {
-    backend.value = value;
-    // 切换 agent:模型/思考强度是 per-agent 的选项,清空回到默认,
-    // 待新 agent 的清单探测完成后由用户重选(打开时预填走 watch,不经过这里)
-    model.value = "";
-    thinking.value = "";
-  }
-}
+// ── 模型清单(ai-config 全部厂商/模型,按厂商分组) ─────────────────────────
 
-// ── 模型/思考强度清单自动获取(acpTestCached 会话级缓存) ──────────────────
-
-/** 内置后端可选模型:ai-config 全部厂商/模型,按厂商分组 */
 const builtinModelGroups = computed<ModelSelectorGroup[]>(() => {
   const config = aiConfig.config;
   if (!config) return [];
@@ -181,7 +131,7 @@ const builtinModelGroups = computed<ModelSelectorGroup[]>(() => {
   }));
 });
 
-/** 内置后端的引用是否仍指向现存厂商与模型 */
+/** 已选模型引用是否仍指向现存厂商与模型 */
 function builtinModelExists(value: string): boolean {
   const separator = value.indexOf("/");
   if (separator <= 0) return false;
@@ -189,126 +139,13 @@ function builtinModelExists(value: string): boolean {
   return Boolean(provider?.models.some((m) => m.id === value.slice(separator + 1)));
 }
 
-function onBuiltinModelChange(value: unknown) {
+function onModelChange(value: unknown) {
   if (typeof value === "string") {
     model.value = value;
   }
 }
 
-const probeKey = computed(() => backend.value);
-
-const probeState = ref<{
-  key: string;
-  loading: boolean;
-  failed: boolean;
-  error: string;
-  result: AcpTestResult | null;
-} | null>(null);
-
-async function probeAgent(force = false) {
-  const key = probeKey.value;
-  if (backend.value === "builtin" || !key) {
-    probeState.value = null;
-    return;
-  }
-  // 已在展示同一 key 的结果/进行中状态且非强制时跳过
-  if (
-    !force &&
-    probeState.value?.key === key &&
-    (probeState.value.loading || (!probeState.value.failed && probeState.value.result !== null))
-  ) {
-    return;
-  }
-  probeState.value = { key, loading: true, failed: false, error: "", result: null };
-  try {
-    // acpTestCached 命中会话缓存时立即返回,不会重复 spawn
-    const result = await acpTestCached(key, { agentId: backend.value }, force);
-    if (probeKey.value === key) {
-      probeState.value = { key, loading: false, failed: false, error: "", result };
-    }
-  } catch (error) {
-    if (probeKey.value === key) {
-      probeState.value = {
-        key,
-        loading: false,
-        failed: true,
-        error: error instanceof Error ? error.message : String(error),
-        result: null,
-      };
-    }
-  }
-}
-
-watch(probeKey, () => {
-  void probeAgent();
-});
-
-const probeLoading = computed(() => probeState.value?.loading ?? false);
-const probeFailed = computed(() => probeState.value?.failed ?? false);
-
-/** 模型下拉选项:优先 config_options 的 model 项,agent 未上报时回退旧式 modes */
-const modelChoices = computed(() => {
-  const r = probeState.value?.result;
-  if (!r) {
-    return [];
-  }
-  const opt = r.configOptions.find((o) => o.category === "model");
-  if (opt) {
-    return opt.choices;
-  }
-  return r.modes.map((m) => ({ id: m.id, name: m.name }));
-});
-
-/** 思考强度下拉选项:config_options 的 thought_level 项 */
-const thinkingChoices = computed(() => {
-  const r = probeState.value?.result;
-  const opt = r?.configOptions.find((o) => o.category === "thought_level");
-  return opt ? opt.choices : [];
-});
-
-/** 本地已选值不在上报列表内时补一个原样选项,避免下拉显示空白 */
-const modelOptions = computed(() => {
-  const list = [...modelChoices.value];
-  if (model.value && !list.some((c) => c.id === model.value)) {
-    list.push({ id: model.value, name: model.value });
-  }
-  return list;
-});
-const thinkingOptions = computed(() => {
-  const list = [...thinkingChoices.value];
-  if (thinking.value && !list.some((c) => c.id === thinking.value)) {
-    list.push({ id: thinking.value, name: thinking.value });
-  }
-  return list;
-});
-
-/** 思考强度下拉:内置后端用 chat 七档;agent 后端用探测到的上报选项 */
-const thinkingSelectOptions = computed(() =>
-  backend.value === "builtin"
-    ? CHAT_THINKING_LEVELS.map((level) => ({
-        id: level,
-        name: t(`chat.thinkingLevels.${level}`),
-      }))
-    : thinkingOptions.value,
-);
-
-/** 「默认」项文案:内置 = 模型默认;agent = agent 自身配置 */
-const thinkingDefaultLabel = computed(() =>
-  backend.value === "builtin" ? t("wiki.builtinThinkingDefault") : t("wiki.agentThinkingDefault"),
-);
-
-/** 并发数说明:两种后端的默认语义不同 */
-const concurrencyHint = computed(() =>
-  backend.value === "builtin" ? t("wiki.builtinConcurrencyHint") : t("wiki.agentConcurrencyHint"),
-);
-
 const DEFAULT_VALUE = "__default__";
-
-function onModelChange(value: unknown) {
-  if (typeof value === "string") {
-    model.value = value === DEFAULT_VALUE ? "" : value;
-  }
-}
 
 function onThinkingChange(value: unknown) {
   if (typeof value === "string") {
@@ -316,19 +153,12 @@ function onThinkingChange(value: unknown) {
   }
 }
 
-/** 探测状态提示行:获取中 / 失败 / agent 未上报任何选项 */
-const probeHint = computed(() => {
-  if (probeLoading.value) {
-    return t("wiki.agentFetchingModels");
-  }
-  if (probeFailed.value) {
-    return t("wiki.agentFetchModelsFailed", { error: probeState.value?.error });
-  }
-  if (probeState.value?.result && !modelChoices.value.length && !thinkingChoices.value.length) {
-    return t("wiki.agentNoModelOptions");
-  }
-  return "";
-});
+const thinkingOptions = computed(() =>
+  CHAT_THINKING_LEVELS.map((level) => ({
+    id: level,
+    name: t(`chat.thinkingLevels.${level}`),
+  })),
+);
 
 // ── 提交 ────────────────────────────────────────────────────────────────────
 
@@ -344,26 +174,16 @@ async function confirm() {
   const autoUpdate = wikiAutoUpdate.value;
   const shouldSaveAutoUpdate =
     !settings.wikiAutoUpdate && autoUpdate !== initialWikiAutoUpdate.value;
-  const selectedBackend: WikiGenBackend =
-    backend.value === "builtin"
-      ? {
-          kind: "builtin",
-          // 失效引用(厂商/模型已从 ai-config 删除)不落盘,回退设置页默认模型
-          model: model.value && builtinModelExists(model.value) ? model.value : undefined,
-          thinking: thinking.value || undefined,
-          concurrency:
-            typeof concurrency.value === "number" && concurrency.value > 0
-              ? Math.min(8, Math.max(1, Math.round(concurrency.value)))
-              : undefined,
-        }
-      : {
-          kind: "agent",
-          agentId: backend.value,
-          model: model.value || undefined,
-          thinking: thinking.value || undefined,
-          concurrency: Math.min(8, Math.max(1, Math.round(Number(concurrency.value) || 2))),
-        };
-  const config: WikiGenerationConfig = { version: 1, backend: selectedBackend };
+  const config: WikiGenerationConfig = {
+    version: 1,
+    // 失效引用(厂商/模型已从 ai-config 删除)不落盘,回退设置页默认模型
+    model: model.value && builtinModelExists(model.value) ? model.value : undefined,
+    thinking: thinking.value || undefined,
+    concurrency:
+      typeof concurrency.value === "number" && concurrency.value > 0
+        ? Math.min(8, Math.max(1, Math.round(concurrency.value)))
+        : undefined,
+  };
   configSaving.value = true;
   configError.value = "";
   try {
@@ -390,105 +210,52 @@ async function confirm() {
       </DialogHeader>
 
       <ScrollArea class="min-h-0 flex-1 py-2">
-        <div class="flex flex-col gap-4">
-          <!-- 后端:内置 Agent + 已安装的精选 agent(未安装/自定义不展示) -->
-          <div class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium">{{ t("wiki.genBackend") }}</label>
-            <Select
-              :model-value="backend"
+        <!-- 模型(按厂商列 ai-config 全部模型)/ 思考强度 / 并发数 -->
+        <div class="grid gap-3">
+          <div class="flex min-w-0 flex-col gap-1.5">
+            <label class="text-sm font-medium">{{ t("wiki.agentModel") }}</label>
+            <ModelSelector
+              :model-value="model"
+              :groups="builtinModelGroups"
+              :placeholder="t('wiki.builtinModelDefault')"
               :disabled="configLoading || configSaving"
-              @update:model-value="onBackendChange"
+              size="default"
+              trigger-class="min-w-0 w-full"
+              @update:model-value="onModelChange"
+            />
+          </div>
+          <div class="flex min-w-0 flex-col gap-1.5">
+            <label class="text-sm font-medium">{{ t("wiki.agentThinking") }}</label>
+            <Select
+              :model-value="thinking || DEFAULT_VALUE"
+              :disabled="configLoading || configSaving"
+              @update:model-value="onThinkingChange"
             >
-              <SelectTrigger>
-                <SelectValue />
+              <SelectTrigger class="min-w-0 w-full">
+                <SelectValue class="min-w-0 flex-1 truncate text-left" />
               </SelectTrigger>
               <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="builtin">{{ t("wiki.genBuiltin") }}</SelectItem>
-                  <SelectItem v-for="a in installedAgents" :key="a.id" :value="a.id">
-                    {{ a.name }}
-                  </SelectItem>
-                </SelectGroup>
+                <SelectItem :value="DEFAULT_VALUE">
+                  {{ t("wiki.builtinThinkingDefault") }}
+                </SelectItem>
+                <SelectItem v-for="c in thinkingOptions" :key="c.id" :value="c.id">
+                  {{ c.name }}
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
-
-          <!-- 模型(内置按厂商列 ai-config 全部模型 / agent 用探测清单)/ 思考强度 / 并发数 -->
-          <div class="grid gap-3">
-            <div class="flex min-w-0 flex-col gap-1.5">
-              <label class="text-sm font-medium">{{ t("wiki.agentModel") }}</label>
-              <ModelSelector
-                v-if="backend === 'builtin'"
-                :model-value="model"
-                :groups="builtinModelGroups"
-                :placeholder="t('wiki.builtinModelDefault')"
-                :disabled="configLoading || configSaving"
-                size="default"
-                trigger-class="min-w-0 w-full"
-                @update:model-value="onBuiltinModelChange"
-              />
-              <Select
-                v-else
-                :model-value="model || DEFAULT_VALUE"
-                :disabled="configLoading || configSaving || probeLoading"
-                @update:model-value="onModelChange"
-              >
-                <SelectTrigger class="min-w-0 w-full">
-                  <SelectValue class="min-w-0 flex-1 truncate text-left" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem :value="DEFAULT_VALUE">
-                    {{ t("wiki.agentModelDefault") }}
-                  </SelectItem>
-                  <SelectItem v-for="c in modelOptions" :key="c.id" :value="c.id">
-                    {{ c.name }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div class="flex min-w-0 flex-col gap-1.5">
-              <label class="text-sm font-medium">{{ t("wiki.agentThinking") }}</label>
-              <Select
-                :model-value="thinking || DEFAULT_VALUE"
-                :disabled="
-                  configLoading ||
-                  configSaving ||
-                  (backend !== 'builtin' && (probeLoading || thinkingChoices.length === 0))
-                "
-                @update:model-value="onThinkingChange"
-              >
-                <SelectTrigger class="min-w-0 w-full">
-                  <SelectValue class="min-w-0 flex-1 truncate text-left" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem :value="DEFAULT_VALUE">{{ thinkingDefaultLabel }}</SelectItem>
-                  <SelectItem v-for="c in thinkingSelectOptions" :key="c.id" :value="c.id">
-                    {{ c.name }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div class="flex min-w-0 flex-col gap-1.5">
-              <label class="text-sm font-medium">{{ t("wiki.agentConcurrency") }}</label>
-              <Input
-                v-model.number="concurrency"
-                type="number"
-                min="1"
-                max="8"
-                :placeholder="backend === 'builtin' ? t('wiki.builtinConcurrencyPlaceholder') : ''"
-                :disabled="configLoading || configSaving"
-              />
-              <p class="text-xs text-muted-foreground">{{ concurrencyHint }}</p>
-            </div>
+          <div class="flex min-w-0 flex-col gap-1.5">
+            <label class="text-sm font-medium">{{ t("wiki.agentConcurrency") }}</label>
+            <Input
+              v-model.number="concurrency"
+              type="number"
+              min="1"
+              max="8"
+              :placeholder="t('wiki.builtinConcurrencyPlaceholder')"
+              :disabled="configLoading || configSaving"
+            />
+            <p class="text-xs text-muted-foreground">{{ t("wiki.builtinConcurrencyHint") }}</p>
           </div>
-          <p
-            v-if="backend !== 'builtin' && probeHint"
-            class="flex items-center gap-1.5 text-xs"
-            :class="probeFailed ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'"
-          >
-            <Loader2 v-if="probeLoading" class="h-3 w-3 animate-spin" />
-            {{ probeHint }}
-          </p>
         </div>
       </ScrollArea>
 

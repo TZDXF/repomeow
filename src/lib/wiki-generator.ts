@@ -4,8 +4,8 @@ import type { SupportedLocale } from "@/i18n";
 import type { WikiOutlinePage } from "@/types";
 
 /**
- * Wiki 后端任务的类型与 Tauri Channel 桥。前端只维护可渲染状态，文件收集、
- * 生成后端选择、ACP 会话、重试、并发和落盘均由 Rust 完成。
+ * Wiki 生成任务的类型与 Tauri Channel 桥。前端只维护可渲染状态，文件收集、
+ * 内置 Agent 会话、重试、并发和落盘均由 Rust 完成。
  */
 
 export type WikiGenPhase =
@@ -60,37 +60,20 @@ export interface WikiRetryStatus {
   reason: "rateLimited" | "temporary";
 }
 
-/** 生成后端选择:内置 Agent 或本地 agent(经 ACP 会话) */
-export type WikiGenBackend =
-  | {
-      kind: "builtin";
-      /** 模型引用("providerId/modelId";空 = 设置页默认模型) */
-      model?: string;
-      /** 思考强度(chat 七档 off..max;空 = 模型默认:推理模型中档,其余关闭) */
-      thinking?: string;
-      /** 页面并发数(1-8;空/0 = 设置页全局 AI 并发) */
-      concurrency?: number;
-    }
-  | {
-      kind: "agent";
-      agentId?: string;
-      customCommand?: string;
-      /** 模型/思考强度 id(设置页从 agent 上报的选项列表选择;空 = agent 默认) */
-      model?: string;
-      thinking?: string;
-      /** 页面并发数(每页独立会话可并行;1-8,空 = 默认 2) */
-      concurrency?: number;
-    };
-
-/** 单个项目独立保存于 Wiki 目录 config.json 的生成配置。 */
+/** 单个项目独立保存于 Wiki 目录 config.json 的生成配置(生成始终使用内置 Agent)。 */
 export interface WikiGenerationConfig {
   version: number;
-  backend: WikiGenBackend;
+  /** 模型引用("providerId/modelId";空 = 设置页默认模型) */
+  model?: string;
+  /** 思考强度(chat 七档 off..max;空 = 模型默认:推理模型中档,其余关闭) */
+  thinking?: string;
+  /** 页面并发数(1-8;空/0 = 设置页全局 AI 并发) */
+  concurrency?: number;
 }
 
 export interface WikiGenOptions {
   language: SupportedLocale;
-  /** 并发生成的页数(内置后端未在项目配置里设置并发时的回退;agent 后端忽略此值) */
+  /** 并发生成的页数(项目配置未设置并发时回退到该值,即设置页全局 AI 并发) */
   concurrency: number;
 }
 
@@ -177,7 +160,7 @@ export interface WikiUpdateResult {
   updatedPageIds: string[];
 }
 
-/** 单页/增量生成桥；ACP 会话、重试与落盘均在后端。 */
+/** 单页/增量生成桥；内置 Agent 会话、重试与落盘均在后端。 */
 export async function regenerateWikiPage(
   project: { path: string; name: string },
   page: WikiOutlinePage,

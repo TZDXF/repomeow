@@ -39,6 +39,7 @@ pub(super) fn valid_page_file(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
 }
 
+#[cfg(test)]
 pub(super) fn save_page_in(dir: &Path, file_name: &str, content: &str) -> AppResult<()> {
     if !valid_page_file(file_name) {
         return Err(AppError::coded(ErrorCode::InvalidPath, file_name));
@@ -92,38 +93,6 @@ pub(super) fn load_config_in(dir: &Path) -> AppResult<WikiGenerationConfig> {
             format!("{}: {error}", path.to_string_lossy()),
         )
     })
-}
-
-fn legacy_wiki_config(app: &AppHandle) -> WikiGenerationConfig {
-    let model = crate::tray::read_setting_string(app, "wikiAgentModel").filter(|v| !v.is_empty());
-    let thinking =
-        crate::tray::read_setting_string(app, "wikiAgentThinking").filter(|v| !v.is_empty());
-    let backend = match crate::tray::read_setting_string(app, "wikiGenBackend").as_deref() {
-        None | Some("") | Some("builtin") => crate::commands::ai::WikiGenerationBackend::Builtin {
-            model: None,
-            thinking: None,
-            concurrency: None,
-        },
-        Some("custom") => crate::commands::ai::WikiGenerationBackend::Agent {
-            agent_id: None,
-            custom_command: crate::tray::read_setting_string(app, "wikiAgentCustomCommand")
-                .filter(|v| !v.is_empty()),
-            model,
-            thinking,
-            concurrency: None,
-        },
-        Some(agent_id) => crate::commands::ai::WikiGenerationBackend::Agent {
-            agent_id: Some(agent_id.to_string()),
-            custom_command: None,
-            model,
-            thinking,
-            concurrency: None,
-        },
-    };
-    WikiGenerationConfig {
-        version: CONFIG_VERSION,
-        backend,
-    }
 }
 
 pub(super) fn load_wiki_in(dir: &Path) -> Option<(WikiMeta, Vec<WikiPageData>)> {
@@ -568,18 +537,9 @@ pub(crate) fn load_wiki_config_internal(
     if dir.join(CONFIG_FILE).is_file() {
         return load_config_in(&dir);
     }
-    let config = legacy_wiki_config(app);
+    let config = WikiGenerationConfig::default();
     save_config_in(&dir, config.clone())?;
     Ok(config)
-}
-
-pub(crate) fn save_wiki_page_internal(
-    app: &AppHandle,
-    project_path: &str,
-    file_name: &str,
-    content: &str,
-) -> AppResult<()> {
-    save_page_in(&wiki_dir(app, project_path)?, file_name, content)
 }
 
 pub(crate) fn save_wiki_meta(

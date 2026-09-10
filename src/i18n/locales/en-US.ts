@@ -1290,27 +1290,17 @@ export default {
     regenerate: "Regenerate",
     genConfigTitle: "Generation settings",
     genConfigDesc:
-      "Choose the backend and model for this project; the config is stored independently in its Wiki folder",
+      "Choose the model used to generate this project's Wiki; the config is stored independently in its Wiki folder",
     genConfigError: "Failed to read or save the Wiki generation config: {error}",
-    genBackend: "Backend",
-    genBuiltin: "Built-in Agent",
     genConfirm: "Start generating",
     agentModel: "Model",
-    agentModelDefault: "Default (use the agent's own config)",
     builtinModelDefault: "Default (settings default model)",
     agentThinking: "Thinking effort",
-    agentThinkingDefault: "Default",
     agentConcurrency: "Concurrency",
-    agentConcurrencyHint:
-      "Pages generated in parallel (1-8, default 2). Higher is faster but uses more agent quota",
     builtinThinkingDefault: "Model default (medium for reasoning models, off otherwise)",
     builtinConcurrencyHint:
       "Pages generated in parallel (1-8). Falls back to the global AI concurrency in Settings when unset",
     builtinConcurrencyPlaceholder: "Empty = use global",
-    agentFetchingModels: "Fetching model list from the agent...",
-    agentFetchModelsFailed: "Failed to fetch the model list: {error}",
-    agentNoModelOptions:
-      "This agent did not report model / thinking-effort options; its defaults will be used",
     regeneratePage: "Regenerate this page",
     pageRegenerated: "Page regenerated",
     openDir: "Open Folder",
@@ -1326,7 +1316,7 @@ export default {
     cancel: "Cancel",
     failed: "Generation failed: {error}",
     invalidOutline:
-      "The AI returned an incomplete wiki outline. Try again; if it keeps failing, switch the model or generation backend.",
+      "The AI returned an incomplete wiki outline. Try again; if it keeps failing, switch the model.",
     update: "Update",
     updateHint:
       "Incremental update: only regenerates pages affected by code changes. New files do not create new pages — regenerate the whole wiki after structural changes.",

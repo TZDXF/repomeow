@@ -1,6 +1,5 @@
 use super::*;
 use crate::agent::types::AgentTool;
-use crate::commands::ai::WikiGenerationBackend;
 use crate::commands::wiki::load_wiki_config_internal;
 use crate::error::{AppError, ErrorCode};
 use serde_json::{json, Value};
@@ -44,7 +43,7 @@ pub(super) fn get_ai_config_tool(app: &AppHandle, ctx: &ChatToolContext) -> Agen
     tool(
         "get_ai_config",
         "AI 配置",
-        "查看 AI 接入配置:厂商清单(id/名称/baseUrl/是否已配密钥)及其模型列表(id/名称/是否支持推理)、默认模型、问答面板当前使用的模型,以及本项目 Wiki 生成配置(后端/模型/思考强度/并发)和该模型当前是否有效。回答「有哪些可用模型」「Wiki 用的是哪个模型」时使用;Wiki 生成或更新因「配置的模型不存在」失败时,先用它挑替代模型、询问用户后再用 set_wiki_model 写回。密钥本身不会返回。无参数。",
+        "查看 AI 接入配置:厂商清单(id/名称/baseUrl/是否已配密钥)及其模型列表(id/名称/是否支持推理)、默认模型、问答面板当前使用的模型,以及本项目 Wiki 生成配置(模型/思考强度/并发)和该模型当前是否有效。回答「有哪些可用模型」「Wiki 用的是哪个模型」时使用;Wiki 生成或更新因「配置的模型不存在」失败时,先用它挑替代模型、询问用户后再用 set_wiki_model 写回。密钥本身不会返回。无参数。",
         json!({
             "type": "object",
             "properties": {},
@@ -80,42 +79,18 @@ pub(super) fn get_ai_config_tool(app: &AppHandle, ctx: &ChatToolContext) -> Agen
                             })
                         })
                         .collect();
-                    let wiki_backend = load_wiki_config_internal(&app, &project_path)
-                        .map_err(tool_err)?
-                        .backend;
-                    let wiki = match &wiki_backend {
-                        WikiGenerationBackend::Builtin {
-                            model,
-                            thinking,
-                            concurrency,
-                        } => {
-                            let (effective, status) =
-                                builtin_model_status(&config, model.as_deref());
-                            json!({
-                                "backend": "builtin",
-                                "configuredModel": model,
-                                "effectiveModel": effective,
-                                "modelOk": status.is_ok(),
-                                "modelError": status.err(),
-                                "thinking": thinking,
-                                "concurrency": concurrency,
-                            })
-                        }
-                        WikiGenerationBackend::Agent {
-                            agent_id,
-                            model,
-                            thinking,
-                            concurrency,
-                            ..
-                        } => json!({
-                            "backend": "agent",
-                            "agentId": agent_id,
-                            "model": model,
-                            "thinking": thinking,
-                            "concurrency": concurrency,
-                            "note": "本地 agent 后端的模型由 agent 自身管理,set_wiki_model 不适用",
-                        }),
-                    };
+                    let wiki_config = load_wiki_config_internal(&app, &project_path)
+                        .map_err(tool_err)?;
+                    let (effective, status) =
+                        builtin_model_status(&config, wiki_config.model.as_deref());
+                    let wiki = json!({
+                        "configuredModel": wiki_config.model,
+                        "effectiveModel": effective,
+                        "modelOk": status.is_ok(),
+                        "modelError": status.err(),
+                        "thinking": wiki_config.thinking,
+                        "concurrency": wiki_config.concurrency,
+                    });
                     let out = json!({
                         "defaultModel": config.default_model.as_ref().map(|reference| {
                             format!("{}/{}", reference.provider_id, reference.model_id)
@@ -139,7 +114,7 @@ pub(super) fn set_wiki_model_tool(app: &AppHandle, ctx: &ChatToolContext) -> Age
     tool(
         "set_wiki_model",
         "切换 Wiki 模型",
-        "把本项目 Wiki 生成(内置后端)使用的模型切换为指定模型,写回项目 Wiki 配置。典型用途:Wiki 生成/更新因「配置的模型不存在」失败时,先用 get_ai_config 查看可用模型并与用户确认替代项,再调用本工具,然后重试 update_wiki / regenerate_wiki。当前为「确认后执行」权限时,应用会在执行前弹出确认。仅适用于内置后端;Wiki 配置为本地 agent 后端时会报错(其模型由 agent 自身管理,需在 Wiki 生成对话框调整)。参数:provider_id(必填)与 model_id(必填),取值来自 get_ai_config 的模型清单。",
+        "把本项目 Wiki 生成使用的模型切换为指定模型,写回项目 Wiki 配置。典型用途:Wiki 生成/更新因「配置的模型不存在」失败时,先用 get_ai_config 查看可用模型并与用户确认替代项,再调用本工具,然后重试 update_wiki / regenerate_wiki。当前为「确认后执行」权限时,应用会在执行前弹出确认。参数:provider_id(必填)与 model_id(必填),取值来自 get_ai_config 的模型清单。",
         json!({
             "type": "object",
             "properties": {
@@ -185,14 +160,8 @@ pub(super) fn set_wiki_model_tool(app: &AppHandle, ctx: &ChatToolContext) -> Age
                     }
                     let mut wiki_config = load_wiki_config_internal(&app, &project_path)
                         .map_err(tool_err)?;
-                    let WikiGenerationBackend::Builtin { model, .. } = &mut wiki_config.backend
-                    else {
-                        return text_result(
-                            "本项目 Wiki 生成配置的是本地 agent 后端,模型由 agent 自身管理,本工具不适用;请在 Wiki 面板的生成对话框中调整后端或模型。",
-                        );
-                    };
                     let reference = format!("{provider_id}/{model_id}");
-                    *model = Some(reference.clone());
+                    wiki_config.model = Some(reference.clone());
                     crate::commands::wiki::save_wiki_config(
                         app.clone(),
                         project_path.clone(),

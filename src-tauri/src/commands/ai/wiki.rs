@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use futures::{stream, StreamExt};
@@ -8,20 +8,15 @@ use tauri::{AppHandle, State};
 use tokio_util::sync::CancellationToken;
 
 use crate::ai::prompts::{
-    language_name, AGENT_WIKI_OUTLINE_PROMPT, AGENT_WIKI_PAGE_PROMPT,
-    BUILTIN_AGENT_WIKI_PAGE_PROMPT,
+    language_name, AGENT_WIKI_OUTLINE_PROMPT, BUILTIN_AGENT_WIKI_PAGE_PROMPT,
 };
 use crate::ai::sdk;
-use crate::commands::usage::insert_usage_row;
-use crate::commands::{agent, usage, wiki};
+use crate::commands::wiki;
 use crate::db::Db;
 use crate::error::{AppError, AppResult, ErrorCode};
-use crate::models::AiUsageRecord;
-use crate::time_util::now_ts;
 
 use super::run::RegisteredRun;
 
-mod agent_backend;
 mod builtin_backend;
 #[cfg(test)]
 mod builtin_backend_tests;
@@ -29,7 +24,6 @@ mod generation;
 mod types;
 mod update;
 
-use agent_backend::*;
 use builtin_backend::*;
 pub use generation::*;
 pub use types::*;
@@ -41,73 +35,6 @@ struct WikiRetryNotice {
     max_attempts: usize,
     delay_seconds: u64,
     reason: String,
-}
-
-fn retry_notice(error: &AppError, attempt: usize, max_attempts: usize) -> WikiRetryNotice {
-    // agent 后端的限流信号混在底层错误文本里(stderr/协议错误),按内容识别
-    let text = error.to_string().to_lowercase();
-    let rate_limited = error.code() == "ai_rate_limited"
-        || text.contains("429")
-        || text.contains("rate limit")
-        || text.contains("too many requests");
-    WikiRetryNotice {
-        attempt,
-        max_attempts,
-        delay_seconds: 1_u64 << attempt.min(4),
-        reason: if rate_limited {
-            "rateLimited".into()
-        } else {
-            "temporary".into()
-        },
-    }
-}
-
-async fn wait_for_wiki_retry(
-    cancel: &CancellationToken,
-    notice: &WikiRetryNotice,
-) -> AppResult<()> {
-    tokio::select! {
-        _ = tokio::time::sleep(std::time::Duration::from_secs(notice.delay_seconds)) => Ok(()),
-        _ = cancel.cancelled() => Err(AppError::coded(ErrorCode::AiRequestFailed, "canceled")),
-    }
-}
-
-/// 某些 ACP agent 会把自身的 429 重试提示作为正文 chunk 上报。将该传输状态
-/// 从最终 Markdown 中剥离，同时保留结构化信息供进度 UI 展示。
-fn sanitize_agent_retry_notices(text: &str) -> (String, Option<WikiRetryNotice>) {
-    static COMPLETE: OnceLock<regex::Regex> = OnceLock::new();
-    static START: OnceLock<regex::Regex> = OnceLock::new();
-    static INCOMPLETE: OnceLock<regex::Regex> = OnceLock::new();
-    let complete = COMPLETE.get_or_init(|| {
-        regex::Regex::new(
-            r"(?is)Retrying\s*\(\s*attempt\s+(\d+)\s*/\s*(\d+)\s*,\s*waiting\s+(\d+)\s*s\s*\)\s*\.\.\.\s*Retry finished,\s*resuming\.\s*",
-        )
-        .expect("valid ACP retry regex")
-    });
-    let start = START.get_or_init(|| {
-        regex::Regex::new(
-            r"(?is)Retrying\s*\(\s*attempt\s+(\d+)\s*/\s*(\d+)\s*,\s*waiting\s+(\d+)\s*s\s*\)\s*\.\.\.",
-        )
-        .expect("valid ACP retry start regex")
-    });
-    let incomplete = INCOMPLETE.get_or_init(|| {
-        regex::Regex::new(r"(?is)Retrying\s*\(\s*attempt[^\r\n]*$")
-            .expect("valid ACP partial retry regex")
-    });
-    let mut latest = None;
-    for captures in start.captures_iter(text) {
-        latest = Some(WikiRetryNotice {
-            attempt: captures[1].parse().unwrap_or(1),
-            max_attempts: captures[2].parse().unwrap_or(3),
-            delay_seconds: captures[3].parse().unwrap_or(0),
-            reason: "rateLimited".into(),
-        });
-    }
-    let mut cleaned = complete.replace_all(text, "").into_owned();
-    if let Some(found) = incomplete.find(&cleaned) {
-        cleaned.truncate(found.start());
-    }
-    (cleaned, latest)
 }
 
 fn wiki_outline_user_prompt(context: &wiki::WikiContext, project_name: &str) -> String {
@@ -140,7 +67,7 @@ fn wiki_outline_user_prompt(context: &wiki::WikiContext, project_name: &str) -> 
     )
 }
 
-/// 相关文件全文区块:逐行 `N: ` 前缀(行级引用用),内置与 agent 后端的页面 prompt 共用
+/// 相关文件全文区块:逐行 `N: ` 前缀(行级引用用),大纲与页面 prompt 共用
 fn wiki_files_section(files: &[wiki::WikiFileContent]) -> String {
     let files_section = files
         .iter()
@@ -193,8 +120,7 @@ fn outline_retry_prompt(original: &str, validation_error: &str) -> String {
     )
 }
 
-/// agent 页面 prompt(混合模式):相关文件全文直接喂入(与内置后端同预算同行号前缀),
-/// agent 仅在不足时少量补读,不再逐文件工具调用
+/// 页面 prompt(混合模式):相关文件全文直接喂入,内置 Agent 仅在不足时少量补读
 fn builtin_agent_wiki_page_prompt(
     page: &wiki::WikiOutlinePage,
     files: &[wiki::WikiFileContent],
@@ -233,76 +159,6 @@ fn builtin_agent_wiki_page_prompt(
     )
 }
 
-fn agent_wiki_page_prompt(
-    page: &wiki::WikiOutlinePage,
-    files: &[wiki::WikiFileContent],
-    changed_files: &[String],
-    language: &str,
-) -> String {
-    let changed = if changed_files.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "\n\nRecently changed files (this page is being refreshed after these changes):\n{}",
-            changed_files
-                .iter()
-                .map(|path| format!("- {path}"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        )
-    };
-    format!(
-        "{}\n\nRespond in {}.\n\nWiki page: {}\nCoverage: {}{}\n\n{}",
-        AGENT_WIKI_PAGE_PROMPT.trim(),
-        language_name(language),
-        page.title,
-        page.description,
-        changed,
-        wiki_files_section(files),
-    )
-}
-
-fn record_acp_usage(
-    db: &Db,
-    model: &str,
-    prompt: &str,
-    result: &agent::AcpPromptResult,
-    duration_ms: i64,
-) {
-    let (input_tokens, output_tokens, total_tokens, cached_tokens) = match result.usage {
-        Some(usage) => (
-            i64::try_from(usage.input_tokens).ok(),
-            i64::try_from(usage.output_tokens).ok(),
-            i64::try_from(usage.total_tokens).ok(),
-            usage
-                .cached_read_tokens
-                .and_then(|value| i64::try_from(value).ok()),
-        ),
-        None => {
-            let input = usage::estimate_text_tokens(model, prompt);
-            let output = usage::estimate_text_tokens(model, &result.text);
-            (
-                Some(input),
-                Some(output),
-                Some(input.saturating_add(output)),
-                None,
-            )
-        }
-    };
-    let record = AiUsageRecord {
-        task_type: "wiki".into(),
-        model: model.to_string(),
-        input_tokens,
-        output_tokens,
-        total_tokens,
-        duration_ms: Some(duration_ms),
-        cached_tokens,
-    };
-    if let Ok(conn) = db.0.lock() {
-        let _ = insert_usage_row(&conn, &record, now_ts());
-    }
-}
-
 fn send_wiki_event(channel: &Channel<WikiGenerationEvent>, event: WikiGenerationEvent) {
     let _ = channel.send(event);
 }
@@ -325,15 +181,6 @@ fn fail_wiki_generation(
     Err(error)
 }
 
-fn wiki_backend_id(backend: &WikiGenerationBackend) -> String {
-    match backend {
-        WikiGenerationBackend::Builtin { .. } => "builtin".into(),
-        WikiGenerationBackend::Agent { agent_id, .. } => {
-            format!("acp:{}", agent_id.as_deref().unwrap_or("custom"))
-        }
-    }
-}
-
 fn should_reject_wiki_backend_change(
     previous_backend: Option<&str>,
     current_backend: &str,
@@ -342,7 +189,7 @@ fn should_reject_wiki_backend_change(
     !automatic && previous_backend.unwrap_or("builtin") != current_backend
 }
 
-/// 单页 Wiki 重生成入口。内置 Harness 与 ACP 会话生命周期都封装在 Rust。
+/// 单页 Wiki 重生成入口。内置 Agent 的 Harness 生命周期封装在 Rust。
 #[tauri::command]
 pub async fn ai_regenerate_wiki_page(
     app: AppHandle,
@@ -351,66 +198,30 @@ pub async fn ai_regenerate_wiki_page(
     on_progress: Channel<String>,
 ) -> AppResult<RegeneratedWikiPage> {
     let run = RegisteredRun::new(request.run_id);
-    let backend = wiki::load_wiki_config_internal(&app, &request.project_path)?.backend;
+    let config = wiki::load_wiki_config_internal(&app, &request.project_path)?;
     let page_title = request.page.title.clone();
     let project_path = request.project_path.clone();
-    let generated = match backend {
-        WikiGenerationBackend::Builtin {
-            model, thinking, ..
-        } => {
-            let model_name = generate_builtin_page_to_disk(
-                &app,
-                &db,
-                &run.id,
-                &request.project_path,
-                &request.page,
-                &request.language,
-                &request.changed_files,
-                model.as_deref(),
-                thinking.as_deref(),
-                &run.token,
-                Arc::new(move |content| {
-                    let _ = on_progress.send(content);
-                }),
-                Arc::new(|_| {}),
-                Arc::new(|_| {}),
-            )
-            .await?;
-            RegeneratedWikiPage {
-                model: model_name,
-                generator: "builtin".into(),
-            }
-        }
-        WikiGenerationBackend::Agent { .. } => {
-            let params = AgentSessionParams::from_backend(&backend, &request.project_path)
-                .expect("agent backend");
-            let slot = AgentSessionSlot::default();
-            let cancel_watch = watch_agent_cancel(run.token.clone(), slot.clone());
-            let progress = Arc::new(move |content: String| {
-                let _ = on_progress.send(content);
-            });
-            let result = generate_agent_page_to_disk(
-                &app,
-                &db,
-                &params,
-                &slot,
-                &request.page,
-                &request.language,
-                &request.changed_files,
-                &run.token,
-                progress,
-                Arc::new(|_| {}),
-                Arc::new(|_| {}),
-            )
-            .await;
-            slot.cancel_all();
-            cancel_watch.abort();
-            let stats = result?;
-            RegeneratedWikiPage {
-                model: stats.usage_model,
-                generator: format!("acp:{}", params.agent_id.as_deref().unwrap_or("custom")),
-            }
-        }
+    let model_name = generate_builtin_page_to_disk(
+        &app,
+        &db,
+        &run.id,
+        &request.project_path,
+        &request.page,
+        &request.language,
+        &request.changed_files,
+        config.model.as_deref(),
+        config.thinking.as_deref(),
+        &run.token,
+        Arc::new(move |content| {
+            let _ = on_progress.send(content);
+        }),
+        Arc::new(|_| {}),
+        Arc::new(|_| {}),
+    )
+    .await?;
+    let generated = RegeneratedWikiPage {
+        model: model_name,
+        generator: "builtin".into(),
     };
     if let Err(error) = wiki::commit_wiki(
         app,
@@ -427,21 +238,25 @@ pub async fn ai_regenerate_wiki_page(
 mod tests {
     use serde_json::json;
 
-    use super::{
-        sanitize_agent_retry_notices, should_reject_wiki_backend_change, WikiGenerationEvent,
-        WikiUpdateResult,
-    };
+    use super::{should_reject_wiki_backend_change, WikiGenerationEvent, WikiUpdateResult};
 
     #[test]
-    fn automatic_wiki_update_accepts_backend_change() {
+    fn automatic_wiki_update_accepts_legacy_generator_change() {
+        // 旧 Wiki 由已移除的三方 agent 后端生成:自动更新直接用内置重生成,
+        // 手动更新拒绝(界面退化为整本重生成)
         assert!(!should_reject_wiki_backend_change(
             Some("acp:pi"),
-            "acp:opencode",
+            "builtin",
             true,
         ));
         assert!(should_reject_wiki_backend_change(
             Some("acp:pi"),
-            "acp:opencode",
+            "builtin",
+            false,
+        ));
+        assert!(!should_reject_wiki_backend_change(
+            Some("builtin"),
+            "builtin",
             false,
         ));
     }
@@ -509,19 +324,5 @@ mod tests {
                 "reason": "rateLimited",
             })
         );
-    }
-
-    #[test]
-    fn acp_retry_notices_do_not_enter_wiki_markdown() {
-        let (content, retry) = sanitize_agent_retry_notices(
-            "Retrying (attempt 1/3, waiting 2s)...Retry finished, resuming.# 请求数据流",
-        );
-        assert_eq!(content, "# 请求数据流");
-        assert_eq!(retry.unwrap().attempt, 1);
-
-        let (partial, retry) =
-            sanitize_agent_retry_notices("# 已生成\nRetrying (attempt 2/3, waiting 4s)...");
-        assert_eq!(partial, "# 已生成\n");
-        assert_eq!(retry.unwrap().delay_seconds, 4);
     }
 }

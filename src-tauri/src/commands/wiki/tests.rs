@@ -66,42 +66,56 @@ fn save_and_load_roundtrip() {
 #[test]
 fn generation_config_roundtrip_and_default() {
     let dir = temp_dir("config-roundtrip");
-    assert!(matches!(
-        load_config_in(&dir).unwrap().backend,
-        crate::commands::ai::WikiGenerationBackend::Builtin { .. }
-    ));
+    let default = load_config_in(&dir).unwrap();
+    assert_eq!(default.version, CONFIG_VERSION);
+    assert_eq!(default.model, None);
+    assert_eq!(default.thinking, None);
+    assert_eq!(default.concurrency, None);
     save_config_in(
         &dir,
         WikiGenerationConfig {
             version: 99,
-            backend: crate::commands::ai::WikiGenerationBackend::Agent {
-                agent_id: Some("codex".into()),
-                custom_command: None,
-                model: Some("gpt-5".into()),
-                thinking: Some("high".into()),
-                concurrency: Some(3),
-            },
+            model: Some("openai/gpt-5".into()),
+            thinking: Some("high".into()),
+            concurrency: Some(3),
         },
     )
     .unwrap();
     let loaded = load_config_in(&dir).unwrap();
     assert_eq!(loaded.version, CONFIG_VERSION, "保存时应覆写配置版本");
-    match loaded.backend {
-        crate::commands::ai::WikiGenerationBackend::Agent {
-            agent_id,
-            model,
-            thinking,
-            concurrency,
-            ..
-        } => {
-            assert_eq!(agent_id.as_deref(), Some("codex"));
-            assert_eq!(model.as_deref(), Some("gpt-5"));
-            assert_eq!(thinking.as_deref(), Some("high"));
-            assert_eq!(concurrency, Some(3));
-        }
-        crate::commands::ai::WikiGenerationBackend::Builtin { .. } => panic!("应读回 agent 配置"),
-    }
+    assert_eq!(loaded.model.as_deref(), Some("openai/gpt-5"));
+    assert_eq!(loaded.thinking.as_deref(), Some("high"));
+    assert_eq!(loaded.concurrency, Some(3));
     assert!(!dir.join("config.json.tmp").exists());
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn generation_config_reads_legacy_backend_shape() {
+    // 旧版内置后端配置:迁移为扁平字段
+    let dir = temp_dir("config-legacy-builtin");
+    fs::write(
+        dir.join(CONFIG_FILE),
+        r#"{"version":1,"backend":{"kind":"builtin","model":"openai/gpt-5","thinking":"low","concurrency":4}}"#,
+    )
+    .unwrap();
+    let loaded = load_config_in(&dir).unwrap();
+    assert_eq!(loaded.model.as_deref(), Some("openai/gpt-5"));
+    assert_eq!(loaded.thinking.as_deref(), Some("low"));
+    assert_eq!(loaded.concurrency, Some(4));
+    fs::remove_dir_all(&dir).ok();
+
+    // 旧版三方 agent 后端配置:agent 专属字段不迁移,回退默认
+    let dir = temp_dir("config-legacy-agent");
+    fs::write(
+        dir.join(CONFIG_FILE),
+        r#"{"version":1,"backend":{"kind":"agent","agentId":"pi","model":"gpt-5","thinking":"high","concurrency":3}}"#,
+    )
+    .unwrap();
+    let loaded = load_config_in(&dir).unwrap();
+    assert_eq!(loaded.model, None);
+    assert_eq!(loaded.thinking, None);
+    assert_eq!(loaded.concurrency, None);
     fs::remove_dir_all(&dir).ok();
 }
 
@@ -175,11 +189,7 @@ fn begin_wiki_keeps_git_dir() {
     fs::create_dir_all(dir.join(PAGES_DIR)).unwrap();
     fs::write(dir.join(PAGES_DIR).join("01-old.md"), "old").unwrap();
     fs::write(dir.join(META_FILE), "{}").unwrap();
-    fs::write(
-        dir.join(CONFIG_FILE),
-        "{\"version\":1,\"backend\":{\"kind\":\"builtin\"}}",
-    )
-    .unwrap();
+    fs::write(dir.join(CONFIG_FILE), "{\"version\":1}").unwrap();
     fs::create_dir_all(dir.join(".git")).unwrap();
 
     begin_wiki_in(&dir).unwrap();

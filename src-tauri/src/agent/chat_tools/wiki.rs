@@ -1,8 +1,8 @@
 use super::*;
 use crate::agent::types::{AgentTool, AgentToolResult};
 use crate::commands::ai::{
-    ai_generate_wiki, ai_update_wiki, GenerateWikiRequest, UpdateWikiRequest,
-    WikiGenerationBackend, WikiGenerationEvent, WikiUpdateEvent,
+    ai_generate_wiki, ai_update_wiki, GenerateWikiRequest, UpdateWikiRequest, WikiGenerationEvent,
+    WikiUpdateEvent,
 };
 use crate::commands::wiki::{load_wiki, load_wiki_config_internal, WikiOutlinePage};
 use crate::db::Db;
@@ -175,22 +175,20 @@ pub(super) fn regenerate_wiki_tool(app: &AppHandle, ctx: &ChatToolContext) -> Ag
                 let project_path = project_path.clone();
                 let project_name = project_name.clone();
                 Box::pin(async move {
-                    // 后台任务失败只会进 stderr,agent 无从感知;启动前先预检内置
-                    // 后端模型(配置缺失/模型不存在时直接报错,引导走
+                    // 后台任务失败只会进 stderr,agent 无从感知;启动前先预检
+                    // 生成模型(配置缺失/模型不存在时直接报错,引导走
                     // get_ai_config + set_wiki_model 的换模型恢复流程)。
                     let wiki_config = load_wiki_config_internal(&app, &project_path)
                         .map_err(tool_err)?;
-                    if let WikiGenerationBackend::Builtin { model, .. } = &wiki_config.backend {
-                        let ai_config = crate::ai::catalog::load_ai_config_file(&app);
-                        let (_, status) = builtin_model_status(&ai_config, model.as_deref());
-                        if let Err(reason) = status {
-                            return Err(tool_err(AppError::coded(
-                                ErrorCode::AiNotConfigured,
-                                format!(
-                                    "{reason}。可用 get_ai_config 查看可用模型,与用户确认后用 set_wiki_model 切换再重试"
-                                ),
-                            )));
-                        }
+                    let ai_config = crate::ai::catalog::load_ai_config_file(&app);
+                    let (_, status) = builtin_model_status(&ai_config, wiki_config.model.as_deref());
+                    if let Err(reason) = status {
+                        return Err(tool_err(AppError::coded(
+                            ErrorCode::AiNotConfigured,
+                            format!(
+                                "{reason}。可用 get_ai_config 查看可用模型,与用户确认后用 set_wiki_model 切换再重试"
+                            ),
+                        )));
                     }
                     let request = GenerateWikiRequest {
                         run_id: pseudo_request_id(),
