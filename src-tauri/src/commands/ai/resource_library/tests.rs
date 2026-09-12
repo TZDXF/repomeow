@@ -1322,6 +1322,8 @@ fn market_download(
             installed_at: None,
         },
         MarketplaceDownload {
+            revision: None,
+            binary_files: Vec::new(),
             // 模拟 marketplace::download 的输出:路径已改写为相对技能目录
             files: files
                 .iter()
@@ -1663,4 +1665,29 @@ fn scan_model_resolves_explicit_choice_and_falls_back_to_default() {
     // defaultModel 也未配置 → 明确报错(调用方据此跳过语义层)
     let unset = AiConfigFile::default();
     assert!(super::resolve_scan_model(&unset, None, None).is_err());
+}
+
+#[test]
+fn marketplace_install_preserves_binary_attachments() {
+    let t = temp_lib("marketplace-binary");
+    let (source, mut download) = market_download(
+        "owner/repo/binary-demo",
+        "",
+        &[("SKILL.md", "---\nname: binary-demo\n---\nDemo")],
+    );
+    download
+        .binary_files
+        .push(("assets/demo.png".into(), vec![0, 255, 128, 42]));
+    let installed = ops::skill_import_marketplace(&t.lib, source, download, None).unwrap();
+    assert_eq!(
+        fs::read(
+            t.lib
+                .root()
+                .join(DIR_SKILLS)
+                .join(installed.directory)
+                .join("assets/demo.png")
+        )
+        .unwrap(),
+        vec![0, 255, 128, 42]
+    );
 }

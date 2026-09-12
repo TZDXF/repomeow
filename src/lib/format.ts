@@ -94,3 +94,35 @@ export function formatCommitTime(dateStr: string): string {
   if (Date.now() - ts >= 30 * 86400_000) return dateStr;
   return formatRelativeTime(Math.floor(ts / 1000));
 }
+
+const EN_MONTH_PREFIXES = [
+  "jan",
+  "feb",
+  "mar",
+  "apr",
+  "may",
+  "jun",
+  "jul",
+  "aug",
+  "sep",
+  "oct",
+  "nov",
+  "dec",
+];
+
+/** skills.sh 审计日期("Mar 15, 2026")→ 当前语言的本地日期(zh-CN: 2026年3月15日);解析失败回退原串 */
+export function formatAuditDate(text: string): string {
+  const match = /^([A-Za-z]{3,9})\s+(\d{1,2}),\s*(\d{4})$/.exec(text.trim());
+  if (!match) return text;
+  const monthIndex = EN_MONTH_PREFIXES.indexOf(match[1].slice(0, 3).toLowerCase());
+  if (monthIndex < 0) return text;
+  const year = Number(match[3]);
+  const date = new Date(year, monthIndex, Number(match[2]));
+  // 回绕(如 2 月 31 日)说明日期无效,回退原串
+  if (date.getFullYear() !== year || date.getMonth() !== monthIndex) return text;
+  return date.toLocaleDateString(i18n.global.locale.value, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}

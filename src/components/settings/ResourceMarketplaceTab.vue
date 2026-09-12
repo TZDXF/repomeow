@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import ResourceGithubSource from "@/components/settings/ResourceGithubSource.vue";
 import ScrollArea from "@/components/common/ScrollArea.vue";
 import {
   filterMarketplaceSkills,
@@ -21,6 +22,8 @@ import {
 
 const { t } = useI18n();
 
+const showGithub = ref(false);
+const repositorySource = ref("");
 const loading = ref(true);
 /** 是否完成过至少一次加载:之后的后台刷新不清空列表,避免切回本页时闪烁 */
 const loaded = ref(false);
@@ -142,6 +145,10 @@ onDeactivated(() => {
 
 function selectSource(id: string | null) {
   activeSourceId.value = id;
+  if (id) {
+    repositorySource.value = id;
+    showGithub.value = true;
+  }
   sourcePickerOpen.value = false;
   sourcePickerQuery.value = "";
 }
@@ -179,198 +186,213 @@ async function openSkillPage(skill: ResourceMarketplaceSkill) {
       {{ t("settings.resources.market.description") }}
     </p>
 
-    <div class="mt-3 flex flex-wrap items-center gap-2">
-      <div class="flex rounded-md border p-0.5 text-xs">
-        <button
-          v-for="mode in ['all', 'trending', 'hot'] as const"
-          :key="mode"
-          type="button"
-          class="rounded px-2 py-1 transition-colors"
-          :class="browseMode === mode ? 'bg-accent text-foreground' : 'text-muted-foreground'"
-          @click="switchMode(mode)"
+    <div class="mt-3 flex gap-2">
+      <Button :variant="showGithub ? 'outline' : 'default'" size="sm" @click="showGithub = false"
+        >skills.sh</Button
+      >
+      <Button :variant="showGithub ? 'default' : 'outline'" size="sm" @click="showGithub = true">{{
+        t("settings.resources.market.remote.githubSource")
+      }}</Button>
+    </div>
+    <ResourceGithubSource v-if="showGithub" :initial-source="repositorySource" />
+    <template v-else>
+      <div class="mt-3 flex flex-wrap items-center gap-2">
+        <div class="flex rounded-md border p-0.5 text-xs">
+          <button
+            v-for="mode in ['all', 'trending', 'hot'] as const"
+            :key="mode"
+            type="button"
+            class="rounded px-2 py-1 transition-colors"
+            :class="browseMode === mode ? 'bg-accent text-foreground' : 'text-muted-foreground'"
+            @click="switchMode(mode)"
+          >
+            {{ t(`settings.resources.market.modes.${mode}`) }}
+          </button>
+        </div>
+        <div class="relative max-w-xs flex-1">
+          <Search
+            class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            v-model="query"
+            class="h-8 pl-8 text-xs"
+            :placeholder="t('settings.resources.market.searchPlaceholder')"
+            spellcheck="false"
+            @keydown.enter="submitSearch"
+          />
+        </div>
+        <Button size="sm" class="h-8 shrink-0 gap-1.5" :disabled="loading" @click="submitSearch">
+          <Search class="h-3.5 w-3.5" />
+          {{ t("settings.resources.market.search") }}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          class="h-8 shrink-0"
+          :disabled="loading"
+          :title="t('settings.resources.market.refresh')"
+          @click="fetchList(true)"
         >
-          {{ t(`settings.resources.market.modes.${mode}`) }}
+          <RotateCw class="h-3.5 w-3.5" />
+        </Button>
+      </div>
+
+      <div
+        v-if="!loading && sources.length"
+        class="mt-3 flex min-w-0 items-center gap-1.5 overflow-hidden"
+      >
+        <button
+          type="button"
+          class="shrink-0 rounded-full border px-2.5 py-1 text-xs transition-colors"
+          :class="
+            activeSourceId === null
+              ? 'border-foreground bg-foreground text-background'
+              : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+          "
+          @click="selectSource(null)"
+        >
+          {{ t("settings.resources.market.allSources") }}
         </button>
-      </div>
-      <div class="relative max-w-xs flex-1">
-        <Search
-          class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
-        />
-        <Input
-          v-model="query"
-          class="h-8 pl-8 text-xs"
-          :placeholder="t('settings.resources.market.searchPlaceholder')"
-          spellcheck="false"
-          @keydown.enter="submitSearch"
-        />
-      </div>
-      <Button size="sm" class="h-8 shrink-0 gap-1.5" :disabled="loading" @click="submitSearch">
-        <Search class="h-3.5 w-3.5" />
-        {{ t("settings.resources.market.search") }}
-      </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        class="h-8 shrink-0"
-        :disabled="loading"
-        :title="t('settings.resources.market.refresh')"
-        @click="fetchList(true)"
-      >
-        <RotateCw class="h-3.5 w-3.5" />
-      </Button>
-    </div>
-
-    <div
-      v-if="!loading && sources.length"
-      class="mt-3 flex min-w-0 items-center gap-1.5 overflow-hidden"
-    >
-      <button
-        type="button"
-        class="shrink-0 rounded-full border px-2.5 py-1 text-xs transition-colors"
-        :class="
-          activeSourceId === null
-            ? 'border-foreground bg-foreground text-background'
-            : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-        "
-        @click="selectSource(null)"
-      >
-        {{ t("settings.resources.market.allSources") }}
-      </button>
-      <button
-        v-for="source in visibleSources"
-        :key="source.id"
-        type="button"
-        class="max-w-40 shrink-0 truncate rounded-full border px-2.5 py-1 text-xs transition-colors"
-        :title="source.url || source.name"
-        :class="
-          activeSourceId === source.id
-            ? 'border-foreground bg-foreground text-background'
-            : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-        "
-        @click="selectSource(source.id)"
-      >
-        {{ source.name }}
-      </button>
-      <Popover v-if="hiddenSources.length" v-model:open="sourcePickerOpen">
-        <PopoverTrigger as-child>
-          <Button variant="outline" size="sm" class="h-7 shrink-0 gap-1 rounded-full px-2 text-xs">
-            {{ t("settings.resources.market.moreSources", { count: hiddenSources.length }) }}
-            <ChevronDown class="h-3 w-3" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent class="w-72 p-2" align="start" @open-auto-focus.prevent>
-          <div class="relative">
-            <Search
-              class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
-            />
-            <Input
-              v-model="sourcePickerQuery"
-              class="h-8 pl-8 text-xs"
-              :placeholder="t('settings.resources.market.searchSourcesPlaceholder')"
-              spellcheck="false"
-            />
-          </div>
-          <ScrollArea class="mt-1 max-h-56">
-            <button
-              v-for="source in searchedSources"
-              :key="source.id"
-              type="button"
-              class="hover:bg-accent w-full truncate rounded-sm px-2 py-1.5 text-left text-xs"
-              :class="activeSourceId === source.id ? 'bg-accent text-foreground' : ''"
-              :title="source.url || source.name"
-              @click="selectSource(source.id)"
-            >
-              {{ source.name }}
-            </button>
-            <p v-if="!searchedSources.length" class="px-2 py-2 text-xs text-muted-foreground">
-              {{ t("settings.resources.market.noMatchingSources") }}
-            </p>
-          </ScrollArea>
-        </PopoverContent>
-      </Popover>
-    </div>
-
-    <p v-if="loading" class="mt-6 text-center text-xs text-muted-foreground">
-      {{ t("common.loading") }}
-    </p>
-    <template v-else-if="filtered.length">
-      <div class="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <div v-for="skill in filtered" :key="skill.id" class="group rounded-lg border p-3">
-          <div class="flex items-start justify-between gap-2">
-            <div class="min-w-0">
-              <p class="truncate text-sm font-medium" :title="skill.name">{{ skill.name }}</p>
-              <p class="mt-0.5 truncate text-[11px] text-muted-foreground">
-                {{ skill.source }}
-              </p>
-            </div>
-            <span class="flex shrink-0 items-center gap-1">
-              <Button
-                variant="ghost"
-                size="icon"
-                class="h-7 w-7"
-                :title="t('settings.resources.market.openPage')"
-                @click="openSkillPage(skill)"
-              >
-                <ExternalLink class="h-3.5 w-3.5" />
-              </Button>
-              <span
-                v-if="skill.installedSkillId"
-                class="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground"
-              >
-                <Check class="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
-                {{ t("settings.resources.market.installed") }}
-              </span>
-              <Button
-                v-else
-                size="sm"
-                class="h-7 gap-1 px-2 text-xs"
-                :disabled="installingIds.has(skill.id)"
-                @click="install(skill)"
-              >
-                <Download
-                  class="h-3.5 w-3.5"
-                  :class="{ 'animate-pulse': installingIds.has(skill.id) }"
-                />
-                {{
-                  installingIds.has(skill.id)
-                    ? t("settings.resources.market.installing")
-                    : t("settings.resources.market.install")
-                }}
-              </Button>
-            </span>
-          </div>
-          <p v-if="skill.description" class="mt-1 line-clamp-2 text-xs text-muted-foreground">
-            {{ skill.description }}
-          </p>
-          <div class="mt-2 flex items-center gap-2">
-            <Badge
-              v-if="sourceName(skill.source)"
+        <button
+          v-for="source in visibleSources"
+          :key="source.id"
+          type="button"
+          class="max-w-40 shrink-0 truncate rounded-full border px-2.5 py-1 text-xs transition-colors"
+          :title="source.url || source.name"
+          :class="
+            activeSourceId === source.id
+              ? 'border-foreground bg-foreground text-background'
+              : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+          "
+          @click="selectSource(source.id)"
+        >
+          {{ source.name }}
+        </button>
+        <Popover v-if="hiddenSources.length" v-model:open="sourcePickerOpen">
+          <PopoverTrigger as-child>
+            <Button
               variant="outline"
-              class="max-w-40 truncate text-[10px]"
+              size="sm"
+              class="h-7 shrink-0 gap-1 rounded-full px-2 text-xs"
             >
-              {{ sourceName(skill.source) }}
-            </Badge>
-            <span
-              class="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground"
-              :title="t('settings.resources.market.installCount', { count: skill.installs })"
-            >
-              <Download class="h-3 w-3" />
-              {{ formatInstalls(skill.installs) }}
-            </span>
+              {{ t("settings.resources.market.moreSources", { count: hiddenSources.length }) }}
+              <ChevronDown class="h-3 w-3" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent class="w-72 p-2" align="start" @open-auto-focus.prevent>
+            <div class="relative">
+              <Search
+                class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+              />
+              <Input
+                v-model="sourcePickerQuery"
+                class="h-8 pl-8 text-xs"
+                :placeholder="t('settings.resources.market.searchSourcesPlaceholder')"
+                spellcheck="false"
+              />
+            </div>
+            <ScrollArea class="mt-1 max-h-56">
+              <button
+                v-for="source in searchedSources"
+                :key="source.id"
+                type="button"
+                class="hover:bg-accent w-full truncate rounded-sm px-2 py-1.5 text-left text-xs"
+                :class="activeSourceId === source.id ? 'bg-accent text-foreground' : ''"
+                :title="source.url || source.name"
+                @click="selectSource(source.id)"
+              >
+                {{ source.name }}
+              </button>
+              <p v-if="!searchedSources.length" class="px-2 py-2 text-xs text-muted-foreground">
+                {{ t("settings.resources.market.noMatchingSources") }}
+              </p>
+            </ScrollArea>
+          </PopoverContent>
+        </Popover>
+      </div>
+
+      <p v-if="loading" class="mt-6 text-center text-xs text-muted-foreground">
+        {{ t("common.loading") }}
+      </p>
+      <template v-else-if="filtered.length">
+        <div class="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <div v-for="skill in filtered" :key="skill.id" class="group rounded-lg border p-3">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                <p class="truncate text-sm font-medium" :title="skill.name">{{ skill.name }}</p>
+                <p class="mt-0.5 truncate text-[11px] text-muted-foreground">
+                  {{ skill.source }}
+                </p>
+              </div>
+              <span class="flex shrink-0 items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="h-7 w-7"
+                  :title="t('settings.resources.market.openPage')"
+                  @click="openSkillPage(skill)"
+                >
+                  <ExternalLink class="h-3.5 w-3.5" />
+                </Button>
+                <span
+                  v-if="skill.installedSkillId"
+                  class="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground"
+                >
+                  <Check class="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                  {{ t("settings.resources.market.installed") }}
+                </span>
+                <Button
+                  v-else
+                  size="sm"
+                  class="h-7 gap-1 px-2 text-xs"
+                  :disabled="installingIds.has(skill.id)"
+                  @click="install(skill)"
+                >
+                  <Download
+                    class="h-3.5 w-3.5"
+                    :class="{ 'animate-pulse': installingIds.has(skill.id) }"
+                  />
+                  {{
+                    installingIds.has(skill.id)
+                      ? t("settings.resources.market.installing")
+                      : t("settings.resources.market.install")
+                  }}
+                </Button>
+              </span>
+            </div>
+            <p v-if="skill.description" class="mt-1 line-clamp-2 text-xs text-muted-foreground">
+              {{ skill.description }}
+            </p>
+            <div class="mt-2 flex items-center gap-2">
+              <Badge
+                v-if="sourceName(skill.source)"
+                variant="outline"
+                class="max-w-40 truncate text-[10px]"
+              >
+                {{ sourceName(skill.source) }}
+              </Badge>
+              <span
+                class="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground"
+                :title="t('settings.resources.market.installCount', { count: skill.installs })"
+              >
+                <Download class="h-3 w-3" />
+                {{ formatInstalls(skill.installs) }}
+              </span>
+            </div>
           </div>
         </div>
-      </div>
-    </template>
+      </template>
 
-    <p
-      v-else-if="!loading"
-      class="mt-6 rounded-md border border-dashed px-3 py-8 text-center text-xs text-muted-foreground"
-    >
-      {{
-        submittedQuery || activeSourceId
-          ? t("settings.resources.market.noMatch")
-          : t("settings.resources.market.empty")
-      }}
-    </p>
+      <p
+        v-else-if="!loading"
+        class="mt-6 rounded-md border border-dashed px-3 py-8 text-center text-xs text-muted-foreground"
+      >
+        {{
+          submittedQuery || activeSourceId
+            ? t("settings.resources.market.noMatch")
+            : t("settings.resources.market.empty")
+        }}
+      </p>
+    </template>
   </section>
 </template>

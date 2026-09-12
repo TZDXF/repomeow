@@ -1,5 +1,11 @@
+import { invoke } from "@tauri-apps/api/core";
 import { describe, expect, it, vi } from "vitest";
 import {
+  listResourceMarketplaceSkills,
+  marketplaceAuditId,
+  readMarketplaceRepository,
+  listMarketplaceAudits,
+  readMarketplaceAuditDetail,
   filterMarketplaceSkills,
   filterSkills,
   formatArgLines,
@@ -428,5 +434,51 @@ describe("mergeMarketplaceSources", () => {
     expect(mergeMarketplaceSources([], [])).toEqual([]);
     expect(mergeMarketplaceSources([{ id: "a", name: "A" }], [])).toEqual([{ id: "a", name: "A" }]);
     expect(mergeMarketplaceSources([], [{ id: "b", name: "B" }])).toEqual([{ id: "b", name: "B" }]);
+  });
+});
+
+describe("GitHub 来源与公开审计", () => {
+  it("来源查询传递完整仓库和强制刷新，不附加关键词", async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({ skills: [] });
+    expect(
+      await listResourceMarketplaceSkills({ mode: "all", source: "  owner/repo  ", refresh: true }),
+    ).toEqual({ skills: [], sources: [] });
+    expect(invoke).toHaveBeenLastCalledWith("rl_marketplace_list", {
+      mode: "all",
+      source: "owner/repo",
+      refresh: true,
+    });
+  });
+  it("仓库 Stars 和审计详情使用独立只读命令", async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({
+      source: "a/b",
+      stars: 0,
+      url: "https://github.com/a/b",
+    });
+    expect((await readMarketplaceRepository("a/b")).stars).toBe(0);
+    vi.mocked(invoke).mockResolvedValueOnce([]);
+    expect(await listMarketplaceAudits("a/b/demo")).toEqual([]);
+    vi.mocked(invoke).mockResolvedValueOnce({
+      markdown: "Warn",
+      url: "https://skills.sh/a/b/demo/security/snyk",
+    });
+    expect((await readMarketplaceAuditDetail("a/b/demo", "snyk")).markdown).toBe("Warn");
+    expect(invoke).toHaveBeenLastCalledWith("rl_marketplace_audit_detail", {
+      id: "a/b/demo",
+      provider: "snyk",
+    });
+  });
+  it("旧市场保持原 ID，GitHub 来源只用合法技能名查询", () => {
+    const base = skill({ id: "local", name: "find-skills" });
+    expect(marketplaceAuditId(base)).toBeNull();
+    const marketplace = {
+      id: "a/b/original",
+      source: "a/b",
+      url: "https://skills.sh/a/b/original",
+    };
+    expect(marketplaceAuditId({ ...base, marketplace })).toBe("a/b/original");
+    marketplace.id = "github:a/b/skills/find/SKILL.md";
+    expect(marketplaceAuditId({ ...base, marketplace })).toBe("a/b/find-skills");
+    expect(marketplaceAuditId({ ...base, name: "../evil", marketplace })).toBeNull();
   });
 });

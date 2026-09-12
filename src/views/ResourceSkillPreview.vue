@@ -18,6 +18,8 @@ import {
   ShieldCheck,
 } from "@lucide/vue";
 import { Markdown, type ControlsConfig, type NodeRenderers } from "vue-stream-markdown";
+import ResourceRepositoryStars from "@/components/settings/ResourceRepositoryStars.vue";
+import ResourcePublicAudits from "@/components/settings/ResourcePublicAudits.vue";
 import FileTreeList from "@/components/common/FileTreeList.vue";
 import {
   ModelSelector,
@@ -42,6 +44,7 @@ import { getCachedTranslation, putCachedTranslation } from "@/lib/translation-ca
 import { useAiConfigStore } from "@/stores/ai-config";
 import { useSettingsStore } from "@/stores/settings";
 import {
+  marketplaceAuditId,
   listResourceSkills,
   openResourceSkillDir,
   readResourceSkillFile,
@@ -804,6 +807,7 @@ const llmNotice = computed(() => {
           {{ t("settings.resources.skills.previewPage.openDir") }}
         </Button>
       </div>
+      <ResourceRepositoryStars v-if="skill?.marketplace" :source="skill.marketplace.source" />
     </header>
 
     <div class="flex min-h-0 flex-1">
@@ -991,6 +995,7 @@ const llmNotice = computed(() => {
         <ScrollArea class="min-h-0 flex-1">
           <!-- 安全扫描 -->
           <div v-if="selected.kind === 'scan'" class="mx-auto max-w-3xl space-y-3 p-4">
+            <ResourcePublicAudits :marketplace-id="skill ? marketplaceAuditId(skill) : null" />
             <div v-if="scanning" class="flex flex-col items-center gap-4 px-6 py-16 text-center">
               <div class="relative flex h-14 w-14 items-center justify-center">
                 <span class="scan-pulse absolute inset-0 rounded-full bg-primary/15" />

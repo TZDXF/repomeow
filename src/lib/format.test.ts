@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatCompactNumber } from "./format";
+import { formatAuditDate, formatCompactNumber } from "./format";
 
 describe("formatCompactNumber", () => {
   it("小于 1000 时显示完整数字", () => {
@@ -17,5 +17,21 @@ describe("formatCompactNumber", () => {
   it("舍入到单位上界时提升到下一级", () => {
     expect(formatCompactNumber(999_999)).toBe("1M");
     expect(formatCompactNumber(999_999_999)).toBe("1B");
+  });
+});
+
+describe("formatAuditDate", () => {
+  it("解析英文审计日期并按当前语言本地化(默认 zh-CN)", () => {
+    expect(formatAuditDate("Mar 15, 2026")).toBe("2026年3月15日");
+    expect(formatAuditDate("January 1, 2026")).toBe("2026年1月1日");
+  });
+
+  it("全月名与多余空白也能解析", () => {
+    expect(formatAuditDate("  December  25, 2025 ")).toBe("2025年12月25日");
+  });
+
+  it("无法解析或日期无效时回退原串", () => {
+    expect(formatAuditDate("unknown")).toBe("unknown");
+    expect(formatAuditDate("")).toBe("");
   });
 });

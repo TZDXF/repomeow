@@ -276,6 +276,27 @@ impl Library {
         Ok(())
     }
 
+    pub fn write_skill_bytes(&self, directory: &str, files: &[(String, Vec<u8>)]) -> RlResult<()> {
+        if !is_safe_directory(directory) {
+            return Err(RlError::coded(
+                codes::DIRECTORY_INVALID,
+                directory.to_string(),
+            ));
+        }
+        let base = self.root.join(DIR_SKILLS).join(directory);
+        for (path, contents) in files {
+            if !is_safe_relative_path(path) {
+                return Err(RlError::coded(codes::DIRECTORY_INVALID, path.clone()));
+            }
+            let mut target = base.clone();
+            for component in path.split('/') {
+                target = target.join(component);
+            }
+            self.atomic_write(&target, contents)?;
+        }
+        Ok(())
+    }
+
     /// 技能目录重命名(directory 变化时迁移正文)
     pub fn rename_skill_dir(&self, from: &str, to: &str) -> RlResult<()> {
         let from_path = self.root.join(DIR_SKILLS).join(from);

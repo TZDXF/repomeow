@@ -18,6 +18,7 @@ mod frontmatter;
 mod git;
 mod import;
 mod marketplace;
+mod marketplace_remote;
 mod models;
 mod ops;
 mod scan;
@@ -595,22 +596,25 @@ pub async fn rl_marketplace_list(
     mode: String,
     query: Option<String>,
     source: Option<String>,
+    refresh: Option<bool>,
 ) -> RlResult<MarketplaceList> {
     let lib = Library::app(&app)?;
     blocking(move || {
-        let _guard = lock_op();
-        let mut result = if let Some(query) = query.filter(|value| !value.trim().is_empty()) {
+        let mut result = if let Some(source) = source.as_deref().filter(|s| !s.trim().is_empty()) {
+            marketplace_remote::list(source, refresh.unwrap_or(false))
+        } else if let Some(query) = query.filter(|value| !value.trim().is_empty()) {
             marketplace::search(&query, source.as_deref())
         } else {
             marketplace::browse(&mode)
         }?;
+        let _guard = lock_op();
         let local = ops::skill_list(&lib)?;
         for item in &mut result.skills {
             item.installed_skill_id = local.skills.iter().find_map(|skill| {
                 skill
                     .marketplace
                     .as_ref()
-                    .filter(|source| source.id == item.id)
+                    .filter(|source| marketplace_remote::same_skill(source, &item.id))
                     .map(|_| skill.id.clone())
             });
         }
@@ -621,13 +625,18 @@ pub async fn rl_marketplace_list(
 
 #[tauri::command]
 pub async fn rl_marketplace_install(app: AppHandle, id: String) -> RlResult<Skill> {
-    mutate(&app, move |lib| {
+    let (source, download, installed_sha) = blocking(move || {
         let download = marketplace::download(&id)?;
         let source = marketplace::source_for(&id, &download.repo_dir)?;
-        // 安装基线:GitHub 查询失败不阻断安装,留 None 由检查更新时回填
-        let installed_sha = marketplace::latest_commit_sha(&source.source, &source.repo_dir)
-            .ok()
-            .flatten();
+        let installed_sha = download.revision.clone().or_else(|| {
+            marketplace::latest_commit_sha(&source.source, &source.repo_dir)
+                .ok()
+                .flatten()
+        });
+        Ok((source, download, installed_sha))
+    })
+    .await?;
+    mutate(&app, move |lib| {
         ops::skill_import_marketplace(lib, source, download, installed_sha)
     })
     .await
@@ -656,10 +665,15 @@ pub async fn rl_marketplace_update_skill(app: AppHandle, id: String) -> RlResult
             .find(|skill| skill.id == id)
             .and_then(|skill| skill.marketplace.clone())
             .ok_or_else(|| RlError::coded(codes::MARKETPLACE_SKILL_INVALID, id.clone()))?;
+        if marketplace.id.starts_with("github:") {
+            marketplace_remote::list(&marketplace.source, true)?;
+        }
         let download = marketplace::download(&marketplace.id)?;
-        let installed_sha = marketplace::latest_commit_sha(&marketplace.source, &download.repo_dir)
-            .ok()
-            .flatten();
+        let installed_sha = download.revision.clone().or_else(|| {
+            marketplace::latest_commit_sha(&marketplace.source, &download.repo_dir)
+                .ok()
+                .flatten()
+        });
         ops::skill_apply_marketplace_update(lib, &id, download, installed_sha)
     })
     .await
@@ -771,4 +785,23 @@ pub async fn rl_resolve_fork(app: AppHandle, direction: String) -> RlResult<()> 
     let lib = Library::app(&app)?;
     let _guard = SYNC_LOCK.lock().await;
     blocking(move || git::resolve_fork(&lib, &direction)).await
+}
+
+// GitHub 仓库统计与第三方审计均为只读网络请求，不占用资源库写锁。
+#[tauri::command]
+pub async fn rl_marketplace_repository(
+    source: String,
+) -> RlResult<marketplace_remote::RepositoryInfo> {
+    blocking(move || marketplace_remote::repository_info(&source)).await
+}
+#[tauri::command]
+pub async fn rl_marketplace_audits(id: String) -> RlResult<Vec<marketplace_remote::PublicAudit>> {
+    blocking(move || marketplace_remote::audit_list(&id)).await
+}
+#[tauri::command]
+pub async fn rl_marketplace_audit_detail(
+    id: String,
+    provider: String,
+) -> RlResult<marketplace_remote::PublicAuditDetail> {
+    blocking(move || marketplace_remote::audit_detail(&id, &provider)).await
 }

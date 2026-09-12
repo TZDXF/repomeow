@@ -1873,6 +1873,31 @@ export default {
         agents: "Agent 工具",
       },
       market: {
+        remote: {
+          githubSource: "GitHub 来源",
+          sourceHint:
+            "输入公开 GitHub 仓库，直接扫描全部 SKILL.md。下载包含附件；不会执行其中的脚本。大仓库超出安全限制时会报错，不会显示为完整列表。",
+          sourcePlaceholder: "owner/repo 或 https://github.com/owner/repo",
+          fetchSource: "获取来源",
+          sourceCount: "共 {count} 个 Skills",
+          installAll: "安装全部未安装项 ({count})",
+          filterSource: "筛选此来源技能（不影响全部安装范围）",
+          confirmInstall:
+            "将从 {source} 安装全部 {count} 个未安装技能，跳过已安装项且不覆盖本地编辑。请仅安装可信来源。",
+          stop: "停止后续安装",
+          stopping: "等待当前安装完成…",
+          progress: "进度 {completed}/{total} · 成功 {success} · 失败 {failed}；未安装项可重试",
+          repoStars: "仓库 Stars",
+          retryStars: "获取失败，点击重试",
+          auditSources: "审计来源",
+          audits: "公开安全审计 · skills.sh",
+          auditDisclaimer:
+            "第三方历史审计，仅供参考，不代表本地扫描结论，也不保证当前安装版本安全。GitHub 来源按技能名称匹配公开记录，请核对原文来源与日期。",
+          noAudits: "未找到公开审计记录；这不表示已通过安全检查。",
+          noAuditSource: "此技能没有可查询的市场来源，本地扫描仍可使用。",
+          originalAudit: "查看审计原文",
+          translationHint: "翻译将使用已配置的翻译模型，发送审计文本；译文仅供参考，以原文为准。",
+        },
         description: "从市场来源浏览并安装技能,安装后进入本地 Skills 库",
         searchPlaceholder: "搜索市场技能...",
         search: "搜索",

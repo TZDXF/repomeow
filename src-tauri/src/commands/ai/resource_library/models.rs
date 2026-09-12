@@ -161,6 +161,8 @@ pub struct MarketplaceFile {
 
 #[derive(Debug, Clone)]
 pub struct MarketplaceDownload {
+    pub revision: Option<String>,
+    pub binary_files: Vec<(String, Vec<u8>)>,
     pub files: Vec<MarketplaceFile>,
     pub skill_md: String,
     pub repo_dir: String,

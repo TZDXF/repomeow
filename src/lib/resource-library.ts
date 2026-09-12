@@ -367,6 +367,7 @@ interface BackendMarketplaceList {
 
 export interface ResourceMarketplaceListOptions {
   mode: ResourceMarketplaceMode;
+  refresh?: boolean;
   query?: string;
   /** 限定来源 id;空值 = 全部来源 */
   source?: string | null;
@@ -379,6 +380,7 @@ export async function listResourceMarketplaceSkills(
   const source = options.source?.trim();
   const data = await cmd<BackendMarketplaceList>("rl_marketplace_list", {
     mode: options.mode,
+    refresh: options.refresh ?? false,
     ...(query ? { query } : {}),
     ...(source ? { source } : {}),
   });
@@ -935,4 +937,39 @@ export function onResourceBackupStatusChanged(
   return onListen<BackendSyncOutcome>("resource-library://sync-completed", () => {
     void getResourceBackupStatus().then(handler);
   });
+}
+
+/** 仓库来源模式以仓库内路径作为稳定标识，避免同名目录串装。 */
+export function marketplaceAuditId(skill: ResourceSkill): string | null {
+  const marketplace = skill.marketplace;
+  if (!marketplace) return null;
+  if (!marketplace.id.startsWith("github:")) return marketplace.id;
+  return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(skill.name)
+    ? `${marketplace.source}/${skill.name}`
+    : null;
+}
+
+export interface ResourcePublicAudit {
+  provider: string;
+  name: string;
+  status: string;
+  url: string;
+}
+export interface ResourcePublicAuditDetail {
+  url: string;
+  /** 审核时间,后端从 HTML 结构提取(头部「Audited by … on <date>」段的末个文本节点) */
+  auditedAt?: string | null;
+  /** 后端把审计 <main> 正文转为保留结构的 Markdown(标题/列表/表格) */
+  markdown: string;
+}
+export function readMarketplaceRepository(source: string) {
+  return cmd<{ source: string; stars: number; url: string }>("rl_marketplace_repository", {
+    source,
+  });
+}
+export function listMarketplaceAudits(id: string) {
+  return cmd<ResourcePublicAudit[]>("rl_marketplace_audits", { id });
+}
+export function readMarketplaceAuditDetail(id: string, provider: string) {
+  return cmd<ResourcePublicAuditDetail>("rl_marketplace_audit_detail", { id, provider });
 }

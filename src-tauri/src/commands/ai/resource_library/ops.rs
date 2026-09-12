@@ -459,7 +459,7 @@ pub(super) fn skill_import_marketplace(
         skill
             .marketplace
             .as_ref()
-            .is_some_and(|item| item.id == source.id)
+            .is_some_and(|item| super::marketplace_remote::same_skill(item, &source.id))
     }) {
         return Ok(existing.clone());
     }
@@ -495,6 +495,7 @@ pub(super) fn skill_import_marketplace(
         .map(|file| (file.path.clone(), file.contents.clone()))
         .collect();
     lib.write_skill_files(&skill.directory, &files)?;
+    lib.write_skill_bytes(&skill.directory, &download.binary_files)?;
     data.skills.push(skill.clone());
     lib.write_plain_json(FILE_SKILLS, &data)?;
     git::auto_commit(lib, &format!("从市场添加技能:{name}"))?;
@@ -525,6 +526,7 @@ pub(super) fn skill_apply_marketplace_update(
         .collect();
     lib.remove_skill_dir(&data.skills[index].directory)?;
     lib.write_skill_files(&data.skills[index].directory, &files)?;
+    lib.write_skill_bytes(&data.skills[index].directory, &download.binary_files)?;
     if let (_, Some(description)) = fm::name_description_of(&download.skill_md) {
         data.skills[index].description = description;
     }
@@ -587,7 +589,14 @@ fn check_marketplace_update(
         };
         match marketplace::download(&marketplace.id) {
             Ok(download) if download.skill_md == local => {
-                match marketplace::latest_commit_sha(&marketplace.source, &marketplace.repo_dir) {
+                match marketplace::latest_commit_sha(
+                    &marketplace.source,
+                    if marketplace.id.starts_with("github:") {
+                        ""
+                    } else {
+                        &marketplace.repo_dir
+                    },
+                ) {
                     Ok(latest) => match backfill_installed_sha(lib, &skill.id, latest) {
                         Ok(()) => status.update_available = Some(false),
                         Err(err) => status.error_code = Some(err.code().to_string()),
@@ -600,7 +609,14 @@ fn check_marketplace_update(
         }
         return status;
     };
-    match marketplace::latest_commit_sha(&marketplace.source, &marketplace.repo_dir) {
+    match marketplace::latest_commit_sha(
+        &marketplace.source,
+        if marketplace.id.starts_with("github:") {
+            ""
+        } else {
+            &marketplace.repo_dir
+        },
+    ) {
         Ok(latest) => {
             status.update_available = update_from_shas(Some(installed_sha), latest.as_deref());
         }

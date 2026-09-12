@@ -77,7 +77,7 @@ struct DownloadSkill {
     markdown: String,
 }
 
-fn client() -> RlResult<Client> {
+pub(super) fn client() -> RlResult<Client> {
     Client::builder()
         .user_agent("RepoMeow skills marketplace")
         .timeout(Duration::from_secs(15))
@@ -85,7 +85,7 @@ fn client() -> RlResult<Client> {
         .map_err(|err| RlError::coded(codes::MARKETPLACE_UNAVAILABLE, err.to_string()))
 }
 
-fn read_limited(response: reqwest::blocking::Response, max: u64) -> RlResult<Vec<u8>> {
+pub(super) fn read_limited(response: reqwest::blocking::Response, max: u64) -> RlResult<Vec<u8>> {
     if response.content_length().is_some_and(|length| length > max) {
         return Err(RlError::coded(
             codes::MARKETPLACE_RESPONSE_TOO_LARGE,
@@ -106,7 +106,7 @@ fn read_limited(response: reqwest::blocking::Response, max: u64) -> RlResult<Vec
     Ok(out)
 }
 
-fn fetch_text(url: &str, max: u64) -> RlResult<String> {
+pub(super) fn fetch_text(url: &str, max: u64) -> RlResult<String> {
     let response = client()?
         .get(url)
         .send()
@@ -121,8 +121,10 @@ fn fetch_text(url: &str, max: u64) -> RlResult<String> {
         .map_err(|err| RlError::coded(codes::MARKETPLACE_INVALID_RESPONSE, err.to_string()))
 }
 
-fn validate_part(part: &str) -> bool {
+pub(super) fn validate_part(part: &str) -> bool {
     !part.is_empty()
+        && part != "."
+        && part != ".."
         && part.len() <= 100
         && part
             .bytes()
@@ -151,6 +153,9 @@ fn marketplace_url(id: &str) -> String {
 /// 由市场条目 id 与下载结果组装随本地技能落库的来源标识
 /// (repo_dir 来自 SKILL.md 在仓库内的实际位置;安装基线由调用方回填)
 pub(super) fn source_for(id: &str, repo_dir: &str) -> RlResult<MarketplaceSource> {
+    if id.starts_with("github:") {
+        return super::marketplace_remote::source_for(id);
+    }
     let (owner, repo, slug) = parse_marketplace_id(id)?;
     Ok(MarketplaceSource {
         id: format!("{owner}/{repo}/{slug}"),
@@ -442,6 +447,9 @@ fn split_skill_files(files: &[DownloadFile]) -> Option<(Vec<MarketplaceFile>, St
 /// (`files[].path`/`files[].contents`,SKILL.md 位置不固定),历史上还有顶层
 /// content 与嵌套 skill 内容两种;始终取 SKILL.md 所在目录下的全部文件。
 pub(super) fn download(id: &str) -> RlResult<MarketplaceDownload> {
+    if id.starts_with("github:") {
+        return super::marketplace_remote::download(id);
+    }
     let (owner, repo, slug) = parse_marketplace_id(id)?;
     let url = format!("{SKILLS_HOST}/api/download/{owner}/{repo}/{slug}");
     let response = client()?
@@ -489,6 +497,8 @@ pub(super) fn download(id: &str) -> RlResult<MarketplaceDownload> {
             )
         };
     Ok(MarketplaceDownload {
+        revision: None,
+        binary_files: Vec::new(),
         files,
         skill_md,
         repo_dir: repo_dir.to_string(),
