@@ -10,8 +10,14 @@ mod python;
 mod remote;
 mod rust;
 mod version;
+#[cfg(windows)]
+mod windows_env;
 
-use crate::commands::open::{spawn_terminal, ShellKind};
+#[cfg(not(windows))]
+use crate::commands::open::spawn_terminal;
+#[cfg(windows)]
+use crate::commands::open::spawn_terminal_with_env;
+use crate::commands::open::ShellKind;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::{ToolchainRemoteVersion, ToolchainStatus};
 
@@ -50,6 +56,15 @@ pub fn toolchain_op(tool: String, op: String, version: Option<String>) -> AppRes
             .unwrap_or_else(|| ".".to_string());
         // 工具链命令文本是 cmd 专属语法(del /f、%USERPROFILE%、`&` 串联),
         // 在 PowerShell / bash 下会直接报错,固定走 cmd,不跟随终端设置
+        #[cfg(windows)]
+        return spawn_terminal_with_env(
+            &home,
+            &format!("Toolchain: {tool}"),
+            Some(&command),
+            ShellKind::Cmd,
+            windows_env::apply,
+        );
+        #[cfg(not(windows))]
         return spawn_terminal(
             &home,
             &format!("Toolchain: {tool}"),

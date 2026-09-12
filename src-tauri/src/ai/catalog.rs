@@ -3,7 +3,7 @@
 //! 格式对齐 pi 的 models.json(provider 列表 + 模型元数据),字段为 camelCase;
 //! `api` 按 pi 的 wire adapter 语义支持 `openai-completions` / `openai-responses` /
 //! `anthropic-messages` / `google-generative-ai`,模型级可覆盖厂商默认值。文件缺失时用
-//! 内置目录(`builtin_models.json`)播种;播种时若旧版 `settings.json` 的
+//! 空配置初始化;初始化时若旧版 `settings.json` 的
 //! `aiBaseUrl/aiApiKey/aiModel` 三键仍在,额外合成一个「自定义」厂商完成
 //! 迁移。文件损坏时备份后重新播种,绝不阻塞调用方。
 //!
@@ -226,9 +226,9 @@ pub fn save_ai_config_file_at(data_dir: &Path, config: &AiConfigFile) -> AppResu
     Ok(())
 }
 
-/// 播种:内置目录 + 旧 settings.json 三键迁移(三键齐备时合成「自定义」厂商)。
+/// 播种:空配置 + 旧 settings.json 三键迁移(三键齐备时合成「自定义」厂商)。
 fn seed_at(data_dir: &Path) -> AiConfigFile {
-    let mut config = builtin_config();
+    let mut config = AiConfigFile::default();
     let legacy = read_legacy_settings(data_dir);
     let base_url = legacy
         .get("aiBaseUrl")
@@ -704,6 +704,31 @@ mod tests {
     }
 
     #[test]
+    fn fresh_install_starts_with_empty_config() {
+        let dir = temp_dir("fresh-install");
+        let config = load_ai_config_file_at(&dir);
+        assert_eq!(config.version, AI_CONFIG_VERSION);
+        assert!(config.providers.is_empty());
+        assert!(config.default_model.is_none());
+        assert!(config.chat.provider_id.is_none());
+        assert!(config.chat.model_id.is_none());
+        assert!(config.task_models.is_empty());
+        assert!(dir.join(AI_CONFIG_FILE_NAME).exists());
+        assert_eq!(load_ai_config_file_at(&dir), config);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn existing_providers_are_preserved() {
+        let dir = temp_dir("existing-providers");
+        let mut config = builtin_config();
+        normalize(&mut config);
+        save_ai_config_file_at(&dir, &config).unwrap();
+        assert_eq!(load_ai_config_file_at(&dir), config);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn seed_migrates_legacy_settings_keys() {
         let dir = temp_dir("migrate");
         fs::write(
@@ -712,6 +737,7 @@ mod tests {
         )
         .unwrap();
         let config = load_ai_config_file_at(&dir);
+        assert_eq!(config.providers.len(), 1);
         assert!(config.providers.contains_key(LEGACY_PROVIDER_ID));
         let reference = config.default_model.as_ref().unwrap();
         assert_eq!(reference.provider_id, LEGACY_PROVIDER_ID);
@@ -732,7 +758,8 @@ mod tests {
         let path = dir.join(AI_CONFIG_FILE_NAME);
         fs::write(&path, "{ not json").unwrap();
         let config = load_ai_config_file_at(&dir);
-        assert!(!config.providers.is_empty());
+        assert!(config.providers.is_empty());
+        assert!(config.default_model.is_none());
         assert!(path.exists(), "重新播种应生成新配置");
         let backups = fs::read_dir(&dir)
             .unwrap()

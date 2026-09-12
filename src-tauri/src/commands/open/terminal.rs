@@ -24,6 +24,19 @@ pub fn spawn_terminal(
     command: Option<&str>,
     shell: ShellKind,
 ) -> AppResult<()> {
+    spawn_terminal_with_env(path, title, command, shell, |_| {})
+}
+
+/// 为终端启动进程配置环境；工具链操作可注入最新 PATH，不修改 GUI 的全局环境。
+/// Windows Terminal 与 start 兜底必须使用相同配置。
+#[cfg(windows)]
+pub(crate) fn spawn_terminal_with_env(
+    path: &str,
+    title: &str,
+    command: Option<&str>,
+    shell: ShellKind,
+    configure: impl Fn(&mut Command),
+) -> AppResult<()> {
     // 即使调用方已提前探测，启动前仍防御性复查，覆盖运行期间卸载或直接传入
     // ShellKind 的调用点。被执行的命令往往是 npm 这类通用命令，降级优于阻断。
     let (shell, bash, ps) = match shell {
@@ -51,7 +64,7 @@ pub fn spawn_terminal(
     let command = command.as_deref();
     if let Some(wt) = find_wt() {
         // wt 是 GUI 子系统进程,自己创建窗口,不存在句柄透传问题,直接启动即可
-        let spawned = Command::new(wt)
+        let spawned = configured_terminal_command(&wt, &configure)
             .args(build_wt_args(path, title, command, shell, tools))
             .spawn();
         if spawned.is_ok() {
@@ -76,8 +89,20 @@ pub fn spawn_terminal(
     // powershell / git bash 分支由 start 的 /D 参数指定工作目录,命令经
     // -EncodedCommand(base64) / 双引号包裹的 -c 负载传递。
     let cmdline = build_start_cmdline(path, title, command, shell, tools);
-    hidden(Command::new("cmd")).raw_arg(&cmdline).spawn()?;
+    hidden(configured_terminal_command("cmd", &configure))
+        .raw_arg(&cmdline)
+        .spawn()?;
     Ok(())
+}
+
+#[cfg(windows)]
+pub(super) fn configured_terminal_command(
+    program: &str,
+    configure: &impl Fn(&mut Command),
+) -> Command {
+    let mut command = Command::new(program);
+    configure(&mut command);
+    command
 }
 
 /// 构造外层 cmd 的命令串(非 cmd 的 shell 也借 start 拉起,工作目录用 /D 指定):

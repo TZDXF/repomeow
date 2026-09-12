@@ -4,12 +4,19 @@ use std::time::{Duration, Instant};
 
 use crate::commands::open::hidden;
 
+fn probe_command(exe: &Path) -> Command {
+    let mut command = hidden(Command::new(exe));
+    #[cfg(windows)]
+    super::windows_env::apply(&mut command);
+    command
+}
+
 const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// where/which 命中的路径(找不到或执行失败返回空)。
 pub(super) fn cli_hits_on_path(cli: &str) -> Vec<PathBuf> {
     #[cfg(windows)]
-    let probe = hidden(Command::new("where")).arg(cli).output();
+    let probe = probe_command(Path::new("where.exe")).arg(cli).output();
     #[cfg(not(windows))]
     let probe = Command::new("which").arg(cli).output();
     let out = match probe {
@@ -58,7 +65,7 @@ pub(super) fn run_with_timeout_in(
     args: &[&str],
     timeout: Duration,
 ) -> Option<(bool, String)> {
-    let mut child = hidden(Command::new(exe))
+    let mut child = probe_command(exe)
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

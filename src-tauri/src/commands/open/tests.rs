@@ -517,3 +517,28 @@ fn start_cmdline_flattens_multiline_command() {
 fn find_wt_does_not_panic() {
     let _wt = find_wt();
 }
+
+#[cfg(windows)]
+#[test]
+fn terminal_launchers_receive_configured_environment() {
+    use std::ffi::OsStr;
+
+    // 两种启动器都必须拿到更新后的环境，并通过 Command 传递，不能拼进 shell 命令。
+    for program in ["wt.exe", "cmd"] {
+        let command = configured_terminal_command(program, &|command| {
+            command.env("PATH", r"C:\new uv\bin;C:\tools & sdk");
+            command.env("UV_INSTALL_DIR", r"C:\new uv\bin");
+        });
+        assert_eq!(command.get_program(), OsStr::new(program));
+        let env: std::collections::BTreeMap<_, _> = command.get_envs().collect();
+        assert_eq!(
+            env.get(OsStr::new("PATH")),
+            Some(&Some(OsStr::new(r"C:\new uv\bin;C:\tools & sdk")))
+        );
+        assert_eq!(
+            env.get(OsStr::new("UV_INSTALL_DIR")),
+            Some(&Some(OsStr::new(r"C:\new uv\bin")))
+        );
+        assert_eq!(command.get_args().count(), 0);
+    }
+}
