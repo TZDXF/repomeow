@@ -493,7 +493,7 @@ pub async fn ai_generate_batch_reports(
                         send_batch_status(&on_event, &item, "cancelled", None)
                     }
                     Ok(false) => send_batch_status(&on_event, &item, "skipped-no-commits", None),
-                    Err(error) if token.is_cancelled() => {
+                    Err(_) if token.is_cancelled() => {
                         send_batch_status(&on_event, &item, "cancelled", None)
                     }
                     Err(error) => {

@@ -1161,7 +1161,7 @@ mod tests {
         let mut entries = Vec::new();
         let mut seq = 1;
         let mut parent: Option<String> = None;
-        for i in 0..5 {
+        for _ in 0..5 {
             entries.push(message_entry(
                 seq,
                 parent.as_deref(),

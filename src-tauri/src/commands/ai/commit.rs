@@ -201,7 +201,7 @@ pub async fn ai_generate_commit_message(
     {
         Ok(output) => output,
         // 取消不算错误:与 report 一致返回 None,前端静默收场
-        Err(error) if run.as_ref().is_some_and(|run| run.token.is_cancelled()) => return Ok(None),
+        Err(_) if run.as_ref().is_some_and(|run| run.token.is_cancelled()) => return Ok(None),
         Err(error) => return Err(error),
     };
     record_usage(
