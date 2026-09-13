@@ -361,9 +361,6 @@ onBeforeUnmount(() => {
       >
         {{ t("settings.resources.market.remote.noAudits") }}
       </p>
-      <p v-else-if="!marketplaceId" class="px-2 py-1.5 text-[11px] text-muted-foreground">
-        {{ t("settings.resources.market.remote.noAuditSource") }}
-      </p>
       <div v-for="audit in audits" :key="audit.provider" class="flex items-center gap-0.5">
         <button
           type="button"

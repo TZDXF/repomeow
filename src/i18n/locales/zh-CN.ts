@@ -1894,7 +1894,6 @@ export default {
           auditDisclaimer:
             "第三方历史审计，仅供参考，不代表本地扫描结论，也不保证当前安装版本安全。GitHub 来源按技能名称匹配公开记录，请核对原文来源与日期。",
           noAudits: "未找到公开审计记录；这不表示已通过安全检查。",
-          noAuditSource: "此技能没有可查询的市场来源，本地扫描仍可使用。",
           selectAudit: "在右侧选择来源查看审计内容",
           originalAudit: "查看审计原文",
           translationHint: "翻译将使用已配置的翻译模型，发送审计文本；译文仅供参考，以原文为准。",
