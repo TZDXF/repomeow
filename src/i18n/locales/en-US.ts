@@ -539,7 +539,7 @@ export default {
       cloned: 'Cloned and added project "{name}".',
       modeAccount: "Account repos",
       accountDescription:
-        "Browse repositories under your linked accounts, select one to clone and add as a project.",
+        "Browse repositories under your accounts, select one to clone and add as a project.",
       accountLabel: "Account",
       accountLoading: "Loading accounts...",
       accountEmpty:
@@ -569,7 +569,7 @@ export default {
     relocate: {
       title: "Relocate directory",
       description:
-        'Select a new directory for project "{name}". Tags, custom commands, and other data will be preserved.',
+        'Select a new directory for "{name}". Tags, custom commands, and other data will be preserved.',
       dialogTitle: "Select new project directory",
       currentPath: "Current path",
       pathLabel: "New directory",
@@ -581,7 +581,7 @@ export default {
     moveDir: {
       title: "Move project directory",
       description:
-        'Move the folder of project "{name}" to a new location. The registered path will be updated. Moving across drives copies the folder, which may take a while for large directories.',
+        'Move "{name}" to a new location. The registered path will be updated. Moving across drives copies the folder, which can take a while for large directories.',
       dialogTitle: "Select new parent folder",
       parentLabel: "New parent folder",
       parentPlaceholder: "Select a folder...",
@@ -611,7 +611,7 @@ export default {
       success: "Git repository initialized",
       title: "Initialize Git repository",
       description:
-        "Run git init in the project directory, with an optional initial branch name and remote repository",
+        "Run git init in the project directory; pick a default branch and link a remote",
       branchLabel: "Default branch name",
       remoteLabel: "Remote repository (optional)",
       remotePlaceholder: "https://github.com/user/repo.git",
@@ -839,7 +839,7 @@ export default {
     conflict: {
       title: "Merge conflicts",
       description:
-        "The operation produced {count} conflicted files. Let the built-in agent resolve them in the background, or handle them in VS Code or a terminal.",
+        "The operation produced {count} conflicted files. Let the built-in agent resolve them, or handle them yourself in VS Code or a terminal.",
       files: "Conflicted files",
       agentLabel: "Built-in agent model",
       agentHint:
@@ -875,7 +875,7 @@ export default {
       branchBase: "Base branch {name} (not checked out in any worktree)",
       pathLabel: "Directory",
       pathHint:
-        "Supports the {branch} placeholder and relative paths (resolved against the repository root). Change the default template in Settings",
+        "Supports the {branch} placeholder and relative paths (relative to the repository root). Change the default template in Settings",
       creating: "Creating...",
       created: 'Worktree "{name}" created',
       mergeBack: "Merge into…",
@@ -1031,7 +1031,7 @@ export default {
   },
   report: {
     title: "Generate Report",
-    description: "Select projects and dates to generate a daily or weekly report",
+    description: "Pick projects and dates to generate a daily or weekly report",
     mode: "Type",
     modeDaily: "Daily",
     modeWeekly: "Weekly",
@@ -1138,15 +1138,15 @@ export default {
   },
   reportSchedule: {
     title: "Scheduled Tasks",
-    description: "Manage built-in tasks and scheduled reports",
+    description: "Manage the app's built-in tasks and scheduled reports",
     systemGitUpdate: "Git update check",
     systemTask: "System task",
     everyMinutes: "Every {count} minutes",
     editSystemTask: "Edit system task",
-    systemTaskHint: "System tasks can be disabled or rescheduled, but cannot be deleted.",
+    systemTaskHint: "System tasks can be disabled or rescheduled, but not deleted.",
     intervalLabel: "Run interval",
     minutes: "minutes",
-    intervalHint: "Enter 1–1440 minutes. Changes take effect immediately after saving.",
+    intervalHint: "Range 1–1440 minutes; changes take effect right after saving.",
     empty: "No scheduled tasks",
     create: "New schedule",
     edit: "Edit schedule",
@@ -1157,35 +1157,35 @@ export default {
     projectsLabel: "Select projects",
     tagIncludeLabel: "Include by tags",
     tagIncludeHint:
-      "Projects with any selected tag are included automatically (union with the projects checked below); newly tagged projects take effect without editing this task.",
+      "Projects with any selected tag are added automatically (unioned with the projects checked below); newly tagged projects join right away.",
     reportType: "Report type",
     typeDaily: "Daily",
     typeWeekly: "Weekly",
-    typeDailyHint: "Generates a commit report for the selected day at the set time",
+    typeDailyHint: "Generates a daily report for the selected day at the set time",
     dailyRangeLabel: "Report day",
     dailyRangePrevious: "Previous day",
     dailyRangeToday: "Same day",
     dailyTodayHint:
-      'Commits made after the run time on the same day won\'t be included; choose "Previous day" if you often work late.',
+      'Commits made after the run time on the same day are excluded; pick "Previous day" if you often work late.',
     typeWeeklyHint:
-      "By work week or a custom weekday range, fires at the set time on the period's end day, covering from the start day through that day.",
+      "By work week or a custom weekday range, fires at the set time on the end day, covering from the start day through that day.",
     timeLabel: "Run time",
     weekdayLabel: "Weekday filter",
     everyday: "Every day",
     weekdaysOnly: "Weekdays only (Mon-Fri)",
     chineseWorkdayOnly: "Chinese workdays only",
     chineseWorkdayHint:
-      "Based on official Chinese holidays and makeup workdays; excludes public holidays and includes makeup workdays.",
+      "Follows official Chinese holidays and makeup days; excludes public holidays and includes makeup workdays.",
     workweekLabel: "Fires on work week's last day",
     workweekHint:
-      "A work week is a continuous stretch of working time (including makeup workdays; a single mid-week public holiday does not break it). The task fires automatically at the set time on the last workday of the work week, covering its start day through that day.",
+      "A work week is a continuous stretch of working days (including makeup days; a single mid-week holiday does not break it). The task fires at the set time on the last workday, covering the work week's start day through that day.",
     weeklyMode: "Weekly period",
     weeklyModeWorkweek: "Work week",
     weeklyModeCustom: "Custom",
     weeklyStart: "From",
     weeklyEnd: "To",
     weeklyCustomHint:
-      "Fires weekly at the set time on the end weekday; the report covers from the start weekday through that day.",
+      "Fires weekly at the set time on the end weekday; the report covers the start weekday through that day.",
     authorLabel: "Author",
     authorMe: "Myself only",
     authorAll: "Everyone",
@@ -1279,12 +1279,12 @@ export default {
     back: "Back to Project",
     stale: "Code updated",
     staleHint:
-      "New commits landed after this wiki was generated; content may be outdated. Consider regenerating.",
+      "New commits landed after the wiki was generated; content may be outdated. Consider regenerating.",
     generate: "Generate Wiki",
     regenerate: "Regenerate",
     genConfigTitle: "Generation settings",
     genConfigDesc:
-      "Choose the model used to generate this project's Wiki; the config is stored independently in its Wiki folder",
+      "Choose the model used to generate this project's Wiki; the config is saved independently in its Wiki folder",
     genConfigError: "Failed to read or save the Wiki generation config: {error}",
     genConfirm: "Start generating",
     agentModel: "Model",
@@ -1303,7 +1303,7 @@ export default {
     deleteFailed: "Delete failed: {error}",
     emptyTitle: "No wiki yet",
     emptyDescription:
-      "Generate a structured wiki from project files with AI: it analyzes the file tree into an outline, then writes each page. Results are stored under ~/.repomeow/wiki/.",
+      "Generate a structured wiki from project files with AI: it first analyzes the file tree into an outline, then writes each page. Output is saved under ~/.repomeow/wiki/.",
     emptyContent:
       "This page has no content. The previous generation was probably interrupted or failed.",
     morePages: "...and {count} more pages to go",
@@ -1313,7 +1313,7 @@ export default {
       "The AI returned an incomplete wiki outline. Try again; if it keeps failing, switch the model.",
     update: "Update",
     updateHint:
-      "Incremental update: only regenerates pages affected by code changes. New files do not create new pages — regenerate the whole wiki after structural changes.",
+      "Incremental update: only regenerates pages affected by code changes. New files don't add pages — regenerate the whole wiki after structural changes.",
     updatedPages: "Updated {count} page(s)",
     updateNoop: "No pages are affected by these code changes",
     autoUpdated: 'Wiki for "{name}" was updated automatically ({count} page(s))',
@@ -1680,13 +1680,13 @@ export default {
       language: "Language",
       languageDescription: "Choose the interface language",
       languageNote:
-        "UI translations will take effect in a future release; only the preference is saved for now.",
+        "UI translations will take effect in a future release; for now, only the preference is saved.",
       openWith: "Default open with",
       openWithDescription:
-        "The default action of the Open button on the project detail page. You can always pick another one from the dropdown. Drag to reorder the list; only editors that are installed and have their command on PATH are listed.",
+        "Default action of the Open button on the project detail page. You can switch from the dropdown anytime; drag to reorder. Only editors that are installed and have their command on PATH are listed.",
       worktreeDir: "Default worktree directory",
       worktreeDirDescription:
-        "Default directory template for new worktrees. Supports the {branch} placeholder and relative paths (resolved against the repository root), e.g. .worktrees/{branch}",
+        "Default directory template for new worktrees. Supports the {branch} placeholder and relative paths (relative to the repository root), e.g. .worktrees/{branch}"
     },
     update: {
       autoCheck: "Check for updates on startup",
@@ -1696,7 +1696,7 @@ export default {
     tray: {
       title: "System Tray",
       description:
-        "Behavior when the window's close button is clicked. Single-click the tray icon for a project overview; double-click to show the main window.",
+        "Behavior of the window close button. Single-click the tray icon for a project overview; double-click to show the main window.",
       closeToTray: "Minimize to tray",
       closeToTrayHint:
         "Keep the app running in the system tray after closing the window. Quit from the tray menu.",
@@ -1705,7 +1705,7 @@ export default {
     },
     terminal: {
       title: "Terminal for Commands",
-      description: "The terminal used to run npm scripts, custom commands and more",
+      description: "Terminal used to run npm scripts, custom commands, and more",
       available: "Available",
       notDetected: "Not detected",
       selectedUnavailable: "The selected shell was not detected; commands will fall back to cmd",
@@ -1749,7 +1749,7 @@ export default {
       concurrencyHint: "Maximum concurrent AI requests (1-5). Lower this if the API rate-limits.",
       moreModelSettings: "More model settings",
       taskModelHint:
-        "Follow the default unless overridden. Deleted models fall back to the default.",
+        "Uses the default unless overridden. Deleted models automatically fall back to the default.",
       taskModel_commit: "Commit messages",
       taskModel_report: "Daily / weekly reports",
       taskModel_translation: "Translation",
@@ -1761,7 +1761,7 @@ export default {
       importCcSwitch: "Import from CC Switch",
       ccSwitchTitle: "Import from CC Switch",
       ccSwitchDesc:
-        "Reads providers from ~/.cc-switch on this machine and maps each source app to a supported wire API (codex / claude / gemini / opencode / openclaw / pi / hermes / grokbuild); entries with an unrecognized protocol are not listed",
+        "Reads providers from ~/.cc-switch and maps each source app to a supported wire API (codex / claude / gemini / opencode / openclaw / pi / hermes / grokbuild); unrecognized entries are not listed",
       ccSwitchLoading: "Reading CC Switch configuration...",
       ccSwitchNotFound: "No CC Switch configuration detected (~/.cc-switch does not exist)",
       ccSwitchEmpty: "No providers available for import",
@@ -1890,7 +1890,7 @@ export default {
     accounts: {
       title: "Accounts",
       description:
-        "Link GitHub / Gitee / GitLab accounts to browse their repositories and clone them with one click.",
+        "Link GitHub / Gitee / GitLab accounts to browse their repos and clone them with one click.",
       enableGhCli: "GitHub CLI (gh)",
       enableGhCliHint:
         'When enabled, a logged-in `gh` CLI appears as an account in the "Add Project → Account Repositories" dropdown.',
@@ -1902,7 +1902,7 @@ export default {
       addTitle: "Link account",
       editTitle: "Edit account",
       formDescription:
-        "On save, the platform API is called to verify the token and fetch the username. The account is only saved on success.",
+        "On save, the API is called to verify the token and fetch the username. Saved only on success.",
       provider: "Provider",
       baseUrl: "Instance URL",
       baseUrlPlaceholder: "https://gitlab.example.com (intranet http URLs allowed)",
@@ -1926,17 +1926,17 @@ export default {
     prompts: {
       title: "Prompts",
       description:
-        "Customize the prompts used when AI generates commit messages and daily reports. The content is sent to the model as-is as the system prompt.",
+        "Customize the prompts used when AI generates commit messages and daily reports. The content is sent to the model verbatim as the system prompt.",
       openDir: "Open prompts folder",
       openDirFailed: "Failed to open folder: {error}",
       commit: "Commit message",
-      commitDescription: "Prompt used when generating git commit messages",
+      commitDescription: "Prompt used to generate git commit messages",
       report: "Daily report",
-      reportDescription: "Prompt used when summarizing commits into a daily report",
+      reportDescription: "Prompt used to summarize commits into a daily report",
       weeklyReport: "Weekly report prompt",
       weeklyReportDescription:
-        "System prompt used to generate weekly reports. Leave blank to use the built-in default template.",
-      note: "Leave empty to use the built-in default template (shown as the placeholder). The output language is appended automatically based on the language setting, no need to include it.",
+        "System prompt used to generate weekly reports. Leave blank to use the default template.",
+      note: "Leave empty to use the default template (shown as the placeholder). The output language is appended automatically based on the language setting—no need to include it.",
       reset: "Reset to default",
       saved: "Prompts saved",
       saveFailed: "Save failed: {error}",
@@ -1945,7 +1945,7 @@ export default {
     resources: {
       title: "Resource library",
       description:
-        "Install skills from the marketplace, maintain the global skill library and MCP server library, and sync the whole library to a remote repository.",
+        "Install skills from the marketplace, maintain the global skill library and MCP server library, and back up the whole library to a remote repository.",
       tabs: {
         market: "Market",
         skills: "Skills",
@@ -1982,7 +1982,7 @@ export default {
             "Translation sends the audit text to your configured translation model. The original remains authoritative.",
         },
         description:
-          "Browse and install skills from marketplace sources; installed skills land in the local Skills library.",
+          "Browse and install skills from the marketplace; installed skills land in the local Skills library.",
         searchPlaceholder: "Search marketplace skills...",
         search: "Search",
         refresh: "Refresh",
@@ -2013,7 +2013,7 @@ export default {
           url: "Import from URL...",
           urlTitle: "Import skill from URL",
           urlDescription:
-            "Clone a Git repository (e.g. a GitHub repo) and import the skill folders inside that contain SKILL.md",
+            "Clone a Git repository and import the skill folders inside that contain SKILL.md",
           urlPlaceholder: "https://github.com/user/repo.git",
           urlConfirm: "Clone and import",
           urlInvalid: "URL must start with http:// or https://",
@@ -2054,7 +2054,7 @@ export default {
         groups: {
           title: "Skill groups",
           description:
-            "Create, rename, delete, and reorder groups with optional descriptions. A skill can belong to multiple groups.",
+            "Create, rename, delete, and reorder groups; descriptions are optional. A skill can belong to multiple groups.",
           newPlaceholder: "New group name",
           descPlaceholder: "Group description (optional)",
           create: "Create",
@@ -2173,7 +2173,7 @@ export default {
         editDialog: {
           createTitle: "New MCP server",
           editTitle: "Edit MCP server",
-          description: "Configure a generic MCP server definition reusable in project AI assets.",
+          description: "Configure a generic MCP server definition, reusable in project AI assets.",
           nameLabel: "Name",
           namePlaceholder: "Server name",
           nameRequired: "Please enter a server name",
@@ -2226,7 +2226,7 @@ export default {
       },
       backup: {
         title: "Backup sync",
-        description: "Sync the global resource library (Skills / MCP) to a remote git repository.",
+        description: "Sync the global resource library (Skills / MCP), as a local git repo, to a remote.",
         notConfigured:
           "Backup sync is not configured yet. Set a remote repository to sync with one click.",
         configure: "Configure sync",
@@ -2261,7 +2261,7 @@ export default {
         configDialog: {
           title: "Configure backup sync",
           description:
-            "Enter the remote git repository URL and branch. The first sync pushes the local library.",
+            "Enter the remote git repo URL and branch. The first sync pushes the local library.",
           remoteUrlLabel: "Remote repository URL",
           remoteUrlPlaceholder: "e.g. https://github.com/user/repomeow-resources.git",
           branchLabel: "Branch",
@@ -2280,7 +2280,7 @@ export default {
     },
     skin: {
       title: "Theme style",
-      description: "Pick a visual style, freely combined with light/dark mode",
+      description: "Pick a visual style; freely combinable with light/dark mode",
       default: "Default",
       defaultDesc: "Clean and neutral look",
       island: "Animal Island",
@@ -2293,7 +2293,7 @@ export default {
     mdTheme: {
       title: "Markdown theme",
       description:
-        "Choose the rendering style for README and other Markdown content. Adapts automatically with light/dark mode.",
+        "Choose the rendering style for README and other Markdown. Adapts automatically to light/dark mode.",
       default: "Follow app",
       defaultDesc: "Matches the app's interface theme",
       github: "GitHub",
@@ -2329,7 +2329,7 @@ export default {
     archive: {
       title: "Archived projects",
       description:
-        "Archived projects keep their history and can be restored to the project list or permanently deleted.",
+        "Archived projects keep their history and can be restored or permanently deleted.",
       archivedAt: "Archived {time}",
       searchPlaceholder: "Search name, description, or path...",
       noMatch: "No matching archived projects",
@@ -2350,10 +2350,10 @@ export default {
     tracking: {
       title: "Update tracking",
       description:
-        "Tracked projects are checked periodically and fast-forward pulled automatically when the remote has updates; when fast-forward is not possible (diverged or local changes may conflict), the pull is canceled silently.",
+        "Tracked projects are checked periodically and fast-forward pulled automatically when the remote has updates; if fast-forward isn't possible (diverged or local changes may conflict), the pull is silently canceled.",
       wikiAutoUpdateLabel: "Auto-update wiki",
       wikiAutoUpdateHint:
-        "Checks wiki source files after local code changes and incrementally updates only affected pages. When on, it applies to all projects; when off, only to projects selected below.",
+        "Checks wiki sources after local code changes and incrementally updates only affected pages. When on, applies to all projects; when off, only to the projects selected below.",
       wikiToggleHint: "Toggle automatic wiki updates for this project",
       wikiToggleGloballyOn:
         "Global switch is on: every project with a wiki is auto-updated, no per-project checkbox needed",
