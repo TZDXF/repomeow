@@ -1,4 +1,5 @@
 import { cmd } from "@/lib/tauri";
+import type { ProjectSkill } from "@/types";
 
 export type ProjectResourceKind = "skills" | "mcp";
 export interface ProjectAiTarget {
@@ -211,4 +212,45 @@ export function assignChanges(
       (d) => selectedAgents.has(d.agentId) && (d.status === "update" || d.status === "missing"),
     ).length,
   };
+}
+
+/** 同名技能跨 Agent 目录去重后的合并视图:一个技能一行,dirs 记录全部实例目录。 */
+export interface MergedSkill {
+  name: string;
+  description: string;
+  /** 全部同名技能目录(仓库相对路径),按 Agent 目标顺序稳定排列,首项为主来源。 */
+  dirs: string[];
+}
+
+/**
+ * 非托管技能按名称去重:同一技能散落在多个 Agent skills 目录时合并为一行。
+ * 扫描层保留全部实例(与 Agent 显隐设置无关),合并只发生在展示层;
+ * skillPaths 为各 Agent 的技能根(按 TARGETS 顺序),目录按所属根排序,
+ * 首项作为导入/认领/预览的主来源,描述取首个非空值。
+ */
+export function mergeSkillsByName(skills: ProjectSkill[], skillPaths: string[]): MergedSkill[] {
+  const rank = (dir: string) => {
+    const index = skillPaths.findIndex((root) => dir.startsWith(`${root}/`));
+    return index === -1 ? skillPaths.length : index;
+  };
+  const byName = new Map<string, ProjectSkill[]>();
+  for (const skill of skills) {
+    const group = byName.get(skill.name);
+    if (group) {
+      group.push(skill);
+    } else {
+      byName.set(skill.name, [skill]);
+    }
+  }
+  return [...byName.values()].map((group) => {
+    const ordered = [...group].sort(
+      (a, b) => rank(a.dir) - rank(b.dir) || a.dir.localeCompare(b.dir),
+    );
+    return {
+      name: ordered[0].name,
+      // 描述跟随主来源(排序后首个目录),为空时取其他实例的首个非空值。
+      description: ordered[0].description || ordered.find((s) => s.description)?.description || "",
+      dirs: ordered.map((s) => s.dir),
+    };
+  });
 }

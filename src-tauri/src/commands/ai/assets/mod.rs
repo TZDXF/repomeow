@@ -179,7 +179,7 @@ pub(super) const MCP_TARGETS: &[McpTarget] = &[
     },
 ];
 
-/// 项目级 skills 目录候选;同名技能按真实目录独立保留。
+/// 项目级 skills 目录候选;同名技能按真实目录独立保留(与 Agent 显隐设置无关,全量扫描)。
 /// `.claude/skills` 是 Claude Code 约定,`.agents/skills` 是跨 agent 约定,
 /// `.zcode/skills` 是 ZCode 项目级 skills 目录。
 const SKILL_DIR_PROBES: &[&str] = &[
@@ -302,7 +302,8 @@ fn read_mcp_servers(path: &Path, target: &McpTarget) -> Vec<McpServerEntry> {
 }
 
 /// 扫全部候选 skills 目录:每个含 SKILL.md 的子目录算一个技能,
-/// 按真实目录保留所有实例,同名资源可在不同 Agent 目录各自配置。
+/// 按真实目录保留所有实例,同名资源可在不同 Agent 目录各自配置;
+/// 同名合并且去重只发生在前端展示层,后端始终按目录独立处理。
 fn scan_project_skills(root: &Path) -> Vec<ProjectSkill> {
     let mut skills: Vec<ProjectSkill> = Vec::new();
     for rel_dir in SKILL_DIR_PROBES {

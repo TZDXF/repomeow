@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   assignChanges,
+  mergeSkillsByName,
   resourceTree,
   selectionState,
   toggleResources,
   type ResourceChoice,
   type ResourceDeployment,
 } from "./project-ai-resources";
+import type { ProjectSkill } from "@/types";
 
 vi.mock("@/lib/tauri", () => ({ cmd: vi.fn() }));
 
@@ -161,5 +163,58 @@ it("sends the snapshot revision with add/assign/remove commands", async () => {
     source: ".mcp.json",
     name: "context",
     expectedRevision: "revision-1",
+  });
+});
+
+describe("mergeSkillsByName", () => {
+  const skill = (dir: string, name: string, description = ""): ProjectSkill => ({
+    dir,
+    name,
+    description,
+    descriptionTokenCount: 0,
+    tokenCount: 0,
+  });
+  const roots = [".claude/skills", ".agents/skills", ".zcode/skills"];
+
+  it("merges same-name skills across agent directories into one row", () => {
+    const merged = mergeSkillsByName(
+      [
+        skill(".agents/skills/element-source", "element-source", "from agents"),
+        skill(".claude/skills/element-source", "element-source", "from claude"),
+        skill(".agents/skills/update-version", "update-version"),
+      ],
+      roots,
+    );
+    expect(merged).toEqual([
+      {
+        name: "element-source",
+        description: "from claude",
+        dirs: [".claude/skills/element-source", ".agents/skills/element-source"],
+      },
+      {
+        name: "update-version",
+        description: "",
+        dirs: [".agents/skills/update-version"],
+      },
+    ]);
+  });
+
+  it("keeps distinct names as separate rows and falls back to lexicographic order", () => {
+    const merged = mergeSkillsByName(
+      [
+        skill(".zcode/skills/a", "a"),
+        skill(".unknown/skills/a", "a"),
+        skill(".zcode/skills/b", "b"),
+      ],
+      roots,
+    );
+    expect(merged.map((m) => [m.name, m.dirs])).toEqual([
+      ["a", [".zcode/skills/a", ".unknown/skills/a"]],
+      ["b", [".zcode/skills/b"]],
+    ]);
+  });
+
+  it("returns empty for no skills", () => {
+    expect(mergeSkillsByName([], roots)).toEqual([]);
   });
 });

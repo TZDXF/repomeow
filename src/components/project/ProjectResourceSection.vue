@@ -22,6 +22,7 @@ import {
   deleteUnmanagedProjectResource,
   importProjectResource,
   loadProjectResources,
+  mergeSkillsByName,
   removeProjectResource,
   repairProjectResource,
   resourceTree,
@@ -154,18 +155,25 @@ interface UnmanagedItem {
   name: string;
   /** 技能描述(仅 skills 有;mcp 为空串)。 */
   description: string;
-  /** 预览路径(skills 为 SKILL.md 路径,mcp 为配置文件路径)。 */
+  /** 预览路径(skills 为主来源的 SKILL.md 路径,mcp 为配置文件路径)。 */
   path: string;
-  /** 导入来源:skills = 技能目录;mcp = 配置文件路径。 */
+  /** 主来源:skills = 首个技能目录;mcp = 配置文件路径。 */
   source: string;
+  /** 全部来源:skills 同名去重后的所有技能目录(含主来源);mcp 恒为单元素。 */
+  sources: string[];
 }
+/** 非托管条目:skills 按名称跨 Agent 目录去重(扫描保留全部实例,合并只在展示层)。 */
 const unmanaged = computed<UnmanagedItem[]>(() =>
   props.kind === "skills"
-    ? unmanagedSkills.value.map((s) => ({
-        key: `skill:${s.dir}`,
+    ? mergeSkillsByName(
+        unmanagedSkills.value,
+        props.targets.map((a) => a.skillPath),
+      ).map((s) => ({
+        key: `skill:${s.name}`,
         name: s.name,
-        path: joinPath(s.dir, "SKILL.md"),
-        source: s.dir,
+        path: joinPath(s.dirs[0], "SKILL.md"),
+        source: s.dirs[0],
+        sources: s.dirs,
         description: s.description,
       }))
     : unmanagedMcp.value.map((s) => ({
@@ -173,6 +181,7 @@ const unmanaged = computed<UnmanagedItem[]>(() =>
         name: s.name,
         path: s.path,
         source: s.path,
+        sources: [s.path],
         description: "",
       })),
 );
@@ -334,29 +343,42 @@ function previewUnmanaged(item: UnmanagedItem) {
   }
   emit("preview", item.path);
 }
-/** 非托管行的归属 Agent:skills 按目录前缀、mcp 按配置文件路径判定。 */
-function unmanagedOwner(item: UnmanagedItem): string {
-  const owner =
-    props.kind === "skills"
-      ? props.targets.find((a) => item.source.startsWith(`${a.skillPath}/`))
-      : props.targets.find((a) => a.mcpPath === item.source);
-  return owner?.id ?? "";
+/** 非托管行的归属 Agent 集合:skills 同名合并后可有多个归属(每个目录前缀各算一个)。 */
+function unmanagedOwners(item: UnmanagedItem): string[] {
+  if (props.kind === "skills") {
+    return item.sources
+      .map((dir) => props.targets.find((a) => dir.startsWith(`${a.skillPath}/`))?.id)
+      .filter((id): id is string => !!id);
+  }
+  const owner = props.targets.find((a) => a.mcpPath === item.source);
+  return owner ? [owner.id] : [];
 }
-/** 非托管行可见 Agent:未隐藏目标 ∪ 归属 Agent(即使隐藏也展示其现状)。 */
-function unmanagedChips(item: UnmanagedItem) {
-  return props.targets.filter(
-    (a) => !settings.hiddenResourceAgents.includes(a.id) || a.id === unmanagedOwner(item),
-  );
+/** 该 Agent 名下的实例来源(skills 为其目录,mcp 为配置文件路径);非归属返回空。 */
+function unmanagedOwnerSource(item: UnmanagedItem, agentId: string): string {
+  const target = props.targets.find((a) => a.id === agentId);
+  if (!target) {
+    return "";
+  }
+  if (props.kind === "skills") {
+    return item.sources.find((dir) => dir.startsWith(`${target.skillPath}/`)) ?? "";
+  }
+  return target.mcpPath === item.source ? item.source : "";
+}
+/** 非托管行可见 Agent:跟随设置显隐(扫描与显隐无关,只在展示层过滤,全行表现一致)。 */
+function unmanagedChips() {
+  return props.targets.filter((a) => !settings.hiddenResourceAgents.includes(a.id));
 }
 function unmanagedChipTitle(item: UnmanagedItem, agent: ProjectAiTarget) {
-  if (unmanagedOwner(item) === agent.id) {
-    return `${agent.name} · ${item.source} · ${t("projectAi.states.configured")}`;
+  const owned = unmanagedOwnerSource(item, agent.id);
+  if (owned) {
+    return `${agent.name} · ${owned} · ${t("projectAi.states.configured")}`;
   }
   return `${agent.name} · ${props.kind === "skills" ? agent.skillPath : agent.mcpPath}`;
 }
 /**
  * 非托管资源直接配置 Agent:先认领为项目本地来源(记录来源、不入库,
  * 来源 Agent 按现状登记),再把目标集合设为「现状 ∪ 点击的 Agent」一次 assign。
+ * skills 同名合并行:其余归属 Agent 一并并入目标集合,同名副本统一纳入同一托管记录。
  */
 async function configureUnmanaged(item: UnmanagedItem, agent: ProjectAiTarget) {
   if (!data.value || toggling.value) {
@@ -375,6 +397,9 @@ async function configureUnmanaged(item: UnmanagedItem, agent: ProjectAiTarget) {
     const current = new Set(
       snapshot.deployments.filter((d) => d.resourceId === outcome.resourceId).map((d) => d.agentId),
     );
+    for (const owner of unmanagedOwners(item)) {
+      current.add(owner);
+    }
     current.add(agent.id);
     const result = await assignProjectResource({
       path: props.projectPath,
@@ -446,13 +471,18 @@ async function importUnmanaged(item: UnmanagedItem) {
   }
   importing.value = item.key;
   try {
-    await importProjectResource({
-      path: props.projectPath,
-      kind: props.kind,
-      source: item.source,
-      name: props.kind === "mcp" ? item.name : undefined,
-      expectedRevision: data.value.revision,
-    });
+    // skills 同名合并行:逐目录导入(同名复用同一库条目,各目录归属 Agent 按现状认领);
+    // 每次导入会使 revision 失效,逐项重取快照。
+    for (const source of item.sources) {
+      const snapshot = await loadProjectResources(props.projectPath, props.kind);
+      await importProjectResource({
+        path: props.projectPath,
+        kind: props.kind,
+        source,
+        name: props.kind === "mcp" ? item.name : undefined,
+        expectedRevision: snapshot.revision,
+      });
+    }
     toast.success(t("projectAi.imported", { name: item.name }));
     changed();
   } catch (e) {
@@ -469,13 +499,17 @@ async function confirmRemoveUnmanaged() {
   }
   removingUnmanaged.value = true;
   try {
-    await deleteUnmanagedProjectResource({
-      path: props.projectPath,
-      kind: props.kind,
-      source: target.source,
-      name: props.kind === "mcp" ? target.name : undefined,
-      expectedRevision: data.value.revision,
-    });
+    // skills 同名合并行:逐目录删除;每次删除会使 revision 失效,逐项重取快照。
+    for (const source of target.sources) {
+      const snapshot = await loadProjectResources(props.projectPath, props.kind);
+      await deleteUnmanagedProjectResource({
+        path: props.projectPath,
+        kind: props.kind,
+        source,
+        name: props.kind === "mcp" ? target.name : undefined,
+        expectedRevision: snapshot.revision,
+      });
+    }
     toast.success(t("projectAi.removed", { name: target.name }));
     unmanagedRemoveTarget.value = null;
     changed();
@@ -787,15 +821,15 @@ function changed() {
           </div>
           <div class="flex flex-wrap gap-1">
             <button
-              v-for="agent in unmanagedChips(item)"
+              v-for="agent in unmanagedChips()"
               :key="agent.id"
               class="flex size-6 items-center justify-center rounded border"
               :class="
-                unmanagedOwner(item) === agent.id
+                unmanagedOwnerSource(item, agent.id)
                   ? 'border-primary/40 bg-primary/10 text-primary'
                   : 'text-muted-foreground hover:bg-accent hover:text-foreground'
               "
-              :disabled="!!toggling || unmanagedOwner(item) === agent.id"
+              :disabled="!!toggling || !!unmanagedOwnerSource(item, agent.id)"
               :title="unmanagedChipTitle(item, agent)"
               @click="configureUnmanaged(item, agent)"
             >
