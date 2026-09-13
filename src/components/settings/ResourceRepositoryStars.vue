@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Star } from "@lucide/vue";
 import { toast } from "vue-sonner";
+import { formatCompactNumber } from "@/lib/format";
 import { readMarketplaceRepository } from "@/lib/resource-library";
 
 const props = defineProps<{ source: string }>();
@@ -46,17 +47,19 @@ watch(() => props.source, load, { immediate: true });
   <button
     type="button"
     class="flex shrink-0 items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-    :title="error || t('settings.resources.market.remote.repoStars')"
+    :title="
+      error ||
+      `${t('settings.resources.market.remote.repoStars')}${stars !== null ? `: ${stars}` : ''}`
+    "
     :disabled="loading"
     @click="error ? load() : openRepository()"
   >
     <Star class="h-3.5 w-3.5" />
-    {{ t("settings.resources.market.remote.repoStars") }}:
     {{
       loading
         ? "…"
         : stars !== null
-          ? String(stars)
+          ? formatCompactNumber(stars)
           : t("settings.resources.market.remote.retryStars")
     }}
   </button>

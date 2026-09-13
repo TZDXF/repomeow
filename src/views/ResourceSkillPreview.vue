@@ -763,8 +763,23 @@ const llmNotice = computed(() => {
         >
           {{ skill?.description ?? localMeta?.description }}
         </p>
-        <!-- 当前技能所属分组徽标,样式与 Skills 列表卡片一致 -->
-        <div v-if="skillGroupEntries.length" class="flex flex-wrap items-center gap-1">
+        <!-- 分组操作与所属标签集中展示 -->
+        <div
+          v-if="!isLocal || skillGroupEntries.length"
+          class="mt-1 flex flex-wrap items-center gap-1"
+        >
+          <Button
+            v-if="!isLocal"
+            variant="ghost"
+            size="sm"
+            class="h-6 shrink-0 gap-1 rounded-full px-2 text-[11px] text-muted-foreground"
+            :title="t('settings.resources.skills.previewPage.groups.button')"
+            @click="openGroupsDialog"
+          >
+            <ListPlus class="h-3 w-3" />
+            {{ t("settings.resources.skills.previewPage.groups.button") }}
+          </Button>
+
           <span
             v-for="entry in skillGroupEntries"
             :key="entry.id"
@@ -791,23 +806,16 @@ const llmNotice = computed(() => {
           <ExternalLink class="h-3.5 w-3.5" />
           {{ skill.marketplace.source }}
         </Button>
-        <Button
-          v-if="!isLocal"
-          variant="ghost"
-          size="sm"
-          class="h-8 gap-1.5"
-          :title="t('settings.resources.skills.previewPage.groups.button')"
-          @click="openGroupsDialog"
-        >
-          <ListPlus class="h-3.5 w-3.5" />
-          {{ t("settings.resources.skills.previewPage.groups.button") }}
-        </Button>
+        <ResourceRepositoryStars
+          v-if="skill?.marketplace"
+          :source="skill.marketplace.source"
+          class="mx-1.5"
+        />
         <Button variant="ghost" size="sm" class="h-8 gap-1.5" @click="openDir">
           <FolderOpen class="h-3.5 w-3.5" />
           {{ t("settings.resources.skills.previewPage.openDir") }}
         </Button>
       </div>
-      <ResourceRepositoryStars v-if="skill?.marketplace" :source="skill.marketplace.source" />
     </header>
 
     <div class="flex min-h-0 flex-1">
