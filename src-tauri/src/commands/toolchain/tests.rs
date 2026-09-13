@@ -368,3 +368,25 @@ fn registry_ids_are_unique() {
         assert!(seen.insert(spec.id), "重复的工具 id: {}", spec.id);
     }
 }
+
+#[test]
+fn powershell_detection_and_operations() {
+    assert!(TOOLS.iter().any(|spec| spec.id == "pwsh"));
+    assert_eq!(extract_semver("PowerShell 7.6.0").as_deref(), Some("7.6.0"));
+    let missing = caps_for("pwsh", false, None, false);
+    assert_eq!(missing.can_install, cfg!(windows));
+    assert!(!missing.can_update && !missing.can_uninstall);
+    let installed = caps_for("pwsh", true, Some("standalone"), false);
+    assert!(!installed.can_install && !installed.can_switch && !installed.can_list_remote);
+    assert_eq!(installed.can_update, cfg!(windows));
+    assert_eq!(installed.can_uninstall, cfg!(windows));
+    for (op, action) in [("install", "install"), ("update", "upgrade"), ("uninstall", "uninstall")] {
+        let result = resolve_op("pwsh", op, None, None);
+        if cfg!(windows) {
+            assert_eq!(result.unwrap(), format!("winget {action} --id Microsoft.PowerShell -e"));
+        } else {
+            assert!(result.is_err());
+        }
+    }
+    assert!(resolve_op("pwsh", "use", Some("7.6.0"), None).is_err());
+}

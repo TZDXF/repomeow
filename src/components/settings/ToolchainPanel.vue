@@ -47,13 +47,14 @@ const scanning = ref(false);
 const scanned = ref(false);
 
 /** 分组展示顺序与图标;工具行顺序由后端 TOOLS 注册表决定 */
-const KIND_ORDER: ToolchainKind[] = ["rust", "python", "node", "dotnet", "git"];
+const KIND_ORDER: ToolchainKind[] = ["rust", "python", "node", "dotnet", "git", "powershell"];
 const GROUP_ICONS: Record<ToolchainKind, Component> = {
   rust: markRaw(Hammer),
   python: markRaw(FileTerminal),
   node: markRaw(Hexagon),
   dotnet: markRaw(Box),
   git: markRaw(GitBranch),
+  powershell: markRaw(FileTerminal),
 };
 
 const groups = computed(() =>
@@ -72,6 +73,7 @@ function versionLabel(tool: ToolchainStatus): string {
 }
 
 function displayName(tool: ToolchainStatus): string {
+  if (tool.id === "pwsh") return "PowerShell 7";
   return tool.id === "vp" ? "vp (Vite+)" : tool.id;
 }
 

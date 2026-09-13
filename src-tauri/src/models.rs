@@ -500,6 +500,7 @@ pub enum ToolchainKind {
     Node,
     Dotnet,
     Git,
+    Powershell,
 }
 
 /// 版本管理器登记的一个版本(rustup 工具链 / nvm·fnm·vp 的 Node 版本 / uv 的 Python 版本 / dotnet SDK)

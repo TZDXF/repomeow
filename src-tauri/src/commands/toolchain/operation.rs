@@ -20,6 +20,13 @@ pub(super) fn caps_for(
     rustup_found: bool,
 ) -> ToolchainCaps {
     match id {
+        "pwsh" => ToolchainCaps {
+            can_install: cfg!(windows) && !found,
+            can_update: cfg!(windows) && found,
+            can_uninstall: cfg!(windows) && found,
+            can_switch: false,
+            can_list_remote: false,
+        },
         "rustup" | "vp" => ToolchainCaps {
             can_install: !found,
             can_update: found,
@@ -98,6 +105,12 @@ pub(super) fn resolve_op(
         None => None,
     };
     match tool {
+        "pwsh" if cfg!(windows) => match op {
+            "install" => Ok(winget("install", "Microsoft.PowerShell")),
+            "update" => Ok(winget("upgrade", "Microsoft.PowerShell")),
+            "uninstall" => Ok(winget("uninstall", "Microsoft.PowerShell")),
+            _ => Err(unsupported(tool, op)),
+        },
         "rustup" | "rustc" | "cargo" => rust::resolve(tool, op),
         "uv" => python::resolve(op, version, source),
         "nvm" | "fnm" | "vp" => node::resolve(tool, op, version, source),

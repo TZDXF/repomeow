@@ -1,5 +1,5 @@
 /** 工具链所属生态(detect_toolchains 输出的分组) */
-export type ToolchainKind = "rust" | "python" | "node" | "dotnet" | "git";
+export type ToolchainKind = "rust" | "python" | "node" | "dotnet" | "git" | "powershell";
 
 /** 版本管理器登记的一个版本(rustup 工具链 / nvm·fnm·vp 的 Node 版本 / uv 的 Python 版本 / dotnet SDK) */
 export interface ToolchainVersion {

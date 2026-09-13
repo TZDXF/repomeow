@@ -1645,6 +1645,7 @@ export default {
           node: "Node.js",
           dotnet: ".NET",
           git: "Git",
+          powershell: "PowerShell",
         },
         notFound: "Not found",
         installedNoVersion: "Installed",

@@ -24,6 +24,11 @@ pub(super) struct ToolSpec {
 
 pub(super) const TOOLS: &[ToolSpec] = &[
     ToolSpec {
+        id: "pwsh",
+        kind: ToolchainKind::Powershell,
+        version_args: &["--version"],
+    },
+    ToolSpec {
         id: "rustup",
         kind: ToolchainKind::Rust,
         version_args: &["--version"],

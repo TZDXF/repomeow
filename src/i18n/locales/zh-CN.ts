@@ -1579,6 +1579,7 @@ export default {
           node: "Node.js",
           dotnet: ".NET",
           git: "Git",
+          powershell: "PowerShell",
         },
         notFound: "未检测到",
         installedNoVersion: "已安装",
