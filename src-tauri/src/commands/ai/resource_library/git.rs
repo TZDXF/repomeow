@@ -3,7 +3,7 @@
 //!
 //! 复用 `commands::git` 的 `git_command` / `run_git`(禁用终端凭据交互、
 //! Windows 隐藏黑窗、错误码映射与项目 git 一致)。资源库自身是目录内
-//! `.git` 仓库;MCP 定义以明文 JSON 参与同步。
+//! `.git` 仓库;MCP 定义以JSON 参与同步。
 
 use std::fs;
 use std::process::Output;

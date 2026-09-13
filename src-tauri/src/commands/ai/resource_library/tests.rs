@@ -1,4 +1,4 @@
-//! 资源库集成测试:数据 CRUD、明文 MCP 读写、本地 bare remote
+//! 资源库集成测试:数据 CRUD、MCP JSON 读写、本地 bare remote
 //! 同步/分叉/导入(备份保留)/聚合配置。
 //!
 //! 直接用 `Library::new(临时目录)` 驱动 ops/git/store,不经 AppHandle;
@@ -136,7 +136,7 @@ fn skills_are_multi_group_and_flat_listed() {
         Some("# 正文".into()),
     )
     .unwrap();
-    // 正文落在 skills/<directory>/SKILL.md(恒明文;带 name/description frontmatter)
+    // 正文落在 skills/<directory>/SKILL.md(带 name/description frontmatter)
     let body_path = t.root.join("skills").join(&s.directory).join("SKILL.md");
     assert!(body_path.exists());
     let raw_body = fs::read_to_string(&body_path).unwrap();
@@ -1577,7 +1577,7 @@ fn mcp_plaintext_roundtrip_without_remote_check() {
     let bytes = fs::read(t.root.join("mcp.json")).unwrap();
     let stored: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(stored[0]["env"]["API_TOKEN"], "test-token");
-    // 重新打开资源库无需任何进程内解锁状态。
+    // 重新打开资源库即可读取 MCP 定义。
     let reopened = Library::new(t.root.clone());
     let list = ops::mcp_list(&reopened).unwrap();
     assert_eq!(list.len(), 1);

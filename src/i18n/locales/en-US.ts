@@ -296,8 +296,6 @@ export default {
       "Choose deployment targets shown on project AI pages. Installation is not required. Hiding a target never removes resources or changes Wiki ACP agents. This preference is local to this device.",
     sharedHint:
       "Some tools also read other tools’ skill directories. Changes to shared content may affect them. Managed paths are retained while another target references them.",
-    secretWarning:
-      "MCP credentials may be written to the project in plain text. Check Git ignore rules to avoid committing credentials.",
     search: "Search resources or groups…",
     ungrouped: "Ungrouped",
     sourceUnavailableHint:

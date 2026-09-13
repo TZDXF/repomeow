@@ -1,4 +1,4 @@
-//! 资源库存储层:文件布局、进程内互斥、原子写、明文 JSON 读写。
+//! 资源库存储层:文件布局、进程内互斥、原子写、JSON 读写。
 //!
 //! 互斥:应用经 single-instance 插件保证单进程,此处用进程内 `Mutex` 兜底
 //! 并发命令(不引入锁文件,避免崩溃残留导致永久锁死)。git 网络操作另有
@@ -118,7 +118,7 @@ impl Library {
         Ok(())
     }
 
-    // ── meta(library.json,恒为明文,git 跟踪)───────────────────────────
+    // ── meta(library.json,git 跟踪)───────────────────────────
 
     pub fn meta(&self) -> RlResult<LibraryMeta> {
         let bytes = fs::read(self.root.join(FILE_LIBRARY))?;
@@ -172,7 +172,7 @@ impl Library {
         self.atomic_write(&self.state_path(), text.as_bytes())
     }
 
-    // ── 明文 JSON──────────────────────
+    // ── JSON──────────────────────
 
     pub fn read_plain_json<T: DeserializeOwned>(&self, rel: &str) -> RlResult<T> {
         let bytes = fs::read(self.root.join(rel))?;
@@ -191,12 +191,12 @@ impl Library {
         self.read_plain_json(FILE_MCP)
     }
 
-    /// 以明文 JSON 保存 MCP 定义。
+    /// 以JSON 保存 MCP 定义。
     pub fn write_mcp_json<T: Serialize>(&self, value: &T) -> RlResult<()> {
         self.write_plain_json(FILE_MCP, value)
     }
 
-    // ── 技能正文(skills/<directory>/SKILL.md,恒明文)───────────────────
+    // ── 技能正文(skills/<directory>/SKILL.md)───────────────────
 
     /// 正文路径;directory 必须是安全目录名(调用方校验后传入)
     pub fn body_path(&self, directory: &str) -> RlResult<PathBuf> {

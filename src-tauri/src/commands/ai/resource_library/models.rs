@@ -3,8 +3,8 @@
 //! 磁盘布局(`~/.repomeow/resource-library/`):
 //! - `library.json` — 元数据
 //! - `skills.json` — 分组与技能元数据
-//! - `mcp.json` — 通用 MCP 服务器定义(明文 JSON)
-//! - `skills/<directory>/SKILL.md` — 技能正文(恒为明文)
+//! - `mcp.json` — 通用 MCP 服务器定义(JSON)
+//! - `skills/<directory>/SKILL.md` — 技能正文
 //! - `.git/` — 整个资源库目录本身是本地 git 仓库
 //!
 //! 同步状态存仓库外 `~/.repomeow/resource-library-state.json`(见 store.rs),
@@ -30,7 +30,7 @@ pub struct SyncRecord {
     pub diverged: bool,
 }
 
-/// library.json(明文):格式版本。
+/// library.json:格式版本。
 /// 历史版本曾内嵌 lastSync,现移至仓库外 state 文件;旧字段读取时被忽略
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]

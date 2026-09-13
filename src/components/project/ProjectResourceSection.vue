@@ -656,12 +656,6 @@ function changed() {
       >
     </div>
     <p class="text-xs text-muted-foreground">{{ t("projectAi.sectionHint") }}</p>
-    <p
-      v-if="kind === 'mcp'"
-      class="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs text-amber-700 dark:text-amber-400"
-    >
-      {{ t("projectAi.secretWarning") }}
-    </p>
     <div v-if="filters.length" class="flex flex-wrap gap-1.5">
       <button
         class="rounded-full border px-2.5 py-1 text-xs"

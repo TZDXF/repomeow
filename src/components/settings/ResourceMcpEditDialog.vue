@@ -38,7 +38,7 @@ import ResourceMcpRowsEditor, { type McpRow } from "./ResourceMcpRowsEditor.vue"
 
 const props = defineProps<{
   open: boolean;
-  /** null = 新建;非 null = 编辑该服务器(须已解锁) */
+  /** null = 新建;非 null = 编辑该服务器 */
   server: ResourceMcpServer | null;
 }>();
 
