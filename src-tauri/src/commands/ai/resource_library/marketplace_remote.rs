@@ -5,7 +5,6 @@ use std::time::{Duration, Instant};
 
 use scraper::{Html, Selector};
 use serde::Serialize;
-use serde_json::Value;
 
 use super::errors::{codes, RlError, RlResult};
 use super::marketplace::{
@@ -36,40 +35,6 @@ pub(super) fn normalize_source(input: &str) -> RlResult<String> {
         return Err(RlError::coded(codes::MARKETPLACE_SOURCE_INVALID, input));
     }
     Ok(source.to_ascii_lowercase())
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RepositoryInfo {
-    pub source: String,
-    pub stars: u64,
-    pub url: String,
-}
-
-pub(super) fn repository_info(input: &str) -> RlResult<RepositoryInfo> {
-    let source = normalize_source(input)?;
-    let response = client()?
-        .get(format!("https://api.github.com/repos/{source}"))
-        .send()
-        .map_err(|e| RlError::coded(codes::MARKETPLACE_UNAVAILABLE, e.to_string()))?;
-    if matches!(response.status().as_u16(), 403 | 429) {
-        return Err(RlError::coded(codes::MARKETPLACE_RATE_LIMITED, source));
-    }
-    if !response.status().is_success() {
-        return Err(RlError::coded(
-            codes::MARKETPLACE_UNAVAILABLE,
-            response.status().to_string(),
-        ));
-    }
-    let value: Value = serde_json::from_slice(&read_limited(response, MAX_PAGE)?)
-        .map_err(|e| invalid(e.to_string()))?;
-    Ok(RepositoryInfo {
-        url: format!("https://github.com/{source}"),
-        source,
-        stars: value["stargazers_count"]
-            .as_u64()
-            .ok_or_else(|| invalid("missing stars"))?,
-    })
 }
 
 struct RepositorySnapshot {
@@ -848,19 +813,15 @@ mod tests {
     #[ignore = "requires public GitHub and skills.sh network access"]
     fn live_find_skills_source_and_audits() {
         // GitHub 未登录 API 限流(60 次/小时)时跳过 GitHub 相关断言,只验证 skills.sh 审计转换
-        let mut github_ok = false;
-        match repository_info("vercel-labs/skills") {
-            Ok(repo) => {
-                assert!(repo.stars > 0);
-                github_ok = true;
-            }
+        let listed = match list("vercel-labs/skills", true) {
+            Ok(skills) => Some(skills),
             Err(err) if err.code() == codes::MARKETPLACE_RATE_LIMITED => {
                 eprintln!("GitHub API 限流,跳过来源/下载断言");
+                None
             }
-            Err(err) => panic!("repository_info: {err}"),
-        }
-        if github_ok {
-            let skills = list("vercel-labs/skills", true).unwrap();
+            Err(err) => panic!("list: {err}"),
+        };
+        if let Some(skills) = listed {
             let skill = skills
                 .skills
                 .iter()

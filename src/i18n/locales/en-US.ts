@@ -1969,8 +1969,6 @@ export default {
           stopping: "Waiting for current install…",
           progress:
             "Progress {completed}/{total} · Succeeded {success} · Failed {failed}; missing items can be retried",
-          repoStars: "Repository Stars",
-          retryStars: "Failed — click to retry",
           auditSources: "Audit sources",
           audits: "Security audits",
           auditDisclaimer:

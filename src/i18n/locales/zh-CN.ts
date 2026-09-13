@@ -1881,8 +1881,6 @@ export default {
           stop: "停止后续安装",
           stopping: "等待当前安装完成…",
           progress: "进度 {completed}/{total} · 成功 {success} · 失败 {failed}；未安装项可重试",
-          repoStars: "仓库 Stars",
-          retryStars: "获取失败，点击重试",
           auditSources: "审计来源",
           audits: "安全审计",
           auditDisclaimer:

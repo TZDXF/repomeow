@@ -4,7 +4,6 @@ import {
   listResourceMarketplaceSkills,
   listResourceMcpServers,
   marketplaceAuditId,
-  readMarketplaceRepository,
   listMarketplaceAudits,
   readMarketplaceAuditDetail,
   filterMarketplaceSkills,
@@ -450,13 +449,7 @@ describe("GitHub 来源与公开审计", () => {
       refresh: true,
     });
   });
-  it("仓库 Stars 和审计详情使用独立只读命令", async () => {
-    vi.mocked(invoke).mockResolvedValueOnce({
-      source: "a/b",
-      stars: 0,
-      url: "https://github.com/a/b",
-    });
-    expect((await readMarketplaceRepository("a/b")).stars).toBe(0);
+  it("审计详情使用独立只读命令", async () => {
     vi.mocked(invoke).mockResolvedValueOnce([]);
     expect(await listMarketplaceAudits("a/b/demo")).toEqual([]);
     vi.mocked(invoke).mockResolvedValueOnce({

@@ -752,13 +752,8 @@ pub async fn rl_resolve_fork(app: AppHandle, direction: String) -> RlResult<()> 
     blocking(move || git::resolve_fork(&lib, &direction)).await
 }
 
-// GitHub 仓库统计与第三方审计均为只读网络请求，不占用资源库写锁。
-#[tauri::command]
-pub async fn rl_marketplace_repository(
-    source: String,
-) -> RlResult<marketplace_remote::RepositoryInfo> {
-    blocking(move || marketplace_remote::repository_info(&source)).await
-}
+// 第三方审计为只读网络请求，不占用资源库写锁。
+
 #[tauri::command]
 pub async fn rl_marketplace_audits(id: String) -> RlResult<Vec<marketplace_remote::PublicAudit>> {
     blocking(move || marketplace_remote::audit_list(&id)).await

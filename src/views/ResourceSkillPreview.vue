@@ -18,7 +18,6 @@ import {
   ShieldCheck,
 } from "@lucide/vue";
 import { Markdown, type ControlsConfig, type NodeRenderers } from "vue-stream-markdown";
-import ResourceRepositoryStars from "@/components/settings/ResourceRepositoryStars.vue";
 import ResourcePublicAudits from "@/components/settings/ResourcePublicAudits.vue";
 import FileTreeList from "@/components/common/FileTreeList.vue";
 import {
@@ -806,11 +805,6 @@ const llmNotice = computed(() => {
           <ExternalLink class="h-3.5 w-3.5" />
           {{ skill.marketplace.source }}
         </Button>
-        <ResourceRepositoryStars
-          v-if="skill?.marketplace"
-          :source="skill.marketplace.source"
-          class="mx-1.5"
-        />
         <Button variant="ghost" size="sm" class="h-8 gap-1.5" @click="openDir">
           <FolderOpen class="h-3.5 w-3.5" />
           {{ t("settings.resources.skills.previewPage.openDir") }}

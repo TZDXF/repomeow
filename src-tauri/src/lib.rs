@@ -319,7 +319,6 @@ pub fn run() {
             commands::ai::skill_dir_file_read,
             commands::ai::skill_dir_scan,
             commands::ai::rl_marketplace_list,
-            commands::ai::rl_marketplace_repository,
             commands::ai::rl_marketplace_audits,
             commands::ai::rl_marketplace_audit_detail,
             commands::ai::rl_marketplace_install,

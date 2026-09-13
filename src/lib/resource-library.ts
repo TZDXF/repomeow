@@ -935,11 +935,7 @@ export interface ResourcePublicAuditDetail {
   /** 后端把审计 <main> 正文转为保留结构的 Markdown(标题/列表/表格) */
   markdown: string;
 }
-export function readMarketplaceRepository(source: string) {
-  return cmd<{ source: string; stars: number; url: string }>("rl_marketplace_repository", {
-    source,
-  });
-}
+
 export function listMarketplaceAudits(id: string) {
   return cmd<ResourcePublicAudit[]>("rl_marketplace_audits", { id });
 }
