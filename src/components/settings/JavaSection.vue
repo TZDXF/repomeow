@@ -232,16 +232,15 @@ function startInstall() {
         >
           java
         </span>
-        <Badge v-if="defaultJdk" variant="secondary" class="font-mono">
-          {{ defaultJdk.name }}
+        <Badge
+          variant="secondary"
+          class="font-mono"
+          :class="!defaultJdk && 'text-muted-foreground'"
+          :title="!defaultJdk ? t('settings.devEnv.tools.jdkNoDefault') : undefined"
+        >
+          {{ defaultJdk?.name ?? t("settings.devEnv.tools.jdkNone") }}
         </Badge>
-        <Badge v-else variant="outline" class="text-muted-foreground">
-          {{ t("settings.devEnv.tools.jdkNone") }}
-        </Badge>
-        <span v-if="!defaultJdk" class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-          {{ t("settings.devEnv.tools.jdkNoDefault") }}
-        </span>
-        <span v-else class="min-w-0 flex-1"></span>
+        <span class="min-w-0 flex-1"></span>
         <div class="flex shrink-0 gap-1.5">
           <Button size="sm" variant="outline" :disabled="detecting" @click="detect">
             <ScanSearch class="h-4 w-4" />
