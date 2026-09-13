@@ -1978,12 +1978,13 @@ export default {
           repoStars: "Repository Stars",
           retryStars: "Failed — click to retry",
           auditSources: "Audit sources",
-          audits: "Public security audits · skills.sh",
+          audits: "Security audits",
           auditDisclaimer:
             "Historical third-party audits, not local scan results or a guarantee for the installed version. GitHub skills are matched by name; verify the original source and audit date.",
           noAudits: "No public audits found. This does not mean the skill passed a security check.",
           noAuditSource:
             "No queryable marketplace source is available. Local scanning is still available.",
+          selectAudit: "Select a source on the right to view the audit",
           originalAudit: "View original audit",
           translationHint:
             "Translation sends the audit text to your configured translation model. The original remains authoritative.",
@@ -2119,6 +2120,7 @@ export default {
             modelDefault: "Default model",
             modelDefaultNamed: "{model} (default)",
             notScanned: 'Not scanned yet. Click "Start scan" to get a risk report',
+            idle: "Not scanned",
             summary: "AI summary:",
             filesScanned: "{count} files scanned",
             scannedAt: "Scanned {time}",

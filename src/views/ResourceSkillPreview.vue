@@ -887,16 +887,15 @@ const llmNotice = computed(() => {
 
       <!-- 右侧:选中内容 -->
       <div class="flex min-w-0 flex-1 flex-col">
-        <div class="flex shrink-0 items-center gap-2 border-b px-4 py-2">
+        <div
+          v-if="selected.kind === 'file'"
+          class="flex shrink-0 items-center gap-2 border-b px-4 py-2"
+        >
           <span
-            v-if="selected.kind === 'file'"
             class="min-w-0 truncate font-mono text-xs text-muted-foreground"
             :title="selected.path"
           >
             {{ selected.path }}
-          </span>
-          <span v-else class="min-w-0 truncate text-xs font-medium">
-            {{ t("settings.resources.skills.previewPage.scan.title") }}
           </span>
           <div
             v-if="selected.kind === 'file' && isSvg"
@@ -956,46 +955,49 @@ const llmNotice = computed(() => {
               }}
             </Button>
           </div>
-          <div
-            v-else-if="selected.kind === 'scan'"
-            class="ml-auto flex shrink-0 items-center gap-1.5"
-          >
-            <span :title="t('settings.resources.skills.previewPage.scan.modelLabel')">
-              <ModelSelector
-                v-model="scanModelValue"
-                :groups="scanModelGroups"
-                :disabled="scanning"
-                :generic-option="{
-                  value: SCAN_MODEL_DEFAULT,
-                  label: scanDefaultModelLabel,
-                }"
-                trigger-class="text-muted-foreground min-w-0 max-w-96"
-              />
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              class="h-7 shrink-0 gap-1 px-2 text-xs"
-              :disabled="scanning"
-              @click="runScan"
-            >
-              <ShieldCheck v-if="!scanReport" class="h-3.5 w-3.5" />
-              <RefreshCw v-else class="h-3.5 w-3.5" />
-              {{
-                t(
-                  scanReport
-                    ? "settings.resources.skills.previewPage.scan.rerun"
-                    : "settings.resources.skills.previewPage.scan.run",
-                )
-              }}
-            </Button>
-          </div>
         </div>
 
-        <ScrollArea class="min-h-0 flex-1">
-          <!-- 安全扫描 -->
-          <div v-if="selected.kind === 'scan'" class="mx-auto max-w-3xl space-y-3 p-4">
-            <ResourcePublicAudits :marketplace-id="skill ? marketplaceAuditId(skill) : null" />
+        <!-- 安全审计:组件自管布局——左侧内容(含标题)原生滚动,右侧来源卡片固定不随滚动 -->
+        <ResourcePublicAudits
+          v-if="selected.kind === 'scan'"
+          class="min-h-0 flex-1"
+          :marketplace-id="skill ? marketplaceAuditId(skill) : null"
+          :local-scan="scanReport"
+          :scanning="scanning"
+        >
+          <template #local>
+            <!-- 扫描控制:模型选择 + 运行/重新扫描(原右侧头部工具行迁入) -->
+            <div class="flex items-center justify-end gap-1.5">
+              <span :title="t('settings.resources.skills.previewPage.scan.modelLabel')">
+                <ModelSelector
+                  v-model="scanModelValue"
+                  :groups="scanModelGroups"
+                  :disabled="scanning"
+                  :generic-option="{
+                    value: SCAN_MODEL_DEFAULT,
+                    label: scanDefaultModelLabel,
+                  }"
+                  trigger-class="text-muted-foreground min-w-0 max-w-96"
+                />
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                class="h-7 shrink-0 gap-1 px-2 text-xs"
+                :disabled="scanning"
+                @click="runScan"
+              >
+                <ShieldCheck v-if="!scanReport" class="h-3.5 w-3.5" />
+                <RefreshCw v-else class="h-3.5 w-3.5" />
+                {{
+                  t(
+                    scanReport
+                      ? "settings.resources.skills.previewPage.scan.rerun"
+                      : "settings.resources.skills.previewPage.scan.run",
+                  )
+                }}
+              </Button>
+            </div>
             <div v-if="scanning" class="flex flex-col items-center gap-4 px-6 py-16 text-center">
               <div class="relative flex h-14 w-14 items-center justify-center">
                 <span class="scan-pulse absolute inset-0 rounded-full bg-primary/15" />
@@ -1136,54 +1138,54 @@ const llmNotice = computed(() => {
             >
               {{ t("settings.resources.skills.previewPage.scan.notScanned") }}
             </p>
-          </div>
+          </template>
+        </ResourcePublicAudits>
 
-          <!-- 文件内容 -->
-          <template v-else>
-            <p
-              v-if="loadingPath === selected.path"
-              class="py-8 text-center text-xs text-muted-foreground"
-            >
-              {{ t("common.loading") }}
-            </p>
-            <div v-else-if="isImage && !svgSource" class="h-full min-h-0">
-              <ImageViewer v-if="imageSrc" :src="imageSrc" :svg="isSvg" :alt="selected.path" />
-              <p v-else class="px-3 py-8 text-center text-xs text-muted-foreground">
-                {{ t("settings.resources.skills.previewPage.fileBinary") }}
-              </p>
-            </div>
-            <p
-              v-else-if="fileContent === null"
-              class="px-3 py-8 text-center text-xs text-muted-foreground"
-            >
+        <ScrollArea v-else class="min-h-0 flex-1">
+          <!-- 文件内容(注意:这里不能再包一层无指令的 <template>,否则会被渲染成真实 DOM 节点导致内容不可见) -->
+          <p
+            v-if="loadingPath === selected.path"
+            class="py-8 text-center text-xs text-muted-foreground"
+          >
+            {{ t("common.loading") }}
+          </p>
+          <div v-else-if="isImage && !svgSource" class="h-full min-h-0">
+            <ImageViewer v-if="imageSrc" :src="imageSrc" :svg="isSvg" :alt="selected.path" />
+            <p v-else class="px-3 py-8 text-center text-xs text-muted-foreground">
               {{ t("settings.resources.skills.previewPage.fileBinary") }}
             </p>
-            <p
-              v-else-if="!displayContent"
-              class="px-3 py-8 text-center text-xs text-muted-foreground"
-            >
-              {{ t("settings.resources.skills.previewPage.emptyFile") }}
-            </p>
-            <div
-              v-else-if="isMarkdown(selected.path)"
-              ref="mdContainerRef"
-              class="mx-auto max-w-3xl p-4"
-              @click="onMarkdownClick"
-            >
-              <Markdown
-                mode="static"
-                :content="displayContent"
-                :controls="controls"
-                :theme-element="themeElement"
-                :locale="language"
-                :before-download="beforeDownload"
-                :node-renderers="nodeRenderers"
-              />
-            </div>
-            <div v-else class="h-full">
-              <CodeViewer :text="fileContent ?? ''" :path="selected.path" :wrap="true" />
-            </div>
-          </template>
+          </div>
+          <p
+            v-else-if="fileContent === null"
+            class="px-3 py-8 text-center text-xs text-muted-foreground"
+          >
+            {{ t("settings.resources.skills.previewPage.fileBinary") }}
+          </p>
+          <p
+            v-else-if="!displayContent"
+            class="px-3 py-8 text-center text-xs text-muted-foreground"
+          >
+            {{ t("settings.resources.skills.previewPage.emptyFile") }}
+          </p>
+          <div
+            v-else-if="isMarkdown(selected.path)"
+            ref="mdContainerRef"
+            class="mx-auto max-w-3xl p-4"
+            @click="onMarkdownClick"
+          >
+            <Markdown
+              mode="static"
+              :content="displayContent"
+              :controls="controls"
+              :theme-element="themeElement"
+              :locale="language"
+              :before-download="beforeDownload"
+              :node-renderers="nodeRenderers"
+            />
+          </div>
+          <div v-else class="h-full">
+            <CodeViewer :text="fileContent ?? ''" :path="selected.path" :wrap="true" />
+          </div>
         </ScrollArea>
       </div>
     </div>

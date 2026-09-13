@@ -406,16 +406,20 @@ fn is_blockish(el: &scraper::ElementRef<'_>) -> bool {
     BLOCK_TAGS.contains(&el.value().name()) || el.select(&selector(BLOCK_TAGS)).next().is_some()
 }
 
+/// 整段恰为状态词徽章(允许 `**` 加粗包裹,如 `**Pass**`):
+/// 状态已展示在标题行,正文段落/行叶子段不再重复。
+fn status_badge(text: &str) -> bool {
+    matches!(
+        text.trim_matches('*').to_ascii_lowercase().as_str(),
+        "pass" | "warn" | "fail" | "safe" | "low" | "medium" | "high" | "critical"
+    )
+}
+
 /// 行叶子段:整段恰为状态词(页头徽章)或是 Risk Level 芯片行时剔除
 /// (状态已展示在标题行);其余返回行内文本(徽章/标题 class 已由 inline_text 加粗)。
 fn style_leaf(el: scraper::ElementRef<'_>) -> Option<String> {
     let text = inline_text(el);
-    if header_noise(&text)
-        || matches!(
-            text.to_ascii_lowercase().as_str(),
-            "pass" | "warn" | "fail" | "safe" | "low" | "medium" | "high" | "critical"
-        )
-    {
+    if header_noise(&text) || status_badge(&text) {
         return None;
     }
     Some(text)
@@ -492,7 +496,7 @@ fn append_element(el: scraper::ElementRef<'_>, out: &mut String) {
         }
         "p" | "blockquote" => {
             let text = inline_text(el);
-            if !header_noise(&text) {
+            if !header_noise(&text) && !status_badge(&text) {
                 push_para(&text, out);
             }
         }
@@ -553,7 +557,10 @@ fn append_element(el: scraper::ElementRef<'_>, out: &mut String) {
             for child in el.children() {
                 match child.value() {
                     scraper::node::Node::Text(text) => {
-                        push_para(&collapse_ws(&text), out);
+                        let text = collapse_ws(&text);
+                        if !status_badge(&text) {
+                            push_para(&text, out);
+                        }
                     }
                     scraper::node::Node::Element(_) => {
                         if let Some(child_el) = scraper::ElementRef::wrap(child) {
@@ -739,6 +746,7 @@ mod tests {
             <div>
                 <div>
                     <section>
+                        <p><span class="uppercase">Pass</span></p>
                         <div><div class="text-sm font-mono uppercase">Checks</div><div>
                             <div><svg/><div><span>Malicious behavior</span><span>Injection, exfiltration</span></div></div>
                             <div><svg/><div><span>Code obfuscation</span><span>Hidden code</span></div></div>
@@ -754,6 +762,8 @@ mod tests {
         assert!(!md.contains("# find-skills"), "{md}");
         assert!(!md.contains("Audited by"), "{md}");
         assert!(md.contains("**Checks**"), "{md}");
+        // 正文状态徽章段(与标题行状态重复的 **Pass**)被剔除
+        assert!(!md.contains("Pass"), "{md}");
         let paragraphs: Vec<&str> = md.split("\n\n").collect();
         assert!(
             paragraphs.contains(&"Malicious behavior Injection, exfiltration"),

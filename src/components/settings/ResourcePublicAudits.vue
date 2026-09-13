@@ -9,6 +9,7 @@ import {
   listMarketplaceAudits,
   readMarketplaceAuditDetail,
   type ResourcePublicAudit,
+  type ResourceSkillScanReport,
 } from "@/lib/resource-library";
 import { Markdown, type NodeRenderers } from "vue-stream-markdown";
 import MdLink from "@/components/markdown/MdLink.vue";
@@ -19,8 +20,16 @@ import { cmd } from "@/lib/tauri";
 import { getCachedTranslation, putCachedTranslation } from "@/lib/translation-cache";
 import { useSettingsStore } from "@/stores/settings";
 
-const props = defineProps<{ marketplaceId: string | null }>();
-const { t, locale } = useI18n();
+const props = withDefaults(
+  defineProps<{
+    marketplaceId: string | null;
+    /** 本地安全扫描报告(父级扫描页传入);null 表示尚未扫描 */
+    localScan?: ResourceSkillScanReport | null;
+    scanning?: boolean;
+  }>(),
+  { localScan: null, scanning: false },
+);
+const { t, te, locale } = useI18n();
 const language = computed(() => locale.value as SupportedLocale);
 const nodeRenderers: NodeRenderers = { link: MdLink };
 // 传游离元素,避免 Markdown 库把 island/glass 主题变量写成无效 hsl(#…)(与技能预览一致)
@@ -30,9 +39,15 @@ const settings = useSettingsStore();
 const audits = ref<ResourcePublicAudit[]>([]);
 const loading = ref(false);
 const error = ref("");
-const selected = ref<ResourcePublicAudit | null>(null);
+/** 选中的审计来源:"local"=本地扫描(默认);其余为远程 provider */
+const selection = ref<"local" | string>("local");
+const selected = computed(
+  () => audits.value.find((audit) => audit.provider === selection.value) ?? null,
+);
 const detailLoading = ref(false);
 const detailError = ref("");
+/** 远程审计详情缓存(provider 维度):切换来源不重复请求;刷新/切换技能时随 resetDetail 清空 */
+const detailCache = new Map<string, { markdown: string; auditedAt: string }>();
 const original = ref("");
 const auditedAt = ref("");
 const translated = ref("");
@@ -53,7 +68,8 @@ function cancelTranslation() {
 function resetDetail() {
   detailSeq++;
   cancelTranslation();
-  selected.value = null;
+  detailCache.clear();
+  selection.value = "local";
   original.value = "";
   translated.value = "";
   showTranslation.value = false;
@@ -76,10 +92,6 @@ async function load() {
       return;
     }
     audits.value = result;
-    // 默认展示第一条审计详情,侧边栏可切换
-    if (result.length) {
-      void selectAudit(result[0]);
-    }
   } catch (e) {
     if (seq === listSeq) {
       error.value = String(e);
@@ -90,22 +102,42 @@ async function load() {
     }
   }
 }
+function selectLocal() {
+  detailSeq++;
+  cancelTranslation();
+  // 复位详情加载态:作废旧请求后其 finally 不再复位,不清理会卡死后续切换
+  detailLoading.value = false;
+  detailError.value = "";
+  selection.value = "local";
+}
 async function selectAudit(audit: ResourcePublicAudit) {
-  if (!props.marketplaceId || detailLoading.value) {
+  if (!props.marketplaceId) {
     return;
   }
   detailSeq++;
   cancelTranslation();
-  selected.value = audit;
-  original.value = "";
-  auditedAt.value = "";
+  selection.value = audit.provider;
   translated.value = "";
   showTranslation.value = false;
   detailError.value = "";
+  // 已缓存的来源直接命中,切回不重复请求
+  const cached = detailCache.get(audit.provider);
+  if (cached) {
+    original.value = cached.markdown;
+    auditedAt.value = cached.auditedAt;
+    detailLoading.value = false;
+    return;
+  }
+  original.value = "";
+  auditedAt.value = "";
   detailLoading.value = true;
   const seq = detailSeq;
   try {
     const detail = await readMarketplaceAuditDetail(props.marketplaceId, audit.provider);
+    detailCache.set(audit.provider, {
+      markdown: detail.markdown,
+      auditedAt: detail.auditedAt ?? "",
+    });
     if (seq === detailSeq) {
       original.value = detail.markdown;
       auditedAt.value = detail.auditedAt ?? "";
@@ -191,6 +223,36 @@ function statusClass(status: string) {
       return "text-muted-foreground";
   }
 }
+/** 本地扫描来源的状态摘要:扫描中 / 等级+评分 / 未扫描 */
+const localStatus = computed(() => {
+  if (props.scanning) {
+    return t("settings.resources.skills.previewPage.scan.running");
+  }
+  const report = props.localScan;
+  if (!report) {
+    return t("settings.resources.skills.previewPage.scan.idle");
+  }
+  const key = `settings.resources.skills.previewPage.scan.level.${report.level}`;
+  const label = te(key) ? t(key) : report.level;
+  return `${label} ${report.score}`;
+});
+const localStatusClass = computed(() => {
+  if (props.scanning) {
+    return "text-primary";
+  }
+  switch (props.localScan?.level) {
+    case "low":
+      return "text-emerald-600 dark:text-emerald-400";
+    case "medium":
+      return "text-amber-600 dark:text-amber-400";
+    case "high":
+      return "text-orange-600 dark:text-orange-400";
+    case "critical":
+      return "text-red-600 dark:text-red-400";
+    default:
+      return "text-muted-foreground";
+  }
+});
 watch(() => props.marketplaceId, load, { immediate: true });
 watch(
   () => settings.language,
@@ -207,57 +269,15 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="space-y-3 rounded-lg border p-4">
-    <div class="flex items-center justify-between gap-2">
-      <h3 class="text-sm font-medium">
-        {{ t("settings.resources.market.remote.audits") }}
-      </h3>
-      <Button v-if="marketplaceId" variant="ghost" size="sm" :disabled="loading" @click="load">
-        <RotateCw class="mr-1 h-3.5 w-3.5" />{{ t("settings.resources.market.refresh") }}
-      </Button>
-    </div>
-    <p class="text-xs text-muted-foreground">
-      {{ t("settings.resources.market.remote.auditDisclaimer") }}
-    </p>
-    <p v-if="loading" class="text-xs text-muted-foreground">{{ t("common.loading") }}</p>
-    <p v-else-if="error" role="alert" class="text-xs text-destructive">{{ error }}</p>
-    <p v-else-if="!audits.length" class="text-xs text-muted-foreground">
-      {{
-        t(
-          marketplaceId
-            ? "settings.resources.market.remote.noAudits"
-            : "settings.resources.market.remote.noAuditSource",
-        )
-      }}
-    </p>
-    <!-- 侧边栏列出审计来源,正文直接内联展示选中来源的详情,不再弹窗 -->
-    <div v-else class="flex min-w-0 items-stretch gap-0">
-      <aside class="w-36 shrink-0 border-r pr-3">
-        <p class="mb-1.5 text-[11px] uppercase text-muted-foreground">
-          {{ t("settings.resources.market.remote.auditSources") }}
-        </p>
-        <button
-          v-for="audit in audits"
-          :key="audit.provider"
-          type="button"
-          class="hover:bg-accent block w-full truncate rounded-sm px-2 py-1.5 text-left text-xs transition-colors"
-          :class="
-            selected?.provider === audit.provider
-              ? 'bg-accent text-foreground'
-              : 'text-muted-foreground'
-          "
-          :title="audit.name"
-          @click="selectAudit(audit)"
-        >
-          <span class="block truncate">{{ audit.name }}</span>
-          <span class="block text-[11px]" :class="statusClass(audit.status)">{{
-            audit.status
-          }}</span>
-        </button>
-      </aside>
-      <div class="min-w-0 flex-1 pl-3">
+  <section class="flex min-h-0 gap-3 p-4">
+    <!-- 布局约定:左列审计内容(含标题行)原生滚动,右侧来源卡片固定;保持 section 唯一根节点,父级 class(min-h-0 flex-1)才能继承 -->
+    <div class="min-h-0 min-w-0 flex-1 overflow-y-auto">
+      <div v-if="selection === 'local'" class="space-y-3">
+        <slot name="local" />
+      </div>
+      <template v-else-if="selected">
         <div class="flex flex-wrap items-center gap-2">
-          <span v-if="selected" class="text-sm font-medium">
+          <span class="text-sm font-medium">
             {{ selected.name }} ·
             <span :class="statusClass(selected.status)">{{ selected.status }}</span>
             <span v-if="auditedAt" class="ml-1 font-normal text-muted-foreground">
@@ -281,28 +301,15 @@ onBeforeUnmount(() => {
               )
             }}
           </Button>
-          <Button v-if="selected" variant="ghost" size="sm" @click="openOriginal(selected.url)">
-            <ExternalLink class="mr-1 h-3.5 w-3.5" />{{
-              t("settings.resources.market.remote.originalAudit")
-            }}
-          </Button>
         </div>
-        <p class="mt-1 text-xs text-muted-foreground">
-          {{ t("settings.resources.market.remote.translationHint") }}
-        </p>
         <p v-if="detailLoading" class="mt-3 text-sm">{{ t("common.loading") }}</p>
         <div v-else-if="detailError" class="mt-3 space-y-2 text-sm text-destructive" role="alert">
           {{ detailError }}
-          <Button v-if="selected" variant="outline" size="sm" @click="selectAudit(selected)">{{
+          <Button variant="outline" size="sm" @click="selectAudit(selected)">{{
             t("settings.resources.market.refresh")
           }}</Button>
         </div>
-        <!-- 外层扫描页已有滚动容器,这里用原生 overflow 避免嵌套 reka ScrollArea(其注入的 viewport <style> 会污染区域文本) -->
-        <div
-          v-else
-          class="audit-markdown mt-3 max-h-96 overflow-y-auto pr-3 text-sm leading-relaxed"
-          @click="onMarkdownClick"
-        >
+        <div v-else class="audit-markdown mt-3 text-sm leading-relaxed" @click="onMarkdownClick">
           <Markdown
             mode="static"
             :content="showTranslation ? translated : original"
@@ -311,6 +318,76 @@ onBeforeUnmount(() => {
             :node-renderers="nodeRenderers"
           />
         </div>
+      </template>
+    </div>
+    <!-- 审计来源卡片 -->
+    <div class="w-36 shrink-0 self-start rounded-lg border bg-popover p-1.5 text-sm shadow-md">
+      <div class="flex items-center justify-between gap-1 px-1 pb-1">
+        <p class="text-[11px] uppercase text-muted-foreground">
+          {{ t("settings.resources.market.remote.auditSources") }}
+        </p>
+        <Button
+          v-if="marketplaceId"
+          variant="ghost"
+          size="icon"
+          class="h-5 w-5"
+          :disabled="loading"
+          :title="t('settings.resources.market.refresh')"
+          @click="load"
+        >
+          <RotateCw class="h-3 w-3" />
+        </Button>
+      </div>
+      <button
+        type="button"
+        class="hover:bg-accent block w-full truncate rounded-sm px-2 py-1.5 text-left text-xs transition-colors"
+        :class="selection === 'local' ? 'bg-accent text-foreground' : 'text-muted-foreground'"
+        @click="selectLocal"
+      >
+        <span class="block truncate">{{
+          t("settings.resources.skills.previewPage.scan.title")
+        }}</span>
+        <span class="block text-[11px]" :class="localStatusClass">{{ localStatus }}</span>
+      </button>
+      <p v-if="loading" class="px-2 py-1.5 text-xs text-muted-foreground">
+        {{ t("common.loading") }}
+      </p>
+      <p v-else-if="error" role="alert" class="px-2 py-1.5 text-xs text-destructive">
+        {{ error }}
+      </p>
+      <p
+        v-else-if="marketplaceId && !audits.length"
+        class="px-2 py-1.5 text-[11px] text-muted-foreground"
+      >
+        {{ t("settings.resources.market.remote.noAudits") }}
+      </p>
+      <p v-else-if="!marketplaceId" class="px-2 py-1.5 text-[11px] text-muted-foreground">
+        {{ t("settings.resources.market.remote.noAuditSource") }}
+      </p>
+      <div v-for="audit in audits" :key="audit.provider" class="flex items-center gap-0.5">
+        <button
+          type="button"
+          class="hover:bg-accent block min-w-0 flex-1 truncate rounded-sm px-2 py-1.5 text-left text-xs transition-colors"
+          :class="
+            selection === audit.provider ? 'bg-accent text-foreground' : 'text-muted-foreground'
+          "
+          :title="audit.name"
+          @click="selectAudit(audit)"
+        >
+          <span class="block truncate">{{ audit.name }}</span>
+          <span class="block text-[11px]" :class="statusClass(audit.status)">{{
+            audit.status
+          }}</span>
+        </button>
+        <Button
+          variant="ghost"
+          size="icon"
+          class="h-6 w-6 shrink-0 text-muted-foreground"
+          :title="t('settings.resources.market.remote.originalAudit')"
+          @click="openOriginal(audit.url)"
+        >
+          <ExternalLink class="h-3 w-3" />
+        </Button>
       </div>
     </div>
   </section>
