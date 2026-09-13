@@ -1,12 +1,9 @@
-//! 资源库存储层:文件布局、进程内互斥、原子写、加密感知读写。
+//! 资源库存储层:文件布局、进程内互斥、原子写、明文 JSON 读写。
 //!
 //! 互斥:应用经 single-instance 插件保证单进程,此处用进程内 `Mutex` 兜底
 //! 并发命令(不引入锁文件,避免崩溃残留导致永久锁死)。git 网络操作另有
 //! `mod.rs` 里的异步 `SYNC_LOCK` 串行化,避免并发 fetch/push 争抢 refs。
 //!
-//! 加密范围(**仅 mcp.json**):skills.json 与 skills/** 恒为明文,
-//! 加密上锁后技能仍可正常管理,仅 MCP 定义读写需要解锁。
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
@@ -17,9 +14,6 @@ use tauri::{AppHandle, Manager};
 
 use crate::APP_DATA_DIR_NAME;
 
-#[cfg(test)]
-use super::crypto::clear_key;
-use super::crypto::{decrypt_bytes, encrypt_bytes, key_for};
 use super::errors::{codes, RlError, RlResult};
 use super::models::{LibraryMeta, LibraryState, McpServer, SkillLibrary};
 
@@ -178,7 +172,7 @@ impl Library {
         self.atomic_write(&self.state_path(), text.as_bytes())
     }
 
-    // ── 明文 JSON(skills.json;加密上锁后仍可读写)──────────────────────
+    // ── 明文 JSON──────────────────────
 
     pub fn read_plain_json<T: DeserializeOwned>(&self, rel: &str) -> RlResult<T> {
         let bytes = fs::read(self.root.join(rel))?;
@@ -192,33 +186,14 @@ impl Library {
         self.atomic_write(&self.root.join(rel), text.as_bytes())
     }
 
-    // ── 加密 JSON(仅 mcp.json)─────────────────────────────────────────
-
-    /// 读取 mcp.json;加密未解锁时返回 `resource_library_locked`
+    /// 读取本地 MCP 定义。
     pub fn read_mcp_json<T: DeserializeOwned>(&self) -> RlResult<T> {
-        let bytes = fs::read(self.root.join(FILE_MCP))?;
-        let key = if self.meta()?.encrypted {
-            key_for(&self.root)
-        } else {
-            None
-        };
-        let plain = decrypt_bytes(key.as_deref(), &bytes)?;
-        let text = std::str::from_utf8(&plain).map_err(|e| RlError::corrupt(FILE_MCP, e))?;
-        serde_json::from_str(text).map_err(|e| RlError::corrupt(FILE_MCP, e))
+        self.read_plain_json(FILE_MCP)
     }
 
-    /// 写 mcp.json;加密开启时写入容器字节(未解锁报 locked)
+    /// 以明文 JSON 保存 MCP 定义。
     pub fn write_mcp_json<T: Serialize>(&self, value: &T) -> RlResult<()> {
-        let mut text =
-            serde_json::to_string_pretty(value).map_err(|e| RlError::corrupt(FILE_MCP, e))?;
-        text.push('\n');
-        let out = if self.meta()?.encrypted {
-            let key = key_for(&self.root).ok_or_else(|| RlError::coded(codes::LOCKED, ""))?;
-            encrypt_bytes(&key, text.as_bytes())?
-        } else {
-            text.into_bytes()
-        };
-        self.atomic_write(&self.root.join(FILE_MCP), &out)
+        self.write_plain_json(FILE_MCP, value)
     }
 
     // ── 技能正文(skills/<directory>/SKILL.md,恒明文)───────────────────
@@ -314,19 +289,6 @@ impl Library {
         remove_dir_tolerating_readonly(&dir)
     }
 
-    // ── 加密批量变换(仅 mcp.json)──────────────────────────────────────
-
-    /// 对 mcp.json 做字节变换(读取→变换→原子写),用于批量加密/解密;缺失容忍
-    pub fn transform_encrypted_file(&self, f: impl Fn(&[u8]) -> RlResult<Vec<u8>>) -> RlResult<()> {
-        let path = self.root.join(FILE_MCP);
-        if !path.exists() {
-            return Ok(());
-        }
-        let data = fs::read(&path)?;
-        let out = f(&data)?;
-        self.atomic_write(&path, &out)
-    }
-
     // ── 备份 / 整库清除 ────────────────────────────────────────────────
 
     /// 整库备份目录(父目录下):`<库目录名>.backup-<ts>`
@@ -345,7 +307,6 @@ impl Library {
 
     #[cfg(test)]
     pub fn clear_all(&self) -> RlResult<()> {
-        clear_key(&self.root);
         if self.root.exists() {
             remove_dir_tolerating_readonly(&self.root)?;
         }
@@ -436,7 +397,6 @@ pub fn remove_dir_tolerating_readonly(dir: &Path) -> RlResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::ai::resource_library::crypto::{derive_key, new_salt};
     use crate::time_util::now_ts_nanos;
 
     fn temp_lib(name: &str) -> (Library, PathBuf) {
@@ -455,7 +415,6 @@ mod tests {
         let (lib, root) = temp_lib("seed");
         let meta = lib.meta().unwrap();
         assert_eq!(meta.version, 1);
-        assert!(!meta.encrypted);
         let skills: SkillLibrary = lib.read_plain_json(FILE_SKILLS).unwrap();
         assert!(skills.groups.is_empty() && skills.skills.is_empty());
         let mcp: Vec<McpServer> = lib.read_mcp_json().unwrap();
@@ -523,26 +482,6 @@ mod tests {
     }
 
     #[test]
-    fn encrypted_only_mcp_json_and_skills_stay_plain() {
-        let (lib, root) = temp_lib("enc");
-        let salt = new_salt();
-        let key = derive_key("p@ss", &salt).unwrap();
-        // 批量加密只作用于 mcp.json
-        lib.transform_encrypted_file(|bytes| encrypt_bytes(&key, bytes))
-            .unwrap();
-        assert!(super::super::crypto::is_container(
-            &fs::read(root.join(FILE_MCP)).unwrap()
-        ));
-        assert!(!super::super::crypto::is_container(
-            &fs::read(root.join(FILE_SKILLS)).unwrap()
-        ));
-        // library.json 恒为明文
-        assert!(!super::super::crypto::is_container(
-            &fs::read(root.join(FILE_LIBRARY)).unwrap()
-        ));
-    }
-
-    #[test]
     fn body_roundtrip_via_directory_plaintext() {
         let (lib, root) = temp_lib("body");
         lib.write_body("sk1", "# 你好\n技能正文").unwrap();
@@ -561,43 +500,10 @@ mod tests {
     }
 
     #[test]
-    fn mcp_json_write_encrypts_while_locked_skills_remain_editable() {
-        let (lib, root) = temp_lib("mcpenc");
-        let salt = new_salt();
-        let key = derive_key("p@ss", &salt).unwrap();
-        let mut meta = lib.meta().unwrap();
-        meta.encrypted = true;
-        lib.write_meta(&meta).unwrap();
-        super::super::crypto::store_key(&root, key);
-        lib.write_mcp_json(&Vec::<McpServer>::new()).unwrap();
-        super::super::crypto::clear_key(&root);
-        // mcp.json 为容器,skills.json 明文
-        assert!(super::super::crypto::is_container(
-            &fs::read(root.join(FILE_MCP)).unwrap()
-        ));
-        assert!(!super::super::crypto::is_container(
-            &fs::read(root.join(FILE_SKILLS)).unwrap()
-        ));
-        // 上锁:技能读写照常,MCP 读写报 locked
-        let err = lib.read_mcp_json::<Vec<McpServer>>().unwrap_err();
-        assert_eq!(err.code(), codes::LOCKED);
-        lib.write_plain_json(FILE_SKILLS, &SkillLibrary::default())
-            .unwrap();
-        lib.write_body("s1", "正文").unwrap();
-        assert!(lib.read_body("s1").unwrap() == "正文".as_bytes());
-        // 无 tmp/bak 残留
-        for entry in fs::read_dir(&root).unwrap().flatten() {
-            assert!(!entry.file_name().to_string_lossy().contains("repomeow-tmp"));
-        }
-    }
-
-    #[test]
-    fn clear_all_removes_content_and_key() {
+    fn clear_all_removes_content() {
         let (lib, root) = temp_lib("clear");
         lib.write_body("sk1", "x").unwrap();
-        super::super::crypto::store_key(&root, derive_key("p", &new_salt()).unwrap());
         lib.clear_all().unwrap();
         assert!(root.exists() && !root.join(DIR_SKILLS).join("sk1").exists());
-        assert!(!super::super::crypto::is_unlocked(&root));
     }
 }

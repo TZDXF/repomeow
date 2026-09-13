@@ -1,4 +1,4 @@
-//! 资源库集成测试:数据 CRUD、加密(仅 mcp.json)、本地 bare remote
+//! 资源库集成测试:数据 CRUD、明文 MCP 读写、本地 bare remote
 //! 同步/分叉/导入(备份保留)/聚合配置。
 //!
 //! 直接用 `Library::new(临时目录)` 驱动 ops/git/store,不经 AppHandle;
@@ -11,7 +11,6 @@ use crate::commands::git::git_command;
 use crate::path_util::to_forward_slash;
 use crate::time_util::now_ts_nanos;
 
-use super::crypto::{is_container, key_for};
 use super::errors::codes;
 use super::git;
 use super::models::McpServerInput;
@@ -27,7 +26,6 @@ struct TempLib {
 
 impl Drop for TempLib {
     fn drop(&mut self) {
-        super::crypto::clear_key(&self.root);
         let _ = remove_dir_tolerating_readonly(&self.root);
     }
 }
@@ -606,129 +604,6 @@ fn every_mutation_auto_inits_and_commits() {
     assert!(!git::dirty(&t.lib).unwrap());
 }
 
-// ── 加密(仅 mcp.json;口令仅内存;历史重写)─────────────────────────────
-
-#[test]
-fn encryption_enable_unlock_lock_disable_flow() {
-    let t = temp_lib("encflow");
-    let s = ops::skill_create(&t.lib, "机密技能", None, vec![], Some("机密正文".into())).unwrap();
-    ops::mcp_create(&t.lib, &stdio_def("内部 MCP")).unwrap();
-    assert_eq!(commit_count(&t.root), 2);
-
-    // 启用:无 remote,outcome 应 ok(未推送)
-    let outcome = ops::encryption_enable(&t.lib, "口令123").unwrap();
-    assert!(outcome.ok && !outcome.pushed);
-
-    let meta = t.lib.meta().unwrap();
-    assert!(meta.encrypted);
-    assert!(meta.kdf_salt.is_some());
-    assert!(meta.key_check.is_some());
-    // **仅 mcp.json 容器化**;skills.json / 正文 / library.json 恒为明文
-    assert!(is_container(&fs::read(t.root.join("mcp.json")).unwrap()));
-    assert!(!is_container(
-        &fs::read(t.root.join("skills.json")).unwrap()
-    ));
-    assert!(!is_container(
-        &fs::read(t.root.join("skills").join(&s.directory).join("SKILL.md")).unwrap()
-    ));
-    assert!(!is_container(
-        &fs::read(t.root.join("library.json")).unwrap()
-    ));
-    // 历史重写:旧明文提交不可达,只剩 1 个重建提交
-    assert_eq!(commit_count(&t.root), 1);
-    // 启用后保持解锁,可正常读写
-    assert!(super::crypto::is_unlocked(&t.root));
-    let content = ops::body_read(&t.lib, &s.id).unwrap().content;
-    assert!(content.ends_with("机密正文"), "{content}");
-    // 再次启用报 already
-    assert_eq!(
-        ops::encryption_enable(&t.lib, "x").unwrap_err().code(),
-        codes::ALREADY_ENCRYPTED
-    );
-
-    // 上锁:技能照常管理(明文),仅 MCP 读取报 locked
-    ops::encryption_lock(&t.lib);
-    assert!(!super::crypto::is_unlocked(&t.root));
-    assert_eq!(ops::mcp_list(&t.lib).unwrap_err().code(), codes::LOCKED);
-    assert_eq!(
-        ops::mcp_create(&t.lib, &stdio_def("新 MCP"))
-            .unwrap_err()
-            .code(),
-        codes::LOCKED
-    );
-    assert_eq!(ops::skill_list(&t.lib).unwrap().skills.len(), 1);
-    ops::skill_create(&t.lib, "上锁后新增技能", None, vec![], None).unwrap();
-    assert_eq!(ops::skill_list(&t.lib).unwrap().skills.len(), 2);
-    // library_info 不因上锁失败,仅 MCP 计数取 0
-    let info = ops::library_info(&t.lib).unwrap();
-    assert!(info.encrypted && !info.unlocked);
-    assert_eq!(info.skill_count, 2);
-    assert_eq!(info.mcp_count, 0);
-    // 错误口令 / 正确口令
-    assert_eq!(
-        ops::encryption_unlock(&t.lib, "错误口令")
-            .unwrap_err()
-            .code(),
-        codes::PASSWORD_INVALID
-    );
-    ops::encryption_unlock(&t.lib, "口令123").unwrap();
-    assert!(super::crypto::is_unlocked(&t.root));
-
-    // 关闭:解密回明文,meta 字段清空,密钥清除
-    let outcome = ops::encryption_disable(&t.lib, "口令123").unwrap();
-    assert!(outcome.ok);
-    let meta = t.lib.meta().unwrap();
-    assert!(!meta.encrypted && meta.kdf_salt.is_none() && meta.key_check.is_none());
-    assert!(!is_container(&fs::read(t.root.join("mcp.json")).unwrap()));
-    assert_eq!(ops::mcp_list(&t.lib).unwrap().len(), 1);
-    assert!(!super::crypto::is_unlocked(&t.root));
-    assert_eq!(
-        ops::encryption_disable(&t.lib, "口令123")
-            .unwrap_err()
-            .code(),
-        codes::NOT_ENCRYPTED
-    );
-    assert_eq!(
-        ops::encryption_unlock(&t.lib, "口令123")
-            .unwrap_err()
-            .code(),
-        codes::NOT_ENCRYPTED
-    );
-}
-
-#[test]
-fn encryption_rewrites_history_and_force_pushes_to_remote() {
-    let t = temp_lib("encpush");
-    let bare = make_bare("encpush-bare");
-    ops::skill_create(&t.lib, "技能", None, vec![], Some("正文".into())).unwrap();
-    git::remote_set(&t.lib, &bare_url(&bare)).unwrap();
-    git::push_now(&t.lib).unwrap();
-    assert_eq!(commit_count(&t.root), 1);
-
-    // 启用加密:重建历史 + fetch + force-with-lease(显式租约)强推
-    let outcome = ops::encryption_enable(&t.lib, "pw").unwrap();
-    assert!(outcome.ok, "{outcome:?}");
-    assert!(outcome.pushed, "{outcome:?}");
-    assert_eq!(commit_count(&t.root), 1);
-
-    // 远端被强推更新:clone 出来 mcp.json 为密文,其余明文,单提交历史
-    let cloned = clone_repo(&bare, "clone");
-    assert_eq!(commit_count(&cloned), 1);
-    assert!(is_container(&fs::read(cloned.join("mcp.json")).unwrap()));
-    assert!(!is_container(
-        &fs::read(cloned.join("skills.json")).unwrap()
-    ));
-    assert!(!is_container(
-        &fs::read(cloned.join("library.json")).unwrap()
-    ));
-    assert!(git_out(&cloned, &["log", "--oneline"]).contains("启用加密"));
-    // 远端 clone 侧用同口令可解锁(盐随 meta 同步)
-    let lib_b = Library::new(cloned.clone());
-    ops::encryption_unlock(&lib_b, "pw").unwrap();
-    assert_eq!(ops::mcp_list(&lib_b).unwrap().len(), 0);
-    let _ = key_for(&cloned); // 密钥已登记(按 root 分片)
-}
-
 // ── 本地 bare remote 同步 / 分叉 / 导入 / 聚合配置 ────────────────────
 
 #[test]
@@ -878,8 +753,6 @@ fn import_remote_conflict_backup_and_restore() {
     // 新内容可继续同步
     ops::skill_create(&t.lib, "新的技能", None, vec![], None).unwrap();
     assert!(git::sync_once_impl(&t.lib).ok);
-    // 导入后旧密钥作废(安全)
-    assert!(!super::crypto::is_unlocked(&t.root));
 
     // 失败导入:恢复原目录
     let t3 = temp_lib("import-restore");
@@ -1690,4 +1563,25 @@ fn marketplace_install_preserves_binary_attachments() {
         .unwrap(),
         vec![0, 255, 128, 42]
     );
+}
+
+#[test]
+fn mcp_plaintext_roundtrip_without_remote_check() {
+    let t = temp_lib("mcp-plain-offline");
+    let mut def = stdio_def("本地 MCP");
+    def.env.insert("API_TOKEN".into(), "test-token".into());
+    let created = ops::mcp_create(&t.lib, &def).unwrap();
+    // 配置一个不存在的本地远端。列表查询只读文件,不应检查远端可用性。
+    let missing_remote = t.root.join("missing-remote.git");
+    git::remote_set(&t.lib, &to_forward_slash(&missing_remote)).unwrap();
+    let bytes = fs::read(t.root.join("mcp.json")).unwrap();
+    let stored: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(stored[0]["env"]["API_TOKEN"], "test-token");
+    // 重新打开资源库无需任何进程内解锁状态。
+    let reopened = Library::new(t.root.clone());
+    let list = ops::mcp_list(&reopened).unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].id, created.id);
+    assert_eq!(list[0].env.get("API_TOKEN").unwrap(), "test-token");
+    assert_eq!(ops::library_info(&reopened).unwrap().mcp_count, 1);
 }

@@ -12,11 +12,6 @@ use crate::error::AppError;
 /// 资源库专属错误码(小写蛇形,与前端 i18n `errors.*` 键对应)。
 /// 通用 io/json/git 底层错误不走这里,由 `RlError::App` 透传既有码。
 pub mod codes {
-    pub const LOCKED: &str = "resource_library_locked";
-    pub const PASSWORD_INVALID: &str = "resource_library_password_invalid";
-    pub const PASSWORD_REQUIRED: &str = "resource_library_password_required";
-    pub const ALREADY_ENCRYPTED: &str = "resource_library_already_encrypted";
-    pub const NOT_ENCRYPTED: &str = "resource_library_not_encrypted";
     pub const CORRUPT: &str = "resource_library_corrupt";
     pub const SKILL_NOT_FOUND: &str = "resource_library_skill_not_found";
     pub const SKILL_NAME_REQUIRED: &str = "resource_library_skill_name_required";
@@ -138,9 +133,9 @@ mod tests {
 
     #[test]
     fn serialize_emits_code_and_message() {
-        let raw = RlError::coded(codes::LOCKED, "");
+        let raw = RlError::coded(codes::CORRUPT, "");
         let json = serde_json::to_value(&raw).unwrap();
-        assert_eq!(json["code"], "resource_library_locked");
+        assert_eq!(json["code"], "resource_library_corrupt");
         assert_eq!(json["message"], "");
     }
 

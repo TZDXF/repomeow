@@ -7,12 +7,9 @@
 //! - 配置了 remote 后自动触发后台同步(全局串行),同步结果写回
 //!   `library.json.lastSync` 并经 `resource-library://sync-completed` 事件推送,
 //!   **本地保存不因网络失败整体报错**;
-//! - 加密为可选:Argon2id + XChaCha20Poly1305,口令仅内存(重启后需 unlock),
-//!   启用/关闭会重建 git 历史清除明文提交,有 remote 时 force-with-lease 强推;
 //! - 互斥:进程内 `Mutex`(应用 single-instance 单进程),git 网络操作另经
 //!   异步 `SYNC_LOCK` 串行,避免并发 fetch/push 争抢 refs。
 
-mod crypto;
 mod errors;
 mod frontmatter;
 mod git;
@@ -161,7 +158,7 @@ where
     Ok(result)
 }
 
-/// 写命令骨架(不触发自动同步:git 配置/加密等自行处理同步)
+/// 写命令骨架(不触发自动同步:git 配置等自行处理同步)
 async fn mutate_quiet<T, F>(app: &AppHandle, f: F) -> RlResult<T>
 where
     T: Send + 'static,
@@ -185,13 +182,6 @@ pub async fn rl_library_info(app: AppHandle) -> RlResult<LibraryInfo> {
 #[tauri::command]
 pub async fn rl_library_open_dir(app: AppHandle) -> RlResult<()> {
     mutate_quiet(&app, ops::library_open_dir).await
-}
-
-#[tauri::command]
-pub fn rl_encryption_status(app: AppHandle) -> RlResult<EncryptionStatus> {
-    let lib = Library::app(&app)?;
-    let _guard = lock_op();
-    ops::encryption_status(&lib)
 }
 
 // ── Skill 多分组 CRUD ──────────────────────────────────────────────────
@@ -709,31 +699,6 @@ pub async fn rl_mcp_import(
     defs: Vec<McpServerInput>,
 ) -> RlResult<McpImportOutcome> {
     mutate(&app, move |lib| ops::mcp_import(lib, &defs)).await
-}
-
-// ── 加密(可选,口令仅内存)──────────────────────────────────────────────
-
-#[tauri::command]
-pub async fn rl_encryption_enable(app: AppHandle, password: String) -> RlResult<SyncOutcome> {
-    mutate_quiet(&app, move |lib| ops::encryption_enable(lib, &password)).await
-}
-
-#[tauri::command]
-pub async fn rl_encryption_disable(app: AppHandle, password: String) -> RlResult<SyncOutcome> {
-    mutate_quiet(&app, move |lib| ops::encryption_disable(lib, &password)).await
-}
-
-#[tauri::command]
-pub async fn rl_encryption_unlock(app: AppHandle, password: String) -> RlResult<()> {
-    mutate_quiet(&app, move |lib| ops::encryption_unlock(lib, &password)).await
-}
-
-#[tauri::command]
-pub fn rl_encryption_lock(app: AppHandle) -> RlResult<()> {
-    let lib = Library::app(&app)?;
-    let _guard = lock_op();
-    ops::encryption_lock(&lib);
-    Ok(())
 }
 
 // ── Git / 同步 ─────────────────────────────────────────────────────────

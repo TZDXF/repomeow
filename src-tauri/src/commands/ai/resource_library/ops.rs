@@ -1,5 +1,4 @@
-//! 资源库业务操作:Skill 多分组 CRUD(恒明文)、正文读写、通用 MCP CRUD
-//! (唯一加密对象)、加密开关。
+//! 资源库业务操作:Skill 多分组 CRUD、正文读写、通用 MCP CRUD。
 //!
 //! 命令层(mod.rs)负责 AppHandle 解析、进程内互斥与后台自动同步;
 //! 本层纯 `Library` 驱动,可直接单测。所有写操作自动 git init + 快照提交
@@ -12,18 +11,14 @@ use std::path::PathBuf;
 use crate::commands::open;
 use crate::time_util::now_ts;
 
-use super::crypto::{
-    clear_key, derive_key, encrypt_bytes, is_unlocked, key_for, make_key_check, new_salt,
-    store_key, verify_key_check,
-};
 use super::errors::{codes, RlError, RlResult};
 use super::frontmatter as fm;
 use super::git;
 use super::marketplace;
 use super::models::{
-    EncryptionStatus, LibraryInfo, MarketplaceDownload, MarketplaceSource, MarketplaceUpdateStatus,
+    LibraryInfo, MarketplaceDownload, MarketplaceSource, MarketplaceUpdateStatus,
     McpImportOutcome, McpImportSkip, McpServer, McpServerInput, Skill, SkillBody, SkillGroup,
-    SkillLibrary, SyncOutcome, TRANSPORTS,
+    SkillLibrary, TRANSPORTS,
 };
 use super::store::{is_safe_directory, Library, DIR_SKILLS, FILE_SKILLS};
 
@@ -150,21 +145,13 @@ pub(super) fn library_open_dir(lib: &Library) -> RlResult<()> {
 pub(super) fn library_info(lib: &Library) -> RlResult<LibraryInfo> {
     lib.ensure()?;
     let meta = lib.meta()?;
-    let unlocked = is_unlocked(lib.root());
-    // skills 恒明文,计数始终可用;MCP 加密未解锁时计数取 0(unlocked 已透出)
     let skills: SkillLibrary = lib.read_plain_json(FILE_SKILLS).unwrap_or_default();
-    let mcp_count = if !meta.encrypted || unlocked {
-        lib.read_mcp_json::<Vec<McpServer>>()
-            .map(|list| list.len() as u32)
-            .unwrap_or(0)
-    } else {
-        0
-    };
+    let mcp_count = lib.read_mcp_json::<Vec<McpServer>>()
+        .map(|list| list.len() as u32)
+        .unwrap_or(0);
     Ok(LibraryInfo {
         root: lib.root().to_string_lossy().into_owned(),
         version: meta.version,
-        encrypted: meta.encrypted,
-        unlocked,
         git_initialized: git::is_repo(lib),
         git_dirty: if git::is_repo(lib) {
             git::dirty(lib).unwrap_or(false)
@@ -177,15 +164,6 @@ pub(super) fn library_info(lib: &Library) -> RlResult<LibraryInfo> {
         group_count: skills.groups.len() as u32,
         mcp_count,
         last_sync: lib.read_state().last_sync,
-    })
-}
-
-pub(super) fn encryption_status(lib: &Library) -> RlResult<EncryptionStatus> {
-    lib.ensure()?;
-    let meta = lib.meta()?;
-    Ok(EncryptionStatus {
-        enabled: meta.encrypted,
-        unlocked: is_unlocked(lib.root()),
     })
 }
 
@@ -931,111 +909,4 @@ pub(super) fn mcp_import(lib: &Library, defs: &[McpServerInput]) -> RlResult<Mcp
         git::auto_commit(lib, &message)?;
     }
     Ok(outcome)
-}
-
-// ── 加密开关(仅加密 mcp.json;口令仅内存)──────────────────────────────
-
-/// 启用加密:meta 先翻转(明文残留可容错直读),再加密 mcp.json,
-/// 随后重建 git 历史清除含明文 MCP 的旧提交,配置了 remote 时 fetch +
-/// force-with-lease(显式租约 OID)强推;成功后保持解锁。
-pub(super) fn encryption_enable(lib: &Library, password: &str) -> RlResult<SyncOutcome> {
-    lib.ensure()?;
-    if password.is_empty() {
-        return Err(RlError::coded(codes::PASSWORD_REQUIRED, ""));
-    }
-    let mut meta = lib.meta()?;
-    if meta.encrypted {
-        return Err(RlError::coded(codes::ALREADY_ENCRYPTED, ""));
-    }
-    let salt = new_salt();
-    let key = derive_key(password, &salt)?;
-    let key_check = make_key_check(&key)?;
-    // 1) meta 翻转(提交点;此后明文残留经容器校验直通,不丢数据)
-    meta.encrypted = true;
-    meta.kdf_salt = Some(salt);
-    meta.key_check = Some(key_check);
-    lib.write_meta(&meta)?;
-    // 2) 加密 mcp.json(唯一加密文件)
-    lib.transform_encrypted_file(|bytes| encrypt_bytes(&key, bytes))?;
-    // 3) 历史重写 + 强推
-    let outcome = git::rewrite_and_push(lib, "启用加密:重建历史(清除明文)");
-    // 4) 保持解锁
-    store_key(lib.root(), key);
-    Ok(outcome)
-}
-
-/// 关闭加密:先解密 mcp.json(meta 仍为加密态,中途崩溃可由容器校验容错),
-/// 再翻转 meta,随后重建历史并强推;结束后清除内存密钥。
-pub(super) fn encryption_disable(lib: &Library, password: &str) -> RlResult<SyncOutcome> {
-    lib.ensure()?;
-    let mut meta = lib.meta()?;
-    if !meta.encrypted {
-        return Err(RlError::coded(codes::NOT_ENCRYPTED, ""));
-    }
-    let key = match key_for(lib.root()) {
-        Some(key) => key,
-        None => {
-            let salt = meta
-                .kdf_salt
-                .clone()
-                .ok_or_else(|| RlError::coded(codes::CORRUPT, "缺少 kdf salt"))?;
-            let key = derive_key(password, &salt)?;
-            let check = meta
-                .key_check
-                .clone()
-                .ok_or_else(|| RlError::coded(codes::CORRUPT, "缺少 key check"))?;
-            if !verify_key_check(&key, &check) {
-                return Err(RlError::coded(codes::PASSWORD_INVALID, ""));
-            }
-            key
-        }
-    };
-    // 1) 批量解密 mcp.json
-    lib.transform_encrypted_file(|bytes| {
-        super::crypto::decrypt_bytes(Some(&key), bytes).map(|plain| plain.to_vec())
-    })?;
-    // 2) meta 翻转
-    meta.encrypted = false;
-    meta.kdf_salt = None;
-    meta.key_check = None;
-    lib.write_meta(&meta)?;
-    // 3) 历史重写 + 强推
-    let outcome = git::rewrite_and_push(lib, "关闭加密:重建历史");
-    // 4) 清除内存密钥
-    clear_key(lib.root());
-    Ok(outcome)
-}
-
-/// 解锁:派生密钥并校验口令(区分口令错误与数据损坏),成功后仅驻留内存
-pub(super) fn encryption_unlock(lib: &Library, password: &str) -> RlResult<()> {
-    lib.ensure()?;
-    let meta = lib.meta()?;
-    if !meta.encrypted {
-        return Err(RlError::coded(codes::NOT_ENCRYPTED, ""));
-    }
-    if password.is_empty() {
-        return Err(RlError::coded(codes::PASSWORD_REQUIRED, ""));
-    }
-    if is_unlocked(lib.root()) {
-        return Ok(());
-    }
-    let salt = meta
-        .kdf_salt
-        .clone()
-        .ok_or_else(|| RlError::coded(codes::CORRUPT, "缺少 kdf salt"))?;
-    let key = derive_key(password, &salt)?;
-    let check = meta
-        .key_check
-        .clone()
-        .ok_or_else(|| RlError::coded(codes::CORRUPT, "缺少 key check"))?;
-    if !verify_key_check(&key, &check) {
-        return Err(RlError::coded(codes::PASSWORD_INVALID, ""));
-    }
-    store_key(lib.root(), key);
-    Ok(())
-}
-
-/// 上锁:立即清除内存密钥
-pub(super) fn encryption_lock(lib: &Library) {
-    clear_key(lib.root());
 }

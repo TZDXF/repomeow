@@ -652,7 +652,7 @@ fn assign(
     }
     let state_path = manifest_file(library, root);
     let mut state = read_manifest(&state_path, root)?;
-    // 来源被删除/上锁时仍允许解除配置;新增配置由 apply_one 拒绝。
+    // 来源被删除/损坏时仍允许解除配置;新增配置由 apply_one 拒绝。
     let list = sources(library, kind).ok().map(|(_, list)| list);
     let locals = local_sources(root, &state, kind);
     let source = list
@@ -1403,7 +1403,7 @@ fn apply_one(
             return apply_local_origin(root, state_path, state, &local, agent, selected);
         }
     }
-    // 来源被删除/上锁时保留已配置项,不把空来源列表当成卸载指令。
+    // 来源被删除/损坏时保留已配置项,不把空来源列表当成卸载指令。
     if selected && source.is_none() {
         return if existing.is_some() {
             Ok(false)

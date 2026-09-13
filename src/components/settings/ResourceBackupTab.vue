@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
-import { FolderOpen, LoaderCircle, Lock, LockOpen, RefreshCw } from "@lucide/vue";
+import { FolderOpen, LoaderCircle, RefreshCw } from "@lucide/vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,14 +19,11 @@ import { formatRelativeTime } from "@/lib/format";
 import {
   configureResourceBackup,
   getResourceBackupStatus,
-  lockResourceBackup,
   onResourceBackupStatusChanged,
   openResourceLibraryDir,
   resolveResourceBackup,
-  setResourceBackupEncryption,
   syncResourceBackupNow,
   unlinkResourceBackup,
-  unlockResourceBackup,
   type ResourceBackupStatus,
 } from "@/lib/resource-library";
 
@@ -147,81 +144,8 @@ async function syncNow() {
   }
 }
 
-// 加密
-const encryptOpen = ref(false);
-const passphrase = ref("");
-const passphraseConfirm = ref("");
-const savingEncrypt = ref(false);
-
-function openEncrypt() {
-  passphrase.value = "";
-  passphraseConfirm.value = "";
-  encryptOpen.value = true;
-}
-
-async function saveEncryption() {
-  if (savingEncrypt.value) {
-    return;
-  }
-  if (!passphrase.value) {
-    toast.error(t("settings.resources.backup.encryption.dialog.missing"));
-    return;
-  }
-  if (passphrase.value !== passphraseConfirm.value) {
-    toast.error(t("settings.resources.backup.encryption.dialog.mismatch"));
-    return;
-  }
-  savingEncrypt.value = true;
-  try {
-    status.value = await setResourceBackupEncryption(true, passphrase.value);
-    encryptOpen.value = false;
-    passphrase.value = "";
-    passphraseConfirm.value = "";
-    toast.success(t("settings.resources.backup.encryption.dialog.saved"));
-  } catch (e) {
-    toast.error(String(e));
-  } finally {
-    savingEncrypt.value = false;
-  }
-}
-
-const unlockOpen = ref(false);
-const unlockPassphrase = ref("");
-const unlocking = ref(false);
-
-function openUnlock() {
-  unlockPassphrase.value = "";
-  unlockOpen.value = true;
-}
-
-async function submitUnlock() {
-  if (!unlockPassphrase.value || unlocking.value) {
-    return;
-  }
-  unlocking.value = true;
-  try {
-    status.value = await unlockResourceBackup(unlockPassphrase.value);
-    unlockOpen.value = false;
-    unlockPassphrase.value = "";
-    toast.success(t("settings.resources.backup.encryption.dialog.unlocked"));
-  } catch (e) {
-    toast.error(String(e));
-  } finally {
-    unlocking.value = false;
-  }
-}
-
-async function lockNow() {
-  try {
-    status.value = await lockResourceBackup();
-    toast.success(t("settings.resources.backup.encryption.dialog.locked"));
-  } catch (e) {
-    toast.error(String(e));
-  }
-}
-
-// 通用确认(解除同步 / 关闭加密 / 分叉解决方向)
-type PendingConfirm = "unlink" | "disableEncrypt" | "resolveRemote" | "resolveLocal";
+// 通用确认(解除同步 / 分叉解决方向)
+type PendingConfirm = "unlink" | "resolveRemote" | "resolveLocal";
 const pendingConfirm = ref<PendingConfirm | null>(null);
 const confirmOpen = computed({
   get: () => pendingConfirm.value !== null,
@@ -236,8 +160,6 @@ const confirmDescription = computed(() => {
   switch (pendingConfirm.value) {
     case "unlink":
       return t("settings.resources.backup.unlinkConfirm");
-    case "disableEncrypt":
-      return t("settings.resources.backup.encryption.disableConfirm");
     case "resolveRemote":
       return t("settings.resources.backup.resolveRemoteConfirm");
     case "resolveLocal":
@@ -248,10 +170,7 @@ const confirmDescription = computed(() => {
 });
 
 const confirmDestructive = computed(
-  () =>
-    pendingConfirm.value === "unlink" ||
-    pendingConfirm.value === "disableEncrypt" ||
-    pendingConfirm.value === "resolveRemote",
+  () => pendingConfirm.value === "unlink" || pendingConfirm.value === "resolveRemote",
 );
 
 async function confirm() {
@@ -261,14 +180,6 @@ async function confirm() {
         await unlinkResourceBackup();
         toast.success(t("settings.resources.backup.unlinked"));
         await load();
-      } catch (e) {
-        toast.error(String(e));
-      }
-      break;
-    case "disableEncrypt":
-      try {
-        status.value = await setResourceBackupEncryption(false);
-        toast.success(t("settings.resources.backup.encryption.dialog.saved"));
       } catch (e) {
         toast.error(String(e));
       }
@@ -284,9 +195,6 @@ async function confirm() {
   }
   pendingConfirm.value = null;
 }
-
-// Git 同步的是 mcp.json 密文,不需要在当前设备解锁资源库。
-const syncDisabled = computed(() => syncing.value);
 
 async function openDir() {
   try {
@@ -414,7 +322,7 @@ async function openDir() {
           <Button size="sm" variant="outline" class="h-8" @click="openConfig">
             {{ t("settings.resources.backup.edit") }}
           </Button>
-          <Button size="sm" class="h-8 gap-1.5" :disabled="syncDisabled" @click="syncNow">
+          <Button size="sm" class="h-8 gap-1.5" :disabled="syncing" @click="syncNow">
             <LoaderCircle v-if="syncing" class="h-3.5 w-3.5 animate-spin" />
             <RefreshCw v-else class="h-3.5 w-3.5" />
             {{
@@ -422,68 +330,6 @@ async function openDir() {
                 ? t("settings.resources.backup.syncing")
                 : t("settings.resources.backup.syncNow")
             }}
-          </Button>
-        </div>
-      </template>
-    </div>
-
-    <div class="rounded-lg border p-4">
-      <div class="flex items-start justify-between gap-3">
-        <div>
-          <h3 class="text-sm font-semibold">
-            {{ t("settings.resources.backup.encryption.title") }}
-          </h3>
-          <p class="mt-1 text-xs text-muted-foreground">
-            {{ t("settings.resources.backup.encryption.description") }}
-          </p>
-        </div>
-        <Badge variant="outline" class="shrink-0">
-          {{
-            status?.encrypted
-              ? t("settings.resources.backup.encryption.enabled")
-              : t("settings.resources.backup.encryption.disabled")
-          }}
-        </Badge>
-      </div>
-
-      <template v-if="!status?.encrypted">
-        <div class="mt-3 flex justify-end border-t pt-3">
-          <Button size="sm" variant="outline" class="h-8" @click="openEncrypt">
-            {{ t("settings.resources.backup.encryption.enable") }}
-          </Button>
-        </div>
-      </template>
-      <template v-else>
-        <p
-          v-if="status.unlocked !== true"
-          class="mt-3 flex items-center gap-1.5 rounded-md bg-muted/60 px-3 py-2 text-xs text-muted-foreground"
-        >
-          <Lock class="h-3 w-3 shrink-0" />
-          {{ t("settings.resources.backup.encryption.lockedHint") }}
-        </p>
-        <div class="mt-3 flex justify-end gap-2 border-t pt-3">
-          <Button
-            v-if="status.unlocked"
-            size="sm"
-            variant="outline"
-            class="h-8"
-            @click="pendingConfirm = 'disableEncrypt'"
-          >
-            {{ t("settings.resources.backup.encryption.disable") }}
-          </Button>
-          <Button
-            v-if="status.unlocked"
-            size="sm"
-            variant="outline"
-            class="h-8 gap-1.5"
-            @click="lockNow"
-          >
-            <Lock class="h-3.5 w-3.5" />
-            {{ t("settings.resources.backup.encryption.lock") }}
-          </Button>
-          <Button v-else size="sm" class="h-8 gap-1.5" @click="openUnlock">
-            <LockOpen class="h-3.5 w-3.5" />
-            {{ t("settings.resources.backup.encryption.unlock") }}
           </Button>
         </div>
       </template>
@@ -531,98 +377,6 @@ async function openDir() {
             </Button>
             <Button type="submit" :disabled="!remoteUrl.trim() || savingConfig">
               {{ t("common.save") }}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-
-    <Dialog v-model:open="encryptOpen">
-      <DialogContent class="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{{
-            t("settings.resources.backup.encryption.dialog.enableTitle")
-          }}</DialogTitle>
-          <DialogDescription>
-            {{ t("settings.resources.backup.encryption.dialog.enableDescription") }}
-          </DialogDescription>
-        </DialogHeader>
-        <form class="flex flex-col gap-3 py-1" @submit.prevent="saveEncryption">
-          <div class="flex flex-col gap-1">
-            <label class="text-xs text-muted-foreground">
-              {{ t("settings.resources.backup.encryption.dialog.passphraseLabel") }}
-            </label>
-            <Input
-              v-model="passphrase"
-              type="password"
-              class="h-8 text-xs"
-              autocomplete="new-password"
-              spellcheck="false"
-            />
-          </div>
-          <div class="flex flex-col gap-1">
-            <label class="text-xs text-muted-foreground">
-              {{ t("settings.resources.backup.encryption.dialog.confirmLabel") }}
-            </label>
-            <Input
-              v-model="passphraseConfirm"
-              type="password"
-              class="h-8 text-xs"
-              autocomplete="new-password"
-              spellcheck="false"
-            />
-          </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              :disabled="savingEncrypt"
-              @click="encryptOpen = false"
-            >
-              {{ t("common.cancel") }}
-            </Button>
-            <Button type="submit" :disabled="savingEncrypt">
-              {{ t("common.confirm") }}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-
-    <Dialog v-model:open="unlockOpen">
-      <DialogContent class="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{{
-            t("settings.resources.backup.encryption.dialog.unlockTitle")
-          }}</DialogTitle>
-          <DialogDescription>
-            {{ t("settings.resources.backup.encryption.dialog.unlockDescription") }}
-          </DialogDescription>
-        </DialogHeader>
-        <form class="flex flex-col gap-3 py-1" @submit.prevent="submitUnlock">
-          <div class="flex flex-col gap-1">
-            <label class="text-xs text-muted-foreground">
-              {{ t("settings.resources.backup.encryption.dialog.passphraseLabel") }}
-            </label>
-            <Input
-              v-model="unlockPassphrase"
-              type="password"
-              class="h-8 text-xs"
-              autocomplete="current-password"
-              spellcheck="false"
-            />
-          </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              :disabled="unlocking"
-              @click="unlockOpen = false"
-            >
-              {{ t("common.cancel") }}
-            </Button>
-            <Button type="submit" :disabled="!unlockPassphrase || unlocking">
-              {{ t("common.confirm") }}
             </Button>
           </DialogFooter>
         </form>

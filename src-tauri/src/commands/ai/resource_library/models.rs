@@ -1,9 +1,9 @@
 //! 资源库数据模型:serde 结构化类型。
 //!
 //! 磁盘布局(`~/.repomeow/resource-library/`):
-//! - `library.json` — 元数据(恒为明文,git 同步/状态查询无需口令)
-//! - `skills.json` — 分组与技能元数据(恒为明文;加密上锁后仍可管理)
-//! - `mcp.json` — 通用 MCP 服务器定义(唯一加密文件)
+//! - `library.json` — 元数据
+//! - `skills.json` — 分组与技能元数据
+//! - `mcp.json` — 通用 MCP 服务器定义(明文 JSON)
 //! - `skills/<directory>/SKILL.md` — 技能正文(恒为明文)
 //! - `.git/` — 整个资源库目录本身是本地 git 仓库
 //!
@@ -16,15 +16,6 @@ use serde::{Deserialize, Serialize};
 
 /// library.json 的格式版本;未发布前可原地演进
 pub const LIBRARY_VERSION: u32 = 1;
-
-/// 加密文件容器所用的密钥校验值(nonce + 密文,base64),存于明文 meta:
-/// 解锁时先校验口令正确性,把「口令错误」与「数据文件损坏」区分开
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct KeyCheck {
-    pub nonce: String,
-    pub ciphertext: String,
-}
 
 /// 最近一次自动同步的结果记录(网络失败不阻断本地保存,记录于此)
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -39,26 +30,18 @@ pub struct SyncRecord {
     pub diverged: bool,
 }
 
-/// library.json(明文):版本、加密状态与 KDF 参数。
+/// library.json(明文):格式版本。
 /// 历史版本曾内嵌 lastSync,现移至仓库外 state 文件;旧字段读取时被忽略
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct LibraryMeta {
     pub version: u32,
-    pub encrypted: bool,
-    /// Argon2id 盐(b64);仅 encrypted=true 时存在
-    pub kdf_salt: Option<String>,
-    /// 口令校验值;仅 encrypted=true 时存在
-    pub key_check: Option<KeyCheck>,
 }
 
 impl Default for LibraryMeta {
     fn default() -> Self {
         Self {
             version: LIBRARY_VERSION,
-            encrypted: false,
-            kdf_salt: None,
-            key_check: None,
         }
     }
 }
@@ -283,15 +266,12 @@ pub struct McpImportOutcome {
 
 // ── 查询结果 ───────────────────────────────────────────────────────────
 
-/// 库信息(设置页/首次引导用;加密未解锁时 MCP 计数取 0)
+/// 库信息(设置页/首次引导用)
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryInfo {
     pub root: String,
     pub version: u32,
-    pub encrypted: bool,
-    /// 本次进程内是否已 unlock(口令仅内存)
-    pub unlocked: bool,
     pub git_initialized: bool,
     pub git_dirty: bool,
     pub remote_url: Option<String>,
@@ -300,13 +280,6 @@ pub struct LibraryInfo {
     pub group_count: u32,
     pub mcp_count: u32,
     pub last_sync: Option<SyncRecord>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EncryptionStatus {
-    pub enabled: bool,
-    pub unlocked: bool,
 }
 
 /// 单条被跳过的导入来源(SKILL.md 目录):name 取 frontmatter name,
@@ -480,19 +453,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn meta_defaults_to_version_1_unencrypted() {
+    fn meta_defaults_to_version_1() {
         let meta = LibraryMeta::default();
         assert_eq!(meta.version, LIBRARY_VERSION);
-        assert!(!meta.encrypted);
-        assert!(meta.kdf_salt.is_none());
-        assert!(meta.key_check.is_none());
+        assert_eq!(
+            serde_json::to_value(&meta).unwrap(),
+            serde_json::json!({"version": LIBRARY_VERSION})
+        );
     }
 
     #[test]
     fn old_library_json_with_last_sync_field_still_parses() {
-        let json = r#"{"version":1,"encrypted":false,"lastSync":{"at":1,"ok":true}}"#;
+        let json = r#"{"version":1,"lastSync":{"at":1,"ok":true}}"#;
         let meta: LibraryMeta = serde_json::from_str(json).unwrap();
-        assert!(!meta.encrypted);
+        assert_eq!(meta.version, LIBRARY_VERSION);
     }
 
     #[test]

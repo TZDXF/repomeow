@@ -801,8 +801,6 @@ export interface ResourceBackupStatus {
   configured: boolean;
   remoteUrl: string;
   branch: string;
-  encrypted: boolean;
-  unlocked: boolean;
   state: ResourceBackupState;
   lastSyncAt?: number;
   ahead?: number;
@@ -820,8 +818,6 @@ type BackendSyncRecord = {
 };
 
 type BackendLibraryInfo = {
-  encrypted: boolean;
-  unlocked: boolean;
   remoteUrl?: string;
   branch?: string;
   lastSync?: BackendSyncRecord;
@@ -857,8 +853,6 @@ function mapBackupStatus(
     configured: remoteUrl.length > 0,
     remoteUrl,
     branch: sync?.branch ?? info.branch ?? "main",
-    encrypted: info.encrypted,
-    unlocked: !info.encrypted || info.unlocked,
     state: diverged ? "diverged" : failed ? "error" : record ? "idle" : "never",
     lastSyncAt: record?.at,
     ahead: outcome?.ahead ?? sync?.ahead ?? record?.ahead,
@@ -908,27 +902,6 @@ export async function syncResourceBackupNow(): Promise<ResourceBackupStatus> {
 export async function resolveResourceBackup(chooseRemote: boolean): Promise<ResourceBackupStatus> {
   await cmd<void>("rl_resolve_fork", { direction: chooseRemote ? "remote" : "local" });
   return syncResourceBackupNow();
-}
-
-export async function setResourceBackupEncryption(
-  enabled: boolean,
-  passphrase?: string,
-): Promise<ResourceBackupStatus> {
-  const outcome = await cmd<BackendSyncOutcome>(
-    enabled ? "rl_encryption_enable" : "rl_encryption_disable",
-    { password: passphrase ?? "" },
-  );
-  return mapBackupStatus(await getLibraryInfo(), undefined, outcome);
-}
-
-export async function unlockResourceBackup(passphrase: string): Promise<ResourceBackupStatus> {
-  await cmd<void>("rl_encryption_unlock", { password: passphrase });
-  return getResourceBackupStatus();
-}
-
-export async function lockResourceBackup(): Promise<ResourceBackupStatus> {
-  await cmd<void>("rl_encryption_lock");
-  return getResourceBackupStatus();
 }
 
 export function onResourceBackupStatusChanged(

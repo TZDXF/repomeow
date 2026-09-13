@@ -102,12 +102,7 @@ export default {
     git_merge_needs_checkout:
       "The target branch is not checked out in any worktree and cannot be fast-forwarded (diverged, or squash was requested). Create a worktree for it first, then merge. Target branch:",
     // resource library
-    resource_library_locked: "The resource library is locked. Enter the backup passphrase first",
-    resource_library_password_invalid: "Incorrect backup passphrase",
-    resource_library_password_required: "Backup passphrase is required",
-    resource_library_already_encrypted: "Resource library encryption is already enabled",
-    resource_library_not_encrypted: "Resource library encryption is not enabled",
-    resource_library_corrupt: "Resource library data is damaged or ciphertext verification failed",
+    resource_library_corrupt: "Resource library data is damaged",
     resource_library_skill_not_found: "Skill not found",
     resource_library_skill_name_required: "Skill name is required",
     resource_library_skill_name_conflict: "A skill with this name already exists",
@@ -302,11 +297,11 @@ export default {
     sharedHint:
       "Some tools also read other tools’ skill directories. Changes to shared content may affect them. Managed paths are retained while another target references them.",
     secretWarning:
-      "MCP credentials may be written to the project in plain text. Library encryption does not encrypt exported files. Check Git ignore rules to avoid committing credentials.",
+      "MCP credentials may be written to the project in plain text. Check Git ignore rules to avoid committing credentials.",
     search: "Search resources or groups…",
     ungrouped: "Ungrouped",
     sourceUnavailableHint:
-      "The source is unavailable. Unlock or repair it in Resource management, then refresh. Existing configuration is never removed automatically.",
+      "The source is unavailable. Repair it in Resource management, then refresh. Existing configuration is never removed automatically.",
     libraryEmpty: "The library is empty. Add resources in Resource management first.",
     noResults: "No matching resources",
     selectGroup: "Select current results in this group",
@@ -2167,25 +2162,15 @@ export default {
         },
       },
       mcp: {
-        description:
-          "Maintain generic MCP server definitions (stdio / HTTP / SSE). When the library is encrypted and locked, unlock it before editing.",
+        description: "Maintain generic MCP server definitions (stdio / HTTP / SSE).",
         create: "New server",
         empty: 'No MCP servers yet. Click "New server" to add one.',
-        unlock: "Unlock",
-        libraryLocked:
-          "The resource library is encrypted and locked: unlock it to add, edit, or delete MCP servers.",
-        unlocked: "Resource library unlocked.",
         deleted: "MCP server deleted.",
         deleteConfirm: 'Delete MCP server "{name}"?',
         transports: {
           stdio: "stdio",
           http: "HTTP",
           sse: "SSE",
-        },
-        unlockDialog: {
-          title: "Unlock resource library",
-          description: "Enter the encryption passphrase to unlock the resource library.",
-          passphraseLabel: "Passphrase",
         },
         editDialog: {
           createTitle: "New MCP server",
@@ -2284,33 +2269,6 @@ export default {
           branchLabel: "Branch",
           branchPlaceholder: "main",
           saved: "Backup configuration saved.",
-        },
-        encryption: {
-          title: "Encrypted backup",
-          description:
-            "Optional: when enabled, resources are encrypted with a passphrase before syncing.",
-          enabled: "Encryption on",
-          disabled: "Not encrypted",
-          enable: "Enable encryption",
-          disable: "Disable encryption",
-          lock: "Lock",
-          unlock: "Unlock",
-          lockedHint: "Locked: enter the passphrase to sync or change encryption settings.",
-          disableConfirm: "Disable encryption? Synced content will be transferred in plain text.",
-          dialog: {
-            enableTitle: "Enable encryption",
-            enableDescription:
-              "Set the passphrase used to encrypt backup content. Keep it safe; data cannot be decrypted without it.",
-            unlockTitle: "Unlock",
-            unlockDescription: "Enter the passphrase to decrypt and unlock the backup.",
-            passphraseLabel: "Passphrase",
-            confirmLabel: "Confirm passphrase",
-            missing: "Please enter a passphrase",
-            mismatch: "Passphrases do not match",
-            saved: "Encryption settings updated.",
-            unlocked: "Unlocked.",
-            locked: "Locked.",
-          },
         },
       },
     },

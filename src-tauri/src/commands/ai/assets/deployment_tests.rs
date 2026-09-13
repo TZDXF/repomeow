@@ -303,21 +303,15 @@ fn invalid_manifest_and_project_local_mcp_changes_fail_closed() {
 }
 
 #[test]
-fn locked_mcp_library_does_not_block_skills_or_remove_existing_mcp() {
+fn corrupt_mcp_library_does_not_block_skills_or_remove_existing_mcp() {
     let f = Fixture::new();
     f.mcp();
     f.apply("mcp", "claude", &["m1"]);
-    let mut meta = f.library.meta().unwrap();
-    meta.encrypted = true;
-    f.library.write_meta(&meta).unwrap();
-    // 合法加密容器头 + nonce/tag 占位;无进程内密钥时应先返回 locked。
-    let mut encrypted = b"RLENC1\x01".to_vec();
-    encrypted.extend_from_slice(&[0; 40]);
-    fs::write(f.library.root().join("mcp.json"), encrypted).unwrap();
+    fs::write(f.library.root().join("mcp.json"), b"not json").unwrap();
     let state = snapshot(&f.library, &f.root, "mcp").unwrap();
     assert_eq!(
         state.source_error.as_deref(),
-        Some("resource_library_locked")
+        Some("resource_library_corrupt")
     );
     assert_eq!(state.deployments[0].status, "sourceUnavailable");
     assert_eq!(f.apply("mcp", "claude", &["m1"]).applied, 0);

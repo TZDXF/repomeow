@@ -1,9 +1,9 @@
 //! 资源库 git 层:初始化、快照提交、remote 配置(聚合)、同步状态、
-//! 首次远端导入(备份保留)、分叉 resolve(remote/local)、加密历史重写 + 强推。
+//! 首次远端导入(备份保留)、分叉 resolve(remote/local)。
 //!
 //! 复用 `commands::git` 的 `git_command` / `run_git`(禁用终端凭据交互、
 //! Windows 隐藏黑窗、错误码映射与项目 git 一致)。资源库自身是目录内
-//! `.git` 仓库;mcp.json 加密后的密文直接进 git,同步无需口令。
+//! `.git` 仓库;MCP 定义以明文 JSON 参与同步。
 
 use std::fs;
 use std::process::Output;
@@ -13,12 +13,13 @@ use crate::error::{AppError, ErrorCode};
 #[cfg(test)]
 use crate::time_util::now_ts;
 
-use super::crypto::clear_key;
 use super::errors::{codes, RlError, RlResult};
 #[cfg(test)]
 use super::models::ImportResult;
 use super::models::{SyncOutcome, SyncStatus};
-use super::store::{remove_dir_tolerating_readonly, Library};
+#[cfg(test)]
+use super::store::remove_dir_tolerating_readonly;
+use super::store::Library;
 
 const GIT_NAME: &str = "RepoMeow";
 const GIT_EMAIL: &str = "repomeow@localhost";
@@ -251,7 +252,6 @@ pub(super) fn remote_configure_impl(
                 &["checkout", "-B", &rb, "--track", &format!("origin/{rb}")],
             )?;
             ensure_gitignore(lib)?;
-            clear_key(lib.root());
             out.pulled = true;
         }
         (Some(rb), true) => {
@@ -651,8 +651,6 @@ pub(super) fn import_remote(lib: &Library, url: &str, force: bool) -> RlResult<I
     };
     match run() {
         Ok(()) => {
-            // 远端内容已替换本地:作废本进程内旧密钥
-            clear_key(lib.root());
             Ok(ImportResult {
                 backup: backup.map(|b| b.to_string_lossy().into_owned()),
             })
@@ -666,49 +664,4 @@ pub(super) fn import_remote(lib: &Library, url: &str, force: bool) -> RlResult<I
             Err(e)
         }
     }
-}
-
-// ── 加密历史重写 + 强推(enable/disable 共用)───────────────────────────
-
-/// 重建 git 历史:清除含明文 MCP 的旧提交。先记下 remote URL
-/// (重建会抹掉 .git/config),全新 init + 单次提交后重挂 remote,
-/// fetch 建立租约,再 `--force-with-lease`(显式 expected OID)强推;
-/// 网络失败不阻断本地重建。
-pub(super) fn rewrite_and_push(lib: &Library, message: &str) -> SyncOutcome {
-    let mut out = SyncOutcome::default();
-    let url = match remote_get(lib) {
-        Ok(u) => u,
-        Err(e) => return fail_out(out, e),
-    };
-    if let Err(e) = rewrite_history(lib, message) {
-        return fail_out(out, e);
-    }
-    let Some(url) = url else {
-        out.ok = true;
-        return out;
-    };
-    if let Err(e) = remote_set(lib, &url).and_then(|_| fetch(lib)) {
-        return fail_out(out, e);
-    }
-    out.fetched = true;
-    match push(lib, true) {
-        Ok(()) => out.pushed = true,
-        Err(e) => return fail_out(out, e),
-    }
-    out.ok = true;
-    out
-}
-
-/// 保留分支名,全新 init + 单次快照提交,旧历史不可达
-fn rewrite_history(lib: &Library, message: &str) -> RlResult<()> {
-    let keep_branch = branch(lib)?.unwrap_or_else(|| "main".to_string());
-    let git_dir = lib.root().join(".git");
-    if git_dir.exists() {
-        remove_dir_tolerating_readonly(&git_dir)?;
-    }
-    init(lib)?;
-    let dir = dir_str(lib);
-    run_git(&dir, &["checkout", "-B", &keep_branch])?;
-    commit(lib, message)?;
-    Ok(())
 }

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { describe, expect, it, vi } from "vitest";
 import {
   listResourceMarketplaceSkills,
+  listResourceMcpServers,
   marketplaceAuditId,
   readMarketplaceRepository,
   listMarketplaceAudits,
@@ -480,5 +481,16 @@ describe("GitHub 来源与公开审计", () => {
     marketplace.id = "github:a/b/skills/find/SKILL.md";
     expect(marketplaceAuditId({ ...base, marketplace })).toBe("a/b/find-skills");
     expect(marketplaceAuditId({ ...base, name: "../evil", marketplace })).toBeNull();
+  });
+});
+
+describe("listResourceMcpServers", () => {
+  it("只调用本地列表命令,不查询备份或远程同步状态", async () => {
+    vi.mocked(invoke).mockReset();
+    const servers = [{ id: "local-mcp", name: "本地 MCP", transport: "stdio" }];
+    vi.mocked(invoke).mockResolvedValueOnce(servers);
+    expect(await listResourceMcpServers()).toEqual(servers);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(invoke).mock.calls[0]?.[0]).toBe("rl_mcp_list");
   });
 });
