@@ -7,7 +7,6 @@ import {
   ArrowLeft,
   BookOpenText,
   Bot,
-  FileText,
   FolderSync,
   FolderTree,
   LayoutGrid,
@@ -30,7 +29,6 @@ import DockerCompose from "@/components/project/DockerCompose.vue";
 import AiAssetsView from "@/components/project/AiAssetsView.vue";
 import SpringBootCard from "@/components/java/SpringBootCard.vue";
 import RelocateProjectDialog from "@/components/project/RelocateProjectDialog.vue";
-import DailyReportDialog from "@/components/report/DailyReportDialog.vue";
 import CustomCommands from "@/components/scripts/CustomCommands.vue";
 import PackageScripts from "@/components/scripts/PackageScripts.vue";
 import TagPicker from "@/components/tags/TagPicker.vue";
@@ -71,9 +69,6 @@ watch(
     editingDesc.value = false;
   },
 );
-
-// --- AI 日报弹窗 ---
-const reportOpen = ref(false);
 
 // --- worktree 工作区切换 ---
 // activeWorktreePath: 详情页当前工作目录(null = 主工作区),按项目记忆在 localStorage;
@@ -286,10 +281,6 @@ async function saveDesc() {
               :class="project.favorited_at ? 'fill-yellow-400 text-yellow-400' : ''"
             />
           </Button>
-          <Button variant="outline" size="sm" :title="t('report.title')" @click="reportOpen = true">
-            <FileText class="h-4 w-4" />
-            {{ t("ai.entry") }}
-          </Button>
           <Button
             v-if="project.path_exists"
             variant="outline"
@@ -420,7 +411,6 @@ async function saveDesc() {
       <AiAssetsView v-else :project="worktreeProject ?? project" />
     </ScrollArea>
 
-    <DailyReportDialog v-model:open="reportOpen" :preset-project-id="project.id" />
     <RelocateProjectDialog v-model:open="relocateOpen" :project="project" />
     <WorktreePanel
       v-model:open="worktreeOpen"
