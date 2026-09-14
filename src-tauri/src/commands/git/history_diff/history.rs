@@ -86,7 +86,12 @@ pub(crate) fn run_git_log(
             hash: short_hash(&commit),
             author: author_name.to_string(),
             date: format_git_time(author_sig.when()),
-            subject: commit.summary().unwrap_or_default().to_string(),
+            subject: commit
+                .summary()
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .to_string(),
         });
         if commits.len() >= limit {
             break;
@@ -233,7 +238,7 @@ impl GraphDeco {
                 if r.kind() == Some(git2::ReferenceType::Symbolic) {
                     continue;
                 }
-                let Some(name) = r.name() else { continue };
+                let Ok(name) = r.name() else { continue };
                 let display = name
                     .strip_prefix("refs/heads/")
                     .map(String::from)
@@ -250,7 +255,7 @@ impl GraphDeco {
         let head_branch = head
             .as_ref()
             .filter(|h| h.is_branch())
-            .and_then(|h| h.shorthand().map(String::from));
+            .and_then(|h| h.shorthand().ok().map(String::from));
         GraphDeco {
             by_oid,
             head_oid,
@@ -282,7 +287,12 @@ impl GraphDeco {
             parents: commit.parent_ids().map(|p| p.to_string()).collect(),
             author: commit.author().name().unwrap_or_default().to_string(),
             date: format_git_time(commit.author().when()),
-            subject: commit.summary().unwrap_or_default().to_string(),
+            subject: commit
+                .summary()
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .to_string(),
             refs,
             is_head,
         }

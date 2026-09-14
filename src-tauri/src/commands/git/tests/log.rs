@@ -172,7 +172,7 @@ fn graph_log_excludes_remote_refs_when_disabled() {
     let subjects: Vec<String> = walk
         .flatten()
         .filter_map(|oid| repo.find_commit(oid).ok())
-        .map(|c| c.summary().unwrap_or_default().to_string())
+        .map(|c| c.summary().ok().flatten().unwrap_or_default().to_string())
         .collect();
     assert_eq!(subjects, vec!["c1".to_string()]);
 

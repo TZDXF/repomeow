@@ -26,12 +26,10 @@ const textContent = computed(() => {
   return nodes.map((node) => (typeof node.children === "string" ? node.children : "")).join("");
 });
 
-const style = computed(
-  (): CSSProperties => ({
-    "--shimmer-spread": `${textContent.value.length * props.spread}px`,
-    animationDuration: `${props.duration}s`,
-  }),
-);
+const style = computed((): CSSProperties => ({
+  "--shimmer-spread": `${textContent.value.length * props.spread}px`,
+  animationDuration: `${props.duration}s`,
+}));
 </script>
 
 <template>

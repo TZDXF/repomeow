@@ -274,7 +274,7 @@ pub(crate) fn ai_commit_context_blocking(
         .head()
         .ok()
         .filter(|head| head.is_branch())
-        .and_then(|head| head.shorthand().map(str::to_string))
+        .and_then(|head| head.shorthand().ok().map(str::to_string))
         .unwrap_or_default();
 
     let normalized_paths = paths.map(|items| {

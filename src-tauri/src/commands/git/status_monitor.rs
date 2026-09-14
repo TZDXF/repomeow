@@ -67,7 +67,7 @@ pub(super) fn parse_log_datetime(s: &str) -> Option<i64> {
 pub(super) fn head_branch_name(repo: &Repository) -> Option<String> {
     match repo.head() {
         Ok(head) => {
-            if let Some(name) = head.shorthand().filter(|_| head.is_branch()) {
+            if let Some(name) = head.shorthand().ok().filter(|_| head.is_branch()) {
                 return Some(name.to_string());
             }
             // detached HEAD
@@ -82,7 +82,7 @@ pub(super) fn head_branch_name(repo: &Repository) -> Option<String> {
         Err(e) if e.code() == git2::ErrorCode::UnbornBranch => repo
             .find_reference("HEAD")
             .ok()
-            .and_then(|r| r.symbolic_target().map(String::from))
+            .and_then(|r| r.symbolic_target().ok().flatten().map(String::from))
             .map(|t| t.strip_prefix("refs/heads/").unwrap_or(&t).to_string()),
         Err(_) => None,
     }
@@ -311,10 +311,12 @@ pub(super) fn read_git_system_schedule(conn: &rusqlite::Connection) -> AppResult
         "SELECT id, enabled, interval_minutes, last_run_at FROM system_schedules WHERE id = ?1",
         [GIT_UPDATE_SCHEDULE_ID],
         |row| {
+            let interval: i64 = row.get(2)?;
             Ok(SystemSchedule {
                 id: row.get(0)?,
                 enabled: row.get::<_, i64>(1)? != 0,
-                interval_minutes: row.get::<_, u64>(2)?,
+                interval_minutes: u64::try_from(interval)
+                    .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(2, interval))?,
                 last_run_at: row.get(3)?,
             })
         },
@@ -353,7 +355,7 @@ pub fn save_system_schedule(
              VALUES (?1, ?2, ?3, NULL)
              ON CONFLICT(id) DO UPDATE SET enabled = excluded.enabled,
                  interval_minutes = excluded.interval_minutes",
-            rusqlite::params![GIT_UPDATE_SCHEDULE_ID, enabled as i64, interval],
+            rusqlite::params![GIT_UPDATE_SCHEDULE_ID, enabled as i64, interval as i64],
         )?;
         read_git_system_schedule(&conn)?
     };

@@ -33,18 +33,18 @@ serde_yaml_ng = "0.10"
 ignore = "0.4"
 # walk 缓存的失效监听:项目内 package.json / yaml 变更时即时让目录遍历缓存失效
 notify = "8"
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 # codex/grokbuild 的 cc-switch settings_config 内嵌 TOML 文本
-toml = "0.8"
+toml = "1.1.6"
 # codex 项目 .codex/config.toml 的 MCP 服务器编辑:保格式(注释/排版不丢)
-toml_edit = "0.22"
+toml_edit = "0.25.15"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 chrono = { version = "0.4", features = ["serde"] }
 reqwest = { version = "0.13", features = ["json", "blocking"] }
 # OpenAI 兼容请求统一经 SDK；byot 用于向兼容服务商附加思考模式等扩展字段。
-async-openai = { version = "0.41", default-features = false, features = ["rustls", "chat-completion", "model", "byot"] }
-thiserror = "1"
+async-openai = { version = "0.42", default-features = false, features = ["rustls", "chat-completion", "model", "byot"] }
+thiserror = "2"
 anyhow = "1"
 # 编辑器图标提取(image 负责缩放与 PNG 编码;pelite/ico 解析 Windows exe 资源;
 # plist/icns 解析 macOS .app 图标)——四个均为纯 Rust,放通用依赖以便跨平台编译与单测
@@ -56,15 +56,15 @@ plist = "1.10.0"
 # git 读操作(status/分支/log/diff 等)走 libgit2 避免子进程开销;
 # 写操作与网络操作(fetch/pull/push/clone)仍走系统 git CLI。
 # default-features = false:只读本地操作不需要 https/ssh,避免引入 OpenSSL/libssh2
-git2 = { version = "0.20", default-features = false }
+git2 = { version = "0.21", default-features = false }
 # 全文搜索(search_project_text)的单词边界与用户正则模式
 globset = "0.4"
 regex = "1"
-scraper = "0.24"
+scraper = "0.27"
 # JDK 在线安装(install_jdk)解压发行包 zip;仅 deflate 即可覆盖 Adoptium/Zulu 的归档
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "8.6", default-features = false, features = ["deflate"] }
 # 提交内图片预览(git_commit_file_blob):git blob 内容 base64 编码后经 IPC 传前端拼 data: URL
-base64 = "0.22"
+base64 = "0.23"
 # docker 导出可选 gzip 压缩:纯 Rust 编码器,避免依赖系统 gzip(Windows 无内置)
 flate2 = "1"
 # ACP(Agent Client Protocol)官方客户端:wiki agent 后端与本地 coding agent CLI 的 JSON-RPC over stdio 交互
@@ -77,17 +77,17 @@ async-process = "2"
 # stderr 尾部采集等 futures AsyncRead 用法
 futures = "0.3"
 # agent CLI 安装探测(Windows 正确处理 PATHEXT/.cmd)
-which = "7"
-similar = "2"
+which = "8"
+similar = "3"
 # MCP 对外服务：首版通过 stdio 提供代码提交与 Wiki 目录查询。
-rmcp = { version = "3.1.4", features = ["server", "transport-io"] }
-jsonschema = "0.52.0"
+rmcp = { version = "3.3.0", features = ["server", "transport-io"] }
+jsonschema = "0.56.0"
 # 库内 ID 的系统随机源
-getrandom = "0.3"
+getrandom = "0.4"
 
 [dev-dependencies]
-urlpattern = "0.3"
+urlpattern = "0.6"
 url = "2"
 
 [target.'cfg(windows)'.dependencies]
-winreg = "0.55"
+winreg = "0.56"

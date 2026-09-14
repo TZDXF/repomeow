@@ -1,7 +1,7 @@
 sem
 Copyright (c) Ataraxy Labs contributors
 Source: https://github.com/Ataraxy-Labs/sem
-Bundled version: 0.23.1
+Bundled version: 0.25.0
 License: MIT OR Apache-2.0
 
 RepoMeow bundles the official sem command-line binary as an offline Tauri sidecar.

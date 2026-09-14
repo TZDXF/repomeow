@@ -13,12 +13,12 @@ pub(super) fn list_remotes_blocking(path: &str) -> AppResult<Vec<GitRemote>> {
     };
     let names = repo.remotes().map_err(git_err)?;
     let mut out: Vec<GitRemote> = Vec::new();
-    for name in names.iter().flatten() {
+    for name in names.iter().filter_map(Result::ok).flatten() {
         // 无 URL 的 remote(纯 pushurl 等)跳过,与 `git remote -v` 一致取 fetch 地址
         let url = repo
             .find_remote(name)
             .ok()
-            .and_then(|r| r.url().map(String::from));
+            .and_then(|r| r.url().ok().map(String::from));
         if let Some(url) = url.filter(|u| !u.is_empty()) {
             out.push(GitRemote {
                 name: name.to_string(),

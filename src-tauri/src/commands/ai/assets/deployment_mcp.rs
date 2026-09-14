@@ -275,9 +275,7 @@ impl McpDocument {
     pub fn entry(&self, target: &McpTarget, name: &str) -> RlResult<Option<Value>> {
         if let Some(doc) = &self.toml {
             // toml 的 serde 转换可处理普通表和 inline table,且不会吞掉解析错误。
-            let value: toml::Value = doc
-                .to_string()
-                .parse()
+            let value: toml::Value = toml::from_str(&doc.to_string())
                 .map_err(|e: toml::de::Error| problem(e.to_string()))?;
             return value
                 .get(target.key)

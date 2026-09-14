@@ -224,6 +224,8 @@ impl StatsAccumulator {
             short_id,
             subject: commit
                 .summary()
+                .ok()
+                .flatten()
                 .unwrap_or_default()
                 .chars()
                 .take(80)

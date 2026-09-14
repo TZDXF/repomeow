@@ -221,7 +221,7 @@ mod tests {
 
     #[test]
     fn prompt_is_claude_init_style_instruction_only() {
-        assert!(AGENTS_MD_PROMPT.contains("analyze this codebase and create an AGENTS.md file"));
+        assert!(AGENTS_MD_PROMPT.contains("Analyze this codebase and create an AGENTS.md"));
         assert!(AGENTS_MD_PROMPT.contains("Do not create or modify any other file"));
         // 只给生成指令:不含工作模式/预算/预注上下文类约束
         for banned in [

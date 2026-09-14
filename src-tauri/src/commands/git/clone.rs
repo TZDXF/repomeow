@@ -178,7 +178,7 @@ pub async fn list_project_remote_urls(db: State<'_, Db>) -> AppResult<Vec<String
             let url = open_repo(&path).ok().flatten().and_then(|r| {
                 r.find_remote("origin")
                     .ok()
-                    .and_then(|remote| remote.url().map(String::from))
+                    .and_then(|remote| remote.url().ok().map(String::from))
             });
             if let Some(url) = url.map(|u| u.trim().to_string()).filter(|u| !u.is_empty()) {
                 urls.push(url);

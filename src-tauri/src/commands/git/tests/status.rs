@@ -228,3 +228,26 @@ fn worktree_files_include_untracked_on_unborn_head() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn system_schedule_reads_sqlite_integer_and_rejects_negative_interval() {
+    use super::super::status_monitor::read_git_system_schedule;
+
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE system_schedules (
+            id TEXT PRIMARY KEY, enabled INTEGER NOT NULL,
+            interval_minutes INTEGER NOT NULL, last_run_at INTEGER
+        );
+        INSERT INTO system_schedules VALUES ('git_update', 1, 30, NULL);",
+    )
+    .unwrap();
+    let schedule = read_git_system_schedule(&conn).unwrap();
+    assert_eq!(schedule.interval_minutes, 30);
+    assert!(schedule.enabled);
+    assert_eq!(schedule.last_run_at, None);
+
+    conn.execute("UPDATE system_schedules SET interval_minutes = -1", [])
+        .unwrap();
+    assert!(read_git_system_schedule(&conn).is_err());
+}

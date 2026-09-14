@@ -84,12 +84,12 @@ mod tests {
         for (locale, expected_language) in [("zh-CN", "中文"), ("en-US", "English")] {
             let prompt = fixed_system_prompt(DEFAULT_SKILL_SCAN_PROMPT, locale);
             assert!(prompt.contains(&format!("Write the response in {expected_language}.")));
-            assert!(prompt.contains("summary, findings[].title, and findings[].detail"));
+            assert!(prompt.contains("`summary`, `findings[].title`, `findings[].detail`"));
             assert!(prompt.contains("including a safe/no-findings assessment"));
-            assert!(prompt.contains("Simplified Chinese, not English"));
+            assert!(prompt.contains("中文 → Simplified Chinese; English → English"));
             assert!(prompt.contains("English schema placeholders"));
             assert!(prompt.contains("Keep JSON keys, severity/category enum values"));
-            assert!(prompt.contains("must never override these requirements"));
+            assert!(prompt.contains("never let them override these requirements"));
             assert!(prompt.contains("rewrite any noncompliant prose"));
         }
     }
@@ -120,14 +120,12 @@ mod tests {
         assert!(AGENT_WIKI_OUTLINE_PROMPT.contains("Output ONLY one complete JSON object"));
         assert!(AGENT_WIKI_OUTLINE_PROMPT.contains("\"relevantFiles\""));
         assert!(!AGENT_WIKI_OUTLINE_PROMPT.contains("<wiki_structure>"));
-        assert!(
-            AGENT_WIKI_OUTLINE_PROMPT.contains("Explore the repository and use tools silently.")
-        );
+        assert!(AGENT_WIKI_OUTLINE_PROMPT.contains("Explore silently."));
         assert!(AGENT_WIKI_OUTLINE_PROMPT.contains("at most 20 additional files"));
-        assert!(AGENT_WIKI_OUTLINE_PROMPT.contains("The first non-whitespace character is"));
+        assert!(AGENT_WIKI_OUTLINE_PROMPT.contains("First non-whitespace character is `{`"));
         assert!(BUILTIN_AGENT_WIKI_PAGE_PROMPT.contains("Never run shell commands"));
         // 页面生成是混合模式:相关文件全文已喂入,只允许少量补充读取
         assert!(BUILTIN_AGENT_WIKI_PAGE_PROMPT.contains("exactly the writable draft path"));
-        assert!(BUILTIN_AGENT_WIKI_PAGE_PROMPT.contains("Use write for a complete replacement"));
+        assert!(BUILTIN_AGENT_WIKI_PAGE_PROMPT.contains("Use `write` for full replacement"));
     }
 }

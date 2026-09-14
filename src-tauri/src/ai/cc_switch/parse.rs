@@ -141,7 +141,7 @@ fn parse_model_array(config: &Value) -> Vec<AiModelDef> {
 /// 按激活 model_provider 的 `wire_api` 判定协议:`chat` → OpenAI Chat,缺省/`responses` → OpenAI Responses。
 fn parse_codex(config: &Value) -> Option<(String, String, String, Vec<AiModelDef>)> {
     let config_text = config.get("config").and_then(Value::as_str)?;
-    let doc = config_text.parse::<toml::Value>().ok()?;
+    let doc = toml::from_str::<toml::Value>(config_text).ok()?;
     let providers = doc.get("model_providers").and_then(toml::Value::as_table);
     let active_id = doc.get("model_provider").and_then(toml::Value::as_str);
     let active = active_id.and_then(|id| providers.and_then(|tables| tables.get(id)));
@@ -418,7 +418,7 @@ fn parse_hermes(config: &Value) -> Option<(String, String, Vec<AiModelDef>)> {
 /// 仅 `api_backend = "chat_completions"` 兼容。
 fn parse_grokbuild(config: &Value) -> Option<(String, String, Vec<AiModelDef>)> {
     let config_text = config.get("config").and_then(Value::as_str)?;
-    let doc = config_text.parse::<toml::Value>().ok()?;
+    let doc = toml::from_str::<toml::Value>(config_text).ok()?;
     let profile = doc
         .get("models")
         .and_then(toml::Value::as_table)

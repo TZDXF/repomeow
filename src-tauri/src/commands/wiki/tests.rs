@@ -285,7 +285,7 @@ fn commit_wiki_snapshots_and_skips_when_clean() {
     commit_wiki_in(&dir, "重新生成页面:概览").unwrap();
     assert_eq!(count(), 2);
     let head = repo.head().unwrap().peel_to_commit().unwrap();
-    assert_eq!(head.author().name(), Some(TEST_WIKI_GIT_NAME));
+    assert_eq!(head.author().name().unwrap(), TEST_WIKI_GIT_NAME);
     assert_eq!(head.message().unwrap().trim_end(), "重新生成页面:概览");
     fs::remove_dir_all(&dir).ok();
 }

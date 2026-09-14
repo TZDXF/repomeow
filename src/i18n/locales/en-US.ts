@@ -610,8 +610,7 @@ export default {
       action: "Initialize repository",
       success: "Git repository initialized",
       title: "Initialize Git repository",
-      description:
-        "Run git init in the project directory; pick a default branch and link a remote",
+      description: "Run git init in the project directory; pick a default branch and link a remote",
       branchLabel: "Default branch name",
       remoteLabel: "Remote repository (optional)",
       remotePlaceholder: "https://github.com/user/repo.git",
@@ -1686,7 +1685,7 @@ export default {
         "Default action of the Open button on the project detail page. You can switch from the dropdown anytime; drag to reorder. Only editors that are installed and have their command on PATH are listed.",
       worktreeDir: "Default worktree directory",
       worktreeDirDescription:
-        "Default directory template for new worktrees. Supports the {branch} placeholder and relative paths (relative to the repository root), e.g. .worktrees/{branch}"
+        "Default directory template for new worktrees. Supports the {branch} placeholder and relative paths (relative to the repository root), e.g. .worktrees/{branch}",
     },
     update: {
       autoCheck: "Check for updates on startup",
@@ -2224,7 +2223,8 @@ export default {
       },
       backup: {
         title: "Backup sync",
-        description: "Sync the global resource library (Skills / MCP), as a local git repo, to a remote.",
+        description:
+          "Sync the global resource library (Skills / MCP), as a local git repo, to a remote.",
         notConfigured:
           "Backup sync is not configured yet. Set a remote repository to sync with one click.",
         configure: "Configure sync",

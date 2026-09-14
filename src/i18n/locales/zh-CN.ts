@@ -1839,8 +1839,7 @@ export default {
     },
     prompts: {
       title: "提示词管理",
-      description:
-        "自定义 AI 生成提交信息与日报时使用的提示词,作为 system prompt 原样发给模型",
+      description: "自定义 AI 生成提交信息与日报时使用的提示词,作为 system prompt 原样发给模型",
       openDir: "打开提示词目录",
       openDirFailed: "打开目录失败:{error}",
       commit: "提交",
@@ -1857,8 +1856,7 @@ export default {
     },
     resources: {
       title: "资源管理",
-      description:
-        "从市场安装技能,维护全局技能库与 MCP 服务器库,可把整个资源库备份到远端仓库",
+      description: "从市场安装技能,维护全局技能库与 MCP 服务器库,可把整个资源库备份到远端仓库",
       tabs: {
         market: "市场",
         skills: "Skills",

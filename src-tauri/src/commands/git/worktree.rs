@@ -18,7 +18,7 @@ pub(super) fn worktree_info_of(wt_repo: &Repository, wt_path: &Path, is_main: bo
     if let Ok(head) = wt_repo.head() {
         w.head = head.target().map(|oid| oid.to_string()).unwrap_or_default();
         if head.is_branch() {
-            w.branch = head.shorthand().map(String::from);
+            w.branch = head.shorthand().ok().map(String::from);
         } else {
             w.detached = true;
         }
@@ -116,7 +116,7 @@ pub(super) fn list_worktrees_blocking(path: &str) -> AppResult<Vec<GitWorktree>>
         list.push(worktree_info_of(&repo, workdir, true));
     }
     let names = repo.worktrees().map_err(git_err)?;
-    for name in names.iter().flatten() {
+    for name in names.iter().filter_map(Result::ok).flatten() {
         let Ok(wt) = repo.find_worktree(name) else {
             continue;
         };
