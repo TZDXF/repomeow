@@ -11,6 +11,8 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // 渲染回归测试需要 mock Markdown 库内部的异步高亮接口。
+    server: { deps: { inline: ["vue-stream-markdown"] } },
     include: ["src/**/*.test.ts"],
     // 最小 mock 即可:仅覆盖测试需要的模块,不引入 happy-dom 等浏览器环境
     setupFiles: [],
