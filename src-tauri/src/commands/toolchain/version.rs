@@ -149,7 +149,7 @@ pub(super) fn parse_uv_python_remote(text: &str) -> Vec<ToolchainRemoteVersion> 
 pub(super) fn python_version_from_path(text: &str) -> Option<String> {
     static RE: OnceLock<Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
-        Regex::new(r"(?:cpython|pypy)-(\d+\.\d+\.\d+)|[Pp]ython3?(\d{2})[\\/]|python3\.(\d+)")
+        Regex::new(r"(?:cpython|pypy)-(\d+\.\d+(?:\.\d+)?)|[Pp]ython3?(\d{2})[\\/]|python3\.(\d+)")
             .unwrap()
     });
     let captures = re.captures(text)?;

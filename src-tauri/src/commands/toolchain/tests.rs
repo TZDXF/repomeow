@@ -296,6 +296,15 @@ fn extracts_python_version_from_find_output() {
         .as_deref(),
         Some("3.12.7")
     );
+    // `uv python install --default` 会生成次版本号目录(cpython-3.13-…),
+    // `uv python find` 可能解析到这里,只有两段版本号
+    assert_eq!(
+        python_version_from_path(
+            r"C:\Users\x\AppData\Roaming\uv\python\cpython-3.13-windows-x86_64-none\python.exe"
+        )
+        .as_deref(),
+        Some("3.13")
+    );
     assert_eq!(
         python_version_from_path(r"C:\Users\x\AppData\Local\Programs\Python\Python312\python.exe")
             .as_deref(),
