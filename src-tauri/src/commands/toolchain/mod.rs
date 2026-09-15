@@ -9,6 +9,7 @@ mod process;
 mod python;
 mod remote;
 mod rust;
+mod update_check;
 mod version;
 #[cfg(windows)]
 mod windows_env;
@@ -19,7 +20,7 @@ use crate::commands::open::spawn_terminal;
 use crate::commands::open::spawn_terminal_with_env;
 use crate::commands::open::ShellKind;
 use crate::error::{AppError, AppResult, ErrorCode};
-use crate::models::{ToolchainRemoteVersion, ToolchainStatus};
+use crate::models::{ToolchainRemoteVersion, ToolchainStatus, ToolchainUpdateInfo};
 
 use detect::{detect_toolchains_blocking, TOOLS};
 use operation::{resolve_op, unsupported};
@@ -40,6 +41,17 @@ pub async fn list_toolchain_versions(tool: String) -> AppResult<Vec<ToolchainRem
         .map_err(|error| AppError::coded(ErrorCode::IoError, error.to_string()))?
 }
 
+/// 「更新」按钮的自动检测:联网查询远端版本,判定 可更新/已最新/无法判定
+#[tauri::command]
+pub async fn check_toolchain_update(tool: String) -> AppResult<ToolchainUpdateInfo> {
+    let tool = tool.trim().to_string();
+    if !TOOLS.iter().any(|spec| spec.id == tool) {
+        return Err(unsupported(&tool, "check_update"));
+    }
+    tokio::task::spawn_blocking(move || update_check::check_toolchain_update_blocking(&tool))
+        .await
+        .map_err(|error| AppError::coded(ErrorCode::IoError, error.to_string()))
+}
 #[tauri::command]
 pub fn toolchain_op(tool: String, op: String, version: Option<String>) -> AppResult<()> {
     let tool = tool.trim();

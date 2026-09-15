@@ -42,6 +42,16 @@ export interface ToolchainStatus {
   caps: ToolchainCaps;
 }
 
+/** 「更新」按钮的自动检测状态(check_toolchain_update);unknown = 无查询通道或检测失败,退化为点击即更新 */
+export type ToolchainUpdateState = "unknown" | "up_to_date" | "update_available";
+
+/** 单个工具的更新检测结果 */
+export interface ToolchainUpdateInfo {
+  tool: string;
+  state: ToolchainUpdateState;
+  /** 可更新时的目标版本;无法解析(brew 通道)为 null */
+  latest: string | null;
+}
 /** 工具链管理操作(toolchain_op 的 op 参数) */
 export type ToolchainOp =
   | "install"

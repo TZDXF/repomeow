@@ -38,7 +38,7 @@ pub(super) fn resolve(op: &str, version: Option<&str>, source: Option<&str>) -> 
     }
 }
 
-fn highest_major() -> Option<String> {
+pub(super) fn highest_major() -> Option<String> {
     let exe = cli_hits_on_path("dotnet").into_iter().next()?;
     let Some((true, output)) = run_with_timeout(&exe, &["--list-sdks"]) else {
         return None;

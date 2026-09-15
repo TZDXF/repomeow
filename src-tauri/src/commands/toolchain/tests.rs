@@ -1,12 +1,13 @@
 use std::collections::HashSet;
 
 use crate::error::ErrorCode;
-use crate::models::{ToolchainCaps, ToolchainRemoteVersion, ToolchainVersion};
+use crate::models::{ToolchainCaps, ToolchainRemoteVersion, ToolchainUpdateState, ToolchainVersion};
 
 #[cfg(not(windows))]
 use super::detect::fill_unix_nvm;
 use super::detect::TOOLS;
 use super::operation::{caps_for, resolve_op, sanitize_version};
+use super::update_check::{parse_rustup_check, parse_uv_self_update_dry_run, parse_winget_list_row};
 use super::version::{
     extract_semver, natural_version_cmp, parse_dotnet_sdks, parse_gh_auth_status,
     parse_nvm_available_table, parse_nvm_list, parse_remote_tokens, parse_token_versions,
@@ -398,4 +399,101 @@ fn powershell_detection_and_operations() {
         }
     }
     assert!(resolve_op("pwsh", "use", Some("7.6.0"), None).is_err());
+}
+
+#[test]
+fn parses_winget_list_rows() {
+    // 含「可用」列(中文表头):可更新,目标版本取 ID 后第二个版本号
+    let (state, latest) = parse_winget_list_row(
+        "名称                            ID              版本        可用        源\n\
+         -----------------------------------------------------------------------\n\
+         Git version 2.51.0.2            Git.Git         2.51.0.2    2.52.0      winget\n",
+        "Git.Git",
+    );
+    assert_eq!(state, ToolchainUpdateState::UpdateAvailable);
+    assert_eq!(latest.as_deref(), Some("2.52.0"));
+
+    // 无「可用」列(英文表头):已是最新
+    let (state, latest) = parse_winget_list_row(
+        "Name                ID                      Version Source\n\
+         ------------------------------------------------------------\n\
+         PowerShell 7.6.0.4  Microsoft.PowerShell    7.6.0.4 winget\n",
+        "Microsoft.PowerShell",
+    );
+    assert_eq!(state, ToolchainUpdateState::UpToDate);
+    assert_eq!(latest, None);
+
+    // 无匹配数据行(未安装/查询异常):未知
+    let (state, latest) = parse_winget_list_row("No installed package found", "Git.Git");
+    assert_eq!(state, ToolchainUpdateState::Unknown);
+    assert_eq!(latest, None);
+}
+
+#[test]
+fn parses_rustup_check_output() {
+    // rustup 1.29.x 真实输出:小写 + 冒号间距不一致
+    let output = "stable-x86_64-pc-windows-msvc - up to date: 1.98.1 (48a229cea 2026-09-01)\n\
+                  rustup - up to date : 1.29.1\n";
+    assert_eq!(
+        parse_rustup_check(output, "rustup"),
+        (ToolchainUpdateState::UpToDate, None)
+    );
+    assert_eq!(
+        parse_rustup_check(output, "rustc"),
+        (ToolchainUpdateState::UpToDate, None)
+    );
+
+    // 旧版首字母大写格式兼容
+    let output = "stable-x86_64-pc-windows-msvc - Up to date : 1.89.0\n\
+                  rustup - Up to date : 1.28.2\n";
+    assert_eq!(
+        parse_rustup_check(output, "rustup"),
+        (ToolchainUpdateState::UpToDate, None)
+    );
+
+    // 工具链可更新:rustc/cargo 提示更新,rustup 自身不受影响
+    let output = "stable-x86_64-pc-windows-msvc - update available: 1.89.0 (2025-08-07) -> 1.90.0 (2025-09-18)\n\
+                  rustup - up to date : 1.28.2\n";
+    assert_eq!(
+        parse_rustup_check(output, "cargo"),
+        (ToolchainUpdateState::UpdateAvailable, Some("1.90.0".to_string()))
+    );
+    assert_eq!(
+        parse_rustup_check(output, "rustup"),
+        (ToolchainUpdateState::UpToDate, None)
+    );
+
+    // rustup 自身可更新
+    let output = "rustup - update available: 1.28.2 -> 1.29.0\n";
+    assert_eq!(
+        parse_rustup_check(output, "rustup"),
+        (ToolchainUpdateState::UpdateAvailable, Some("1.29.0".to_string()))
+    );
+    assert_eq!(parse_rustup_check(output, "rustc").0, ToolchainUpdateState::Unknown);
+}
+#[test]
+fn parses_uv_self_update_dry_run() {
+    // 已最新(uv 0.12.x 真实输出)
+    assert_eq!(
+        parse_uv_self_update_dry_run(
+            "info: Checking for updates...\n\
+             success: You're already on version v0.12.15 of uv (the latest version).\n"
+        ),
+        (ToolchainUpdateState::UpToDate, None)
+    );
+
+    // 可更新:目标版本取自 " to " 之后
+    assert_eq!(
+        parse_uv_self_update_dry_run(
+            "info: Checking for updates...\n\
+             success: Would update uv from v0.12.15 to v0.13.1\n"
+        ),
+        (ToolchainUpdateState::UpdateAvailable, Some("0.13.1".to_string()))
+    );
+
+    // 其余输出(报错/无法判定):未知
+    assert_eq!(
+        parse_uv_self_update_dry_run("error: network unreachable"),
+        (ToolchainUpdateState::Unknown, None)
+    );
 }

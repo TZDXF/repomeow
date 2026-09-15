@@ -36,7 +36,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cmd } from "@/lib/tauri";
-import type { ToolchainKind, ToolchainOp, ToolchainRemoteVersion, ToolchainStatus } from "@/types";
+import type { ToolchainKind, ToolchainOp, ToolchainRemoteVersion, ToolchainStatus, ToolchainUpdateInfo } from "@/types";
 import JavaSection from "@/components/settings/JavaSection.vue";
 
 const { t } = useI18n();
@@ -83,6 +83,7 @@ async function scan() {
   try {
     items.value = await cmd<ToolchainStatus[]>("detect_toolchains");
     scanned.value = true;
+    checkAllUpdates();
   } catch (e) {
     toast.error(e instanceof Error ? e.message : String(e));
   } finally {
@@ -100,6 +101,49 @@ async function run(tool: string, op: ToolchainOp, version?: string) {
   }
 }
 
+// ---- 「更新」自动检测:扫描完成后并行查询远端版本,点击更新按结果拦截 ──────────
+
+/** 各工具的更新检测结果(check_toolchain_update 走网络,扫描完成后自动触发) */
+const updateInfo = ref<Record<string, ToolchainUpdateInfo>>({});
+
+/** 检测单个工具的更新;失败静默按 unknown 处理(保留手动更新入口,不在面板打开时打扰) */
+async function checkUpdate(tool: ToolchainStatus): Promise<ToolchainUpdateInfo | null> {
+  try {
+    const info = await cmd<ToolchainUpdateInfo>("check_toolchain_update", { tool: tool.id });
+    updateInfo.value[tool.id] = info;
+    return info;
+  } catch {
+    updateInfo.value[tool.id] = { tool: tool.id, state: "unknown", latest: null };
+    return null;
+  }
+}
+
+function checkAllUpdates() {
+  for (const tool of items.value) {
+    if (tool.caps.can_update) void checkUpdate(tool);
+  }
+}
+
+/** 点击「更新」:已最新仅提示;未知(自动检测失败/vp)时先补检一次,再决定是否执行 */
+async function update(tool: ToolchainStatus) {
+  let info = updateInfo.value[tool.id];
+  if (!info || info.state === "unknown") {
+    info = (await checkUpdate(tool)) ?? updateInfo.value[tool.id];
+  }
+  if (info?.state === "up_to_date") {
+    toast.info(t("settings.devEnv.tools.alreadyLatest", { name: displayName(tool) }));
+    return;
+  }
+  void run(tool.id, "update");
+}
+
+/** 「更新」按钮文案:已检出目标版本时直接展示 */
+function updateLabel(tool: ToolchainStatus): string {
+  const info = updateInfo.value[tool.id];
+  return info?.state === "update_available" && info.latest
+    ? t("settings.devEnv.tools.updateTo", { version: info.latest })
+    : t("settings.devEnv.tools.update");
+}
 function install(tool: ToolchainStatus) {
   // dotnet 的 winget id 按大版本区分,先选目标大版本
   if (tool.id === "dotnet") {
@@ -297,7 +341,7 @@ onMounted(() => {
               {{ t("settings.devEnv.tools.managedByRustup") }}
             </span>
             <span class="min-w-0 flex-1"></span>
-            <div class="flex shrink-0 gap-1.5">
+            <div class="flex shrink-0 items-center gap-1.5">
               <Button
                 v-if="tool.caps.can_install"
                 size="sm"
@@ -306,14 +350,24 @@ onMounted(() => {
               >
                 {{ t("settings.devEnv.tools.install") }}
               </Button>
-              <Button
-                v-if="tool.caps.can_update"
-                size="sm"
-                variant="outline"
-                @click="run(tool.id, 'update')"
-              >
-                {{ t("settings.devEnv.tools.update") }}
-              </Button>
+              <template v-if="tool.caps.can_update">
+                <Badge
+                  v-if="updateInfo[tool.id]?.state === 'up_to_date'"
+                  variant="outline"
+                  class="text-muted-foreground"
+                >
+                  {{ t("settings.devEnv.tools.upToDate") }}
+                </Badge>
+                <!-- 检测完成前与已最新时均不展示更新按钮;unknown(检测失败/vp)保留手动入口 -->
+                <Button
+                  v-else-if="updateInfo[tool.id]"
+                  size="sm"
+                  :variant="updateInfo[tool.id]?.state === 'update_available' ? 'default' : 'outline'"
+                  @click="update(tool)"
+                >
+                  {{ updateLabel(tool) }}
+                </Button>
+              </template>
               <Button
                 v-if="tool.caps.can_uninstall"
                 size="sm"
@@ -402,7 +456,6 @@ onMounted(() => {
               <template v-else>
                 <Input
                   v-model="remoteFilter[tool.id]"
-                  :placeholder="t('settings.devEnv.tools.filterVersionsPlaceholder')"
                   class="h-6 px-2 text-xs"
                 />
                 <p v-if="!filteredRemote(tool).length" class="text-xs text-muted-foreground">

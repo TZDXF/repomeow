@@ -557,6 +557,24 @@ pub struct ToolchainStatus {
     pub account: Option<String>,
     pub caps: ToolchainCaps,
 }
+/// 「更新」按钮的自动检测结果(check_toolchain_update)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolchainUpdateState {
+    /// 无查询通道(vp)或检测失败;前端退化为原「点击即更新」
+    Unknown,
+    UpToDate,
+    UpdateAvailable,
+}
+
+/// 单个工具的更新检测结果
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolchainUpdateInfo {
+    pub tool: String,
+    pub state: ToolchainUpdateState,
+    /// UpdateAvailable 时的目标版本;无法解析版本号(brew 通道)为 None
+    pub latest: Option<String>,
+}
 
 /// 项目维度被隐藏的 UI 项
 /// kind: "packageFile"(整个 package.json 分组)/ "packageScript"(分组内单条命令)/ "composeFile" / "javaBuild"(Spring Boot 构建组)
