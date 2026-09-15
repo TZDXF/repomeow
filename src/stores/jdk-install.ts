@@ -12,6 +12,7 @@ import type { JdkCandidate, JdkVendor } from "@/types";
 export const JDK_VENDORS: { value: JdkVendor; label: string }[] = [
   { value: "adoptium", label: "Adoptium (Temurin)" },
   { value: "zulu", label: "Azul Zulu" },
+  { value: "openjdk", label: "OpenJDK (java.net)" },
 ];
 
 export function jdkVendorLabel(vendor: JdkVendor): string {

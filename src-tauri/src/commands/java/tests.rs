@@ -6,7 +6,8 @@ use super::builds::java_builds_from_files;
 use super::detection::{check_jdk, detect_jdks_blocking, parse_java_version};
 use super::install::{extract_zip, move_dir};
 use super::remote::{
-    is_zulu_jdk_zip, list_adoptium_releases, list_zulu_releases, zulu_version_label,
+    is_zulu_jdk_zip, list_adoptium_releases, list_openjdk_releases, list_zulu_releases,
+    openjdk_file_name, zulu_version_label,
 };
 use crate::error::ErrorCode;
 use crate::models::{JavaBuildTool, JdkVendor};
@@ -245,11 +246,11 @@ fn extracts_zip_and_moves_top_dir() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// 手动验证:对两个安装源拉真实元数据(cargo test real_world -- --ignored --nocapture)
+/// 手动验证:对三个安装源拉真实元数据(cargo test real_world -- --ignored --nocapture)
 #[test]
 #[ignore]
 fn real_world_list_remote_jdks() {
-    for vendor in [JdkVendor::Adoptium, JdkVendor::Zulu] {
+    for vendor in [JdkVendor::Adoptium, JdkVendor::Zulu, JdkVendor::Openjdk] {
         match vendor {
             JdkVendor::Adoptium => {
                 for r in list_adoptium_releases().unwrap() {
@@ -261,6 +262,39 @@ fn real_world_list_remote_jdks() {
                     println!("zulu: java {} ({})", r.major, r.version);
                 }
             }
+            JdkVendor::Openjdk => {
+                for r in list_openjdk_releases().unwrap() {
+                    println!("openjdk: java {} ({})", r.major, r.version);
+                }
+            }
         }
+    }
+}
+
+#[test]
+fn labels_openjdk_ri_file_names() {
+    assert_eq!(
+        openjdk_file_name(21, 35, "windows-x64", "zip"),
+        "openjdk-21+35_windows-x64_bin.zip"
+    );
+    assert_eq!(
+        openjdk_file_name(26, 35, "linux-x64", "tar.gz"),
+        "openjdk-26+35_linux-x64_bin.tar.gz"
+    );
+}
+
+#[test]
+fn lists_openjdk_releases_newest_first() {
+    // Windows/Linux x64 平台(本仓库开发/CI 环境)应返回常量表全量
+    if cfg!(any(
+        all(windows, target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "x86_64")
+    )) {
+        let releases = list_openjdk_releases().unwrap();
+        assert!(!releases.is_empty());
+        assert!(releases.windows(2).all(|w| w[0].major > w[1].major));
+        assert!(releases
+            .iter()
+            .all(|r| r.version.starts_with(&format!("{}+", r.major))));
     }
 }

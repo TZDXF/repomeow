@@ -480,6 +480,8 @@ pub enum JdkVendor {
     Adoptium,
     /// Azul Zulu,元数据 api.azul.com
     Zulu,
+    /// OpenJDK 官方参考实现(RI),download.java.net,仅 Windows/Linux x64
+    Openjdk,
 }
 
 /// 某安装源可在线安装的 JDK 大版本(list_remote_jdks)

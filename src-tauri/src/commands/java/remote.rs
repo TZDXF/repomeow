@@ -205,10 +205,84 @@ fn resolve_zulu_asset(major: u32) -> AppResult<RemoteAsset> {
     })
 }
 
+/// OpenJDK 官方参考实现(RI)发布表:(主版本, GA 构建号)。RI 每个主版本只发一次
+/// GA、无后续安全更新,download.java.net 也无元数据 API/目录列表,只能维护常量;
+/// 新主版本发布时在此追加一行
+const OPENJDK_RI_BUILDS: [(u32, u32); 7] = [
+    (26, 35),
+    (25, 36),
+    (24, 36),
+    (23, 37),
+    (22, 36),
+    (21, 35),
+    (17, 35),
+];
+
+/// RI 包名的平台段:(os-arch, 扩展名)。RI 只发布 Windows/Linux x64 构建,
+/// macOS 与 aarch64 无包
+fn openjdk_platform() -> Option<(&'static str, &'static str)> {
+    if cfg!(all(windows, target_arch = "x86_64")) {
+        Some(("windows-x64", "zip"))
+    } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        Some(("linux-x64", "tar.gz"))
+    } else {
+        None
+    }
+}
+
+/// RI 发行包名:openjdk-{major}+{build}_{platform}_bin.{ext}
+pub(super) fn openjdk_file_name(major: u32, build: u32, platform: &str, ext: &str) -> String {
+    format!("openjdk-{major}+{build}_{platform}_bin.{ext}")
+}
+
+fn openjdk_ri_build(major: u32) -> Option<u32> {
+    OPENJDK_RI_BUILDS
+        .iter()
+        .find(|(m, _)| *m == major)
+        .map(|(_, b)| *b)
+}
+
+/// 解析 OpenJDK RI 某主版本的发行包(URL 由常量表直接拼出,无需请求元数据)
+fn resolve_openjdk_asset(major: u32) -> AppResult<RemoteAsset> {
+    let unsupported = || {
+        AppError::coded(
+            ErrorCode::JdkInstallFailed,
+            format!("java {major}: no OpenJDK RI build for this version/platform"),
+        )
+    };
+    let build = openjdk_ri_build(major).ok_or_else(unsupported)?;
+    let (platform, ext) = openjdk_platform().ok_or_else(unsupported)?;
+    let file_name = openjdk_file_name(major, build, platform, ext);
+    Ok(RemoteAsset {
+        url: format!("https://download.java.net/openjdk/jdk{major}/ri/{file_name}"),
+        is_zip: ext == "zip",
+        version: format!("{major}+{build}"),
+        file_name,
+    })
+}
+
+/// OpenJDK RI 可安装的大版本:常量表全量(已按新到旧排序),版本串为 "{major}+{build}"
+pub(super) fn list_openjdk_releases() -> AppResult<Vec<RemoteJdkRelease>> {
+    if openjdk_platform().is_none() {
+        return Err(AppError::coded(
+            ErrorCode::JdkInstallFailed,
+            "OpenJDK RI builds are only published for Windows/Linux x64",
+        ));
+    }
+    Ok(OPENJDK_RI_BUILDS
+        .iter()
+        .map(|(major, build)| RemoteJdkRelease {
+            major: *major,
+            version: format!("{major}+{build}"),
+        })
+        .collect())
+}
+
 pub(super) fn resolve_asset(vendor: JdkVendor, major: u32) -> AppResult<RemoteAsset> {
     match vendor {
         JdkVendor::Adoptium => resolve_adoptium_asset(major),
         JdkVendor::Zulu => resolve_zulu_asset(major),
+        JdkVendor::Openjdk => resolve_openjdk_asset(major),
     }
 }
 
@@ -284,6 +358,7 @@ pub(super) async fn list_remote_jdks(vendor: JdkVendor) -> AppResult<Vec<RemoteJ
     tokio::task::spawn_blocking(move || match vendor {
         JdkVendor::Adoptium => list_adoptium_releases(),
         JdkVendor::Zulu => list_zulu_releases(),
+        JdkVendor::Openjdk => list_openjdk_releases(),
     })
     .await
     .map_err(|e| AppError::coded(ErrorCode::IoError, e.to_string()))?

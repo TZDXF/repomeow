@@ -37,7 +37,7 @@ export interface JdkCandidate {
 }
 
 /** 在线安装源(list_remote_jdks / install_jdk 的 vendor 参数) */
-export type JdkVendor = "adoptium" | "zulu";
+export type JdkVendor = "adoptium" | "zulu" | "openjdk";
 
 /** 某安装源可在线安装的 JDK 大版本(list_remote_jdks) */
 export interface RemoteJdkRelease {
