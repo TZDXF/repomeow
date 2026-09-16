@@ -7,7 +7,6 @@ use crate::db::Db;
 use crate::error::AppError;
 use crate::path_util::clean_str;
 use crate::APP_DATA_DIR_NAME;
-use rmcp::model::CallToolResult;
 use serde_json::json;
 
 pub(super) const PROJECTS_DB_FILE: &str = "projects.db";
@@ -44,12 +43,13 @@ impl ToolFailure {
         }
     }
 
-    pub(super) fn into_result(self) -> CallToolResult {
-        CallToolResult::structured_error(json!({
+    /// 序列化为 CLI stderr 输出的错误 JSON。
+    pub(super) fn to_json(&self) -> serde_json::Value {
+        json!({
             "code": self.code,
             "message": self.message,
             "detail": self.detail,
-        }))
+        })
     }
 }
 

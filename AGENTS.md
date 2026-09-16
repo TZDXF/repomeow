@@ -21,7 +21,7 @@
 | `pnpm lint` / `pnpm lint:fix` | `oxlint .` 静态检查 / 自动修复 |
 | `pnpm format` / `pnpm format:check` | `oxfmt --write src/` 格式化 / 仅检查 |
 | `pnpm test:unit` | `vitest run`(node 环境,仅 `src/**/*.test.ts`,无 setup 文件) |
-| `pnpm mcp:dev` | 以 `--mcp` 模式运行主程序(stdio MCP Server,不开窗口) |
+| `pnpm cli:dev -- <args>` | 以 CLI 模式运行主程序(首参数子命令进入,不开窗口) |
 | `pnpm sem:prepare` / `sem:check` | 下载/校验 sem sidecar 二进制 |
 | `pnpm release:*` | `scripts/release/release.mjs` 本地发布调试(check/build/sign/latest/all/local) |
 
@@ -50,16 +50,16 @@ src/                    Vue 3 前端(<script setup> SFC)
   router/               Vue Router
 src-tauri/src/
   lib.rs                插件注册、Db 初始化、invoke_handler 命令清单、setup(后台任务)
-  main.rs               入口:--mcp 进内置 stdio MCP Server,否则进 lib.rs 的 run()
+  main.rs               入口:首参数命中 git/wiki/sem/project/report 进内置 CLI,否则进 lib.rs 的 run()
   commands/             Tauri 命令域。目录模块:account / agent / ai / chat / files / git
                         / java / open / project / report / semantic / toolchain / wiki;
-                        单文件:docker / editor_icon / hidden / mcp / overview / pin
+                        单文件:docker / editor_icon / hidden / cli / overview / pin
                         / prompt / scan / script / tag / usage / walk / window
   agent/                pi-agent-core 的 Rust 复刻:llm/(adapter + EventStream)、
                         harness/(session/compaction/tools/...)、chat_tools
   ai/                   AI 接入:catalog.rs + builtin_models.json(厂商/模型目录)、
                         sdk.rs、harness_support.rs、wiki_outline.rs、prompts/
-  mcp/                  内置 stdio MCP Server(--mcp 模式),工具按域拆分
+  cli/                  内置 CLI(clap 子命令,JSON 输出;技能文本在仓库根 skills/)
   scheduler/            调度引擎:calendar / config / execution / runtime
   db/                   rusqlite(全局 Mutex 单连接) + migrations.rs
   models.rs / error.rs  serde 结构;AppError 错误序列化为中文字符串传前端
@@ -82,7 +82,7 @@ scripts/                sem/(sidecar 下载)、release/(发布流程)
 7. **路径别名** `@/` → `src/`(tsconfig + vite + vitest 三处均配置)。
 8. **路径风格统一**:禁止 ad-hoc `replace('\\', "/")`。Rust 侧走 `path_util.rs`(`clean_str` 落库/缓存 key、`to_forward_slash` IPC/git pathspec、`repo_relative_str`);前端走 `src/lib/path.ts`(`cleanPath` / `toForwardSlash` / `baseName` / `splitDirName` / `joinPath` / `displayRelativeTo`)。项目路径入库前必须 `clean_str`;IPC 输出的仓库内路径恒为 `/` 分隔;HashMap/缓存 key 先归一化再读写。
 9. **sem sidecar**:官方 sem CLI 以 externalBin 内置,版本/平台/SHA-256 固定在 `scripts/sem/manifest.json`,`pnpm sem:prepare` 下载到被 gitignore 的 `src-tauri/binaries/sem-<target>`;升级版本须同步 `src-tauri/third-party/sem/NOTICE`。应用只从 Rust `commands/semantic/` 暴露固定操作,禁止前端传任意 CLI 参数。
-10. **内置 MCP Server**:`main.rs` 在 Tauri 初始化前识别 `--mcp`,复用主程序二进制运行 `src/mcp/` stdio 服务(rmcp crate),不单独发布 MCP 可执行文件。工具组(git / wiki / sem / project / report)开关由设置页写入 `~/.repomeow/settings.json`,**默认全部关闭**,MCP 进程启动时读取,改配置需客户端重连。详见根目录 `MCP.md`。
+10. **内置 CLI + Skills**:`main.rs` 在 Tauri 初始化前检查首参数,命中 `git`/`wiki`/`sem`/`project`/`report` 即进入 `src/cli/` 的 clap CLI(执行后退出,不开窗口);成功 JSON 写 stdout,失败 `{"code","message","detail"}` JSON 写 stderr 且退出码非 0。release 为 windows 子系统,CLI 模式先 `AttachConsole(ATTACH_PARENT_PROCESS)` 以便终端可见输出。配套内置技能 `repomeow`(仓库根 `skills/repomeow/`,SKILL.md 入口 + references/ 细分,`{{REPOMEOW_CLI}}` 占位符导入时替换为当前可执行路径)经「设置 → CLI」一键导入资源库,再由项目 AI 资源部署到各 agent;能力暴露由技能部署控制,无运行时开关。详见根目录 `CLI.md`。
 11. **i18n**:词条改动需同步 zh-CN 与 en-US,`src/i18n/locales/locales.test.ts` 校验键对齐。
 12. **错误处理**:Rust 错误经 `error.rs` 序列化为 `{ code, message }` 传前端;前端 `lib/tauri.ts` 对部分笼统错误码追加展示 message,新增错误码需在 Rust 错误枚举、前端处理与 i18n 文案三处同步。
 13. **oxlint 配置**:correctness / suspicious / perf 为 error,style 为 warn;忽略 `dist/`、`node_modules/`、`src-tauri/`、`scripts/`。

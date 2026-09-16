@@ -1538,7 +1538,7 @@ export default {
       tracking: "Update tracking",
       devEnv: "Dev environment",
       archive: "Archived projects",
-      mcp: "MCP",
+      cli: "CLI",
       ai: "AI",
       aiUsage: "AI Usage",
       accounts: "Accounts",
@@ -1547,49 +1547,18 @@ export default {
       schedule: "Schedules",
       about: "About",
     },
-    mcp: {
-      title: "MCP",
+    cli: {
+      title: "CLI",
       description:
-        "Expose built-in RepoMeow capabilities to MCP clients such as Codex and Claude Desktop",
-      toolGroups: "Tool groups",
-      toolGroupsHint:
-        "Only enabled tool groups are visible externally; all groups are disabled by default",
-      reconnectHint:
-        "Changes apply to new MCP connections. Disconnect and reconnect your MCP client after changing a switch.",
-      git: {
-        title: "Git status & commits",
-        description:
-          "Allow MCP clients to read repository status summaries and commit all changes or selected files",
-      },
-      wiki: {
-        title: "Wiki lookup",
-        description:
-          "Allow MCP clients to read the outline and pages of a completed Wiki and get its directory",
-      },
-      sem: {
-        title: "Semantic code analysis",
-        description:
-          "Allow MCP clients to search code entities by name, inspect entity context and call relations, and summarize uncommitted changes",
-      },
-      project: {
-        title: "Project data lookup",
-        description:
-          "Allow MCP clients to read project files, report history, and registered custom commands",
-      },
-      report: {
-        title: "Report generation",
-        description:
-          "Allow MCP clients to generate daily/weekly reports for registered projects (calls AI and writes to report history, consuming AI quota)",
-      },
-      configuration: "How to configure",
-      stepEnable: "Enable the tool groups you want to use.",
-      stepCopy: "Copy the configuration below into your MCP client's server configuration.",
-      stepReconnect: "Restart or reconnect the MCP client after saving the configuration.",
-      copyConfig: "Copy config",
-      loadingConfig: "Reading the RepoMeow executable path...",
-      configUnavailable: "Unable to read the MCP configuration. Reopen Settings and try again.",
-      builtinHint:
-        "The MCP server is built into the main RepoMeow executable. Clients start it with --mcp; no separate MCP executable needs to be downloaded or distributed.",
+        "The RepoMeow CLI is built into the main executable, letting AI agents and scripts use Git, Wiki, semantic analysis, project data, and reporting from the command line",
+      skillsTitle: "Built-in skills",
+      skillsHint:
+        "Import the skill into the resource library, then deploy it to each agent's skills directory via Project → AI resources; importing again rebuilds the skill contents (syncing the latest executable path).",
+      skillRepomeow:
+        "Git / Wiki / semantic analysis / project data / daily & weekly reports (SKILL.md with references)",
+      install: "Import into library",
+      installing: "Importing...",
+      installDone: "Built-in skills imported: {added} added, {updated} refreshed",
     },
     devEnv: {
       detect: "Auto detect",
@@ -1955,6 +1924,7 @@ export default {
         market: "Market",
         skills: "Skills",
         mcp: "MCP",
+        cli: "CLI",
         backup: "Backup",
         agents: "Agent tools",
       },

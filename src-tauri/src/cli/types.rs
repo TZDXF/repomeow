@@ -1,8 +1,7 @@
-use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommitCodeInput {
     /// Git 仓库目录。可以使用绝对路径，提交范围始终以仓库根目录为准。
@@ -23,7 +22,7 @@ pub struct CommitCodeOutput {
     pub committed_files: Vec<String>,
 }
 
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetWikiDirectoryInput {
     /// RepoMeow 中项目登记使用的目录。路径会按 RepoMeow 的规则归一化后定位 Wiki。
@@ -39,14 +38,7 @@ pub struct WikiDirectoryOutput {
     pub meta: Value,
 }
 
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct GitStatusInput {
-    /// Git 仓库目录(仓库内任意路径均可)。
-    pub directory: String,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReadWikiPageInput {
     /// RepoMeow 中项目登记使用的目录。
@@ -79,42 +71,7 @@ pub struct WikiPageOutput {
     pub truncated: bool,
 }
 
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SemFindInput {
-    /// Git 仓库目录(仓库内任意路径均可)。
-    pub directory: String,
-    /// 搜索关键词:实体名或其一部分,如 "debounce"、"WikiGenKernel"。
-    pub query: String,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SemEntityInput {
-    /// Git 仓库目录(仓库内任意路径均可)。
-    pub directory: String,
-    /// 实体名或 entityId(形如 src/a.ts::function::run,含 "::" 时按 entityId 精确匹配)。
-    pub entity: String,
-    /// 实体所在文件的仓库相对路径(/ 分隔),重名时用于消歧。
-    pub file_path: Option<String>,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SemContextInput {
-    /// Git 仓库目录(仓库内任意路径均可)。
-    pub directory: String,
-    /// 实体名或 entityId(含 "::" 的串视为 entityId)。
-    pub entity: String,
-    /// 实体所在文件的仓库相对路径(/ 分隔),重名时用于消歧。
-    pub file_path: Option<String>,
-    /// 上下文预算(token 数,500-4000),缺省 2000。
-    pub budget: Option<u32>,
-    /// 关系扩展跳数(0-3),缺省 1。
-    pub hops: Option<u32>,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReadProjectFileInput {
     /// 项目目录(读取范围以该目录为根,拒绝越界与符号链接逃逸)。
@@ -143,7 +100,7 @@ pub struct ProjectFileOutput {
     pub preview_truncated: bool,
 }
 
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListReportsInput {
     /// 仅列出该项目的报告;省略时列出全部项目的报告。
@@ -152,14 +109,14 @@ pub struct ListReportsInput {
     pub limit: Option<u32>,
 }
 
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectDirectoryInput {
     /// RepoMeow 中项目登记使用的目录。
     pub project_directory: String,
 }
 
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateReportInput {
     /// 参与统计的项目目录列表(必须是 RepoMeow 已登记且未归档的项目)。

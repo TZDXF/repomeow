@@ -19,7 +19,7 @@ use super::*;
 
 fn temp_dir(tag: &str) -> PathBuf {
     let dir = env::temp_dir().join(format!(
-        "repomeow-mcp-{tag}-{}-{}",
+        "repomeow-cli-{tag}-{}-{}",
         std::process::id(),
         crate::time_util::now_ts_nanos(),
     ));
@@ -33,77 +33,87 @@ fn git(root: &Path, args: &[&str]) {
 }
 
 #[test]
+fn cli_head_detection_only_accepts_known_subcommands() {
+    for head in ["git", "wiki", "sem", "project", "report"] {
+        assert!(is_cli_head(head), "should enter CLI mode: {head}");
+    }
+    for other in ["status", "commit_code", "--mcp", "--autostart", "repomeow"] {
+        assert!(!is_cli_head(other), "should not enter CLI mode: {other}");
+    }
+}
+
+#[test]
+fn cli_parses_git_commit_with_files() {
+    let cli = Cli::try_parse_from([
+        "repomeow",
+        "git",
+        "commit",
+        "-d",
+        "D:/repo",
+        "-m",
+        "feat: x",
+        "--files",
+        "src/a.ts,src/b.ts",
+    ])
+    .unwrap();
+    let Commands::Git(GitCommands::Commit {
+        directory,
+        message,
+        files,
+    }) = cli.command
+    else {
+        panic!("expected git commit");
+    };
+    assert_eq!(directory, "D:/repo");
+    assert_eq!(message, "feat: x");
+    assert_eq!(
+        files,
+        Some(vec!["src/a.ts".to_string(), "src/b.ts".to_string()])
+    );
+}
+
+#[test]
+fn cli_parses_report_generate_defaults() {
+    let cli = Cli::try_parse_from([
+        "repomeow",
+        "report",
+        "generate",
+        "-p",
+        "D:/a,D:/b",
+        "--period-type",
+        "weekly",
+    ])
+    .unwrap();
+    let Commands::Report(ReportCommands::Generate {
+        project_directories,
+        period_type,
+        date_from,
+        author_mode,
+        ..
+    }) = cli.command
+    else {
+        panic!("expected report generate");
+    };
+    assert_eq!(
+        project_directories,
+        vec!["D:/a".to_string(), "D:/b".to_string()]
+    );
+    assert_eq!(period_type, "weekly");
+    assert!(date_from.is_none());
+    assert!(author_mode.is_none());
+}
+
+#[test]
+fn cli_rejects_unknown_subcommand() {
+    assert!(Cli::try_parse_from(["repomeow", "git", "push"]).is_err());
+    assert!(Cli::try_parse_from(["repomeow", "unknown"]).is_err());
+}
+#[test]
 fn commit_paths_only_accept_repository_relative_paths() {
     assert!(normalize_commit_paths(Some(vec!["src/main.rs".into()])).is_ok());
     assert!(normalize_commit_paths(Some(vec!["../secret".into()])).is_err());
     assert!(normalize_commit_paths(Some(vec!["C:/secret".into()])).is_err());
     assert!(normalize_commit_paths(Some(Vec::new())).is_err());
-}
-
-#[test]
-fn tool_groups_are_opt_in_and_filter_visible_routes() {
-    const ALL_ROUTES: &[&str] = &[
-        "commit_code",
-        "get_git_status",
-        "get_wiki_directory",
-        "list_wiki_pages",
-        "read_wiki_page",
-        "sem_find",
-        "sem_context",
-        "sem_relations",
-        "sem_diff",
-        "read_project_file",
-        "list_reports",
-        "list_custom_commands",
-        "generate_report",
-    ];
-    let disabled = RepoMeowMcpServer::new(McpToolGroups::default());
-    for route in ALL_ROUTES {
-        assert!(
-            !disabled.tool_router.has_route(route),
-            "route should be off by default: {route}"
-        );
-    }
-
-    let enabled = RepoMeowMcpServer::new(McpToolGroups {
-        git_commit: true,
-        wiki: true,
-        sem: true,
-        project: true,
-        report: true,
-    });
-    for route in ALL_ROUTES {
-        assert!(
-            enabled.tool_router.has_route(route),
-            "route should be on: {route}"
-        );
-    }
-
-    // 单组开关互不影响
-    let wiki_only = RepoMeowMcpServer::new(McpToolGroups {
-        wiki: true,
-        ..McpToolGroups::default()
-    });
-    assert!(wiki_only.tool_router.has_route("list_wiki_pages"));
-    assert!(!wiki_only.tool_router.has_route("sem_find"));
-    assert!(!wiki_only.tool_router.has_route("generate_report"));
-}
-
-#[test]
-fn tool_group_settings_accept_store_strings_and_json_booleans() {
-    let settings = json!({
-        "mcpGitCommitEnabled": "true",
-        "mcpWikiEnabled": true,
-        "mcpSemEnabled": "true",
-        "mcpProjectEnabled": true,
-        "mcpReportEnabled": "true",
-    });
-    assert!(setting_bool(&settings, GIT_COMMIT_ENABLED_KEY));
-    assert!(setting_bool(&settings, WIKI_ENABLED_KEY));
-    assert!(setting_bool(&settings, SEM_ENABLED_KEY));
-    assert!(setting_bool(&settings, PROJECT_ENABLED_KEY));
-    assert!(setting_bool(&settings, REPORT_ENABLED_KEY));
-    assert!(!setting_bool(&settings, "missing"));
 }
 
 #[test]
@@ -165,8 +175,8 @@ fn wiki_directory_rejects_missing_or_incomplete_meta() {
 fn commit_code_can_commit_selected_files() {
     let root = temp_dir("commit-selected");
     git(&root, &["init", "-b", "main"]);
-    git(&root, &["config", "user.email", "mcp@example.com"]);
-    git(&root, &["config", "user.name", "RepoMeow MCP"]);
+    git(&root, &["config", "user.email", "cli@example.com"]);
+    git(&root, &["config", "user.name", "RepoMeow CLI"]);
     fs::write(root.join("a.txt"), "a\n").unwrap();
     fs::write(root.join("b.txt"), "b\n").unwrap();
 
@@ -404,4 +414,42 @@ fn entity_token_split_and_truncation() {
     let (text, truncated) = truncate_text("你好世界", 7);
     assert!(truncated);
     assert_eq!(text, "你好");
+}
+
+#[test]
+fn cli_parse_failures_are_json() {
+    let cases = [
+        vec!["repomeow", "git", "status"],
+        vec!["repomeow", "git", "push"],
+        vec![
+            "repomeow", "sem", "context", "-d", "D:/repo", "-e", "run", "--budget", "invalid",
+        ],
+    ];
+    for args in cases {
+        let error = Cli::try_parse_from(args).unwrap_err();
+        let expected_detail = error.to_string();
+        let (exit_code, output) = format_parse_error(error);
+        assert_eq!(exit_code, 2);
+        let value: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(value["code"], "invalid_arguments");
+        assert_eq!(value["message"], "CLI 参数无效");
+        assert_eq!(value["detail"], expected_detail);
+    }
+}
+
+#[test]
+fn cli_help_and_version_remain_successful_text() {
+    for args in [
+        vec!["repomeow", "--help"],
+        vec!["repomeow", "git", "--help"],
+        vec!["repomeow", "--version"],
+    ] {
+        let error = Cli::try_parse_from(args).unwrap_err();
+        let expected = error.to_string();
+        let (exit_code, output) = format_parse_error(error);
+        assert_eq!(exit_code, 0);
+        assert_eq!(output, expected);
+        assert!(!output.is_empty());
+        assert!(serde_json::from_str::<serde_json::Value>(&output).is_err());
+    }
 }

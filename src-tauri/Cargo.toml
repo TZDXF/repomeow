@@ -45,6 +45,8 @@ reqwest = { version = "0.13", features = ["json", "blocking"] }
 # OpenAI 兼容请求统一经 SDK；byot 用于向兼容服务商附加思考模式等扩展字段。
 async-openai = { version = "0.42", default-features = false, features = ["rustls", "chat-completion", "model", "byot"] }
 thiserror = "2"
+# CLI 子命令解析(derive)
+clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 # 编辑器图标提取(image 负责缩放与 PNG 编码;pelite/ico 解析 Windows exe 资源;
 # plist/icns 解析 macOS .app 图标)——四个均为纯 Rust,放通用依赖以便跨平台编译与单测
@@ -79,8 +81,6 @@ futures = "0.3"
 # agent CLI 安装探测(Windows 正确处理 PATHEXT/.cmd)
 which = "8"
 similar = "3"
-# MCP 对外服务：首版通过 stdio 提供代码提交与 Wiki 目录查询。
-rmcp = { version = "3.3.0", features = ["server", "transport-io"] }
 jsonschema = "0.56.0"
 # 库内 ID 的系统随机源
 getrandom = "0.4"
@@ -91,3 +91,5 @@ url = "2"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"
+# CLI 模式附加父进程控制台(windows_subsystem="windows" 默认无控制台)
+windows-sys = { version = "0.61", features = ["Win32_System_Console"] }

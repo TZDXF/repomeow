@@ -322,21 +322,21 @@ pub async fn semantic_entity_context(
     .await
 }
 
-// ── MCP(headless)入口:sidecar 按可执行文件旁路径解析,无请求取消 ──────
+// ── CLI(headless)入口:sidecar 按可执行文件旁路径解析,无请求取消 ──────
 
 /// standalone launcher:二进制缺失时返回 SemanticToolMissing。
 fn standalone_launcher() -> AppResult<SemLauncher> {
     Ok(SemLauncher::Standalone(process::resolve_sem_binary()?))
 }
 
-pub async fn mcp_semantic_find_entities(
+pub async fn cli_semantic_find_entities(
     path: String,
     query: String,
 ) -> AppResult<SemanticFindResult> {
     navigation::find_entities_impl(standalone_launcher()?, path, query, None).await
 }
 
-pub async fn mcp_semantic_entity_context(
+pub async fn cli_semantic_entity_context(
     path: String,
     entity_id: Option<String>,
     entity_name: Option<String>,
@@ -357,7 +357,7 @@ pub async fn mcp_semantic_entity_context(
     .await
 }
 
-pub async fn mcp_semantic_entity_relations(
+pub async fn cli_semantic_entity_relations(
     path: String,
     entity_id: Option<String>,
     entity_name: Option<String>,
@@ -387,7 +387,7 @@ pub async fn mcp_semantic_entity_relations(
     Ok((callers, refs))
 }
 
-pub async fn mcp_semantic_worktree_diff(path: String) -> AppResult<SemanticDiffResult> {
+pub async fn cli_semantic_worktree_diff(path: String) -> AppResult<SemanticDiffResult> {
     context::worktree_diff_impl(standalone_launcher()?, path, None).await
 }
 

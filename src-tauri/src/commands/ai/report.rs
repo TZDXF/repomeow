@@ -358,8 +358,8 @@ pub async fn ai_generate_and_save_report(
     save_generated_report(Some(&app), &db, &request, result, data).map(Some)
 }
 
-/// MCP(headless)报告管线:与手动报告同一实现,无运行注册/取消与前端事件。
-pub(crate) async fn mcp_generate_and_save_report(
+/// CLI\(headless\)报告管线:与手动报告同一实现,无运行注册/取消与前端事件。
+pub(crate) async fn cli_generate_and_save_report(
     data_dir: &Path,
     db: &Db,
     request: &GenerateAndSaveReportRequest,

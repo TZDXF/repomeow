@@ -68,8 +68,7 @@ pub(super) struct SemOutput {
     pub stderr: Vec<u8>,
 }
 
-/// sem 二进制的启动方式:应用内经 Tauri sidecar 插件;headless 进程(内置 MCP
-/// server 的 `--mcp` 模式)没有 AppHandle,按可执行文件旁的显式路径直接 spawn。
+/// sem 二进制的启动方式:应用内经 Tauri sidecar 插件;headless 进程(内置 CLI 模式)没有 AppHandle,按可执行文件旁的显式路径直接 spawn。
 #[derive(Clone)]
 pub(crate) enum SemLauncher {
     App(AppHandle),

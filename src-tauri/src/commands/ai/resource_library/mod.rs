@@ -765,3 +765,45 @@ pub async fn rl_marketplace_audit_detail(
 ) -> RlResult<marketplace_remote::PublicAuditDetail> {
     blocking(move || marketplace_remote::audit_detail(&id, &provider)).await
 }
+
+/// CLI 内置技能一键导入(供 commands::cli 调用):按名称幂等。
+/// 已存在则整体重建技能目录(处理引用文件增删),分组等元数据保持不变。
+/// skills 项为 (名称, 描述, [(目录内相对路径, 内容)]),文件列表必含 SKILL.md 且位于首位。
+pub async fn cli_upsert_builtin_skills(
+    app: &AppHandle,
+    skills: Vec<(String, String, Vec<(String, String)>)>,
+) -> RlResult<(Vec<String>, Vec<String>)> {
+    mutate(&app, move |lib| {
+        let mut installed = Vec::new();
+        let mut updated = Vec::new();
+        for (name, description, files) in skills {
+            let (body, extra_files) = files
+                .split_first()
+                .ok_or_else(|| RlError::coded(codes::SKILL_NAME_REQUIRED, name.clone()))?;
+            debug_assert_eq!(body.0, "SKILL.md");
+            let data = ops::skill_list(lib)?;
+            if let Some(existing) = data.skills.iter().find(|skill| skill.name == name) {
+                let directory = existing.directory.clone();
+                lib.remove_skill_dir(&directory)?;
+                lib.write_skill_files(&directory, &files)?;
+                let mut data: SkillLibrary = lib.read_plain_json(store::FILE_SKILLS)?;
+                if let Some(index) = data.skills.iter().position(|skill| skill.name == name) {
+                    data.skills[index].updated_at = crate::time_util::now_ts();
+                    lib.write_plain_json(store::FILE_SKILLS, &data)?;
+                }
+                git::auto_commit(lib, &format!("刷新内置技能:{name}"))?;
+                updated.push(name);
+            } else {
+                let skill =
+                    ops::skill_create(lib, &name, Some(description), vec![], Some(body.1.clone()))?;
+                if !extra_files.is_empty() {
+                    lib.write_skill_files(&skill.directory, extra_files)?;
+                    git::auto_commit(lib, &format!("补充技能文件:{name}"))?;
+                }
+                installed.push(name);
+            }
+        }
+        Ok((installed, updated))
+    })
+    .await
+}

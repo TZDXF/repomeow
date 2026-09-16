@@ -1481,7 +1481,7 @@ export default {
       tracking: "跟踪更新",
       devEnv: "开发环境",
       archive: "归档项目",
-      mcp: "MCP",
+      cli: "CLI",
       ai: "AI 接入",
       aiUsage: "AI 用量",
       accounts: "账号绑定",
@@ -1490,42 +1490,17 @@ export default {
       schedule: "定时任务",
       about: "关于",
     },
-    mcp: {
-      title: "MCP",
-      description: "将 RepoMeow 的内置能力提供给 Codex、Claude Desktop 等 MCP 客户端",
-      toolGroups: "工具组",
-      toolGroupsHint: "仅已开启的工具组会对外可见;所有工具组默认关闭",
-      reconnectHint: "开关在新的 MCP 连接中生效;修改后请在 MCP 客户端断开并重新连接。",
-      git: {
-        title: "Git 状态与提交",
-        description: "允许 MCP 客户端读取仓库状态摘要,并提交全部变更或所选文件",
-      },
-      wiki: {
-        title: "Wiki 查询",
-        description: "允许 MCP 客户端读取已生成 Wiki 的大纲与页面正文,并获取 Wiki 目录",
-      },
-      sem: {
-        title: "代码语义分析",
-        description: "允许 MCP 客户端语义搜索代码实体、查看实体上下文与调用关系、汇总未提交变更",
-      },
-      project: {
-        title: "项目数据查询",
-        description: "允许 MCP 客户端读取项目内文件、报告历史与已登记的自定义命令",
-      },
-      report: {
-        title: "报告生成",
-        description:
-          "允许 MCP 客户端为已登记项目生成日报/周报(调用 AI 并写入报告历史,消耗 AI 额度)",
-      },
-      configuration: "如何配置",
-      stepEnable: "开启需要使用的工具组。",
-      stepCopy: "复制下方配置,粘贴到 MCP 客户端的服务器配置中。",
-      stepReconnect: "保存配置后重启或重新连接 MCP 客户端。",
-      copyConfig: "复制配置",
-      loadingConfig: "正在读取 RepoMeow 程序路径...",
-      configUnavailable: "无法读取 MCP 配置,请重新打开设置页后重试。",
-      builtinHint:
-        "MCP 服务内置于 RepoMeow 主程序,客户端通过 --mcp 参数启动,无需单独下载或发布 MCP 可执行文件。",
+    cli: {
+      title: "CLI",
+      description:
+        "RepoMeow CLI 内置于主程序,供 AI agent 与脚本在命令行中调用 Git、Wiki、语义分析、项目数据与报告能力",
+      skillsTitle: "内置技能(Skills)",
+      skillsHint:
+        "将技能导入资源库后,可在「项目 → AI 资源」部署到各 agent 的 skills 目录,agent 即可按技能说明调用 CLI;重复导入会重建技能内容(同步最新可执行文件路径)。",
+      skillRepomeow: "Git / Wiki / 语义分析 / 项目数据 / 日报周报(SKILL.md + references 细分)",
+      install: "导入到资源库",
+      installing: "正在导入...",
+      installDone: "内置技能已导入资源库:新增 {added} 个,刷新 {updated} 个",
     },
     devEnv: {
       detect: "自动探测",
@@ -1867,6 +1842,7 @@ export default {
         market: "市场",
         skills: "Skills",
         mcp: "MCP",
+        cli: "CLI",
         backup: "备份",
         agents: "Agent 工具",
       },

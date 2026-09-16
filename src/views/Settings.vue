@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import ScrollArea from "@/components/common/ScrollArea.vue";
 import GeneralSettings from "@/components/settings/GeneralSettings.vue";
 import ToolchainPanel from "@/components/settings/ToolchainPanel.vue";
-import McpSettings from "@/components/settings/McpSettings.vue";
+import CliSettings from "@/components/settings/CliSettings.vue";
 import TagSettings from "@/components/settings/TagSettings.vue";
 import TrackingSettings from "@/components/settings/TrackingSettings.vue";
 import ArchiveSettings from "@/components/settings/ArchiveSettings.vue";
@@ -68,7 +68,7 @@ const categories: Category[] = [
     icon: Archive,
     component: ArchiveSettings,
   },
-  { id: "mcp", labelKey: "settings.categories.mcp", icon: Cable, component: McpSettings },
+  { id: "cli", labelKey: "settings.categories.cli", icon: Cable, component: CliSettings },
   { id: "ai", labelKey: "settings.categories.ai", icon: Sparkles, component: AiSettings },
   {
     id: "aiUsage",

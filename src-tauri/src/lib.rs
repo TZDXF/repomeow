@@ -1,10 +1,10 @@
 mod agent;
 mod ai;
 mod background_task;
+pub mod cli;
 mod commands;
 mod db;
 mod error;
-pub mod mcp;
 mod models;
 mod path_util;
 mod scheduler;
@@ -219,7 +219,7 @@ pub fn run() {
             commands::window::show_main_window,
             commands::window::hide_tray_popup,
             commands::window::toggle_devtools,
-            commands::mcp::get_mcp_server_info,
+            commands::cli::cli_install_builtin_skills,
             commands::prompt::get_ai_prompts,
             commands::prompt::get_default_ai_prompts,
             commands::prompt::set_ai_prompts,

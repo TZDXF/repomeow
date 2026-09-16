@@ -2,7 +2,7 @@ use chrono::Local;
 
 use serde_json::{json, Value};
 
-use crate::commands::ai::{mcp_generate_and_save_report, GenerateAndSaveReportRequest};
+use crate::commands::ai::{cli_generate_and_save_report, GenerateAndSaveReportRequest};
 
 use super::types::GenerateReportInput;
 use super::util::{data_root_or_default, open_db, resolve_project_id, truncate_text, ToolFailure};
@@ -90,7 +90,7 @@ pub(super) async fn generate_report_impl(
     }
 
     let request = GenerateAndSaveReportRequest {
-        run_id: format!("mcp-{}", crate::time_util::now_ts_nanos()),
+        run_id: format!("cli-{}", crate::time_util::now_ts_nanos()),
         project_ids,
         date_from,
         date_to,
@@ -99,7 +99,7 @@ pub(super) async fn generate_report_impl(
         language: language.to_string(),
         period_type: period_type.to_string(),
     };
-    let Some(report) = mcp_generate_and_save_report(&data_root, &db, &request)
+    let Some(report) = cli_generate_and_save_report(&data_root, &db, &request)
         .await
         .map_err(|error| ToolFailure::from_app("生成报告失败", error))?
     else {

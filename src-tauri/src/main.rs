@@ -2,12 +2,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    if repomeow_lib::mcp::is_mcp_mode() {
-        if let Err(error) = repomeow_lib::mcp::serve_stdio_blocking() {
-            eprintln!("RepoMeow MCP 服务退出：{error}");
-            std::process::exit(1);
-        }
-        return;
+    // CLI 模式:首参数命中 git/wiki/sem/project/report 时执行命令并退出,不启动桌面窗口。
+    if repomeow_lib::cli::is_cli_mode() {
+        std::process::exit(repomeow_lib::cli::run_cli_blocking());
     }
     repomeow_lib::run()
 }

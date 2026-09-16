@@ -126,7 +126,7 @@ pub(super) fn read_wiki_page_impl(
     let Some(page) = data.pages.iter().find(|page| page.id == page_id) else {
         return Err(ToolFailure::new(
             "wiki_page_not_found",
-            format!("未找到页面 id「{page_id}」,可用 list_wiki_pages 查看页面清单"),
+            format!("未找到页面 id「{page_id}」,可用 wiki pages 查看页面清单"),
         ));
     };
     let (content, truncated) = truncate_text(&page.content, WIKI_PAGE_MAX_BYTES);
