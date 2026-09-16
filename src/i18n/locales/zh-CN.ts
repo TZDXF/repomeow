@@ -1651,6 +1651,10 @@ export default {
       launchAtLoginHint: "登录系统后自动启动应用,静默驻留系统托盘,不弹出主窗口",
       toggleFailed: "切换开机自启失败:{error}",
     },
+    developer: {
+      title: "开发者模式",
+      hint: "F12 切换 DevTools,Ctrl+Shift+E 进入元素选取并查看组件源码位置;dev 构建恒启用,此开关控制打包版本",
+    },
     about: {
       title: "关于",
       description: "本地开发项目管理中心",

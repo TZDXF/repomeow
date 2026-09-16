@@ -72,6 +72,8 @@ export const useSettingsStore = defineStore("settings", () => {
   const projectsSortKey = ref<ProjectsSortKey>("name");
   /** 启动时自动检查更新 */
   const autoCheckUpdate = ref(true);
+  /** 开发者模式(默认关闭):F12 切换 DevTools + Ctrl+Shift+E 元素源码选取 */
+  const developerMode = ref(false);
   /**
    * Wiki 自动增量更新全局开关(默认关闭):打开 = 所有项目都参与自动增量更新
    * (项目勾选被忽略并在 UI 禁用);关闭 = 仅项目勾选了的参与
@@ -106,7 +108,7 @@ export const useSettingsStore = defineStore("settings", () => {
   const projectJdkMap = ref<Record<string, string>>({});
 
   let fileStore: Store | null = null;
-  let initialized = false;
+  let initPromise: Promise<void> | null = null;
 
   const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
 
@@ -356,10 +358,14 @@ export const useSettingsStore = defineStore("settings", () => {
 
   // ── lifecycle ─────────────────────────────────────────────
 
-  async function init() {
-    if (initialized) return;
-    initialized = true;
+  function init(): Promise<void> {
+    // main.ts(开发者模式读取)与 App.vue 可能并发触发:共享同一 Promise,
+    // 保证等待方拿到的是加载完成后的结果,而非「已初始化」的空跑
+    initPromise ??= doInit();
+    return initPromise;
+  }
 
+  async function doInit() {
     fileStore = await load(await join(await homeDir(), APP_DATA_DIR_NAME, STORE_FILE), {
       defaults: {
         theme: "system",
@@ -382,6 +388,7 @@ export const useSettingsStore = defineStore("settings", () => {
         mcpProjectEnabled: "false",
         mcpReportEnabled: "false",
         worktreeDirTemplate: ".worktrees/{branch}",
+        developerMode: "false",
       },
     });
     const savedTheme = await fileStore.get<ThemeMode>("theme");
@@ -441,6 +448,11 @@ export const useSettingsStore = defineStore("settings", () => {
     const savedAutoCheckUpdate = await fileStore.get<string>("autoCheckUpdate");
     if (savedAutoCheckUpdate === "true" || savedAutoCheckUpdate === "false") {
       autoCheckUpdate.value = savedAutoCheckUpdate === "true";
+    }
+    // 开发者模式开关:存为字符串 "true"/"false",非法值回退 false
+    const savedDeveloperMode = await fileStore.get<string>("developerMode");
+    if (savedDeveloperMode === "true" || savedDeveloperMode === "false") {
+      developerMode.value = savedDeveloperMode === "true";
     }
     // Wiki 自动增量更新开关:存为字符串 "true"/"false",非法值回退 false
     const hiddenAgents = await fileStore.get<unknown>("hiddenResourceAgents");
@@ -638,6 +650,11 @@ export const useSettingsStore = defineStore("settings", () => {
     await persist("autoCheckUpdate", String(value));
   }
 
+  async function setDeveloperMode(value: boolean) {
+    developerMode.value = value;
+    await persist("developerMode", String(value));
+  }
+
   async function setWikiAutoUpdate(value: boolean) {
     wikiAutoUpdate.value = value;
     await persist("wikiAutoUpdate", String(value));
@@ -792,6 +809,7 @@ export const useSettingsStore = defineStore("settings", () => {
     projectsViewMode,
     projectsSortKey,
     autoCheckUpdate,
+    developerMode,
     wikiAutoUpdate,
     hiddenResourceAgents,
     setHiddenResourceAgents,
@@ -826,6 +844,7 @@ export const useSettingsStore = defineStore("settings", () => {
     setProjectsViewMode,
     setProjectsSortKey,
     setAutoCheckUpdate,
+    setDeveloperMode,
     setWikiAutoUpdate,
     setCloseAction,
     setTerminal,

@@ -9,6 +9,7 @@ import TerminalSettings from "@/components/settings/TerminalSettings.vue";
 import WorktreeSettings from "@/components/settings/WorktreeSettings.vue";
 import TraySettings from "@/components/settings/TraySettings.vue";
 import AutostartSettings from "@/components/settings/AutostartSettings.vue";
+import DeveloperSettings from "@/components/settings/DeveloperSettings.vue";
 import { getTerminalCapabilities, type TerminalCapabilities } from "@/lib/terminal";
 
 const terminalCapabilities = ref<TerminalCapabilities | null>(null);
@@ -37,5 +38,7 @@ onMounted(async () => {
     <LanguageSettings />
     <Separator />
     <AutostartSettings />
+    <Separator />
+    <DeveloperSettings />
   </div>
 </template>

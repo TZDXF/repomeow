@@ -4,6 +4,8 @@ import App from "./App.vue";
 import { router } from "./router";
 import { i18n } from "./i18n";
 import { getEditorIcons } from "./lib/open-with";
+import { enableDeveloperMode } from "@/lib/developer-mode";
+import { useSettingsStore } from "@/stores/settings";
 import "@fontsource/nunito/400.css";
 import "@fontsource/nunito/600.css";
 import "@fontsource/nunito/700.css";
@@ -25,12 +27,18 @@ app.mount("#app");
 // 否则 OpenWithIcon 挂载时才请求,会排在项目页数据请求之后、并争抢后端 DB 互斥锁,图标迟迟不出。
 void getEditorIcons();
 
-// 仅在开发模式加载 element-source-dev:Ctrl+Shift+E 切换元素选取模式,点击页面元素可查看其
-// 源文件位置与组件栈,方便开发时定位组件代码。import.meta.env.DEV 由 Vite 静态替换,
-// 生产构建中此分支连同 element-source / html2canvas 依赖被整体 tree-shake,不进产物。
+// 开发者模式:dev 构建恒启用;release 构建按 settings.json 的 developerMode 开关启用
+// (F12 切换 DevTools + Ctrl+Shift+E 元素源码选取)。element-source-dev 经动态 import
+// 加载,未开启时仅为异步 chunk,不进首屏 bundle。store init 幂等,与 App.vue 共用实例。
 if (import.meta.env.DEV) {
-  const { default: elementDev } = await import("element-source-dev");
-  elementDev();
+  void enableDeveloperMode();
+} else {
+  const settingsStore = useSettingsStore();
+  void settingsStore.init().then(() => {
+    if (settingsStore.developerMode) {
+      void enableDeveloperMode();
+    }
+  });
 }
 
 // 仅在打包版本禁用 WebView 默认右键菜单;dev 保留以便右键检查元素调试。

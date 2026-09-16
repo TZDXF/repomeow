@@ -1725,6 +1725,10 @@ export default {
         "Auto-launch the app at login and stay silently in the system tray without opening the main window.",
       toggleFailed: "Failed to toggle launch at login: {error}",
     },
+    developer: {
+      title: "Developer mode",
+      hint: "F12 toggles DevTools; Ctrl+Shift+E enters element picking to inspect component source locations. Always on in dev builds; this switch controls packaged builds.",
+    },
     about: {
       title: "About",
       description: "A local dev project manager",
