@@ -64,6 +64,11 @@ pub(super) const TOOLS: &[ToolSpec] = &[
         version_args: &["--version", "-v"],
     },
     ToolSpec {
+        id: "go",
+        kind: ToolchainKind::Go,
+        version_args: &["version"],
+    },
+    ToolSpec {
         id: "dotnet",
         kind: ToolchainKind::Dotnet,
         version_args: &["--version"],

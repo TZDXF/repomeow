@@ -13,6 +13,7 @@ import {
   Hexagon,
   Plus,
   RotateCw,
+  Squirrel,
   Trash2,
 } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
@@ -47,12 +48,13 @@ const scanning = ref(false);
 const scanned = ref(false);
 
 /** 分组展示顺序与图标;工具行顺序由后端 TOOLS 注册表决定 */
-const KIND_ORDER: ToolchainKind[] = ["rust", "python", "node", "dotnet", "git", "powershell"];
+const KIND_ORDER: ToolchainKind[] = ["rust", "python", "node", "dotnet", "go", "git", "powershell"];
 const GROUP_ICONS: Record<ToolchainKind, Component> = {
   rust: markRaw(Hammer),
   python: markRaw(FileTerminal),
   node: markRaw(Hexagon),
   dotnet: markRaw(Box),
+  go: markRaw(Squirrel),
   git: markRaw(GitBranch),
   powershell: markRaw(FileTerminal),
 };

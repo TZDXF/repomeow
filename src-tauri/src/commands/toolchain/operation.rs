@@ -1,7 +1,7 @@
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::ToolchainCaps;
 
-use super::{dotnet, git, node, python, rust};
+use super::{dotnet, git, go, node, python, rust};
 
 pub(super) fn manageable(source: Option<&str>) -> bool {
     if cfg!(windows) {
@@ -115,6 +115,7 @@ pub(super) fn resolve_op(
         "uv" => python::resolve(op, version, source),
         "nvm" | "fnm" | "vp" => node::resolve(tool, op, version, source),
         "dotnet" => dotnet::resolve(op, version, source),
+        "go" => go::resolve(tool, op, source),
         "git" | "gh" => git::resolve(tool, op, source),
         _ => Err(unsupported(tool, op)),
     }

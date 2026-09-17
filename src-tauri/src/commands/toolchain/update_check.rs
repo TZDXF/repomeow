@@ -43,7 +43,7 @@ fn detect_update_state(tool: &str) -> (ToolchainUpdateState, Option<String>) {
                 winget_id(tool).map_or(UNKNOWN, |id| winget_check(&id))
             } else if source == "brew" {
                 match tool {
-                    "nvm" | "fnm" | "git" | "gh" => {
+                    "nvm" | "fnm" | "git" | "gh" | "go" => {
                         brew_check(&["outdated", "--quiet", tool])
                     }
                     "dotnet" => brew_check(&["outdated", "--quiet", "--cask", "dotnet-sdk"]),
@@ -64,6 +64,7 @@ fn winget_id(tool: &str) -> Option<String> {
         "gh" => "GitHub.cli".to_string(),
         "nvm" => "CoreyButler.NVMforWindows".to_string(),
         "fnm" => "Schniz.fnm".to_string(),
+        "go" => "GoLang.Go".to_string(),
         // dotnet 更新针对已装的最高大版本 SDK,与 dotnet::resolve 的 update 一致
         "dotnet" => format!("Microsoft.DotNet.SDK.{}", dotnet::highest_major()?),
         _ => return None,

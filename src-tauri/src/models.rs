@@ -501,6 +501,7 @@ pub enum ToolchainKind {
     Python,
     Node,
     Dotnet,
+    Go,
     Git,
     Powershell,
 }
@@ -541,7 +542,7 @@ pub struct ToolchainRemoteVersion {
 /// 单个工具链工具的检测结果(detect_toolchains)
 #[derive(Debug, Clone, Serialize)]
 pub struct ToolchainStatus {
-    /// CLI 名(rustup / rustc / cargo / uv / nvm / fnm / vp / dotnet / git / gh)
+    /// CLI 名(rustup / rustc / cargo / uv / nvm / fnm / vp / dotnet / go / git / gh)
     pub id: String,
     pub kind: ToolchainKind,
     pub found: bool,

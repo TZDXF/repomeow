@@ -402,6 +402,34 @@ fn powershell_detection_and_operations() {
 }
 
 #[test]
+fn go_detection_and_operations() {
+    assert!(TOOLS.iter().any(|spec| spec.id == "go"));
+    // `go version` 输出:go version go1.23.2 windows/amd64
+    assert_eq!(
+        extract_semver("go version go1.23.2 windows/amd64").as_deref(),
+        Some("1.23.2")
+    );
+    let missing = caps_for("go", false, None, false);
+    assert!(missing.can_install);
+    assert!(!missing.can_update && !missing.can_uninstall);
+    let installed = caps_for("go", true, Some("winget"), false);
+    assert!(!installed.can_install && !installed.can_switch && !installed.can_list_remote);
+    assert!(installed.can_update && installed.can_uninstall);
+    for (op, action) in [("install", "install"), ("update", "upgrade"), ("uninstall", "uninstall")] {
+        let result = resolve_op("go", op, None, Some("winget"));
+        if cfg!(windows) {
+            assert_eq!(result.unwrap(), format!("winget {action} --id GoLang.Go -e"));
+        } else if cfg!(target_os = "macos") {
+            assert!(result.is_ok());
+        } else if op == "install" {
+            assert!(result.is_ok());
+        } else {
+            assert!(result.is_err());
+        }
+    }
+    assert!(resolve_op("go", "use", Some("1.23.2"), None).is_err());
+}
+#[test]
 fn parses_winget_list_rows() {
     // 含「可用」列(中文表头):可更新,目标版本取 ID 后第二个版本号
     let (state, latest) = parse_winget_list_row(

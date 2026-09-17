@@ -1605,6 +1605,7 @@ export default {
           python: "Python",
           node: "Node.js",
           dotnet: ".NET",
+          go: "Go",
           git: "Git",
           powershell: "PowerShell",
         },

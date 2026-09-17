@@ -3,6 +3,7 @@
 mod detect;
 mod dotnet;
 mod git;
+mod go;
 mod node;
 mod operation;
 mod process;
