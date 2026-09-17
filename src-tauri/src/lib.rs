@@ -220,6 +220,8 @@ pub fn run() {
             commands::window::hide_tray_popup,
             commands::window::toggle_devtools,
             commands::cli::cli_install_builtin_skills,
+            commands::cli::cli_get_path_status,
+            commands::cli::cli_set_user_path,
             commands::prompt::get_ai_prompts,
             commands::prompt::get_default_ai_prompts,
             commands::prompt::set_ai_prompts,

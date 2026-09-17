@@ -1,6 +1,6 @@
 # Wiki 与项目查询
 
-可执行文件:`{{REPOMEOW_CLI}}`(以 `repomeow` 代称)。以下命令均为只读;`<项目目录>` 指 RepoMeow 登记项目时使用的目录。
+通过 PATH 直接调用 `repomeow`。以下命令均为只读;`<项目目录>` 指 RepoMeow 登记项目时使用的目录。
 
 ## Wiki
 

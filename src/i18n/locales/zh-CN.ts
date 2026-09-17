@@ -1491,12 +1491,21 @@ export default {
       about: "关于",
     },
     cli: {
+      pathTitle: "用户 PATH",
+      pathHint:
+        "将当前程序目录加入用户 PATH，即可直接运行 repomeow。更改后请重启终端和 AI 工具；移除只影响此目录，不修改系统 PATH。",
+      pathAdded: "已加入用户 PATH",
+      pathMissing: "尚未加入用户 PATH",
+      pathAdd: "添加到用户 PATH",
+      pathRemove: "从用户 PATH 移除",
+      pathUpdated: "用户 PATH 已更新，请重启终端和 AI 工具",
+
       title: "CLI",
       description:
         "RepoMeow CLI 内置于主程序,供 AI agent 与脚本在命令行中调用 Git、Wiki、语义分析、项目数据与报告能力",
       skillsTitle: "内置技能(Skills)",
       skillsHint:
-        "将技能导入资源库后,可在「项目 → AI 资源」部署到各 agent 的 skills 目录,agent 即可按技能说明调用 CLI;重复导入会重建技能内容(同步最新可执行文件路径)。",
+        "将技能导入资源库后,可在「项目 → AI 资源」部署到各 agent 的 skills 目录,配置 PATH 并重启终端和 AI 工具后,agent 即可直接使用 repomeow 调用 CLI;重复导入会同步最新技能内容,不写入本机程序路径。",
       skillRepomeow: "Git / Wiki / 语义分析 / 项目数据 / 日报周报(SKILL.md + references 细分)",
       install: "导入到资源库",
       installing: "正在导入...",

@@ -92,4 +92,4 @@ url = "2"
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"
 # CLI 模式附加父进程控制台(windows_subsystem="windows" 默认无控制台)
-windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
+windows-sys = { version = "0.61", features = ["Win32_System_Console", "Win32_UI_WindowsAndMessaging"] }

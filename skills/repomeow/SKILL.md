@@ -5,9 +5,13 @@ description: 用 RepoMeow CLI 操作 RepoMeow 管理的本地项目:Git 状态�
 
 # RepoMeow CLI
 
-可执行文件:`{{REPOMEOW_CLI}}`(下文以 `repomeow` 代称)。首参数传入子命令即进入 CLI 模式,不打开窗口。
+通过 PATH 直接调用 `repomeow`,无需指定可执行文件路径。首参数传入子命令即进入 CLI 模式,不打开窗口。
 
 约定:成功结果以 JSON 写 stdout;失败以含 code/message/detail 字段的 JSON 写 stderr 且退出码非 0。`repomeow <分组> --help` 可查看各命令参数。
+
+## 环境准备
+
+使用前需将 RepoMeow 程序目录加入 PATH。Windows 可在「设置 → CLI」点击「添加到用户 PATH」,然后重启终端和 AI 工具。若提示找不到 `repomeow`,请先完成上述配置,不要将本机绝对路径写入技能。
 
 ## 命令分组
 

@@ -1,6 +1,6 @@
 # 报告生成
 
-可执行文件:`{{REPOMEOW_CLI}}`(以 `repomeow` 代称)。
+通过 PATH 直接调用 `repomeow`。
 
 ## 命令
 

@@ -2,7 +2,7 @@
 //! 再由项目 AI 资源部署到各 agent 的 skills 目录。
 //!
 //! 渐进式披露:SKILL.md 为入口与分组路由,细分用法在 references/ 下。
-//! 文件中的 `{{REPOMEOW_CLI}}` 占位符在导入时替换为当前可执行文件绝对路径。
+//! 技能通过 PATH 直接调用 `repomeow`,导入时原样保存,不写入本机可执行文件路径。
 
 /// 内置 skill 定义。
 pub(crate) struct BuiltinSkill {
@@ -12,13 +12,14 @@ pub(crate) struct BuiltinSkill {
     pub(crate) files: &'static [(&'static str, &'static str)],
 }
 
-pub(crate) const EXECUTABLE_PLACEHOLDER: &str = "{{REPOMEOW_CLI}}";
-
 pub(crate) const BUILTIN_SKILLS: &[BuiltinSkill] = &[BuiltinSkill {
     name: "repomeow",
     description: "RepoMeow CLI:Git / Wiki / 语义分析 / 项目数据 / 日报周报",
     files: &[
-        ("SKILL.md", include_str!("../../../skills/repomeow/SKILL.md")),
+        (
+            "SKILL.md",
+            include_str!("../../../skills/repomeow/SKILL.md"),
+        ),
         (
             "references/git.md",
             include_str!("../../../skills/repomeow/references/git.md"),
@@ -37,3 +38,18 @@ pub(crate) const BUILTIN_SKILLS: &[BuiltinSkill] = &[BuiltinSkill {
         ),
     ],
 }];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builtin_skills_use_path_command() {
+        for skill in BUILTIN_SKILLS {
+            for (path, content) in skill.files {
+                assert!(!content.contains("{{REPOMEOW_CLI}}"), "{path}");
+                assert!(content.contains("`repomeow`"), "{path}");
+            }
+        }
+    }
+}

@@ -1548,12 +1548,21 @@ export default {
       about: "About",
     },
     cli: {
+      pathTitle: "User PATH",
+      pathHint:
+        "Add the executable directory to your user PATH to run repomeow directly. Restart terminals and AI tools after changes. Removal only affects this directory, not the system PATH.",
+      pathAdded: "Added to user PATH",
+      pathMissing: "Not added to user PATH",
+      pathAdd: "Add to user PATH",
+      pathRemove: "Remove from user PATH",
+      pathUpdated: "User PATH updated. Restart terminals and AI tools.",
+
       title: "CLI",
       description:
         "The RepoMeow CLI is built into the main executable, letting AI agents and scripts use Git, Wiki, semantic analysis, project data, and reporting from the command line",
       skillsTitle: "Built-in skills",
       skillsHint:
-        "Import the skill into the resource library, then deploy it to each agent's skills directory via Project → AI resources; importing again rebuilds the skill contents (syncing the latest executable path).",
+        "Import the skill into the resource library, then deploy it to each agent's skills directory via Project → AI resources; after configuring PATH and restarting terminals and AI tools, agents can call repomeow directly. Importing again refreshes the skill contents without embedding a local executable path.",
       skillRepomeow:
         "Git / Wiki / semantic analysis / project data / daily & weekly reports (SKILL.md with references)",
       install: "Import into library",

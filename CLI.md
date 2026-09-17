@@ -12,11 +12,15 @@ RepoMeow CLI 内置于主程序,不单独发布。首参数传入子命令即进
 
 打开「设置 → CLI」:
 
-1. 复制 CLI 可执行文件路径(与桌面应用同一可执行文件);
+1. 点击「添加到用户 PATH」(Windows),然后重启终端和 AI 工具;技能直接使用 `repomeow`,无需写入程序路径;
 2. 点击「导入到资源库」将内置技能 `repomeow` 导入资源库(SKILL.md 为入口,references/ 下按 git / project / sem / report 细分);
 3. 在「项目 → AI 资源」将技能部署到各 agent 的 skills 目录(如 `.claude/skills`、`.agents/skills`)。
 
-技能入口 SKILL.md 含输出约定与分组路由,细分用法在 references/ 下,agent 按需加载。重复导入会重建技能内容(同步最新可执行文件路径)。
+技能入口 SKILL.md 含输出约定与分组路由,细分用法在 references/ 下,agent 按需加载。重复导入会重建技能内容(同步最新技能说明,通过 PATH 调用 `repomeow`)。
+
+## 用户 PATH（Windows）
+
+在「设置 → CLI」可查看当前程序目录是否已加入用户 PATH，并一键添加或移除。仅修改当前用户的 PATH，不需要管理员权限，不修改系统 PATH。更改后重启终端和 AI 工具，即可直接运行 `repomeow git status -d <仓库目录>`。建议使用正式安装目录；移动安装目录后需重新添加，旧目录可在 Windows 环境变量设置中清理。
 
 ## 命令
 
