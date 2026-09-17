@@ -118,6 +118,26 @@ pub(super) fn resolve_project_id(
     })
 }
 
+/// 按登记目录(归一化后)定位项目 id(含已归档;归档/删除等管理操作需要)。
+pub(super) fn require_project_id_including_archived(
+    conn: &Connection,
+    directory: &str,
+) -> Result<i64, ToolFailure> {
+    let path = clean_str(directory);
+    conn.query_row(
+        "SELECT id FROM projects WHERE path = ?1",
+        params![path],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(|error| {
+        ToolFailure::new("db_query_failed", "查询项目失败").with_detail(error.to_string())
+    })?
+    .ok_or_else(|| {
+        ToolFailure::new("project_not_found", "该项目未在 RepoMeow 登记").with_detail(path)
+    })
+}
+
 pub(super) fn require_project_id(conn: &Connection, directory: &str) -> Result<i64, ToolFailure> {
     resolve_project_id(conn, directory)?.ok_or_else(|| {
         ToolFailure::new("project_not_found", "该项目未在 RepoMeow 登记或已归档")

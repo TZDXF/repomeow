@@ -3,27 +3,6 @@ use serde_json::Value;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CommitCodeInput {
-    /// Git 仓库目录。可以使用绝对路径，提交范围始终以仓库根目录为准。
-    pub directory: String,
-    /// Git 提交信息，不能为空。
-    pub message: String,
-    /// 可选的仓库相对路径列表。省略时提交全部变更（含未跟踪文件）。
-    pub files: Option<Vec<String>>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CommitCodeOutput {
-    pub directory: String,
-    pub commit_hash: String,
-    pub short_hash: String,
-    pub branch: Option<String>,
-    pub committed_files: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct GetWikiDirectoryInput {
     /// RepoMeow 中项目登记使用的目录。路径会按 RepoMeow 的规则归一化后定位 Wiki。
     pub project_directory: String,

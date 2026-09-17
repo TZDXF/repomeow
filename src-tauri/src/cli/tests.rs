@@ -5,14 +5,17 @@ use std::path::{Path, PathBuf};
 use rusqlite::params;
 use serde_json::json;
 
-use crate::commands::git::run_git;
 use crate::commands::wiki::wiki_dir_in;
 use crate::db::Db;
 use crate::path_util::clean_str;
 
-use super::git_tool::*;
+use super::ai_tool::*;
+use super::file_tool::*;
+use super::pin_tool::*;
 use super::project_tool::*;
 use super::report_tool::*;
+use super::script_tool::*;
+use super::tag_tool::*;
 use super::util::*;
 use super::wiki_tool::*;
 use super::*;
@@ -27,49 +30,18 @@ fn temp_dir(tag: &str) -> PathBuf {
     dir
 }
 
-fn git(root: &Path, args: &[&str]) {
-    let root = root.to_string_lossy();
-    run_git(&root, args).unwrap();
-}
 
 #[test]
 fn cli_head_detection_only_accepts_known_subcommands() {
-    for head in ["git", "wiki", "sem", "project", "report"] {
+    for head in [
+        "wiki", "sem", "project", "report", "tag", "script", "pin", "hidden", "ai",
+        "prompt", "account", "file",
+    ] {
         assert!(is_cli_head(head), "should enter CLI mode: {head}");
     }
     for other in ["status", "commit_code", "--mcp", "--autostart", "repomeow"] {
         assert!(!is_cli_head(other), "should not enter CLI mode: {other}");
     }
-}
-
-#[test]
-fn cli_parses_git_commit_with_files() {
-    let cli = Cli::try_parse_from([
-        "repomeow",
-        "git",
-        "commit",
-        "-d",
-        "D:/repo",
-        "-m",
-        "feat: x",
-        "--files",
-        "src/a.ts,src/b.ts",
-    ])
-    .unwrap();
-    let Commands::Git(GitCommands::Commit {
-        directory,
-        message,
-        files,
-    }) = cli.command
-    else {
-        panic!("expected git commit");
-    };
-    assert_eq!(directory, "D:/repo");
-    assert_eq!(message, "feat: x");
-    assert_eq!(
-        files,
-        Some(vec!["src/a.ts".to_string(), "src/b.ts".to_string()])
-    );
 }
 
 #[test]
@@ -105,17 +77,9 @@ fn cli_parses_report_generate_defaults() {
 
 #[test]
 fn cli_rejects_unknown_subcommand() {
-    assert!(Cli::try_parse_from(["repomeow", "git", "push"]).is_err());
+    assert!(Cli::try_parse_from(["repomeow", "sem", "frobnicate"]).is_err());
     assert!(Cli::try_parse_from(["repomeow", "unknown"]).is_err());
 }
-#[test]
-fn commit_paths_only_accept_repository_relative_paths() {
-    assert!(normalize_commit_paths(Some(vec!["src/main.rs".into()])).is_ok());
-    assert!(normalize_commit_paths(Some(vec!["../secret".into()])).is_err());
-    assert!(normalize_commit_paths(Some(vec!["C:/secret".into()])).is_err());
-    assert!(normalize_commit_paths(Some(Vec::new())).is_err());
-}
-
 #[test]
 fn wiki_directory_returns_completed_meta() {
     let data_root = temp_dir("wiki-completed");
@@ -169,30 +133,6 @@ fn wiki_directory_rejects_missing_or_incomplete_meta() {
     assert_eq!(incomplete.code, "wiki_not_generated");
 
     let _ = fs::remove_dir_all(data_root);
-}
-
-#[test]
-fn commit_code_can_commit_selected_files() {
-    let root = temp_dir("commit-selected");
-    git(&root, &["init", "-b", "main"]);
-    git(&root, &["config", "user.email", "cli@example.com"]);
-    git(&root, &["config", "user.name", "RepoMeow CLI"]);
-    fs::write(root.join("a.txt"), "a\n").unwrap();
-    fs::write(root.join("b.txt"), "b\n").unwrap();
-
-    let output = commit_code_impl(CommitCodeInput {
-        directory: root.to_string_lossy().into_owned(),
-        message: "test: 仅提交 a".into(),
-        files: Some(vec!["a.txt".into()]),
-    })
-    .unwrap();
-
-    assert_eq!(output.branch.as_deref(), Some("main"));
-    assert_eq!(output.committed_files, vec!["a.txt"]);
-    let status = git_output(&output.directory, &["status", "--porcelain"], "status").unwrap();
-    assert!(status.contains("?? b.txt"));
-
-    let _ = fs::remove_dir_all(root);
 }
 
 fn seed_wiki(data_root: &Path, project_path: &str) {
@@ -419,8 +359,8 @@ fn entity_token_split_and_truncation() {
 #[test]
 fn cli_parse_failures_are_json() {
     let cases = [
-        vec!["repomeow", "git", "status"],
-        vec!["repomeow", "git", "push"],
+        vec!["repomeow", "project", "add"],
+        vec!["repomeow", "tag", "create"],
         vec![
             "repomeow", "sem", "context", "-d", "D:/repo", "-e", "run", "--budget", "invalid",
         ],
@@ -441,7 +381,7 @@ fn cli_parse_failures_are_json() {
 fn cli_help_and_version_remain_successful_text() {
     for args in [
         vec!["repomeow", "--help"],
-        vec!["repomeow", "git", "--help"],
+        vec!["repomeow", "wiki", "--help"],
         vec!["repomeow", "--version"],
     ] {
         let error = Cli::try_parse_from(args).unwrap_err();
@@ -452,4 +392,413 @@ fn cli_help_and_version_remain_successful_text() {
         assert!(!output.is_empty());
         assert!(serde_json::from_str::<serde_json::Value>(&output).is_err());
     }
+}
+
+// ── 新分组解析测试 ─────────────────────────────────────────────────────
+
+#[test]
+fn cli_parses_project_management_commands() {
+    let cli = Cli::try_parse_from([
+        "repomeow", "project", "add", "-p", "D:/repo", "--name", "demo",
+    ])
+    .unwrap();
+    let Commands::Project(ProjectCommands::Add {
+        project_directory,
+        name,
+        ..
+    }) = cli.command
+    else {
+        panic!("expected project add");
+    };
+    assert_eq!(project_directory, "D:/repo");
+    assert_eq!(name.as_deref(), Some("demo"));
+
+    let cli = Cli::try_parse_from([
+        "repomeow",
+        "project",
+        "set-auto-pull",
+        "-p",
+        "D:/repo",
+        "--enabled",
+        "true",
+    ])
+    .unwrap();
+    let Commands::Project(ProjectCommands::SetAutoPull { enabled, .. }) = cli.command else {
+        panic!("expected project set-auto-pull");
+    };
+    assert!(enabled);
+}
+
+#[test]
+fn cli_parses_tag_script_pin_hidden_commands() {
+    let cli = Cli::try_parse_from(["repomeow", "tag", "create", "--name", "后端"]).unwrap();
+    assert!(matches!(
+        cli.command,
+        Commands::Tag(TagCommands::Create { .. })
+    ));
+
+    let cli = Cli::try_parse_from([
+        "repomeow",
+        "tag",
+        "set-project",
+        "-p",
+        "D:/repo",
+        "--tag-ids",
+        "1,2",
+    ])
+    .unwrap();
+    let Commands::Tag(TagCommands::SetProject { tag_ids, .. }) = cli.command else {
+        panic!("expected tag set-project");
+    };
+    assert_eq!(tag_ids, vec![1, 2]);
+
+    let cli = Cli::try_parse_from([
+        "repomeow",
+        "script",
+        "create",
+        "-p",
+        "D:/repo",
+        "--name",
+        "dev",
+        "--command",
+        "pnpm dev",
+    ])
+    .unwrap();
+    assert!(matches!(
+        cli.command,
+        Commands::Script(ScriptCommands::Create { .. })
+    ));
+
+    let cli = Cli::try_parse_from([
+        "repomeow",
+        "pin",
+        "set",
+        "-p",
+        "D:/repo",
+        "--kind",
+        "customCommand",
+        "--target-key",
+        "1",
+        "--pinned",
+        "true",
+    ])
+    .unwrap();
+    let Commands::Pin(PinCommands::Set { pinned, .. }) = cli.command else {
+        panic!("expected pin set");
+    };
+    assert!(pinned);
+
+    let cli = Cli::try_parse_from([
+        "repomeow",
+        "hidden",
+        "set",
+        "-p",
+        "D:/repo",
+        "--kind",
+        "packageScript",
+        "--target-key",
+        "build",
+        "--hidden",
+        "false",
+    ])
+    .unwrap();
+    let Commands::Hidden(HiddenCommands::Set { hidden, .. }) = cli.command else {
+        panic!("expected hidden set");
+    };
+    assert!(!hidden);
+}
+
+#[test]
+fn cli_parses_ai_account_file_commands() {
+    let cli = Cli::try_parse_from([
+        "repomeow",
+        "ai",
+        "usage-log",
+        "--offset",
+        "0",
+        "--limit",
+        "20",
+        "--task-type",
+        "report",
+    ])
+    .unwrap();
+    let Commands::Ai(AiCommands::UsageLog { limit, .. }) = cli.command else {
+        panic!("expected ai usage-log");
+    };
+    assert_eq!(limit, Some(20));
+
+    let cli = Cli::try_parse_from([
+        "repomeow",
+        "account",
+        "add",
+        "--provider",
+        "github",
+        "--label",
+        "work",
+        "--token",
+        "tok",
+    ])
+    .unwrap();
+    assert!(matches!(
+        cli.command,
+        Commands::Account(AccountCommands::Add { .. })
+    ));
+
+    let cli = Cli::try_parse_from([
+        "repomeow",
+        "file",
+        "save",
+        "-p",
+        "D:/repo",
+        "--path",
+        "docs/a.md",
+        "--content",
+        "hi",
+    ])
+    .unwrap();
+    assert!(matches!(
+        cli.command,
+        Commands::File(FileCommands::Save { .. })
+    ));
+
+
+}
+
+// ── 新分组实现测试(临时数据目录)──────────────────────────────────────
+
+/// 项目登记管理全生命周期:add → list/get → 开关 → archive/unarchive → delete。
+#[test]
+fn project_management_lifecycle() {
+    let data_root = temp_dir("project-mgmt");
+    let project = temp_dir("project-mgmt-repo");
+    let dir = project.to_string_lossy().into_owned();
+
+    let added = add_project_impl(&dir, None, None, Some(&data_root)).unwrap();
+    let id = added["id"].as_i64().unwrap();
+    assert!(id > 0);
+    // 缺省名称取目录 basename
+    assert_eq!(
+        added["name"],
+        json!(project.file_name().unwrap().to_string_lossy())
+    );
+
+    let listed = list_projects_impl(false, Some(&data_root)).unwrap();
+    assert_eq!(listed["projects"].as_array().unwrap().len(), 1);
+
+    let got = get_project_impl(
+        ProjectDirectoryInput {
+            project_directory: dir.clone(),
+        },
+        Some(&data_root),
+    )
+    .unwrap();
+    assert_eq!(got["id"], json!(id));
+
+    let renamed =
+        update_project_impl(&dir, Some("new-name".into()), None, Some(&data_root)).unwrap();
+    assert_eq!(renamed["name"], json!("new-name"));
+
+    let flag = set_project_flag_impl(&dir, "autoPull", true, Some(&data_root)).unwrap();
+    assert_eq!(flag["enabled"], json!(true));
+
+    // 归档后不再出现在未归档列表;get 仍可查到(含已归档)
+    set_project_archived_impl(&dir, true, Some(&data_root)).unwrap();
+    assert!(
+        list_projects_impl(false, Some(&data_root)).unwrap()["projects"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        list_projects_impl(true, Some(&data_root)).unwrap()["projects"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    set_project_archived_impl(&dir, false, Some(&data_root)).unwrap();
+    delete_project_impl(&dir, Some(&data_root)).unwrap();
+    let missing = get_project_impl(
+        ProjectDirectoryInput {
+            project_directory: dir,
+        },
+        Some(&data_root),
+    )
+    .unwrap_err();
+    assert_eq!(missing.code, "project_not_found");
+
+    let _ = fs::remove_dir_all(data_root);
+    let _ = fs::remove_dir_all(project);
+}
+
+/// 标签 + 项目绑定 + 自定义命令生命周期。
+#[test]
+fn tag_and_script_lifecycle() {
+    let data_root = temp_dir("tag-script");
+    let project = temp_dir("tag-script-repo");
+    let dir = project.to_string_lossy().into_owned();
+    add_project_impl(&dir, None, None, Some(&data_root)).unwrap();
+
+    let tag = create_tag_impl("后端", Some("#ff0000"), Some(&data_root)).unwrap();
+    let tag_id = tag["id"].as_i64().unwrap();
+    assert_eq!(tag["name"], json!("后端"));
+
+    let bound = set_project_tags_impl(&dir, vec![tag_id], Some(&data_root)).unwrap();
+    assert_eq!(bound["tagIds"], json!([tag_id]));
+    let got = get_project_impl(
+        ProjectDirectoryInput {
+            project_directory: dir.clone(),
+        },
+        Some(&data_root),
+    )
+    .unwrap();
+    assert_eq!(got["tags"][0]["name"], json!("后端"));
+
+    let cmd = create_command_impl(&dir, "dev", "pnpm dev", None, None, Some(&data_root)).unwrap();
+    let cmd_id = cmd["id"].as_i64().unwrap();
+    let updated = update_command_impl(
+        cmd_id,
+        "dev2",
+        "pnpm dev2",
+        Some("开发"),
+        None,
+        Some(&data_root),
+    )
+    .unwrap();
+    assert_eq!(updated["name"], json!("dev2"));
+
+    // pin 标记该命令,删除命令后 pin 同步移除
+    set_pin_impl(
+        &dir,
+        "customCommand",
+        &cmd_id.to_string(),
+        true,
+        Some("dev2"),
+        Some("pnpm dev2"),
+        None,
+        Some(&data_root),
+    )
+    .unwrap();
+    let pins = list_pins_impl(Some(&dir), Some(&data_root)).unwrap();
+    assert_eq!(pins["pins"].as_array().unwrap().len(), 1);
+
+    delete_command_impl(cmd_id, Some(&data_root)).unwrap();
+    let pins = list_pins_impl(Some(&dir), Some(&data_root)).unwrap();
+    assert!(pins["pins"].as_array().unwrap().is_empty());
+
+    let hidden = set_hidden_impl(&dir, "packageScript", "build", true, Some(&data_root)).unwrap();
+    assert_eq!(hidden["hidden"], json!(true));
+    let listed = list_hidden_impl(&dir, Some(&data_root)).unwrap();
+    assert_eq!(listed["hidden"].as_array().unwrap().len(), 1);
+
+    delete_tag_impl(tag_id, Some(&data_root)).unwrap();
+    assert!(list_tags_impl(Some(&data_root)).unwrap()["tags"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+
+    let _ = fs::remove_dir_all(data_root);
+    let _ = fs::remove_dir_all(project);
+}
+
+/// Wiki 配置读写与删除(临时数据目录,不动真实 wiki)。
+#[test]
+fn wiki_config_and_delete_lifecycle() {
+    let data_root = temp_dir("wiki-mgmt");
+    let project_path = "D:/projects/wiki-demo".to_string();
+
+    let got = wiki_config_get_impl(&project_path, Some(&data_root)).unwrap();
+    assert_eq!(got["exists"], json!(false));
+
+    let set = wiki_config_set_impl(
+        &project_path,
+        Some("aether/step-3.7-flash".into()),
+        Some("high".into()),
+        Some(4),
+        Some(&data_root),
+    )
+    .unwrap();
+    assert_eq!(set["config"]["model"], json!("aether/step-3.7-flash"));
+    assert_eq!(set["config"]["concurrency"], json!(4));
+
+    let got = wiki_config_get_impl(&project_path, Some(&data_root)).unwrap();
+    assert_eq!(got["exists"], json!(true));
+    assert_eq!(got["config"]["thinking"], json!("high"));
+
+    let deleted = delete_wiki_impl(&project_path, Some(&data_root)).unwrap();
+    assert_eq!(deleted["deleted"], json!(true));
+
+    let _ = fs::remove_dir_all(data_root);
+}
+
+/// 提示词读写往返(临时数据目录)。
+#[test]
+fn prompts_roundtrip_via_files() {
+    let data_root = temp_dir("prompts");
+    let prompt_file = temp_dir("prompt-src").join("commit.md");
+    fs::write(&prompt_file, "自定义提交提示词").unwrap();
+
+    let set = prompts_set_impl(
+        Some(prompt_file.to_string_lossy().as_ref()),
+        None,
+        None,
+        false,
+        Some(&data_root),
+    )
+    .unwrap();
+    assert_eq!(set["commit"], json!("自定义提交提示词"));
+
+    let got = prompts_get_impl(Some(&data_root)).unwrap();
+    assert_eq!(got["commit"], json!("自定义提交提示词"));
+    assert_eq!(got["report"], json!(""));
+
+    // --clear 恢复未指定项默认(清空 commit)
+    let cleared = prompts_set_impl(None, None, None, true, Some(&data_root)).unwrap();
+    assert_eq!(cleared["commit"], json!(""));
+
+    let default = prompts_default_impl().unwrap();
+    assert!(default["commit"].as_str().unwrap().len() > 10);
+
+    let _ = fs::remove_dir_all(data_root);
+}
+
+/// 系统调度读写(临时数据目录)。
+#[test]
+fn system_schedule_roundtrip() {
+    let data_root = temp_dir("syssched");
+    seed_db(&data_root);
+
+    let saved = save_system_schedule_impl(false, 30, Some(&data_root)).unwrap();
+    assert_eq!(saved["enabled"], json!(false));
+    assert_eq!(saved["intervalMinutes"], json!(30));
+
+    let listed = list_system_schedules_impl(Some(&data_root)).unwrap();
+    assert_eq!(listed["schedules"][0]["enabled"], json!(false));
+
+    let _ = fs::remove_dir_all(data_root);
+}
+
+/// 文件写入:拒绝越界路径与双内容源。
+#[test]
+fn save_file_rejects_traversal_and_dual_source() {
+    let project = temp_dir("file-save");
+
+    let traversal = save_file_impl(&project.to_string_lossy(), "../escape.txt", Some("x"), None);
+    assert!(traversal.is_err());
+    assert_eq!(traversal.unwrap_err().code, "invalid_file_path");
+
+    let dual = save_file_impl(
+        &project.to_string_lossy(),
+        "a.txt",
+        Some("x"),
+        Some("other.txt"),
+    );
+    assert!(dual.is_err());
+
+    let ok = save_file_impl(&project.to_string_lossy(), "a.txt", Some("内容"), None).unwrap();
+    assert_eq!(ok["saved"], json!(true));
+    assert_eq!(fs::read_to_string(project.join("a.txt")).unwrap(), "内容");
+
+    let _ = fs::remove_dir_all(project);
 }

@@ -278,10 +278,10 @@ pub struct GitStatusItem {
     pub status: GitStatus,
 }
 
-pub(super) const GIT_UPDATE_SCHEDULE_ID: &str = "git_update";
+pub(crate) const GIT_UPDATE_SCHEDULE_ID: &str = "git_update";
 pub(super) const DEFAULT_GIT_CHECK_INTERVAL_MINUTES: u64 = 10;
-pub(super) const MIN_GIT_CHECK_INTERVAL_MINUTES: u64 = 1;
-pub(super) const MAX_GIT_CHECK_INTERVAL_MINUTES: u64 = 24 * 60;
+pub(crate) const MIN_GIT_CHECK_INTERVAL_MINUTES: u64 = 1;
+pub(crate) const MAX_GIT_CHECK_INTERVAL_MINUTES: u64 = 24 * 60;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -306,7 +306,7 @@ impl Default for SystemSchedule {
 /// Git 监控配置变更通知：设置页保存后立即唤醒休眠中的 monitor_loop。
 pub struct GitMonitorNotify(pub Arc<Notify>);
 
-pub(super) fn read_git_system_schedule(conn: &rusqlite::Connection) -> AppResult<SystemSchedule> {
+pub(crate) fn read_git_system_schedule(conn: &rusqlite::Connection) -> AppResult<SystemSchedule> {
     conn.query_row(
         "SELECT id, enabled, interval_minutes, last_run_at FROM system_schedules WHERE id = ?1",
         [GIT_UPDATE_SCHEDULE_ID],
@@ -344,25 +344,34 @@ pub fn save_system_schedule(
             format!("unknown system schedule: {id}"),
         ));
     }
-    let interval = interval_minutes.clamp(
-        MIN_GIT_CHECK_INTERVAL_MINUTES,
-        MAX_GIT_CHECK_INTERVAL_MINUTES,
-    );
     let schedule = {
         let conn = db.0.lock().unwrap();
-        conn.execute(
-            "INSERT INTO system_schedules (id, enabled, interval_minutes, last_run_at)
-             VALUES (?1, ?2, ?3, NULL)
-             ON CONFLICT(id) DO UPDATE SET enabled = excluded.enabled,
-                 interval_minutes = excluded.interval_minutes",
-            rusqlite::params![GIT_UPDATE_SCHEDULE_ID, enabled as i64, interval as i64],
-        )?;
-        read_git_system_schedule(&conn)?
+        write_git_system_schedule(&conn, enabled, interval_minutes)?
     };
     if let Some(notify) = app.try_state::<GitMonitorNotify>() {
         notify.0.notify_one();
     }
     Ok(schedule)
+}
+
+/// 写入 git 系统调度(不含 GUI 通知);CLI 与 Tauri 命令共用。
+pub(crate) fn write_git_system_schedule(
+    conn: &rusqlite::Connection,
+    enabled: bool,
+    interval_minutes: u64,
+) -> AppResult<SystemSchedule> {
+    let interval = interval_minutes.clamp(
+        MIN_GIT_CHECK_INTERVAL_MINUTES,
+        MAX_GIT_CHECK_INTERVAL_MINUTES,
+    );
+    conn.execute(
+        "INSERT INTO system_schedules (id, enabled, interval_minutes, last_run_at)
+         VALUES (?1, ?2, ?3, NULL)
+         ON CONFLICT(id) DO UPDATE SET enabled = excluded.enabled,
+             interval_minutes = excluded.interval_minutes",
+        rusqlite::params![GIT_UPDATE_SCHEDULE_ID, enabled as i64, interval as i64],
+    )?;
+    read_git_system_schedule(conn)
 }
 
 #[derive(Debug, Clone)]

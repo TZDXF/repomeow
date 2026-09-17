@@ -107,9 +107,24 @@ pub fn save_report_schedules(
 ) -> AppResult<()> {
     {
         let mut conn = db.0.lock().unwrap();
+        write_schedules(&mut conn, &schedules)?;
+    }
+
+    if let Some(notify) = app.try_state::<ScheduleNotify>() {
+        notify.0.notify_one();
+    }
+    Ok(())
+}
+
+/// 全量覆盖写入报告调度的纯实现(供 CLI 复用;CLI 场景无运行中的调度器,无需 notify)。
+pub(crate) fn write_schedules(
+    conn: &mut Connection,
+    schedules: &[ReportSchedule],
+) -> AppResult<()> {
+    {
         let tx = conn.transaction()?;
         tx.execute("DELETE FROM report_schedules", [])?;
-        for s in &schedules {
+        for s in schedules {
             let ids_json = serde_json::to_string(&s.project_ids).unwrap_or_default();
             let tag_ids_json = serde_json::to_string(&s.tag_ids).unwrap_or_default();
             tx.execute(
@@ -137,10 +152,6 @@ pub fn save_report_schedules(
             )?;
         }
         tx.commit()?;
-    }
-
-    if let Some(notify) = app.try_state::<ScheduleNotify>() {
-        notify.0.notify_one();
     }
     Ok(())
 }

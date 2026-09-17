@@ -126,3 +126,84 @@ pub(super) async fn generate_report_impl(
             .collect::<Vec<_>>(),
     }))
 }
+
+// ── 报告历史与调度管理 ─────────────────────────────────────────────────
+
+/// 读取单条报告详情(含 Markdown 正文与提交记录)。
+pub(super) fn get_report_impl(id: i64, data_root: Option<&Path>) -> Result<Value, ToolFailure> {
+    let data_root = data_root_or_default(data_root)?;
+    let db = open_db(&data_root)?;
+    let conn = db.0.lock().unwrap();
+    let detail = crate::commands::report::get_report_history_impl(&conn, id)
+        .map_err(|error| ToolFailure::from_app("查询报告详情失败", error))?;
+    Ok(json!(detail))
+}
+
+/// 删除单条报告历史(级联删除关联提交记录)。
+pub(super) fn delete_report_impl(id: i64, data_root: Option<&Path>) -> Result<Value, ToolFailure> {
+    let data_root = data_root_or_default(data_root)?;
+    let db = open_db(&data_root)?;
+    let conn = db.0.lock().unwrap();
+    crate::commands::report::delete_report_history_impl(&conn, id)
+        .map_err(|error| ToolFailure::from_app("删除报告失败", error))?;
+    Ok(json!({ "id": id, "deleted": true }))
+}
+
+/// 列出全部报告调度。
+pub(super) fn list_schedules_impl(data_root: Option<&Path>) -> Result<Value, ToolFailure> {
+    let data_root = data_root_or_default(data_root)?;
+    let db = open_db(&data_root)?;
+    let conn = db.0.lock().unwrap();
+    let schedules = crate::commands::report::read_schedules(&conn)
+        .map_err(|error| ToolFailure::from_app("查询报告调度失败", error))?;
+    Ok(json!({ "schedules": schedules }))
+}
+
+/// 从 JSON 文件全量覆盖报告调度(数组,元素结构同 schedules 输出)。
+/// 注意:若桌面应用正在运行,需重启后新调度才被调度器感知。
+pub(super) fn save_schedules_impl(
+    file: &str,
+    data_root: Option<&Path>,
+) -> Result<Value, ToolFailure> {
+    let raw = std::fs::read_to_string(file).map_err(|error| {
+        ToolFailure::new("schedule_file_read_failed", "读取调度 JSON 文件失败")
+            .with_detail(format!("{file}: {error}"))
+    })?;
+    let schedules: Vec<crate::commands::report::ReportSchedule> = serde_json::from_str(&raw)
+        .map_err(|error| {
+            ToolFailure::new("schedule_file_invalid", "调度 JSON 格式无效")
+                .with_detail(error.to_string())
+        })?;
+    let count = schedules.len();
+    let data_root = data_root_or_default(data_root)?;
+    let db = open_db(&data_root)?;
+    let mut conn = db.0.lock().unwrap();
+    crate::commands::report::write_schedules(&mut conn, &schedules)
+        .map_err(|error| ToolFailure::from_app("保存报告调度失败", error))?;
+    Ok(json!({ "saved": count }))
+}
+
+/// 列出系统级调度(当前仅 git_update 后台检查)。
+pub(super) fn list_system_schedules_impl(data_root: Option<&Path>) -> Result<Value, ToolFailure> {
+    let data_root = data_root_or_default(data_root)?;
+    let db = open_db(&data_root)?;
+    let conn = db.0.lock().unwrap();
+    let schedule = crate::commands::git::read_git_system_schedule(&conn)
+        .map_err(|error| ToolFailure::from_app("查询系统调度失败", error))?;
+    Ok(json!({ "schedules": [schedule] }))
+}
+
+/// 保存系统级调度(git_update)。注意:运行中的桌面应用需重启后生效。
+pub(super) fn save_system_schedule_impl(
+    enabled: bool,
+    interval_minutes: u64,
+    data_root: Option<&Path>,
+) -> Result<Value, ToolFailure> {
+    let data_root = data_root_or_default(data_root)?;
+    let db = open_db(&data_root)?;
+    let conn = db.0.lock().unwrap();
+    let schedule =
+        crate::commands::git::write_git_system_schedule(&conn, enabled, interval_minutes)
+            .map_err(|error| ToolFailure::from_app("保存系统调度失败", error))?;
+    Ok(json!(schedule))
+}

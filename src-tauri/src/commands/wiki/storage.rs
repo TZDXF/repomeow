@@ -66,7 +66,7 @@ pub(super) fn save_meta_in(dir: &Path, mut meta: WikiMeta) -> AppResult<()> {
     Ok(())
 }
 
-pub(super) fn save_config_in(dir: &Path, mut config: WikiGenerationConfig) -> AppResult<()> {
+pub(crate) fn save_config_in(dir: &Path, mut config: WikiGenerationConfig) -> AppResult<()> {
     config.version = CONFIG_VERSION;
     fs::create_dir_all(dir)?;
     let target = dir.join(CONFIG_FILE);
@@ -78,7 +78,7 @@ pub(super) fn save_config_in(dir: &Path, mut config: WikiGenerationConfig) -> Ap
     Ok(())
 }
 
-pub(super) fn load_config_in(dir: &Path) -> AppResult<WikiGenerationConfig> {
+pub(crate) fn load_config_in(dir: &Path) -> AppResult<WikiGenerationConfig> {
     let path = dir.join(CONFIG_FILE);
     let raw = match fs::read_to_string(&path) {
         Ok(raw) => raw,
@@ -118,7 +118,7 @@ pub(super) fn load_wiki_in(dir: &Path) -> Option<(WikiMeta, Vec<WikiPageData>)> 
     Some((meta, pages))
 }
 
-pub(super) fn has_wiki_in(dir: &Path) -> bool {
+pub(crate) fn has_wiki_in(dir: &Path) -> bool {
     dir.is_dir()
         && fs::read_dir(dir)
             .map(|mut entries| entries.next().is_some())
@@ -485,7 +485,7 @@ fn clear_readonly_recursive(root: &Path) {
 #[cfg(not(windows))]
 fn clear_readonly_recursive(_root: &Path) {}
 
-pub(super) fn remove_wiki_dir(dir: &Path) -> AppResult<()> {
+pub(crate) fn remove_wiki_dir(dir: &Path) -> AppResult<()> {
     match fs::remove_dir_all(dir) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),

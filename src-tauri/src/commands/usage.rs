@@ -86,7 +86,7 @@ pub fn get_ai_usage_summary(db: State<Db>) -> AppResult<AiUsageSummary> {
     usage_summary(&db.0.lock().unwrap())
 }
 
-fn usage_summary(conn: &Connection) -> AppResult<AiUsageSummary> {
+pub(crate) fn usage_summary(conn: &Connection) -> AppResult<AiUsageSummary> {
     let (total_calls, ti, to, tt, tc): (i64, i64, i64, i64, i64) = conn.query_row(
         "SELECT COUNT(*),
                 COALESCE(SUM(input_tokens), 0),
@@ -172,7 +172,7 @@ pub fn list_ai_usage_log(
     list_usage_rows(&db.0.lock().unwrap(), offset, limit, task_type.as_deref())
 }
 
-fn list_usage_rows(
+pub(crate) fn list_usage_rows(
     conn: &Connection,
     offset: i64,
     limit: i64,
@@ -202,7 +202,7 @@ pub fn clear_ai_usage_log(db: State<Db>) -> AppResult<u32> {
 }
 
 /// 返回删除的行数(前端 toast 展示)
-fn clear_usage_rows(conn: &Connection) -> AppResult<u32> {
+pub(crate) fn clear_usage_rows(conn: &Connection) -> AppResult<u32> {
     let deleted = conn.execute("DELETE FROM ai_usage_log", [])? as u32;
     Ok(deleted)
 }

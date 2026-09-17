@@ -9,7 +9,11 @@ use crate::commands::script;
 use super::types::{
     ListReportsInput, ProjectDirectoryInput, ProjectFileOutput, ReadProjectFileInput,
 };
-use super::util::{data_root_or_default, open_db, require_project_id, ToolFailure};
+use super::util::{
+    data_root_or_default, open_db, require_project_id, require_project_id_including_archived,
+    ToolFailure,
+};
+use crate::commands::project as project_repo;
 use crate::path_util::{clean_str, to_forward_slash_str};
 
 /// read_project_file 默认/最大返回行数(对齐 chat 工具)。
@@ -115,4 +119,157 @@ pub(super) fn list_custom_commands_impl(
         "projectId": project_id,
         "commands": commands,
     }))
+}
+
+// ── 项目登记管理 ──────────────────────────────────────────────────────
+
+pub(super) fn list_projects_impl(
+    archived: bool,
+    data_root: Option<&Path>,
+) -> Result<Value, ToolFailure> {
+    let data_root = data_root_or_default(data_root)?;
+    let db = open_db(&data_root)?;
+    let conn = db.0.lock().unwrap();
+    let projects = if archived {
+        project_repo::list_archived(&conn)
+    } else {
+        project_repo::list(&conn, None, None)
+    }
+    .map_err(|error| ToolFailure::from_app("查询项目列表失败", error))?;
+    Ok(json!({ "projects": projects }))
+}
+
+pub(super) fn get_project_impl(
+    input: ProjectDirectoryInput,
+    data_root: Option<&Path>,
+) -> Result<Value, ToolFailure> {
+    let data_root = data_root_or_default(data_root)?;
+    let db = open_db(&data_root)?;
+    let conn = db.0.lock().unwrap();
+    let path = clean_str(&input.project_directory);
+    let id = require_project_id_including_archived(&conn, &path)?;
+    let project = project_repo::get(&conn, id)
+        .map_err(|error| ToolFailure::from_app("查询项目失败", error))?;
+    Ok(json!(project))
+}
+
+pub(super) fn add_project_impl(
+    project_directory: &str,
+    name: Option<String>,
+    description: Option<String>,
+    data_root: Option<&Path>,
+) -> Result<Value, ToolFailure> {
+    let path = clean_str(project_directory);
+    if path.is_empty() {
+        return Err(ToolFailure::new(
+            "invalid_project_directory",
+            "项目目录不能为空",
+        ));
+    }
+    let name = name
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| {
+            // 与前端一致:缺省取目录 basename 作为项目名
+            path.rsplit(['/', '\\'])
+                .next()
+                .unwrap_or(path.as_str())
+                .to_string()
+        });
+    let description = description.unwrap_or_default();
+    let data_root = data_root_or_default(data_root)?;
+    let db = open_db(&data_root)?;
+    let conn = db.0.lock().unwrap();
+    let project = project_repo::add(&conn, &path, &name, &description)
+        .map_err(|error| ToolFailure::from_app("登记项目失败", error))?;
+    Ok(json!(project))
+}
+
+pub(super) fn update_project_impl(
+    project_directory: &str,
+    name: Option<String>,
+    description: Option<String>,
+    data_root: Option<&Path>,
+) -> Result<Value, ToolFailure> {
+    let data_root = data_root_or_default(data_root)?;
+    let db = open_db(&data_root)?;
+    let conn = db.0.lock().unwrap();
+    let id = require_project_id(&conn, project_directory)?;
+    let existing = project_repo::get(&conn, id)
+        .map_err(|error| ToolFailure::from_app("查询项目失败", error))?;
+    // 缺省字段沿用原值,支持只改单项
+    let name = name
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or(existing.name);
+    let description = description.unwrap_or(existing.description);
+    let project = project_repo::update(&conn, id, &name, &description)
+        .map_err(|error| ToolFailure::from_app("更新项目失败", error))?;
+    Ok(json!(project))
+}
+
+pub(super) fn set_project_archived_impl(
+    project_directory: &str,
+    archived: bool,
+    data_root: Option<&Path>,
+) -> Result<Value, ToolFailure> {
+    let data_root = data_root_or_default(data_root)?;
+    let db = open_db(&data_root)?;
+    let conn = db.0.lock().unwrap();
+    let id = require_project_id_including_archived(&conn, project_directory)?;
+    let result = if archived {
+        project_repo::archive(&conn, id)
+    } else {
+        project_repo::unarchive(&conn, id)
+    };
+    result.map_err(|error| {
+        ToolFailure::from_app(
+            if archived {
+                "归档项目失败"
+            } else {
+                "恢复项目失败"
+            },
+            error,
+        )
+    })?;
+    Ok(json!({ "projectId": id, "archived": archived }))
+}
+
+pub(super) fn delete_project_impl(
+    project_directory: &str,
+    data_root: Option<&Path>,
+) -> Result<Value, ToolFailure> {
+    let data_root = data_root_or_default(data_root)?;
+    let db = open_db(&data_root)?;
+    let conn = db.0.lock().unwrap();
+    let id = require_project_id_including_archived(&conn, project_directory)?;
+    project_repo::remove(&conn, id)
+        .map_err(|error| ToolFailure::from_app("删除项目失败", error))?;
+    Ok(json!({ "projectId": id, "deleted": true }))
+}
+
+/// 项目开关:favorite(收藏)/ autoPull(跟踪更新)/ wikiAutoUpdate(Wiki 自动更新)。
+pub(super) fn set_project_flag_impl(
+    project_directory: &str,
+    flag: &str,
+    enabled: bool,
+    data_root: Option<&Path>,
+) -> Result<Value, ToolFailure> {
+    let data_root = data_root_or_default(data_root)?;
+    let db = open_db(&data_root)?;
+    let conn = db.0.lock().unwrap();
+    let id = require_project_id(&conn, project_directory)?;
+    let result = match flag {
+        "favorite" => project_repo::set_favorite(&conn, id, enabled),
+        "autoPull" => project_repo::set_auto_pull(&conn, id, enabled),
+        "wikiAutoUpdate" => project_repo::set_wiki_auto_update(&conn, id, enabled),
+        _ => {
+            return Err(ToolFailure::new(
+                "invalid_flag",
+                format!("未知项目开关: {flag}"),
+            ))
+        }
+    };
+    result.map_err(|error| ToolFailure::from_app("更新项目开关失败", error))?;
+    Ok(json!({ "projectId": id, "flag": flag, "enabled": enabled }))
 }

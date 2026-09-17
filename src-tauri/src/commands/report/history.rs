@@ -210,7 +210,14 @@ pub fn list_report_history_impl(
 /// 查询单条报告详情(含 Markdown 正文与提交记录)。
 pub fn get_report_history(db: State<'_, Db>, id: i64) -> AppResult<ReportHistoryDetail> {
     let conn = db.0.lock().unwrap();
+    get_report_history_impl(&conn, id)
+}
 
+/// 查询单条报告详情的纯实现(供 CLI 复用)。
+pub(crate) fn get_report_history_impl(
+    conn: &Connection,
+    id: i64,
+) -> AppResult<ReportHistoryDetail> {
     let (mut item, ids, result) = conn.query_row(
         "SELECT id, project_ids, date_from, date_to, range_label,
                 author_mode, language, period_type, created_at, result
@@ -239,10 +246,10 @@ pub fn get_report_history(db: State<'_, Db>, id: i64) -> AppResult<ReportHistory
         },
     )?;
 
-    item.project_names = resolve_project_names(&conn, &ids)?;
-    item.total_commits = count_commits(&conn, item.id)?;
+    item.project_names = resolve_project_names(conn, &ids)?;
+    item.total_commits = count_commits(conn, item.id)?;
 
-    let commits = load_report_commits(&conn, item.id)?;
+    let commits = load_report_commits(conn, item.id)?;
 
     Ok(ReportHistoryDetail {
         item,

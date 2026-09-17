@@ -56,11 +56,32 @@ fn write_prompt(dir: &Path, file: &str, content: &str) -> AppResult<()> {
 #[tauri::command]
 pub fn get_ai_prompts(app: AppHandle) -> AppResult<AiPrompts> {
     let dir = prompts_dir(&app)?;
-    Ok(AiPrompts {
-        commit: read_prompt(&dir, COMMIT_PROMPT_FILE),
-        report: read_prompt(&dir, REPORT_PROMPT_FILE),
-        report_weekly: read_prompt(&dir, REPORT_WEEKLY_PROMPT_FILE),
-    })
+    Ok(read_prompts_in(&dir))
+}
+
+/// 读取提示词的纯实现(供 CLI 复用;dir 为 <数据根>/prompts)。
+pub(crate) fn read_prompts_in(dir: &Path) -> AiPrompts {
+    AiPrompts {
+        commit: read_prompt(dir, COMMIT_PROMPT_FILE),
+        report: read_prompt(dir, REPORT_PROMPT_FILE),
+        report_weekly: read_prompt(dir, REPORT_WEEKLY_PROMPT_FILE),
+    }
+}
+
+/// 写入提示词的纯实现(供 CLI 复用;含旧 wiki 提示词文件清理)。
+pub(crate) fn write_prompts_in(dir: &Path, prompts: &AiPrompts) -> AppResult<()> {
+    fs::create_dir_all(dir)?;
+    write_prompt(dir, COMMIT_PROMPT_FILE, &prompts.commit)?;
+    write_prompt(dir, REPORT_PROMPT_FILE, &prompts.report)?;
+    write_prompt(dir, REPORT_WEEKLY_PROMPT_FILE, &prompts.report_weekly)?;
+    write_prompt(dir, LEGACY_WIKI_OUTLINE_PROMPT_FILE, "")?;
+    write_prompt(dir, LEGACY_WIKI_PAGE_PROMPT_FILE, "")?;
+    Ok(())
+}
+
+/// CLI 场景由数据根目录推导 prompts 目录(无 AppHandle)。
+pub(crate) fn prompts_dir_in(data_root: &Path) -> PathBuf {
+    data_root.join(PROMPTS_DIR_NAME)
 }
 
 /// 返回后端内置默认模板，仅供设置页作为只读占位预览；生成逻辑不依赖前端副本。
@@ -78,13 +99,7 @@ pub fn get_default_ai_prompts() -> AiPrompts {
 #[tauri::command]
 pub fn set_ai_prompts(app: AppHandle, prompts: AiPrompts) -> AppResult<()> {
     let dir = prompts_dir(&app)?;
-    fs::create_dir_all(&dir)?;
-    write_prompt(&dir, COMMIT_PROMPT_FILE, &prompts.commit)?;
-    write_prompt(&dir, REPORT_PROMPT_FILE, &prompts.report)?;
-    write_prompt(&dir, REPORT_WEEKLY_PROMPT_FILE, &prompts.report_weekly)?;
-    write_prompt(&dir, LEGACY_WIKI_OUTLINE_PROMPT_FILE, "")?;
-    write_prompt(&dir, LEGACY_WIKI_PAGE_PROMPT_FILE, "")?;
-    Ok(())
+    write_prompts_in(&dir, &prompts)
 }
 
 #[tauri::command]

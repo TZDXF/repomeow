@@ -14,16 +14,13 @@ pub(crate) struct BuiltinSkill {
 
 pub(crate) const BUILTIN_SKILLS: &[BuiltinSkill] = &[BuiltinSkill {
     name: "repomeow",
-    description: "RepoMeow CLI:Git / Wiki / 语义分析 / 项目数据 / 日报周报",
+    description: "RepoMeow CLI:项目管理 / Wiki / 语义分析 / 报告与调度 / 标签 / AI 配置",
     files: &[
         (
             "SKILL.md",
             include_str!("../../../skills/repomeow/SKILL.md"),
         ),
-        (
-            "references/git.md",
-            include_str!("../../../skills/repomeow/references/git.md"),
-        ),
+
         (
             "references/project.md",
             include_str!("../../../skills/repomeow/references/project.md"),
@@ -35,6 +32,14 @@ pub(crate) const BUILTIN_SKILLS: &[BuiltinSkill] = &[BuiltinSkill {
         (
             "references/report.md",
             include_str!("../../../skills/repomeow/references/report.md"),
+        ),
+        (
+            "references/manage.md",
+            include_str!("../../../skills/repomeow/references/manage.md"),
+        ),
+        (
+            "references/settings.md",
+            include_str!("../../../skills/repomeow/references/settings.md"),
         ),
     ],
 }];

@@ -1559,12 +1559,12 @@ export default {
 
       title: "CLI",
       description:
-        "The RepoMeow CLI is built into the main executable, letting AI agents and scripts use Git, Wiki, semantic analysis, project data, and reporting from the command line",
+        "The RepoMeow CLI is built into the main executable, letting AI agents and scripts manage projects, Wiki, semantic analysis, reports, and AI configuration from the command line (use local git/docker CLIs directly)",
       skillsTitle: "Built-in skills",
       skillsHint:
         "Import the skill into the resource library, then deploy it to each agent's skills directory via Project → AI resources; after configuring PATH and restarting terminals and AI tools, agents can call repomeow directly. Importing again refreshes the skill contents without embedding a local executable path.",
       skillRepomeow:
-        "Git / Wiki / semantic analysis / project data / daily & weekly reports (SKILL.md with references)",
+        "Project management / Wiki / semantic analysis / reports & schedules / tags / AI config (SKILL.md with references)",
       install: "Import into library",
       installing: "Importing...",
       installDone: "Built-in skills imported: {added} added, {updated} refreshed",

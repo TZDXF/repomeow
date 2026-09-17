@@ -185,6 +185,11 @@ pub(crate) fn build_authed_url(provider: &str, username: &str, token: &str, url:
 #[tauri::command]
 pub fn list_git_accounts(db: State<'_, Db>) -> AppResult<Vec<GitAccount>> {
     let conn = db.0.lock().unwrap();
+    list_accounts(&conn)
+}
+
+/// 列出全部 Git 账号的纯实现(供 CLI 复用)。
+pub(crate) fn list_accounts(conn: &Connection) -> AppResult<Vec<GitAccount>> {
     let sql = format!("SELECT {ACCOUNT_COLS} FROM git_accounts ORDER BY id");
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map([], map_row)?;
@@ -204,12 +209,23 @@ pub async fn add_git_account(
     base_url: Option<String>,
     token: String,
 ) -> AppResult<GitAccount> {
-    let provider = normalize_provider(&provider)?;
+    add_account(&db, &provider, &label, base_url.as_deref(), &token).await
+}
+
+/// 绑定账号的纯实现(供 CLI 复用):先调平台 API 验证 token,成功才落库。
+pub(crate) async fn add_account(
+    db: &Db,
+    provider: &str,
+    label: &str,
+    base_url: Option<&str>,
+    token: &str,
+) -> AppResult<GitAccount> {
+    let provider = normalize_provider(provider)?;
     let token = token.trim().to_string();
     if token.is_empty() {
         return Err(AppError::coded(ErrorCode::AccountTokenRequired, ""));
     }
-    let base = resolve_base_url(&provider, base_url.as_deref())?;
+    let base = resolve_base_url(&provider, base_url)?;
     let username = fetch_username(&provider, &base, &token).await?;
 
     let conn = db.0.lock().unwrap();
@@ -232,6 +248,17 @@ pub async fn update_git_account(
     base_url: Option<String>,
     token: Option<String>,
 ) -> AppResult<GitAccount> {
+    update_account(&db, id, &label, base_url.as_deref(), token.as_deref()).await
+}
+
+/// 更新账号的纯实现(供 CLI 复用);token 传 None/空表示保留原 token。
+pub(crate) async fn update_account(
+    db: &Db,
+    id: i64,
+    label: &str,
+    base_url: Option<&str>,
+    token: Option<&str>,
+) -> AppResult<GitAccount> {
     let existing = {
         let conn = db.0.lock().unwrap();
         get_account_row(&conn, id)?
@@ -240,10 +267,7 @@ pub async fn update_git_account(
         .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty());
     let base = if existing.provider == "gitlab" {
-        resolve_base_url(
-            "gitlab",
-            base_url.as_deref().or(Some(existing.base_url.as_str())),
-        )?
+        resolve_base_url("gitlab", base_url.or(Some(existing.base_url.as_str())))?
     } else {
         existing.base_url.clone()
     };
@@ -273,6 +297,11 @@ pub async fn update_git_account(
 #[tauri::command]
 pub fn remove_git_account(db: State<'_, Db>, id: i64) -> AppResult<()> {
     let conn = db.0.lock().unwrap();
+    remove_account(&conn, id)
+}
+
+/// 删除账号的纯实现(供 CLI 复用)。
+pub(crate) fn remove_account(conn: &Connection, id: i64) -> AppResult<()> {
     let affected = conn.execute("DELETE FROM git_accounts WHERE id = ?1", params![id])?;
     if affected == 0 {
         return Err(AppError::coded(ErrorCode::AccountNotFound, id.to_string()));
