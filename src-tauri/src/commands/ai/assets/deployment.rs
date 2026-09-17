@@ -124,10 +124,44 @@ struct LocalResource {
     name: String,
     #[serde(default)]
     description: String,
-    /// 来源位置:skills = 技能目录;mcp = 配置文件路径。
+    /// 来源位置:skills = 技能目录(主来源);mcp = 配置文件路径。
     source_path: String,
+    /// 同名技能散落在多个 Agent 目录的全部来源实例(skills 专用,含主来源);
+    /// 空数组按 source_path 单来源处理(兼容旧清单)。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    source_paths: Vec<String>,
     /// 来源路径归属的 Agent(该 Agent 只登记记录,文件保持原样)。
     origin_agent: String,
+}
+/// 来源目录按 Agent 目标顺序稳定排列并去重。
+fn order_source_dirs(mut dirs: Vec<String>) -> Vec<String> {
+    let rank = |dir: &str| {
+        TARGETS
+            .iter()
+            .position(|t| Path::new(dir).parent() == Some(Path::new(t.skill_path)))
+            .unwrap_or(TARGETS.len())
+    };
+    dirs.sort_by(|a, b| rank(a).cmp(&rank(b)).then_with(|| a.cmp(b)));
+    dirs.dedup();
+    dirs
+}
+impl LocalResource {
+    /// 全部来源实例目录(skills):含主来源,按 Agent 目标顺序稳定排列;mcp 恒为单元素。
+    fn source_dirs(&self) -> Vec<String> {
+        let dirs = if self.source_paths.is_empty() {
+            vec![self.source_path.clone()]
+        } else {
+            self.source_paths.clone()
+        };
+        order_source_dirs(dirs)
+    }
+    /// 该 Agent 名下的来源实例目录(目录父级为其 skills 根);非来源 Agent 返回 None。
+    fn source_dir_for(&self, agent: &str) -> Option<String> {
+        let skill_path = target(agent).ok()?.skill_path;
+        self.source_dirs()
+            .into_iter()
+            .find(|d| Path::new(d).parent() == Some(Path::new(skill_path)))
+    }
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -201,6 +235,21 @@ fn read_manifest(path: &Path, root: &Path) -> RlResult<Manifest> {
         {
             return Err(problem("invalid local resource record"));
         }
+        // 同名多副本来源目录也必须是某个 Agent skills 根下的安全目录。
+        for dir in &local.source_paths {
+            let p = Path::new(dir);
+            let owned = TARGETS
+                .iter()
+                .any(|t| p.parent() == Some(Path::new(t.skill_path)));
+            if local.kind != "skills"
+                || !owned
+                || !p
+                    .file_name()
+                    .is_some_and(|n| is_safe_directory(&n.to_string_lossy()))
+            {
+                return Err(problem("invalid local resource record"));
+            }
+        }
     }
     let mut shortlisted = HashSet::new();
     for item in &manifest.shortlist {
@@ -234,6 +283,9 @@ pub struct ResourceChoice {
     /// 市场技能来源(owner/repo);手动创建技能与 MCP 无此字段,前端按来源附加分组。
     #[serde(skip_serializing_if = "Option::is_none")]
     source: Option<String>,
+    /// 本地来源技能的全部来源目录(含主来源,按 Agent 目标顺序);非本地技能无此字段。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_dirs: Option<Vec<String>>,
 }
 enum Source {
     Skill(Skill),
@@ -260,6 +312,7 @@ impl Source {
                 group_ids: s.group_ids.clone(),
                 supported_agents: TARGETS.iter().map(|t| t.id.to_string()).collect(),
                 source: s.marketplace.as_ref().map(|m| m.source.clone()),
+                source_dirs: None,
             },
             Self::Mcp(s) => ResourceChoice {
                 id: s.id.clone(),
@@ -272,6 +325,7 @@ impl Source {
                     .flat_map(|t| t.agents.iter().map(|a| a.to_string()))
                     .collect(),
                 source: None,
+                source_dirs: None,
             },
             Self::LocalSkill(l) => ResourceChoice {
                 id: l.id.clone(),
@@ -280,6 +334,7 @@ impl Source {
                 group_ids: vec![],
                 supported_agents: TARGETS.iter().map(|t| t.id.to_string()).collect(),
                 source: None,
+                source_dirs: Some(l.source_dirs()),
             },
             Self::LocalMcp(l, server) => ResourceChoice {
                 id: l.id.clone(),
@@ -292,6 +347,7 @@ impl Source {
                     .flat_map(|t| t.agents.iter().map(|a| a.to_string()))
                     .collect(),
                 source: None,
+                source_dirs: None,
             },
         }
     }
@@ -830,7 +886,8 @@ fn repair(
             save_manifest(&state_path, &next)
         }
         "reapply" => {
-            // 本地来源的来源 Agent:来源即文件本身,修复 = 把现状认领为新基线。
+            // 本地来源的主来源 Agent:来源即文件本身,修复 = 把现状认领为新基线;
+            // skills 同名副本不在此列,走下方 force 部署以主来源内容覆盖统一。
             if let Some(local) = state
                 .locals
                 .iter()
@@ -1065,7 +1122,7 @@ fn migrate_local(
     let mut state = read_manifest(state_path, root)?;
     let Some(pos) = state.locals.iter().position(|l| {
         l.kind == kind
-            && l.source_path == source_path
+            && l.source_dirs().iter().any(|d| d == source_path)
             && (kind == "skills" || l.name == name.unwrap_or_default())
     }) else {
         return Ok(());
@@ -1079,14 +1136,15 @@ fn migrate_local(
     save_manifest(state_path, &state)
 }
 
-/// 本地来源的来源 Agent 只登记/解除记录:文件是用户原始内容,认领取现状指纹,
-/// 解除保留文件;最后一个部署解除时连同本地记录清理,目录回到非托管。
+/// 本地来源的来源 Agent(含同名副本所在目录)只登记/解除记录:文件是用户原始内容,
+/// 认领取现状指纹,解除保留文件;最后一个部署解除时连同本地记录清理,目录回到非托管。
 fn apply_local_origin(
     root: &Path,
     state_path: &Path,
     state: &mut Manifest,
     local: &LocalResource,
     agent: &str,
+    path: &str,
     selected: bool,
 ) -> RlResult<bool> {
     let existed = state
@@ -1105,7 +1163,7 @@ fn apply_local_origin(
             agent_id: agent.to_string(),
             resource_id: local.id.clone(),
             name: local.name.clone(),
-            path: local.source_path.clone(),
+            path: path.to_string(),
             fingerprint: String::new(),
         };
         entry.fingerprint =
@@ -1156,7 +1214,7 @@ fn claim_local(
     validate_kind(kind)?;
     let state_path = manifest_file(library, root);
     let mut state = read_manifest(&state_path, root)?;
-    let (entry, local) = if kind == "skills" {
+    if kind == "skills" {
         // source 必须是某个 Agent skills 目录下的安全目录名,据此归属来源 Agent。
         let origin = TARGETS
             .iter()
@@ -1177,26 +1235,39 @@ fn claim_local(
         let name = name
             .filter(|n| !n.trim().is_empty())
             .ok_or_else(|| problem(source))?;
-        let id = format!("{LOCAL_PREFIX}skills:{source}");
-        (
-            Deployment {
-                kind: kind.to_string(),
-                agent_id: origin.id.to_string(),
-                resource_id: id.clone(),
-                name: name.clone(),
-                path: source.to_string(),
-                fingerprint: tree_hash(&tree),
-            },
-            LocalResource {
-                kind: kind.to_string(),
-                id,
-                name,
-                description: description.unwrap_or_default(),
-                source_path: source.to_string(),
-                origin_agent: origin.id.to_string(),
-            },
-        )
-    } else {
+        // 同名技能散落在多个 Agent 目录时视为一体:认领时扫描全部同名副本,逐目录按现状登记。
+        let dir_name = Path::new(source)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .ok_or_else(|| problem(source))?;
+        let mut copies: Vec<(String, String, String)> = vec![];
+        for t in TARGETS {
+            let dir = format!("{}/{}", t.skill_path, dir_name);
+            let Ok(path) = safe_path(root, &dir) else {
+                continue;
+            };
+            if !path.is_dir() || !path.join("SKILL.md").is_file() {
+                continue;
+            }
+            let Ok(copy_tree) = read_tree(&path) else {
+                continue;
+            };
+            copies.push((t.id.to_string(), dir, tree_hash(&copy_tree)));
+        }
+        let local = LocalResource {
+            kind: kind.to_string(),
+            id: format!("{LOCAL_PREFIX}skills:{source}"),
+            name,
+            description: description.unwrap_or_default(),
+            source_path: source.to_string(),
+            source_paths: order_source_dirs(
+                copies.iter().map(|(_, dir, _)| dir.clone()).collect(),
+            ),
+            origin_agent: origin.id.to_string(),
+        };
+        return claim_local_skill(&state_path, &mut state, local, copies);
+    }
+    let (entry, local) = {
         let name = name.ok_or_else(|| problem("MCP server name required"))?;
         let target = MCP_TARGETS
             .iter()
@@ -1223,6 +1294,7 @@ fn claim_local(
                 name: name.to_string(),
                 description: String::new(),
                 source_path: source.to_string(),
+                source_paths: vec![],
                 origin_agent: target.agents[0].to_string(),
             },
         )
@@ -1247,6 +1319,69 @@ fn claim_local(
     state.entries.push(entry);
     save_manifest(&state_path, &state)?;
     Ok(ClaimOutcome { resource_id })
+}
+
+/// skills 认领落库:同名(跨 Agent 目录)已认领时并入既有来源记录并补登记新副本,
+/// 否则新建本地来源;每个已存在副本按各自现状指纹登记部署,来源 Agent 不写文件。
+/// copies = (agent_id, 目录, 目录现状指纹),按 TARGETS 顺序。
+fn claim_local_skill(
+    state_path: &Path,
+    state: &mut Manifest,
+    local: LocalResource,
+    copies: Vec<(String, String, String)>,
+) -> RlResult<ClaimOutcome> {
+    let existing = state
+        .locals
+        .iter()
+        .position(|l| l.kind == "skills" && l.name == local.name);
+    let id = existing
+        .map(|pos| state.locals[pos].id.clone())
+        .unwrap_or_else(|| local.id.clone());
+    // 冲突:副本目录已被其他资源托管。
+    for (_, dir, _) in &copies {
+        if state
+            .entries
+            .iter()
+            .any(|e| e.kind == "skills" && e.path == *dir && e.resource_id != id)
+        {
+            return Err(problem(format!("resource collision: {dir}")));
+        }
+    }
+    // 补登记尚未登记的副本(各副本指纹独立,内容分叉时自然落 modified/update)。
+    for (agent, dir, fingerprint) in &copies {
+        if state
+            .entries
+            .iter()
+            .any(|e| e.kind == "skills" && e.agent_id == *agent && e.resource_id == id)
+        {
+            continue;
+        }
+        state.entries.push(Deployment {
+            kind: "skills".to_string(),
+            agent_id: agent.clone(),
+            resource_id: id.clone(),
+            name: local.name.clone(),
+            path: dir.clone(),
+            fingerprint: fingerprint.clone(),
+        });
+    }
+    if let Some(pos) = existing {
+        let merged = &mut state.locals[pos];
+        let mut dirs = merged.source_dirs();
+        for (_, dir, _) in &copies {
+            if !dirs.contains(dir) {
+                dirs.push(dir.clone());
+            }
+        }
+        merged.source_paths = order_source_dirs(dirs);
+        if merged.description.is_empty() {
+            merged.description = local.description.clone();
+        }
+    } else {
+        state.locals.push(local);
+    }
+    save_manifest(state_path, state)?;
+    Ok(ClaimOutcome { resource_id: id })
 }
 
 /// 删除非托管资源:skills 删除整个技能目录,mcp 从配置文件中移除服务器条目。
@@ -1392,7 +1527,9 @@ fn apply_one(
         .iter()
         .find(|e| e.kind == kind && e.agent_id == agent && e.resource_id == id)
         .cloned();
-    // 本地来源(非托管认领)的来源 Agent:认领取现状指纹,解除仅删记录保留文件。
+    // 本地来源(非托管认领):主来源 Agent 只登记/解除(来源即文件本身,认领/编辑取现状,
+    // 解除保留文件);skills 同名副本所在 Agent 解除同样只删记录保留文件,
+    // 但选中时走正常部署管线——以主来源内容写入,分叉副本由此可「应用更新」统一。
     if let Some(local) = state
         .locals
         .iter()
@@ -1400,7 +1537,19 @@ fn apply_one(
         .cloned()
     {
         if agent == local.origin_agent {
-            return apply_local_origin(root, state_path, state, &local, agent, selected);
+            let dir = if local.kind == "skills" {
+                local
+                    .source_dir_for(agent)
+                    .unwrap_or_else(|| local.source_path.clone())
+            } else {
+                local.source_path.clone()
+            };
+            return apply_local_origin(root, state_path, state, &local, agent, &dir, selected);
+        }
+        if local.kind == "skills" && !selected {
+            if let Some(dir) = local.source_dir_for(agent) {
+                return apply_local_origin(root, state_path, state, &local, agent, &dir, false);
+            }
         }
     }
     // 来源被删除/损坏时保留已配置项,不把空来源列表当成卸载指令。

@@ -656,6 +656,162 @@ fn claim_local_skill_configures_agents_without_library_import() {
 }
 
 #[test]
+fn claim_local_skill_merges_same_name_copies_across_agent_dirs() {
+    let f = Fixture::new();
+    let body_v1 = "---\nname: release-tagger\ndescription: 发版\n---\nv1\n";
+    let zcode_dir = f.root.join(".zcode/skills/release-tagger");
+    let codex_dir = f.root.join(".agents/skills/release-tagger");
+    fs::create_dir_all(&zcode_dir).unwrap();
+    fs::create_dir_all(&codex_dir).unwrap();
+    fs::write(zcode_dir.join("SKILL.md"), body_v1).unwrap();
+    fs::write(codex_dir.join("SKILL.md"), body_v1).unwrap();
+
+    // 认领视为一体:同名副本一并登记,各按现状指纹;来源目录按 Agent 目标顺序展示。
+    let outcome = claim_local(
+        &f.library,
+        &f.root,
+        "skills",
+        ".zcode/skills/release-tagger",
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        outcome.resource_id,
+        "local:skills:.zcode/skills/release-tagger"
+    );
+    let snap = snapshot(&f.library, &f.root, "skills").unwrap();
+    assert_eq!(snap.resources.len(), 1);
+    assert_eq!(
+        snap.resources[0].source_dirs,
+        Some(vec![
+            ".agents/skills/release-tagger".to_string(),
+            ".zcode/skills/release-tagger".to_string(),
+        ])
+    );
+    assert_eq!(snap.deployments.len(), 2);
+    let status = |snap: &ProjectResourceSnapshot, agent: &str| {
+        snap.deployments
+            .iter()
+            .find(|d| d.entry.agent_id == agent)
+            .unwrap()
+            .status
+            .clone()
+    };
+    assert_eq!(status(&snap, "codex"), "configured");
+    assert_eq!(status(&snap, "zcode"), "configured");
+
+    // 从另一个副本目录重复认领:合并到同一资源,不产生重复记录。
+    let again = claim_local(
+        &f.library,
+        &f.root,
+        "skills",
+        ".agents/skills/release-tagger",
+        None,
+    )
+    .unwrap();
+    assert_eq!(again.resource_id, outcome.resource_id);
+    assert_eq!(
+        snapshot(&f.library, &f.root, "skills")
+            .unwrap()
+            .deployments
+            .len(),
+        2
+    );
+
+    // 副本本地编辑 → modified;副本不是主来源,reapply 以主来源内容覆盖统一。
+    let body_v2 = body_v1.replace("v1", "v2");
+    fs::write(codex_dir.join("SKILL.md"), &body_v2).unwrap();
+    let snap = snapshot(&f.library, &f.root, "skills").unwrap();
+    assert_eq!(status(&snap, "codex"), "modified");
+    repair(
+        &f.library,
+        &f.root,
+        "skills",
+        &outcome.resource_id,
+        "codex",
+        "reapply",
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(codex_dir.join("SKILL.md")).unwrap(),
+        body_v1
+    );
+    let snap = snapshot(&f.library, &f.root, "skills").unwrap();
+    assert_eq!(status(&snap, "codex"), "configured");
+
+    // 主来源编辑:主来源落 modified,副本落 update;assign 把主来源内容传播到副本。
+    let body_v3 = body_v1.replace("v1", "v3");
+    fs::write(zcode_dir.join("SKILL.md"), &body_v3).unwrap();
+    let snap = snapshot(&f.library, &f.root, "skills").unwrap();
+    assert_eq!(status(&snap, "zcode"), "modified");
+    assert_eq!(status(&snap, "codex"), "update");
+    let r = assign(
+        &f.library,
+        &f.root,
+        "skills",
+        &outcome.resource_id,
+        &["zcode".to_string(), "codex".to_string()],
+    )
+    .unwrap();
+    assert!(r.failures.is_empty());
+    assert_eq!(r.applied, 1);
+    assert_eq!(
+        fs::read_to_string(codex_dir.join("SKILL.md")).unwrap(),
+        body_v3
+    );
+
+    // 解除副本 Agent:仅删记录保留文件,本地来源记录仍在(主来源条目还在)。
+    let r = assign(
+        &f.library,
+        &f.root,
+        "skills",
+        &outcome.resource_id,
+        &["zcode".to_string()],
+    )
+    .unwrap();
+    assert_eq!(r.applied, 1);
+    assert!(codex_dir.join("SKILL.md").exists());
+    let snap = snapshot(&f.library, &f.root, "skills").unwrap();
+    assert_eq!(snap.deployments.len(), 1);
+    assert_eq!(snap.resources.len(), 1);
+
+    // 认领第三个目录新出现的同名副本:合并进既有资源;磁盘上仍在的副本一并补登记。
+    let claude_dir = f.root.join(".claude/skills/release-tagger");
+    fs::create_dir_all(&claude_dir).unwrap();
+    fs::write(claude_dir.join("SKILL.md"), body_v1).unwrap();
+    let merged = claim_local(
+        &f.library,
+        &f.root,
+        "skills",
+        ".claude/skills/release-tagger",
+        None,
+    )
+    .unwrap();
+    assert_eq!(merged.resource_id, outcome.resource_id);
+    let snap = snapshot(&f.library, &f.root, "skills").unwrap();
+    assert_eq!(snap.deployments.len(), 3);
+    assert_eq!(
+        snap.resources[0].source_dirs,
+        Some(vec![
+            ".claude/skills/release-tagger".to_string(),
+            ".agents/skills/release-tagger".to_string(),
+            ".zcode/skills/release-tagger".to_string(),
+        ])
+    );
+
+    // 导入资源库:任一副本路径都能匹配迁移,部署记录改挂库资源 ID,本地来源记录清除。
+    let imported = import_skill(&f.library, &f.root, ".agents/skills/release-tagger").unwrap();
+    let snap = snapshot(&f.library, &f.root, "skills").unwrap();
+    assert_eq!(snap.resources.len(), 1);
+    assert!(snap.resources[0].source_dirs.is_none());
+    assert_eq!(snap.deployments.len(), 3);
+    assert!(snap
+        .deployments
+        .iter()
+        .all(|d| d.entry.resource_id == imported.resource_id));
+}
+
+#[test]
 fn claim_local_mcp_deploys_translated_and_preserves_origin() {
     let f = Fixture::new();
     fs::create_dir_all(f.root.join(".zcode")).unwrap();

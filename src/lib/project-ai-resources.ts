@@ -16,6 +16,8 @@ export interface ResourceChoice {
   supportedAgents: string[];
   /** 市场技能来源(owner/repo);手动创建技能与 MCP 无此字段。 */
   source?: string;
+  /** 本地来源技能的全部来源目录(含主来源,按 Agent 目标顺序);非本地技能无此字段。 */
+  sourceDirs?: string[];
 }
 export interface ResourceGroup {
   id: string;

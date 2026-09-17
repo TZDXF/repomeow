@@ -309,7 +309,8 @@ function preview(resource: ResourceChoice) {
   // skills 统一走技能预览页(库技能按 id,本地来源按目录);MCP 保持抽屉只读预览
   if (props.kind === "skills") {
     if (resource.id.startsWith("local:")) {
-      const dir = records(resource.id)[0]?.path;
+      // 同名多副本时以主来源(id 内嵌的认领目录)为准,而非首个部署记录。
+      const dir = resource.id.slice("local:skills:".length) || records(resource.id)[0]?.path;
       if (dir) {
         void router.push({
           name: "resource-skill",
@@ -431,13 +432,14 @@ function localImportTarget(resource: ResourceChoice): { source: string; name?: s
   if (!resource.id.startsWith("local:")) {
     return null;
   }
-  const record = records(resource.id)[0];
-  if (record) {
-    return { source: record.path, name: props.kind === "mcp" ? record.name : undefined };
-  }
   const rest = resource.id.slice(`local:${props.kind}:`.length);
   if (props.kind === "skills") {
+    // 同名多副本时以主来源(id 内嵌的认领目录)为准,而非首个部署记录。
     return rest ? { source: rest } : null;
+  }
+  const record = records(resource.id)[0];
+  if (record) {
+    return { source: record.path, name: record.name };
   }
   const hash = rest.lastIndexOf("#");
   return hash > 0 ? { source: rest.slice(0, hash), name: rest.slice(hash + 1) } : null;
@@ -729,11 +731,25 @@ function changed() {
             <p v-if="resource.description" class="mt-1 truncate text-xs text-muted-foreground">
               {{ resource.description }}
             </p>
+            <p
+              v-if="resource.sourceDirs && resource.sourceDirs.length > 1"
+              class="mt-1 truncate font-mono text-[10px] text-muted-foreground"
+              :title="resource.sourceDirs.join('\n')"
+            >
+              {{ resource.sourceDirs.join(" · ") }}
+            </p>
           </button>
           <div v-else class="min-w-0 flex-1">
             <p class="truncate text-xs font-medium">{{ resource.name }}</p>
             <p v-if="resource.description" class="mt-1 truncate text-xs text-muted-foreground">
               {{ resource.description }}
+            </p>
+            <p
+              v-if="resource.sourceDirs && resource.sourceDirs.length > 1"
+              class="mt-1 truncate font-mono text-[10px] text-muted-foreground"
+              :title="resource.sourceDirs.join('\n')"
+            >
+              {{ resource.sourceDirs.join(" · ") }}
             </p>
           </div>
           <div class="flex flex-wrap gap-1">
