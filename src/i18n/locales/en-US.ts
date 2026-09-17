@@ -1706,7 +1706,7 @@ export default {
     },
     developer: {
       title: "Developer mode",
-      hint: "F12 toggles DevTools; Ctrl+Shift+E enters element picking to inspect component source locations. Always on in dev builds; this switch controls packaged builds.",
+      hint: "F12 toggles DevTools; Ctrl+Shift+E locates component source for an element.",
     },
     about: {
       title: "About",

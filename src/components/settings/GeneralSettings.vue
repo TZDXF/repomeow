@@ -37,8 +37,7 @@ onMounted(async () => {
     <Separator />
     <LanguageSettings />
     <Separator />
-    <AutostartSettings />
-    <Separator />
     <DeveloperSettings />
+    <AutostartSettings />
   </div>
 </template>

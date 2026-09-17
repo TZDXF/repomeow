@@ -1638,7 +1638,7 @@ export default {
     },
     developer: {
       title: "开发者模式",
-      hint: "F12 切换 DevTools,Ctrl+Shift+E 进入元素选取并查看组件源码位置;dev 构建恒启用,此开关控制打包版本",
+      hint: "F12 切换开发者工具，Ctrl+Shift+E 查看元素对应的组件源码位置",
     },
     about: {
       title: "关于",

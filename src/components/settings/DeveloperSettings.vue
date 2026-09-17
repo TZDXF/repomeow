@@ -7,10 +7,12 @@ import { useSettingsStore } from "@/stores/settings";
 const { t } = useI18n();
 const settings = useSettingsStore();
 
-// dev 构建恒启用(见 main.ts),开关状态仍落盘,供 release 构建启动时读取;
-// 运行时切换即时生效:注册/移除 F12 监听 + 加载/销毁元素选取工具
+// dev 构建恒启用,开关仅保存偏好;打包版本中运行时切换即时生效。
 async function onToggle(value: boolean) {
   await settings.setDeveloperMode(value);
+  if (import.meta.env.DEV) {
+    return;
+  }
   if (value) {
     await enableDeveloperMode();
   } else {
