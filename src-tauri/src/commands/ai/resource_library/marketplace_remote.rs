@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use super::errors::{codes, RlError, RlResult};
 use super::marketplace::{
-    client, fetch_text, latest_commit_sha, parse_marketplace_id, read_limited, validate_part,
+    client, fetch_text, parse_marketplace_id, read_limited, validate_part,
 };
 use super::models::{
     MarketplaceDownload, MarketplaceFile, MarketplaceList, MarketplaceSkill, MarketplaceSource,
@@ -58,26 +58,7 @@ fn snapshot(source: &str, refresh: bool) -> RlResult<Arc<RepositorySnapshot>> {
             return Ok(cached.clone());
         }
     }
-    let revision =
-        latest_commit_sha(source, "")?.ok_or_else(|| invalid("missing repository revision"))?;
-    if !revision.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(invalid("invalid revision"));
-    }
-    let response = client()?
-        .get(format!(
-            "https://codeload.github.com/{source}/zip/{revision}"
-        ))
-        .timeout(Duration::from_secs(120))
-        .send()
-        .map_err(|e| RlError::coded(codes::MARKETPLACE_UNAVAILABLE, e.to_string()))?;
-    if !response.status().is_success() {
-        return Err(RlError::coded(
-            codes::MARKETPLACE_UNAVAILABLE,
-            response.status().to_string(),
-        ));
-    }
-    let bytes = read_limited(response, MAX_ARCHIVE)?;
-    let files = unpack(&bytes)?;
+    let (revision, files) = git_snapshot(&format!("https://github.com/{source}.git"))?;
     let result = Arc::new(RepositorySnapshot {
         source: source.into(),
         revision,
@@ -86,6 +67,39 @@ fn snapshot(source: &str, refresh: bool) -> RlResult<Arc<RepositorySnapshot>> {
     });
     *SNAPSHOT.lock().unwrap_or_else(|e| e.into_inner()) = Some(result.clone());
     Ok(result)
+}
+
+/// 使用本机 Git 的 credential helper / insteadOf 等配置,不读取或复制用户凭据。
+fn git_snapshot(url: &str) -> RlResult<(String, Vec<(String, Vec<u8>)>)> {
+    let parent = std::env::temp_dir();
+    let temp = parent.join(format!(
+        "repomeow-marketplace-{}-{}",
+        std::process::id(),
+        crate::time_util::now_ts_nanos()
+    ));
+    std::fs::create_dir(&temp)?;
+    let result = (|| {
+        let repo = temp.join("repo");
+        super::import::clone_repo_with_checkout(
+            &temp, url, &repo, Duration::from_secs(120), false,
+        )?;
+        let dir = repo.to_string_lossy();
+        let head = crate::commands::git::run_git(&dir, &["rev-parse", "HEAD"])?;
+        let revision = String::from_utf8_lossy(&head.stdout).trim().to_string();
+        let archive = temp.join("snapshot.zip");
+        crate::commands::git::run_git(&dir, &[
+            "archive", "--format=zip", "--prefix=repo/", "-o",
+            &archive.to_string_lossy(), &revision,
+        ])?;
+        if std::fs::metadata(&archive)?.len() > MAX_ARCHIVE {
+            return Err(RlError::coded(codes::MARKETPLACE_RESPONSE_TOO_LARGE, "archive size"));
+        }
+        let files = unpack(&std::fs::read(&archive)?)?;
+        Ok((revision, files))
+    })();
+    // 与已有仓库导入一致:尽力清理,不让 Windows 文件占用掩盖原始结果。
+    let _ = super::store::remove_dir_tolerating_readonly(&temp);
+    result
 }
 
 fn unpack(bytes: &[u8]) -> RlResult<Vec<(String, Vec<u8>)>> {
@@ -744,6 +758,36 @@ mod tests {
         assert!(md.contains("| --- | --- |"), "{md}");
         assert!(md.contains("| `npx skills` | Pass |"), "{md}");
     }
+    #[test]
+    fn git_snapshot_reads_committed_files_without_checkout() {
+        use crate::commands::git::run_git;
+        let root = std::env::temp_dir().join(format!(
+            "repomeow-marketplace-test-{}-{}",
+            std::process::id(), crate::time_util::now_ts_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let dir = root.to_string_lossy();
+        run_git(&dir, &["init"]).unwrap();
+        std::fs::create_dir(root.join("demo")).unwrap();
+        std::fs::write(root.join("demo/SKILL.md"), "---\nname: demo\n---\nHello").unwrap();
+        std::fs::write(root.join("demo/image.png"), [0, 255, 128]).unwrap();
+        run_git(&dir, &["add", "."]).unwrap();
+        run_git(&dir, &[
+            "-c", "user.name=Test", "-c", "user.email=test@example.com",
+            "-c", "commit.gpgsign=false", "commit", "-m", "fixture",
+        ]).unwrap();
+        let head = run_git(&dir, &["rev-parse", "HEAD"]).unwrap();
+        let (revision, files) = git_snapshot(&dir).unwrap();
+        assert_eq!(revision, String::from_utf8_lossy(&head.stdout).trim());
+        assert!(files.iter().any(|(p, data)| p == "demo/image.png" && data == &[0, 255, 128]));
+        let snapshot = RepositorySnapshot {
+            source: "owner/repo".into(), revision, at: Instant::now(), files,
+        };
+        assert_eq!(snapshot_skills(&snapshot).skills[0].name, "demo");
+        assert!(git_snapshot(&root.join("missing").to_string_lossy()).is_err());
+        super::super::store::remove_dir_tolerating_readonly(&root).unwrap();
+    }
+
     #[test]
     fn archive_keeps_all_skills_and_binary_attachments() {
         use std::io::Write;

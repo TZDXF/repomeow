@@ -281,10 +281,26 @@ fn kill_process_tree(child: &mut std::process::Child) {
 /// 非零退出复用 git 层的友好错误映射(与 run_git 语义一致)。
 /// stderr 由独立线程持续消费:clone 进度行刷在 stderr,管道写满会阻塞子进程。
 fn clone_repo(workdir: &Path, url: &str, target: &Path, timeout: Duration) -> RlResult<()> {
+    clone_repo_with_checkout(workdir, url, target, timeout, true)
+}
+
+/// 市场快照无需检出文件,避免执行 checkout filter,认证与普通克隆保持一致。
+pub(super) fn clone_repo_with_checkout(
+    workdir: &Path,
+    url: &str,
+    target: &Path,
+    timeout: Duration,
+    checkout: bool,
+) -> RlResult<()> {
     let dir = workdir.to_string_lossy().into_owned();
     let target_str = target.to_string_lossy().into_owned();
-    let mut child = git_command(&dir)
-        .args(["clone", "--depth", "1", "--", url, &target_str])
+    let mut command = git_command(&dir);
+    command.args(["clone", "--depth", "1"]);
+    if !checkout {
+        command.arg("--no-checkout");
+    }
+    let mut child = command
+        .args(["--", url, &target_str])
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
