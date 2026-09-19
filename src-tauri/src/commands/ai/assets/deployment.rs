@@ -22,8 +22,12 @@ pub struct ProjectAiTarget {
     id: &'static str,
     name: &'static str,
     skill_path: &'static str,
+    /// 空字符串表示尚未接入项目级 MCP 部署。
     mcp_path: &'static str,
 }
+// 新目标路径依据: Kimi Code docs/en/customization/skills.md 与 mcp.md;
+// DeepSeek Harness packages/skill/skill-filesystem/README.md;
+// MiniMax Code: vercel-labs/skills src/agents.ts; Pi: packages/coding-agent/docs/skills.md。
 const TARGETS: &[ProjectAiTarget] = &[
     ProjectAiTarget {
         id: "claude",
@@ -66,6 +70,30 @@ const TARGETS: &[ProjectAiTarget] = &[
         name: "ZCode",
         skill_path: ".zcode/skills",
         mcp_path: ".zcode/config.json",
+    },
+    ProjectAiTarget {
+        id: "kimi",
+        name: "Kimi Code CLI",
+        skill_path: ".kimi-code/skills",
+        mcp_path: ".kimi-code/mcp.json",
+    },
+    ProjectAiTarget {
+        id: "dsh",
+        name: "DeepSeek Harness",
+        skill_path: ".dsh/skills",
+        mcp_path: "",
+    },
+    ProjectAiTarget {
+        id: "minimax",
+        name: "MiniMax Code",
+        skill_path: ".minimax/skills",
+        mcp_path: "",
+    },
+    ProjectAiTarget {
+        id: "pi",
+        name: "Pi",
+        skill_path: ".pi/skills",
+        mcp_path: "",
     },
 ];
 

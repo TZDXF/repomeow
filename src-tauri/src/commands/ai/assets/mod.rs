@@ -133,7 +133,8 @@ impl McpTarget {
 /// gemini=`.gemini/settings.json` 的 mcpServers、codex=`.codex/config.toml` 的
 /// mcp_servers 表、opencode=`opencode.json` 的 mcp 键、zcode=`.zcode/config.json`
 /// 的嵌套 mcp.servers 键(服务器对象与 claude 同形,复用 claude 方言);
-/// pi 无 MCP 支持故不在列)。
+/// Kimi Code 的 `.kimi-code/mcp.json` 复用 JSON 结构,transport 字段单独映射;
+/// DSH 需插件配置、MiniMax 尚未接入项目级 MCP、Pi 无内置 MCP,故不在列)。
 pub(super) const MCP_TARGETS: &[McpTarget] = &[
     McpTarget {
         path: ".mcp.json",
@@ -177,6 +178,12 @@ pub(super) const MCP_TARGETS: &[McpTarget] = &[
         key: "mcp.servers",
         agents: &["zcode"],
     },
+    McpTarget {
+        path: ".kimi-code/mcp.json",
+        dialect: "claude",
+        key: "mcpServers",
+        agents: &["kimi"],
+    },
 ];
 
 /// 项目级 skills 目录候选;同名技能按真实目录独立保留(与 Agent 显隐设置无关,全量扫描)。
@@ -190,6 +197,10 @@ const SKILL_DIR_PROBES: &[&str] = &[
     ".github/skills",
     ".gemini/skills",
     ".opencode/skills",
+    ".kimi-code/skills",
+    ".dsh/skills",
+    ".minimax/skills",
+    ".pi/skills",
 ];
 
 // ── 扫描命令 ─────────────────────────────────────────────────────────

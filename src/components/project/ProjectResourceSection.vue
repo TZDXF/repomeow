@@ -235,7 +235,9 @@ function recordOf(resourceId: string, agentId: string): ResourceDeployment | und
 /** 可见 Agent:设置页未隐藏的目标 + 虽隐藏但已部署该资源的 Agent(允许解除配置)。 */
 function visibleAgents(resource: ResourceChoice) {
   return props.targets.filter(
-    (a) => !settings.hiddenResourceAgents.includes(a.id) || recordOf(resource.id, a.id),
+    (a) =>
+      ((props.kind === "skills" || !!a.mcpPath) && !settings.hiddenResourceAgents.includes(a.id)) ||
+      recordOf(resource.id, a.id),
   );
 }
 function supported(resource: ResourceChoice, agent: ProjectAiTarget) {
@@ -367,7 +369,10 @@ function unmanagedOwnerSource(item: UnmanagedItem, agentId: string): string {
 }
 /** 非托管行可见 Agent:跟随设置显隐(扫描与显隐无关,只在展示层过滤,全行表现一致)。 */
 function unmanagedChips() {
-  return props.targets.filter((a) => !settings.hiddenResourceAgents.includes(a.id));
+  return props.targets.filter(
+    (a) =>
+      (props.kind === "skills" || !!a.mcpPath) && !settings.hiddenResourceAgents.includes(a.id),
+  );
 }
 function unmanagedChipTitle(item: UnmanagedItem, agent: ProjectAiTarget) {
   const owned = unmanagedOwnerSource(item, agent.id);

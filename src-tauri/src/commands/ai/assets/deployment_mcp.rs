@@ -36,7 +36,7 @@ pub(super) fn definition(server: &McpServer, target: &McpTarget) -> RlResult<Val
                 value["environment"] = json!(server.env);
             }
         } else {
-            if target.dialect == "claude" {
+            if target.dialect == "claude" && !target.agents.contains(&"kimi") {
                 value["type"] = json!("stdio");
             }
             value["command"] = json!(command);
@@ -70,7 +70,11 @@ pub(super) fn definition(server: &McpServer, target: &McpTarget) -> RlResult<Val
                 value["url"] = json!(url);
             }
             _ => {
-                value["type"] = json!(server.transport);
+                value[if target.agents.contains(&"kimi") {
+                    "transport"
+                } else {
+                    "type"
+                }] = json!(server.transport);
                 value["url"] = json!(url);
             }
         }
@@ -177,7 +181,15 @@ pub(super) fn parse_server_value(
         "codex" => (obj.get("url").and_then(Value::as_str), "http"),
         _ => (
             obj.get("url").and_then(Value::as_str),
-            if obj.get("type").and_then(Value::as_str) == Some("sse") {
+            if obj
+                .get(if target.agents.contains(&"kimi") {
+                    "transport"
+                } else {
+                    "type"
+                })
+                .and_then(Value::as_str)
+                == Some("sse")
+            {
                 "sse"
             } else {
                 "http"

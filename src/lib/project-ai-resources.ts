@@ -6,6 +6,7 @@ export interface ProjectAiTarget {
   id: string;
   name: string;
   skillPath: string;
+  /** 空字符串表示尚未接入项目级 MCP 部署。 */
   mcpPath: string;
 }
 export interface ResourceChoice {

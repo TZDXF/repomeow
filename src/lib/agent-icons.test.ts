@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { getIcon } from "@iconify/vue";
 import { agentBrandIcon } from "./agent-icons";
 
-/** 与 Rust 侧 commands/ai/assets/deployment.rs 的 TARGETS id 对齐。 */
+/** 已内嵌品牌图标的部署目标;其余目标使用通用 Bot 图标。 */
 const TARGET_IDS = ["claude", "cursor", "copilot", "gemini", "codex", "opencode", "zcode"];
 
 describe("agentBrandIcon", () => {
@@ -11,6 +11,12 @@ describe("agentBrandIcon", () => {
       const name = agentBrandIcon(id);
       expect(name).toBe(`agent-brand:${id}`);
       expect(getIcon(name!)).toBeTruthy();
+    }
+  });
+
+  it("新增目标未内嵌品牌图标时回退通用图标", () => {
+    for (const id of ["kimi", "dsh", "minimax", "pi"]) {
+      expect(agentBrandIcon(id)).toBeNull();
     }
   });
 

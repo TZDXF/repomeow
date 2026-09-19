@@ -292,6 +292,7 @@ export default {
     empty: "No matching projects",
   },
   projectAi: {
+    mcpNotIntegrated: "Not integrated yet",
     agentSettingsHint:
       "Choose deployment targets shown on project AI pages. Installation is not required. Hiding a target never removes resources or changes Wiki ACP agents. This preference is local to this device.",
     sharedHint:

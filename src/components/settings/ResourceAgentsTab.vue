@@ -54,7 +54,8 @@ async function toggle(id: string, visible: boolean) {
         <div class="min-w-0 flex-1">
           <p class="text-sm font-medium">{{ agent.name }}</p>
           <p class="mt-1 break-all font-mono text-xs text-muted-foreground">
-            Skills: {{ agent.skillPath }} · MCP: {{ agent.mcpPath }}
+            Skills: {{ agent.skillPath }} · MCP:
+            {{ agent.mcpPath || t("projectAi.mcpNotIntegrated") }}
           </p>
         </div>
         <Switch

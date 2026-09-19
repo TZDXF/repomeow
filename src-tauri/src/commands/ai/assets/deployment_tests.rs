@@ -233,7 +233,7 @@ fn unsupported_sse_and_shared_reference_removal_are_safe() {
 fn all_agent_targets_roundtrip_and_preserve_unrelated_mcp_entries() {
     let f = Fixture::new();
     f.mcp();
-    for agent in TARGETS {
+    for agent in TARGETS.iter().filter(|agent| !agent.mcp_path.is_empty()) {
         let target = mcp_target(agent.id).unwrap();
         if target.dialect != "codex" {
             let path = safe_path(&f.root, target.path).unwrap();
@@ -1060,4 +1060,54 @@ fn parse_jsonc_strips_comments_and_trailing_commas_but_keeps_strings() {
     assert_eq!(value["esc"], "a\"/*b*/");
     assert_eq!(value["list"], json!([1, 2]));
     assert!(parse_jsonc("{ broken").is_err());
+}
+
+#[test]
+fn new_agents_skills_roundtrip() {
+    let f = Fixture::new();
+    f.skill(
+        "s1",
+        "review",
+        "---\nname: review\ndescription: Review\n---\nReview",
+    );
+    for id in ["kimi", "dsh", "minimax", "pi"] {
+        let agent = target(id).unwrap();
+        assert_eq!(f.apply("skills", id, &["s1"]).applied, 1);
+        let dir = format!("{}/review", agent.skill_path);
+        assert!(f.root.join(&dir).join("SKILL.md").exists());
+        assert!(super::super::scan_project_skills(&f.root)
+            .iter()
+            .any(|s| s.dir == dir));
+        assert_eq!(f.apply("skills", id, &[]).applied, 1);
+        assert!(!f.root.join(&dir).exists());
+        if agent.mcp_path.is_empty() {
+            f.mcp();
+            assert!(!f.apply("mcp", id, &["m1"]).failures.is_empty());
+        }
+    }
+}
+
+#[test]
+fn kimi_mcp_transport_roundtrip() {
+    let target = mcp_target("kimi").unwrap();
+    for transport in ["http", "sse"] {
+        let input = parse_server_value(
+            target,
+            "remote",
+            &json!({
+                "url": "https://example.com/mcp", "transport": transport
+            }),
+        )
+        .unwrap();
+        assert_eq!(input.transport, transport);
+        let server: McpServer = serde_json::from_value(json!({
+            "id": "remote", "name": "remote", "transport": transport,
+            "url": "https://example.com/mcp", "enabled": true,
+            "args": [], "env": {}, "headers": {}, "createdAt": 0, "updatedAt": 0
+        }))
+        .unwrap();
+        let value = definition(&server, target).unwrap();
+        assert_eq!(value["transport"], transport);
+        assert!(value.get("type").is_none());
+    }
 }

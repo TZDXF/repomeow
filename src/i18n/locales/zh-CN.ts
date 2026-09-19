@@ -275,6 +275,7 @@ export default {
     empty: "没有匹配的项目",
   },
   projectAi: {
+    mcpNotIntegrated: "暂未接入",
     agentSettingsHint:
       "控制项目 AI 资源页显示的配置目标,无需安装对应工具。隐藏不会删除已配置资源,不影响 Wiki 的 ACP Agent。此偏好仅保存在本机。",
     sharedHint:
