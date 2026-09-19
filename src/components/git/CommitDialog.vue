@@ -27,6 +27,7 @@ import {
 import { openPathWith, sortOpenWithOptions } from "@/lib/open-with";
 import { baseName } from "@/lib/path";
 import { cmd } from "@/lib/tauri";
+import { useCommitAndPush } from "@/composables/git/useCommitAndPush";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
 import type { GitCommitFileDiff, GitWorktreeFile, Project } from "@/types";
@@ -372,23 +373,42 @@ async function submit() {
   }
 }
 
-async function submitAndPush() {
-  if (!message.value.trim() || committable.value === 0 || submitting.value) return;
-  submitting.value = true;
-  submittingAndPushing.value = true;
-  try {
+const { pendingPush, run: commitAndPush } = useCommitAndPush(
+  async () => {
     await store.commitChanges(
       props.project,
       message.value.trim(),
       includeUntracked.value,
       checkedPayload.value,
     );
-    await store.pushRepository(props.project);
-    toast.success(t("git.commit.submitAndPushSuccess"));
+    // 本地提交已落盘，即使推送失败也不能保留旧的提交信息和文件选择。
     message.value = "";
+    files.value = [];
+    checkedPaths.value = new Set();
+    deselectedPaths.value = new Set();
+    selectedPath.value = null;
+    diff.value = null;
+    showChanges.value = false;
+  },
+  () => store.pushRepository(props.project),
+);
+
+async function submitAndPush() {
+  if (submitting.value) return;
+  if (!pendingPush.value && (!message.value.trim() || committable.value === 0)) return;
+  submitting.value = true;
+  submittingAndPushing.value = true;
+  try {
+    await commitAndPush();
+    toast.success(t("git.commit.submitAndPushSuccess"));
     open.value = false;
   } catch (e) {
-    toast.error(String(e));
+    const detail = e instanceof Error ? e.message : String(e);
+    if (pendingPush.value) {
+      toast.error(t("git.commit.pushFailedAfterCommit"), { description: detail });
+    } else {
+      toast.error(detail);
+    }
   } finally {
     submitting.value = false;
     submittingAndPushing.value = false;
@@ -659,17 +679,24 @@ function cancelGenerate() {
           {{ t("git.commit.includeUntracked") }}
           <span class="text-xs text-muted-foreground">({{ untrackedCount }})</span>
         </label>
+        <p v-if="pendingPush" class="text-sm text-muted-foreground" role="status">
+          {{ t("git.commit.pendingPushHint") }}
+        </p>
         <DialogFooter>
           <Button
             type="button"
             variant="outline"
-            :disabled="!message.trim() || committable === 0 || submitting"
+            :disabled="submitting || (!pendingPush && (!message.trim() || committable === 0))"
             @click="submitAndPush"
           >
             {{
               submittingAndPushing
-                ? t("git.commit.submittingAndPushing")
-                : t("git.commit.submitAndPush")
+                ? pendingPush
+                  ? t("git.commit.retryingPush")
+                  : t("git.commit.submittingAndPushing")
+                : pendingPush
+                  ? t("git.commit.retryPush")
+                  : t("git.commit.submitAndPush")
             }}
           </Button>
           <Button type="submit" :disabled="!message.trim() || committable === 0 || submitting">
