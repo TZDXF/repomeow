@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { toast } from "vue-sonner";
 import { useNow } from "@vueuse/core";
 import { BookOpenText, LoaderCircle, RefreshCw } from "@lucide/vue";
-import { Markdown, type ControlsConfig } from "vue-stream-markdown";
 import { Button } from "@/components/ui/button";
 import ScrollArea from "@/components/common/ScrollArea.vue";
 import WikiGenerateDialog from "@/components/wiki/WikiGenerateDialog.vue";
@@ -15,12 +14,8 @@ import WikiPageToc from "@/components/wiki/WikiPageToc.vue";
 import WikiStaticContent from "@/components/wiki/WikiStaticContent.vue";
 import WikiWritingAnimation from "@/components/wiki/WikiWritingAnimation.vue";
 import type { WikiNavItem } from "@/components/wiki/wiki-navigation";
-import { pickAutoPreviewPage, useWikiAutoPreview } from "@/composables/wiki/useWikiAutoPreview";
-import { useWikiPreviewScroll } from "@/composables/wiki/useWikiPreviewScroll";
-import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
 import { openWikiDir } from "@/lib/wiki";
 import type { WikiGenPhase } from "@/lib/wiki-generator";
-import { parseWikiSources } from "@/lib/wiki-parse";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
 import { useWikiStore } from "@/stores/wiki";
@@ -63,9 +58,9 @@ const generatingHere = computed(() => {
 const pages = computed(() => wiki.data?.pages ?? []);
 const selectedId = ref<string | null>(null);
 watch(
-  pages,
-  (list) => {
-    if (!list.some((p) => p.id === selectedId.value)) {
+  [pages, generatingHere],
+  ([list, generating]) => {
+    if (!generating && !list.some((p) => p.id === selectedId.value)) {
       selectedId.value = list[0]?.id ?? null;
     }
   },
@@ -126,27 +121,27 @@ const elapsedText = computed(() => {
   return hours > 0 ? `${String(hours).padStart(2, "0")}:${pair}` : pair;
 });
 
-/** 手动选中的预览页;未选或选中页不可预览时按粘性规则自动跟随生成中的页 */
-const previewId = ref<string | null>(null);
-const autoPreviewId = useWikiAutoPreview(generation);
-const previewItem = computed(() => {
-  const state = generation.value;
-  const list = state?.pages ?? [];
-  const manual = list.find((i) => i.page.id === previewId.value);
-  if (manual && (state?.streamContents[manual.page.id] || manual.status === "running")) {
-    return manual;
-  }
-  if (!state) return null;
-  const picked = pickAutoPreviewPage(autoPreviewId.value, list, state.streamContents);
-  return list.find((i) => i.page.id === picked) ?? null;
-});
-const previewContent = computed(() =>
-  previewItem.value ? (generation.value?.streamContents[previewItem.value.page.id] ?? "") : "",
+/** 生成期间只阅读已完成页面，不展示中间正文或自动跟随生成页。 */
+const generationItem = computed(() =>
+  generation.value?.pages.find((item) => item.page.id === selectedId.value),
+);
+const completedPages = computed<WikiPageData[]>(() =>
+  (generation.value?.pages ?? [])
+    .filter((item) => item.status === "done")
+    .map((item) => ({
+      ...item.page,
+      content: generation.value?.streamContents[item.page.id] ?? "",
+    })),
+);
+const readingPage = computed(() =>
+  generatingHere.value
+    ? (completedPages.value.find((page) => page.id === selectedId.value) ?? null)
+    : current.value,
 );
 const retryStatus = computed(() => {
   const retries = generation.value?.retries;
   if (!retries) return undefined;
-  return previewItem.value ? retries[previewItem.value.page.id] : retries.outline;
+  return generationItem.value ? retries[generationItem.value.page.id] : retries.outline;
 });
 const retryText = computed(() => {
   const retry = retryStatus.value;
@@ -170,10 +165,6 @@ const navItems = computed<WikiNavItem[]>(() => {
       status: i.status,
       error: i.error,
       durationMs: i.durationMs,
-      wordCount:
-        i.status === "running"
-          ? (generation.value?.streamContents[i.page.id]?.length ?? 0)
-          : undefined,
     }));
   }
   return pages.value.map((p) => ({
@@ -185,16 +176,11 @@ const navItems = computed<WikiNavItem[]>(() => {
   }));
 });
 
-const activeId = computed(() =>
-  generatingHere.value ? (previewItem.value?.page.id ?? null) : selectedId.value,
-);
+const activeId = computed(() => selectedId.value);
 
 function selectPage(id: string) {
-  if (generatingHere.value) previewId.value = id;
-  else {
-    selectedId.value = id;
-    if (project.value) wiki.markPageRead(project.value.path, id);
-  }
+  selectedId.value = id;
+  if (!generatingHere.value && project.value) wiki.markPageRead(project.value.path, id);
 }
 
 /** 页面进入正文视口即视为已读；也覆盖首次打开和更新后仍停留在当前页的情况。 */
@@ -209,22 +195,16 @@ function selectRelatedPage(id: string) {
   selectPage(id);
 }
 
-// ── 流式预览自动跟随滚动(用户上翻阅读时暂停,回到底部自动恢复) ─────────────
-
-const activePreviewId = computed(() => previewItem.value?.page.id);
+// 切换阅读页面时回到顶部，不再跟随生成内容滚动。
 const previewHost = ref<HTMLElement | null>(null);
-const { scrollPreviewToTop } = useWikiPreviewScroll({
-  generating: generatingHere,
-  activePreviewId,
-  previewContent,
-  previewHost,
-});
-
-// 静态查看切换页面(含列表变化后的自动重选)时回到正文顶部;
-// 生成中的流式预览滚动由 useWikiPreviewScroll 自行管理
-watch(selectedId, () => {
-  if (!generatingHere.value) void scrollPreviewToTop();
-});
+watch(
+  () => readingPage.value?.id,
+  async () => {
+    await nextTick();
+    const viewport = previewHost.value?.closest('[data-slot="scroll-area-viewport"]');
+    if (viewport) viewport.scrollTop = 0;
+  },
+);
 
 // ── 生成 / 操作 ───────────────────────────────────────────────────────────
 
@@ -310,24 +290,6 @@ async function updateWiki() {
     generate();
   }
 }
-
-/** 流式预览同样剥离 sources 注释块(生成中途的未闭合尾巴也一并隐藏) */
-const previewDisplay = computed(() => parseWikiSources(previewContent.value).body);
-
-// ── Markdown 渲染配置(与 ReportHistory 一致) ─────────────────────────────
-
-const controls: ControlsConfig = {
-  table: {
-    copy: true,
-    download: true,
-    fullscreen: true,
-    customize: createTableCustomize(t),
-  },
-  code: { copy: true, collapse: true },
-};
-const detachedThemeEl = document.createElement("div");
-const themeElement = () => detachedThemeEl;
-const beforeDownload = createBeforeDownload(t);
 </script>
 
 <template>
@@ -347,7 +309,7 @@ const beforeDownload = createBeforeDownload(t);
       @remove="removeWiki"
     />
 
-    <!-- 主体:左侧页面列表 + 右侧内容;生成中复用同一布局(列表带单页状态,右侧流式预览) -->
+    <!-- 主体:左侧页面列表 + 右侧内容;生成中复用同一布局(列表带单页状态,右侧阅读已完成页面) -->
     <div v-if="generatingHere || wiki.data" class="flex min-h-0 flex-1">
       <WikiPageNavigation
         :items="navItems"
@@ -364,12 +326,12 @@ const beforeDownload = createBeforeDownload(t);
       <div class="relative min-w-0 flex-1">
         <ScrollArea class="h-full">
           <div ref="previewHost" class="mx-auto max-w-3xl px-6 py-5 text-sm">
-            <!-- 生成中:流式预览 -->
-            <template v-if="generatingHere">
-              <div v-if="previewItem" class="mb-3 flex items-center gap-2 border-b pb-3">
+            <!-- 未完成页面只展示生成状态 -->
+            <template v-if="generatingHere && !readingPage">
+              <div v-if="generationItem" class="mb-3 flex items-center gap-2 border-b pb-3">
                 <LoaderCircle class="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
                 <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-                  {{ t("wiki.writing") }} · {{ previewItem.page.title }}
+                  {{ t("wiki.writing") }} · {{ generationItem.page.title }}
                 </span>
                 <span
                   v-if="totalPageCount"
@@ -387,22 +349,10 @@ const beforeDownload = createBeforeDownload(t);
                 <RefreshCw class="h-3.5 w-3.5 shrink-0 animate-spin" />
                 <span>{{ retryText }}</span>
               </div>
-              <Markdown
-                v-if="previewDisplay"
-                mode="streaming"
-                :content="previewDisplay"
-                :controls="controls"
-                :theme-element="themeElement"
-                :locale="settings.language"
-                :before-download="beforeDownload"
-              />
-              <div
-                v-else
-                class="flex min-h-[22rem] flex-col items-center justify-center text-center"
-              >
+              <div class="flex min-h-[22rem] flex-col items-center justify-center text-center">
                 <WikiWritingAnimation :tool-calls="writingToolCalls" />
                 <p class="mt-6 text-sm font-medium">
-                  {{ previewItem ? t("wiki.waitingFirstChunk") : phaseText }}
+                  {{ phaseText }}
                 </p>
                 <p
                   v-if="contextSummaryText"
@@ -417,12 +367,13 @@ const beforeDownload = createBeforeDownload(t);
             </template>
 
             <WikiStaticContent
-              v-else-if="current"
-              :page="current"
-              :pages="pages"
+              v-else-if="readingPage"
+              :page="readingPage"
+              :pages="generatingHere ? completedPages : pages"
               :project-root="project.path"
               :language="settings.language"
-              :regenerating="wiki.regeneratingPage === current.id"
+              :regenerating="wiki.regeneratingPage === readingPage.id"
+              :generation-active="generatingHere"
               @regenerate="regeneratePage"
               @select-related="selectRelatedPage"
             />
@@ -430,10 +381,10 @@ const beforeDownload = createBeforeDownload(t);
         </ScrollArea>
 
         <WikiPageToc
-          v-if="!generatingHere && current"
+          v-if="readingPage"
           :root="previewHost"
-          :content="current.content"
-          :page-id="current.id"
+          :content="readingPage.content"
+          :page-id="readingPage.id"
         />
       </div>
     </div>

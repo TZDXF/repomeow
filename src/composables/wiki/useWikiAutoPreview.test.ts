@@ -54,9 +54,9 @@ describe("pickAutoPreviewPage", () => {
     expect(pickAutoPreviewPage("a", pages, { a: "x", b: "y" })).toBe("a");
   });
 
-  it("跟随页字数为 0 而其他页已在输出时切到那个页", () => {
+  it("跟随页暂无输出也不被其他页面抢占", () => {
     const pages = [pageItem("a", "running"), pageItem("b", "running")];
-    expect(pickAutoPreviewPage("a", pages, { b: "y" })).toBe("b");
+    expect(pickAutoPreviewPage("a", pages, { b: "y" })).toBe("a");
   });
 
   it("跟随页字数为 0 且无其他页输出时保持等待", () => {
@@ -64,19 +64,19 @@ describe("pickAutoPreviewPage", () => {
     expect(pickAutoPreviewPage("a", pages, {})).toBe("a");
   });
 
-  it("跟随页完成后切到第一个已在输出的生成中页", () => {
+  it("跟随页完成后继续阅读，不切到其他输出页", () => {
     const pages = [pageItem("a", "done"), pageItem("b", "running"), pageItem("c", "running")];
-    expect(pickAutoPreviewPage("a", pages, { b: "y", c: "z" })).toBe("b");
+    expect(pickAutoPreviewPage("a", pages, { b: "y", c: "z" })).toBe("a");
   });
 
-  it("跟随页完成后无页输出时取第一个生成中页", () => {
+  it("跟随页完成后无页输出也保持选择", () => {
     const pages = [pageItem("a", "done"), pageItem("b", "running")];
-    expect(pickAutoPreviewPage("a", pages, {})).toBe("b");
+    expect(pickAutoPreviewPage("a", pages, {})).toBe("a");
   });
 });
 
 describe("useWikiAutoPreview", () => {
-  it("跨状态更新粘住输出中的页,完成后才前进到下一页", async () => {
+  it("跨状态更新保持当前页，完成后不自动切换", async () => {
     const state = makeState([pageItem("a", "running"), pageItem("b", "running")], { b: "partial" });
     const followedId = useWikiAutoPreview(computed(() => state));
     await nextTick();
@@ -86,23 +86,23 @@ describe("useWikiAutoPreview", () => {
     state.streamContents.a = "x";
     await nextTick();
     expect(followedId.value).toBe("b");
-    // b 完成后才前进到 a
+    // b 完成后仍停留在 b
     const b = state.pages.find((item) => item.page.id === "b");
     if (b) {
       b.status = "done";
     }
     delete state.streamContents.b;
     await nextTick();
-    expect(followedId.value).toBe("a");
+    expect(followedId.value).toBe("b");
   });
 
-  it("跟随页迟迟无输出时让位给已在输出的页", async () => {
+  it("跟随页暂无输出时也不会被动切页", async () => {
     const state = makeState([pageItem("a", "running"), pageItem("b", "running")], {});
     const followedId = useWikiAutoPreview(computed(() => state));
     await nextTick();
     expect(followedId.value).toBe("a");
     state.streamContents.b = "y";
     await nextTick();
-    expect(followedId.value).toBe("b");
+    expect(followedId.value).toBe("a");
   });
 });

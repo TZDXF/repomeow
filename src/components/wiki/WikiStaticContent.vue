@@ -22,6 +22,7 @@ const props = defineProps<{
   projectRoot: string;
   language: SupportedLocale;
   regenerating: boolean;
+  generationActive?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -88,7 +89,7 @@ function sourceRangeLabel(path: string): string {
     <Button
       variant="ghost"
       size="sm"
-      :disabled="regenerating"
+      :disabled="regenerating || generationActive"
       :title="t('wiki.regeneratePage')"
       @click="emit('regenerate', page)"
     >

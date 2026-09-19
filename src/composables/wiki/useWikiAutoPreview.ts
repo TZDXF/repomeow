@@ -1,31 +1,14 @@
 import { ref, watch, type ComputedRef, type Ref } from "vue";
 import type { WikiGenPageItem, WikiGenerationState } from "@/stores/wiki";
 
-/**
- * 自动预览页挑选规则(纯函数,便于单测):
- * - 跟随页仍在生成中且已有输出(字数 > 0)时粘住不动,直到它进入终态;
- * - 跟随页字数为 0(还没等到首块)而其他生成中页已在输出时,切到那个页,避免干等;
- * - 无可跟随页(未开始/已完成/不在列表)时,优先取第一个已在输出的生成中页,
- *   再退回第一个生成中的页。
- */
+/** 首次优先预览已有输出的页面；选定后保持不变，不随并发进度切页。 */
 export function pickAutoPreviewPage(
   followedId: string | null,
   pages: WikiGenPageItem[],
   streamContents: Record<string, string>,
 ): string | null {
   const followed = pages.find((item) => item.page.id === followedId);
-  if (followed?.status === "running") {
-    if (streamContents[followed.page.id]) {
-      return followed.page.id;
-    }
-    const outputting = pages.find(
-      (item) => item.status === "running" && streamContents[item.page.id],
-    );
-    if (outputting) {
-      return outputting.page.id;
-    }
-    return followed.page.id;
-  }
+  if (followed) return followed.page.id;
   return (
     pages.find((item) => item.status === "running" && streamContents[item.page.id])?.page.id ??
     pages.find((item) => item.status === "running")?.page.id ??

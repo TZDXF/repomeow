@@ -303,9 +303,9 @@ export const useWikiStore = defineStore("wiki", () => {
               durationMs: stats?.durationMs,
             });
           }
-          // 页面进入终态后清掉流式预览内容
+          // 完成页保留正文，整本生成期间仍可阅读；失败/取消页释放残稿。
           if (status !== "running" && status !== "pending") {
-            delete state.streamContents[page.id];
+            if (status !== "done") delete state.streamContents[page.id];
             delete state.retries[page.id];
           }
         },
