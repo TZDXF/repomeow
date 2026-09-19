@@ -1,18 +1,18 @@
 ---
 name: release-tagger
-description: 在此仓库（tzdxf/repomeow，Tauri 2 + Vue 3）发布新版本。读取 `src-tauri/tauri.conf.json` 的 `version` 字段作为发布号，做一致性检查与构建验证后，走**CI 打包发布**：本机 bump → commit → push → push `v*` tag → `.github/workflows/release.yml` 在 CI 上用 tauri-action 构建 NSIS、安装包签名、生成 `latest.json` 并自动创建 draft Release；本机不需要打包、不需要私钥。CI 跑完后本机无需任何动作，draft Release 视为已发布。在用户提及"发版"、"发布新版本"、"CI 打包"、"cut a release"、"v0.X.0"或想发起 GitHub Release 流程时调用此 skill——即便用户只是说"准备发版"，也走这条流程。
+description: 在此仓库（tzdxf/repomeow，Tauri 2 + Vue 3）发布新版本。读取 `src-tauri/tauri.conf.json` 的 `version` 字段作为发布号，做一致性检查与构建验证后，走**CI 打包发布**：本机 bump → commit → push → push `v*` tag → `.github/workflows/release.yml` 在 CI 上用 tauri-action 构建 NSIS、安装包签名、生成 `latest.json` 并自动创建 draft Release；本机不需要打包、不需要私钥。CI 跑完后补充仅面向用户功能变化的版本更新说明并验证 draft Release，默认保持 draft 状态。在用户提及"发版"、"发布新版本"、"CI 打包"、"cut a release"、"v0.X.0"或想发起 GitHub Release 流程时调用此 skill——即便用户只是说"准备发版"，也走这条流程。
 ---
 
 # CI 打包发布工作流
 
-自 v0.1.9 起，发布流程全部由 **GitHub Actions** 完成：推送 `v*` tag 触发 `.github/workflows/release.yml`，在 `windows-latest` runner 上用 [`tauri-apps/tauri-action`](https://github.com/tauri-apps/tauri-action) 构建 NSIS 安装包、用 `update` Environment 下的 `TAURI_SIGNING_PRIVATE_KEY` 签名、上传 `RepoMeow_<ver>_x64-setup.exe` / `.sig` / `latest.json`，并创建 **draft Release**。本机只需要 bump 版本号、push commit、push tag，**不需要 `~/.tauri/` 私钥，不需要跑 `pnpm release:all`**。
+自 v0.1.9 起，发布流程全部由 **GitHub Actions** 完成：推送 `v*` tag 触发 `.github/workflows/release.yml`，在 `windows-latest` runner 上用 [`tauri-apps/tauri-action`](https://github.com/tauri-apps/tauri-action) 构建 NSIS 安装包、用 `update` Environment 下的 `TAURI_SIGNING_PRIVATE_KEY` 签名、上传 `RepoMeow_<ver>_x64-setup.exe` / `.sig` / `latest.json`，并创建 **draft Release**。本机负责 bump 版本号、push commit、push tag，以及 CI 完成后写入版本更新说明，**不需要 `~/.tauri/` 私钥，不需要跑 `pnpm release:all`**。
 
 旧的本地打包脚本 `scripts/release/release.mjs`（`pnpm release:all` 等）保留为可选项：仅在 CI 暂时不可用、本地需要复现构建、或排查签名问题时手动调用，**不纳入默认发版流程**。
 
 ## 前置条件
 
 - Node 18+、pnpm 11+（仓库 `packageManager` 已锁版本）
-- `gh` CLI 已登录 `TZDXF` 账号（仅用于事后用 `gh release view` 验证；本机不再 `gh release create`）
+- `gh` CLI 已登录 `TZDXF` 账号（用于查看历史发布、写入版本更新说明及验证；本机不再 `gh release create`）
 - 仓库 GitHub `update` Environment 已配置 `TAURI_SIGNING_PRIVATE_KEY`（CI 私钥；本机不需私钥）
 - `git push` 可达 `github.com/TZDXF/repomeow`（remotes `github` 或 `origin`，CI workflow 监听 `push: tags: v*`）
 
@@ -66,7 +66,21 @@ pnpm build     # 含 vue-tsc --noEmit 类型检查,最高保真预发布闸门
 
 任何一条失败 → 中止，把输出原样贴回给用户。CI 不会重新跑 lint/typecheck，**本机这两步是仅有的发布前闸门**。
 
-### 4. 提交 bump 并推送 main
+### 4. 编写版本更新说明
+
+在推送前，比较上一发布版本的 tag 与本次待发布提交，结合 `git log <上一版本tag>..HEAD` 和实际 diff 整理中文更新说明；首次发布则根据当前已实现的功能编写。不要仅按提交前缀机械摘抄，也不要把历史版本已发布的功能算作本次新增。
+
+内容规则：
+
+- **只写用户可感知的功能新增、功能优化与问题修复**，说明变化及用户收益；按需使用「新增功能」「功能优化」「问题修复」分组，没有内容的分组省略。
+- **不提及依赖或工具链版本升级、开发用 skills/代理规则变更、CI/构建/发布流程调整、测试/格式化/内部重构、版本号 bump 等内部维护事项**。即使本次主要是这些变更，也不要用它们凑更新说明。
+- 混合提交只提取其中的功能变化；若内部调整确实解决了用户问题，只描述经代码确认的问题修复，不描述内部实现或依赖版本。
+- 合并同一功能的零散提交，使用简洁中文，不直接粘贴提交列表、文件路径或提交哈希；不得编造未实现或未经证实的功能与效果。
+- 若没有符合条件的功能变化，仅写「本版本暂无面向用户的功能更新。」。
+
+将正文以 UTF-8 写入仓库外的临时 Markdown 文件，并将绝对路径记为 `NOTES_FILE`，不要为临时说明引入未提交文件。第 8 步必须将它写入 GitHub Release，不能只在最终回复中展示。
+
+### 5. 提交 bump 并推送 main
 
 ```bash
 git add package.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
@@ -76,7 +90,7 @@ git push github main
 
 main 必须先于 tag 推送——`v*` tag 必须指向这次 bump 提交（CI 流程会 checkout 这个 tag，tauri-action 也会用 tag 推断 `__VERSION__`）。
 
-### 5. 推送 `v*` tag 触发 CI
+### 6. 推送 `v*` tag 触发 CI
 
 ```bash
 git tag -a "v$VERSION" -m "Release v$VERSION"
@@ -87,7 +101,7 @@ git push github "v$VERSION"
 - **推送 tag 后 CI 会自动启动**：触发 `.github/workflows/release.yml` 的 `release-windows` job，在 `windows-latest` 上拉取、打包、签名、上传资产、创建 draft Release
 - 本流程不调用 `pnpm release:all`、不调用 `gh release create`——这些事 CI 全做了
 
-### 6. 等待 CI 完成
+### 7. 等待 CI 完成
 
 ```bash
 gh run list --workflow=release.yml --limit 1
@@ -104,7 +118,16 @@ CI 步骤概要（详见 `.github/workflows/release.yml`）：
 
 耗时主要在 Rust release 编译（约 1–3 分钟）。失败时 `gh run watch` 退出非 0，把日志贴回用户并建议查 `.github/workflows/release.yml` 排错。
 
-### 7. 验证 draft Release
+### 8. 写入版本更新说明并验证 draft Release
+
+当前 workflow 的 `releaseBody` 只是下载提示，因此必须在 CI 成功完成后，用第 4 步准备的说明替换该占位正文，避免在 CI 运行期间写入而被覆盖。不使用未经筛选的自动生成提交日志作为更新说明。
+
+```bash
+gh release edit "v$VERSION" --notes-file "$NOTES_FILE"
+gh release view "v$VERSION" --json body
+```
+
+核对远端 `body` 与准备的说明一致，且仅包含符合上述规则的内容。写入失败或正文不符时中止并报告，不得宣称发布流程完成；修复说明即可，不要因此重推 tag 或重跑构建。保持 draft 状态不变，再验证资产：
 
 ```bash
 gh release view "v$VERSION" --json isDraft,isPrerelease,assets
@@ -118,7 +141,7 @@ gh release view "v$VERSION" --json isDraft,isPrerelease,assets
 
 任何一项不符都先排查 CI 日志，不要把不完整的 Release 转正。
 
-### 8. 发布验证（可选）
+### 9. 发布验证（可选）
 
 ```bash
 gh api repos/TZDXF/repomeow/releases/latest --jq '.tag_name'   # 可能仍是上一版,draft 不影响 latest
