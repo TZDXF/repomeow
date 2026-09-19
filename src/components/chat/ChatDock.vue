@@ -577,7 +577,7 @@ const retrySeconds = computed(() => {
 
             <template v-else>
               <template v-for="view in timeline" :key="view.key">
-                <Message v-if="view.kind === 'user'" from="user" class="max-w-[90%]">
+                <Message v-if="view.kind === 'user'" from="user" class="max-w-[90%] flex-col items-end">
                   <!-- 编辑态:气泡换成内联 textarea,Enter 确认重发 / Esc 取消
                        (Esc 拦截冒泡,避免触发面板级 Esc 收起) -->
                   <MessageContent v-if="editingKey === view.key" class="w-full min-w-0">
@@ -609,10 +609,13 @@ const retrySeconds = computed(() => {
                     </div>
                   </MessageContent>
                   <template v-else>
-                    <!-- 操作钮固定占位(opacity 切换),悬停气泡时显示,不引起布局位移;
+                    <MessageContent>
+                      <span class="whitespace-pre-wrap">{{ view.content }}</span>
+                    </MessageContent>
+                    <!-- 操作钮位于气泡右下方,固定占位(opacity 切换),悬停气泡时显示,不引起布局位移;
                          复制对所有提问可用,编辑仅最后一条 -->
                     <MessageActions
-                      class="shrink-0 self-center opacity-0 transition-opacity group-hover:opacity-100"
+                      class="shrink-0 self-end opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
                     >
                       <MessageAction
                         v-if="view.editable"
@@ -625,9 +628,6 @@ const retrySeconds = computed(() => {
                         <Copy class="size-3.5" />
                       </MessageAction>
                     </MessageActions>
-                    <MessageContent>
-                      <span class="whitespace-pre-wrap">{{ view.content }}</span>
-                    </MessageContent>
                   </template>
                 </Message>
                 <!-- 自动压缩时间线标记(分隔条样式,居中) -->
@@ -699,8 +699,8 @@ const retrySeconds = computed(() => {
                           class="text-muted-foreground"
                         />
                       </template>
-                      <!-- 回合复制仅在回答完成后显示，并紧跟在回答正文底部 -->
-                      <MessageActions v-if="!view.live && view.contents.length > 0">
+                      <!-- 回合复制仅在回答完成后显示，位于回答正文左下方 -->
+                      <MessageActions v-if="!view.live && view.contents.length > 0" class="self-start">
                         <MessageAction :tooltip="t('chat.copy')" @click="copyTurn(view)">
                           <Copy class="size-3.5" />
                         </MessageAction>
