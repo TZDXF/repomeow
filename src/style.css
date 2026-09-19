@@ -141,7 +141,7 @@
   color-scheme: dark;
 }
 
-/* ===== Animal Island skin（动森小岛）===== */
+/* ===== Mint Island skin（薄荷小岛）===== */
 /* 参考 animal-island 设计令牌：奶油底、暖棕字、青绿主色、大圆角 */
 [data-theme="island"] {
   --font-app:
@@ -182,7 +182,7 @@
   --scrollbar-thumb-hover: #b8a684;
 }
 
-/* 动森暗色：原项目无暗色，按保色相、降明度、暖色调原则推导 */
+/* 小岛暗色：按保色相、降明度、暖色调原则推导 */
 [data-theme="island"].dark {
   --background: #2b241b;
   --foreground: #efe6d2;
@@ -434,7 +434,7 @@
   }
 
   /* ===== Animal Island 风味细节 ===== */
-  /* 奶油底上的圆点阵纹理（动森标志性 polka dot） */
+  /* 奶油底上的圆点阵纹理（polka dot） */
   [data-theme="island"] body {
     background-image: radial-gradient(circle, rgba(196, 184, 158, 0.18) 1.5px, transparent 1.5px);
     background-size: 28px 28px;

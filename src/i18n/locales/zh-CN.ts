@@ -2169,7 +2169,7 @@ export default {
       description: "选择界面视觉风格,可与亮暗模式自由组合",
       default: "默认",
       defaultDesc: "简洁中性的默认外观",
-      island: "动森小岛",
+      island: "薄荷小岛",
       islandDesc: "奶油底色、青绿点缀的绘本风",
       glass: "科技玻璃",
       glassDesc: "深空蓝底、霓虹青光效的磨砂玻璃风",

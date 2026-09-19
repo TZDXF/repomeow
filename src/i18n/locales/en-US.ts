@@ -2267,7 +2267,7 @@ export default {
       description: "Pick a visual style; freely combinable with light/dark mode",
       default: "Default",
       defaultDesc: "Clean and neutral look",
-      island: "Animal Island",
+      island: "Mint Island",
       islandDesc: "Creamy picture-book style with teal accents",
       glass: "Tech Glass",
       glassDesc: "Frosted glass over deep space blue with neon cyan glow",
