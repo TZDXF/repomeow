@@ -9,9 +9,10 @@ const props = withDefaults(
     monthLabels: { col: number; month: number }[];
     cellTitle: (cell: T) => string;
     centered?: boolean;
+    fitWidth?: boolean;
     showLegend?: boolean;
   }>(),
-  { centered: false, showLegend: false },
+  { centered: false, fitWidth: false, showLegend: false },
 );
 const { t } = useI18n();
 const weekdayKeys = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
@@ -49,6 +50,7 @@ const rows = computed(() =>
     :row-labels="rowLabels"
     :column-labels="columnLabels"
     :centered="centered"
+    :fit-width="fitWidth"
     :legend="
       showLegend
         ? { less: t('settings.usage.legendLess'), more: t('settings.usage.legendMore') }

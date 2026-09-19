@@ -12,9 +12,10 @@ const props = withDefaults(
     columnLabels: string[];
     size?: "sm" | "md";
     centered?: boolean;
+    fitWidth?: boolean;
     legend?: { less: string; more: string };
   }>(),
-  { size: "sm", centered: false, legend: undefined },
+  { size: "sm", centered: false, fitWidth: false, legend: undefined },
 );
 const { themeStamp } = useChartTheme();
 const step = computed(() => (props.size === "sm" ? 15 : 19));
@@ -131,8 +132,8 @@ const option = computed<EChartsCoreOption>(() => {
 </script>
 
 <template>
-  <div class="overflow-x-auto pb-1">
-    <div :class="{ 'mx-auto': centered }" :style="{ width: `${width}px` }">
+  <div class="min-w-0 overflow-x-auto pb-1">
+    <div :class="{ 'mx-auto': centered }" :style="{ width: fitWidth ? '100%' : `${width}px` }">
       <div :style="{ height: `${height}px` }">
         <EChart :option="option" />
       </div>

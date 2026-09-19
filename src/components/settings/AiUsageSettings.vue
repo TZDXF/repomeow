@@ -257,6 +257,7 @@ function ioTitle(entry: AiUsageEntry): string {
       <div class="mt-1 border-t pt-4">
         <label class="text-sm font-medium">{{ t("settings.usage.trend") }}</label>
         <CalendarHeatmap
+          fit-width
           class="mt-2"
           :weeks="heatmap.weeks"
           :month-labels="heatmap.monthLabels"
