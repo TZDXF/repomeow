@@ -1607,8 +1607,8 @@ export default {
         "新建 worktree 时的默认目录模板,支持 {branch} 占位符与相对路径(相对仓库根目录),例如 .worktrees/{branch}",
     },
     update: {
-      autoCheck: "启动时自动检查更新",
-      autoCheckHint: "应用启动后自动检查是否有新版本,发现更新时提示",
+      autoCheck: "自动检查更新",
+      autoCheckHint: "应用启动时及每个整点自动检查是否有新版本，发现更新时提示",
     },
     tray: {
       title: "系统托盘",

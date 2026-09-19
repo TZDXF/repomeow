@@ -9,6 +9,7 @@ import { Toaster } from "@/components/ui/sonner";
 import TitleBar from "@/components/TitleBar.vue";
 import BatchProgressFloat from "@/components/report/BatchProgressFloat.vue";
 import { onListen } from "@/lib/tauri";
+import { scheduleHourly } from "@/lib/hourly-scheduler";
 import { useStreamMarkdownWheelZoom } from "@/composables/useStreamMarkdownWheelZoom";
 import { usePinsStore } from "@/stores/pins";
 import { useBackgroundTasksStore } from "@/stores/background-tasks";
@@ -40,6 +41,9 @@ const isTrayPopup = getCurrentWindow().label === "tray-popup";
 // markdown 全屏弹窗(teleport 到 body)内直接滚轮缩放 mermaid/图片,无需 ctrl
 useStreamMarkdownWheelZoom();
 
+let stopHourlyUpdateCheck: (() => void) | undefined;
+let unmounted = false;
+
 let unlistenGit: UnlistenFn | undefined;
 let unlistenBackgroundTasks: UnlistenFn | undefined;
 let unlistenConflictResolution: UnlistenFn | undefined;
@@ -50,11 +54,16 @@ onMounted(async () => {
     document.body.classList.add("tray-popup-window");
   }
   await settingsStore.init();
+  if (unmounted) return;
   if (!isTrayPopup) {
     updateStore.init();
-    // 启动后静默检查更新(dev 环境跳过,避免无签名产物时无意义报错)
-    if (settingsStore.autoCheckUpdate && !import.meta.env.DEV) {
-      updateStore.checkForUpdate(false);
+    // 启动及每个本地整点静默检查;每次读取开关,设置变更即时生效。
+    if (!import.meta.env.DEV) {
+      const checkAutomatically = () => {
+        if (settingsStore.autoCheckUpdate) void updateStore.checkForUpdate(false);
+      };
+      checkAutomatically();
+      stopHourlyUpdateCheck = scheduleHourly(checkAutomatically);
     }
   }
   if (!isTrayPopup) {
@@ -156,6 +165,8 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  unmounted = true;
+  stopHourlyUpdateCheck?.();
   unlistenGit?.();
   unlistenBackgroundTasks?.();
   unlistenConflictResolution?.();

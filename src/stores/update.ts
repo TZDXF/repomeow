@@ -78,7 +78,12 @@ export const useUpdateStore = defineStore("update", () => {
    * @param manual true 时通过 toast 反馈「已是最新/检查失败」;false 为静默检查(仅发现更新时提示)
    */
   async function checkForUpdate(manual: boolean) {
-    if (status.value === "checking" || status.value === "downloading") return;
+    if (
+      status.value === "checking" ||
+      status.value === "downloading" ||
+      status.value === "installed"
+    )
+      return;
     const t = i18n.global.t;
     status.value = "checking";
     error.value = "";

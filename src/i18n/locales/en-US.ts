@@ -1669,9 +1669,9 @@ export default {
         "Default directory template for new worktrees. Supports the {branch} placeholder and relative paths (relative to the repository root), e.g. .worktrees/{branch}",
     },
     update: {
-      autoCheck: "Check for updates on startup",
+      autoCheck: "Automatically check for updates",
       autoCheckHint:
-        "Automatically check for new versions after launch and notify when an update is found.",
+        "Automatically check for new versions on startup and at the start of every hour, and notify when an update is found.",
     },
     tray: {
       title: "System Tray",
