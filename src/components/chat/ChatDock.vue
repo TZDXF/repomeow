@@ -877,7 +877,7 @@ const retrySeconds = computed(() => {
       <button
         v-if="!open"
         type="button"
-        class="pointer-events-auto absolute right-0 bottom-0 flex h-12 w-12 items-center justify-center rounded-full border bg-card shadow-lg transition-shadow hover:shadow-xl"
+        class="chat-fab pointer-events-auto absolute right-0 bottom-0 flex h-12 w-12 items-center justify-center rounded-full border bg-card shadow-lg transition-shadow hover:shadow-xl"
         :title="t('chat.entry')"
         @click="toggleOpen"
       >

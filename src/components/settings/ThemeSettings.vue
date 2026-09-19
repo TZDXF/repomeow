@@ -51,6 +51,13 @@ const SKINS: { value: ThemeSkin; labelKey: string; descriptionKey: string; swatc
       descriptionKey: "settings.skin.pixelDesc",
       swatches: ["#f4f4f4", "#ff004d", "#1a1c2c"],
     },
+    {
+      // 设计来源: https://www.stylekit.top/zh/styles/glassmorphism
+      value: "glassmorphism",
+      labelKey: "settings.skin.glassmorphism",
+      descriptionKey: "settings.skin.glassmorphismDesc",
+      swatches: ["#0b1322", "#e4b863", "#7c9cc4"],
+    },
   ];
 </script>
 
@@ -65,7 +72,7 @@ const SKINS: { value: ThemeSkin; labelKey: string; descriptionKey: string; swatc
         v-for="opt in OPTIONS"
         :key="opt.value"
         type="button"
-        class="flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors hover:bg-accent"
+        class="theme-choice flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors hover:bg-accent"
         :class="store.theme === opt.value && 'border-primary'"
         @click="store.setTheme(opt.value)"
       >
@@ -86,8 +93,9 @@ const SKINS: { value: ThemeSkin; labelKey: string; descriptionKey: string; swatc
       <button
         v-for="skin in SKINS"
         :key="skin.value"
+        :aria-pressed="store.themeSkin === skin.value"
         type="button"
-        class="flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors hover:bg-accent"
+        class="theme-choice flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors hover:bg-accent"
         :class="store.themeSkin === skin.value && 'border-primary'"
         @click="store.setThemeSkin(skin.value)"
       >

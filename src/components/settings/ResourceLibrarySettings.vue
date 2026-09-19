@@ -55,7 +55,7 @@ function onTablistKeydown(event: KeyboardEvent) {
 
     <div
       role="tablist"
-      class="mt-5 inline-flex items-center gap-1 rounded-lg border bg-muted/40 p-1"
+      class="segmented-control mt-5 inline-flex items-center gap-1 rounded-lg border bg-muted/40 p-1"
       @keydown="onTablistKeydown"
     >
       <button

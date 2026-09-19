@@ -172,12 +172,13 @@ const sortedProjects = computed(() => {
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
-        <div class="flex items-center rounded-md border p-0.5">
+        <div class="segmented-control flex items-center rounded-md border p-0.5">
           <Button
             variant="ghost"
             size="icon"
             class="h-7 w-7"
             :class="viewMode === 'grid' && 'bg-accent'"
+            :aria-pressed="viewMode === 'grid'"
             :title="t('projects.home.viewGrid')"
             @click="viewMode = 'grid'"
           >
@@ -188,6 +189,7 @@ const sortedProjects = computed(() => {
             size="icon"
             class="h-7 w-7"
             :class="viewMode === 'table' && 'bg-accent'"
+            :aria-pressed="viewMode === 'table'"
             :title="t('projects.home.viewTable')"
             @click="viewMode = 'table'"
           >

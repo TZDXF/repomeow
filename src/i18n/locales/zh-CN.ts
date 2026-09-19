@@ -2177,6 +2177,8 @@ export default {
       islandDesc: "奶油底色、青绿点缀的绘本风",
       pixel: "8-Bit 像素",
       pixelDesc: "PICO-8 配色、硬边阴影的复古像素游戏风",
+      glassmorphism: "玻璃拟态",
+      glassmorphismDesc: "柔和光斑、通透磨砂玻璃与香槟金点缀，暗色下呈现夜航质感",
     },
     mdTheme: {
       title: "Markdown 主题",

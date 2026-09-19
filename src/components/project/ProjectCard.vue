@@ -19,7 +19,7 @@ function open() {
 
 <template>
   <div
-    class="group cursor-pointer rounded-md border px-3 py-2 transition-colors hover:bg-accent/60"
+    class="project-card group cursor-pointer rounded-md border px-3 py-2 transition-colors hover:bg-accent/60"
     @click="open"
   >
     <div class="flex items-center justify-between gap-2">

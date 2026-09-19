@@ -482,10 +482,11 @@ async function save() {
           <label class="text-xs text-muted-foreground">
             {{ t("settings.resources.mcp.editDialog.definitionLabel") }}
           </label>
-          <div class="flex rounded-md border p-0.5">
+          <div class="segmented-control flex rounded-md border p-0.5">
             <button
               v-for="item in MODE_ITEMS"
               :key="item.value"
+              :aria-pressed="mode === item.value"
               type="button"
               class="rounded-sm px-2 py-0.5 text-xs transition-colors"
               :class="

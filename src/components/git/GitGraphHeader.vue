@@ -58,10 +58,12 @@ function shortHash(hash: string) {
     </div>
 
     <!-- 视图切换:图谱 | 分析(紧跟标题之后) -->
-    <div class="ml-2 flex shrink-0 rounded-md border p-0.5">
+    <div class="segmented-control ml-2 flex shrink-0 rounded-md border p-0.5">
       <button
         v-for="v in ['graph', 'analysis'] as const"
         :key="v"
+        type="button"
+        :aria-pressed="view === v"
         class="rounded px-2.5 py-1 text-xs transition-colors"
         :class="
           cn(

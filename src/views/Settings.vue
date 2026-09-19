@@ -356,9 +356,10 @@ async function locateSetting(entry = searchResults.value[selectedIndex.value]) {
 </template>
 
 <style scoped>
-.settings-content :deep([data-setting]:focus) {
+/* 设置搜索跳转高亮:程序 focus() 会命中 focus-visible;鼠标点击只命中 focus,
+   不会描边。轮廓跟随元素自身圆角(分段控件/胶囊按钮保持形状)。 */
+.settings-content :deep([data-setting]:focus-visible) {
   outline: 2px solid var(--primary);
   outline-offset: 6px;
-  border-radius: 2px;
 }
 </style>

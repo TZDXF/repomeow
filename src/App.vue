@@ -177,7 +177,7 @@ onUnmounted(() => {
   <!-- 托盘弹窗窗口:整体透明,背景交给 TrayPopup 根节点(玻璃皮肤下透出系统模糊) -->
   <main
     class="flex h-screen flex-col overflow-hidden text-foreground"
-    :class="isTrayPopup ? 'bg-transparent' : 'bg-background'"
+    :class="isTrayPopup ? 'bg-transparent' : 'app-surface bg-background'"
   >
     <TitleBar v-if="!isTrayPopup" />
     <div class="min-h-0 flex-1">

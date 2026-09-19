@@ -2275,6 +2275,9 @@ export default {
       islandDesc: "Creamy picture-book style with teal accents",
       pixel: "8-Bit Pixel",
       pixelDesc: "Retro pixel-game look with PICO-8 palette and hard-edge shadows",
+      glassmorphism: "Glassmorphism",
+      glassmorphismDesc:
+        "Soft light, frosted glass and champagne accents, with a nocturne dark mode",
     },
     mdTheme: {
       title: "Markdown theme",

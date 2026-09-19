@@ -197,10 +197,11 @@ async function openSkillPage(skill: ResourceMarketplaceSkill) {
     <ResourceGithubSource v-if="showGithub" :initial-source="repositorySource" />
     <template v-else>
       <div class="mt-3 flex flex-wrap items-center gap-2">
-        <div class="flex rounded-md border p-0.5 text-xs">
+        <div class="segmented-control flex rounded-md border p-0.5 text-xs">
           <button
             v-for="mode in ['all', 'trending', 'hot'] as const"
             :key="mode"
+            :aria-pressed="browseMode === mode"
             type="button"
             class="rounded px-2 py-1 transition-colors"
             :class="browseMode === mode ? 'bg-accent text-foreground' : 'text-muted-foreground'"

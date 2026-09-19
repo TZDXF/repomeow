@@ -1,0 +1,295 @@
+/* Inspired by StyleKit Nocturne Glassmorphism:
+   https://www.stylekit.top/zh/styles/glassmorphism
+   仅皮肤作用域内生效;模糊限制在主要表面,不改变滚动容器/定位层的 containing block。 */
+:root[data-theme="glassmorphism"] {
+  --background: #e8eef4;
+  --foreground: #203047;
+  --card: rgb(255 255 255 / 10%);
+  --card-foreground: var(--foreground);
+  /* 浮层有独立底色,避免叠加列表文字透出造成阅读干扰。 */
+  --popover: #f0f4f8;
+  --popover-foreground: var(--foreground);
+  --primary: #815b1d;
+  --primary-foreground: #ffffff;
+  --secondary: rgb(255 255 255 / 12%);
+  --secondary-foreground: var(--foreground);
+  --muted: rgb(32 48 71 / 6%);
+  --muted-foreground: #526176;
+  --accent: rgb(255 255 255 / 14%);
+  --accent-foreground: var(--foreground);
+  --border: rgb(32 48 71 / 16%);
+  --input: rgb(32 48 71 / 24%);
+  --ring: var(--primary);
+  --sidebar: rgb(255 255 255 / 8%);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+  --chart-1: #815b1d;
+  --chart-2: #33517a;
+  --chart-3: #526e91;
+  --chart-4: #667c94;
+  --chart-5: #8b7046;
+  --scrollbar-thumb: rgb(51 81 122 / 25%);
+  --scrollbar-thumb-hover: rgb(51 81 122 / 45%);
+  --radius: 1rem;
+  --glass-shadow:
+    0 12px 32px rgb(51 81 122 / 10%), inset 0 1px 0 rgb(255 255 255 / 70%),
+    inset 0 -1px 0 rgb(32 48 71 / 10%);
+  --glass-scene:
+    radial-gradient(ellipse at 85% 10%, rgb(124 156 196 / 28%), transparent 60%),
+    radial-gradient(ellipse at 8% 85%, rgb(51 81 122 / 14%), transparent 60%),
+    radial-gradient(ellipse at 35% 35%, rgb(228 184 99 / 12%), transparent 55%);
+}
+
+:root[data-theme="glassmorphism"].dark {
+  --background: #0b1322;
+  --foreground: #edf2f8;
+  --popover: #16233a;
+  --primary: #e4b863;
+  --primary-foreground: #20190d;
+  --muted: rgb(255 255 255 / 6%);
+  --muted-foreground: #b1bfd0;
+  --border: rgb(255 255 255 / 15%);
+  --input: rgb(255 255 255 / 22%);
+  --chart-1: #e4b863;
+  --chart-2: #7c9cc4;
+  --chart-3: #a2b9d6;
+  --chart-4: #7489a5;
+  --chart-5: #c7b087;
+  --scrollbar-thumb: rgb(255 255 255 / 20%);
+  --scrollbar-thumb-hover: rgb(255 255 255 / 35%);
+  --glass-shadow:
+    0 16px 40px rgb(3 7 18 / 35%), inset 0 1px 0 rgb(255 255 255 / 22%),
+    inset 0 -1px 0 rgb(2 6 16 / 35%);
+  --glass-scene:
+    radial-gradient(ellipse at 85% 10%, rgb(124 156 196 / 28%), transparent 60%),
+    radial-gradient(ellipse at 8% 85%, rgb(51 81 122 / 35%), transparent 60%),
+    radial-gradient(ellipse at 35% 35%, rgb(228 184 99 / 8%), transparent 55%);
+}
+
+[data-theme="glassmorphism"] :is(.app-surface, [data-slot="tray-popup"]) {
+  background-color: var(--background);
+  background-image: var(--glass-scene);
+}
+
+/* 不覆盖 body:托盘窗口外围必须保持透明。噪点作为背景层而非遮挡交互的覆盖层。 */
+[data-theme="glassmorphism"] .app-surface > [data-tauri-drag-region] {
+  background-color: rgb(255 255 255 / 6%);
+}
+
+[data-theme="glassmorphism"] :is([data-slot="card"], .project-card, .theme-choice) {
+  background-color: var(--card);
+  background-image:
+    linear-gradient(rgb(255 255 255 / 8%), transparent 55%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' opacity='.025' filter='url(%23n)'/%3E%3C/svg%3E");
+  border-radius: 1rem;
+  box-shadow: var(--glass-shadow);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(40px) saturate(180%);
+  transition:
+    background-color 500ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 500ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 500ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+[data-theme="glassmorphism"] .project-card:hover {
+  background-color: rgb(255 255 255 / 14%);
+  border-color: var(--ring);
+}
+
+[data-theme="glassmorphism"]
+  :is(
+    [data-slot="dialog-content"],
+    [data-slot="alert-dialog-content"],
+    [data-slot="sheet-content"],
+    [data-slot="popover-content"],
+    [data-slot="dropdown-menu-content"],
+    [data-slot="dropdown-menu-sub-content"],
+    [data-slot="context-menu-content"],
+    [data-slot="context-menu-sub-content"],
+    [data-slot="select-content"],
+    [data-slot="hover-card-content"],
+    [data-sonner-toast]
+  ) {
+  background-color: var(--popover);
+  color: var(--popover-foreground);
+  border-radius: 1rem;
+  box-shadow: var(--glass-shadow);
+}
+
+/* as-child 的 Trigger 会覆盖 data-slot;用 Button 自带的 group/button 标记兜底,
+   同时覆盖 dropdown/popover/dialog 等组合组件,不修改生成的 ui 组件。 */
+[data-theme="glassmorphism"]
+  :is(
+    [data-slot="button"],
+    [class~="group/button"],
+    [data-slot="input"],
+    [data-slot="textarea"],
+    [data-slot="select-trigger"]
+  ) {
+  transition-duration: 500ms;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+[data-theme="glassmorphism"]
+  :is([data-slot="button"], [class~="group/button"])[data-variant="outline"] {
+  background-color: rgb(255 255 255 / 8%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 22%);
+}
+
+[data-theme="glassmorphism"]
+  :is([data-slot="button"], [class~="group/button"])[data-variant="outline"]:not(:disabled):is(
+    :hover,
+    [aria-expanded="true"]
+  ) {
+  background-color: rgb(255 255 255 / 14%);
+  border-color: var(--ring);
+}
+
+/* 系统关闭透明效果/浏览器不支持模糊时提供不透明后备。 */
+@supports not (backdrop-filter: blur(40px)) {
+  [data-theme="glassmorphism"] :is([data-slot="card"], .project-card, .theme-choice) {
+    background: var(--popover);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  [data-theme="glassmorphism"] :is([data-slot="card"], .project-card, .theme-choice) {
+    background: var(--popover);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-theme="glassmorphism"]
+    :is(
+      :is([data-slot="button"], [class~="group/button"]),
+      [data-slot="input"],
+      [data-slot="textarea"],
+      [data-slot="select-trigger"],
+      [data-slot="card"],
+      .project-card,
+      .theme-choice
+    ) {
+    transition: none;
+  }
+}
+
+/* 主操作保留唯一的香槟强调,危险操作仍沿用 destructive 语义色。 */
+[data-theme="glassmorphism"]
+  :is([data-slot="button"], [class~="group/button"]):is(
+    [data-variant="default"],
+    :not([data-variant])
+  ) {
+  background-color: color-mix(in srgb, var(--primary) 15%, transparent);
+  color: var(--primary);
+  border: 1px solid color-mix(in srgb, var(--primary) 40%, transparent);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 22%);
+}
+
+[data-theme="glassmorphism"]
+  :is([data-slot="button"], [class~="group/button"]):is(
+    [data-variant="default"],
+    :not([data-variant])
+  ):not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--primary) 22%, transparent);
+  border-color: var(--primary);
+}
+
+/* 外框和按钮共享胶囊几何,留出安全间距;裁剪 hover 背景,焦点改为内描边。 */
+[data-theme="glassmorphism"] .segmented-control {
+  border-radius: 9999px;
+  padding: 3px;
+  gap: 2px;
+  overflow: hidden;
+}
+
+[data-theme="glassmorphism"] .segmented-control > :is([aria-pressed], [aria-selected]) {
+  border-radius: 9999px;
+  min-width: 0;
+}
+
+/* 分段切换:选中态独立于普通 hover,用香槟填充与内描边同时标记,不改变布局尺寸。 */
+[data-theme="glassmorphism"]
+  .segmented-control
+  > :is([aria-pressed="true"], [aria-selected="true"]) {
+  background-color: color-mix(in srgb, var(--primary) 26%, var(--background));
+  color: var(--primary);
+  font-weight: 600;
+}
+
+[data-theme="glassmorphism"]
+  .segmented-control
+  > :is([aria-pressed="false"], [aria-selected="false"]):not(:disabled):hover {
+  background-color: var(--accent);
+  color: var(--foreground);
+}
+
+[data-theme="glassmorphism"]
+  .segmented-control
+  > :is([aria-pressed], [aria-selected]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -3px;
+}
+
+/* 高光阴影不应吞掉组件原来的键盘焦点提示。 */
+[data-theme="glassmorphism"] :is([data-slot="button"], [class~="group/button"]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -3px;
+}
+
+/* ChatDock 圆形入口:bg-card 在本主题下是低透明白,需补足模糊与方向性阴影,
+   否则悬浮在页面内容上几乎不可见。 */
+[data-theme="glassmorphism"] .chat-fab {
+  background-color: rgb(255 255 255 / 10%);
+  border-color: var(--border);
+  box-shadow: var(--glass-shadow);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(40px) saturate(180%);
+  transition:
+    background-color 500ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 500ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 500ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+[data-theme="glassmorphism"] .chat-fab:hover {
+  background-color: rgb(255 255 255 / 16%);
+  border-color: var(--ring);
+  color: var(--primary);
+}
+
+[data-theme="glassmorphism"] .chat-fab:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@supports not (backdrop-filter: blur(40px)) {
+  [data-theme="glassmorphism"] .chat-fab {
+    background: var(--popover);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  [data-theme="glassmorphism"] .chat-fab {
+    background: var(--popover);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-theme="glassmorphism"] .chat-fab {
+    transition: none;
+  }
+}
+
+/* 资源库 tablist:选中态本身即焦点指示(方向键直接改选中),显式 tabindex 会使
+   Chromium 在鼠标点击时也命中 focus-visible,产生突兀的裁剪轮廓,此处移除。 */
+[data-theme="glassmorphism"] .segmented-control > [role="tab"]:focus-visible {
+  outline: none;
+}
