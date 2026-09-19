@@ -32,7 +32,7 @@ const props = withDefaults(
 const { t, te, locale } = useI18n();
 const language = computed(() => locale.value as SupportedLocale);
 const nodeRenderers: NodeRenderers = { link: MdLink };
-// 传游离元素,避免 Markdown 库把 island/glass 主题变量写成无效 hsl(#…)(与技能预览一致)
+// 传游离元素,避免 Markdown 库把 island/pixel 主题变量写成无效 hsl(#…)(与技能预览一致)
 const detachedThemeEl = document.createElement("div");
 const themeElement = () => detachedThemeEl;
 const settings = useSettingsStore();

@@ -57,7 +57,7 @@ const emit = defineEmits<{
 const { t } = useI18n();
 const settingsStore = useSettingsStore();
 
-// 传游离元素,避免 Markdown 库将 island/glass 的十六进制主题变量写成无效的 hsl(#…)。
+// 传游离元素,避免 Markdown 库将 island/pixel 的十六进制主题变量写成无效的 hsl(#…)。
 const detachedThemeEl = document.createElement("div");
 const themeElement = () => detachedThemeEl;
 

@@ -26,7 +26,7 @@ const { t, locale } = useI18n();
 
 // 主题变量读取隔离(与 wiki/report 的用法一致):传一个游离元素,库的
 // useTailwindV3Theme 从它读不到任何 shadcn 变量,就不会把变量快照内联写回
-// body 下共享的 overlay 容器——hex 格式的皮肤变量(island/glass)会被库误包成
+// body 下共享的 overlay 容器——hex 格式的皮肤变量(island/pixel)会被库误包成
 // 非法的 hsl(#…),导致表格/代码块的全屏弹层背景全透明。
 const detachedThemeEl = document.createElement("div");
 const themeElement = () => detachedThemeEl;

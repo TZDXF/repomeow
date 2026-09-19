@@ -119,7 +119,7 @@ const controls: ControlsConfig = {
   code: { copy: true, collapse: true },
 };
 const beforeDownload = createBeforeDownload(t);
-// 传游离元素,避免 Markdown 库将 island/glass 的十六进制主题变量写成无效的 hsl(#…)
+// 传游离元素,避免 Markdown 库将 island/pixel 的十六进制主题变量写成无效的 hsl(#…)
 const detachedThemeEl = document.createElement("div");
 const themeElement = () => detachedThemeEl;
 // 自定义链接渲染器:绕过库内置 harden(裸相对路径如 references/x.md 会被误判拦截),

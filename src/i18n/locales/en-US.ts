@@ -2269,8 +2269,6 @@ export default {
       defaultDesc: "Clean and neutral look",
       island: "Mint Island",
       islandDesc: "Creamy picture-book style with teal accents",
-      glass: "Tech Glass",
-      glassDesc: "Frosted glass over deep space blue with neon cyan glow",
       pixel: "8-Bit Pixel",
       pixelDesc: "Retro pixel-game look with PICO-8 palette and hard-edge shadows",
     },

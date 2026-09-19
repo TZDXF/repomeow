@@ -2171,8 +2171,6 @@ export default {
       defaultDesc: "简洁中性的默认外观",
       island: "薄荷小岛",
       islandDesc: "奶油底色、青绿点缀的绘本风",
-      glass: "科技玻璃",
-      glassDesc: "深空蓝底、霓虹青光效的磨砂玻璃风",
       pixel: "8-Bit 像素",
       pixelDesc: "PICO-8 配色、硬边阴影的复古像素游戏风",
     },

@@ -38,18 +38,14 @@ const SKINS: { value: ThemeSkin; labelKey: string; descriptionKey: string; swatc
       swatches: ["#ffffff", "#171717", "#525252"],
     },
     {
+      // 设计来源: Animal Island UI https://guokaigdg.github.io/animal-island-ui/#/skill
       value: "island",
       labelKey: "settings.skin.island",
       descriptionKey: "settings.skin.islandDesc",
       swatches: ["#f8f8f0", "#19c8b9", "#794f27"],
     },
     {
-      value: "glass",
-      labelKey: "settings.skin.glass",
-      descriptionKey: "settings.skin.glassDesc",
-      swatches: ["#070d1f", "#22d3ee", "#8b5cf6"],
-    },
-    {
+      // 设计来源: StyleKit Pixel Art https://www.stylekit.top/zh/styles/pixel-art
       value: "pixel",
       labelKey: "settings.skin.pixel",
       descriptionKey: "settings.skin.pixelDesc",

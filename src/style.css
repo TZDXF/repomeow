@@ -142,6 +142,7 @@
 }
 
 /* ===== Mint Island skin（薄荷小岛）===== */
+/* 设计来源: Animal Island UI https://guokaigdg.github.io/animal-island-ui/#/skill */
 /* 参考 animal-island 设计令牌：奶油底、暖棕字、青绿主色、大圆角 */
 [data-theme="island"] {
   --font-app:
@@ -214,86 +215,8 @@
   --scrollbar-thumb-hover: #6f5f47;
 }
 
-/* ===== Glass skin（科技玻璃）===== */
-/* 深空蓝 + 霓虹青主色 + 紫色点缀，半透明色值配合 backdrop blur 呈现玻璃拟态 */
-[data-theme="glass"] {
-  --font-app:
-    "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "PingFang SC",
-    "Microsoft YaHei", sans-serif;
-  --background: #e9eef7;
-  --foreground: #1b2438;
-  --card: rgb(255 255 255 / 0.75);
-  --card-foreground: #1b2438;
-  --popover: rgb(255 255 255 / 0.85);
-  --popover-foreground: #1b2438;
-  --primary: #0891b2;
-  --primary-foreground: #ffffff;
-  --secondary: rgb(255 255 255 / 0.55);
-  --secondary-foreground: #1b2438;
-  --muted: #dde6f2;
-  --muted-foreground: #5b6b8c;
-  --accent: #d8f3f9;
-  --accent-foreground: #155e75;
-  --destructive: #e05a5a;
-  --border: rgb(100 130 180 / 0.25);
-  --input: rgb(100 130 180 / 0.3);
-  --ring: #0891b2;
-  --chart-1: #0891b2;
-  --chart-2: #3b82f6;
-  --chart-3: #8b5cf6;
-  --chart-4: #ec4899;
-  --chart-5: #ef4444;
-  --radius: 0.75rem;
-  --sidebar: rgb(255 255 255 / 0.7);
-  --sidebar-foreground: #1b2438;
-  --sidebar-primary: #0891b2;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #d8f3f9;
-  --sidebar-accent-foreground: #155e75;
-  --sidebar-border: rgb(100 130 180 / 0.25);
-  --sidebar-ring: #0891b2;
-  --scrollbar-thumb: rgb(100 130 180 / 0.35);
-  --scrollbar-thumb-hover: rgb(100 130 180 / 0.55);
-}
-
-/* 玻璃暗色：深空蓝底 + 霓虹青辉光 */
-[data-theme="glass"].dark {
-  --background: #070d1f;
-  --foreground: #dbe7ff;
-  --card: rgb(30 42 80 / 0.65);
-  --card-foreground: #dbe7ff;
-  --popover: rgb(13 20 45 / 0.88);
-  --popover-foreground: #dbe7ff;
-  --primary: #22d3ee;
-  --primary-foreground: #062430;
-  --secondary: rgb(148 163 255 / 0.08);
-  --secondary-foreground: #dbe7ff;
-  --muted: #141d3a;
-  --muted-foreground: #7d8fb8;
-  --accent: rgb(34 211 238 / 0.12);
-  --accent-foreground: #67e8f9;
-  --destructive: #f87171;
-  --border: rgb(125 180 255 / 0.14);
-  --input: rgb(125 180 255 / 0.18);
-  --ring: #22d3ee;
-  --chart-1: #22d3ee;
-  --chart-2: #60a5fa;
-  --chart-3: #a78bfa;
-  --chart-4: #f472b6;
-  --chart-5: #f87171;
-  --sidebar: rgb(13 20 45 / 0.85);
-  --sidebar-foreground: #dbe7ff;
-  --sidebar-primary: #22d3ee;
-  --sidebar-primary-foreground: #062430;
-  --sidebar-accent: rgb(34 211 238 / 0.12);
-  --sidebar-accent-foreground: #67e8f9;
-  --sidebar-border: rgb(125 180 255 / 0.14);
-  --sidebar-ring: #22d3ee;
-  --scrollbar-thumb: rgb(125 180 255 / 0.2);
-  --scrollbar-thumb-hover: rgb(125 180 255 / 0.35);
-}
-
 /* ===== 8bit / Pixel skin（像素艺术）===== */
+/* 设计来源: StyleKit Pixel Art https://www.stylekit.top/zh/styles/pixel-art */
 /* PICO-8 调色板 + Sweetie-16 中性色:浅灰底、深蓝黑描边、高饱和强调色、
    直角、等宽字体与硬边偏移阴影;风味细节见文件末尾(必须在 @layer 之外)。 */
 [data-theme="pixel"] {
@@ -486,99 +409,12 @@
   }
 }
 
-/* 注意：glass 皮肤的覆盖规则必须放在 @layer 之外 —— Tailwind v4 的层顺序中 utilities 高于 base,
-   层内规则覆盖不了 bg-background / shadow-sm 等工具类设置的属性;无层样式优先级高于所有具名层。 */
-/* ===== Glass 风味细节（科技玻璃）===== */
-/* 亮色：浅冰蓝底 + 左上淡青 / 右下淡紫径向光晕 + 极淡网格线 */
-/* body:not(.tray-popup-window)：托盘弹窗窗口的 body 必须保持全透明,才能透出系统级模糊 */
-[data-theme="glass"] body:not(.tray-popup-window) {
-  background-image:
-    radial-gradient(ellipse 60% 50% at 10% 0%, rgb(34 211 238 / 0.14), transparent 70%),
-    radial-gradient(ellipse 55% 50% at 95% 100%, rgb(139 92 246 / 0.12), transparent 70%),
-    repeating-linear-gradient(0deg, rgb(100 130 180 / 0.06) 0 1px, transparent 1px 40px),
-    repeating-linear-gradient(90deg, rgb(100 130 180 / 0.06) 0 1px, transparent 1px 40px);
-}
-/* 暗色：深空渐变 + 青 / 紫霓虹光斑 + 淡网格 */
-[data-theme="glass"].dark body:not(.tray-popup-window) {
-  background-color: #070d1f;
-  background-image:
-    radial-gradient(ellipse 60% 50% at 15% -5%, rgb(34 211 238 / 0.12), transparent 70%),
-    radial-gradient(ellipse 50% 45% at 90% 100%, rgb(139 92 246 / 0.14), transparent 70%),
-    radial-gradient(ellipse 40% 35% at 70% 20%, rgb(59 130 246 / 0.08), transparent 70%),
-    repeating-linear-gradient(0deg, rgb(125 180 255 / 0.035) 0 1px, transparent 1px 40px),
-    repeating-linear-gradient(90deg, rgb(125 180 255 / 0.035) 0 1px, transparent 1px 40px);
-}
-
-/* 卡片：磨砂玻璃 + 柔和阴影（暗色带一点青色辉光） */
-[data-theme="glass"] [data-slot="card"] {
-  -webkit-backdrop-filter: blur(16px) saturate(1.4);
-  backdrop-filter: blur(16px) saturate(1.4);
-  border: 1px solid var(--border);
-  box-shadow: 0 8px 24px 0 rgb(27 36 56 / 0.08);
-}
-[data-theme="glass"].dark [data-slot="card"] {
-  box-shadow:
-    0 8px 24px 0 rgb(0 0 0 / 0.35),
-    0 0 16px 0 rgb(34 211 238 / 0.08);
-}
-
-/* 弹层：更重的磨砂，让下拉 / 弹窗呈玻璃感 */
-[data-theme="glass"] [data-slot="popover-content"],
-[data-theme="glass"] [data-slot="dialog-content"],
-[data-theme="glass"] [data-slot="dropdown-menu-content"],
-[data-theme="glass"] [data-slot="dropdown-menu-sub-content"],
-[data-theme="glass"] [data-slot="context-menu-content"],
-[data-theme="glass"] [data-slot="select-content"] {
-  -webkit-backdrop-filter: blur(28px) saturate(1.6);
-  backdrop-filter: blur(28px) saturate(1.6);
-}
-
-/* 主按钮：科技辉光 */
-[data-theme="glass"] [data-slot="button"][data-variant="default"] {
-  transition:
-    box-shadow 0.25s ease,
-    transform 0.15s ease;
-  box-shadow: 0 0 12px 0 rgb(8 145 178 / 0.25);
-}
-[data-theme="glass"] [data-slot="button"][data-variant="default"]:not(:disabled):hover {
-  box-shadow: 0 0 20px 0 rgb(8 145 178 / 0.4);
-}
-[data-theme="glass"] [data-slot="button"][data-variant="default"]:not(:disabled):active {
-  transform: translateY(1px);
-  box-shadow: 0 0 6px 0 rgb(8 145 178 / 0.2);
-}
-[data-theme="glass"].dark [data-slot="button"][data-variant="default"] {
-  box-shadow: 0 0 14px 0 rgb(34 211 238 / 0.35);
-}
-[data-theme="glass"].dark [data-slot="button"][data-variant="default"]:not(:disabled):hover {
-  box-shadow: 0 0 26px 0 rgb(34 211 238 / 0.55);
-}
-[data-theme="glass"].dark [data-slot="button"][data-variant="default"]:not(:disabled):active {
-  transform: translateY(1px);
-  box-shadow: 0 0 8px 0 rgb(34 211 238 / 0.25);
-}
-
-/* 托盘弹窗窗口:body 不刷底色,透明窗口才能真正透出桌面(弹窗根节点自带底色,其他皮肤外观不变) */
+/* 托盘弹窗窗口:保持透明背景,透出系统级模糊。 */
 body.tray-popup-window {
   background: transparent;
 }
 
-/* 托盘弹窗:窗口已开透明 + 系统模糊(Acrylic / Vibrancy),此处叠加皮肤色调与圆角 */
-[data-theme="glass"] [data-slot="tray-popup"] {
-  background-color: rgb(233 238 247 / 0.55);
-  border-color: rgb(255 255 255 / 0.4);
-  border-radius: 12px;
-}
-[data-theme="glass"].dark [data-slot="tray-popup"] {
-  background-color: rgb(7 13 31 / 0.55);
-  border-color: rgb(125 180 255 / 0.2);
-  border-radius: 12px;
-  box-shadow:
-    0 8px 32px 0 rgb(0 0 0 / 0.5),
-    0 0 20px 0 rgb(34 211 238 / 0.12);
-}
-
-/* 注意:pixel 皮肤的覆盖规则与 glass 同理必须放在 @layer 之外 —— 无层样式优先级
+/* 注意:pixel 皮肤的覆盖规则必须放在 @layer 之外 —— 无层样式优先级
    高于所有具名层,才能压过 rounded-* / shadow-* / transition-* 等工具类。 */
 /* ===== 8bit / Pixel 风味细节(像素艺术)===== */
 
