@@ -347,8 +347,6 @@ export default {
     generatingAgentsMd: "正在生成 AGENTS.md…",
     agentsMdOverwriteHint: "已存在 AGENTS.md,生成的内容将覆盖现有文件。",
     agentsMdDone: "已生成 AGENTS.md",
-    agentsMdClaudeCreated: "已创建 CLAUDE.md(仅 {'@'}AGENTS.md 引用)",
-    agentsMdClaudeAligned: "已在 CLAUDE.md 顶部补充 {'@'}AGENTS.md 引用",
     mcp: "MCP 配置",
     skills: "Skills",
     agents: "Agent 工具",

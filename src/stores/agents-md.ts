@@ -76,14 +76,7 @@ export const useAgentsMdStore = defineStore("agentsMd", () => {
         return;
       }
       state.status = "done";
-      let note = "";
-      if (result.claudeAction === "created") {
-        note = i18n.global.t("aiAssets.agentsMdClaudeCreated");
-      } else if (result.claudeAction === "aligned") {
-        note = i18n.global.t("aiAssets.agentsMdClaudeAligned");
-      }
-      const done = i18n.global.t("aiAssets.agentsMdDone");
-      toast.success(note ? `${done} · ${note}` : done);
+      toast.success(i18n.global.t("aiAssets.agentsMdDone"));
     } catch (e) {
       state.status = "failed";
       toast.error(String(e));

@@ -373,8 +373,6 @@ export default {
     agentsMdOverwriteHint:
       "AGENTS.md already exists; generated content will overwrite the current file.",
     agentsMdDone: "AGENTS.md generated",
-    agentsMdClaudeCreated: "Created CLAUDE.md ({'@'}AGENTS.md reference only)",
-    agentsMdClaudeAligned: "Added the {'@'}AGENTS.md reference to the top of CLAUDE.md",
     mcp: "MCP Configs",
     skills: "Skills",
     agents: "Agent Tools",

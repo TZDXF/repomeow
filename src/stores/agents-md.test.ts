@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { useAgentsMdStore } from "@/stores/agents-md";
+import { i18n } from "@/i18n";
 import type { Project } from "@/types";
 
 const { generateAgentsMdMock, toastSuccess, toastError } = vi.hoisted(() => ({
@@ -23,7 +24,7 @@ describe("agents-md store", () => {
   });
 
   it("生成挂在 store 上:进行态可查询并镜像为后台任务,成功后 toast 并收敛状态", async () => {
-    generateAgentsMdMock.mockResolvedValue({ claudeAction: "aligned" });
+    generateAgentsMdMock.mockResolvedValue(true);
     const store = useAgentsMdStore();
     const run = store.generate(project, "zh-CN", { model: "deepseek/deepseek-v4-pro" });
     // 状态同步进入 running(不等待 IPC 返回),后台任务中心立即可见
@@ -37,6 +38,7 @@ describe("agents-md store", () => {
     expect(store.generationFor(project.path)?.finishedAt).not.toBeNull();
     expect(store.backgroundTasks).toEqual([]);
     expect(toastSuccess).toHaveBeenCalledOnce();
+    expect(toastSuccess).toHaveBeenCalledWith(i18n.global.t("aiAssets.agentsMdDone"));
     // 模型/思考强度与取消信号一并透传
     const [, , options] = generateAgentsMdMock.mock.calls[0]!;
     expect(options.model).toBe("deepseek/deepseek-v4-pro");

@@ -4,14 +4,12 @@
 //! 由内置 agent 以读写权限执行:RestrictedEnv 收敛为「项目根只读 + 写仅 AGENTS.md」,
 //! shell 一律拒绝;读工具不设调用预算,agent 自由探索仓库(对齐 claude init 的模式:
 //! prompt 只给生成指令,上下文由 agent 自行收集,首轮未落盘时给同一会话一次修复机会)。
-//! CLAUDE.md 不经 agent,由命令本身对齐为 @AGENTS.md 引用:缺失则创建;
-//! 已存在且未引用则把引用行置顶补齐(保留既有内容);已引用则不动。
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tauri::{AppHandle, State};
 use tokio_util::sync::CancellationToken;
 
@@ -33,27 +31,6 @@ use super::run::RegisteredRun;
 
 /// 首轮未落盘时给同一会话一次明确修复机会
 const MAX_ATTEMPTS: usize = 2;
-/// CLAUDE.md 中对 AGENTS.md 的引用行(Claude Code 的 @ 导入语法)
-const CLAUDE_REF: &str = "@AGENTS.md";
-
-/// CLAUDE.md 对齐为 @AGENTS.md 引用;返回动作标识供前端提示。
-fn align_claude_md(root: &Path) -> AppResult<&'static str> {
-    let path = root.join("CLAUDE.md");
-    match fs::read_to_string(&path) {
-        Ok(content) if content.contains(CLAUDE_REF) => Ok("unchanged"),
-        Ok(content) => {
-            // 向上边对齐:引用行置顶,既有内容保留在下方
-            fs::write(&path, format!("{CLAUDE_REF}\n\n{content}"))?;
-            Ok("aligned")
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            fs::write(&path, format!("{CLAUDE_REF}\n"))?;
-            Ok("created")
-        }
-        Err(error) => Err(error.into()),
-    }
-}
-
 /// 唯一的 prompt:生成指令(改写自 claude init) + 输出语言。
 fn agents_md_prompt(language: &str) -> String {
     format!(
@@ -81,13 +58,6 @@ pub struct GenerateAgentsMdRequest {
     thinking: Option<String>,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GenerateAgentsMdResult {
-    /// CLAUDE.md 对齐结果:created(新建)/ aligned(引用置顶补齐)/ unchanged(已引用)
-    pub claude_action: String,
-}
-
 const REPAIR_PROMPT: &str =
     "The AGENTS.md file was not written. Write the complete file now at the repository root.";
 
@@ -96,7 +66,7 @@ pub async fn ai_generate_agents_md(
     app: AppHandle,
     db: State<'_, Db>,
     request: GenerateAgentsMdRequest,
-) -> AppResult<Option<GenerateAgentsMdResult>> {
+) -> AppResult<Option<bool>> {
     let root = PathBuf::from(&request.project_path);
     let target = root.join("AGENTS.md");
     // 重新生成场景:记录生成前内容,以变化判定本轮落盘(旧内容不被误认为产出)
@@ -164,60 +134,12 @@ pub async fn ai_generate_agents_md(
         return Ok(None);
     }
     result?;
-    let claude_action = align_claude_md(&root)?;
-    Ok(Some(GenerateAgentsMdResult {
-        claude_action: claude_action.to_string(),
-    }))
+    Ok(Some(true))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn temp_project_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "repomeow-agents-md-{tag}-{}-{}",
-            std::process::id(),
-            crate::time_util::now_ts_nanos()
-        ));
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    #[test]
-    fn creates_claude_md_with_reference_only() {
-        let dir = temp_project_dir("create");
-        assert_eq!(align_claude_md(&dir).unwrap(), "created");
-        assert_eq!(
-            fs::read_to_string(dir.join("CLAUDE.md")).unwrap(),
-            "@AGENTS.md\n"
-        );
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn prepends_reference_to_existing_claude_md() {
-        let dir = temp_project_dir("align");
-        fs::write(dir.join("CLAUDE.md"), "# Existing notes\n").unwrap();
-        assert_eq!(align_claude_md(&dir).unwrap(), "aligned");
-        assert_eq!(
-            fs::read_to_string(dir.join("CLAUDE.md")).unwrap(),
-            "@AGENTS.md\n\n# Existing notes\n"
-        );
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn leaves_referencing_claude_md_untouched() {
-        let dir = temp_project_dir("keep");
-        fs::write(dir.join("CLAUDE.md"), "See @AGENTS.md for details.\n").unwrap();
-        assert_eq!(align_claude_md(&dir).unwrap(), "unchanged");
-        assert_eq!(
-            fs::read_to_string(dir.join("CLAUDE.md")).unwrap(),
-            "See @AGENTS.md for details.\n"
-        );
-        let _ = fs::remove_dir_all(&dir);
-    }
 
     #[test]
     fn prompt_is_claude_init_style_instruction_only() {

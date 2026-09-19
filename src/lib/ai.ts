@@ -82,23 +82,18 @@ export async function generateCommitMessage(
   }
 }
 
-/** 内置 agent 生成 AGENTS.md 的返回;claudeAction 为 CLAUDE.md 对齐结果。 */
-export interface GenerateAgentsMdResult {
-  claudeAction: "created" | "aligned" | "unchanged";
-}
-
-/** 内置 agent(读写权限,写仅 AGENTS.md)生成/重新生成 AGENTS.md 并对齐 CLAUDE.md 引用。
+/** 内置 agent(读写权限,写仅 AGENTS.md)生成/重新生成 AGENTS.md。
  *  options 可指定模型(复合值 "providerId/modelId")、思考强度(空 = 设置页默认 /
- *  模型默认档)与取消信号。取消后返回 null。 */
+ *  模型默认档)与取消信号。成功返回 true,取消后返回 null。 */
 export async function generateAgentsMd(
   project: { path: string; name: string },
   language: SupportedLocale,
   options?: { model?: string; thinking?: string; signal?: AbortSignal },
-): Promise<GenerateAgentsMdResult | null> {
+): Promise<boolean | null> {
   const id = runId("agents-md");
   const unbind = bindCancellation(id, options?.signal);
   try {
-    return await cmd<GenerateAgentsMdResult | null>("ai_generate_agents_md", {
+    return await cmd<boolean | null>("ai_generate_agents_md", {
       request: {
         projectPath: project.path,
         language,
