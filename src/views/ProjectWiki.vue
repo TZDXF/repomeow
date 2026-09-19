@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { toast } from "vue-sonner";
@@ -38,10 +38,15 @@ const project = computed<Project | undefined>(() => {
   return Number.isFinite(id) ? store.projects.find((p) => p.id === id) : undefined;
 });
 
+// 首次渲染前启动加载，避免把尚未读取的数据误判为空；也响应项目切换。
 // 生成状态托管在全局 store:离开页面不中止,回来直接续看进度
-onMounted(async () => {
-  if (project.value) await wiki.load(project.value.path);
-});
+watch(
+  () => project.value?.path,
+  async (path) => {
+    if (path) await wiki.load(path);
+  },
+  { immediate: true },
+);
 
 /** 当前项目的生成状态;不同项目的任务在全局 store 中按路径隔离 */
 const generation = computed(() => {
@@ -431,6 +436,16 @@ const beforeDownload = createBeforeDownload(t);
           :page-id="current.id"
         />
       </div>
+    </div>
+
+    <!-- 已有内容刷新时不隐藏；首次读取结束前不展示空态。 -->
+    <div
+      v-else-if="wiki.loading"
+      class="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground"
+      role="status"
+    >
+      <LoaderCircle class="h-4 w-4 animate-spin" />
+      <span>{{ t("common.loading") }}</span>
     </div>
 
     <!-- 空态 -->
