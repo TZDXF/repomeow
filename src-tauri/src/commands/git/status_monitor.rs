@@ -106,6 +106,7 @@ pub fn status(path: &str) -> AppResult<GitStatus> {
     };
     let mut st = GitStatus {
         is_repo: true,
+        is_shallow: repo.is_shallow(),
         branch: head_branch_name(&repo),
         ..Default::default()
     };

@@ -450,3 +450,29 @@ pub(super) fn push_blocking(path: &str) -> AppResult<GitStatus> {
     cache_status(path, &st);
     Ok(st)
 }
+
+/// 补全浅克隆历史及 origin 的所有分支,不修改工作区或合并远端提交。
+#[tauri::command]
+pub async fn git_unshallow(app: AppHandle, path: String) -> AppResult<GitStatus> {
+    let event_path = path.clone();
+    let status = run_blocking(move || unshallow_blocking(&path)).await?;
+    publish_write_status(&app, &event_path, &status, "unshallow", true);
+    Ok(status)
+}
+
+pub(super) fn unshallow_blocking(path: &str) -> AppResult<GitStatus> {
+    let mut args = vec!["fetch", "--tags"];
+    if status(path)?.is_shallow {
+        args.push("--unshallow");
+    }
+    args.extend(["origin", "+refs/heads/*:refs/remotes/origin/*"]);
+    run_git(path, &args)?;
+    // depth 隐含 single-branch,补全后也让后续 fetch 跟踪所有远端分支。
+    run_git(path, &["config", "--replace-all", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"])?;
+    let st = status(path)?;
+    if st.is_shallow {
+        return Err(AppError::coded(ErrorCode::GitCommandFailed, "The remote repository is shallow; full history is unavailable."));
+    }
+    cache_status(path, &st);
+    Ok(st)
+}

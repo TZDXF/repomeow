@@ -41,6 +41,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { buildBranchTree, type BranchTreeNode } from "@/lib/branch-tree";
+import { cmd } from "@/lib/tauri";
 import { toForwardSlash } from "@/lib/path";
 import { useProjectsStore } from "@/stores/projects";
 import CommitDialog from "@/components/git/CommitDialog.vue";
@@ -48,9 +49,9 @@ import ConflictDialog from "@/components/git/ConflictDialog.vue";
 import GitBranchDeleteDialog from "@/components/git/GitBranchDeleteDialog.vue";
 import GitBranchTreeItems from "@/components/git/GitBranchTreeItems.vue";
 import WorktreeOpsDialogs from "@/components/git/WorktreeOpsDialogs.vue";
-import type { GitBranches, GitWorktree, Project } from "@/types";
+import type { GitStatus, GitBranches, GitWorktree, Project } from "@/types";
 
-type Op = "pull" | "push" | "";
+type Op = "pull" | "push" | "unshallow" | "";
 
 const { t } = useI18n();
 const props = defineProps<{ project: Project }>();
@@ -100,6 +101,21 @@ const opsLocked = computed(() => busy.value !== "" || switching.value || !!branc
 
 /** 暴露给触发按钮的同步状态:点击菜单项后菜单即关闭,loading 需展示在外部按钮上 */
 const triggerOp = computed<Op>(() => busy.value || branchOp.value?.op || "");
+
+async function unshallow() {
+  if (opsLocked.value) return;
+  const project = props.project;
+  busy.value = "unshallow";
+  try {
+    project.git = await cmd<GitStatus>("git_unshallow", { path: project.path });
+    toast.success(t("git.unshallow.success"));
+    if (props.project.path === project.path) await loadBranches();
+  } catch (e) {
+    toast.error(String(e));
+  } finally {
+    busy.value = "";
+  }
+}
 
 // --- 新建分支对话框 ---
 const createOpen = ref(false);
@@ -506,6 +522,16 @@ function onOpsChanged() {
                 class="ml-auto text-[10px] font-medium leading-none text-emerald-600"
                 >{{ ahead }}</span
               >
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              v-if="git?.is_shallow"
+              class="gap-2 text-xs"
+              :disabled="opsLocked"
+              @click="unshallow"
+            >
+              <Loader2 v-if="busy === 'unshallow'" class="h-3.5 w-3.5 animate-spin" />
+              <ArrowDownToLine v-else class="h-3.5 w-3.5" />
+              {{ busy === "unshallow" ? t("git.unshallow.loading") : t("git.unshallow.action") }}
             </DropdownMenuItem>
             <DropdownMenuItem
               class="gap-2 text-xs"

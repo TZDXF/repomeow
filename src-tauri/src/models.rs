@@ -10,6 +10,8 @@ pub struct Tag {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GitStatus {
     pub is_repo: bool,
+    #[serde(default)]
+    pub is_shallow: bool,
     pub branch: Option<String>,
     pub ahead: i32,
     pub behind: i32,

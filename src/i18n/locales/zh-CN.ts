@@ -578,6 +578,11 @@ export default {
     },
   },
   git: {
+    unshallow: {
+      action: "转为完整克隆",
+      loading: "正在补全历史…",
+      success: "已转为完整克隆",
+    },
     init: {
       action: "初始化仓库",
       success: "已初始化 Git 仓库",

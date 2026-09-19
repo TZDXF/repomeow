@@ -167,6 +167,7 @@ pub fn run() {
             commands::git::git_checkout,
             commands::git::git_commit,
             commands::git::git_pull,
+            commands::git::git_unshallow,
             commands::git::git_push,
             commands::git::git_branch_delete,
             commands::git::git_remote_branch_delete,

@@ -1,5 +1,6 @@
 export interface GitStatus {
   is_repo: boolean;
+  is_shallow?: boolean;
   branch: string | null;
   ahead: number;
   behind: number;

@@ -17,7 +17,6 @@ const git = computed(() => props.project.git);
 /** 非 git 仓库时展示「初始化仓库」配置对话框 */
 const initDialogOpen = ref(false);
 const stashDialogOpen = ref(false);
-
 const ahead = computed(() => git.value?.ahead ?? 0);
 const behind = computed(() => git.value?.behind ?? 0);
 /** 未提交变更总数(已暂存 + 已修改 + 未跟踪) */
@@ -51,7 +50,9 @@ const changesTitle = computed(
                 ? t('git.pull.pulling')
                 : op === 'push'
                   ? t('git.push.pushing')
-                  : t('git.branch.switch')
+                  : op === 'unshallow'
+                    ? t('git.unshallow.loading')
+                    : t('git.branch.switch')
             "
           >
             <Loader2 v-if="op" class="h-3 w-3 animate-spin" />

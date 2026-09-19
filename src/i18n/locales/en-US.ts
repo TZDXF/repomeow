@@ -609,6 +609,11 @@ export default {
     },
   },
   git: {
+    unshallow: {
+      action: "Convert to full clone",
+      loading: "Fetching full history…",
+      success: "Converted to a full clone",
+    },
     init: {
       action: "Initialize repository",
       success: "Git repository initialized",
