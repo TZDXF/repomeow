@@ -535,6 +535,9 @@ export default {
       dirNameLabel: "Directory name",
       dirNamePlaceholder: "Directory to clone into",
       cloning: "Cloning...",
+      shallowClone: "Shallow clone",
+      shallowCloneHint:
+        "Clone only the latest commit (depth=1) to reduce downloads. Full history and other branches will not be available.",
       cloneAndAdd: "Clone & add",
       cloned: 'Cloned and added project "{name}".',
       modeAccount: "Account repos",

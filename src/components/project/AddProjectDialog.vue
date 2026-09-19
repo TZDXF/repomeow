@@ -23,6 +23,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import ScrollArea from "@/components/common/ScrollArea.vue";
@@ -79,6 +80,7 @@ const cloneName = ref("");
 const dirNameTouched = ref(false);
 const cloneNameTouched = ref(false);
 const cloning = ref(false);
+const shallowClone = ref(false);
 const cancelling = ref(false);
 let cloneJobId = "";
 // 从「账号仓库」入口克隆时记录账号,后端用其 token 克隆;手动切模式时清空
@@ -93,6 +95,7 @@ const accountsLoaded = ref(false);
 const selectedAccountId = ref<number | null>(null);
 const repos = ref<RemoteRepo[]>([]);
 const reposLoading = ref(false);
+const reposError = ref("");
 const repoSearch = ref("");
 const selectedOwner = ref("");
 const ownerPickerOpen = ref(false);
@@ -161,18 +164,23 @@ async function loadRepos() {
   if (id == null) return;
   const seq = ++reposLoadSeq;
   reposLoading.value = true;
+  reposError.value = "";
   try {
     const list = await listAccountRepos(id);
     // 期间已切换到其他账号:结果过期,丢弃
     if (seq === reposLoadSeq) repos.value = list;
   } catch (e) {
-    if (seq === reposLoadSeq) toast.error(String(e));
+    if (seq === reposLoadSeq) {
+      reposError.value = String(e);
+      toast.error(reposError.value);
+    }
   } finally {
     if (seq === reposLoadSeq) reposLoading.value = false;
   }
 }
 
 watch(selectedAccountId, (id) => {
+  reposError.value = "";
   repos.value = [];
   repoSearch.value = "";
   selectedOwner.value = "";
@@ -291,6 +299,7 @@ async function submitClone() {
       targetPath.value,
       cloneJobId,
       cloneAccountId,
+      shallowClone.value,
     );
     const project = await store.addProject(
       clonedPath,
@@ -304,6 +313,7 @@ async function submitClone() {
     parentDir.value = "";
     dirName.value = "";
     cloneName.value = "";
+    shallowClone.value = false;
     dirNameTouched.value = false;
     cloneNameTouched.value = false;
     cloneAccountId = undefined;
@@ -546,6 +556,14 @@ function switchMode(m: "local" | "clone" | "account") {
               <Loader2 class="h-4 w-4 animate-spin" />
               {{ t("projects.add.repoLoading") }}
             </div>
+            <div v-else-if="reposError" class="flex flex-col items-center gap-3 px-3 py-6">
+              <p role="alert" class="text-center text-sm text-destructive break-all">
+                {{ reposError }}
+              </p>
+              <Button type="button" variant="outline" :disabled="reposLoading" @click="loadRepos">
+                {{ t("common.retry") }}
+              </Button>
+            </div>
             <p
               v-else-if="filteredRepos.length === 0"
               class="py-6 text-center text-sm text-muted-foreground"
@@ -628,7 +646,13 @@ function switchMode(m: "local" | "clone" | "account") {
             @input="cloneNameTouched = true"
           />
         </div>
-        <DialogFooter>
+        <DialogFooter class="flex-row items-center">
+          <div class="mr-auto flex items-center gap-2">
+            <Switch id="project-shallow-clone" v-model="shallowClone" :disabled="cloning" />
+            <label for="project-shallow-clone" class="text-sm font-medium">
+              {{ t("projects.add.shallowClone") }}
+            </label>
+          </div>
           <Button v-if="cloning" type="button" variant="outline" @click="cancelClone">
             {{ t("common.cancel") }}
           </Button>

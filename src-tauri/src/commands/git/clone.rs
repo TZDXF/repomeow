@@ -26,6 +26,7 @@ pub async fn git_clone(
     target_path: String,
     job_id: String,
     account_id: Option<i64>,
+    shallow: Option<bool>,
 ) -> AppResult<String> {
     let url = url.trim().to_string();
     if url.is_empty() {
@@ -71,8 +72,12 @@ pub async fn git_clone(
     if clone_url != url {
         command.arg("-c").arg("credential.helper=");
     }
+    command.arg("clone");
+    if shallow.unwrap_or(false) {
+        command.args(["--depth", "1"]);
+    }
     command
-        .args(["clone", "--", &clone_url, &target_path])
+        .args(["--", &clone_url, &target_path])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);

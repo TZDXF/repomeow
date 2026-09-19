@@ -191,8 +191,15 @@ export const useProjectsStore = defineStore("projects", () => {
     targetPath: string,
     jobId: string,
     accountId?: number,
+    shallow = false,
   ): Promise<string> {
-    return cmd<string>("git_clone", { url, targetPath, jobId, accountId: accountId ?? null });
+    return cmd<string>("git_clone", {
+      url,
+      targetPath,
+      jobId,
+      accountId: accountId ?? null,
+      shallow,
+    });
   }
 
   /** 取消进行中的克隆(后端 kill 子进程并清理半成品目录) */

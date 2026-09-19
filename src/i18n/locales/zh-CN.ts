@@ -508,6 +508,9 @@ export default {
       dirNameLabel: "目录名",
       dirNamePlaceholder: "克隆到的目录名",
       cloning: "克隆中...",
+      shallowClone: "浅克隆",
+      shallowCloneHint:
+        "仅克隆最近一次提交（depth=1），减少下载量；历史记录及其他分支不可完整查看。",
       cloneAndAdd: "克隆并添加",
       cloned: "已克隆并添加项目「{name}」",
       modeAccount: "账号仓库",
