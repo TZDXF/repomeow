@@ -3,6 +3,8 @@ import {
   resourceSettingsSearchEntries,
   resourceTabForSetting,
   matchesSettingsSearch,
+  scoreSettingsSearch,
+  searchSnippet,
   settingsSearchText,
 } from "./settings-search";
 
@@ -34,5 +36,38 @@ describe("resource settings navigation", () => {
   it("does not select a tab for other settings", () => {
     expect(resourceTabForSetting("settings.categories.resources")).toBeUndefined();
     expect(resourceTabForSetting("settings.general.theme")).toBeUndefined();
+  });
+});
+
+describe("settings search scoring", () => {
+  it("ranks title matches above detail-only matches", () => {
+    const titleHit = scoreSettingsSearch("用户", {
+      title: "用户名",
+      category: "账号绑定",
+      details: "保存时验证 Token",
+    })!;
+    const detailHit = scoreSettingsSearch("用户", {
+      title: "CLI",
+      category: "CLI",
+      details: "将程序目录加入用户 PATH",
+    })!;
+    expect(titleHit.score).toBeGreaterThan(detailHit.score);
+    expect(titleHit.snippet).toBe("");
+    expect(detailHit.snippet).toContain("用户 PATH");
+  });
+  it("returns null when any term misses and handles blank query", () => {
+    const fields = { title: "主题", category: "常规" };
+    expect(scoreSettingsSearch("主题 缺失", fields)).toBeNull();
+    expect(scoreSettingsSearch("  ", fields)).toBeNull();
+  });
+  it("extracts a snippet around the first matched term", () => {
+    const text = "前缀文字 ".repeat(10) + "用户 PATH 已更新" + " 后缀文字".repeat(10);
+    const snippet = searchSnippet(text, "用户");
+    expect(snippet).toContain("用户 PATH");
+    expect(snippet.startsWith("…")).toBe(true);
+    expect(snippet.endsWith("…")).toBe(true);
+  });
+  it("returns empty snippet without a match", () => {
+    expect(searchSnippet("常规 主题", "用户")).toBe("");
   });
 });

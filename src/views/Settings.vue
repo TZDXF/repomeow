@@ -40,7 +40,7 @@ import AboutSettings from "@/components/settings/AboutSettings.vue";
 import {
   resourceSettingsSearchEntries,
   resourceTabForSetting,
-  matchesSettingsSearch,
+  scoreSettingsSearch,
   settingsSearchText,
 } from "@/lib/settings-search";
 
@@ -176,32 +176,46 @@ const resourceLibrary = ref<InstanceType<typeof ResourceLibrarySettings>>();
 onClickOutside(searchRoot, () => {
   searchOpen.value = false;
 });
-const searchResults = computed(() => {
+interface SearchResult {
+  category: string;
+  labelKey: string;
+  score: number;
+  /** 全文案命中时的上下文摘要，解释该结果为何出现 */
+  snippet: string;
+  order: number;
+}
+const searchResults = computed<SearchResult[]>(() => {
   if (!query.value.trim()) return [];
   const entries = [
     ...settingEntries,
     ...resourceSettingsSearchEntries,
     ...categories.map((c) => ({ category: c.id, labelKey: c.labelKey })),
   ];
-  return entries.filter((entry) => {
-    const category = categories.find((c) => c.id === entry.category)!;
-    // 分类结果同时覆盖描述与子项，未直接展示的设置仍可通过分类入口访问。
-    const resourceEntry = resourceSettingsSearchEntries.find(
-      (item) => item.labelKey === entry.labelKey,
-    );
-    const details =
-      entry.labelKey === category.labelKey
-        ? (categorySearchKeys[entry.category] ?? [])
-            .map((key) => settingsSearchText(tm(key)))
-            .join(" ")
-        : resourceEntry
-          ? settingsSearchText(tm(resourceEntry.searchKey))
-          : "";
-    return matchesSettingsSearch(
-      query.value,
-      `${t(category.labelKey)} ${t(entry.labelKey)} ${entry.labelKey} ${details}`,
-    );
-  });
+  // 标题命中权重最高，分类全文案命中权重最低，同分时保持页面原有顺序。
+  return entries
+    .map((entry, order): SearchResult | null => {
+      const category = categories.find((c) => c.id === entry.category)!;
+      const resourceEntry = resourceSettingsSearchEntries.find(
+        (item) => item.labelKey === entry.labelKey,
+      );
+      const details =
+        entry.labelKey === category.labelKey
+          ? (categorySearchKeys[entry.category] ?? [])
+              .map((key) => settingsSearchText(tm(key)))
+              .join(" ")
+          : resourceEntry
+            ? settingsSearchText(tm(resourceEntry.searchKey))
+            : "";
+      const hit = scoreSettingsSearch(query.value, {
+        title: t(entry.labelKey),
+        category: t(category.labelKey),
+        key: entry.labelKey,
+        details,
+      });
+      return hit ? { ...entry, ...hit, order } : null;
+    })
+    .filter((entry): entry is SearchResult => entry !== null)
+    .sort((a, b) => b.score - a.score || a.order - b.order);
 });
 watch(query, () => {
   selectedIndex.value = 0;
@@ -295,7 +309,10 @@ async function locateSetting(entry = searchResults.value[selectedIndex.value]) {
             @click="locateSetting(result)"
           >
             <span>{{ t(result.labelKey) }}</span>
-            <span class="text-xs text-muted-foreground">{{
+            <span v-if="result.snippet" class="line-clamp-2 text-xs text-muted-foreground">{{
+              result.snippet
+            }}</span>
+            <span class="text-xs text-muted-foreground/70">{{
               t(categories.find((c) => c.id === result.category)!.labelKey)
             }}</span>
           </button>
