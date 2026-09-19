@@ -25,7 +25,7 @@ import {
   type FileTreeNode,
 } from "@/lib/file-tree";
 import { openPathWith, sortOpenWithOptions } from "@/lib/open-with";
-import { baseName } from "@/lib/path";
+import { baseName, cleanPath } from "@/lib/path";
 import { cmd } from "@/lib/tauri";
 import { useCommitAndPush } from "@/composables/git/useCommitAndPush";
 import { useProjectsStore } from "@/stores/projects";
@@ -374,9 +374,9 @@ async function submit() {
 }
 
 const { pendingPush, run: commitAndPush } = useCommitAndPush(
-  async () => {
+  async (target) => {
     await store.commitChanges(
-      props.project,
+      target.project,
       message.value.trim(),
       includeUntracked.value,
       checkedPayload.value,
@@ -390,7 +390,12 @@ const { pendingPush, run: commitAndPush } = useCommitAndPush(
     diff.value = null;
     showChanges.value = false;
   },
-  () => store.pushRepository(props.project),
+  (target) => store.pushRepository(target.project, target.branch ?? undefined),
+  () => ({
+    key: JSON.stringify([cleanPath(props.project.path), git.value?.branch ?? null]),
+    project: props.project,
+    branch: git.value?.branch ?? null,
+  }),
 );
 
 async function submitAndPush() {

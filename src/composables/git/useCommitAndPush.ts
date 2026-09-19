@@ -1,16 +1,22 @@
-import { ref } from "vue";
+import { computed, ref } from "vue";
 
-/** 提交成功后保留推送阶段，失败重试不得再次提交（包括部分文件提交）。 */
-export function useCommitAndPush(commit: () => Promise<void>, push: () => Promise<void>) {
-  const pendingPush = ref(false);
+/** 按仓库/分支隔离重试状态，每次执行固定目标，避免异步期间切换目标后误推。 */
+export function useCommitAndPush<T extends { key: string } = { key: string }>(
+  commit: (target: T) => Promise<void>,
+  push: (target: T) => Promise<void>,
+  getTarget: () => T,
+) {
+  const pendingTargets = ref(new Set<string>());
+  const pendingPush = computed(() => pendingTargets.value.has(getTarget().key));
 
   async function run() {
-    if (!pendingPush.value) {
-      await commit();
-      pendingPush.value = true;
+    const target = getTarget();
+    if (!pendingTargets.value.has(target.key)) {
+      await commit(target);
+      pendingTargets.value.add(target.key);
     }
-    await push();
-    pendingPush.value = false;
+    await push(target);
+    pendingTargets.value.delete(target.key);
   }
 
   return { pendingPush, run };
