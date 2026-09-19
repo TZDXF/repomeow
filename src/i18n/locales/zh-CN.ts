@@ -1473,6 +1473,10 @@ export default {
     },
   },
   settings: {
+    search: {
+      placeholder: "搜索设置…",
+      empty: "未找到匹配的设置",
+    },
     title: "设置",
     back: "返回项目列表",
     categories: {

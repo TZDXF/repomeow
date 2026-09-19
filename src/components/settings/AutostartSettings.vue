@@ -44,7 +44,9 @@ async function onToggle(value: boolean) {
   <section>
     <div class="flex items-center justify-between rounded-lg border px-3 py-2.5">
       <div class="flex flex-col gap-0.5">
-        <span class="text-sm font-medium">{{ t("settings.autostart.launchAtLogin") }}</span>
+        <span data-setting="settings.autostart.launchAtLogin" class="text-sm font-medium">{{
+          t("settings.autostart.launchAtLogin")
+        }}</span>
         <span class="text-xs text-muted-foreground">{{
           t("settings.autostart.launchAtLoginHint")
         }}</span>

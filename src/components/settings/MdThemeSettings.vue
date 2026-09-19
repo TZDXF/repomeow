@@ -37,7 +37,9 @@ const OPTIONS: { value: MdTheme; labelKey: string; descriptionKey: string; icon:
 
 <template>
   <section>
-    <h2 class="text-base font-semibold">{{ t("settings.mdTheme.title") }}</h2>
+    <h2 data-setting="settings.mdTheme.title" class="text-base font-semibold">
+      {{ t("settings.mdTheme.title") }}
+    </h2>
     <p class="mt-1 text-sm text-muted-foreground">{{ t("settings.mdTheme.description") }}</p>
     <div class="mt-4 flex flex-col gap-2">
       <button

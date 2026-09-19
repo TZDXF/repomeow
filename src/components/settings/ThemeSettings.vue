@@ -56,7 +56,9 @@ const SKINS: { value: ThemeSkin; labelKey: string; descriptionKey: string; swatc
 
 <template>
   <section>
-    <h2 class="text-base font-semibold">{{ t("settings.general.theme") }}</h2>
+    <h2 data-setting="settings.general.theme" class="text-base font-semibold">
+      {{ t("settings.general.theme") }}
+    </h2>
     <p class="mt-1 text-sm text-muted-foreground">{{ t("settings.general.themeDescription") }}</p>
     <div class="mt-4 flex flex-col gap-2">
       <button
@@ -76,7 +78,9 @@ const SKINS: { value: ThemeSkin; labelKey: string; descriptionKey: string; swatc
       </button>
     </div>
 
-    <h2 class="mt-8 text-base font-semibold">{{ t("settings.skin.title") }}</h2>
+    <h2 data-setting="settings.skin.title" class="mt-8 text-base font-semibold">
+      {{ t("settings.skin.title") }}
+    </h2>
     <p class="mt-1 text-sm text-muted-foreground">{{ t("settings.skin.description") }}</p>
     <div class="mt-4 flex flex-col gap-2">
       <button

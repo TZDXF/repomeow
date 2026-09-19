@@ -1530,6 +1530,10 @@ export default {
     },
   },
   settings: {
+    search: {
+      placeholder: "Search settings…",
+      empty: "No matching settings",
+    },
     title: "Settings",
     back: "Back to projects",
     categories: {

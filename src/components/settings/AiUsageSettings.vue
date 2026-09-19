@@ -229,7 +229,9 @@ function ioTitle(entry: AiUsageEntry): string {
 <template>
   <section>
     <div class="flex items-center justify-between">
-      <h2 class="text-base font-semibold">{{ t("settings.usage.title") }}</h2>
+      <h2 data-setting="settings.usage.title" class="text-base font-semibold">
+        {{ t("settings.usage.title") }}
+      </h2>
       <Button
         variant="ghost"
         size="icon"
@@ -255,7 +257,9 @@ function ioTitle(entry: AiUsageEntry): string {
 
       <!-- 最近半年热力图(GitHub 贡献图风格:周列 × 周一~周日行) -->
       <div class="mt-1 border-t pt-4">
-        <label class="text-sm font-medium">{{ t("settings.usage.trend") }}</label>
+        <label data-setting="settings.usage.trend" class="text-sm font-medium">{{
+          t("settings.usage.trend")
+        }}</label>
         <CalendarHeatmap
           fit-width
           class="mt-2"
@@ -267,7 +271,9 @@ function ioTitle(entry: AiUsageEntry): string {
 
       <!-- 任务类型分布(条形图:类型 · 占比条 · 次数 · 合计 tokens) -->
       <div class="mt-1 border-t pt-4">
-        <label class="text-sm font-medium">{{ t("settings.usage.distribution") }}</label>
+        <label data-setting="settings.usage.distribution" class="text-sm font-medium">{{
+          t("settings.usage.distribution")
+        }}</label>
         <div v-if="summary.byTask.length" class="mt-2 flex flex-col gap-0.5">
           <div
             v-for="stat in summary.byTask"
@@ -305,7 +311,9 @@ function ioTitle(entry: AiUsageEntry): string {
     <!-- 明细日志 -->
     <div class="mt-1 border-t pt-4">
       <div class="flex items-center justify-between gap-2">
-        <label class="text-sm font-medium">{{ t("settings.usage.details") }}</label>
+        <label data-setting="settings.usage.details" class="text-sm font-medium">{{
+          t("settings.usage.details")
+        }}</label>
         <Button
           variant="outline"
           size="sm"

@@ -22,7 +22,9 @@ const OPTIONS: { value: Language; labelKey: string; nativeLabelKey: string }[] =
 
 <template>
   <section>
-    <h2 class="text-base font-semibold">{{ t("settings.general.language") }}</h2>
+    <h2 data-setting="settings.general.language" class="text-base font-semibold">
+      {{ t("settings.general.language") }}
+    </h2>
     <p class="mt-1 text-sm text-muted-foreground">
       {{ t("settings.general.languageDescription") }}
     </p>

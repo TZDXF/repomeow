@@ -347,11 +347,15 @@ const CONCURRENCY_OPTIONS = [1, 2, 3, 4, 5];
 
 <template>
   <section>
-    <h2 class="text-base font-semibold">{{ t("settings.ai.title") }}</h2>
+    <h2 data-setting="settings.ai.title" class="text-base font-semibold">
+      {{ t("settings.ai.title") }}
+    </h2>
     <div class="mt-4 flex flex-col gap-4">
       <!-- 默认模型 -->
       <div class="flex flex-col gap-1.5">
-        <label class="text-sm font-medium">{{ t("settings.ai.defaultModel") }}</label>
+        <label data-setting="settings.ai.defaultModel" class="text-sm font-medium">{{
+          t("settings.ai.defaultModel")
+        }}</label>
         <ModelSelector
           :model-value="defaultModelValue"
           :groups="modelGroups"
@@ -391,7 +395,9 @@ const CONCURRENCY_OPTIONS = [1, 2, 3, 4, 5];
       <!-- 厂商列表 -->
       <div class="flex flex-col gap-1.5">
         <div class="flex items-center justify-between">
-          <label class="text-sm font-medium">{{ t("settings.ai.providers") }}</label>
+          <label data-setting="settings.ai.providers" class="text-sm font-medium">{{
+            t("settings.ai.providers")
+          }}</label>
           <div class="flex items-center gap-1.5">
             <Button
               variant="outline"
@@ -450,7 +456,9 @@ const CONCURRENCY_OPTIONS = [1, 2, 3, 4, 5];
 
       <!-- 并发上限 -->
       <div class="flex flex-col gap-1.5">
-        <label class="text-sm font-medium">{{ t("settings.ai.concurrency") }}</label>
+        <label data-setting="settings.ai.concurrency" class="text-sm font-medium">{{
+          t("settings.ai.concurrency")
+        }}</label>
         <div class="flex gap-1.5">
           <button
             v-for="n in CONCURRENCY_OPTIONS"

@@ -24,7 +24,9 @@ const OPTIONS: { value: CloseAction; icon: typeof Power; labelKey: string; descK
 
 <template>
   <section>
-    <h2 class="text-base font-semibold">{{ t("settings.tray.title") }}</h2>
+    <h2 data-setting="settings.tray.title" class="text-base font-semibold">
+      {{ t("settings.tray.title") }}
+    </h2>
     <p class="mt-1 text-sm text-muted-foreground">
       {{ t("settings.tray.description") }}
     </p>

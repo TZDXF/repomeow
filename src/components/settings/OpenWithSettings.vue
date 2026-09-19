@@ -136,7 +136,9 @@ const customById = computed(
   <section>
     <div class="flex items-start justify-between gap-4">
       <div>
-        <h2 class="text-base font-semibold">{{ t("settings.general.openWith") }}</h2>
+        <h2 data-setting="settings.general.openWith" class="text-base font-semibold">
+          {{ t("settings.general.openWith") }}
+        </h2>
         <p class="mt-1 text-sm text-muted-foreground">
           {{ t("settings.general.openWithDescription") }}
         </p>

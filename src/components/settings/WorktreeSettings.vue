@@ -29,7 +29,9 @@ function commit() {
 
 <template>
   <section>
-    <h2 class="text-base font-semibold">{{ t("settings.general.worktreeDir") }}</h2>
+    <h2 data-setting="settings.general.worktreeDir" class="text-base font-semibold">
+      {{ t("settings.general.worktreeDir") }}
+    </h2>
     <p class="mt-1 text-sm text-muted-foreground">
       {{ t("settings.general.worktreeDirDescription") }}
     </p>

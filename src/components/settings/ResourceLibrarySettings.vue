@@ -2,6 +2,7 @@
 import { computed, ref, type Component } from "vue";
 import { useI18n } from "vue-i18n";
 import { Bot, Boxes, Cable, DatabaseBackup, Store } from "@lucide/vue";
+import { resourceSettingsTabs, type ResourceSettingsTab } from "@/lib/settings-search";
 import ResourceBackupTab from "./ResourceBackupTab.vue";
 import ResourceMcpTab from "./ResourceMcpTab.vue";
 import ResourceMarketplaceTab from "./ResourceMarketplaceTab.vue";
@@ -10,20 +11,26 @@ import ResourceSkillsTab from "./ResourceSkillsTab.vue";
 
 const { t } = useI18n();
 
-type ResourceTabId = "market" | "skills" | "mcp" | "backup" | "agents";
+type ResourceTabId = ResourceSettingsTab;
 
-const tabs: { id: ResourceTabId; icon: Component; component: Component }[] = [
-  { id: "skills", icon: Boxes, component: ResourceSkillsTab },
-  { id: "mcp", icon: Cable, component: ResourceMcpTab },
-  { id: "agents", icon: Bot, component: ResourceAgentsTab },
-  { id: "backup", icon: DatabaseBackup, component: ResourceBackupTab },
-  { id: "market", icon: Store, component: ResourceMarketplaceTab },
-];
+const tabComponents: Record<ResourceTabId, { icon: Component; component: Component }> = {
+  skills: { icon: Boxes, component: ResourceSkillsTab },
+  mcp: { icon: Cable, component: ResourceMcpTab },
+  agents: { icon: Bot, component: ResourceAgentsTab },
+  backup: { icon: DatabaseBackup, component: ResourceBackupTab },
+  market: { icon: Store, component: ResourceMarketplaceTab },
+};
+const tabs = resourceSettingsTabs.map((id) => ({ id, ...tabComponents[id] }));
 
 const activeTab = ref<ResourceTabId>("skills");
 const activeComponent = computed(
   () => tabs.find((tab) => tab.id === activeTab.value)?.component ?? ResourceSkillsTab,
 );
+
+function selectTab(tab: ResourceTabId) {
+  activeTab.value = tab;
+}
+defineExpose({ selectTab });
 
 /** 方向键在 Tab 间循环切换(简单 keyboard navigation) */
 function onTablistKeydown(event: KeyboardEvent) {
@@ -56,6 +63,7 @@ function onTablistKeydown(event: KeyboardEvent) {
         :key="tab.id"
         type="button"
         role="tab"
+        :data-setting="`settings.resources.tabs.${tab.id}`"
         :aria-selected="activeTab === tab.id"
         :tabindex="activeTab === tab.id ? 0 : -1"
         class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
