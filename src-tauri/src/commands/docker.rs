@@ -192,7 +192,7 @@ fn compose_services(dir: &Path, file: &str, language: &str) -> AppResult<Vec<Str
 /// 本地是否已存在该镜像(docker image inspect);探测失败一律视为不存在
 fn image_exists(dir: &Path, image: &str) -> bool {
     docker_command()
-        .args(["image", "inspect", "-q", image])
+        .args(["image", "inspect", "--format", "{{.Id}}", image])
         .current_dir(dir)
         .output()
         .map(|o| o.status.success())
