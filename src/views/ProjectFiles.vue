@@ -27,8 +27,9 @@ import MdImage from "@/components/markdown/MdImage.vue";
 import MdLink from "@/components/markdown/MdLink.vue";
 import { MD_BASE_PATH_KEY } from "@/components/markdown/keys";
 import ImageViewer from "@/components/files/ImageViewer.vue";
+import VideoViewer from "@/components/files/VideoViewer.vue";
 import { cmd, onListen } from "@/lib/tauri";
-import { extOf, IMAGE_EXTS } from "@/lib/file-kind";
+import { extOf, IMAGE_EXTS, VIDEO_EXTS } from "@/lib/file-kind";
 import { invalidateSemanticCache } from "@/lib/semantic";
 import { hasScheme, resolvePath, safeLinkHref } from "@/lib/markdown";
 import { openPathWith, sortOpenWithOptions } from "@/lib/open-with";
@@ -102,7 +103,7 @@ watch(rootPath, () => {
 const MD_EXTS = new Set(["md", "markdown"]);
 
 // 图片预览公共逻辑(与 ResourceSkillPreview 共用):asset 直显 + svg 预览/源码切换
-const { selectedExt, isImage, isSvg, svgMode, svgSource, imageSrc, onSelectImage } =
+const { selectedExt, isImage, isSvg, svgMode, svgSource, imageSrc, onSelectImage, isVideo, videoSrc } =
   useImagePreview(selected, (path) => (project.value ? resolvePath(rootPath.value, path) : null));
 const isMarkdown = computed(() => MD_EXTS.has(selectedExt.value));
 
@@ -118,8 +119,9 @@ watch([selected, svgSource], async ([path]) => {
     previewPath.value = null;
     return;
   }
-  if (IMAGE_EXTS.has(extOf(path)) && !svgSource.value) {
-    previewText.value = null; // 图片走 asset 协议直显,不读内容(svg 源码模式除外)
+  const selExt = extOf(path);
+  if ((IMAGE_EXTS.has(selExt) && !svgSource.value) || VIDEO_EXTS.has(selExt)) {
+    previewText.value = null; // 图片/视频走 asset 协议直显,不读内容(svg 源码模式除外)
     previewPath.value = null;
     return;
   }
@@ -188,7 +190,8 @@ const leftView = ref<"tree" | "search" | "outline">("tree");
 
 // ── 结构视图(sem 语义导航):仅当前文件为可预览文本时可用 ──────────────────────
 const outlineEnabled = computed(
-  () => !!selected.value && !previewBinary.value && (!isImage.value || svgSource.value),
+  () =>
+    !!selected.value && !previewBinary.value && !isVideo.value && (!isImage.value || svgSource.value),
 );
 watch(outlineEnabled, (enabled) => {
   if (!enabled && leftView.value === "outline") leftView.value = "tree";
@@ -585,6 +588,11 @@ function startTreeResize(e: PointerEvent) {
           <p v-else-if="previewBinary" class="p-6 text-sm text-muted-foreground">
             {{ t("files.binary") }}
           </p>
+          <VideoViewer
+            v-else-if="isVideo"
+            :src="videoSrc"
+            :name="selected ?? undefined"
+          />
           <ImageViewer
             v-else-if="isImage && !svgSource"
             :src="imageSrc"

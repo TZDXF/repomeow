@@ -28,13 +28,14 @@ import {
 } from "@/components/ai-elements/model-selector";
 import CodeViewer from "@/components/files/CodeViewer.vue";
 import ImageViewer from "@/components/files/ImageViewer.vue";
+import VideoViewer from "@/components/files/VideoViewer.vue";
 import MdLink from "@/components/markdown/MdLink.vue";
 import type { SupportedLocale } from "@/i18n";
 import { buildFileTree, flattenVisibleTree, type FileTreeRow } from "@/lib/file-tree";
 import { formatRelativeTime } from "@/lib/format";
 import { createBeforeDownload } from "@/lib/markdown-download";
 import { hasScheme, resolvePath, safeLinkHref } from "@/lib/markdown";
-import { extOf, IMAGE_EXTS } from "@/lib/file-kind";
+import { extOf, IMAGE_EXTS, VIDEO_EXTS } from "@/lib/file-kind";
 import { joinPath } from "@/lib/path";
 import { useImagePreview } from "@/composables/files/useImagePreview";
 import { getCachedScanReport, putCachedScanReport } from "@/lib/scan-cache";
@@ -104,7 +105,7 @@ const selectedFilePath = computed(() =>
 );
 /** 资源库技能的磁盘目录(图片拼绝对路径用;本地模式直接用 localDir) */
 const librarySkillDir = ref<string | null>(null);
-const { isImage, isSvg, svgMode, svgSource, imageSrc, onSelectImage } = useImagePreview(
+const { isImage, isSvg, svgMode, svgSource, imageSrc, onSelectImage, isVideo, videoSrc } = useImagePreview(
   selectedFilePath,
   (path) => {
     const root = isLocal.value ? localDir.value : librarySkillDir.value;
@@ -310,8 +311,9 @@ function syncContent() {
 }
 
 async function ensureFileContent(path: string) {
-  // 图片走 asset 协议直显,不读文本内容(svg 源码模式除外)
-  if (IMAGE_EXTS.has(extOf(path)) && !svgSource.value) {
+  // 图片/视频走 asset 协议直显,不读文本内容(svg 源码模式除外)
+  const selExt = extOf(path);
+  if ((IMAGE_EXTS.has(selExt) && !svgSource.value) || VIDEO_EXTS.has(selExt)) {
     fileContent.value = null;
     return;
   }
@@ -1151,6 +1153,12 @@ const llmNotice = computed(() => {
           >
             {{ t("common.loading") }}
           </p>
+          <div v-else-if="isVideo" class="h-full min-h-0">
+            <VideoViewer v-if="videoSrc" :src="videoSrc" :name="selected.path" />
+            <p v-else class="px-3 py-8 text-center text-xs text-muted-foreground">
+              {{ t("settings.resources.skills.previewPage.fileBinary") }}
+            </p>
+          </div>
           <div v-else-if="isImage && !svgSource" class="h-full min-h-0">
             <ImageViewer v-if="imageSrc" :src="imageSrc" :svg="isSvg" :alt="selected.path" />
             <p v-else class="px-3 py-8 text-center text-xs text-muted-foreground">

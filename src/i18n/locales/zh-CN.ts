@@ -1322,6 +1322,7 @@ export default {
     searchLimited: "仅显示前 {count} 条匹配",
     listFailed: "文件列表加载失败",
     loadFailed: "文件加载失败",
+    videoFailed: "视频无法播放(格式不受支持或文件已损坏)",
     selectHint: "从左侧选择文件以预览",
     binary: "二进制文件,无法预览",
     truncated: "文件过大,仅显示前 512KB 内容",

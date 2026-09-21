@@ -11,6 +11,25 @@ export const IMAGE_EXTS = new Set([
   "avif",
 ]);
 
+/** 视频扩展名集合(文件预览走 asset 协议直显;WebView2 对 mkv/avi 等容器支持有限,
+ *  不可播格式由 VideoViewer 的 error 事件兜底提示) */
+export const VIDEO_EXTS = new Set([
+  "mp4",
+  "m4v",
+  "webm",
+  "ogg",
+  "ogv",
+  "mov",
+  "mkv",
+  "avi",
+  "wmv",
+  "flv",
+  "ts",
+  "mpg",
+  "mpeg",
+  "3gp",
+]);
+
 /** 取路径扩展名(小写、不含点;只看最后一个路径段内的最后一个点) */
 export function extOf(path: string): string {
   const name = path.slice(path.lastIndexOf("/") + 1);
