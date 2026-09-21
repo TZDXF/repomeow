@@ -1376,6 +1376,7 @@ export default {
     searchLimited: "Showing first {count} matches",
     listFailed: "Failed to load file list",
     loadFailed: "Failed to load file",
+    fileGone: "The file has been moved or deleted",
     videoFailed: "Cannot play video (unsupported format or corrupted file)",
     selectHint: "Select a file on the left to preview",
     binary: "Binary file, cannot preview",

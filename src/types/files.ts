@@ -57,3 +57,11 @@ export interface GitWorktreeFile {
   /** 是否未跟踪文件(勾选"包含未跟踪文件"才会被提交) */
   untracked: boolean;
 }
+
+/** 文件树变更事件(files://tree-changed,watch_project_files 监听期间由后端去抖后推送) */
+export interface FilesTreeChangedPayload {
+  /** 监听根目录('/' 分隔,已归一化) */
+  root: string;
+  /** 变更的仓库相对路径('/' 分隔,去重);空数组表示事件过多/丢失,需全量刷新 */
+  paths: string[];
+}

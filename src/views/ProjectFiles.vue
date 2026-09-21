@@ -34,6 +34,7 @@ import { invalidateSemanticCache } from "@/lib/semantic";
 import { hasScheme, resolvePath, safeLinkHref } from "@/lib/markdown";
 import { openPathWith, sortOpenWithOptions } from "@/lib/open-with";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
+import { toForwardSlash } from "@/lib/path";
 import type { FindQuery } from "@/lib/text-search";
 import { useFileFind } from "@/composables/files/useFileFind";
 import { useImagePreview } from "@/composables/files/useImagePreview";
@@ -42,6 +43,7 @@ import { useSettingsStore } from "@/stores/settings";
 import { useProjectsStore } from "@/stores/projects";
 import type {
   FilePreview,
+  FilesTreeChangedPayload,
   GitProjectChangedPayload,
   Project,
   SemanticEntityRef,
@@ -75,7 +77,7 @@ const rootPath = computed(() => {
 
 // ── 选中与预览 ──────────────────────────────────────────────────────────────
 const selected = ref<string | null>(null);
-const { listError, listLoading, revealPath, rootEmpty, toggleFolder, visibleRows } =
+const { listError, listLoading, refreshDirs, revealPath, rootEmpty, toggleFolder, visibleRows } =
   useLazyProjectFiles({ rootPath, selected });
 
 async function openFileFromSearch(path: string) {
@@ -85,6 +87,8 @@ async function openFileFromSearch(path: string) {
 }
 
 const previewError = ref(false);
+// 选中文件已被移动/删除(预览失败或树变更时经存在性复核确认)
+const previewGone = ref(false);
 const previewText = ref<string | null>(null);
 // 当前 previewText 所属文件(与 text 同步赋值/清空):区分「选中了什么」与「内容就位没有」,
 // 旧文件残留内容不得进新文件的渲染分支(代码→MD 切换闪旧文本即此因)
@@ -112,6 +116,7 @@ const isMarkdown = computed(() => MD_EXTS.has(selectedExt.value));
 watch([selected, svgSource], async ([path]) => {
   const mySeq = ++previewSeq;
   previewError.value = false;
+  previewGone.value = false;
   previewBinary.value = false;
   previewTruncated.value = false;
   if (!path || !project.value) {
@@ -140,12 +145,31 @@ watch([selected, svgSource], async ([path]) => {
       previewPath.value = path;
       previewTruncated.value = res.truncated;
     }
-  } catch {
-    if (mySeq === previewSeq) {
-      previewText.value = null;
-      previewPath.value = null;
-      previewError.value = true;
+  } catch (e) {
+    if (mySeq !== previewSeq) return;
+    previewText.value = null;
+    previewPath.value = null;
+    // 路径类错误(文件被移动/删除/无权限读取):复核存在性,确认不存在给明确提示,
+    // 仍存在则按通用加载失败展示
+    const code = (e as { code?: string }).code;
+    if (code === "invalid_path" || code === "io_error") {
+      try {
+        const exists = await cmd<boolean>("project_file_exists", {
+          root: rootPath.value,
+          relPath: path,
+        });
+        if (mySeq !== previewSeq) return;
+        if (!exists) {
+          previewGone.value = true;
+          refreshDirs(new Set([parentDirOf(path), path]));
+          return;
+        }
+      } catch {
+        if (mySeq !== previewSeq) return;
+        // 复核请求本身失败:按通用错误展示
+      }
     }
+    previewError.value = true;
   }
 });
 
@@ -214,6 +238,84 @@ onMounted(async () => {
   );
 });
 onBeforeUnmount(() => unlistenGitChanged?.());
+
+// ── 文件树变更监听:后端递归 notify + 去抖,事件驱动增量刷新(不轮询) ──────────
+let watchedRoot: string | null = null;
+
+async function syncTreeWatch(root: string) {
+  if (watchedRoot === root) return;
+  if (watchedRoot) {
+    const old = watchedRoot;
+    watchedRoot = null;
+    cmd("unwatch_project_files", { root: old }).catch(() => {});
+  }
+  if (!root) return;
+  try {
+    await cmd("watch_project_files", { root });
+    watchedRoot = root;
+  } catch {
+    // 监听安装失败(权限/平台限制)静默降级:文件树退化为不自动刷新
+  }
+}
+
+watch(rootPath, (root) => void syncTreeWatch(root), { immediate: true });
+
+function parentDirOf(path: string): string {
+  const idx = path.lastIndexOf("/");
+  return idx === -1 ? "" : path.slice(0, idx);
+}
+
+/** 选中文件可能已被删除/移动:复核存在性,确认后给出「文件已不存在」提示并刷新所在目录 */
+async function verifySelectedExists(path: string) {
+  const mySeq = previewSeq;
+  try {
+    const exists = await cmd<boolean>("project_file_exists", {
+      root: rootPath.value,
+      relPath: path,
+    });
+    if (exists || mySeq !== previewSeq || selected.value !== path) return;
+    previewSeq++; // 作废在途读取,残留内容不得回填
+    previewText.value = null;
+    previewPath.value = null;
+    previewGone.value = true;
+    refreshDirs(new Set([parentDirOf(path), path]));
+  } catch {
+    // 复核失败保持现状,不打扰当前预览
+  }
+}
+
+let unlistenTreeChanged: (() => void) | null = null;
+onMounted(async () => {
+  unlistenTreeChanged = await onListen<FilesTreeChangedPayload>(
+    "files://tree-changed",
+    (payload) => {
+      if (toForwardSlash(payload.root) !== toForwardSlash(rootPath.value)) return;
+      if (payload.paths.length === 0) {
+        // 大规模变更/事件丢失:全量刷新并复核选中文件
+        refreshDirs(null);
+        if (selected.value) void verifySelectedExists(selected.value);
+        return;
+      }
+      const dirs = new Set<string>();
+      for (const p of payload.paths) {
+        dirs.add(parentDirOf(p));
+        dirs.add(p); // 变更对象本身可能是目录:其子树缓存同样作废
+      }
+      refreshDirs(dirs);
+      const sel = selected.value;
+      if (sel && payload.paths.some((p) => sel === p || sel.startsWith(p + "/"))) {
+        void verifySelectedExists(sel);
+      }
+    },
+  );
+});
+onBeforeUnmount(() => {
+  unlistenTreeChanged?.();
+  if (watchedRoot) {
+    cmd("unwatch_project_files", { root: watchedRoot }).catch(() => {});
+    watchedRoot = null;
+  }
+});
 
 /** 结构面板点击实体:当前文件内定位并高亮行区间 */
 function onOutlineLocate(startLine: number, endLine: number) {
@@ -582,6 +684,9 @@ function startTreeResize(e: PointerEvent) {
             <FileQuestion class="h-8 w-8" />
             <p class="text-sm">{{ t("files.selectHint") }}</p>
           </div>
+          <p v-else-if="previewGone" class="p-6 text-sm text-muted-foreground">
+            {{ t("files.fileGone") }}
+          </p>
           <p v-else-if="previewError" class="p-6 text-sm text-destructive">
             {{ t("files.loadFailed") }}
           </p>

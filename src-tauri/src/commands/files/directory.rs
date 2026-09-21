@@ -138,3 +138,15 @@ pub(super) fn read_file_preview(root: String, rel_path: String) -> AppResult<Fil
         token_count: Some(token_count),
     })
 }
+
+/// 检查 root 内的文件是否仍存在(预览失败后的存在性复核)。
+/// 与 read_file_preview 同一安全口径:canonicalize 失败(不存在/越界)或
+/// 逃逸出 root 一律按不存在处理,不向前端泄露 root 外路径信息。
+pub(super) fn project_file_exists(root: String, rel_path: String) -> AppResult<bool> {
+    ensure_dir(&root)?;
+    let root_canon = std::fs::canonicalize(&root)?;
+    let Ok(file) = std::fs::canonicalize(root_canon.join(&rel_path)) else {
+        return Ok(false);
+    };
+    Ok(file.starts_with(&root_canon) && file.is_file())
+}

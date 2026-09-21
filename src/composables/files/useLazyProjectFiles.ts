@@ -140,6 +140,42 @@ export function useLazyProjectFiles({ rootPath, selected }: UseLazyProjectFilesO
     document.querySelector(".file-row-selected")?.scrollIntoView({ block: "center" });
   }
 
+  /**
+   * 文件系统变更后的增量刷新(files://tree-changed)。
+   * dirs = null:大规模变更/事件丢失,清空全部层级缓存后按展开状态重列;
+   * 否则只作废受影响目录(含其子树缓存,目录被删/重建时后代缓存同样过期),
+   * 之前已缓存的目录立即重列保持新鲜,未缓存的留给下次展开时按需加载。
+   */
+  function refreshDirs(dirs: Set<string> | null) {
+    if (!rootPath.value) {
+      return;
+    }
+    if (dirs === null) {
+      childrenMap.value = new Map();
+      void ensureChildren("");
+      for (const dir of expandedFolders.value) {
+        void ensureChildren(dir);
+      }
+      return;
+    }
+    const affected = [...dirs];
+    const stale: string[] = [];
+    const next = new Map(childrenMap.value);
+    for (const key of next.keys()) {
+      const hit = affected.some((d) => key === d || (d !== "" && key.startsWith(`${d}/`)));
+      if (hit) {
+        next.delete(key);
+        stale.push(key);
+      }
+    }
+    if (!stale.length) {
+      return;
+    }
+    childrenMap.value = next;
+    for (const dir of stale) {
+      void ensureChildren(dir);
+    }
+  }
   const visibleRows = computed(() => buildVisibleRows(childrenMap.value, expandedFolders.value));
   const rootEmpty = computed(
     () => childrenMap.value.has("") && childrenMap.value.get("")!.length === 0,
@@ -177,6 +213,7 @@ export function useLazyProjectFiles({ rootPath, selected }: UseLazyProjectFilesO
     listError,
     listLoading,
     rootEmpty,
+    refreshDirs,
     revealPath,
     toggleFolder,
     visibleRows,

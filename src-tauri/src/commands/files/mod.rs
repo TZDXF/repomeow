@@ -3,6 +3,9 @@ mod directory;
 mod filename_search;
 mod save;
 mod text_search;
+mod watch;
+
+use tauri::AppHandle;
 
 use crate::error::AppResult;
 use crate::models::{ComposeFile, FilePreview, ProjectFileEntry, TextSearchOutcome};
@@ -56,6 +59,21 @@ pub fn search_project_text(
         include,
         exclude,
     )
+}
+
+#[tauri::command]
+pub fn watch_project_files(app: AppHandle, root: String) -> AppResult<()> {
+    watch::watch_project_files(app, root)
+}
+
+#[tauri::command]
+pub fn unwatch_project_files(root: String) -> AppResult<()> {
+    watch::unwatch_project_files(root)
+}
+
+#[tauri::command]
+pub fn project_file_exists(root: String, rel_path: String) -> AppResult<bool> {
+    directory::project_file_exists(root, rel_path)
 }
 
 #[tauri::command]
