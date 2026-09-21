@@ -4247,7 +4247,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "repomeow"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -4256,6 +4256,7 @@ dependencies = [
  "base64 0.23.1",
  "chrono",
  "clap",
+ "encoding_rs",
  "flate2",
  "futures",
  "getrandom 0.4.3",

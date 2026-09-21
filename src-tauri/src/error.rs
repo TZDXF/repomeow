@@ -156,6 +156,12 @@ pub enum ErrorCode {
     CommandNotFound,
     ScriptDirNotFound,
 
+    // ── 内嵌终端 ──────────────────────────────────────────────────────
+    /// 会话不存在或已被移除
+    TerminalSessionNotFound,
+    /// 会话进程启动失败(message 携带底层 OS 错误)
+    TerminalSpawnFailed,
+
     // ── Java / 开发环境 ───────────────────────────────────────────────
     JdkInvalid,
     /// JDK 在线安装失败(网络/资产解析/解压/校验;message 携带 URL、状态码或目标路径)
@@ -326,6 +332,9 @@ impl ErrorCode {
             Self::CommandNameConflict => "command_name_conflict",
             Self::CommandNotFound => "command_not_found",
             Self::ScriptDirNotFound => "script_dir_not_found",
+            // 内嵌终端
+            Self::TerminalSessionNotFound => "terminal_session_not_found",
+            Self::TerminalSpawnFailed => "terminal_spawn_failed",
             // Java / 开发环境
             Self::JdkInvalid => "jdk_invalid",
             Self::JdkInstallFailed => "jdk_install_failed",

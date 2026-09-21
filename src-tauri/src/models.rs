@@ -338,6 +338,40 @@ pub struct CustomCommand {
     pub sort_order: i64,
 }
 
+/// 内嵌终端会话状态(run_command_session 系列命令)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalSessionStatus {
+    Running,
+    /// 进程自行退出(exit_code 携带退出码,非 0 也表示异常结束)
+    Exited,
+    /// 用户主动停止
+    Stopped,
+    /// 进程启动失败(如 shell 不可用)
+    SpawnFailed,
+}
+
+/// 内嵌终端会话元数据。输出走 `terminal://output` 事件与
+/// get_command_session_output 回放,不随元数据重复传输。
+#[derive(Debug, Clone, Serialize)]
+pub struct TerminalSessionInfo {
+    pub id: u64,
+    pub project_id: i64,
+    pub project_name: String,
+    /// 展示名(npm script 名 / 自定义命令名 / docker 操作),缺省回退 command
+    pub label: String,
+    /// 来源分类:npm / docker / custom / java / shell
+    pub kind: String,
+    pub command: String,
+    /// 实际工作目录(绝对路径)
+    pub cwd: String,
+    pub status: TerminalSessionStatus,
+    pub exit_code: Option<i32>,
+    /// 启动时间(Unix 秒)
+    pub started_at: i64,
+    pub finished_at: Option<i64>,
+}
+
 /// 文件预览内容(read_file_preview):text 为 None 表示二进制文件不可预览
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

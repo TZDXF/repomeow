@@ -156,7 +156,7 @@ pub(super) fn build_start_cmdline(
 /// 回车:前一条失败不阻断后续(故不用 `&&`)。
 /// 单行命令原样借用返回,不产生分配。
 #[cfg(any(windows, target_os = "macos"))]
-pub(super) fn flatten_multiline<'a>(
+pub(crate) fn flatten_multiline<'a>(
     command: Option<&'a str>,
     sep: &str,
 ) -> Option<std::borrow::Cow<'a, str>> {
@@ -332,7 +332,7 @@ pub(super) fn select_powershell(
 /// PowerShell 可执行文件名:优先 pwsh(PowerShell 7+,支持 && / || 短路运算符),
 /// 再确认系统 Windows PowerShell 5.1 是否确实可执行；两者都不可用时返回 None。
 #[cfg(windows)]
-pub(super) fn find_powershell() -> Option<&'static str> {
+pub(crate) fn find_powershell() -> Option<&'static str> {
     let pwsh_available = command_on_path("pwsh");
     let windows_powershell_available = !pwsh_available && command_on_path("powershell");
     select_powershell(pwsh_available, windows_powershell_available)
@@ -349,7 +349,7 @@ pub(super) fn cmd_available() -> bool {
 /// (<Git>\cmd\git.exe -> <Git>\bin\bash.exe),再探测常见安装目录。
 /// 不用裸 `where bash` —— 那会命中 WSL 的 C:\Windows\System32\bash.exe
 #[cfg(windows)]
-pub(super) fn find_git_bash() -> Option<String> {
+pub(crate) fn find_git_bash() -> Option<String> {
     if let Ok(out) = hidden(Command::new("where")).arg("git").output() {
         if out.status.success() {
             for line in String::from_utf8_lossy(&out.stdout).lines() {

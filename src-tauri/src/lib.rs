@@ -83,6 +83,9 @@ pub fn run() {
             let git_monitor_notify = Arc::new(Notify::new());
             app.manage(commands::git::GitMonitorNotify(git_monitor_notify));
 
+            // 内嵌终端会话注册表(纯内存,应用退出即清空)
+            app.manage(Arc::new(commands::terminal::TerminalManager::default()));
+
             // 系统托盘(图标 + 迷你项目列表弹窗)
             tray::setup(app)?;
 
@@ -238,6 +241,13 @@ pub fn run() {
             commands::script::update_custom_command,
             commands::script::delete_custom_command,
             commands::script::run_in_terminal,
+            commands::terminal::run_command_session,
+            commands::terminal::list_command_sessions,
+            commands::terminal::get_command_session_output,
+            commands::terminal::stop_command_session,
+            commands::terminal::restart_command_session,
+            commands::terminal::write_command_session,
+            commands::terminal::remove_command_session,
             commands::files::save_text_file,
             commands::files::list_project_files,
             commands::files::search_project_files,

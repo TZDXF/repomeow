@@ -21,7 +21,7 @@ impl ShellKind {
 
     /// 多行命令摊平时的顺序分隔符:cmd 用 ` & `,其余 shell 用 `; `
     #[cfg(windows)]
-    pub(super) fn separator(self) -> &'static str {
+    pub(crate) fn separator(self) -> &'static str {
         match self {
             Self::Cmd => " & ",
             Self::PowerShell | Self::GitBash => "; ",

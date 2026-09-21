@@ -80,6 +80,8 @@ async-process = "2"
 futures = "0.3"
 # agent CLI 安装探测(Windows 正确处理 PATHEXT/.cmd)
 which = "8"
+# 内嵌终端输出解码:中文 Windows 下 cmd 内建命令/部分工具按 GBK 输出,UTF-8 校验失败时回退
+encoding_rs = "0.8"
 similar = "3"
 jsonschema = "0.56.0"
 # 库内 ID 的系统随机源
