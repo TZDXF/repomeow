@@ -32,6 +32,7 @@ import RelocateProjectDialog from "@/components/project/RelocateProjectDialog.vu
 import CustomCommands from "@/components/scripts/CustomCommands.vue";
 import PackageScripts from "@/components/scripts/PackageScripts.vue";
 import TagPicker from "@/components/tags/TagPicker.vue";
+import TerminalPanel from "@/components/terminal/TerminalPanel.vue";
 import { useProjectsStore } from "@/stores/projects";
 import type { Project } from "@/types";
 
@@ -420,6 +421,7 @@ async function saveDesc() {
       :active-path="activeWorktreePath"
       @changed="onWorktreeChanged"
     />
+    <TerminalPanel v-if="project.path_exists" :project-id="project.id" />
     <ChatDock v-if="project.path_exists" :project="worktreeProject ?? project" />
   </div>
 

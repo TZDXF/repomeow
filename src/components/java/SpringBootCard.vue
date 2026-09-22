@@ -33,8 +33,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { JDK_FOLLOW_DEFAULT, JDK_SYSTEM_PATH, resolveJavaHome } from "@/lib/jdk";
-import { cmd, runInTerminal } from "@/lib/tauri";
+import { cmd } from "@/lib/tauri";
 import { usePinsStore } from "@/stores/pins";
+import { useTerminalStore } from "@/stores/terminal";
 import { useProjectAssetsStore } from "@/stores/project-assets";
 import { useProjectOverviewStore } from "@/stores/project-overview";
 import { useSettingsStore } from "@/stores/settings";
@@ -46,6 +47,7 @@ const assetsStore = useProjectAssetsStore();
 const overviewStore = useProjectOverviewStore();
 const settingsStore = useSettingsStore();
 const pinsStore = usePinsStore();
+const terminalStore = useTerminalStore();
 
 /** 扫描结果来自共享 store(与 npm/docker 卡片合并为一次后端扫描) */
 const groups = computed(() => assetsStore.assetsOf(props.project)?.java_builds ?? []);
@@ -124,7 +126,12 @@ function groupLabel(g: JavaBuildGroup): string {
 async function runCommand(g: JavaBuildGroup, command: string) {
   const cwd = g.run_dir === "." ? undefined : `${props.project.path}/${g.run_dir}`;
   try {
-    await runInTerminal(props.project, command, cwd, javaHome.value);
+    await terminalStore.run(props.project, command, {
+      cwd,
+      javaHome: javaHome.value,
+      kind: "java",
+      label: command,
+    });
     toast.success(t("java.started", { command }));
   } catch (e) {
     toast.error(String(e));

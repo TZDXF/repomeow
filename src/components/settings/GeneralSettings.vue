@@ -26,10 +26,8 @@ onMounted(async () => {
     <MdThemeSettings />
     <Separator />
     <OpenWithSettings />
-    <template v-if="terminalCapabilities?.isWindows">
-      <Separator />
-      <TerminalSettings :availability="terminalCapabilities" />
-    </template>
+    <Separator />
+    <TerminalSettings :availability="terminalCapabilities" />
     <Separator />
     <WorktreeSettings />
     <Separator />

@@ -197,6 +197,9 @@ export default {
     command_name_conflict: "命令名已存在",
     command_not_found: "自定义命令不存在",
     script_dir_not_found: "目录不存在",
+    // 内嵌终端
+    terminal_session_not_found: "终端会话不存在或已结束",
+    terminal_spawn_failed: "终端进程启动失败",
     jdk_invalid: "不是有效的 JDK 目录(缺少 bin/java 或无法获取版本)",
     jdk_install_failed: "JDK 在线安装失败",
     toolchain_op_unsupported: "该工具不支持此操作",
@@ -619,7 +622,8 @@ export default {
       retryPush: "重试推送",
       retryingPush: "推送中...",
       pushFailedAfterCommit: "本地提交已成功，但推送失败",
-      pendingPushHint: "本地提交已保存，无需重复提交。点击“重试推送”仅推送已有提交，不会提交其他文件；若远端有新提交，请先拉取合并。",
+      pendingPushHint:
+        "本地提交已保存，无需重复提交。点击“重试推送”仅推送已有提交，不会提交其他文件；若远端有新提交，请先拉取合并。",
       submitAndPushSuccess: "提交并推送成功",
       success: "提交成功",
       generate: "AI 生成",
@@ -1485,6 +1489,27 @@ export default {
       manage: "管理标签...",
     },
   },
+  terminal: {
+    title: "终端",
+    empty: "暂无终端会话",
+    emptyHint: "运行 npm 脚本、自定义命令或 Docker 操作后,输出会显示在这里",
+    expand: "展开终端面板",
+    collapse: "收起终端面板",
+    stop: "停止",
+    restart: "重启",
+    remove: "移除会话",
+    clearFinished: "清除已结束",
+    runningCount: "{count} 个运行中",
+    menuTitle: "终端会话",
+    menuHint: "点击查看全部会话,按项目分组",
+    exitCode: "退出码 {code}",
+    status: {
+      running: "运行中",
+      exited: "已退出",
+      stopped: "已停止",
+      spawn_failed: "启动失败",
+    },
+  },
   settings: {
     search: {
       placeholder: "搜索设置…",
@@ -1523,7 +1548,8 @@ export default {
       skillsTitle: "内置技能(Skills)",
       skillsHint:
         "将技能导入资源库后,可在「项目 → AI 资源」部署到各 agent 的 skills 目录,配置 PATH 并重启终端和 AI 工具后,agent 即可直接使用 repomeow 调用 CLI;重复导入会同步最新技能内容,不写入本机程序路径。",
-      skillRepomeow: "项目管理 / Wiki / 语义分析 / 报告与调度 / 标签 / AI 配置(SKILL.md + references 细分)",
+      skillRepomeow:
+        "项目管理 / Wiki / 语义分析 / 报告与调度 / 标签 / AI 配置(SKILL.md + references 细分)",
       install: "导入到资源库",
       installing: "正在导入...",
       installDone: "内置技能已导入资源库:新增 {added} 个,刷新 {updated} 个",
@@ -1638,6 +1664,9 @@ export default {
     terminal: {
       title: "执行命令的终端",
       description: "运行 npm 脚本、自定义命令等所用的终端",
+      embedded: "内嵌终端",
+      embeddedHint:
+        "开启后命令在应用底部的终端面板内执行,可实时查看输出、写入输入与停止;关闭则弹出系统终端窗口",
       available: "可用",
       notDetected: "未检测到",
       selectedUnavailable: "当前选择未检测到,执行时将回退到 cmd",

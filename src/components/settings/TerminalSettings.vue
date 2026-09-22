@@ -2,10 +2,12 @@
 import { Check, GitBranch, SquareTerminal, Terminal } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import type { TerminalCapabilities } from "@/lib/terminal";
 import { useSettingsStore, type TerminalKind } from "@/stores/settings";
 
-defineProps<{ availability: TerminalCapabilities }>();
+// availability 为 null 时(探测失败或非 Windows)仅展示内嵌终端开关
+defineProps<{ availability: TerminalCapabilities | null }>();
 
 const { t } = useI18n();
 const store = useSettingsStore();
@@ -39,41 +41,58 @@ const OPTIONS: { value: TerminalKind; icon: typeof Terminal; labelKey: string; d
     <p class="mt-1 text-sm text-muted-foreground">
       {{ t("settings.terminal.description") }}
     </p>
-    <p
-      v-if="store.terminal !== 'cmd' && !availability.shells[store.terminal]"
-      class="mt-2 text-xs text-amber-600 dark:text-amber-400"
-    >
-      {{ t("settings.terminal.selectedUnavailable") }}
-    </p>
-    <div class="mt-4 flex flex-col gap-2">
-      <button
-        v-for="opt in OPTIONS"
-        :key="opt.value"
-        type="button"
-        class="flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent"
-        :class="store.terminal === opt.value && 'border-primary'"
-        :disabled="!availability.shells[opt.value]"
-        @click="store.setTerminal(opt.value)"
-      >
-        <component :is="opt.icon" class="h-4 w-4 shrink-0 text-muted-foreground" />
-        <span class="flex-1">
-          <span class="block text-sm font-medium">{{ t(opt.labelKey) }}</span>
-          <span class="block text-xs text-muted-foreground">{{ t(opt.descKey) }}</span>
-        </span>
-        <Badge
-          :variant="availability.shells[opt.value] ? 'secondary' : 'outline'"
-          :class="!availability.shells[opt.value] && 'text-muted-foreground'"
-        >
-          {{
-            t(
-              availability.shells[opt.value]
-                ? "settings.terminal.available"
-                : "settings.terminal.notDetected",
-            )
-          }}
-        </Badge>
-        <Check v-if="store.terminal === opt.value" class="h-4 w-4 shrink-0 text-primary" />
-      </button>
+    <div class="mt-4 flex items-center justify-between gap-4">
+      <div>
+        <label for="embedded-terminal" class="text-sm font-medium">
+          {{ t("settings.terminal.embedded") }}
+        </label>
+        <p class="mt-0.5 text-xs text-muted-foreground">
+          {{ t("settings.terminal.embeddedHint") }}
+        </p>
+      </div>
+      <Switch
+        id="embedded-terminal"
+        :checked="store.embeddedTerminal"
+        @update:checked="store.setEmbeddedTerminal"
+      />
     </div>
+    <template v-if="availability?.isWindows">
+      <p
+        v-if="store.terminal !== 'cmd' && !availability.shells[store.terminal]"
+        class="mt-2 text-xs text-amber-600 dark:text-amber-400"
+      >
+        {{ t("settings.terminal.selectedUnavailable") }}
+      </p>
+      <div class="mt-4 flex flex-col gap-2">
+        <button
+          v-for="opt in OPTIONS"
+          :key="opt.value"
+          type="button"
+          class="flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent"
+          :class="store.terminal === opt.value && 'border-primary'"
+          :disabled="!availability.shells[opt.value]"
+          @click="store.setTerminal(opt.value)"
+        >
+          <component :is="opt.icon" class="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span class="flex-1">
+            <span class="block text-sm font-medium">{{ t(opt.labelKey) }}</span>
+            <span class="block text-xs text-muted-foreground">{{ t(opt.descKey) }}</span>
+          </span>
+          <Badge
+            :variant="availability.shells[opt.value] ? 'secondary' : 'outline'"
+            :class="!availability.shells[opt.value] && 'text-muted-foreground'"
+          >
+            {{
+              t(
+                availability.shells[opt.value]
+                  ? "settings.terminal.available"
+                  : "settings.terminal.notDetected",
+              )
+            }}
+          </Badge>
+          <Check v-if="store.terminal === opt.value" class="h-4 w-4 shrink-0 text-primary" />
+        </button>
+      </div>
+    </template>
   </section>
 </template>

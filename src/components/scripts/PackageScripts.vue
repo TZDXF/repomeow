@@ -9,8 +9,9 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import ScrollArea from "@/components/common/ScrollArea.vue";
 import ScriptItem from "@/components/scripts/ScriptItem.vue";
 import { useCollapsibleOpen } from "@/composables/useCollapsibleOpen";
-import { cmd, runInTerminal } from "@/lib/tauri";
+import { cmd } from "@/lib/tauri";
 import { usePinsStore } from "@/stores/pins";
+import { useTerminalStore } from "@/stores/terminal";
 import { useProjectOverviewStore } from "@/stores/project-overview";
 import { useProjectAssetsStore } from "@/stores/project-assets";
 import type { HiddenItem, HiddenKind, PackageScript, PackageScriptsGroup, Project } from "@/types";
@@ -18,6 +19,7 @@ import type { HiddenItem, HiddenKind, PackageScript, PackageScriptsGroup, Projec
 const { t } = useI18n();
 const props = defineProps<{ project: Project }>();
 const pinsStore = usePinsStore();
+const terminalStore = useTerminalStore();
 const assetsStore = useProjectAssetsStore();
 const overviewStore = useProjectOverviewStore();
 
@@ -146,7 +148,11 @@ async function run(group: PackageScriptsGroup, script: PackageScript) {
   // monorepo 子包:在其所在目录内执行 npm run
   const cwd = group.dir === "." ? undefined : `${props.project.path}/${group.dir}`;
   try {
-    await runInTerminal(props.project, `npm run ${script.name}`, cwd);
+    await terminalStore.run(props.project, `npm run ${script.name}`, {
+      cwd,
+      kind: "npm",
+      label: script.name,
+    });
     toast.success(t("scripts.package.started", { name: script.name }));
   } catch (e) {
     toast.error(String(e));

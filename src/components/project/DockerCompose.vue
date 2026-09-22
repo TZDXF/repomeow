@@ -40,8 +40,9 @@ import {
 import ScrollArea from "@/components/common/ScrollArea.vue";
 import { Switch } from "@/components/ui/switch";
 import { useCollapsibleOpen } from "@/composables/useCollapsibleOpen";
-import { cmd, runInTerminal } from "@/lib/tauri";
+import { cmd } from "@/lib/tauri";
 import { usePinsStore } from "@/stores/pins";
+import { useTerminalStore } from "@/stores/terminal";
 import { useProjectOverviewStore } from "@/stores/project-overview";
 import { useProjectAssetsStore } from "@/stores/project-assets";
 import type { ComposeFile, ComposeServiceState, HiddenItem, Project } from "@/types";
@@ -49,6 +50,7 @@ import type { ComposeFile, ComposeServiceState, HiddenItem, Project } from "@/ty
 const { t } = useI18n();
 const props = defineProps<{ project: Project }>();
 const pinsStore = usePinsStore();
+const terminalStore = useTerminalStore();
 const assetsStore = useProjectAssetsStore();
 const overviewStore = useProjectOverviewStore();
 
@@ -276,9 +278,12 @@ async function run(
 ) {
   const args = `-f "${file.path}" ${service ? `${action} ${service}` : action}`;
   try {
-    await runInTerminal(props.project, `docker compose ${args}`);
+    await terminalStore.run(props.project, `docker compose ${args}`, {
+      kind: "docker",
+      label: service ?? file.file_name,
+    });
     toast.success(t("docker.started", { name: service ?? file.file_name }));
-    // 命令在新终端窗口中异步执行,延迟刷新一次状态(拉取镜像时可能仍偏早,可手动刷新)
+    // 命令异步执行(内嵌终端或系统终端新窗口),延迟刷新一次状态(拉取镜像时可能仍偏早,可手动刷新)
     setTimeout(loadStatuses, 4000);
   } catch (e) {
     toast.error(String(e));

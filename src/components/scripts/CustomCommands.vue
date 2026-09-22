@@ -19,14 +19,16 @@ import ScrollArea from "@/components/common/ScrollArea.vue";
 import CommandEditor from "@/components/scripts/CommandEditor.vue";
 import ScriptItem from "@/components/scripts/ScriptItem.vue";
 import { COMMAND_ICONS } from "@/lib/command-icons";
-import { cmd, onListen, runInTerminal } from "@/lib/tauri";
+import { cmd, onListen } from "@/lib/tauri";
 import { usePinsStore } from "@/stores/pins";
+import { useTerminalStore } from "@/stores/terminal";
 import { useProjectOverviewStore } from "@/stores/project-overview";
 import type { CustomCommand, Project } from "@/types";
 
 const { t } = useI18n();
 const props = defineProps<{ project: Project }>();
 const pinsStore = usePinsStore();
+const terminalStore = useTerminalStore();
 const overviewStore = useProjectOverviewStore();
 
 const commands = ref<CustomCommand[]>([]);
@@ -132,7 +134,7 @@ async function confirmRemove() {
 
 async function run(c: CustomCommand) {
   try {
-    await runInTerminal(props.project, c.command);
+    await terminalStore.run(props.project, c.command, { kind: "custom", label: c.name });
     toast.success(t("scripts.custom.started", { name: c.name }));
   } catch (e) {
     toast.error(String(e));

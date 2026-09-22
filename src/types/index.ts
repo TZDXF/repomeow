@@ -10,3 +10,4 @@ export * from "./semantic";
 export * from "./toolchain";
 export * from "./usage";
 export * from "./wiki";
+export * from "./terminal";

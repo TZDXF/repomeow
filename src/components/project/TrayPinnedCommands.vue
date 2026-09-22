@@ -18,8 +18,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { commandIcon } from "@/lib/command-icons";
 import { resolveJavaHome } from "@/lib/jdk";
-import { runInTerminal } from "@/lib/tauri";
 import { useSettingsStore } from "@/stores/settings";
+import { useTerminalStore } from "@/stores/terminal";
 import type { PinnedCommand, Project } from "@/types";
 
 const { t } = useI18n();
@@ -27,8 +27,18 @@ const props = defineProps<{ project: Project; pins: PinnedCommand[] }>();
 // 托盘窗口在 TrayPopup 挂载时已 init,且每次弹窗显示时经 tray-popup://refresh 从 localStorage
 // 补读 JDK 配置;javaBuild 标记执行时按项目解析 JAVA_HOME
 const settingsStore = useSettingsStore();
+const terminalStore = useTerminalStore();
 
 type ComposeAction = "up -d" | "up -d --build" | "build" | "restart" | "down" | "stop";
+
+/** pin 类型 -> 内嵌终端会话分类(与详情页各卡片一致,仅用于面板分组展示) */
+const PIN_SESSION_KIND: Record<PinnedCommand["kind"], string> = {
+  packageScript: "npm",
+  composeFile: "docker",
+  composeService: "docker",
+  customCommand: "custom",
+  javaBuild: "java",
+};
 
 /** 下拉菜单动作:与详情页一致,up/down/stop 有专属按钮不进菜单;服务级不含 down */
 const MENU_ACTIONS: ComposeAction[] = ["build", "up -d --build", "restart"];
@@ -115,7 +125,12 @@ async function runPinned(p: PinnedCommand) {
     // Spring Boot 标记命令注入项目选择的 JAVA_HOME(与详情页卡片同一解析逻辑)
     const javaHome =
       p.kind === "javaBuild" ? resolveJavaHome(settingsStore, props.project.id) : undefined;
-    await runInTerminal(props.project, p.command, cwd, javaHome);
+    await terminalStore.run(props.project, p.command, {
+      cwd,
+      javaHome,
+      kind: PIN_SESSION_KIND[p.kind],
+      label: p.label,
+    });
     toast.success(t("pins.started", { name: p.label }));
   } catch (e) {
     toast.error(String(e));
@@ -127,7 +142,7 @@ async function runCompose(p: PinnedCommand, action: ComposeAction) {
   const service = p.kind === "composeService" ? serviceOf(p) : undefined;
   const command = `${p.command} ${service ? `${action} ${service}` : action}`;
   try {
-    await runInTerminal(props.project, command);
+    await terminalStore.run(props.project, command, { kind: "docker", label: p.label });
     toast.success(t("pins.started", { name: p.label }));
   } catch (e) {
     toast.error(String(e));

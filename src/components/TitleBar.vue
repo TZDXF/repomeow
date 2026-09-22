@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { ArrowUpCircle, Copy, Minus, Square, X } from "@lucide/vue";
 import BackgroundTasksMenu from "@/components/common/BackgroundTasksMenu.vue";
+import TerminalSessionsMenu from "@/components/common/TerminalSessionsMenu.vue";
 import UpdateDialog from "@/components/update/UpdateDialog.vue";
 import { useUpdateStore } from "@/stores/update";
 
@@ -63,6 +64,7 @@ function onDragRegionDblClick(event: MouseEvent) {
       <BackgroundTasksMenu />
     </div>
     <div class="flex h-full items-stretch">
+      <TerminalSessionsMenu />
       <button
         v-if="updateStore.update"
         class="relative flex w-11 items-center justify-center text-primary transition-colors hover:bg-accent"

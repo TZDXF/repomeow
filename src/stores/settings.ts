@@ -84,8 +84,10 @@ export const useSettingsStore = defineStore("settings", () => {
   const hiddenResourceAgents = ref<string[]>([]);
   /** 关闭主窗口行为(默认最小化到托盘) */
   const closeAction = ref<CloseAction>("tray");
-  /** 执行命令的终端(默认 cmd,仅 Windows 生效) */
+  /** 执行命令的终端(默认 cmd,仅 Windows 生效;内嵌终端共用同一 shell 选择) */
   const terminal = ref<TerminalKind>("cmd");
+  /** 内嵌终端:开启时命令在应用内终端面板执行(默认开启);关闭则弹系统终端新窗口 */
+  const embeddedTerminal = ref(true);
   /** 启用 GitHub CLI(gh)作为「账号仓库」的虚拟账号来源(默认关闭,opt-in) */
   const enableGhCli = ref(false);
   /** 新建 worktree 的默认目录模板:支持 {branch} 占位符与相对路径(相对主工作区根解析) */
@@ -371,6 +373,7 @@ export const useSettingsStore = defineStore("settings", () => {
         wikiAutoUpdate: "false",
         closeAction: "tray",
         terminal: "cmd",
+        embeddedTerminal: "true",
         enableGhCli: "false",
         worktreeDirTemplate: ".worktrees/{branch}",
         developerMode: "false",
@@ -459,6 +462,11 @@ export const useSettingsStore = defineStore("settings", () => {
     const savedTerminal = await fileStore.get<TerminalKind>("terminal");
     if (savedTerminal === "cmd" || savedTerminal === "powershell" || savedTerminal === "gitbash") {
       terminal.value = savedTerminal;
+    }
+    // 内嵌终端开关:存为字符串 "true"/"false",非法值回退 true
+    const savedEmbeddedTerminal = await fileStore.get<string>("embeddedTerminal");
+    if (savedEmbeddedTerminal === "true" || savedEmbeddedTerminal === "false") {
+      embeddedTerminal.value = savedEmbeddedTerminal === "true";
     }
     // GitHub CLI 集成开关:存为字符串 "true"/"false",非法值回退 false
     const savedEnableGhCli = await fileStore.get<string>("enableGhCli");
@@ -642,6 +650,11 @@ export const useSettingsStore = defineStore("settings", () => {
     await persist("terminal", value);
   }
 
+  async function setEmbeddedTerminal(value: boolean) {
+    embeddedTerminal.value = value;
+    await persist("embeddedTerminal", String(value));
+  }
+
   async function setEnableGhCli(value: boolean) {
     enableGhCli.value = value;
     await persist("enableGhCli", String(value));
@@ -754,6 +767,7 @@ export const useSettingsStore = defineStore("settings", () => {
     setHiddenResourceAgents,
     closeAction,
     terminal,
+    embeddedTerminal,
     enableGhCli,
     worktreeDirTemplate,
     jdkList,
@@ -782,6 +796,7 @@ export const useSettingsStore = defineStore("settings", () => {
     setWikiAutoUpdate,
     setCloseAction,
     setTerminal,
+    setEmbeddedTerminal,
     setEnableGhCli,
     setWorktreeDirTemplate,
     saveJdk,

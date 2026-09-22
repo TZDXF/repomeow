@@ -37,9 +37,9 @@ src/                    Vue 3 前端(<script setup> SFC)
   components/           TitleBar.vue 在顶层;ui/ 为 shadcn-vue(reka-ui)生成组件,勿手改(滚动容器用 common/ScrollArea.vue 包装组件,承载视口高度修复);
                         业务组件按域分目录:ai-elements / chat / common / files / git / icons
                         / java / markdown / open / project / report / scripts / semantic
-                        / settings / tags / update / wiki
+                        / settings / tags / terminal / update / wiki
   composables/          组合式函数,部分按子域分目录(files/ git/ wiki/)
-  stores/               Pinia:projects / settings / tags / wiki / chat / ai-config
+  stores/               Pinia:projects / settings / tags / wiki / chat / ai-config / terminal
                         / background-tasks / batch-report / pins / project-assets
                         / project-overview / jdk-install / update
   i18n/locales/         zh-CN.ts(默认)、en-US.ts(回退),locales.test.ts 校验两文件键对齐

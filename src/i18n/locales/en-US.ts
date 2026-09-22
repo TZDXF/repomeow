@@ -214,6 +214,9 @@ export default {
     command_name_conflict: "Command name already exists",
     command_not_found: "Custom command not found",
     script_dir_not_found: "Directory does not exist",
+    // Embedded terminal
+    terminal_session_not_found: "The terminal session no longer exists",
+    terminal_spawn_failed: "Failed to start the terminal process",
     jdk_invalid: "Not a valid JDK directory (missing bin/java or version unavailable)",
     jdk_install_failed: "Online JDK installation failed",
     toolchain_op_unsupported: "This operation is not supported for the tool",
@@ -650,7 +653,8 @@ export default {
       retryPush: "Retry push",
       retryingPush: "Pushing...",
       pushFailedAfterCommit: "Committed locally, but push failed",
-      pendingPushHint: "Your local commit is saved. Retry push only pushes existing commits; it does not commit other files. If the remote has new commits, pull and merge first.",
+      pendingPushHint:
+        "Your local commit is saved. Retry push only pushes existing commits; it does not commit other files. If the remote has new commits, pull and merge first.",
       submitAndPushSuccess: "Committed and pushed successfully",
       success: "Committed successfully",
       generate: "Generate with AI",
@@ -1542,6 +1546,27 @@ export default {
       manage: "Manage tags...",
     },
   },
+  terminal: {
+    title: "Terminal",
+    empty: "No terminal sessions",
+    emptyHint: "Output of npm scripts, custom commands, and Docker actions will appear here",
+    expand: "Expand terminal panel",
+    collapse: "Collapse terminal panel",
+    stop: "Stop",
+    restart: "Restart",
+    remove: "Remove session",
+    clearFinished: "Clear finished",
+    runningCount: "{count} running",
+    menuTitle: "Terminal Sessions",
+    menuHint: "Click to view all sessions, grouped by project",
+    exitCode: "Exit code {code}",
+    status: {
+      running: "Running",
+      exited: "Exited",
+      stopped: "Stopped",
+      spawn_failed: "Failed to start",
+    },
+  },
   settings: {
     search: {
       placeholder: "Search settings…",
@@ -1703,6 +1728,9 @@ export default {
     terminal: {
       title: "Terminal for Commands",
       description: "Terminal used to run npm scripts, custom commands, and more",
+      embedded: "Embedded terminal",
+      embeddedHint:
+        "Run commands in the terminal panel at the bottom of the app with live output, input, and stop support; turn off to open a system terminal window",
       available: "Available",
       notDetected: "Not detected",
       selectedUnavailable: "The selected shell was not detected; commands will fall back to cmd",
