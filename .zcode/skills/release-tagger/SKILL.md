@@ -125,6 +125,7 @@ CI 步骤概要（详见 `.github/workflows/release.yml`）：
 ```bash
 gh release edit "v$VERSION" --notes-file "$NOTES_FILE"
 gh release view "v$VERSION" --json body
+node scripts/release/sync-notes.mjs "v$VERSION"
 ```
 
 核对远端 `body` 与准备的说明一致，且仅包含符合上述规则的内容。写入失败或正文不符时中止并报告，不得宣称发布流程完成；修复说明即可，不要因此重推 tag 或重跑构建。保持 draft 状态不变，再验证资产：
@@ -140,6 +141,8 @@ gh release view "v$VERSION" --json isDraft,isPrerelease,assets
 - `isPrerelease: false`
 
 任何一项不符都先排查 CI 日志，不要把不完整的 Release 转正。
+
+客户端更新弹窗读取的是资产 `latest.json.notes`，不是 Release 正文。每次编辑正文后都必须运行上述同步脚本；脚本校验版本、拒绝占位说明、备份原文件，只替换 notes 并重新下载校验，保留签名、下载地址和发布日期。同步失败时停止发布并报告，不得转正或宣称完成；不需要重签安装包或重跑构建。
 
 ### 9. 发布验证（可选）
 

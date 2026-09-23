@@ -64,6 +64,7 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: "v__VERSION__"
+          # 编辑 draft 正文后必须运行 scripts/release/sync-notes.mjs 同步 latest.json.notes。
           releaseBody: "See the assets to download and install this version."
           releaseDraft: true
           prerelease: false

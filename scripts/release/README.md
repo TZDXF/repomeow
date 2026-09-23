@@ -107,3 +107,15 @@ gh release create v0.1.0 \
 | `Multiple .key files in ~/.tauri` | 目录里有多个私钥;用 `--key <path>` 指定 |
 | `Cannot read github remote` | 没配 `github` remote;用 `--repo owner/name` 覆盖,或 `git remote add github git@github.com:TZDXF/repomeow.git` |
 | `installer not found` | `--skip-build` 跳过了构建但产物不在;先跑 `pnpm release:build` |
+## 同步 CI Release 更新说明
+
+CI 初次生成的 `latest.json.notes` 是下载占位提示。编辑 GitHub Release 正文不会自动更新它，而客户端弹窗读取的正是该字段。
+每次完成正文编辑后、将 draft 转正前执行（需要已登录且有 Release 写权限的 `gh`，无需私钥）：
+
+```bash
+node scripts/release/sync-notes.mjs v0.2.6
+# 可选第二参数 owner/repo；默认 TZDXF/repomeow
+node --test scripts/release/sync-notes.test.mjs
+```
+
+脚本校验版本并拒绝空正文/占位提示，只替换 `notes`，不改变安装包签名、下载 URL 或发布日期；原元数据备份路径会输出到终端。上传后重新下载校验，失败时停止发布并检查远端资产。它也可用于修复已发布版本的说明，无需发布新版本。相同内容再次执行不会上传。
