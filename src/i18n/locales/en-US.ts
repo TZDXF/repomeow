@@ -1549,7 +1549,8 @@ export default {
   terminal: {
     title: "Terminal",
     empty: "No terminal sessions",
-    emptyHint: "Output of npm scripts, custom commands, and Docker actions will appear here",
+    create: "New terminal",
+    emptyHint: "Click + to create a terminal, or run a script or custom command to see its output",
     expand: "Expand terminal panel",
     collapse: "Collapse terminal panel",
     stop: "Stop",

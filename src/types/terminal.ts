@@ -14,6 +14,8 @@ export interface TerminalSessionInfo {
   /** 来源分类:npm / docker / custom / java / shell */
   kind: string;
   command: string;
+  /** 主动创建的逐行输入 Shell;一次性命令会话为 false */
+  interactive: boolean;
   /** 实际工作目录(绝对路径) */
   cwd: string;
   status: TerminalSessionStatus;

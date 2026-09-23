@@ -1492,7 +1492,8 @@ export default {
   terminal: {
     title: "终端",
     empty: "暂无终端会话",
-    emptyHint: "运行 npm 脚本、自定义命令或 Docker 操作后,输出会显示在这里",
+    create: "新建终端",
+    emptyHint: "点击 + 创建终端，或运行脚本、自定义命令后在此查看输出",
     expand: "展开终端面板",
     collapse: "收起终端面板",
     stop: "停止",

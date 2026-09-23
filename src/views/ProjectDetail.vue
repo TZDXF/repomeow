@@ -421,7 +421,7 @@ async function saveDesc() {
       :active-path="activeWorktreePath"
       @changed="onWorktreeChanged"
     />
-    <TerminalPanel v-if="project.path_exists" :project-id="project.id" />
+    <TerminalPanel v-if="project.path_exists" :project="worktreeProject ?? project" />
     <ChatDock v-if="project.path_exists" :project="worktreeProject ?? project" />
   </div>
 

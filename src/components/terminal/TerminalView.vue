@@ -19,23 +19,43 @@ let fit: FitAddon | null = null;
 let detachOutput: (() => void) | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let themeObserver: MutationObserver | null = null;
+let inputLine = "";
 
-// 随应用明暗主题切换的两套配色(xterm 需要具体色值,不读 CSS 变量)
-const LIGHT_THEME = {
-  background: "#ffffff",
-  foreground: "#1f2328",
-  cursor: "#1f2328",
-  selectionBackground: "#b6d7ff",
-};
-const DARK_THEME = {
-  background: "#0d1117",
-  foreground: "#e6edf3",
-  cursor: "#e6edf3",
-  selectionBackground: "#264f78",
-};
+// 终端配色直接取自应用主题变量(xterm 需要具体色值,不读 CSS 变量),
+// 亮/暗色与 pixel / glassmorphism / island 等皮肤都能自动适配。
+let colorProbe: HTMLDivElement | null = null;
+
+/** 用探针元素把 var(--xxx)(含 oklch)解析成 xterm 可消费的 rgb() 字符串 */
+function resolveThemeColor(varName: string): string | undefined {
+  if (!colorProbe) {
+    colorProbe = document.createElement("div");
+    colorProbe.style.display = "none";
+    document.body.appendChild(colorProbe);
+  }
+  colorProbe.style.color = `var(${varName})`;
+  return getComputedStyle(colorProbe).color || undefined;
+}
+
+/** 给 rgb() 颜色叠加透明度(选区底色用前景色冲淡,适配任意主题) */
+function withAlpha(rgb: string, alpha: number): string {
+  const m = rgb.match(/rgba?\(([^)]+)\)/);
+  return m ? `rgba(${m[1].split(",").slice(0, 3).join(",")},${alpha})` : rgb;
+}
 
 function currentTheme() {
-  return document.documentElement.classList.contains("dark") ? DARK_THEME : LIGHT_THEME;
+  const isDark = document.documentElement.classList.contains("dark");
+  const background = resolveThemeColor("--background") ?? (isDark ? "#0d1117" : "#ffffff");
+  const foreground = resolveThemeColor("--foreground") ?? (isDark ? "#e6edf3" : "#1f2328");
+  const mutedForeground = resolveThemeColor("--muted-foreground") ?? "#8b949e";
+  return {
+    background,
+    foreground,
+    cursor: foreground,
+    cursorAccent: background,
+    selectionBackground: withAlpha(foreground, 0.25),
+    // ANSI 亮黑(常作暗灰提示色)对齐主题的弱化文字色
+    brightBlack: mutedForeground,
+  };
 }
 
 /** 清空并回放当前缓存(挂载/重启时调用;缓存为空即只是清屏) */
@@ -60,16 +80,41 @@ onMounted(() => {
   term.open(container.value);
   fit.fit();
   renderBuffer();
+  term.focus();
 
   detachOutput = store.onOutput((id, chunk) => {
     if (id === props.sessionId) term?.write(chunk);
   });
 
   term.onData((data) => {
-    void writeCommandSession(props.sessionId, data).catch(() => {});
-    // 管道 stdin 无 TTY 回显:本地回显可打印字符与回车,交互式输入才可见
-    if (data === "\r") term?.write("\r\n");
-    else if (data >= " ") term?.write(data);
+    const session = store.sessions.find((s) => s.id === props.sessionId);
+    if (session?.status !== "running") return;
+    if (session.interactive) {
+      // 管道不是 PTY:在前端逐行编辑,回车时整行写入 Shell stdin。
+      for (const ch of data) {
+        if (ch === "\r" || ch === "\n") {
+          void writeCommandSession(props.sessionId, `${inputLine}\n`).catch(() => {});
+          inputLine = "";
+          term?.write("\r\n");
+        } else if (ch === "\x7f" || ch === "\b") {
+          if (inputLine) {
+            inputLine = Array.from(inputLine).slice(0, -1).join("");
+            term?.write("\b \b");
+          }
+        } else if (ch === "\x03") {
+          inputLine = "";
+          term?.write("^C\r\n");
+        } else if (ch >= " " && ch !== "\x7f") {
+          inputLine += ch;
+          term?.write(ch);
+        }
+      }
+    } else {
+      void writeCommandSession(props.sessionId, data).catch(() => {});
+      // 一次性命令会话沿用即时写入,便于向运行中的进程回答提示。
+      if (data === "\r") term?.write("\r\n");
+      else if (data >= " ") term?.write(data);
+    }
   });
 
   resizeObserver = new ResizeObserver(() => fit?.fit());
@@ -80,14 +125,17 @@ onMounted(() => {
   });
   themeObserver.observe(document.documentElement, {
     attributes: true,
-    attributeFilter: ["class"],
+    attributeFilter: ["class", "data-theme"],
   });
 });
 
 // 会话重启:store 已按 started_at 变化清空缓存,这里整屏重渲染
 watch(
   () => store.sessions.find((s) => s.id === props.sessionId)?.started_at,
-  () => renderBuffer(),
+  () => {
+    inputLine = "";
+    renderBuffer();
+  },
 );
 
 onBeforeUnmount(() => {
@@ -95,6 +143,8 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect();
   themeObserver?.disconnect();
   term?.dispose();
+  colorProbe?.remove();
+  colorProbe = null;
 });
 </script>
 

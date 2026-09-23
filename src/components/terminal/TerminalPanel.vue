@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import {
   ChevronDown,
   ChevronUp,
   LoaderCircle,
+  Plus,
   RotateCcw,
   Square,
   SquareTerminal,
@@ -17,23 +18,25 @@ import TerminalView from "@/components/terminal/TerminalView.vue";
 import { terminalStatusDotClass } from "@/lib/terminal";
 import { useSettingsStore } from "@/stores/settings";
 import { useTerminalStore } from "@/stores/terminal";
+import type { Project } from "@/types";
 
 /**
  * 项目详情页底部内嵌终端面板:按项目过滤会话,页签切换,
- * 支持停止/重启/移除/清除已结束;收起为底部细条。
+ * 支持主动新建 Shell、停止/重启/移除/清除已结束;收起为底部细条。
  */
-const props = defineProps<{ projectId: number }>();
+const props = defineProps<{ project: Project }>();
 
 const { t } = useI18n();
 const settings = useSettingsStore();
 const store = useTerminalStore();
+const creating = ref(false);
 
 onMounted(() => {
   void store.init();
 });
 
 /** 当前项目的会话(会话按 project_id 归属,worktree 副本共享同一 id) */
-const list = computed(() => store.sessions.filter((s) => s.project_id === props.projectId));
+const list = computed(() => store.sessions.filter((s) => s.project_id === props.project.id));
 const runningCount = computed(() => list.value.filter((s) => s.status === "running").length);
 const hasFinished = computed(() => list.value.some((s) => s.status !== "running"));
 
@@ -46,7 +49,7 @@ const active = computed(
 
 // 选中会话被移除/切换项目时,顺延到当前项目首个会话
 watch(
-  () => [props.projectId, list.value.length],
+  () => [props.project.id, list.value.length],
   () => {
     if (active.value && store.activeId !== active.value.id) {
       store.activeId = active.value.id;
@@ -54,6 +57,18 @@ watch(
   },
   { immediate: true },
 );
+
+async function createTerminal() {
+  if (creating.value) return;
+  creating.value = true;
+  try {
+    await store.create(props.project);
+  } catch (e) {
+    toast.error(String(e));
+  } finally {
+    creating.value = false;
+  }
+}
 
 async function stopActive() {
   if (!active.value) return;
@@ -83,7 +98,7 @@ async function removeSession(id: number) {
 
 async function clearFinished() {
   try {
-    await store.clearFinished(props.projectId);
+    await store.clearFinished(props.project.id);
   } catch (e) {
     toast.error(String(e));
   }
@@ -143,6 +158,19 @@ async function clearFinished() {
             </button>
           </div>
         </div>
+        <Button
+          v-if="settings.embeddedTerminal"
+          variant="ghost"
+          size="icon"
+          class="h-7 w-7 shrink-0"
+          :disabled="creating"
+          :title="t('terminal.create')"
+          :aria-label="t('terminal.create')"
+          @click="createTerminal"
+        >
+          <LoaderCircle v-if="creating" class="h-3.5 w-3.5 animate-spin" />
+          <Plus v-else class="h-3.5 w-3.5" />
+        </Button>
         <template v-if="active">
           <Button
             v-if="active.status === 'running'"

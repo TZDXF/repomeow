@@ -33,6 +33,7 @@ struct SessionSpec {
     command: String,
     cwd: String,
     java_home: Option<String>,
+    interactive: bool,
 }
 
 struct SessionEntry {
@@ -219,8 +220,47 @@ fn build_shell_command(app: &AppHandle, command: &str) -> Command {
     }
 }
 
+/// 手动新建的会话直接运行交互式 shell,而非执行完一次命令就退出。
+/// 仍通过 stdin/stdout 管道通信(非 PTY),适合逐行输入命令。
+fn build_interactive_shell(app: &AppHandle) -> Command {
+    let shell = resolve_shell(app);
+    #[cfg(windows)]
+    {
+        match shell {
+            ShellKind::Cmd => {
+                let mut c = hidden(Command::new("cmd"));
+                c.args(["/Q", "/K"]);
+                c
+            }
+            ShellKind::PowerShell => {
+                let ps = crate::commands::open::find_powershell().unwrap_or("powershell");
+                let mut c = hidden(Command::new(ps));
+                c.args(["-NoLogo", "-NoProfile", "-NoExit", "-Command", "-"]);
+                c
+            }
+            ShellKind::GitBash => {
+                let bash = crate::commands::open::find_git_bash().unwrap_or_else(|| "bash".into());
+                let mut c = hidden(Command::new(bash));
+                c.arg("-i");
+                c
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = shell;
+        let mut c = Command::new("sh");
+        c.arg("-i");
+        c
+    }
+}
+
 fn spawn_child(app: &AppHandle, spec: &SessionSpec) -> AppResult<Child> {
-    let mut cmd = build_shell_command(app, &spec.command);
+    let mut cmd = if spec.interactive {
+        build_interactive_shell(app)
+    } else {
+        build_shell_command(app, &spec.command)
+    };
     cmd.current_dir(&spec.cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -388,6 +428,7 @@ pub fn run_command_session(
         command,
         cwd: work_dir,
         java_home,
+        interactive: false,
     };
     let child = spawn_child(&app, &spec)?;
     let info = TerminalSessionInfo {
@@ -400,6 +441,47 @@ pub fn run_command_session(
             .unwrap_or_else(|| spec.command.clone()),
         kind: kind.unwrap_or_else(|| "shell".into()),
         command: spec.command.clone(),
+        interactive: false,
+        cwd: spec.cwd.clone(),
+        status: TerminalSessionStatus::Running,
+        exit_code: None,
+        started_at: now_ts(),
+        finished_at: None,
+    };
+    let info = register_launch(&app, &mgr, 0, info, spec, child);
+    mgr.prune();
+    Ok(info)
+}
+
+/// 在当前项目(或选中的 worktree)目录手动打开可输入命令的 shell 会话。
+#[tauri::command]
+pub fn create_shell_session(
+    app: AppHandle,
+    manager: State<'_, Arc<TerminalManager>>,
+    project_id: i64,
+    project_name: String,
+    path: String,
+) -> AppResult<TerminalSessionInfo> {
+    if !std::path::Path::new(&path).is_dir() {
+        return Err(AppError::coded(ErrorCode::ScriptDirNotFound, path));
+    }
+    let mgr = manager.inner().clone();
+    let id = mgr.next_id.fetch_add(1, Ordering::Relaxed) + 1;
+    let spec = SessionSpec {
+        command: String::new(),
+        cwd: path,
+        java_home: None,
+        interactive: true,
+    };
+    let child = spawn_child(&app, &spec)?;
+    let info = TerminalSessionInfo {
+        id,
+        project_id,
+        project_name,
+        label: "Shell".into(),
+        kind: "shell".into(),
+        command: "Shell".into(),
+        interactive: true,
         cwd: spec.cwd.clone(),
         status: TerminalSessionStatus::Running,
         exit_code: None,
@@ -467,6 +549,7 @@ pub fn restart_command_session(
             command: entry.spec.command.clone(),
             cwd: entry.spec.cwd.clone(),
             java_home: entry.spec.java_home.clone(),
+            interactive: entry.spec.interactive,
         }
     };
     let mut child = match spawn_child(&app, &spec) {
@@ -521,15 +604,16 @@ pub fn write_command_session(
     id: u64,
     data: String,
 ) -> AppResult<()> {
-    let stdin = {
+    let (stdin, interactive) = {
         let sessions = manager.lock();
         let entry = sessions.get(&id).ok_or_else(|| session_not_found(id))?;
-        entry.stdin.clone()
+        (entry.stdin.clone(), entry.spec.interactive)
     };
     if let Some(stdin) = stdin {
         let mut guard = stdin.lock().unwrap();
         // 子进程已退出但 waiter 尚未清理 stdin 时写入会 EPIPE,按静默处理
-        let _ = guard.write_all(data.as_bytes());
+        let input = if interactive { data.replace('\r', "\n") } else { data };
+        let _ = guard.write_all(input.as_bytes());
         let _ = guard.flush();
     }
     Ok(())
@@ -602,6 +686,7 @@ mod tests {
                 label: "l".into(),
                 kind: "shell".into(),
                 command: "c".into(),
+                interactive: false,
                 cwd: ".".into(),
                 status: TerminalSessionStatus::Running,
                 exit_code: None,
@@ -615,6 +700,7 @@ mod tests {
                 command: "c".into(),
                 cwd: ".".into(),
                 java_home: None,
+                interactive: false,
             },
             stop_requested: false,
             output: VecDeque::new(),

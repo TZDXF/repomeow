@@ -5,6 +5,7 @@ import {
   TERMINAL_OUTPUT_EVENT,
   TERMINAL_SESSION_CHANGED_EVENT,
   appendCapped,
+  createShellSession,
   getCommandSessionOutput,
   listCommandSessions,
   removeCommandSession,
@@ -118,6 +119,15 @@ export const useTerminalStore = defineStore("terminal", () => {
     return "embedded";
   }
 
+  /** 主动创建交互式 Shell,独立于命令执行偏好(只有内嵌面板提供此入口) */
+  async function create(project: Project) {
+    await init();
+    const info = await createShellSession(project);
+    onSessionChanged(info);
+    activeId.value = info.id;
+    open.value = true;
+  }
+
   /** 停止会话(整棵树);状态翻转由 waiter 的 session-changed 事件带回 */
   async function stop(id: number) {
     await stopCommandSession(id);
@@ -166,6 +176,7 @@ export const useTerminalStore = defineStore("terminal", () => {
     activeId,
     init,
     run,
+    create,
     stop,
     restart,
     remove,

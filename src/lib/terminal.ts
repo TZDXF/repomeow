@@ -69,6 +69,15 @@ export function runCommandSession(
   });
 }
 
+/** 在项目当前工作目录新建可输入命令的 Shell 会话 */
+export function createShellSession(project: Project): Promise<TerminalSessionInfo> {
+  return cmd<TerminalSessionInfo>("create_shell_session", {
+    projectId: project.id,
+    projectName: project.name,
+    path: project.path,
+  });
+}
+
 /** 全部会话:运行中优先,其余按启动时间倒序 */
 export function listCommandSessions(): Promise<TerminalSessionInfo[]> {
   return cmd<TerminalSessionInfo[]>("list_command_sessions");
