@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use tauri::{AppHandle, Emitter, State};
 
-use crate::commands::open::{hidden, resolve_shell, ShellKind};
+use crate::commands::open::{hidden, resolve_shell, resolve_shell_choice, ShellKind};
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::{TerminalSessionInfo, TerminalSessionStatus};
 use crate::time_util::now_ts;
@@ -34,6 +34,8 @@ struct SessionSpec {
     cwd: String,
     java_home: Option<String>,
     interactive: bool,
+    /// 手动新建终端时前端显式选择的 shell;None 表示按设置项解析(命令会话)
+    shell: Option<ShellKind>,
 }
 
 struct SessionEntry {
@@ -222,8 +224,7 @@ fn build_shell_command(app: &AppHandle, command: &str) -> Command {
 
 /// 手动新建的会话直接运行交互式 shell,而非执行完一次命令就退出。
 /// 仍通过 stdin/stdout 管道通信(非 PTY),适合逐行输入命令。
-fn build_interactive_shell(app: &AppHandle) -> Command {
-    let shell = resolve_shell(app);
+fn build_interactive_shell(shell: ShellKind) -> Command {
     #[cfg(windows)]
     {
         match shell {
@@ -257,7 +258,8 @@ fn build_interactive_shell(app: &AppHandle) -> Command {
 
 fn spawn_child(app: &AppHandle, spec: &SessionSpec) -> AppResult<Child> {
     let mut cmd = if spec.interactive {
-        build_interactive_shell(app)
+        let shell = spec.shell.unwrap_or_else(|| resolve_shell(app));
+        build_interactive_shell(shell)
     } else {
         build_shell_command(app, &spec.command)
     };
@@ -429,6 +431,7 @@ pub fn run_command_session(
         cwd: work_dir,
         java_home,
         interactive: false,
+        shell: None,
     };
     let child = spawn_child(&app, &spec)?;
     let info = TerminalSessionInfo {
@@ -454,6 +457,7 @@ pub fn run_command_session(
 }
 
 /// 在当前项目(或选中的 worktree)目录手动打开可输入命令的 shell 会话。
+/// shell 为前端显式选择的类型(cmd/powershell/gitbash),缺省按设置项;不可用时回退 cmd。
 #[tauri::command]
 pub fn create_shell_session(
     app: AppHandle,
@@ -461,26 +465,36 @@ pub fn create_shell_session(
     project_id: i64,
     project_name: String,
     path: String,
+    shell: Option<String>,
 ) -> AppResult<TerminalSessionInfo> {
     if !std::path::Path::new(&path).is_dir() {
         return Err(AppError::coded(ErrorCode::ScriptDirNotFound, path));
     }
     let mgr = manager.inner().clone();
     let id = mgr.next_id.fetch_add(1, Ordering::Relaxed) + 1;
+    let shell_kind = match shell {
+        Some(choice) => resolve_shell_choice(Some(choice)),
+        None => resolve_shell(&app),
+    };
+    #[cfg(windows)]
+    let label = shell_kind.label().to_string();
+    #[cfg(not(windows))]
+    let label = "Shell".to_string();
     let spec = SessionSpec {
         command: String::new(),
         cwd: path,
         java_home: None,
         interactive: true,
+        shell: Some(shell_kind),
     };
     let child = spawn_child(&app, &spec)?;
     let info = TerminalSessionInfo {
         id,
         project_id,
         project_name,
-        label: "Shell".into(),
+        label: label.clone(),
         kind: "shell".into(),
-        command: "Shell".into(),
+        command: label,
         interactive: true,
         cwd: spec.cwd.clone(),
         status: TerminalSessionStatus::Running,
@@ -550,6 +564,7 @@ pub fn restart_command_session(
             cwd: entry.spec.cwd.clone(),
             java_home: entry.spec.java_home.clone(),
             interactive: entry.spec.interactive,
+            shell: entry.spec.shell,
         }
     };
     let mut child = match spawn_child(&app, &spec) {
@@ -701,6 +716,7 @@ mod tests {
                 cwd: ".".into(),
                 java_home: None,
                 interactive: false,
+                shell: None,
             },
             stop_requested: false,
             output: VecDeque::new(),

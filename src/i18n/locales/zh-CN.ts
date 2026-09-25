@@ -1496,6 +1496,7 @@ export default {
     emptyHint: "点击 + 创建终端，或运行脚本、自定义命令后在此查看输出",
     expand: "展开终端面板",
     collapse: "收起终端面板",
+    resize: "拖拽调整终端面板高度",
     stop: "停止",
     restart: "重启",
     remove: "移除会话",

@@ -86,7 +86,8 @@ onMounted(() => {
     if (id === props.sessionId) term?.write(chunk);
   });
 
-  term.onData((data) => {
+  /** 键盘输入与剪贴板粘贴共用的写入逻辑(交互式逐行编辑,命令会话即时透传) */
+  function handleInput(data: string) {
     const session = store.sessions.find((s) => s.id === props.sessionId);
     if (session?.status !== "running") return;
     if (session.interactive) {
@@ -115,6 +116,29 @@ onMounted(() => {
       if (data === "\r") term?.write("\r\n");
       else if (data >= " ") term?.write(data);
     }
+  }
+
+  term.onData(handleInput);
+
+  // 复制粘贴:有选区时 Ctrl/Cmd+C 复制选区(无选区保持 ^C 语义);
+  // Ctrl/Cmd+V 读取剪贴板走与键盘输入相同的写入路径(支持多行逐行提交)。
+  term.attachCustomKeyEventHandler((e) => {
+    if (e.type !== "keydown" || !(e.ctrlKey || e.metaKey)) return true;
+    const key = e.key.toLowerCase();
+    if (key === "c" && term?.hasSelection()) {
+      void navigator.clipboard.writeText(term.getSelection()).catch(() => {});
+      return false;
+    }
+    if (key === "v") {
+      void navigator.clipboard
+        .readText()
+        .then((text) => {
+          if (text) handleInput(text.replace(/\r\n/g, "\n"));
+        })
+        .catch(() => {});
+      return false;
+    }
+    return true;
   });
 
   resizeObserver = new ResizeObserver(() => fit?.fit());

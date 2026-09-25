@@ -69,12 +69,16 @@ export function runCommandSession(
   });
 }
 
-/** 在项目当前工作目录新建可输入命令的 Shell 会话 */
-export function createShellSession(project: Project): Promise<TerminalSessionInfo> {
+/** 在项目当前工作目录新建可输入命令的 Shell 会话;shell 显式指定类型,缺省按设置项 */
+export function createShellSession(
+  project: Project,
+  shell?: TerminalKind,
+): Promise<TerminalSessionInfo> {
   return cmd<TerminalSessionInfo>("create_shell_session", {
     projectId: project.id,
     projectName: project.name,
     path: project.path,
+    ...(shell ? { shell } : {}),
   });
 }
 

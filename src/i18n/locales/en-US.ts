@@ -1553,6 +1553,7 @@ export default {
     emptyHint: "Click + to create a terminal, or run a script or custom command to see its output",
     expand: "Expand terminal panel",
     collapse: "Collapse terminal panel",
+    resize: "Drag to resize terminal panel",
     stop: "Stop",
     restart: "Restart",
     remove: "Remove session",

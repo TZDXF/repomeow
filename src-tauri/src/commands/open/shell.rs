@@ -19,6 +19,16 @@ impl ShellKind {
         }
     }
 
+    /// 新建终端页签上的展示名(交互式会话 label)
+    #[cfg(windows)]
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Cmd => "cmd",
+            Self::PowerShell => "PowerShell",
+            Self::GitBash => "Git Bash",
+        }
+    }
+
     /// 多行命令摊平时的顺序分隔符:cmd 用 ` & `,其余 shell 用 `; `
     #[cfg(windows)]
     pub(crate) fn separator(self) -> &'static str {
@@ -77,11 +87,9 @@ pub(super) fn fallback_to_cmd_if_unavailable(requested: ShellKind, available: bo
     }
 }
 
-/// 从 settings.json 读取终端选择(与 closeAction 同一读取通道,执行时才读,天然拿到最新值)，
-/// 并在命令被包装成 shell 专属语法之前完成可用性回退。
+/// 对请求的 shell 做可用性回退(不可用时落到 cmd),供设置项与显式选择两条路径共用。
 #[cfg(windows)]
-pub(crate) fn resolve_shell(app: &AppHandle) -> ShellKind {
-    let requested = ShellKind::from_setting(crate::tray::read_setting_string(app, "terminal"));
+fn resolve_with_availability(requested: ShellKind) -> ShellKind {
     let available = match requested {
         ShellKind::Cmd => true,
         ShellKind::PowerShell => find_powershell().is_some(),
@@ -89,14 +97,36 @@ pub(crate) fn resolve_shell(app: &AppHandle) -> ShellKind {
     };
     let resolved = fallback_to_cmd_if_unavailable(requested, available);
     if resolved != requested {
-        eprintln!("[open] 配置的命令终端不可用，回退到 cmd 执行");
+        eprintln!("[open] 指定的命令终端不可用，回退到 cmd 执行");
     }
     resolved
+}
+
+/// 从 settings.json 读取终端选择(与 closeAction 同一读取通道,执行时才读,天然拿到最新值)，
+/// 并在命令被包装成 shell 专属语法之前完成可用性回退。
+#[cfg(windows)]
+pub(crate) fn resolve_shell(app: &AppHandle) -> ShellKind {
+    resolve_with_availability(ShellKind::from_setting(crate::tray::read_setting_string(
+        app,
+        "terminal",
+    )))
+}
+
+/// 新建终端时按前端显式选择的类型解析(与设置项走同一可用性回退)
+#[cfg(windows)]
+pub(crate) fn resolve_shell_choice(value: Option<String>) -> ShellKind {
+    resolve_with_availability(ShellKind::from_setting(value))
 }
 
 /// 非 Windows 平台无终端选择,固定返回占位值(spawn_terminal 会忽略)
 #[cfg(not(windows))]
 pub(crate) fn resolve_shell(_app: &AppHandle) -> ShellKind {
+    ShellKind::Cmd
+}
+
+/// 非 Windows 平台无终端选择,固定返回占位值(交互式 shell 恒为 sh)
+#[cfg(not(windows))]
+pub(crate) fn resolve_shell_choice(_value: Option<String>) -> ShellKind {
     ShellKind::Cmd
 }
 

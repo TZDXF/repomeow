@@ -14,7 +14,7 @@ import {
   stopCommandSession,
   type RunCommandOptions,
 } from "@/lib/terminal";
-import { useSettingsStore } from "@/stores/settings";
+import { useSettingsStore, type TerminalKind } from "@/stores/settings";
 import type { Project, TerminalSessionInfo } from "@/types";
 
 /** 输出增量回调(TerminalView 注册,按会话 id 过滤后写入 xterm) */
@@ -43,6 +43,10 @@ export const useTerminalStore = defineStore("terminal", () => {
   const open = ref(false);
   /** 当前选中的会话 id */
   const activeId = ref<number | null>(null);
+  /** 展开态面板高度(px,顶部边缘拖拽调整;窗口级 UI 状态,不持久化) */
+  const panelHeight = ref(288);
+  /** 每个项目的页签手工排序(会话 id 列表);未列入的会话按默认排序附后 */
+  const tabOrders = ref(new Map<number, number[]>());
 
   /** 每会话输出缓存:事件流自订阅起完整;订阅前已存在的会话在 init 时回填 */
   const buffers = new Map<number, string>();
@@ -119,10 +123,10 @@ export const useTerminalStore = defineStore("terminal", () => {
     return "embedded";
   }
 
-  /** 主动创建交互式 Shell,独立于命令执行偏好(只有内嵌面板提供此入口) */
-  async function create(project: Project) {
+  /** 主动创建交互式 Shell,独立于命令执行偏好(只有内嵌面板提供此入口);shell 显式指定类型 */
+  async function create(project: Project, shell?: TerminalKind) {
     await init();
-    const info = await createShellSession(project);
+    const info = await createShellSession(project, shell);
     onSessionChanged(info);
     activeId.value = info.id;
     open.value = true;
@@ -170,10 +174,19 @@ export const useTerminalStore = defineStore("terminal", () => {
     return () => outputListeners.delete(listener);
   }
 
+  /** 记录项目页签的手工排序(拖拽调整后调用) */
+  function setTabOrder(projectId: number, ids: number[]) {
+    const next = new Map(tabOrders.value);
+    next.set(projectId, ids);
+    tabOrders.value = next;
+  }
+
   return {
     sessions,
     open,
     activeId,
+    panelHeight,
+    tabOrders,
     init,
     run,
     create,
@@ -183,5 +196,6 @@ export const useTerminalStore = defineStore("terminal", () => {
     clearFinished,
     outputOf,
     onOutput,
+    setTabOrder,
   };
 });
