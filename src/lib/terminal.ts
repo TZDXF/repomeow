@@ -102,9 +102,14 @@ export function restartCommandSession(id: number): Promise<TerminalSessionInfo> 
   return cmd<TerminalSessionInfo>("restart_command_session", { id });
 }
 
-/** 向会话 stdin 写入(终端键盘输入);会话已结束时静默忽略 */
+/** 向会话输入端写入(终端键盘输入);会话已结束时静默忽略 */
 export function writeCommandSession(id: number, data: string): Promise<void> {
   return cmd<void>("write_command_session", { id, data });
+}
+
+/** 同步交互式会话的 PTY 尺寸(xterm fit 后调用);命令会话是管道,后端静默忽略 */
+export function resizeCommandSession(id: number, rows: number, cols: number): Promise<void> {
+  return cmd<void>("resize_command_session", { id, rows, cols });
 }
 
 /** 从注册表移除会话(运行中的先停止) */

@@ -1,15 +1,21 @@
 //! 项目内嵌终端:在项目目录内直接执行命令(npm scripts / docker compose / 自定义命令),
-//! 子进程管道捕获 stdout/stderr,经 `terminal://output` 事件流式推送前端(xterm 渲染),
+//! 输出经 `terminal://output` 事件流式推送前端(xterm 渲染),
 //! 支持实时输出查看、stdin 写入、停止(Windows 整棵树 taskkill)与重启。
 //! 与「系统终端新窗口」模式(run_in_terminal)并存,由设置项 embeddedTerminal 分流。
+//!
+//! 两种会话形态:
+//! - 命令会话:管道捕获 stdout/stderr(避免 ConPTY 屏幕重绘序列污染输出回放缓冲);
+//! - 交互式 Shell:ConPTY 伪终端,提示符/回显/行编辑由 shell 自绘(pwsh 走 PSReadLine)。
 //!
 //! 会话仅存内存:应用退出即清空,不做持久化。
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 
 use tauri::{AppHandle, Emitter, State};
 
@@ -44,7 +50,10 @@ struct SessionEntry {
     /// 避免旧进程退出事件把新会话误标为 stopped
     generation: u64,
     pid: u32,
-    stdin: Option<Arc<Mutex<ChildStdin>>>,
+    /// 命令会话的 stdin 或交互式会话的 PTY 输入端
+    writer: Option<Arc<Mutex<Box<dyn Write + Send>>>>,
+    /// 交互式会话的 PTY 主端(resize 用);进程退出后关闭以释放 ConPTY 句柄
+    master: Option<Box<dyn MasterPty + Send>>,
     /// 重启所需的完整参数(java_home 不入 info,只在后端留存)
     spec: SessionSpec,
     /// 用户主动停止标记:waiter 据此把退出归类为 stopped 而非 exited
@@ -82,6 +91,42 @@ impl TerminalManager {
             sessions.remove(&id);
         }
     }
+}
+
+/// 会话子进程句柄:命令会话是普通管道子进程,交互式是 ConPTY 子进程;
+/// 统一 wait/pid 供 waiter 线程与注册表使用
+enum SessionChild {
+    Piped(std::process::Child),
+    Pty(Box<dyn portable_pty::Child + Send + Sync>),
+}
+
+impl SessionChild {
+    fn pid(&self) -> u32 {
+        match self {
+            SessionChild::Piped(c) => c.id(),
+            SessionChild::Pty(c) => c.process_id().unwrap_or(0),
+        }
+    }
+
+    /// 等待退出并取退出码(信号终止等无码场景为 None)
+    fn wait(&mut self) -> Option<i32> {
+        match self {
+            SessionChild::Piped(c) => c.wait().ok().and_then(|s| s.code()),
+            // portable-pty 的退出码为 u32,截回 i32 与管道会话同型
+            SessionChild::Pty(c) => c
+                .wait()
+                .ok()
+                .map(|s| if s.success() { 0 } else { s.exit_code() as i32 }),
+        }
+    }
+}
+
+/// 一次拉起的全部句柄:子进程 + 输出流(PTY 单流,管道 stdout/stderr 双流)+ 输入端 + PTY 主端
+struct Launched {
+    child: SessionChild,
+    readers: Vec<Box<dyn Read + Send>>,
+    writer: Option<Arc<Mutex<Box<dyn Write + Send>>>>,
+    master: Option<Box<dyn MasterPty + Send>>,
 }
 
 fn session_not_found(id: u64) -> AppError {
@@ -222,62 +267,114 @@ fn build_shell_command(app: &AppHandle, command: &str) -> Command {
     }
 }
 
-/// 手动新建的会话直接运行交互式 shell,而非执行完一次命令就退出。
-/// 仍通过 stdin/stdout 管道通信(非 PTY),适合逐行输入命令。
-fn build_interactive_shell(shell: ShellKind) -> Command {
+/// 交互式 shell 的 ConPTY 启动参数。伪终端下提示符/回显/行编辑由 shell 自绘
+/// (pwsh 走 PSReadLine,cmd 走 conhost 行输入,bash 走 readline),
+/// 不再需要管道模式的 `-Command -` 静默读法与前端逐行编辑。
+fn build_interactive_pty_command(shell: ShellKind, cwd: &str) -> CommandBuilder {
     #[cfg(windows)]
-    {
-        match shell {
-            ShellKind::Cmd => {
-                let mut c = hidden(Command::new("cmd"));
-                c.args(["/Q", "/K"]);
-                c
-            }
-            ShellKind::PowerShell => {
-                let ps = crate::commands::open::find_powershell().unwrap_or("powershell");
-                let mut c = hidden(Command::new(ps));
-                c.args(["-NoLogo", "-NoProfile", "-NoExit", "-Command", "-"]);
-                c
-            }
-            ShellKind::GitBash => {
-                let bash = crate::commands::open::find_git_bash().unwrap_or_else(|| "bash".into());
-                let mut c = hidden(Command::new(bash));
-                c.arg("-i");
-                c
-            }
+    let mut cmd = match shell {
+        ShellKind::Cmd => {
+            let mut c = CommandBuilder::new("cmd");
+            c.arg("/K");
+            c
         }
-    }
+        ShellKind::PowerShell => {
+            let ps = crate::commands::open::find_powershell().unwrap_or("powershell");
+            let mut c = CommandBuilder::new(ps);
+            c.args(["-NoLogo", "-NoProfile"]);
+            c
+        }
+        ShellKind::GitBash => {
+            let bash = crate::commands::open::find_git_bash().unwrap_or_else(|| "bash".into());
+            let mut c = CommandBuilder::new(bash);
+            c.arg("-i");
+            c
+        }
+    };
     #[cfg(not(windows))]
-    {
+    let mut cmd = {
         let _ = shell;
-        let mut c = Command::new("sh");
+        let mut c = CommandBuilder::new("sh");
         c.arg("-i");
         c
-    }
+    };
+    cmd.cwd(cwd);
+    cmd.env("TERM", "xterm-256color");
+    cmd
 }
 
-fn spawn_child(app: &AppHandle, spec: &SessionSpec) -> AppResult<Child> {
-    let mut cmd = if spec.interactive {
-        let shell = spec.shell.unwrap_or_else(|| resolve_shell(app));
-        build_interactive_shell(shell)
-    } else {
-        build_shell_command(app, &spec.command)
-    };
-    cmd.current_dir(&spec.cwd)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        // 管道模式下 npm(chalk)等检测到非 TTY 默认关颜色,强制开启
-        // (xterm 前端能渲染 ANSI 序列;不支持的工具会自行忽略这些变量)
-        .env("FORCE_COLOR", "1")
-        .env("CLICOLOR_FORCE", "1")
-        .env("TERM", "xterm-256color");
-    // JAVA_HOME 用进程环境注入(窗口模式因跨 wt/start 只能拼命令前缀,管道模式无此限制)
+fn spawn_err(e: impl std::fmt::Display) -> AppError {
+    AppError::coded(ErrorCode::TerminalSpawnFailed, e.to_string())
+}
+
+/// 按会话形态拉起子进程:交互式走 ConPTY(初值 120x30,前端 fit 后经 resize 同步),
+/// 命令会话走管道
+fn launch_session(app: &AppHandle, spec: &SessionSpec) -> AppResult<Launched> {
+    if !spec.interactive {
+        let mut cmd = build_shell_command(app, &spec.command);
+        cmd.current_dir(&spec.cwd)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            // 管道模式下 npm(chalk)等检测到非 TTY 默认关颜色,强制开启
+            // (xterm 前端能渲染 ANSI 序列;不支持的工具会自行忽略这些变量)
+            .env("FORCE_COLOR", "1")
+            .env("CLICOLOR_FORCE", "1")
+            .env("TERM", "xterm-256color");
+        // JAVA_HOME 用进程环境注入(窗口模式因跨 wt/start 只能拼命令前缀,管道模式无此限制)
+        if let Some(home) = spec.java_home.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            cmd.env("JAVA_HOME", home.replace('"', ""));
+        }
+        let mut child = cmd.spawn().map_err(spawn_err)?;
+        let writer = child
+            .stdin
+            .take()
+            .map(|s| Arc::new(Mutex::new(Box::new(s) as Box<dyn Write + Send>)));
+        let readers = [
+            child.stdout.take().map(|r| Box::new(r) as Box<dyn Read + Send>),
+            child.stderr.take().map(|r| Box::new(r) as Box<dyn Read + Send>),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        return Ok(Launched {
+            child: SessionChild::Piped(child),
+            readers,
+            writer,
+            master: None,
+        });
+    }
+
+    let shell = spec.shell.unwrap_or_else(|| resolve_shell(app));
+    let mut cmd = build_interactive_pty_command(shell, &spec.cwd);
     if let Some(home) = spec.java_home.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         cmd.env("JAVA_HOME", home.replace('"', ""));
     }
-    cmd.spawn()
-        .map_err(|e| AppError::coded(ErrorCode::TerminalSpawnFailed, e.to_string()))
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: 30,
+            cols: 120,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(spawn_err)?;
+    let writer = Arc::new(Mutex::new(pair.master.take_writer().map_err(spawn_err)?));
+    // 输出经查询拦截器转发:ESC[6n 即答应答并剥离,防止前端迟到应答被显示
+    let reader = PtyQueryReader {
+        inner: pair.master.try_clone_reader().map_err(spawn_err)?,
+        writer: writer.clone(),
+        seq: Vec::new(),
+        ready: VecDeque::new(),
+    };
+    let child = pair.slave.spawn_command(cmd).map_err(spawn_err)?;
+    // 从端句柄在 spawn 后立即释放,避免句柄占用影响子进程退出检测
+    drop(pair.slave);
+    Ok(Launched {
+        child: SessionChild::Pty(child),
+        readers: vec![Box::new(reader)],
+        writer: Some(writer),
+        master: Some(pair.master),
+    })
 }
 
 /// 结束进程树:Windows 用 taskkill /T 连带子进程(npm 脚本常派生 node 子进程,
@@ -292,6 +389,106 @@ fn kill_tree(pid: u32) {
     #[cfg(not(windows))]
     {
         let _ = Command::new("kill").arg("-9").arg(pid.to_string()).output();
+    }
+}
+
+/// PTY 输出查询拦截:shell(PSReadLine 等)会向终端发光标位置查询 `ESC[6n` 并
+/// 短超时等待应答。若交由前端 xterm 应答,一个 IPC 往返的延迟即超过等待窗口,
+/// 迟到的应答会被 shell 当作键入文本显示出来(表现为提示符后出现 `[1;1R`)。
+/// 因此在后端即刻应答,并把查询本体从转发流剥离(xterm 看不到就不会重复应答)。
+/// 同理拦截焦点上报开关 `ESC[?1004h/l`:ConPTY 不识别 xterm 回传的焦点事件
+/// (`ESC[I`/`ESC[O`),会当作键入文本显示在提示符后。
+struct PtyQueryReader {
+    inner: Box<dyn Read + Send>,
+    /// PTY 输入端(与 SessionEntry.writer 同享),用于写应答
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    /// ESC 序列累积缓冲(空 = 普通转发态);查询可能被 read 切开,需跨块拼接
+    seq: Vec<u8>,
+    /// 已决待转发字节
+    ready: VecDeque<u8>,
+}
+
+impl PtyQueryReader {
+    /// DEC 私有模式开关(ESC[?params h/l)是否包含焦点上报(1004)
+    fn is_focus_report_toggle(seq: &[u8]) -> bool {
+        let Some(rest) = seq.strip_prefix(b"\x1b[?") else {
+            return false;
+        };
+        let params = rest.strip_suffix(b"h").or_else(|| rest.strip_suffix(b"l"));
+        let Some(params) = params else {
+            return false;
+        };
+        std::str::from_utf8(params)
+            .map(|s| s.split(';').any(|p| p == "1004"))
+            .unwrap_or(false)
+    }
+
+    /// seq 已完整(或放弃匹配):查询即答应答、焦点上报开关丢弃,其余原样放行
+    fn resolve_seq(&mut self) {
+        if self.seq == b"\x1b[6n" {
+            if let Ok(mut guard) = self.writer.lock() {
+                // 应答内容仅用于能力探测,shell 不依赖真实光标坐标
+                let _ = guard.write_all(b"\x1b[1;1R");
+                let _ = guard.flush();
+            }
+        } else if Self::is_focus_report_toggle(&self.seq) {
+            // 丢弃开关本身即可阻止 xterm 发送焦点事件
+        } else {
+            let seq = std::mem::take(&mut self.seq);
+            self.ready.extend(&seq);
+            return;
+        }
+        self.seq.clear();
+    }
+
+    fn push(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            if self.seq.is_empty() && b != 0x1b {
+                self.ready.push_back(b);
+                continue;
+            }
+            self.seq.push(b);
+            match self.seq.len() {
+                // ESC 单独出现:等下一字节判断是否 CSI
+                1 => {}
+                // ESC + '[':CSI 头,继续累积参数(注意 '[' 本身在终止字节范围内)
+                2 if b == b'[' => {}
+                // CSI 终止字节(0x40~0x7e)到达,序列完整
+                _ if (0x40..=0x7e).contains(&b) => self.resolve_seq(),
+                // ESC + 其他单字符(如 ESC 7):到达终止范围或长度兜底时放行
+                // 异常长序列兜底放行,避免缓冲无限增长
+                _ if self.seq.len() >= 32 => self.resolve_seq(),
+                _ => {}
+            }
+        }
+    }
+}
+
+impl Read for PtyQueryReader {
+    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        loop {
+            if self.ready.is_empty() {
+                let mut buf = [0u8; 4096];
+                match self.inner.read(&mut buf)? {
+                    // 流结束:未决的暂存字节原样交出
+                    0 => {
+                        if !self.seq.is_empty() {
+                            let seq = std::mem::take(&mut self.seq);
+                            self.ready.extend(&seq);
+                        }
+                        if self.ready.is_empty() {
+                            return Ok(0);
+                        }
+                    }
+                    n => self.push(&buf[..n]),
+                }
+                continue;
+            }
+            let n = self.ready.len().min(out.len());
+            let taken: Vec<u8> = self.ready.drain(..n).collect();
+            out[..n].copy_from_slice(&taken);
+            return Ok(n);
+        }
     }
 }
 
@@ -338,9 +535,15 @@ fn spawn_reader(
     });
 }
 
-fn spawn_waiter(app: AppHandle, mgr: Arc<TerminalManager>, id: u64, generation: u64, mut child: Child) {
+fn spawn_waiter(
+    app: AppHandle,
+    mgr: Arc<TerminalManager>,
+    id: u64,
+    generation: u64,
+    mut child: SessionChild,
+) {
     std::thread::spawn(move || {
-        let status = child.wait();
+        let exit_code = child.wait();
         let info = {
             let mut sessions = mgr.lock();
             let Some(entry) = sessions.get_mut(&id) else {
@@ -349,12 +552,13 @@ fn spawn_waiter(app: AppHandle, mgr: Arc<TerminalManager>, id: u64, generation: 
             if entry.generation != generation {
                 return; // 旧进程退出(restart 后),状态已由新代数接管
             }
-            entry.stdin = None;
+            entry.writer = None;
+            entry.master = None; // 关闭 PTY 主端,释放 ConPTY 句柄
             entry.info.finished_at = Some(now_ts());
             if entry.stop_requested {
                 entry.info.status = TerminalSessionStatus::Stopped;
             } else {
-                entry.info.exit_code = status.ok().and_then(|s| s.code());
+                entry.info.exit_code = exit_code;
                 entry.info.status = TerminalSessionStatus::Exited;
             }
             entry.info.clone()
@@ -363,20 +567,23 @@ fn spawn_waiter(app: AppHandle, mgr: Arc<TerminalManager>, id: u64, generation: 
     });
 }
 
-/// 登记新会话并接管子进程管道(reader/waiter 线程 + 事件广播)
+/// 登记新会话并接管子进程句柄(reader/waiter 线程 + 事件广播)
 fn register_launch(
     app: &AppHandle,
     mgr: &Arc<TerminalManager>,
     generation: u64,
     info: TerminalSessionInfo,
     spec: SessionSpec,
-    mut child: Child,
+    launched: Launched,
 ) -> TerminalSessionInfo {
     let id = info.id;
-    let stdin = child.stdin.take().map(|s| Arc::new(Mutex::new(s)));
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let pid = child.id();
+    let Launched {
+        child,
+        readers,
+        writer,
+        master,
+    } = launched;
+    let pid = child.pid();
     {
         let mut sessions = mgr.lock();
         sessions.insert(
@@ -385,7 +592,8 @@ fn register_launch(
                 info: info.clone(),
                 generation,
                 pid,
-                stdin,
+                writer,
+                master,
                 spec,
                 stop_requested: false,
                 output: VecDeque::new(),
@@ -393,11 +601,8 @@ fn register_launch(
             },
         );
     }
-    if let Some(out) = stdout {
-        spawn_reader(app.clone(), mgr.clone(), id, generation, out);
-    }
-    if let Some(err) = stderr {
-        spawn_reader(app.clone(), mgr.clone(), id, generation, err);
+    for reader in readers {
+        spawn_reader(app.clone(), mgr.clone(), id, generation, reader);
     }
     spawn_waiter(app.clone(), mgr.clone(), id, generation, child);
     let _ = app.emit(SESSION_CHANGED_EVENT, &info);
@@ -433,7 +638,7 @@ pub fn run_command_session(
         interactive: false,
         shell: None,
     };
-    let child = spawn_child(&app, &spec)?;
+    let launched = launch_session(&app, &spec)?;
     let info = TerminalSessionInfo {
         id,
         project_id,
@@ -451,7 +656,7 @@ pub fn run_command_session(
         started_at: now_ts(),
         finished_at: None,
     };
-    let info = register_launch(&app, &mgr, 0, info, spec, child);
+    let info = register_launch(&app, &mgr, 0, info, spec, launched);
     mgr.prune();
     Ok(info)
 }
@@ -487,7 +692,7 @@ pub fn create_shell_session(
         interactive: true,
         shell: Some(shell_kind),
     };
-    let child = spawn_child(&app, &spec)?;
+    let launched = launch_session(&app, &spec)?;
     let info = TerminalSessionInfo {
         id,
         project_id,
@@ -502,7 +707,7 @@ pub fn create_shell_session(
         started_at: now_ts(),
         finished_at: None,
     };
-    let info = register_launch(&app, &mgr, 0, info, spec, child);
+    let info = register_launch(&app, &mgr, 0, info, spec, launched);
     mgr.prune();
     Ok(info)
 }
@@ -567,8 +772,8 @@ pub fn restart_command_session(
             shell: entry.spec.shell,
         }
     };
-    let mut child = match spawn_child(&app, &spec) {
-        Ok(c) => c,
+    let launched = match launch_session(&app, &spec) {
+        Ok(l) => l,
         Err(e) => {
             // 重启拉起失败:会话标记为启动失败,保留在列表里供用户查看/重试
             let info = {
@@ -582,16 +787,19 @@ pub fn restart_command_session(
             return Err(e);
         }
     };
-    let stdin = child.stdin.take().map(|s| Arc::new(Mutex::new(s)));
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let pid = child.id();
+    let Launched {
+        child,
+        readers,
+        writer,
+        master,
+    } = launched;
     let (info, generation) = {
         let mut sessions = mgr.lock();
         let entry = sessions.get_mut(&id).ok_or_else(|| session_not_found(id))?;
         entry.generation += 1;
-        entry.pid = pid;
-        entry.stdin = stdin;
+        entry.pid = child.pid();
+        entry.writer = writer;
+        entry.master = master;
         entry.stop_requested = false;
         entry.output.clear();
         entry.output_chars = 0;
@@ -601,35 +809,65 @@ pub fn restart_command_session(
         entry.info.finished_at = None;
         (entry.info.clone(), entry.generation)
     };
-    if let Some(out) = stdout {
-        spawn_reader(app.clone(), mgr.clone(), id, generation, out);
-    }
-    if let Some(err) = stderr {
-        spawn_reader(app.clone(), mgr.clone(), id, generation, err);
+    for reader in readers {
+        spawn_reader(app.clone(), mgr.clone(), id, generation, reader);
     }
     spawn_waiter(app.clone(), mgr.clone(), id, generation, child);
     let _ = app.emit(SESSION_CHANGED_EVENT, &info);
     Ok(info)
 }
 
-/// 向会话 stdin 写入(xterm 键盘输入);会话已结束时静默忽略
+/// 向会话输入端写入(xterm 键盘输入);会话已结束时静默忽略。
+/// 交互式 PTY 会话按终端输入语义把换行统一成 \r(Enter/粘贴多行);
+/// 命令会话原样透传 stdin。
 #[tauri::command]
 pub fn write_command_session(
     manager: State<'_, Arc<TerminalManager>>,
     id: u64,
     data: String,
 ) -> AppResult<()> {
-    let (stdin, interactive) = {
+    let (writer, interactive) = {
         let sessions = manager.lock();
         let entry = sessions.get(&id).ok_or_else(|| session_not_found(id))?;
-        (entry.stdin.clone(), entry.spec.interactive)
+        (entry.writer.clone(), entry.spec.interactive)
     };
-    if let Some(stdin) = stdin {
-        let mut guard = stdin.lock().unwrap();
-        // 子进程已退出但 waiter 尚未清理 stdin 时写入会 EPIPE,按静默处理
-        let input = if interactive { data.replace('\r', "\n") } else { data };
+    if let Some(writer) = writer {
+        let mut guard = writer.lock().unwrap();
+        // 子进程已退出但 waiter 尚未清理句柄时写入会 EPIPE,按静默处理
+        let input = if interactive {
+            // ConPTY 不识别焦点上报事件(ESC[I/ESC[O),会当作字面键入显示;
+            // 输出端已拦截 1004 开关,此处兜底丢弃。xterm 每次焦点变化都单独
+            // 发送完整序列,不会与键盘输入粘连,精确匹配不会误伤 ESC 按键
+            if data == "\x1b[I" || data == "\x1b[O" {
+                return Ok(());
+            }
+            data.replace('\n', "\r")
+        } else {
+            data
+        };
         let _ = guard.write_all(input.as_bytes());
         let _ = guard.flush();
+    }
+    Ok(())
+}
+
+/// 同步交互式会话的 PTY 尺寸(前端 xterm fit 后调用);命令会话是管道无尺寸,静默忽略
+#[tauri::command]
+pub fn resize_command_session(
+    manager: State<'_, Arc<TerminalManager>>,
+    id: u64,
+    rows: u16,
+    cols: u16,
+) -> AppResult<()> {
+    let sessions = manager.lock();
+    let entry = sessions.get(&id).ok_or_else(|| session_not_found(id))?;
+    if let Some(master) = &entry.master {
+        let _ = master.resize(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        });
     }
     Ok(())
 }
@@ -710,7 +948,8 @@ mod tests {
             },
             generation: 0,
             pid: 0,
-            stdin: None,
+            writer: None,
+            master: None,
             spec: SessionSpec {
                 command: "c".into(),
                 cwd: ".".into(),
@@ -727,5 +966,228 @@ mod tests {
         }
         assert!(entry.output_chars <= MAX_OUTPUT_CHARS);
         assert!(!entry.output.is_empty());
+    }
+
+    /// 渲染行为诊断(手动):`cargo test -- --ignored pty_resize_diag --nocapture`。
+    /// 模拟前端时序(spawn 后立刻 resize 到面板行数 → 执行真实命令),
+    /// 转储原始输出流,用于核对 ConPTY 的重绘/清屏序列。
+    #[test]
+    #[ignore]
+    fn pty_resize_diag() {
+        // 临时目录放一个无依赖的 package.json,模拟 pnpm i 快速路径
+        let tmp = std::env::temp_dir().join("repomeow-pty-diag");
+        let _ = std::fs::create_dir_all(&tmp);
+        std::fs::write(tmp.join("package.json"), "{\"name\":\"diag\",\"private\":true}").unwrap();
+        let tmp_str = tmp.to_string_lossy().to_string();
+
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 30,
+                cols: 120,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        let writer = Arc::new(Mutex::new(pair.master.take_writer().unwrap()));
+        let mut reader = PtyQueryReader {
+            inner: pair.master.try_clone_reader().unwrap(),
+            writer: writer.clone(),
+            seq: Vec::new(),
+            ready: VecDeque::new(),
+        };
+        let mut child = pair
+            .slave
+            .spawn_command(build_interactive_pty_command(ShellKind::PowerShell, &tmp_str))
+            .unwrap();
+        // spawn 后立刻 resize,与前端挂载时序一致
+        let _ = pair.master.resize(PtySize {
+            rows: 16,
+            cols: 110,
+            pixel_width: 0,
+            pixel_height: 0,
+        });
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            while let Ok(n) = reader.read(&mut buf) {
+                if n == 0 || tx.send(buf[..n].to_vec()).is_err() {
+                    break;
+                }
+            }
+        });
+        let mut drain = |secs: u64, label: &str, output: &mut Vec<u8>| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+            while std::time::Instant::now() < deadline {
+                if let Ok(chunk) = rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                    output.extend_from_slice(&chunk);
+                }
+            }
+            let text = String::from_utf8_lossy(output);
+            eprintln!("=== {label} ===\n{}", text.escape_default());
+        };
+        let run = |cmd: &str, writer: &Arc<Mutex<Box<dyn Write + Send>>>| {
+            if let Ok(mut guard) = writer.lock() {
+                let _ = guard.write_all(cmd.as_bytes());
+            }
+        };
+        let mut output = Vec::new();
+        drain(3, "启动(resize 后)", &mut output);
+        run("pnpm -v\r", &writer);
+        drain(3, "pnpm -v", &mut output);
+        run("1..40 | ForEach-Object { \"line-$_\" }\r", &writer);
+        drain(4, "灌满 40 行(视口 16 行)", &mut output);
+        run("echo step-x\r", &writer);
+        drain(3, "满屏后执行命令", &mut output);
+        let _ = child.kill();
+    }
+
+    /// 手动冒烟(需本机装有 pwsh):`cargo test -- --ignored pty_pwsh_smoke`。
+    /// 经 ConPTY 真实拉起 PowerShell,验证 PtyQueryReader 自动应答光标查询后
+    /// 提示符正常出现、命令可执行,且查询/应答不泄露到转发流。
+    #[test]
+    #[ignore]
+    fn pty_pwsh_smoke() {
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 30,
+                cols: 120,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        let writer = Arc::new(Mutex::new(pair.master.take_writer().unwrap()));
+        let mut reader = PtyQueryReader {
+            inner: pair.master.try_clone_reader().unwrap(),
+            writer: writer.clone(),
+            seq: Vec::new(),
+            ready: VecDeque::new(),
+        };
+        let mut child = pair
+            .slave
+            .spawn_command(build_interactive_pty_command(ShellKind::PowerShell, "."))
+            .unwrap();
+        // 读线程持续汇集输出,主线程带超时轮询检查
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            while let Ok(n) = reader.read(&mut buf) {
+                if n == 0 || tx.send(buf[..n].to_vec()).is_err() {
+                    break;
+                }
+            }
+        });
+        let mut output: Vec<u8> = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let mut prompted = false;
+        let mut done = false;
+        while std::time::Instant::now() < deadline {
+            if let Ok(chunk) = rx.recv_timeout(std::time::Duration::from_millis(200)) {
+                output.extend_from_slice(&chunk);
+            }
+            let text = String::from_utf8_lossy(&output);
+            if !prompted && text.contains("PS ") {
+                prompted = true;
+                if let Ok(mut guard) = writer.lock() {
+                    guard.write_all(b"echo pty-ok\r").unwrap();
+                }
+            }
+            // 回显里也会出现 pty-ok,以第二个提示符(命令执行完毕)为准
+            if prompted && text.matches("PS ").count() >= 2 && text.contains("pty-ok") {
+                done = true;
+                break;
+            }
+        }
+        let _ = child.kill();
+        let text = String::from_utf8_lossy(&output);
+        assert!(prompted, "未收到 PowerShell 提示符: {text:?}");
+        assert!(done, "未收到 echo 执行结果: {text:?}");
+        // 查询/应答/焦点上报开关都不应出现在转发流(否则会被 shell 当作键入文本显示)
+        assert!(!text.contains("[6n"), "光标查询未被剥离: {text:?}");
+        assert!(!text.contains("[1;1R"), "应答泄露到转发流: {text:?}");
+        assert!(!text.contains("1004"), "焦点上报开关未被剥离: {text:?}");
+    }
+
+    /// 拦截器核心行为:光标查询即答应答、焦点上报开关丢弃,其余序列原样透传
+    /// 记录型 mock writer:拦截器应答内容写入共享缓冲供断言
+    struct RecordingWriter(Arc<Mutex<Vec<u8>>>);
+    impl Write for RecordingWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn recording_writer() -> (Arc<Mutex<Box<dyn Write + Send>>>, Arc<Mutex<Vec<u8>>>) {
+        let recorded = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let writer: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(Box::new(
+            RecordingWriter(recorded.clone()),
+        )));
+        (writer, recorded)
+    }
+
+    /// 拦截器核心行为:光标查询即答应答、焦点上报开关丢弃,其余序列原样透传
+    #[test]
+    fn pty_query_filter_answers_and_strips() {
+        let (writer, recorded) = recording_writer();
+        let mut filter = PtyQueryReader {
+            inner: Box::new(std::io::Cursor::new(
+                b"hi\x1b[6nthere\x1b[?1004h\x1b[?9001h!".to_vec(),
+            )),
+            writer,
+            seq: Vec::new(),
+            ready: VecDeque::new(),
+        };
+        let mut out = Vec::new();
+        filter.take(1024).read_to_end(&mut out).unwrap();
+        assert_eq!(out, b"hithere\x1b[?9001h!");
+        assert_eq!(*recorded.lock().unwrap(), b"\x1b[1;1R");
+    }
+
+    /// 查询序列被 read 切开时仍要能拼出并拦截(逐字节喂入)
+    #[test]
+    fn pty_query_filter_handles_split_sequences() {
+        let (writer, recorded) = recording_writer();
+        struct OneByteReader {
+            data: Vec<u8>,
+            pos: usize,
+        }
+        impl Read for OneByteReader {
+            fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+                if self.pos < self.data.len() {
+                    out[0] = self.data[self.pos];
+                    self.pos += 1;
+                    Ok(1)
+                } else {
+                    Ok(0)
+                }
+            }
+        }
+        let mut filter = PtyQueryReader {
+            inner: Box::new(OneByteReader {
+                data: b"a\x1b[6nb\x1b[?1004hc".to_vec(),
+                pos: 0,
+            }),
+            writer,
+            seq: Vec::new(),
+            ready: VecDeque::new(),
+        };
+        let mut out = Vec::new();
+        filter.take(1024).read_to_end(&mut out).unwrap();
+        assert_eq!(out, b"abc");
+        assert_eq!(*recorded.lock().unwrap(), b"\x1b[1;1R");
+    }
+
+    /// 焦点上报开关识别:单参数/组合参数拦截,其余模式放行
+    #[test]
+    fn filter_focus_report_toggle() {
+        assert!(PtyQueryReader::is_focus_report_toggle(b"\x1b[?1004h"));
+        assert!(PtyQueryReader::is_focus_report_toggle(b"\x1b[?1004l"));
+        assert!(PtyQueryReader::is_focus_report_toggle(b"\x1b[?2004;1004h"));
+        assert!(!PtyQueryReader::is_focus_report_toggle(b"\x1b[?9001h"));
+        assert!(!PtyQueryReader::is_focus_report_toggle(b"\x1b[?25h"));
+        assert!(!PtyQueryReader::is_focus_report_toggle(b"\x1b[6n"));
     }
 }

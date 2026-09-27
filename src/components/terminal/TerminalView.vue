@@ -3,7 +3,7 @@ import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import { writeCommandSession } from "@/lib/terminal";
+import { resizeCommandSession, writeCommandSession } from "@/lib/terminal";
 import { useTerminalStore } from "@/stores/terminal";
 
 /**
@@ -21,7 +21,9 @@ let fit: FitAddon | null = null;
 let detachOutput: (() => void) | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let themeObserver: MutationObserver | null = null;
-let inputLine = "";
+// PTY 尺寸去重:与上次同步值相同则跳过(重启后归零强制重发)
+let syncedCols = 0;
+let syncedRows = 0;
 
 // 终端配色直接取自应用主题变量(xterm 需要具体色值,不读 CSS 变量),
 // 亮/暗色与 pixel / glassmorphism / island 等皮肤都能自动适配。
@@ -67,6 +69,19 @@ function syncTheme() {
   return theme;
 }
 
+function sessionOf(id: number) {
+  return store.sessions.find((s) => s.id === id);
+}
+
+/** 把 xterm 当前尺寸同步给交互式会话的 PTY(命令会话是管道,无尺寸概念) */
+function syncPtySize() {
+  if (!term || !sessionOf(props.sessionId)?.interactive) return;
+  if (term.cols === syncedCols && term.rows === syncedRows) return;
+  syncedCols = term.cols;
+  syncedRows = term.rows;
+  void resizeCommandSession(props.sessionId, term.rows, term.cols).catch(() => {});
+}
+
 /** 清空并回放当前缓存(挂载/重启时调用;缓存为空即只是清屏) */
 function renderBuffer() {
   term?.reset();
@@ -77,8 +92,9 @@ function renderBuffer() {
 onMounted(() => {
   if (!container.value) return;
   term = new Terminal({
-    // 子进程是管道而非 PTY,输出只含 \n:交给 xterm 转成 CRLF 才能正确换行
-    convertEol: true,
+    // 命令会话是管道输出(只有 \n):交给 xterm 转成 CRLF 才能正确换行;
+    // 交互式会话走 ConPTY,输出已含 \r\n,不能重复转换
+    convertEol: !sessionOf(props.sessionId)?.interactive,
     fontSize: 13,
     cursorBlink: false,
     scrollback: 5000,
@@ -88,6 +104,7 @@ onMounted(() => {
   term.loadAddon(fit);
   term.open(container.value);
   fit.fit();
+  syncPtySize();
   renderBuffer();
   term.focus();
 
@@ -95,33 +112,14 @@ onMounted(() => {
     if (id === props.sessionId) term?.write(chunk);
   });
 
-  /** 键盘输入与剪贴板粘贴共用的写入逻辑(交互式逐行编辑,命令会话即时透传) */
+  /** 键盘输入与剪贴板粘贴共用的写入逻辑 */
   function handleInput(data: string) {
-    const session = store.sessions.find((s) => s.id === props.sessionId);
+    const session = sessionOf(props.sessionId);
     if (session?.status !== "running") return;
-    if (session.interactive) {
-      // 管道不是 PTY:在前端逐行编辑,回车时整行写入 Shell stdin。
-      for (const ch of data) {
-        if (ch === "\r" || ch === "\n") {
-          void writeCommandSession(props.sessionId, `${inputLine}\n`).catch(() => {});
-          inputLine = "";
-          term?.write("\r\n");
-        } else if (ch === "\x7f" || ch === "\b") {
-          if (inputLine) {
-            inputLine = Array.from(inputLine).slice(0, -1).join("");
-            term?.write("\b \b");
-          }
-        } else if (ch === "\x03") {
-          inputLine = "";
-          term?.write("^C\r\n");
-        } else if (ch >= " " && ch !== "\x7f") {
-          inputLine += ch;
-          term?.write(ch);
-        }
-      }
-    } else {
-      void writeCommandSession(props.sessionId, data).catch(() => {});
-      // 一次性命令会话沿用即时写入,便于向运行中的进程回答提示。
+    // 交互式 PTY 会话原样透传:回显/行编辑/^C 展示全部由 shell 自绘;
+    // 命令会话(管道)无回显,本地补显键入字符,便于向运行中的进程回答提示。
+    void writeCommandSession(props.sessionId, data).catch(() => {});
+    if (!session.interactive) {
       if (data === "\r") term?.write("\r\n");
       else if (data >= " ") term?.write(data);
     }
@@ -150,7 +148,10 @@ onMounted(() => {
     return true;
   });
 
-  resizeObserver = new ResizeObserver(() => fit?.fit());
+  resizeObserver = new ResizeObserver(() => {
+    fit?.fit();
+    syncPtySize();
+  });
   resizeObserver.observe(container.value);
 
   themeObserver = new MutationObserver(() => {
@@ -162,11 +163,14 @@ onMounted(() => {
   });
 });
 
-// 会话重启:store 已按 started_at 变化清空缓存,这里整屏重渲染
+// 会话重启:store 已按 started_at 变化清空缓存,这里整屏重渲染,
+// 并把尺寸重发给重新拉起的 PTY(归零去重标记强制重发)
 watch(
-  () => store.sessions.find((s) => s.id === props.sessionId)?.started_at,
+  () => sessionOf(props.sessionId)?.started_at,
   () => {
-    inputLine = "";
+    syncedCols = 0;
+    syncedRows = 0;
+    syncPtySize();
     renderBuffer();
   },
 );

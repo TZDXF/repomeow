@@ -86,6 +86,7 @@ similar = "3"
 jsonschema = "0.56.0"
 # 库内 ID 的系统随机源
 getrandom = "0.4"
+portable-pty = "0.9.0"
 
 [dev-dependencies]
 urlpattern = "0.6"

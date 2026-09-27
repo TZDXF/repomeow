@@ -248,6 +248,7 @@ pub fn run() {
             commands::terminal::stop_command_session,
             commands::terminal::restart_command_session,
             commands::terminal::write_command_session,
+            commands::terminal::resize_command_session,
             commands::terminal::remove_command_session,
             commands::files::save_text_file,
             commands::files::list_project_files,
