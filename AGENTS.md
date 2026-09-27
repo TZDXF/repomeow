@@ -14,7 +14,7 @@
 
 | 命令 | 说明 |
 | --- | --- |
-| `pnpm start` | `sem:prepare && tauri dev`,完整桌面端开发(前端 + Rust) |
+| `pnpm start` | `sem:prepare && tauri dev --config src-tauri/tauri.dev.conf.json`,完整桌面端开发(前端 + Rust);dev 用独立 identifier 以便与安装版同时运行(见关键规则 2) |
 | `pnpm dev` | 仅 Vite 前端(端口 1420,见 `tauri.conf.json` devUrl) |
 | `pnpm build` | `vue-tsc --noEmit && vite build`,**唯一的类型检查手段** |
 | `pnpm build:desktop` | `sem:prepare && tauri build` 打包(NSIS) |
@@ -74,7 +74,7 @@ scripts/                sem/(sidecar 下载)、release/(发布流程)
 ## 关键规则
 
 1. **新增 Rust 命令**:在 `commands/` 对应域实现(返回 `AppResult<T>`)后,必须在 `lib.rs` 的 `invoke_handler!` 注册;前端经 `cmd<T>("snake_case 名", { camelCase 参数 })` 调用(Tauri 自动映射参数名)。
-2. **插件**(`Cargo.toml` + `lib.rs`):`tauri` 启用 `protocol-asset` / `tray-icon` / `image-png`;插件注册顺序:single-instance(**必须最先**,二次启动聚焦已有窗口)→ opener / dialog / shell / store / updater / process / autostart(自启附 `--autostart` 参数)。
+2. **插件**(`Cargo.toml` + `lib.rs`):`tauri` 启用 `protocol-asset` / `tray-icon` / `image-png`;插件注册顺序:single-instance(**必须最先**,二次启动聚焦已有窗口)→ opener / dialog / shell / store / updater / process / autostart(自启附 `--autostart` 参数)。single-instance 在 Windows 上按 `tauri.conf.json` 的 `identifier` 派生判重 mutex,WebView2 用户数据目录同样按 identifier 落在 `%LOCALAPPDATA%`;dev 经 `tauri.dev.conf.json`(`pnpm start` 的 `--config` 参数,仅 dev 生效)覆盖为 `com.repomeow.dev`,使 dev 与安装版可同时运行,发布构建不经过该文件、identifier 保持 `com.repomeow.app`。
 3. **数据库**:SQLite 位于 `~/.repomeow/projects.db`。迁移按 `PRAGMA user_version` 顺序应用、保证幂等;每个迁移文件顶部用 `-- App version: x.y.z` 与 `-- Status: in development|released` 标注。版本发布后不得修改已发布的迁移文件,结构变更新增 `00N_xxx.sql`;未发布的开发版本内可直接改当前版本定义。当前已应用 001_init ~ 011_system_schedules。
 4. **应用数据目录 `.repomeow`**:Rust(`lib.rs` 的 `APP_DATA_DIR_NAME`)与前端(`stores/settings.ts`)各有一份常量,改动需同步。设置走 `tauri-plugin-store` → `~/.repomeow/settings.json`;AI 提示词存 `~/.repomeow/prompts/*.md`;AI 接入配置存 `~/.repomeow/ai-config.json`;Wiki 存 `~/.repomeow/wiki/<basename>-<hash>/`;运行期缓存(编辑器图标、chinese-days)在安装目录 `data/` 下(`lib.rs` 的 `runtime_data_root()`,dev 模式落在 `target/debug/data/`),安装目录不可写时静默降级。
 5. **窗口与生命周期**:主窗口默认 `visible: false`,启动时统一 `show()`;带 `--autostart` 保持隐藏仅驻留托盘。托盘迷你弹窗(`TRAY_POPUP_LABEL`)永不真正关闭(失焦收起);主窗口关闭行为按设置项 `closeAction`(tray=最小化到托盘 / exit=退出进程)。

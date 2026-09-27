@@ -11,7 +11,7 @@
     "sem:prepare": "node scripts/sem/prepare.mjs",
     "sem:check": "node scripts/sem/prepare.mjs --check",
     "cli:dev": "cargo run --manifest-path src-tauri/Cargo.toml --",
-    "start": "pnpm sem:prepare && tauri dev",
+    "start": "pnpm sem:prepare && tauri dev --config src-tauri/tauri.dev.conf.json",
     "build:desktop": "pnpm sem:prepare && tauri build",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
