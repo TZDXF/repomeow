@@ -13,6 +13,7 @@ use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
@@ -362,7 +363,7 @@ fn launch_session(app: &AppHandle, spec: &SessionSpec) -> AppResult<Launched> {
     // 输出经查询拦截器转发:ESC[6n 即答应答并剥离,防止前端迟到应答被显示
     let reader = PtyQueryReader {
         inner: pair.master.try_clone_reader().map_err(spawn_err)?,
-        writer: writer.clone(),
+        answers: spawn_answer_writer(writer.clone()),
         seq: Vec::new(),
         ready: VecDeque::new(),
     };
@@ -392,16 +393,38 @@ fn kill_tree(pid: u32) {
     }
 }
 
+/// 光标查询应答写入线程主体:从队列取应答写入 PTY 输入端,写失败(会话已结束)静默忽略。
+/// 队列由读取线程持有发送端,读取线程结束(EOF)后发送端 drop、队列关闭,本线程排空后退出
+fn answer_writer_loop(rx: mpsc::Receiver<Vec<u8>>, writer: Arc<Mutex<Box<dyn Write + Send>>>) {
+    for answer in rx {
+        if let Ok(mut guard) = writer.lock() {
+            let _ = guard.write_all(&answer);
+            let _ = guard.flush();
+        }
+    }
+}
+
+/// 启动应答写入专职线程,返回发送端(交给 PtyQueryReader 持有)。
+/// 应答不能在输出读取线程里同步写:输入管道写满时写入会阻塞,读取线程一旦停摆,
+/// ConPTY 输出失去排水 → conhost/子进程输出背压 → 子进程更不会读输入,三方互锁;
+/// 专职线程被拖住只影响应答时延,不传导回输出排水
+fn spawn_answer_writer(writer: Arc<Mutex<Box<dyn Write + Send>>>) -> mpsc::Sender<Vec<u8>> {
+    let (tx, rx) = mpsc::channel::<Vec<u8>>();
+    std::thread::spawn(move || answer_writer_loop(rx, writer));
+    tx
+}
+
 /// PTY 输出查询拦截:shell(PSReadLine 等)会向终端发光标位置查询 `ESC[6n` 并
 /// 短超时等待应答。若交由前端 xterm 应答,一个 IPC 往返的延迟即超过等待窗口,
 /// 迟到的应答会被 shell 当作键入文本显示出来(表现为提示符后出现 `[1;1R`)。
-/// 因此在后端即刻应答,并把查询本体从转发流剥离(xterm 看不到就不会重复应答)。
+/// 因此在后端即刻应答(经专职线程写入输入端,读取线程不做任何输入写),
+/// 并把查询本体从转发流剥离(xterm 看不到就不会重复应答)。
 /// 同理拦截焦点上报开关 `ESC[?1004h/l`:ConPTY 不识别 xterm 回传的焦点事件
 /// (`ESC[I`/`ESC[O`),会当作键入文本显示在提示符后。
 struct PtyQueryReader {
     inner: Box<dyn Read + Send>,
-    /// PTY 输入端(与 SessionEntry.writer 同享),用于写应答
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    /// 光标查询应答队列的发送端,由专职线程取出写入 PTY 输入端
+    answers: mpsc::Sender<Vec<u8>>,
     /// ESC 序列累积缓冲(空 = 普通转发态);查询可能被 read 切开,需跨块拼接
     seq: Vec<u8>,
     /// 已决待转发字节
@@ -426,11 +449,9 @@ impl PtyQueryReader {
     /// seq 已完整(或放弃匹配):查询即答应答、焦点上报开关丢弃,其余原样放行
     fn resolve_seq(&mut self) {
         if self.seq == b"\x1b[6n" {
-            if let Ok(mut guard) = self.writer.lock() {
-                // 应答内容仅用于能力探测,shell 不依赖真实光标坐标
-                let _ = guard.write_all(b"\x1b[1;1R");
-                let _ = guard.flush();
-            }
+            // 应答内容仅用于能力探测,shell 不依赖真实光标坐标;入队即返回,
+            // 实际写入见 answer_writer_loop
+            let _ = self.answers.send(b"\x1b[1;1R".to_vec());
         } else if Self::is_focus_report_toggle(&self.seq) {
             // 丢弃开关本身即可阻止 xterm 发送焦点事件
         } else {
@@ -991,7 +1012,7 @@ mod tests {
         let writer = Arc::new(Mutex::new(pair.master.take_writer().unwrap()));
         let mut reader = PtyQueryReader {
             inner: pair.master.try_clone_reader().unwrap(),
-            writer: writer.clone(),
+            answers: spawn_answer_writer(writer.clone()),
             seq: Vec::new(),
             ready: VecDeque::new(),
         };
@@ -1058,7 +1079,7 @@ mod tests {
         let writer = Arc::new(Mutex::new(pair.master.take_writer().unwrap()));
         let mut reader = PtyQueryReader {
             inner: pair.master.try_clone_reader().unwrap(),
-            writer: writer.clone(),
+            answers: spawn_answer_writer(writer.clone()),
             seq: Vec::new(),
             ready: VecDeque::new(),
         };
@@ -1107,8 +1128,8 @@ mod tests {
         assert!(!text.contains("1004"), "焦点上报开关未被剥离: {text:?}");
     }
 
-    /// 拦截器核心行为:光标查询即答应答、焦点上报开关丢弃,其余序列原样透传
-    /// 记录型 mock writer:拦截器应答内容写入共享缓冲供断言
+    /// 拦截器核心行为:光标查询即答应答(入队)、焦点上报开关丢弃,其余序列原样透传
+    /// 记录型 mock writer:应答线程写入内容进共享缓冲供断言
     struct RecordingWriter(Arc<Mutex<Vec<u8>>>);
     impl Write for RecordingWriter {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
@@ -1131,25 +1152,30 @@ mod tests {
     /// 拦截器核心行为:光标查询即答应答、焦点上报开关丢弃,其余序列原样透传
     #[test]
     fn pty_query_filter_answers_and_strips() {
-        let (writer, recorded) = recording_writer();
+        let (answers, answer_rx) = mpsc::channel();
         let mut filter = PtyQueryReader {
             inner: Box::new(std::io::Cursor::new(
                 b"hi\x1b[6nthere\x1b[?1004h\x1b[?9001h!".to_vec(),
             )),
-            writer,
+            answers,
             seq: Vec::new(),
             ready: VecDeque::new(),
         };
         let mut out = Vec::new();
-        filter.take(1024).read_to_end(&mut out).unwrap();
+        filter.read_to_end(&mut out).unwrap();
         assert_eq!(out, b"hithere\x1b[?9001h!");
-        assert_eq!(*recorded.lock().unwrap(), b"\x1b[1;1R");
+        assert_eq!(answer_rx.try_recv(), Ok(b"\x1b[1;1R".to_vec()));
+        // 查询之后只有焦点开关被丢弃,不应再产生任何应答
+        assert_eq!(
+            answer_rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty),
+            "焦点上报开关不应触发应答"
+        );
     }
 
     /// 查询序列被 read 切开时仍要能拼出并拦截(逐字节喂入)
     #[test]
     fn pty_query_filter_handles_split_sequences() {
-        let (writer, recorded) = recording_writer();
         struct OneByteReader {
             data: Vec<u8>,
             pos: usize,
@@ -1165,18 +1191,31 @@ mod tests {
                 }
             }
         }
+        let (answers, answer_rx) = mpsc::channel();
         let mut filter = PtyQueryReader {
             inner: Box::new(OneByteReader {
                 data: b"a\x1b[6nb\x1b[?1004hc".to_vec(),
                 pos: 0,
             }),
-            writer,
+            answers,
             seq: Vec::new(),
             ready: VecDeque::new(),
         };
         let mut out = Vec::new();
-        filter.take(1024).read_to_end(&mut out).unwrap();
+        filter.read_to_end(&mut out).unwrap();
         assert_eq!(out, b"abc");
+        assert_eq!(answer_rx.try_recv(), Ok(b"\x1b[1;1R".to_vec()));
+    }
+
+    /// 应答写入线程:排空队列逐条写入输入端,队列关闭后退出
+    #[test]
+    fn answer_writer_loop_drains_then_exits() {
+        let (writer, recorded) = recording_writer();
+        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        let handle = std::thread::spawn(move || answer_writer_loop(rx, writer));
+        tx.send(b"\x1b[1;1R".to_vec()).unwrap();
+        drop(tx);
+        handle.join().unwrap();
         assert_eq!(*recorded.lock().unwrap(), b"\x1b[1;1R");
     }
 
