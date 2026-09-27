@@ -1503,7 +1503,7 @@ export default {
     clearFinished: "清除已结束",
     runningCount: "{count} 个运行中",
     menuTitle: "终端会话",
-    menuHint: "点击查看全部会话,按项目分组",
+    menuHint: "点击查看命令会话,按项目分组",
     exitCode: "退出码 {code}",
     status: {
       running: "运行中",

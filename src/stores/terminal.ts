@@ -153,10 +153,13 @@ export const useTerminalStore = defineStore("terminal", () => {
     }
   }
 
-  /** 清除已结束会话;传 projectId 时仅清该项目的 */
-  async function clearFinished(projectId?: number) {
+  /** 清除已结束会话;传 projectId 时仅清该项目的,opts.excludeInteractive 跳过交互式 Shell(全局菜单只展示命令会话) */
+  async function clearFinished(projectId?: number, opts?: { excludeInteractive?: boolean }) {
     const finished = sessions.value.filter(
-      (s) => s.status !== "running" && (projectId === undefined || s.project_id === projectId),
+      (s) =>
+        s.status !== "running" &&
+        (projectId === undefined || s.project_id === projectId) &&
+        !(opts?.excludeInteractive && s.interactive),
     );
     for (const s of finished) {
       await remove(s.id).catch(() => {});

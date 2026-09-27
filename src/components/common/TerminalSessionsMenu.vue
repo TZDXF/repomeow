@@ -12,7 +12,8 @@ import type { TerminalSessionInfo } from "@/types";
 
 /**
  * 标题栏右侧的内嵌终端会话入口:图标显示运行中数量,
- * 点击弹出全部会话(运行中与历史),按项目分组;
+ * 点击弹出命令会话(npm/docker/custom 等,运行中与历史),按项目分组;
+ * 主动创建的交互式 Shell 不在此展示,只在项目终端面板可见;
  * 点击会话跳转到对应项目详情页并展开终端面板定位到该会话。
  */
 const { t } = useI18n();
@@ -24,7 +25,8 @@ onMounted(() => {
   void store.init();
 });
 
-const sessions = computed(() => store.sessions);
+/** 交互式 Shell 由用户在面板手动创建,全局概览只关心命令会话 */
+const sessions = computed(() => store.sessions.filter((s) => !s.interactive));
 const runningCount = computed(() => sessions.value.filter((s) => s.status === "running").length);
 const hasFinished = computed(() => sessions.value.some((s) => s.status !== "running"));
 const visible = computed(() => sessions.value.length > 0);
@@ -75,7 +77,7 @@ async function openSession(s: TerminalSessionInfo) {
 }
 
 async function clearFinished() {
-  await store.clearFinished();
+  await store.clearFinished(undefined, { excludeInteractive: true });
 }
 </script>
 

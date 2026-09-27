@@ -1560,7 +1560,7 @@ export default {
     clearFinished: "Clear finished",
     runningCount: "{count} running",
     menuTitle: "Terminal Sessions",
-    menuHint: "Click to view all sessions, grouped by project",
+    menuHint: "Click to view command sessions, grouped by project",
     exitCode: "Exit code {code}",
     status: {
       running: "Running",
