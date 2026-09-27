@@ -12,7 +12,8 @@ export const IMAGE_EXTS = new Set([
 ]);
 
 /** 视频扩展名集合(文件预览走 asset 协议直显;WebView2 对 mkv/avi 等容器支持有限,
- *  不可播格式由 VideoViewer 的 error 事件兜底提示) */
+ *  不可播格式由 VideoViewer 的 error 事件兜底提示;
+ *  注意:不含 "ts"——本项目上下文中 .ts 几乎总是 TypeScript 源码,应走文本预览) */
 export const VIDEO_EXTS = new Set([
   "mp4",
   "m4v",
@@ -24,7 +25,6 @@ export const VIDEO_EXTS = new Set([
   "avi",
   "wmv",
   "flv",
-  "ts",
   "mpg",
   "mpeg",
   "3gp",
