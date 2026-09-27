@@ -904,8 +904,8 @@ mod tests {
     #[test]
     fn decoder_gbk_fallback() {
         let mut d = StreamDecoder::default();
-        // "中文" 的 GBK 编码:D6 D0 C4 C4
-        assert_eq!(d.push(&[0xD6, 0xD0, 0xC4, 0xC4]), "中文");
+        // "中文" 的 GBK 编码:D6 D0 CE C4(C4 C4 是"哪",曾因测试数据写错而恒失败)
+        assert_eq!(d.push(&[0xD6, 0xD0, 0xCE, 0xC4]), "中文");
     }
 
     #[test]
