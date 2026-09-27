@@ -209,12 +209,12 @@ async function clearFinished() {
 </script>
 
 <template>
-  <div v-if="visible" class="shrink-0 border-t">
+  <div v-if="visible" class="shrink-0">
     <!-- 收起态:底部细条,显示运行中数量 -->
     <button
       v-if="!store.open"
       type="button"
-      class="flex h-8 w-full items-center gap-2 px-3 text-xs text-muted-foreground transition-colors hover:bg-accent"
+      class="flex h-8 w-full items-center gap-2 border-t px-3 text-xs text-muted-foreground transition-colors hover:bg-accent"
       :title="t('terminal.expand')"
       @click="store.open = true"
     >
@@ -232,15 +232,12 @@ async function clearFinished() {
 
     <!-- 展开态:顶部拖拽条 + 会话页签 + xterm -->
     <div v-else class="flex flex-col" :style="{ height: `${store.panelHeight}px` }">
+      <!-- 顶部拖拽条:自身即顶部分隔线,悬停高亮,避免与边框叠成两条线 -->
       <div
-        class="group/resize relative h-1.5 shrink-0 cursor-row-resize"
+        class="h-1.5 shrink-0 cursor-row-resize border-t transition-colors hover:border-primary"
         :title="t('terminal.resize')"
         @pointerdown="startResize"
-      >
-        <div
-          class="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-border transition-colors group-hover/resize:bg-primary"
-        />
-      </div>
+      />
       <div class="flex h-9 shrink-0 items-center gap-1 border-b px-2">
         <SquareTerminal class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <div class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
@@ -271,9 +268,10 @@ async function clearFinished() {
             >
               {{ s.exit_code }}
             </span>
+            <!-- 关闭按钮常驻占位,悬停仅切换透明度,避免页签宽度跳变 -->
             <button
               type="button"
-              class="hidden h-4 w-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground group-hover:inline-flex"
+              class="pointer-events-none flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100"
               :title="t('terminal.remove')"
               @click.stop="removeSession(s.id)"
             >

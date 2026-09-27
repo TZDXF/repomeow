@@ -14,6 +14,8 @@ const props = defineProps<{ sessionId: number }>();
 const store = useTerminalStore();
 
 const container = ref<HTMLDivElement | null>(null);
+// 容器留白区域(内边距)需与终端自绘背景同色,沿用面板背景会在边缘露出色差
+const termBg = ref<string>("transparent");
 let term: Terminal | null = null;
 let fit: FitAddon | null = null;
 let detachOutput: (() => void) | null = null;
@@ -58,6 +60,13 @@ function currentTheme() {
   };
 }
 
+/** 解析当前主题配色,并把背景色同步给容器留白区域 */
+function syncTheme() {
+  const theme = currentTheme();
+  termBg.value = theme.background;
+  return theme;
+}
+
 /** 清空并回放当前缓存(挂载/重启时调用;缓存为空即只是清屏) */
 function renderBuffer() {
   term?.reset();
@@ -73,7 +82,7 @@ onMounted(() => {
     fontSize: 13,
     cursorBlink: false,
     scrollback: 5000,
-    theme: currentTheme(),
+    theme: syncTheme(),
   });
   fit = new FitAddon();
   term.loadAddon(fit);
@@ -145,7 +154,7 @@ onMounted(() => {
   resizeObserver.observe(container.value);
 
   themeObserver = new MutationObserver(() => {
-    if (term) term.options.theme = currentTheme();
+    if (term) term.options.theme = syncTheme();
   });
   themeObserver.observe(document.documentElement, {
     attributes: true,
@@ -173,5 +182,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="container" class="h-full w-full overflow-hidden px-2 py-1" />
+  <div
+    ref="container"
+    class="h-full w-full overflow-hidden p-2"
+    :style="{ backgroundColor: termBg }"
+  />
 </template>
