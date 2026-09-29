@@ -7,6 +7,7 @@
 //! Unused in openai-completions)暂不建模。
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
@@ -111,7 +112,7 @@ pub struct ProviderResponse {
 }
 
 /// provider 请求发出前观测/改写 payload 的回调(Rust 侧不序列化)。
-pub type OnPayloadFn = Box<dyn Fn(Value) -> BoxFuture<'static, Option<Value>> + Send + Sync>;
+pub type OnPayloadFn = Arc<dyn Fn(Value) -> BoxFuture<'static, Option<Value>> + Send + Sync>;
 /// 收到 HTTP 响应后的回调(Rust 侧不序列化)。
 pub type OnResponseFn = Box<dyn Fn(&ProviderResponse) + Send + Sync>;
 
@@ -168,7 +169,7 @@ impl Clone for SimpleStreamOptions {
             tool_choice: self.tool_choice,
             reasoning: self.reasoning,
             thinking_budgets: self.thinking_budgets.clone(),
-            on_payload: None,
+            on_payload: self.on_payload.clone(),
             on_response: None,
         }
     }

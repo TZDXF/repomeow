@@ -333,7 +333,7 @@ pub fn ai_telemetry_schema() -> Value {
 /// harness 钩子名(蓝本 HOOK_NAMES)。
 pub const HOOK_NAMES: [&str; 11] = [
     "before_run",
-    "before_resume",
+    "before_drive",
     "before_run_end",
     "transform_context",
     "before_request",
@@ -486,7 +486,7 @@ pub fn harness_telemetry_schema() -> Value {
                 "startAttributes": {
                     "pi.lane.name": { "type": "string", "required": true },
                     "pi.operation.id": { "type": "string", "required": false },
-                    "pi.hook.name": { "type": "string", "required": true, "values": ["before_run", "before_resume", "before_run_end", "transform_context", "before_request", "before_payload", "after_response", "before_tool", "after_tool", "before_compaction", "before_navigation"] },
+                    "pi.hook.name": { "type": "string", "required": true, "values": ["before_run", "before_drive", "before_run_end", "transform_context", "before_request", "before_payload", "after_response", "before_tool", "after_tool", "before_compaction", "before_navigation"] },
                     "pi.hook.registration_id": { "type": "string", "required": false }
                 },
                 "endAttributes": {
@@ -768,4 +768,34 @@ mod tests {
         assert_eq!(HOOK_NAMES.len(), 11);
         assert_eq!(EVENT_TYPES.len(), 29);
     }
+}
+
+/// harness hook span("pi.harness.hook"),tool hook 每个 registration 一个。
+pub async fn start_harness_hook_span<T, F, Fut>(
+    context: &dyn TelemetryContext,
+    lane: &str,
+    operation_id: &str,
+    hook_name: &str,
+    registration_id: Option<&str>,
+    callback: F,
+) -> T
+where
+    F: FnOnce(Arc<dyn TelemetrySpan>) -> Fut,
+    Fut: std::future::Future<Output = T>,
+{
+    let mut attributes = vec![
+        ("pi.lane.name".to_string(), AttributeValue::from(lane)),
+        (
+            "pi.operation.id".to_string(),
+            AttributeValue::from(operation_id),
+        ),
+        ("pi.hook.name".to_string(), AttributeValue::from(hook_name)),
+    ];
+    if let Some(registration_id) = registration_id {
+        attributes.push((
+            "pi.hook.registration_id".to_string(),
+            AttributeValue::from(registration_id),
+        ));
+    }
+    start_span(context, "pi.harness.hook", attributes, callback).await
 }

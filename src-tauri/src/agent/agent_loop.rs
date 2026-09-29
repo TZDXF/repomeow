@@ -1154,7 +1154,7 @@ async fn prepare_tool_call(
             Some(prepare) => prepare(raw_args),
             None => raw_args,
         };
-        let validated_args = validate_tool_arguments(&tool.parameters, prepared_args)?;
+        let mut validated_args = validate_tool_arguments(&tool.parameters, prepared_args)?;
 
         if let Some(before) = &config.before_tool_call {
             let before_result = before(
@@ -1175,6 +1175,9 @@ async fn prepare_tool_call(
                 });
             }
             if let Some(before_result) = before_result {
+                if let Some(args) = before_result.args {
+                    validated_args = args;
+                }
                 if before_result.block {
                     let mut result = create_error_tool_result(
                         before_result
@@ -1994,6 +1997,7 @@ mod tests {
         config.before_tool_call = Some(Arc::new(|_context, _signal| {
             Box::pin(async move {
                 Some(crate::agent::types::BeforeToolCallResult {
+                    args: None,
                     block: true,
                     reason: Some("denied".to_string()),
                     terminate: false,
@@ -2045,6 +2049,7 @@ mod tests {
         config.before_tool_call = Some(Arc::new(|_context, _signal| {
             Box::pin(async move {
                 Some(crate::agent::types::BeforeToolCallResult {
+                    args: None,
                     block: true,
                     reason: None,
                     terminate: false,

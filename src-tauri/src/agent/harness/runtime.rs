@@ -19,10 +19,15 @@ use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::agent::agent_loop::now_ms;
+use crate::agent::harness::context::Context as HarnessContext;
 use crate::agent::harness::errors::OperationError;
 use crate::agent::harness::events::{
     HarnessEvent, HarnessEventBus, MessageEvent, MessageUpdateEvent, ToolEvent, ToolEventPhase,
     UsageEvent,
+};
+use crate::agent::harness::execution::{Gate, GateControl};
+use crate::agent::harness::hooks::{
+    AfterResponseEvent, HookEvent, HookName, HookRegistry, HookResult,
 };
 use crate::agent::harness::session::context::build_session_context;
 use crate::agent::harness::session::session::Session;
@@ -74,6 +79,7 @@ pub(crate) struct EngineHandle {
     pub run_id: String,
     pub signal: tokio_util::sync::CancellationToken,
     pub agent: Arc<crate::agent::agent::Agent>,
+    pub gate_control: GateControl,
 }
 
 /// 运行期共享依赖(存入 [`HarnessState`](super::agent_harness::HarnessState),
@@ -225,7 +231,13 @@ pub(crate) fn make_queue_getter(
 }
 
 /// 镜像监听器:AgentEvent → session 条目/记录 + harness 事件。
-pub(crate) fn make_mirroring_listener(shared: RuntimeShared, run_id: String) -> AgentListener {
+pub(crate) fn make_mirroring_listener(
+    shared: RuntimeShared,
+    run_id: String,
+    hooks: Arc<HookRegistry>,
+    gate: Gate,
+    context: HarnessContext,
+) -> AgentListener {
     let attempt_counter = Arc::new(AtomicI64::new(0));
     let tool_counter = Arc::new(AtomicUsize::new(0));
     let last_assistant_entry: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
@@ -242,9 +254,44 @@ pub(crate) fn make_mirroring_listener(shared: RuntimeShared, run_id: String) -> 
         let last_assistant_entry = last_assistant_entry.clone();
         let tool_registry = tool_registry.clone();
         let assistant_started_at = assistant_started_at.clone();
+        let hooks = hooks.clone();
+        let gate = gate.clone();
+        let context = context.clone();
         Box::pin(async move {
             match event {
                 AgentEvent::MessageEnd { message } => {
+                    // after_response 在消息持久化与事件发布前收敛最终形状。
+                    let mut message = message;
+                    if matches!(message, AgentMessage::Message(TypedMessage::Assistant(_))) {
+                        let Some(AgentMessage::Message(TypedMessage::Assistant(mut assistant))) =
+                            Some(message.clone())
+                        else {
+                            unreachable!("assistant match checked above");
+                        };
+                        if let Some(HookResult::AfterResponse(Some(result))) = hooks
+                            .run_with_gate(
+                                HookName::AfterResponse,
+                                HookEvent::AfterResponse(AfterResponseEvent {
+                                    lane: "main".to_string(),
+                                    run_id: run_id.clone(),
+                                    status: None,
+                                    headers: None,
+                                    message: assistant.clone(),
+                                }),
+                                &gate,
+                                context.clone(),
+                            )
+                            .await
+                            .ok()
+                            .flatten()
+                        {
+                            if let Some(replacement) = result.message {
+                                assistant = replacement;
+                                message = AgentMessage::Message(TypedMessage::Assistant(assistant));
+                            }
+                        }
+                    }
+
                     // 工具结果条目复用 ToolStarted 预注册的 result entry id。
                     let pre_registered = match &message {
                         AgentMessage::Message(TypedMessage::ToolResult(tool_result)) => {

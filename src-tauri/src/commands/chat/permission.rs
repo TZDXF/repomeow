@@ -118,6 +118,7 @@ pub(super) fn build_permission_hook(
             let permission = prefs.lock().unwrap().as_ref().map(|prefs| prefs.permission);
             if permission.is_some_and(|permission| !tool_allowed(permission, tool_name)) {
                 return Some(BeforeToolCallResult {
+                    args: None,
                     block: true,
                     reason: Some("Tool execution is disabled in read-only mode".to_string()),
                     terminate: false,
@@ -151,6 +152,7 @@ pub(super) fn build_permission_hook(
             match decision {
                 PermissionDecision::Allow => None,
                 PermissionDecision::Block(reason) => Some(BeforeToolCallResult {
+                    args: None,
                     block: true,
                     reason: Some(reason.to_string()),
                     terminate: false,

@@ -276,6 +276,7 @@ pub struct AgentState {
 /// terminate 参与"整批全部 terminate 才提前终止"的规则。
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct BeforeToolCallResult {
+    pub args: Option<Value>,
     pub block: bool,
     pub reason: Option<String>,
     pub terminate: bool,

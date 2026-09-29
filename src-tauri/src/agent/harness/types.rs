@@ -202,7 +202,8 @@ pub fn bind_harness_tool(
 // ---------------------------------------------------------------------------
 
 /// harness 持有、按回合快照的策展流选项(对齐 TS `AgentHarnessStreamOptions`)。
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentHarnessStreamOptions {
     pub transport: Option<Transport>,
     pub timeout_ms: Option<u64>,
@@ -216,7 +217,8 @@ pub struct AgentHarnessStreamOptions {
 /// provider 钩子按请求返回的流选项补丁(对齐 TS `AgentHarnessStreamOptionsPatch`)。
 ///
 /// `headers`/`metadata` 的键值为 `None` 表示删除该键;整体为 `None` 表示清空全部。
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentHarnessStreamOptionsPatch {
     pub transport: Option<Transport>,
     pub timeout_ms: Option<u64>,

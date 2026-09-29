@@ -593,6 +593,14 @@ impl Agent {
         *lock(&self.inner.stream_function) = stream_fn;
     }
 
+    /// 运行中替换下一次请求的基础流选项(harness before_request hook 使用)。
+    pub fn set_stream_options(&self, options: crate::agent::llm::SimpleStreamOptions) {
+        let mut base = lock(&self.inner.base_config);
+        let on_payload = base.stream.on_payload.take();
+        base.stream = options;
+        base.stream.on_payload = on_payload;
+    }
+
     /// steering 队列 drain 模式。
     pub fn steering_mode(&self) -> QueueMode {
         self.inner.steering_queue.lock().unwrap().mode
@@ -841,7 +849,7 @@ impl Agent {
 /// 将 on_payload/on_response 回调装箱进 SimpleStreamOptions(供应用侧构造 config 用)。
 pub fn wrap_on_payload_callback(callback: &OnPayloadCallback) -> OnPayloadFn {
     let callback = callback.clone();
-    Box::new(move |value: Value| {
+    Arc::new(move |value: Value| {
         let callback = callback.clone();
         Box::pin(async move { callback(value).await })
     })

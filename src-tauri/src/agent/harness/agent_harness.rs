@@ -22,7 +22,13 @@ use crate::agent::harness::events::{
     HarnessEvent, HarnessEventBus, HarnessEventListener, HarnessEventType, RunEndEvent,
     RunEndOutcome, RunStartEvent, WatchHandle,
 };
-use crate::agent::harness::hooks::HarnessHooks;
+use crate::agent::harness::execution::{create_gate, Gate};
+use crate::agent::harness::hooks::{
+    AfterToolEvent, BeforeCompactionEvent, BeforeDriveEvent, BeforeNavigationEvent,
+    BeforePayloadEvent, BeforeRequestEvent, BeforeRunEndEvent, BeforeRunEvent, BeforeToolEvent,
+    DriveOperation, HookCompactionReason, HookEvent, HookName, HookRegistry, HookResult,
+    RequestStep, TransformContextEvent,
+};
 use crate::agent::harness::runtime::{
     branch_entries, build_history, make_mirroring_listener, make_queue_getter, operation_error,
     stream_options_to_simple, EmptyToolContext, EngineHandle, QueueSet, QueuedEntry, RuntimeShared,
@@ -46,9 +52,9 @@ use crate::agent::llm::types::{
     AssistantMessage, Model, ModelThinkingLevel, StopReason, ThinkingLevel, Usage,
 };
 use crate::agent::types::{
-    AgentContext, AgentLoopConfig, AgentLoopTurnUpdate, AgentMessage, AgentState,
-    PrepareNextTurnContext, PrepareNextTurnFn, QueueMode, StreamFn, ToolExecutionMode,
-    TypedMessage,
+    AfterToolCallResult, AgentContext, AgentLoopConfig, AgentLoopTurnUpdate, AgentMessage,
+    AgentState, BeforeToolCallResult, PrepareNextTurnContext, PrepareNextTurnFn, QueueMode,
+    StreamFn, ToolExecutionMode, TypedMessage,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -348,40 +354,6 @@ pub struct SessionSnapshot {
     pub faulted: bool,
 }
 
-/// harness 钩子名(对齐 TS `HookName`)。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum HookName {
-    BeforeRun,
-    BeforeResume,
-    BeforeRunEnd,
-    TransformContext,
-    BeforeRequest,
-    BeforePayload,
-    AfterResponse,
-    BeforeTool,
-    AfterTool,
-    BeforeCompaction,
-    BeforeNavigation,
-}
-
-impl HookName {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            HookName::BeforeRun => "before_run",
-            HookName::BeforeResume => "before_resume",
-            HookName::BeforeRunEnd => "before_run_end",
-            HookName::TransformContext => "transform_context",
-            HookName::BeforeRequest => "before_request",
-            HookName::BeforePayload => "before_payload",
-            HookName::AfterResponse => "after_response",
-            HookName::BeforeTool => "before_tool",
-            HookName::AfterTool => "after_tool",
-            HookName::BeforeCompaction => "before_compaction",
-            HookName::BeforeNavigation => "before_navigation",
-        }
-    }
-}
-
 /// 重试策略(蓝本由 pi-ai 提供;本复刻在 harness 侧定义,与 coding-agent 的
 /// `settings.retry` 同形:`baseDelayMs * 2^(attempt-1)`)。
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -422,7 +394,7 @@ pub struct AgentHarnessOptions {
     pub follow_up_mode: QueueMode,
     pub tool_execution: ToolExecutionMode,
     pub telemetry_context: Option<std::sync::Arc<dyn TelemetryContext>>,
-    pub hooks: HarnessHooks,
+    pub hooks: HookRegistry,
 }
 
 // ---------------------------------------------------------------------------
@@ -456,7 +428,7 @@ struct HarnessState {
     tool_context: Option<Arc<dyn ToolContext>>,
     tool_execution: ToolExecutionMode,
     telemetry_context: Option<Arc<dyn TelemetryContext>>,
-    hooks: Arc<HarnessHooks>,
+    hooks: Arc<HookRegistry>,
     queues: Arc<Mutex<QueueSet>>,
     engine: Arc<Mutex<Option<EngineHandle>>>,
     busy: Arc<tokio::sync::watch::Sender<bool>>,
@@ -727,7 +699,7 @@ impl AgentHarness {
 
     async fn prompt_input(&self, input: QueueInput) -> RunResult {
         // 1. 守卫 + 配置快照(短临界区,不跨 await)。
-        let snapshot = {
+        let mut snapshot = {
             let state = self.lock_state();
             if state.closed {
                 return Err(Self::closed_error());
@@ -758,11 +730,17 @@ impl AgentHarness {
                     .stream_fn
                     .clone()
                     .expect("stream_fn is set at create time"),
+                resources: AgentHarnessResources {
+                    prompt_templates: state.resources.prompt_templates.clone(),
+                    skills: state.resources.skills.clone(),
+                },
+                hooks: state.hooks.clone(),
+                telemetry_context: state.telemetry_context.clone(),
             }
         };
 
         // 2. 输入归一化。
-        let prompt_messages: Vec<AgentMessage> = match input {
+        let mut prompt_messages: Vec<AgentMessage> = match input {
             QueueInput::Text(text) => vec![AgentMessage::user_text(text, now_ms())],
             QueueInput::Message(message) => vec![*message],
             QueueInput::Messages(messages) => messages,
@@ -777,6 +755,31 @@ impl AgentHarness {
 
         let shared = self.shared();
         let run_id = uuid_v7();
+        let (hook_gate, hook_gate_control) = create_gate();
+        let hook_context = HarnessContext::new()
+            .with_telemetry_opt(snapshot.telemetry_context.clone())
+            .with_signal(hook_gate.signal());
+        if let Some(HookResult::BeforeRun(Some(result))) = snapshot
+            .hooks
+            .run_with_gate(
+                HookName::BeforeRun,
+                HookEvent::BeforeRun(BeforeRunEvent {
+                    lane: "main".to_string(),
+                    run_id: run_id.clone(),
+                    prompt: prompt_messages.clone(),
+                    resources: resources_json(&snapshot.resources),
+                }),
+                &hook_gate,
+                hook_context.clone(),
+            )
+            .await
+            .ok()
+            .flatten()
+        {
+            if let Some(messages) = result.messages {
+                prompt_messages.extend(messages);
+            }
+        }
 
         // 3. nextRun 捕获项 + durable intent 落库。
         let initial: Vec<QueuedEntry> = {
@@ -862,11 +865,43 @@ impl AgentHarness {
                     &compaction_settings,
                 )
             {
-                self.auto_compact(CompactionReason::Threshold).await;
+                self.auto_compact(
+                    CompactionReason::Threshold,
+                    &hook_gate,
+                    &hook_context,
+                    &run_id,
+                )
+                .await;
                 // 压缩后重建历史;失败则沿用旧历史继续(不阻断本次 run)
                 if let Ok(rebuilt) = build_history(&self.session).await {
                     history = rebuilt.messages;
                 }
+            }
+        }
+
+        // 5.8 transform_context hook(初始 LLM context 组装前)。
+        if let Some(HookResult::TransformContext(Some(result))) = snapshot
+            .hooks
+            .run_with_gate(
+                HookName::TransformContext,
+                HookEvent::TransformContext(TransformContextEvent {
+                    lane: "main".to_string(),
+                    run_id: run_id.clone(),
+                    messages: history.clone(),
+                    system_prompt: snapshot.system_prompt.clone().unwrap_or_default(),
+                }),
+                &hook_gate,
+                hook_context.clone(),
+            )
+            .await
+            .ok()
+            .flatten()
+        {
+            if let Some(messages) = result.messages {
+                history = messages;
+            }
+            if let Some(system_prompt) = result.system_prompt {
+                snapshot.system_prompt = Some(system_prompt);
             }
         }
 
@@ -901,12 +936,20 @@ impl AgentHarness {
             let model = snapshot.model.clone();
             let settings = { self.lock_state().compaction_settings };
             let stream_fn = snapshot.stream_fn.clone();
+            let hooks_for_compaction = snapshot.hooks.clone();
+            let compaction_gate = hook_gate.clone();
+            let compaction_context = hook_context.clone();
+            let compaction_run_id = run_id.clone();
             let thinking_level =
                 crate::agent::agent_loop::reasoning_from_thinking_level(snapshot.thinking_level);
             Some(std::sync::Arc::new(move |turn: PrepareNextTurnContext| {
                 let session = session.clone();
                 let model = model.clone();
                 let stream_fn = stream_fn.clone();
+                let hooks = hooks_for_compaction.clone();
+                let gate = compaction_gate.clone();
+                let context = compaction_context.clone();
+                let compaction_run_id = compaction_run_id.clone();
                 Box::pin(async move {
                     if !settings.enabled || model.context_window <= 0 {
                         return None;
@@ -927,6 +970,10 @@ impl AgentHarness {
                         thinking_level,
                         &stream_fn,
                         CompactionReason::Threshold,
+                        &hooks,
+                        &gate,
+                        &context,
+                        &compaction_run_id,
                     )
                     .await
                     .ok()?;
@@ -942,9 +989,75 @@ impl AgentHarness {
                 })
             }))
         };
+        // 6.2 before_request hook(首次 assistant 请求前)。
+        let hook_stream_options = {
+            let mut value = serde_json::to_value(&snapshot.stream_options)
+                .unwrap_or_else(|_| serde_json::Value::Null);
+            if let Some(HookResult::BeforeRequest(Some(result))) = snapshot
+                .hooks
+                .run_with_gate(
+                    HookName::BeforeRequest,
+                    HookEvent::BeforeRequest(BeforeRequestEvent {
+                        lane: "main".to_string(),
+                        run_id: run_id.clone(),
+                        model: format!("{}/{}", snapshot.model.provider, snapshot.model.id),
+                        step: RequestStep::Assistant,
+                        attempt: 0,
+                        stream_options: value.clone(),
+                    }),
+                    &hook_gate,
+                    hook_context.clone(),
+                )
+                .await
+                .ok()
+                .flatten()
+            {
+                if let Some(next) = result.stream_options {
+                    value = next;
+                }
+            }
+            serde_json::from_value::<AgentHarnessStreamOptions>(value).unwrap_or_default()
+        };
+        snapshot.stream_options = hook_stream_options;
+
+        let mut simple_stream_options = stream_options_to_simple(&snapshot.stream_options);
+        simple_stream_options.on_payload = Some({
+            let hooks = snapshot.hooks.clone();
+            let gate = hook_gate.clone();
+            let context = hook_context.clone();
+            let run_id = run_id.clone();
+            let model = format!("{}/{}", snapshot.model.provider, snapshot.model.id);
+            Arc::new(move |payload: serde_json::Value| {
+                let hooks = hooks.clone();
+                let gate = gate.clone();
+                let context = context.clone();
+                let run_id = run_id.clone();
+                let model = model.clone();
+                Box::pin(async move {
+                    let Ok(Some(HookResult::BeforePayload(Some(result)))) = hooks
+                        .run_with_gate(
+                            HookName::BeforePayload,
+                            HookEvent::BeforePayload(BeforePayloadEvent {
+                                lane: "main".to_string(),
+                                run_id,
+                                model,
+                                payload,
+                            }),
+                            &gate,
+                            context,
+                        )
+                        .await
+                    else {
+                        return None;
+                    };
+                    Some(result.payload)
+                })
+            })
+        });
+
         let loop_config = AgentLoopConfig {
             model: snapshot.model.clone(),
-            stream: stream_options_to_simple(&snapshot.stream_options),
+            stream: simple_stream_options,
             // harness 版转换:识别 compactionSummary/branchSummary 等自定义消息
             // (core 版会丢弃,压缩摘要将不进上下文)。
             convert_to_llm: std::sync::Arc::new(|messages| {
@@ -967,8 +1080,106 @@ impl AgentHarness {
                 follow_up_mode,
             )),
             tool_execution: snapshot.tool_execution,
-            before_tool_call: None,
-            after_tool_call: None,
+            before_tool_call: Some({
+                let hooks = snapshot.hooks.clone();
+                let gate = hook_gate.clone();
+                let context = hook_context.clone();
+                let run_id = run_id.clone();
+                Arc::new(move |call, signal| {
+                    let hooks = hooks.clone();
+                    let gate = gate.clone();
+                    let context = context.clone();
+                    let run_id = run_id.clone();
+                    Box::pin(async move {
+                        let context = context.with_signal_opt(signal);
+                        let hook_result = hooks
+                            .run_tool_with_gate(
+                                HookName::BeforeTool,
+                                HookEvent::BeforeTool(BeforeToolEvent {
+                                    lane: "main".to_string(),
+                                    run_id,
+                                    tool_call_id: call.tool_call.id.clone(),
+                                    tool_name: call.tool_call.name.clone(),
+                                    args: call.args.clone(),
+                                }),
+                                &gate,
+                                context,
+                            )
+                            .await;
+                        match hook_result {
+                            Ok(Some(HookResult::BeforeTool(result))) => {
+                                let result = result.unwrap_or_default();
+                                Some(BeforeToolCallResult {
+                                    args: result.args,
+                                    block: result.block.is_some(),
+                                    reason: result.block.as_ref().map(|block| block.reason.clone()),
+                                    terminate: result
+                                        .block
+                                        .and_then(|block| block.terminate)
+                                        .unwrap_or(false),
+                                })
+                            }
+                            Ok(_) => Some(BeforeToolCallResult::default()),
+                            Err(error) => Some(BeforeToolCallResult {
+                                args: None,
+                                block: true,
+                                reason: Some(error.message),
+                                terminate: false,
+                            }),
+                        }
+                    })
+                })
+            }),
+            after_tool_call: Some({
+                let hooks = snapshot.hooks.clone();
+                let gate = hook_gate.clone();
+                let context = hook_context.clone();
+                let run_id = run_id.clone();
+                Arc::new(move |call, signal| {
+                    let hooks = hooks.clone();
+                    let gate = gate.clone();
+                    let context = context.clone();
+                    let run_id = run_id.clone();
+                    Box::pin(async move {
+                        let context = context.with_signal_opt(signal);
+                        let details = if call.result.details.is_null() {
+                            None
+                        } else {
+                            Some(call.result.details.clone())
+                        };
+                        let hook_result = hooks
+                            .run_tool_with_gate(
+                                HookName::AfterTool,
+                                HookEvent::AfterTool(AfterToolEvent {
+                                    lane: "main".to_string(),
+                                    run_id,
+                                    tool_call_id: call.tool_call.id.clone(),
+                                    tool_name: call.tool_call.name.clone(),
+                                    args: call.args.clone(),
+                                    content: call.result.content.clone(),
+                                    details,
+                                    is_error: call.is_error,
+                                    usage: call.result.usage.clone(),
+                                }),
+                                &gate,
+                                context,
+                            )
+                            .await;
+                        match hook_result {
+                            Ok(Some(HookResult::AfterTool(Some(result)))) => {
+                                Some(AfterToolCallResult {
+                                    content: result.content,
+                                    details: result.details,
+                                    is_error: result.is_error,
+                                    usage: result.usage,
+                                    terminate: result.terminate,
+                                })
+                            }
+                            _ => Some(AfterToolCallResult::default()),
+                        }
+                    })
+                })
+            }),
             prepare_request: None,
         };
         let agent_state = AgentState {
@@ -988,7 +1199,13 @@ impl AgentHarness {
             loop_config,
             snapshot.stream_fn.clone(),
         ));
-        let listener_id = agent.subscribe(make_mirroring_listener(shared.clone(), run_id.clone()));
+        let listener_id = agent.subscribe(make_mirroring_listener(
+            shared.clone(),
+            run_id.clone(),
+            snapshot.hooks.clone(),
+            hook_gate.clone(),
+            hook_context.clone(),
+        ));
         {
             let mut engine = shared
                 .engine
@@ -998,6 +1215,7 @@ impl AgentHarness {
                 run_id: run_id.clone(),
                 signal: signal.clone(),
                 agent: agent.clone(),
+                gate_control: hook_gate_control.clone(),
             });
         }
         let _ = shared.busy.send(true);
@@ -1006,7 +1224,47 @@ impl AgentHarness {
             run_id: run_id.clone(),
         }));
 
-        // 7. 运行 + 会话级重试链(对齐 AgentSession._prepareRetry)。
+        // 7. before_drive + 运行 + 会话级重试链(对齐 AgentSession._prepareRetry)。
+        if snapshot
+            .hooks
+            .run_with_gate(
+                HookName::BeforeDrive,
+                HookEvent::BeforeDrive(BeforeDriveEvent {
+                    lane: "main".to_string(),
+                    run_id: run_id.clone(),
+                    operation: DriveOperation::Run,
+                }),
+                &hook_gate,
+                hook_context.clone(),
+            )
+            .await
+            .is_err()
+        {
+            let error = OperationError {
+                code: "hook_gate".to_string(),
+                message: "Hook gate rejected drive".to_string(),
+            };
+            self.finish_run(
+                &shared,
+                &run_id,
+                OperationOutcome::Failed,
+                Some(error.clone()),
+            )
+            .await;
+            let leaf_id = self.leaf_id().await;
+            self.events.emit(&HarnessEvent::RunEnd(RunEndEvent {
+                lane: "main".to_string(),
+                run_id,
+                outcome: RunEndOutcome::Failed,
+                leaf_id: leaf_id.clone(),
+            }));
+            return Ok(RunOutcome::Failed {
+                leaf_id,
+                error,
+                final_entry_id: None,
+                final_message: None,
+            });
+        }
         if let Err(error) = agent.prompt(prompt_messages).await {
             let message = error.clone();
             self.finish_run(
@@ -1072,9 +1330,27 @@ impl AgentHarness {
                         messages.pop();
                     }
                     agent.set_messages(messages);
-                    self.auto_compact(CompactionReason::Overflow).await;
+                    self.auto_compact(
+                        CompactionReason::Overflow,
+                        &hook_gate,
+                        &hook_context,
+                        &run_id,
+                    )
+                    .await;
                     if signal.is_cancelled() {
                         break;
+                    }
+                    if let Some(options) = self
+                        .prepare_retry_stream_options(
+                            &snapshot,
+                            &hook_gate,
+                            &hook_context,
+                            &run_id,
+                            retry_attempt,
+                        )
+                        .await
+                    {
+                        agent.set_stream_options(stream_options_to_simple(&options));
                     }
                     if agent.continue_run().await.is_ok() {
                         continue;
@@ -1103,6 +1379,18 @@ impl AgentHarness {
                 messages.pop();
             }
             agent.set_messages(messages);
+            if let Some(options) = self
+                .prepare_retry_stream_options(
+                    &snapshot,
+                    &hook_gate,
+                    &hook_context,
+                    &run_id,
+                    retry_attempt,
+                )
+                .await
+            {
+                agent.set_stream_options(stream_options_to_simple(&options));
+            }
             if !sleep_with_cancel(
                 retry_delay_ms(retry.base_delay_ms, retry_attempt, None),
                 &signal,
@@ -1131,7 +1419,13 @@ impl AgentHarness {
                         && is_context_overflow(&assistant, context_window);
                     if settings.enabled && context_window > 0 {
                         if silent_overflow {
-                            self.auto_compact(CompactionReason::Overflow).await;
+                            self.auto_compact(
+                                CompactionReason::Overflow,
+                                &hook_gate,
+                                &hook_context,
+                                &run_id,
+                            )
+                            .await;
                         } else {
                             let direct = compaction_mod::calculate_context_tokens(&assistant.usage);
                             let tokens =
@@ -1147,10 +1441,77 @@ impl AgentHarness {
                             if tokens > 0
                                 && compaction_mod::should_compact(tokens, context_window, &settings)
                             {
-                                self.auto_compact(CompactionReason::Threshold).await;
+                                self.auto_compact(
+                                    CompactionReason::Threshold,
+                                    &hook_gate,
+                                    &hook_context,
+                                    &run_id,
+                                )
+                                .await;
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // 7.8 before_run_end hook;follow-up 会在同一 operation 内续跑。
+        loop {
+            if signal.is_cancelled() {
+                break;
+            }
+            let hook = snapshot
+                .hooks
+                .run_with_gate(
+                    HookName::BeforeRunEnd,
+                    HookEvent::BeforeRunEnd(BeforeRunEndEvent {
+                        lane: "main".to_string(),
+                        run_id: run_id.clone(),
+                        messages: agent.messages(),
+                    }),
+                    &hook_gate,
+                    hook_context.clone(),
+                )
+                .await;
+            match hook {
+                Ok(Some(HookResult::BeforeRunEnd(Some(result)))) => {
+                    let Some(follow_up) = result.follow_up else {
+                        break;
+                    };
+                    if agent
+                        .prompt(vec![AgentMessage::user_text(follow_up, now_ms())])
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Ok(_) => break,
+                Err(_) => {
+                    let error = OperationError {
+                        code: "hook_gate".to_string(),
+                        message: "Hook gate rejected run end".to_string(),
+                    };
+                    self.finish_run(
+                        &shared,
+                        &run_id,
+                        OperationOutcome::Failed,
+                        Some(error.clone()),
+                    )
+                    .await;
+                    let leaf_id = self.leaf_id().await;
+                    self.events.emit(&HarnessEvent::RunEnd(RunEndEvent {
+                        lane: "main".to_string(),
+                        run_id,
+                        outcome: RunEndOutcome::Failed,
+                        leaf_id: leaf_id.clone(),
+                    }));
+                    return Ok(RunOutcome::Failed {
+                        leaf_id,
+                        error,
+                        final_entry_id: None,
+                        final_message: None,
+                    });
                 }
             }
         }
@@ -1245,7 +1606,13 @@ impl AgentHarness {
 
     /// 自动压缩(对齐 pi `_runAutoCompaction` 的默认摘要路径):
     /// 快照当前设置后委托 [`run_auto_compaction`];失败仅记日志,不打断 run。
-    async fn auto_compact(&self, reason: CompactionReason) {
+    async fn auto_compact(
+        &self,
+        reason: CompactionReason,
+        gate: &Gate,
+        context: &HarnessContext,
+        run_id: &str,
+    ) {
         let (settings, model, thinking_level, stream_fn) = {
             let state = self.lock_state();
             if state.closed || !state.compaction_settings.enabled {
@@ -1268,6 +1635,10 @@ impl AgentHarness {
             thinking_level,
             &stream_fn,
             reason,
+            &self.hooks(),
+            gate,
+            context,
+            run_id,
         )
         .await
         {
@@ -1285,7 +1656,7 @@ impl AgentHarness {
         options: Option<CompactOptions>,
     ) -> Result<CompactionOutcome, HarnessUnavailable> {
         let shared = self.shared();
-        let (settings, model, thinking_level, stream_fn) = {
+        let (settings, model, thinking_level, stream_fn, hooks, telemetry_context) = {
             let state = self.lock_state();
             if state.closed {
                 return Err(HarnessClosed.into());
@@ -1308,9 +1679,37 @@ impl AgentHarness {
                     .stream_fn
                     .clone()
                     .expect("stream_fn is set at create time"),
+                state.hooks.clone(),
+                state.telemetry_context.clone(),
             )
         };
         let run_id = uuid_v7();
+        let (hook_gate, _hook_gate_control) = create_gate();
+        let hook_context = HarnessContext::new()
+            .with_telemetry_opt(telemetry_context)
+            .with_signal(hook_gate.signal());
+        if hooks
+            .run_with_gate(
+                HookName::BeforeDrive,
+                HookEvent::BeforeDrive(BeforeDriveEvent {
+                    lane: "main".to_string(),
+                    run_id: run_id.clone(),
+                    operation: DriveOperation::Compaction,
+                }),
+                &hook_gate,
+                hook_context.clone(),
+            )
+            .await
+            .is_err()
+        {
+            return Ok(CompactionOutcome::Failed {
+                leaf_id: self.leaf_id().await,
+                error: OperationError {
+                    code: "hook_gate".to_string(),
+                    message: "Hook gate rejected compaction".to_string(),
+                },
+            });
+        }
         let result_entry_id = uuid_v7();
         let custom_instructions = options.and_then(|options| options.custom_instructions);
 
@@ -1386,15 +1785,68 @@ impl AgentHarness {
                 });
             }
         };
-        match compaction_mod::compact(
-            preparation,
-            &stream_fn,
-            &model,
-            custom_instructions.as_deref(),
-            thinking_level,
-        )
-        .await
-        {
+        let hook = hooks
+            .run_with_gate(
+                HookName::BeforeCompaction,
+                HookEvent::BeforeCompaction(BeforeCompactionEvent {
+                    lane: "main".to_string(),
+                    run_id: run_id.clone(),
+                    reason: HookCompactionReason::Manual,
+                    preparation: compaction_preparation_json(&preparation),
+                    custom_instructions: custom_instructions.clone(),
+                }),
+                &hook_gate,
+                hook_context.clone(),
+            )
+            .await;
+        let mut hook_result = None;
+        match hook {
+            Ok(Some(HookResult::BeforeCompaction(Some(result)))) => {
+                if result.decline == Some(true) {
+                    self.finish_run(&shared, &run_id, OperationOutcome::Declined, None)
+                        .await;
+                    return Ok(CompactionOutcome::DeclinedOrAborted {
+                        leaf_id: self.leaf_id().await,
+                    });
+                }
+                if let Some(custom) = parse_hook_compaction(&result.compaction) {
+                    hook_result = Some(custom);
+                }
+            }
+            Ok(_) => {}
+            Err(_) => {
+                let error = OperationError {
+                    code: "hook_gate".to_string(),
+                    message: "Hook gate rejected compaction".to_string(),
+                };
+                self.finish_run(
+                    &shared,
+                    &run_id,
+                    OperationOutcome::Failed,
+                    Some(error.clone()),
+                )
+                .await;
+                return Ok(CompactionOutcome::Failed {
+                    leaf_id: self.leaf_id().await,
+                    error,
+                });
+            }
+        }
+
+        let compacted = match hook_result {
+            Some(result) => Ok(result),
+            None => {
+                compaction_mod::compact(
+                    preparation,
+                    &stream_fn,
+                    &model,
+                    custom_instructions.as_deref(),
+                    thinking_level,
+                )
+                .await
+            }
+        };
+        match compacted {
             Ok(result) => {
                 let entry = self
                     .session
@@ -1506,9 +1958,69 @@ impl AgentHarness {
 
     pub async fn navigate_tree(
         &self,
-        _target_id: Option<String>,
-        _options: Option<NavigateOptions>,
+        target_id: Option<String>,
+        options: Option<NavigateOptions>,
     ) -> Result<NavigationOutcome, HarnessUnavailable> {
+        let (hooks, telemetry_context) = {
+            let state = self.lock_state();
+            (state.hooks.clone(), state.telemetry_context.clone())
+        };
+        let run_id = uuid_v7();
+        let (gate, _control) = create_gate();
+        let context = HarnessContext::new()
+            .with_telemetry_opt(telemetry_context)
+            .with_signal(gate.signal());
+        if hooks
+            .run_with_gate(
+                HookName::BeforeDrive,
+                HookEvent::BeforeDrive(BeforeDriveEvent {
+                    lane: "main".to_string(),
+                    run_id: run_id.clone(),
+                    operation: DriveOperation::Navigation,
+                }),
+                &gate,
+                context.clone(),
+            )
+            .await
+            .is_err()
+        {
+            return Ok(NavigationOutcome::Failed {
+                leaf_id: Some(self.leaf_id().await),
+                error: OperationError {
+                    code: "hook_gate".to_string(),
+                    message: "Hook gate rejected navigation".to_string(),
+                },
+            });
+        }
+        let hook = hooks
+            .run_with_gate(
+                HookName::BeforeNavigation,
+                HookEvent::BeforeNavigation(BeforeNavigationEvent {
+                    lane: "main".to_string(),
+                    run_id,
+                    target_id: target_id.unwrap_or_default(),
+                    preparation: serde_json::json!({}),
+                    custom_instructions: options.and_then(|options| options.custom_instructions),
+                }),
+                &gate,
+                context,
+            )
+            .await;
+        if let Ok(Some(HookResult::BeforeNavigation(Some(result)))) = hook {
+            if result.decline == Some(true) {
+                return Ok(NavigationOutcome::DeclinedOrAborted {
+                    leaf_id: Some(self.leaf_id().await),
+                });
+            }
+        } else if hook.is_err() {
+            return Ok(NavigationOutcome::Failed {
+                leaf_id: Some(self.leaf_id().await),
+                error: OperationError {
+                    code: "hook_gate".to_string(),
+                    message: "Hook gate rejected navigation".to_string(),
+                },
+            });
+        }
         self.unavailable("navigateTree")
     }
 
@@ -1540,11 +2052,15 @@ impl AgentHarness {
                 .engine
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            engine
-                .as_ref()
-                .map(|engine| (engine.run_id.clone(), engine.signal.clone()))
+            engine.as_ref().map(|engine| {
+                (
+                    engine.run_id.clone(),
+                    engine.signal.clone(),
+                    engine.gate_control.clone(),
+                )
+            })
         };
-        let Some((run_id, signal)) = handle else {
+        let Some((run_id, signal, gate_control)) = handle else {
             return Err(AbortRejected::NoActiveOperation(NoActiveOperation::new(
                 "No active operation on lane main",
                 "main".to_string(),
@@ -1573,6 +2089,8 @@ impl AgentHarness {
                 },
             ))
             .await;
+        gate_control.begin_abort(signal.clone());
+        gate_control.signal_abort();
         signal.cancel();
         Ok(AbortOutcome {
             run_id,
@@ -2100,59 +2618,14 @@ impl AgentHarness {
         }
     }
 
-    /// 返回四类 hook 的注册数量(P4 接线探针;完整 HookRegistry 后续扩展)。
-    pub fn hook_counts(&self) -> [usize; 4] {
-        let state = self.lock_state();
-        [
-            state.hooks.before_tool_execute.len(),
-            state.hooks.after_tool_result.len(),
-            state.hooks.before_request.len(),
-            state.hooks.after_response.len(),
-        ]
+    /// 返回 11 类 hook 的注册数量。
+    pub fn hook_counts(&self) -> [usize; 11] {
+        self.lock_state().hooks.counts()
     }
 
-    /// 聚合执行 before-tool hooks;任一阻断即返回 false。
-    pub async fn run_before_tool_hooks(
-        &self,
-        tool_call_id: String,
-        tool_name: String,
-        args: serde_json::Value,
-        context: HarnessContext,
-    ) -> bool {
-        let hooks = self.lock_state().hooks.clone();
-        HarnessHooks::run_before_tool_execute(&hooks, tool_call_id, tool_name, args, context).await
-    }
-
-    /// 聚合执行 after-tool hooks。
-    pub async fn run_after_tool_hooks(
-        &self,
-        tool_call_id: String,
-        tool_name: String,
-        args: serde_json::Value,
-        context: HarnessContext,
-    ) {
-        let hooks = self.lock_state().hooks.clone();
-        HarnessHooks::run_after_tool_result(&hooks, tool_call_id, tool_name, args, context).await
-    }
-
-    /// 聚合执行 before-request hooks 并返回最终请求消息。
-    pub async fn run_before_request_hooks(
-        &self,
-        messages: Vec<AgentMessage>,
-        context: HarnessContext,
-    ) -> Vec<AgentMessage> {
-        let hooks = self.lock_state().hooks.clone();
-        HarnessHooks::run_before_request(&hooks, messages, context).await
-    }
-
-    /// 聚合执行 after-response hooks。
-    pub async fn run_after_response_hooks(
-        &self,
-        response: AssistantMessage,
-        context: HarnessContext,
-    ) {
-        let hooks = self.lock_state().hooks.clone();
-        HarnessHooks::run_after_response(&hooks, response, context).await
+    /// 当前 hook registry 快照(注册/取消订阅入口)。
+    pub fn hooks(&self) -> Arc<HookRegistry> {
+        self.lock_state().hooks.clone()
     }
 
     pub async fn get_retry_policy(&self) -> RetryPolicy {
@@ -2244,6 +2717,9 @@ struct PromptSnapshot {
     stream_options: AgentHarnessStreamOptions,
     retry_policy: RetryPolicy,
     stream_fn: crate::agent::types::StreamFn,
+    resources: AgentHarnessResources,
+    hooks: Arc<HookRegistry>,
+    telemetry_context: Option<Arc<dyn TelemetryContext>>,
 }
 
 /// 无真实 assistant 消息时(如首响应前中止)的结果占位消息。
@@ -2400,6 +2876,10 @@ async fn run_auto_compaction(
     thinking_level: Option<ThinkingLevel>,
     stream_fn: &StreamFn,
     reason: CompactionReason,
+    hooks: &HookRegistry,
+    gate: &Gate,
+    context: &HarnessContext,
+    run_id: &str,
 ) -> Result<(), OperationError> {
     if !settings.enabled {
         return Ok(());
@@ -2416,6 +2896,37 @@ async fn run_auto_compaction(
         let Some(preparation) = preparation else {
             return Ok(None);
         };
+        let hook = hooks
+            .run_with_gate(
+                HookName::BeforeCompaction,
+                HookEvent::BeforeCompaction(BeforeCompactionEvent {
+                    lane: "main".to_string(),
+                    run_id: run_id.to_string(),
+                    reason: match reason {
+                        CompactionReason::Manual => HookCompactionReason::Manual,
+                        CompactionReason::Threshold => HookCompactionReason::Threshold,
+                        CompactionReason::Overflow => HookCompactionReason::Overflow,
+                    },
+                    preparation: compaction_preparation_json(&preparation),
+                    custom_instructions: None,
+                }),
+                gate,
+                context.clone(),
+            )
+            .await;
+        if let Ok(Some(HookResult::BeforeCompaction(Some(result)))) = hook {
+            if result.decline == Some(true) {
+                return Ok(None);
+            }
+            if let Some(custom) = parse_hook_compaction(&result.compaction) {
+                return Ok(Some(custom));
+            }
+        } else if hook.is_err() {
+            return Err(OperationError {
+                code: "hook_gate".to_string(),
+                message: "Hook gate rejected compaction".to_string(),
+            });
+        }
         let result = compaction_mod::compact(preparation, stream_fn, model, None, thinking_level)
             .await
             .map_err(|error| OperationError {
@@ -2478,4 +2989,96 @@ async fn run_auto_compaction(
         }))
         .await;
     Ok(())
+}
+
+impl AgentHarness {
+    async fn prepare_retry_stream_options(
+        &self,
+        snapshot: &PromptSnapshot,
+        gate: &Gate,
+        context: &HarnessContext,
+        run_id: &str,
+        attempt: u32,
+    ) -> Option<AgentHarnessStreamOptions> {
+        let mut value =
+            serde_json::to_value(&snapshot.stream_options).unwrap_or(serde_json::Value::Null);
+        if let Some(HookResult::BeforeRequest(Some(result))) = snapshot
+            .hooks
+            .run_with_gate(
+                HookName::BeforeRequest,
+                HookEvent::BeforeRequest(BeforeRequestEvent {
+                    lane: "main".to_string(),
+                    run_id: run_id.to_string(),
+                    model: format!("{}/{}", snapshot.model.provider, snapshot.model.id),
+                    step: RequestStep::Assistant,
+                    attempt,
+                    stream_options: value.clone(),
+                }),
+                gate,
+                context.clone(),
+            )
+            .await
+            .ok()
+            .flatten()
+        {
+            if let Some(next) = result.stream_options {
+                value = next;
+            }
+        }
+        serde_json::from_value(value).ok()
+    }
+}
+
+fn resources_json(resources: &AgentHarnessResources) -> serde_json::Value {
+    serde_json::json!({
+        "promptTemplates": resources.prompt_templates.as_ref().map(serde_json::to_value).transpose().unwrap_or(None),
+        "skills": resources.skills.as_ref().map(serde_json::to_value).transpose().unwrap_or(None),
+    })
+}
+
+fn compaction_preparation_json(
+    preparation: &compaction_mod::CompactionPreparation,
+) -> serde_json::Value {
+    serde_json::json!({
+        "messagesToSummarize": preparation.messages_to_summarize,
+        "turnPrefixMessages": preparation.turn_prefix_messages,
+        "retainedTail": preparation.retained_tail,
+        "isSplitTurn": preparation.is_split_turn,
+        "tokensBefore": preparation.tokens_before,
+        "previousSummary": preparation.previous_summary,
+    })
+}
+
+fn parse_hook_compaction(
+    value: &Option<serde_json::Value>,
+) -> Option<compaction_mod::CompactResult> {
+    let value = value.as_ref()?;
+    let summary = value.get("summary")?.as_str()?.to_string();
+    let retained_tail = value
+        .get("retainedTail")
+        .cloned()
+        .map(serde_json::from_value::<Vec<AgentMessage>>)
+        .transpose()
+        .ok()?
+        .unwrap_or_default();
+    let usage = value
+        .get("usage")
+        .cloned()
+        .map(serde_json::from_value::<Usage>)
+        .transpose()
+        .ok()?
+        .unwrap_or_default();
+    Some(compaction_mod::CompactResult {
+        summary,
+        tokens_before: value
+            .get("tokensBefore")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0),
+        usage,
+        retained_tail,
+        details: value
+            .get("details")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+    })
 }
