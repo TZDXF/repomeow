@@ -682,6 +682,74 @@ impl std::fmt::Debug for ShellExecOptions {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Shell output capture(P4 对齐 harness/types.ts)
+// ---------------------------------------------------------------------------
+
+/// 有界 shell 输出的保留策略。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ShellOutputRetention {
+    Head,
+    Tail,
+}
+
+/// shell 输出的字节/行数上限。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellOutputLimits {
+    pub max_bytes: usize,
+    pub max_lines: usize,
+    pub retention: ShellOutputRetention,
+}
+
+/// 调用方请求的有界 shell 输出捕获选项。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellOutputCaptureOptions {
+    pub limits: ShellOutputLimits,
+    pub spill: bool,
+}
+
+/// 不携带正文副本的截断元数据。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellOutputTruncation {
+    pub truncated: bool,
+    pub total_bytes: u64,
+    pub total_lines: u64,
+}
+
+/// shell 输出伴随元数据。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellOutputMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    pub duration_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truncation: Option<ShellOutputTruncation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub full_output_path: Option<String>,
+}
+
+/// 有界 shell 输出的完整视图。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellOutputView {
+    #[serde(flatten)]
+    pub metadata: ShellOutputMetadata,
+    pub output: String,
+}
+
+/// shell 执行期间发布的输出快照。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ShellOutputUpdate {
+    #[serde(rename = "snapshot")]
+    Snapshot { view: ShellOutputView },
+}
+
 /// [`Shell::exec`] 的成功输出。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecOutcome {

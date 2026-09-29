@@ -257,6 +257,7 @@ pub(crate) async fn create_harness(
         follow_up_mode: QueueMode::OneAtATime,
         tool_execution: ToolExecutionMode::Sequential,
         telemetry_context: None,
+        hooks: Default::default(),
     })
     .await
     .map_err(|error| AppError::coded(ErrorCode::AiRequestFailed, error.to_string()))?;

@@ -12,15 +12,12 @@ use crate::agent::types::AgentMessage;
 
 /// 工具执行前回调;返回 `false` 表示阻断本次工具执行。
 pub type ToolExecuteHook = Arc<
-    dyn Fn(String, String, serde_json::Value, Context) -> BoxFuture<'static, bool>
-        + Send
-        + Sync,
+    dyn Fn(String, String, serde_json::Value, Context) -> BoxFuture<'static, bool> + Send + Sync,
 >;
 
 /// 工具完成后回调;只允许观察结果,不修改 transcript。
-pub type ToolResultHook = Arc<
-    dyn Fn(String, String, serde_json::Value, Context) -> BoxFuture<'static, ()> + Send + Sync,
->;
+pub type ToolResultHook =
+    Arc<dyn Fn(String, String, serde_json::Value, Context) -> BoxFuture<'static, ()> + Send + Sync>;
 
 /// LLM 请求前回调;返回替换后的消息列表(相当于 TS 的 in-place patch)。
 pub type BeforeRequestHook =
@@ -102,11 +99,7 @@ impl HarnessHooks {
     }
 
     /// 按注册顺序通知 after-response hooks。
-    pub async fn run_after_response(
-        hooks: &Self,
-        response: AssistantMessage,
-        context: Context,
-    ) {
+    pub async fn run_after_response(hooks: &Self, response: AssistantMessage, context: Context) {
         for hook in &hooks.after_response {
             hook(response.clone(), context.clone()).await;
         }
@@ -165,13 +158,13 @@ mod tests {
         let mut hooks = HarnessHooks::default();
         hooks.before_request.push(Arc::new(|mut messages, _| {
             Box::pin(async move {
-                messages.push(AgentMessage::Custom("first".to_string().into()));
+                messages.push(AgentMessage::Custom(serde_json::Map::new()));
                 messages
             })
         }));
         hooks.before_request.push(Arc::new(|mut messages, _| {
             Box::pin(async move {
-                messages.push(AgentMessage::Custom("second".to_string().into()));
+                messages.push(AgentMessage::Custom(serde_json::Map::new()));
                 messages
             })
         }));
@@ -186,13 +179,15 @@ mod tests {
         assert!(hooks.is_empty());
         let messages = HarnessHooks::run_before_request(&hooks, Vec::new(), Context::new()).await;
         assert!(messages.is_empty());
-        assert!(HarnessHooks::run_before_tool_execute(
-            &hooks,
-            "call".to_string(),
-            "tool".to_string(),
-            serde_json::Value::Null,
-            Context::new()
-        )
-        .await);
+        assert!(
+            HarnessHooks::run_before_tool_execute(
+                &hooks,
+                "call".to_string(),
+                "tool".to_string(),
+                serde_json::Value::Null,
+                Context::new()
+            )
+            .await
+        );
     }
 }

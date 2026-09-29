@@ -30,12 +30,15 @@
 pub mod agent_harness;
 #[allow(dead_code)]
 pub mod compaction;
+pub mod context;
 #[allow(dead_code)]
 pub mod env;
 #[allow(dead_code)]
 pub mod errors;
 #[allow(dead_code)]
 pub mod events;
+pub mod execution;
+pub mod hooks;
 #[allow(dead_code)]
 pub mod messages;
 #[allow(dead_code)]

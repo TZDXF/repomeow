@@ -11,6 +11,7 @@
 use crate::agent::agent::Agent;
 use crate::agent::agent_loop::now_ms;
 use crate::agent::harness::compaction::compaction::{self as compaction_mod, CompactionSettings};
+use crate::agent::harness::context::Context as HarnessContext;
 use crate::agent::harness::errors::{
     Closed, HarnessClosed, HarnessNotImplemented, HarnessUnavailable, InvalidLane, InvalidMessage,
     LaneBusy, LaneExists, MissingIdentities, NoActiveOperation, NoActiveRun, NothingToCompact,
@@ -21,6 +22,7 @@ use crate::agent::harness::events::{
     HarnessEvent, HarnessEventBus, HarnessEventListener, HarnessEventType, RunEndEvent,
     RunEndOutcome, RunStartEvent, WatchHandle,
 };
+use crate::agent::harness::hooks::HarnessHooks;
 use crate::agent::harness::runtime::{
     branch_entries, build_history, make_mirroring_listener, make_queue_getter, operation_error,
     stream_options_to_simple, EmptyToolContext, EngineHandle, QueueSet, QueuedEntry, RuntimeShared,
@@ -420,6 +422,7 @@ pub struct AgentHarnessOptions {
     pub follow_up_mode: QueueMode,
     pub tool_execution: ToolExecutionMode,
     pub telemetry_context: Option<std::sync::Arc<dyn TelemetryContext>>,
+    pub hooks: HarnessHooks,
 }
 
 // ---------------------------------------------------------------------------
@@ -453,6 +456,7 @@ struct HarnessState {
     tool_context: Option<Arc<dyn ToolContext>>,
     tool_execution: ToolExecutionMode,
     telemetry_context: Option<Arc<dyn TelemetryContext>>,
+    hooks: Arc<HarnessHooks>,
     queues: Arc<Mutex<QueueSet>>,
     engine: Arc<Mutex<Option<EngineHandle>>>,
     busy: Arc<tokio::sync::watch::Sender<bool>>,
@@ -485,6 +489,7 @@ impl AgentHarness {
             follow_up_mode,
             tool_execution,
             telemetry_context,
+            hooks,
         } = options;
         let (queues, engine, busy) = {
             let shared = RuntimeShared::new(session.clone());
@@ -523,6 +528,7 @@ impl AgentHarness {
                     tool_context,
                     tool_execution,
                     telemetry_context,
+                    hooks: Arc::new(hooks),
                     queues,
                     engine,
                     busy,
@@ -2092,6 +2098,61 @@ impl AgentHarness {
             }
             None => {}
         }
+    }
+
+    /// 返回四类 hook 的注册数量(P4 接线探针;完整 HookRegistry 后续扩展)。
+    pub fn hook_counts(&self) -> [usize; 4] {
+        let state = self.lock_state();
+        [
+            state.hooks.before_tool_execute.len(),
+            state.hooks.after_tool_result.len(),
+            state.hooks.before_request.len(),
+            state.hooks.after_response.len(),
+        ]
+    }
+
+    /// 聚合执行 before-tool hooks;任一阻断即返回 false。
+    pub async fn run_before_tool_hooks(
+        &self,
+        tool_call_id: String,
+        tool_name: String,
+        args: serde_json::Value,
+        context: HarnessContext,
+    ) -> bool {
+        let hooks = self.lock_state().hooks.clone();
+        HarnessHooks::run_before_tool_execute(&hooks, tool_call_id, tool_name, args, context).await
+    }
+
+    /// 聚合执行 after-tool hooks。
+    pub async fn run_after_tool_hooks(
+        &self,
+        tool_call_id: String,
+        tool_name: String,
+        args: serde_json::Value,
+        context: HarnessContext,
+    ) {
+        let hooks = self.lock_state().hooks.clone();
+        HarnessHooks::run_after_tool_result(&hooks, tool_call_id, tool_name, args, context).await
+    }
+
+    /// 聚合执行 before-request hooks 并返回最终请求消息。
+    pub async fn run_before_request_hooks(
+        &self,
+        messages: Vec<AgentMessage>,
+        context: HarnessContext,
+    ) -> Vec<AgentMessage> {
+        let hooks = self.lock_state().hooks.clone();
+        HarnessHooks::run_before_request(&hooks, messages, context).await
+    }
+
+    /// 聚合执行 after-response hooks。
+    pub async fn run_after_response_hooks(
+        &self,
+        response: AssistantMessage,
+        context: HarnessContext,
+    ) {
+        let hooks = self.lock_state().hooks.clone();
+        HarnessHooks::run_after_response(&hooks, response, context).await
     }
 
     pub async fn get_retry_policy(&self) -> RetryPolicy {

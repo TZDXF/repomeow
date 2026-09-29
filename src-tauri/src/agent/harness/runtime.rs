@@ -501,6 +501,7 @@ mod runtime_tests {
             follow_up_mode: QueueMode::OneAtATime,
             tool_execution: ToolExecutionMode::Parallel,
             telemetry_context: None,
+            hooks: Default::default(),
         }
     }
 

@@ -1,4 +1,4 @@
-//! `agent`:对 `@earendil-works/pi-agent-core`(packages/agent @ 0.84.4)的 Rust 完整复刻。
+//! `agent`:对 `@earendil-works/pi-agent-core`(packages/agent @ 0.87.1)的 Rust 完整复刻。
 //!
 //! 蓝本仓库:`D:\code\pi`(earendil-works/pi),类型与事件序列化格式保持 camelCase
 //! 以兼容 TS 版 JSONL 会话存储与前端消费。模块划分与蓝本对应:

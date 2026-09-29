@@ -4,7 +4,6 @@
 //! P4 保留 execution 为单文件;tool registry、effect gate 与完整参数校验仍在
 //! 本仓库既有 runtime/tools 路径中运行,待后续逐步接线。
 
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// 参数校验通过、可发布 durable intent 并执行的工具调用。
