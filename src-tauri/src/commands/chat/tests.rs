@@ -96,13 +96,14 @@ fn test_agent(script: Arc<Mutex<Vec<AssistantMessage>>>) -> Agent {
         convert_to_llm: default_convert_to_llm(),
         transform_context: None,
         get_api_key: None,
-        should_stop_after_turn: None,
+        finish_turn: None,
         prepare_next_turn: None,
         get_steering_messages: None,
         get_follow_up_messages: None,
         tool_execution: ToolExecutionMode::Parallel,
         before_tool_call: None,
         after_tool_call: None,
+        prepare_request: None,
     };
     Agent::new(state, loop_config, scripted_stream_fn(script))
 }
@@ -621,6 +622,7 @@ fn readonly_tool_filter_removes_writes_and_restores_full_set() {
             execute: Arc::new(|_, _, _, _| {
                 Box::pin(async { panic!("must not execute while filtering") })
             }),
+            replay: None,
         })
         .collect();
     let readonly = filter_tools(&tools, ChatPermission::ReadOnly);

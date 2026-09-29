@@ -107,8 +107,7 @@ fn resolve_with_availability(requested: ShellKind) -> ShellKind {
 #[cfg(windows)]
 pub(crate) fn resolve_shell(app: &AppHandle) -> ShellKind {
     resolve_with_availability(ShellKind::from_setting(crate::tray::read_setting_string(
-        app,
-        "terminal",
+        app, "terminal",
     )))
 }
 

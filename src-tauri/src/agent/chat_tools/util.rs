@@ -26,6 +26,7 @@ pub(super) fn tool(
         parameters,
         execution_mode: sequential.then_some(ToolExecutionMode::Sequential),
         prepare_arguments: None,
+        replay: None,
         execute: Arc::new(move |_tool_call_id, args, _signal, on_update| execute(args, on_update)),
     }
 }

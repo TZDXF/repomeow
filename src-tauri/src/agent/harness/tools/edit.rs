@@ -275,6 +275,7 @@ pub fn create_edit_tool(env: Arc<dyn ExecutionEnv>) -> AgentTool {
                 }
             })
         }),
+        replay: None,
     }
 }
 

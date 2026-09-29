@@ -114,10 +114,11 @@ impl SessionChild {
         match self {
             SessionChild::Piped(c) => c.wait().ok().and_then(|s| s.code()),
             // portable-pty 的退出码为 u32,截回 i32 与管道会话同型
-            SessionChild::Pty(c) => c
-                .wait()
-                .ok()
-                .map(|s| if s.success() { 0 } else { s.exit_code() as i32 }),
+            SessionChild::Pty(c) => {
+                c.wait()
+                    .ok()
+                    .map(|s| if s.success() { 0 } else { s.exit_code() as i32 })
+            }
         }
     }
 }
@@ -228,7 +229,8 @@ fn build_shell_command(app: &AppHandle, command: &str) -> Command {
                 let mut c = hidden(Command::new("cmd"));
                 // raw_arg:命令原样拼接,等价于在 cmd 里逐字输入(不加额外引号);
                 // 多行先摊平(cmd /C 遇换行即截断)
-                let flat = crate::commands::open::flatten_multiline(Some(command), shell.separator());
+                let flat =
+                    crate::commands::open::flatten_multiline(Some(command), shell.separator());
                 c.raw_arg(format!("/C {}", flat.as_deref().unwrap_or(command)));
                 c
             }
@@ -246,8 +248,7 @@ fn build_shell_command(app: &AppHandle, command: &str) -> Command {
                 c
             }
             ShellKind::GitBash => {
-                let bash =
-                    crate::commands::open::find_git_bash().unwrap_or_else(|| "bash".into());
+                let bash = crate::commands::open::find_git_bash().unwrap_or_else(|| "bash".into());
                 use base64::Engine as _;
                 let b64 = base64::engine::general_purpose::STANDARD.encode(command.as_bytes());
                 // base64 负载不经 bash 分词,命令中的引号/特殊字符原样保留;
@@ -323,7 +324,12 @@ fn launch_session(app: &AppHandle, spec: &SessionSpec) -> AppResult<Launched> {
             .env("CLICOLOR_FORCE", "1")
             .env("TERM", "xterm-256color");
         // JAVA_HOME 用进程环境注入(窗口模式因跨 wt/start 只能拼命令前缀,管道模式无此限制)
-        if let Some(home) = spec.java_home.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(home) = spec
+            .java_home
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             cmd.env("JAVA_HOME", home.replace('"', ""));
         }
         let mut child = cmd.spawn().map_err(spawn_err)?;
@@ -332,8 +338,14 @@ fn launch_session(app: &AppHandle, spec: &SessionSpec) -> AppResult<Launched> {
             .take()
             .map(|s| Arc::new(Mutex::new(Box::new(s) as Box<dyn Write + Send>)));
         let readers = [
-            child.stdout.take().map(|r| Box::new(r) as Box<dyn Read + Send>),
-            child.stderr.take().map(|r| Box::new(r) as Box<dyn Read + Send>),
+            child
+                .stdout
+                .take()
+                .map(|r| Box::new(r) as Box<dyn Read + Send>),
+            child
+                .stderr
+                .take()
+                .map(|r| Box::new(r) as Box<dyn Read + Send>),
         ]
         .into_iter()
         .flatten()
@@ -348,7 +360,12 @@ fn launch_session(app: &AppHandle, spec: &SessionSpec) -> AppResult<Launched> {
 
     let shell = spec.shell.unwrap_or_else(|| resolve_shell(app));
     let mut cmd = build_interactive_pty_command(shell, &spec.cwd);
-    if let Some(home) = spec.java_home.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(home) = spec
+        .java_home
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         cmd.env("JAVA_HOME", home.replace('"', ""));
     }
     let pair = native_pty_system()
@@ -998,7 +1015,11 @@ mod tests {
         // 临时目录放一个无依赖的 package.json,模拟 pnpm i 快速路径
         let tmp = std::env::temp_dir().join("repomeow-pty-diag");
         let _ = std::fs::create_dir_all(&tmp);
-        std::fs::write(tmp.join("package.json"), "{\"name\":\"diag\",\"private\":true}").unwrap();
+        std::fs::write(
+            tmp.join("package.json"),
+            "{\"name\":\"diag\",\"private\":true}",
+        )
+        .unwrap();
         let tmp_str = tmp.to_string_lossy().to_string();
 
         let pair = native_pty_system()
@@ -1018,7 +1039,10 @@ mod tests {
         };
         let mut child = pair
             .slave
-            .spawn_command(build_interactive_pty_command(ShellKind::PowerShell, &tmp_str))
+            .spawn_command(build_interactive_pty_command(
+                ShellKind::PowerShell,
+                &tmp_str,
+            ))
             .unwrap();
         // spawn 后立刻 resize,与前端挂载时序一致
         let _ = pair.master.resize(PtySize {
@@ -1143,9 +1167,8 @@ mod tests {
 
     fn recording_writer() -> (Arc<Mutex<Box<dyn Write + Send>>>, Arc<Mutex<Vec<u8>>>) {
         let recorded = Arc::new(Mutex::new(Vec::<u8>::new()));
-        let writer: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(Box::new(
-            RecordingWriter(recorded.clone()),
-        )));
+        let writer: Arc<Mutex<Box<dyn Write + Send>>> =
+            Arc::new(Mutex::new(Box::new(RecordingWriter(recorded.clone()))));
         (writer, recorded)
     }
 

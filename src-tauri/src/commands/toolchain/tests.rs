@@ -1,13 +1,17 @@
 use std::collections::HashSet;
 
 use crate::error::ErrorCode;
-use crate::models::{ToolchainCaps, ToolchainRemoteVersion, ToolchainUpdateState, ToolchainVersion};
+use crate::models::{
+    ToolchainCaps, ToolchainRemoteVersion, ToolchainUpdateState, ToolchainVersion,
+};
 
 #[cfg(not(windows))]
 use super::detect::fill_unix_nvm;
 use super::detect::TOOLS;
 use super::operation::{caps_for, resolve_op, sanitize_version};
-use super::update_check::{parse_rustup_check, parse_uv_self_update_dry_run, parse_winget_list_row};
+use super::update_check::{
+    parse_rustup_check, parse_uv_self_update_dry_run, parse_winget_list_row,
+};
 use super::version::{
     extract_semver, natural_version_cmp, parse_dotnet_sdks, parse_gh_auth_status,
     parse_nvm_available_table, parse_nvm_list, parse_remote_tokens, parse_token_versions,
@@ -390,10 +394,17 @@ fn powershell_detection_and_operations() {
     assert!(!installed.can_install && !installed.can_switch && !installed.can_list_remote);
     assert_eq!(installed.can_update, cfg!(windows));
     assert_eq!(installed.can_uninstall, cfg!(windows));
-    for (op, action) in [("install", "install"), ("update", "upgrade"), ("uninstall", "uninstall")] {
+    for (op, action) in [
+        ("install", "install"),
+        ("update", "upgrade"),
+        ("uninstall", "uninstall"),
+    ] {
         let result = resolve_op("pwsh", op, None, None);
         if cfg!(windows) {
-            assert_eq!(result.unwrap(), format!("winget {action} --id Microsoft.PowerShell -e"));
+            assert_eq!(
+                result.unwrap(),
+                format!("winget {action} --id Microsoft.PowerShell -e")
+            );
         } else {
             assert!(result.is_err());
         }
@@ -415,10 +426,17 @@ fn go_detection_and_operations() {
     let installed = caps_for("go", true, Some("winget"), false);
     assert!(!installed.can_install && !installed.can_switch && !installed.can_list_remote);
     assert!(installed.can_update && installed.can_uninstall);
-    for (op, action) in [("install", "install"), ("update", "upgrade"), ("uninstall", "uninstall")] {
+    for (op, action) in [
+        ("install", "install"),
+        ("update", "upgrade"),
+        ("uninstall", "uninstall"),
+    ] {
         let result = resolve_op("go", op, None, Some("winget"));
         if cfg!(windows) {
-            assert_eq!(result.unwrap(), format!("winget {action} --id GoLang.Go -e"));
+            assert_eq!(
+                result.unwrap(),
+                format!("winget {action} --id GoLang.Go -e")
+            );
         } else if cfg!(target_os = "macos") {
             assert!(result.is_ok());
         } else if op == "install" {
@@ -484,7 +502,10 @@ fn parses_rustup_check_output() {
                   rustup - up to date : 1.28.2\n";
     assert_eq!(
         parse_rustup_check(output, "cargo"),
-        (ToolchainUpdateState::UpdateAvailable, Some("1.90.0".to_string()))
+        (
+            ToolchainUpdateState::UpdateAvailable,
+            Some("1.90.0".to_string())
+        )
     );
     assert_eq!(
         parse_rustup_check(output, "rustup"),
@@ -495,9 +516,15 @@ fn parses_rustup_check_output() {
     let output = "rustup - update available: 1.28.2 -> 1.29.0\n";
     assert_eq!(
         parse_rustup_check(output, "rustup"),
-        (ToolchainUpdateState::UpdateAvailable, Some("1.29.0".to_string()))
+        (
+            ToolchainUpdateState::UpdateAvailable,
+            Some("1.29.0".to_string())
+        )
     );
-    assert_eq!(parse_rustup_check(output, "rustc").0, ToolchainUpdateState::Unknown);
+    assert_eq!(
+        parse_rustup_check(output, "rustc").0,
+        ToolchainUpdateState::Unknown
+    );
 }
 #[test]
 fn parses_uv_self_update_dry_run() {
@@ -516,7 +543,10 @@ fn parses_uv_self_update_dry_run() {
             "info: Checking for updates...\n\
              success: Would update uv from v0.12.15 to v0.13.1\n"
         ),
-        (ToolchainUpdateState::UpdateAvailable, Some("0.13.1".to_string()))
+        (
+            ToolchainUpdateState::UpdateAvailable,
+            Some("0.13.1".to_string())
+        )
     );
 
     // 其余输出(报错/无法判定):未知

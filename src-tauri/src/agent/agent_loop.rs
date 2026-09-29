@@ -1,4 +1,4 @@
-//! 低层 agent 循环:对齐 `packages/agent/src/agent-loop.ts`(pi-agent-core 0.84.4)。
+//! 低层 agent 循环:对齐 `packages/agent/src/agent-loop.ts`(pi-agent-core 0.87.1)。
 //!
 //! 蓝本语义要点(逐条对齐):
 //! - 外循环(follow-up)+ 内循环(tool calls / steering);内循环条件在回合末评估
@@ -31,13 +31,15 @@ use crate::agent::llm::event_stream::{event_stream, EventStream, EventStreamWrit
 use crate::agent::llm::validate::validate_tool_arguments;
 use crate::agent::llm::{
     AssistantContent, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream,
-    Context as LlmContext, ModelThinkingLevel, StopReason, TextOrImageContent, ThinkingLevel,
+    Context as LlmContext, ModelThinkingLevel, StopReason, TextOrImageContent, ThinkingLevel, Tool,
     ToolCall, ToolResultMessage,
 };
 use crate::agent::types::{
     AbortSignal, AfterToolCallContext, AgentContext, AgentEvent, AgentEventSink, AgentLoopConfig,
     AgentLoopTurnUpdate, AgentMessage, AgentTool, AgentToolResult, AgentToolUpdateCallback,
-    BeforeToolCallContext, ShouldStopAfterTurnContext, StreamFn, ToolExecutionMode, TypedMessage,
+    BeforeToolCallContext, FinishTurnAction, PrepareNextTurnContext, PrepareRequestPayload,
+    PrepareRequestResult, StreamFn, SystemMessage, ToolExecutionMode, ToolReference,
+    ToolStateChanges, TypedMessage,
 };
 
 // ---------------------------------------------------------------------------
@@ -130,9 +132,10 @@ pub async fn run_agent_loop(
     signal: Option<AbortSignal>,
     stream_fn: StreamFn,
 ) -> Vec<AgentMessage> {
-    let new_messages = prompts.clone();
+    let initial_messages = declare_tool_changes(&context, prompts);
+    let new_messages = initial_messages.clone();
     let mut current_context = context;
-    current_context.messages.extend(prompts);
+    current_context.messages.extend(initial_messages.clone());
 
     emit_event(&emit, AgentEvent::AgentStart).await;
     emit_event(&emit, AgentEvent::TurnStart).await;
@@ -210,6 +213,7 @@ fn check_continue_preconditions(context: &AgentContext) -> Result<(), String> {
 // ---------------------------------------------------------------------------
 
 /// 主循环逻辑(agentLoop 与 agentLoopContinue 共用)。
+#[allow(unused_assignments)]
 async fn run_loop(
     mut current_context: AgentContext,
     mut new_messages: Vec<AgentMessage>,
@@ -218,7 +222,8 @@ async fn run_loop(
     emit: &AgentEventSink,
     stream_fn: StreamFn,
 ) -> Vec<AgentMessage> {
-    let mut last_completed_turn: Option<ShouldStopAfterTurnContext> = None;
+    let mut last_completed_turn: Option<PrepareNextTurnContext> = None;
+    let mut explicit_continuation = false;
     // 循环开始时检查 steering(用户可能在等待期间输入)。
     let mut pending_messages = poll_steering(&config).await;
 
@@ -230,6 +235,7 @@ async fn run_loop(
 
         // 内循环:处理工具调用与 steering 消息。
         loop {
+            let prepared_messages: Vec<AgentMessage> = Vec::new();
             if let Some(turn) = last_completed_turn.as_ref() {
                 if let Some(prepare) = config.prepare_next_turn.clone() {
                     if let Some(update) = prepare(clone_turn_context(turn)).await {
@@ -244,25 +250,40 @@ async fn run_loop(
                 emit_event(emit, AgentEvent::TurnStart).await;
             }
 
-            // 在下一次 assistant 响应前注入 pending 消息。
-            if !pending_messages.is_empty() {
-                for message in std::mem::take(&mut pending_messages) {
-                    emit_event(
-                        emit,
-                        AgentEvent::MessageStart {
-                            message: message.clone(),
-                        },
-                    )
-                    .await;
-                    emit_event(
-                        emit,
-                        AgentEvent::MessageEnd {
-                            message: message.clone(),
-                        },
-                    )
-                    .await;
-                    current_context.messages.push(message.clone());
-                    new_messages.push(message);
+            // 在下一次 assistant 响应前声明并注入 pending 消息。
+            let incoming_messages = declare_tool_changes(
+                &current_context,
+                [prepared_messages, pending_messages].concat(),
+            );
+            pending_messages = Vec::new();
+            for message in incoming_messages {
+                emit_event(
+                    emit,
+                    AgentEvent::MessageStart {
+                        message: message.clone(),
+                    },
+                )
+                .await;
+                emit_event(
+                    emit,
+                    AgentEvent::MessageEnd {
+                        message: message.clone(),
+                    },
+                )
+                .await;
+                current_context.messages.push(message.clone());
+                new_messages.push(message);
+            }
+
+            // 每次 LLM 请求前允许替换 context/model/thinking 状态。
+            if let Some(prepare) = &config.prepare_request {
+                let payload = PrepareRequestPayload {
+                    context: current_context.clone(),
+                    model: config.model.clone(),
+                    thinking_level: thinking_level_from_reasoning(config.stream.reasoning),
+                };
+                if let Some(update) = prepare(payload, signal.clone()).await {
+                    apply_prepare_request_update(&mut current_context, &mut config, update);
                 }
             }
 
@@ -278,6 +299,17 @@ async fn run_loop(
             new_messages.push(assistant_message_of(message.clone()));
 
             if matches!(message.stop_reason, StopReason::Error | StopReason::Aborted) {
+                let turn = PrepareNextTurnContext {
+                    message: message.clone(),
+                    tool_results: Vec::new(),
+                    context: current_context.clone(),
+                    new_messages: new_messages.clone(),
+                };
+                last_completed_turn = Some(turn.clone());
+                if let Some(finish) = &config.finish_turn {
+                    // 蓝本忽略错误/中止回合的 action:二者始终硬退出。
+                    let _ = finish(clone_turn_context(&turn), signal.clone()).await;
+                }
                 emit_event(
                     emit,
                     AgentEvent::TurnEnd {
@@ -320,6 +352,18 @@ async fn run_loop(
                 }
             }
 
+            let turn = PrepareNextTurnContext {
+                message: message.clone(),
+                tool_results: tool_results.clone(),
+                context: current_context.clone(),
+                new_messages: new_messages.clone(),
+            };
+            last_completed_turn = Some(turn.clone());
+            let decision = if let Some(finish) = &config.finish_turn {
+                finish(clone_turn_context(&turn), signal.clone()).await
+            } else {
+                None
+            };
             emit_event(
                 emit,
                 AgentEvent::TurnEnd {
@@ -329,28 +373,22 @@ async fn run_loop(
             )
             .await;
 
-            let turn = ShouldStopAfterTurnContext {
-                message: message.clone(),
-                tool_results: tool_results.clone(),
-                context: current_context.clone(),
-                new_messages: new_messages.clone(),
-            };
-            if let Some(should_stop) = &config.should_stop_after_turn {
-                if should_stop(clone_turn_context(&turn)).await {
-                    emit_event(
-                        emit,
-                        AgentEvent::AgentEnd {
-                            messages: new_messages.clone(),
-                        },
-                    )
-                    .await;
-                    return new_messages;
-                }
+            if decision == Some(FinishTurnAction::End) {
+                emit_event(
+                    emit,
+                    AgentEvent::AgentEnd {
+                        messages: new_messages.clone(),
+                    },
+                )
+                .await;
+                return new_messages;
             }
-            last_completed_turn = Some(turn);
 
+            explicit_continuation = decision == Some(FinishTurnAction::Continue);
             pending_messages = poll_steering(&config).await;
-            if !(has_more_tool_calls || !pending_messages.is_empty()) {
+            if has_more_tool_calls || !pending_messages.is_empty() {
+                explicit_continuation = false;
+            } else {
                 break;
             }
         }
@@ -358,7 +396,14 @@ async fn run_loop(
         // agent 本应停止:检查 follow-up 消息。
         let follow_up_messages = poll_follow_up(&config).await;
         if !follow_up_messages.is_empty() {
+            explicit_continuation = false;
             pending_messages = follow_up_messages;
+            continue 'outer;
+        }
+
+        // 没有自然请求时,finishTurn 的 continue 只补一次纯上下文请求。
+        if explicit_continuation {
+            explicit_continuation = false;
             continue 'outer;
         }
 
@@ -373,6 +418,216 @@ async fn run_loop(
     )
     .await;
     new_messages
+}
+
+fn apply_prepare_request_update(
+    current_context: &mut AgentContext,
+    config: &mut AgentLoopConfig,
+    update: PrepareRequestResult,
+) {
+    if let Some(context) = update.context {
+        *current_context = context;
+    }
+    if let Some(model) = update.model {
+        config.model = model;
+    }
+    if let Some(level_update) = update.thinking_level {
+        let level = level_update.unwrap_or(ModelThinkingLevel::Off);
+        config.stream.reasoning = reasoning_from_thinking_level(level);
+    }
+}
+
+pub(crate) fn thinking_level_from_reasoning(
+    reasoning: Option<ThinkingLevel>,
+) -> ModelThinkingLevel {
+    match reasoning {
+        None => ModelThinkingLevel::Off,
+        Some(ThinkingLevel::Minimal) => ModelThinkingLevel::Minimal,
+        Some(ThinkingLevel::Low) => ModelThinkingLevel::Low,
+        Some(ThinkingLevel::Medium) => ModelThinkingLevel::Medium,
+        Some(ThinkingLevel::High) => ModelThinkingLevel::High,
+        Some(ThinkingLevel::Xhigh) => ModelThinkingLevel::Xhigh,
+        Some(ThinkingLevel::Max) => ModelThinkingLevel::Max,
+    }
+}
+
+/// transcript 中全部 system 指令按顺序折叠为当前 system prompt。
+pub(crate) fn current_system_prompt(messages: &[AgentMessage]) -> String {
+    messages
+        .iter()
+        .filter_map(|message| match message {
+            AgentMessage::Message(TypedMessage::System(system)) => Some(system.content.as_str()),
+            _ => None,
+        })
+        .filter(|content| !content.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// `context.tools` 是可执行集合;transcript 的 system 消息声明模型可见集合。
+/// 每次请求前把二者差异写成 `toolsAdded` / `toolsRemoved`。
+pub(crate) fn declare_tool_changes(
+    context: &AgentContext,
+    pending_messages: Vec<AgentMessage>,
+) -> Vec<AgentMessage> {
+    let system_index = pending_messages
+        .iter()
+        .rposition(|message| matches!(message, AgentMessage::Message(TypedMessage::System(_))));
+
+    let pending = system_index.map(|index| match &pending_messages[index] {
+        AgentMessage::Message(TypedMessage::System(system)) => system.clone(),
+        _ => unreachable!("rposition above selected a system message"),
+    });
+    let baseline: Vec<AgentMessage> = match (&pending, system_index) {
+        (Some(pending), Some(index)) => pending_messages
+            .iter()
+            .enumerate()
+            .map(|(position, message)| {
+                if position == index {
+                    AgentMessage::Message(TypedMessage::System(system_message_with_changes(
+                        pending.clone(),
+                        ToolStateChanges::default(),
+                    )))
+                } else {
+                    message.clone()
+                }
+            })
+            .collect(),
+        _ => pending_messages,
+    };
+
+    let previous = current_tools(
+        context
+            .messages
+            .iter()
+            .cloned()
+            .chain(baseline.iter().cloned())
+            .collect(),
+    );
+    let current: Vec<Tool> = context
+        .tools
+        .iter()
+        .map(|tool| tool.as_llm_tool())
+        .collect();
+    let changes = tool_state_changes(&previous, &current);
+    let unchanged = changes.tools_added.is_empty() && changes.tools_removed.is_empty();
+
+    if let Some(pending) = &pending {
+        if unchanged && pending.tools_added.is_empty() && pending.tools_removed.is_empty() {
+            return baseline;
+        }
+        let mut updated = baseline;
+        if let Some(index) = system_index {
+            updated[index] = AgentMessage::Message(TypedMessage::System(
+                system_message_with_changes(pending.clone(), changes),
+            ));
+        }
+        return updated;
+    }
+
+    if unchanged {
+        return baseline;
+    }
+    let update = AgentMessage::Message(TypedMessage::System(SystemMessage {
+        role: "system".to_string(),
+        content: String::new(),
+        tools_added: changes.tools_added,
+        tools_removed: changes.tools_removed,
+        timestamp: now_ms(),
+    }));
+    let insert_index = baseline
+        .iter()
+        .position(|message| message.role_name() != "system")
+        .unwrap_or(baseline.len());
+    let mut updated = baseline;
+    updated.insert(insert_index, update);
+    updated
+}
+
+fn tool_state_changes(previous: &[Tool], current: &[Tool]) -> ToolStateChanges {
+    let previous_by_name: std::collections::HashMap<String, &Tool> = previous
+        .iter()
+        .map(|tool| (tool.name.clone(), tool))
+        .collect();
+    let current_by_name: std::collections::HashMap<String, &Tool> = current
+        .iter()
+        .map(|tool| (tool.name.clone(), tool))
+        .collect();
+    ToolStateChanges {
+        tools_added: current
+            .iter()
+            .filter(|tool| {
+                previous_by_name
+                    .get(&tool.name)
+                    .map(|old| !tools_equal(old, tool))
+                    .unwrap_or(true)
+            })
+            .map(|tool| {
+                serde_json::from_value(serde_json::to_value(tool).unwrap_or_else(|_| {
+                    serde_json::json!({
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters,
+                    })
+                }))
+                .unwrap_or_else(|_| tool.clone())
+            })
+            .collect(),
+        tools_removed: previous
+            .iter()
+            .filter(|tool| {
+                current_by_name
+                    .get(&tool.name)
+                    .map(|current| !tools_equal(tool, current))
+                    .unwrap_or(true)
+            })
+            .map(|tool| ToolReference {
+                name: tool.name.clone(),
+            })
+            .collect(),
+    }
+}
+
+fn tools_equal(left: &Tool, right: &Tool) -> bool {
+    serde_json::to_value(left).ok() == serde_json::to_value(right).ok()
+}
+
+fn system_message_with_changes(
+    mut message: SystemMessage,
+    changes: ToolStateChanges,
+) -> SystemMessage {
+    message.tools_added = changes.tools_added;
+    message.tools_removed = changes.tools_removed;
+    message
+}
+
+fn current_tools(messages: Vec<AgentMessage>) -> Vec<Tool> {
+    let mut tools: Vec<Tool> = Vec::new();
+    let mut positions = std::collections::HashMap::new();
+    for message in messages {
+        let AgentMessage::Message(TypedMessage::System(system)) = message else {
+            continue;
+        };
+        for removed in system.tools_removed {
+            if let Some(position) = positions.remove(&removed.name) {
+                tools.remove(position);
+                for mapped in positions.values_mut() {
+                    if *mapped > position {
+                        *mapped -= 1;
+                    }
+                }
+            }
+        }
+        for tool in system.tools_added {
+            if let Some(position) = positions.remove(&tool.name) {
+                tools[position] = tool;
+            } else {
+                positions.insert(tool.name.clone(), tools.len());
+                tools.push(tool);
+            }
+        }
+    }
+    tools
 }
 
 fn apply_turn_update(
@@ -418,8 +673,8 @@ async fn poll_follow_up(config: &AgentLoopConfig) -> Vec<AgentMessage> {
     }
 }
 
-fn clone_turn_context(turn: &ShouldStopAfterTurnContext) -> ShouldStopAfterTurnContext {
-    ShouldStopAfterTurnContext {
+fn clone_turn_context(turn: &PrepareNextTurnContext) -> PrepareNextTurnContext {
+    PrepareNextTurnContext {
         message: turn.message.clone(),
         tool_results: turn.tool_results.clone(),
         context: turn.context.clone(),
@@ -449,7 +704,7 @@ async fn stream_assistant_response(
     let llm_messages = (config.convert_to_llm)(messages).await;
 
     let llm_context = LlmContext {
-        system_prompt: Some(context.system_prompt.clone()),
+        system_prompt: Some(current_system_prompt(&context.messages)),
         messages: llm_messages,
         tools: context
             .tools
@@ -1092,11 +1347,7 @@ fn create_tool_result_message(finalized: &FinalizedToolCallOutcome) -> ToolResul
             Some(finalized.result.details.clone())
         },
         usage: finalized.result.usage.clone(),
-        added_tool_names: finalized
-            .result
-            .added_tool_names
-            .clone()
-            .filter(|names| !names.is_empty()),
+        added_tool_names: None,
         is_error: finalized.is_error,
         timestamp: now_ms(),
     }
@@ -1225,13 +1476,14 @@ pub(crate) mod testing {
             convert_to_llm: default_convert_to_llm_fn(),
             transform_context: None,
             get_api_key: None,
-            should_stop_after_turn: None,
+            finish_turn: None,
             prepare_next_turn: None,
             get_steering_messages: None,
             get_follow_up_messages: None,
             tool_execution: ToolExecutionMode::Parallel,
             before_tool_call: None,
             after_tool_call: None,
+            prepare_request: None,
         }
     }
 
@@ -1426,6 +1678,7 @@ pub(crate) mod testing {
                     })
                 })
             },
+            replay: None,
         };
         (tool, calls)
     }
@@ -1522,7 +1775,6 @@ mod tests {
         let (stream_fn, _calls) = scripted_stream_fn(vec![text_script("hello")]);
         let prompt = user_message("hi", 1_000);
         let context = AgentContext {
-            system_prompt: "sys".to_string(),
             messages: Vec::new(),
             tools: Vec::new(),
         };
@@ -1596,7 +1848,6 @@ mod tests {
         let (tool, tool_log) = make_tool("echo", ToolBehavior::Ok("echo:x".to_string()));
         let (emit, events) = collecting_sink();
         let context = AgentContext {
-            system_prompt: "sys".to_string(),
             messages: Vec::new(),
             tools: vec![tool],
         };
@@ -1619,8 +1870,8 @@ mod tests {
         drop(log);
 
         // 新消息:user → assistant(toolcall) → toolResult → assistant(最终)。
-        assert_eq!(messages.len(), 4);
-        let tool_result = match &messages[2] {
+        assert_eq!(messages.len(), 5);
+        let tool_result = match &messages[3] {
             AgentMessage::Message(TypedMessage::ToolResult(tool_result)) => tool_result.clone(),
             other => panic!("expected toolResult message, got {other:?}"),
         };
@@ -1637,6 +1888,8 @@ mod tests {
             vec![
                 "agent_start",
                 "turn_start",
+                "message_start",
+                "message_end",
                 "message_start",
                 "message_end",
                 "message_start",
@@ -1684,7 +1937,6 @@ mod tests {
         );
         let (emit, events) = collecting_sink();
         let context = AgentContext {
-            system_prompt: String::new(),
             messages: Vec::new(),
             tools: vec![tool],
         };
@@ -1750,7 +2002,6 @@ mod tests {
         }));
         let (emit, events) = collecting_sink();
         let context = AgentContext {
-            system_prompt: String::new(),
             messages: Vec::new(),
             tools: vec![tool],
         };
@@ -1768,8 +2019,8 @@ mod tests {
         // 工具未执行。
         assert!(tool_log.lock().unwrap().is_empty());
         // 工具结果为 error,内容为 block reason;批次未 terminate → 继续下一回合。
-        assert_eq!(messages.len(), 4);
-        let tool_result = match &messages[2] {
+        assert_eq!(messages.len(), 5);
+        let tool_result = match &messages[3] {
             AgentMessage::Message(TypedMessage::ToolResult(tool_result)) => tool_result.clone(),
             other => panic!("expected toolResult message, got {other:?}"),
         };
@@ -1802,7 +2053,6 @@ mod tests {
         }));
         let (emit, _events) = collecting_sink();
         let context = AgentContext {
-            system_prompt: String::new(),
             messages: Vec::new(),
             tools: vec![tool],
         };
@@ -1818,7 +2068,7 @@ mod tests {
         .await;
 
         assert!(tool_log.lock().unwrap().is_empty());
-        let tool_result = match &messages[2] {
+        let tool_result = match &messages[3] {
             AgentMessage::Message(TypedMessage::ToolResult(tool_result)) => tool_result.clone(),
             other => panic!("expected toolResult message, got {other:?}"),
         };
@@ -1856,7 +2106,6 @@ mod tests {
         }));
         let (emit, _events) = collecting_sink();
         let context = AgentContext {
-            system_prompt: String::new(),
             messages: Vec::new(),
             tools: vec![tool],
         };
@@ -1891,7 +2140,6 @@ mod tests {
         let (tool, tool_log) = make_tool("boom", ToolBehavior::Err("exploded".to_string()));
         let (emit, events) = collecting_sink();
         let context = AgentContext {
-            system_prompt: String::new(),
             messages: Vec::new(),
             tools: vec![tool],
         };
@@ -1907,8 +2155,8 @@ mod tests {
         .await;
 
         assert_eq!(tool_log.lock().unwrap().len(), 1);
-        assert_eq!(messages.len(), 4);
-        let tool_result = match &messages[2] {
+        assert_eq!(messages.len(), 5);
+        let tool_result = match &messages[3] {
             AgentMessage::Message(TypedMessage::ToolResult(tool_result)) => tool_result.clone(),
             other => panic!("expected toolResult message, got {other:?}"),
         };
@@ -1942,7 +2190,6 @@ mod tests {
         }));
         let (emit, events) = collecting_sink();
         let context = AgentContext {
-            system_prompt: String::new(),
             messages: Vec::new(),
             tools: vec![tool],
         };
@@ -1977,7 +2224,7 @@ mod tests {
         assert!(end.2);
         drop(events);
         // toolResult 消息同样反映覆盖。
-        let tool_result = match &messages[2] {
+        let tool_result = match &messages[3] {
             AgentMessage::Message(TypedMessage::ToolResult(tool_result)) => tool_result.clone(),
             other => panic!("expected toolResult message, got {other:?}"),
         };
@@ -2000,7 +2247,6 @@ mod tests {
         let (tool_two, log_two) = make_tool("tool_two", ToolBehavior::Ok("two".to_string()));
         let (emit, events) = collecting_sink();
         let context = AgentContext {
-            system_prompt: String::new(),
             messages: Vec::new(),
             tools: vec![tool_one, tool_two],
         };
@@ -2018,12 +2264,12 @@ mod tests {
         // 全部按截断错误失败,工具未执行;terminate: false → 仍进入下一回合。
         assert!(log_one.lock().unwrap().is_empty());
         assert!(log_two.lock().unwrap().is_empty());
-        assert_eq!(messages.len(), 5);
-        let first_result = match &messages[2] {
+        assert_eq!(messages.len(), 6);
+        let first_result = match &messages[3] {
             AgentMessage::Message(TypedMessage::ToolResult(tool_result)) => tool_result.clone(),
             other => panic!("expected toolResult message, got {other:?}"),
         };
-        let second_result = match &messages[3] {
+        let second_result = match &messages[4] {
             AgentMessage::Message(TypedMessage::ToolResult(tool_result)) => tool_result.clone(),
             other => panic!("expected toolResult message, got {other:?}"),
         };
@@ -2056,7 +2302,6 @@ mod tests {
         ]);
         let (emit, _events) = collecting_sink();
         let context = AgentContext {
-            system_prompt: String::new(),
             messages: Vec::new(),
             tools: Vec::new(),
         };
@@ -2107,7 +2352,6 @@ mod tests {
         };
         let (emit, events) = collecting_sink();
         let context = AgentContext {
-            system_prompt: String::new(),
             messages: Vec::new(),
             tools: vec![tool],
         };
@@ -2131,6 +2375,8 @@ mod tests {
                 "message_start",
                 "message_end",
                 "message_start",
+                "message_end",
+                "message_start",
                 "message_update",
                 "message_end",
                 "tool_execution_start",
@@ -2149,8 +2395,8 @@ mod tests {
             ]
         );
         // 新消息列表包含 steering 消息。
-        assert_eq!(messages.len(), 5);
-        assert_eq!(messages[3].role_name(), "user");
+        assert_eq!(messages.len(), 6);
+        assert_eq!(messages[4].role_name(), "user");
         // 第二次 LLM 调用的上下文末尾是 steering 消息。
         let captured = calls.lock().unwrap();
         assert_eq!(captured[1].context.messages.len(), 4);
@@ -2183,7 +2429,6 @@ mod tests {
         };
         let (emit, events) = collecting_sink();
         let context = AgentContext {
-            system_prompt: String::new(),
             messages: Vec::new(),
             tools: Vec::new(),
         };
@@ -2245,7 +2490,6 @@ mod tests {
             scripted_stream_fn(vec![error_script(StopReason::Aborted, "canceled")]);
         let (emit, events) = collecting_sink();
         let context = AgentContext {
-            system_prompt: String::new(),
             messages: Vec::new(),
             tools: Vec::new(),
         };
@@ -2297,7 +2541,6 @@ mod tests {
         signal.cancel();
         let (emit, _events) = collecting_sink();
         let context = AgentContext {
-            system_prompt: String::new(),
             messages: Vec::new(),
             tools: vec![tool],
         };
@@ -2313,7 +2556,7 @@ mod tests {
         .await;
 
         assert!(tool_log.lock().unwrap().is_empty());
-        let tool_result = match &messages[2] {
+        let tool_result = match &messages[3] {
             AgentMessage::Message(TypedMessage::ToolResult(tool_result)) => tool_result.clone(),
             other => panic!("expected toolResult message, got {other:?}"),
         };
@@ -2339,7 +2582,6 @@ mod tests {
         let (fast, _fast_log) = make_tool("fast", ToolBehavior::Ok("fast-result".to_string()));
         let (emit, events) = collecting_sink();
         let context = AgentContext {
-            system_prompt: String::new(),
             messages: Vec::new(),
             tools: vec![slow, fast],
         };
@@ -2375,11 +2617,11 @@ mod tests {
         assert_eq!(message_order, vec!["call_1", "call_2"]);
         drop(events);
         // 消息内容正确且按源顺序入上下文。
-        let first_result = match &messages[2] {
+        let first_result = match &messages[3] {
             AgentMessage::Message(TypedMessage::ToolResult(tool_result)) => tool_result.clone(),
             other => panic!("expected toolResult message, got {other:?}"),
         };
-        let second_result = match &messages[3] {
+        let second_result = match &messages[4] {
             AgentMessage::Message(TypedMessage::ToolResult(tool_result)) => tool_result.clone(),
             other => panic!("expected toolResult message, got {other:?}"),
         };
@@ -2404,7 +2646,6 @@ mod tests {
         config.tool_execution = ToolExecutionMode::Sequential;
         let (emit, events) = collecting_sink();
         let context = AgentContext {
-            system_prompt: String::new(),
             messages: Vec::new(),
             tools: vec![slow, fast],
         };
@@ -2453,7 +2694,6 @@ mod tests {
         strict.execution_mode = Some(ToolExecutionMode::Sequential);
         let (emit, events) = collecting_sink();
         let context = AgentContext {
-            system_prompt: String::new(),
             messages: Vec::new(),
             tools: vec![plain, strict],
         };
@@ -2529,7 +2769,6 @@ mod tests {
         };
         let (emit, _events) = collecting_sink();
         let context = AgentContext {
-            system_prompt: String::new(),
             messages: Vec::new(),
             tools: Vec::new(),
         };
@@ -2559,7 +2798,6 @@ mod tests {
         config.get_api_key = Some(Arc::new(|_provider| Box::pin(async { None::<String> })));
         let (emit, _events) = collecting_sink();
         let context = AgentContext {
-            system_prompt: String::new(),
             messages: Vec::new(),
             tools: Vec::new(),
         };
@@ -2630,7 +2868,6 @@ mod tests {
         };
         let (emit, _events) = collecting_sink();
         let context = AgentContext {
-            system_prompt: String::new(),
             messages: Vec::new(),
             tools: Vec::new(),
         };
@@ -2662,14 +2899,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn should_stop_after_turn_stops_before_next_llm_call() {
+    async fn finish_turn_end_stops_before_next_llm_call() {
         let (stream_fn, calls) =
             scripted_stream_fn(vec![text_script("one"), text_script("never reached")]);
         let mut config = test_loop_config(test_model());
-        config.should_stop_after_turn = Some(Arc::new(|_context| Box::pin(async { true })));
+        config.finish_turn = Some(Arc::new(|_context, _signal| {
+            Box::pin(async { Some(FinishTurnAction::End) })
+        }));
         let (emit, events) = collecting_sink();
         let context = AgentContext {
-            system_prompt: String::new(),
             messages: Vec::new(),
             tools: Vec::new(),
         };
@@ -2694,6 +2932,152 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn finish_turn_continue_requests_once_without_natural_messages() {
+        let (stream_fn, calls) = scripted_stream_fn(vec![text_script("one"), text_script("two")]);
+        let mut config = test_loop_config(test_model());
+        let turn_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = turn_count.clone();
+        config.finish_turn = Some(Arc::new(move |context, _signal| {
+            let seen = seen.clone();
+            Box::pin(async move {
+                let turn = seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                assert_eq!(context.message.content.len(), 1);
+                if turn == 0 {
+                    Some(FinishTurnAction::Continue)
+                } else {
+                    None
+                }
+            })
+        }));
+        let (emit, events) = collecting_sink();
+        let context = AgentContext {
+            messages: Vec::new(),
+            tools: Vec::new(),
+        };
+
+        let messages = run_agent_loop(
+            vec![user_message("run", 1_000)],
+            context,
+            config,
+            emit,
+            None,
+            stream_fn,
+        )
+        .await;
+
+        assert_eq!(calls.lock().unwrap().len(), 2);
+        assert_eq!(messages.len(), 3);
+        assert_eq!(
+            event_kinds(&events.lock().unwrap())
+                .iter()
+                .filter(|kind| **kind == "turn_start")
+                .count(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn prepare_request_replaces_context_model_and_thinking() {
+        let (stream_fn, calls) = scripted_stream_fn(vec![text_script("one")]);
+        let mut config = test_loop_config(test_model());
+        let payload_seen = Arc::new(Mutex::new(Vec::new()));
+        let seen = payload_seen.clone();
+        config.prepare_request = Some(Arc::new(move |payload, _signal| {
+            let seen = seen.clone();
+            Box::pin(async move {
+                seen.lock().unwrap().push(payload.context.messages.len());
+                Some(PrepareRequestResult {
+                    context: Some(AgentContext {
+                        messages: vec![AgentMessage::Message(TypedMessage::System(
+                            SystemMessage {
+                                role: "system".to_string(),
+                                content: "updated".to_string(),
+                                tools_added: Vec::new(),
+                                tools_removed: Vec::new(),
+                                timestamp: 2,
+                            },
+                        ))],
+                        tools: payload.context.tools,
+                    }),
+                    model: Some(payload.model),
+                    thinking_level: Some(Some(ModelThinkingLevel::High)),
+                })
+            })
+        }));
+        let (emit, _events) = collecting_sink();
+        let context = AgentContext {
+            messages: Vec::new(),
+            tools: Vec::new(),
+        };
+
+        run_agent_loop(
+            vec![user_message("run", 1_000)],
+            context,
+            config,
+            emit,
+            None,
+            stream_fn,
+        )
+        .await;
+
+        assert_eq!(payload_seen.lock().unwrap().as_slice(), [1]);
+        let captured = &calls.lock().unwrap()[0];
+        assert_eq!(captured.context.system_prompt.as_deref(), Some("updated"));
+        assert_eq!(captured.reasoning, Some(ThinkingLevel::High));
+    }
+
+    #[test]
+    fn declare_tool_changes_inserts_and_replaces_pending_system_delta() {
+        let old_tool = Tool {
+            name: "old".to_string(),
+            description: "old".to_string(),
+            parameters: serde_json::json!({"type": "object"}),
+        };
+        let new_tool = Tool {
+            name: "new".to_string(),
+            description: "new".to_string(),
+            parameters: serde_json::json!({"type": "object"}),
+        };
+        let mut context = AgentContext::default();
+        context.tools = vec![AgentTool {
+            name: new_tool.name.clone(),
+            label: "new".to_string(),
+            description: new_tool.description.clone(),
+            parameters: new_tool.parameters.clone(),
+            execution_mode: None,
+            prepare_arguments: None,
+            execute: Arc::new(|_id, _args, _signal, _update| {
+                Box::pin(async { Ok(AgentToolResult::text("")) })
+            }),
+            replay: None,
+        }];
+
+        let pending = declare_tool_changes(
+            &context,
+            vec![
+                AgentMessage::Message(TypedMessage::System(SystemMessage {
+                    role: "system".to_string(),
+                    content: "pending".to_string(),
+                    tools_added: vec![old_tool],
+                    tools_removed: Vec::new(),
+                    timestamp: 1,
+                })),
+                user_message("run", 1_000),
+            ],
+        );
+
+        assert_eq!(pending.len(), 2);
+        let AgentMessage::Message(TypedMessage::System(system)) = &pending[0] else {
+            panic!("expected a system message before the user prompt");
+        };
+        assert_eq!(system.content, "pending");
+        assert_eq!(system.tools_added.len(), 1);
+        assert_eq!(system.tools_added[0].name, "new");
+        // pending 的旧声明只代表旧意图,替换时不会额外产生 removal。
+        assert!(system.tools_removed.is_empty());
+    }
+
     #[test]
     fn continue_preconditions_reject_empty_and_assistant_tail() {
         let empty = AgentContext::default();
@@ -2702,7 +3086,6 @@ mod tests {
             "Cannot continue: no messages in context"
         );
         let assistant_tail = AgentContext {
-            system_prompt: String::new(),
             messages: vec![
                 user_message("hi", 1),
                 assistant_message_of(test_assistant(vec![], StopReason::Stop)),
@@ -2714,7 +3097,6 @@ mod tests {
             "Cannot continue from message role: assistant"
         );
         let user_tail = AgentContext {
-            system_prompt: String::new(),
             messages: vec![user_message("hi", 1)],
             tools: Vec::new(),
         };

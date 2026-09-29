@@ -171,6 +171,7 @@ pub fn create_ls_tool(env: Arc<dyn ExecutionEnv>) -> AgentTool {
                 })
             })
         }),
+        replay: None,
     }
 }
 

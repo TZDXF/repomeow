@@ -1141,7 +1141,12 @@ impl Shell for TokioEnv {
                 }
             }
             let exit_code = match status {
-                Ok(status) => status.code().unwrap_or(0),
+                // 对齐 pi c2d3dc55b:信号终止没有进程 exit code,不能回退为 0;
+                // 统一映射为 shell 惯用的 128(generic signal termination)。
+                Ok(status) => crate::agent::harness::utils::shell_output::normalize_exit_code(
+                    status.code(),
+                    status.success(),
+                ),
                 Err(error) => {
                     return err(ExecutionError::new(
                         ExecutionErrorCode::SpawnError,

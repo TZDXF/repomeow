@@ -11,9 +11,11 @@ use tokio_util::sync::CancellationToken;
 use super::{AssistantMessage, StopReason};
 
 /// pi coding-agent 普通对话的默认自动重试次数。
-pub const DEFAULT_MAX_RETRIES: u32 = 3;
+pub const DEFAULT_MAX_RETRIES: u32 = 10;
 /// pi coding-agent 普通对话的默认退避基数。
 pub const DEFAULT_BASE_DELAY_MS: u64 = 2_000;
+/// agent 层指数退避的单次等待上限;蓝本默认 60 秒。
+pub const DEFAULT_MAX_AGENT_RETRY_DELAY_MS: u64 = 60_000;
 
 fn non_retryable_pattern() -> &'static Regex {
     static PATTERN: OnceLock<Regex> = OnceLock::new();
@@ -49,10 +51,11 @@ pub fn is_retryable_assistant_error(message: &AssistantMessage) -> bool {
     retryable_pattern().is_match(error_message)
 }
 
-/// 第 `attempt` 次重试（1-based）的等待时间。
-pub fn retry_delay_ms(base_delay_ms: u64, attempt: u32) -> u64 {
+/// 第 `attempt` 次重试（1-based）的等待时间；`max_delay_ms` 可覆盖默认上限。
+pub fn retry_delay_ms(base_delay_ms: u64, attempt: u32, max_delay_ms: Option<u64>) -> u64 {
     let exponent = attempt.saturating_sub(1).min(63);
-    base_delay_ms.saturating_mul(1_u64.checked_shl(exponent).unwrap_or(u64::MAX))
+    let backoff = base_delay_ms.saturating_mul(1_u64.checked_shl(exponent).unwrap_or(u64::MAX));
+    backoff.min(max_delay_ms.unwrap_or(DEFAULT_MAX_AGENT_RETRY_DELAY_MS))
 }
 
 /// 等待指定退避时间；取消时立即返回 `false`，正常到期返回 `true`。
@@ -129,9 +132,19 @@ mod tests {
 
     #[test]
     fn computes_pi_exponential_backoff() {
-        assert_eq!(retry_delay_ms(2_000, 1), 2_000);
-        assert_eq!(retry_delay_ms(2_000, 2), 4_000);
-        assert_eq!(retry_delay_ms(2_000, 3), 8_000);
+        assert_eq!(retry_delay_ms(2_000, 1, None), 2_000);
+        assert_eq!(retry_delay_ms(2_000, 2, None), 4_000);
+        assert_eq!(retry_delay_ms(2_000, 3, None), 8_000);
+    }
+
+    #[test]
+    fn caps_agent_retry_backoff() {
+        assert_eq!(retry_delay_ms(2_000, 7, Some(30_000)), 30_000);
+        assert_eq!(
+            retry_delay_ms(2_000, 10, None),
+            DEFAULT_MAX_AGENT_RETRY_DELAY_MS
+        );
+        assert_eq!(retry_delay_ms(1, 63, Some(u64::MAX)), 1_u64 << 62);
     }
 
     #[tokio::test]

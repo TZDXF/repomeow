@@ -30,12 +30,11 @@ fn temp_dir(tag: &str) -> PathBuf {
     dir
 }
 
-
 #[test]
 fn cli_head_detection_only_accepts_known_subcommands() {
     for head in [
-        "wiki", "sem", "project", "report", "tag", "script", "pin", "hidden", "ai",
-        "prompt", "account", "file",
+        "wiki", "sem", "project", "report", "tag", "script", "pin", "hidden", "ai", "prompt",
+        "account", "file",
     ] {
         assert!(is_cli_head(head), "should enter CLI mode: {head}");
     }
@@ -560,8 +559,6 @@ fn cli_parses_ai_account_file_commands() {
         cli.command,
         Commands::File(FileCommands::Save { .. })
     ));
-
-
 }
 
 // ── 新分组实现测试(临时数据目录)──────────────────────────────────────

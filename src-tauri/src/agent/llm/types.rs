@@ -490,7 +490,7 @@ pub enum Message {
 }
 
 /// 工具定义;`parameters` 为 JSON Schema(TS 为 TypeBox schema,序列化形状一致)。
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Tool {
     pub name: String,

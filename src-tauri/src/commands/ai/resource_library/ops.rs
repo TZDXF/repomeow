@@ -16,9 +16,9 @@ use super::frontmatter as fm;
 use super::git;
 use super::marketplace;
 use super::models::{
-    LibraryInfo, MarketplaceDownload, MarketplaceSource, MarketplaceUpdateStatus,
-    McpImportOutcome, McpImportSkip, McpServer, McpServerInput, Skill, SkillBody, SkillGroup,
-    SkillLibrary, TRANSPORTS,
+    LibraryInfo, MarketplaceDownload, MarketplaceSource, MarketplaceUpdateStatus, McpImportOutcome,
+    McpImportSkip, McpServer, McpServerInput, Skill, SkillBody, SkillGroup, SkillLibrary,
+    TRANSPORTS,
 };
 use super::store::{is_safe_directory, Library, DIR_SKILLS, FILE_SKILLS};
 
@@ -146,7 +146,8 @@ pub(super) fn library_info(lib: &Library) -> RlResult<LibraryInfo> {
     lib.ensure()?;
     let meta = lib.meta()?;
     let skills: SkillLibrary = lib.read_plain_json(FILE_SKILLS).unwrap_or_default();
-    let mcp_count = lib.read_mcp_json::<Vec<McpServer>>()
+    let mcp_count = lib
+        .read_mcp_json::<Vec<McpServer>>()
         .map(|list| list.len() as u32)
         .unwrap_or(0);
     Ok(LibraryInfo {

@@ -7,9 +7,7 @@ use scraper::{Html, Selector};
 use serde::Serialize;
 
 use super::errors::{codes, RlError, RlResult};
-use super::marketplace::{
-    client, fetch_text, parse_marketplace_id, read_limited, validate_part,
-};
+use super::marketplace::{client, fetch_text, parse_marketplace_id, read_limited, validate_part};
 use super::models::{
     MarketplaceDownload, MarketplaceFile, MarketplaceList, MarketplaceSkill, MarketplaceSource,
 };
@@ -81,18 +79,32 @@ fn git_snapshot(url: &str) -> RlResult<(String, Vec<(String, Vec<u8>)>)> {
     let result = (|| {
         let repo = temp.join("repo");
         super::import::clone_repo_with_checkout(
-            &temp, url, &repo, Duration::from_secs(120), false,
+            &temp,
+            url,
+            &repo,
+            Duration::from_secs(120),
+            false,
         )?;
         let dir = repo.to_string_lossy();
         let head = crate::commands::git::run_git(&dir, &["rev-parse", "HEAD"])?;
         let revision = String::from_utf8_lossy(&head.stdout).trim().to_string();
         let archive = temp.join("snapshot.zip");
-        crate::commands::git::run_git(&dir, &[
-            "archive", "--format=zip", "--prefix=repo/", "-o",
-            &archive.to_string_lossy(), &revision,
-        ])?;
+        crate::commands::git::run_git(
+            &dir,
+            &[
+                "archive",
+                "--format=zip",
+                "--prefix=repo/",
+                "-o",
+                &archive.to_string_lossy(),
+                &revision,
+            ],
+        )?;
         if std::fs::metadata(&archive)?.len() > MAX_ARCHIVE {
-            return Err(RlError::coded(codes::MARKETPLACE_RESPONSE_TOO_LARGE, "archive size"));
+            return Err(RlError::coded(
+                codes::MARKETPLACE_RESPONSE_TOO_LARGE,
+                "archive size",
+            ));
         }
         let files = unpack(&std::fs::read(&archive)?)?;
         Ok((revision, files))
@@ -763,7 +775,8 @@ mod tests {
         use crate::commands::git::run_git;
         let root = std::env::temp_dir().join(format!(
             "repomeow-marketplace-test-{}-{}",
-            std::process::id(), crate::time_util::now_ts_nanos()
+            std::process::id(),
+            crate::time_util::now_ts_nanos()
         ));
         std::fs::create_dir(&root).unwrap();
         let dir = root.to_string_lossy();
@@ -772,16 +785,32 @@ mod tests {
         std::fs::write(root.join("demo/SKILL.md"), "---\nname: demo\n---\nHello").unwrap();
         std::fs::write(root.join("demo/image.png"), [0, 255, 128]).unwrap();
         run_git(&dir, &["add", "."]).unwrap();
-        run_git(&dir, &[
-            "-c", "user.name=Test", "-c", "user.email=test@example.com",
-            "-c", "commit.gpgsign=false", "commit", "-m", "fixture",
-        ]).unwrap();
+        run_git(
+            &dir,
+            &[
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "fixture",
+            ],
+        )
+        .unwrap();
         let head = run_git(&dir, &["rev-parse", "HEAD"]).unwrap();
         let (revision, files) = git_snapshot(&dir).unwrap();
         assert_eq!(revision, String::from_utf8_lossy(&head.stdout).trim());
-        assert!(files.iter().any(|(p, data)| p == "demo/image.png" && data == &[0, 255, 128]));
+        assert!(files
+            .iter()
+            .any(|(p, data)| p == "demo/image.png" && data == &[0, 255, 128]));
         let snapshot = RepositorySnapshot {
-            source: "owner/repo".into(), revision, at: Instant::now(), files,
+            source: "owner/repo".into(),
+            revision,
+            at: Instant::now(),
+            files,
         };
         assert_eq!(snapshot_skills(&snapshot).skills[0].name, "demo");
         assert!(git_snapshot(&root.join("missing").to_string_lossy()).is_err());

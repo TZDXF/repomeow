@@ -1,4 +1,4 @@
-//! 有状态 Agent 封装:对齐 `packages/agent/src/agent.ts`(pi-agent-core 0.84.4)。
+//! 有状态 Agent 封装:对齐 `packages/agent/src/agent.ts`(pi-agent-core 0.87.1)。
 //!
 //! 蓝本语义要点(逐条对齐):
 //! - 构造即注入初始状态(AgentState)+ 运行配置(AgentLoopConfig)+ StreamFn;
@@ -35,18 +35,19 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::agent_loop::{
-    assistant_message_of, now_ms, reasoning_from_thinking_level, run_agent_loop,
-    run_agent_loop_continue,
+    assistant_message_of, current_system_prompt, now_ms, reasoning_from_thinking_level,
+    run_agent_loop, run_agent_loop_continue,
 };
 use crate::agent::llm::{
     AssistantContent, AssistantMessage, Message, Model, ModelThinkingLevel, OnPayloadFn,
-    OnResponseFn, ProviderResponse, SimpleStreamOptions, StopReason, TextOrImageContent, Usage,
-    UserContent, UserMessage,
+    OnResponseFn, ProviderResponse, SimpleStreamOptions, StopReason, TextOrImageContent, Tool,
+    Usage, UserContent, UserMessage,
 };
 use crate::agent::stream_fn::default_stream_fn;
 use crate::agent::types::{
     AbortSignal, AgentContext, AgentEvent, AgentEventSink, AgentListener, AgentLoopConfig,
-    AgentMessage, AgentState, GetQueuedMessagesFn, QueueMode, StreamFn, TypedMessage,
+    AgentMessage, AgentState, GetQueuedMessagesFn, QueueMode, StreamFn, SystemMessage,
+    TypedMessage,
 };
 
 /// Agent 持有的可克隆 payload 观测回调(构造 SimpleStreamOptions 时装箱)。
@@ -76,6 +77,7 @@ pub fn default_convert_to_llm(messages: Vec<AgentMessage>) -> Vec<Message> {
             AgentMessage::Message(TypedMessage::ToolResult(tool_result)) => {
                 Some(Message::ToolResult(tool_result))
             }
+            AgentMessage::Message(TypedMessage::System(_)) => None,
             AgentMessage::Custom(_) => None,
         })
         .collect()
@@ -160,7 +162,6 @@ impl AgentInner {
     fn create_context_snapshot(&self) -> AgentContext {
         let state = lock(&self.state);
         AgentContext {
-            system_prompt: state.system_prompt.clone(),
             messages: state.messages.clone(),
             tools: state.tools.clone(),
         }
@@ -344,6 +345,85 @@ impl AgentInner {
     }
 }
 
+fn create_initial_system_message(
+    system_prompt: &str,
+    tools: &[crate::agent::types::AgentTool],
+) -> Option<SystemMessage> {
+    let has_prompt = !system_prompt.is_empty();
+    let has_tools = !tools.is_empty();
+    if !has_prompt && !has_tools {
+        return None;
+    }
+    Some(SystemMessage {
+        role: "system".to_string(),
+        content: system_prompt.to_string(),
+        tools_added: tools.iter().map(|tool| tool.as_llm_tool()).collect(),
+        tools_removed: Vec::new(),
+        timestamp: 0,
+    })
+}
+
+fn seed_initial_system_message(state: &mut AgentState) {
+    let starts_with_system = matches!(
+        state.messages.first(),
+        Some(AgentMessage::Message(TypedMessage::System(_)))
+    );
+    if starts_with_system {
+        return;
+    }
+    if let Some(message) = create_initial_system_message(&state.system_prompt, &state.tools) {
+        state
+            .messages
+            .insert(0, AgentMessage::Message(TypedMessage::System(message)));
+    }
+}
+
+/// 按 pi 语义折叠所有 system 消息为一条基线消息(内容合并 + 当前工具集合)。
+fn current_system_message(messages: &[AgentMessage]) -> Option<SystemMessage> {
+    let mut content: Vec<String> = Vec::new();
+    let mut timestamp: Option<i64> = None;
+    let mut tools: Vec<Tool> = Vec::new();
+    let mut positions: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for message in messages {
+        let AgentMessage::Message(TypedMessage::System(system)) = message else {
+            continue;
+        };
+        timestamp.get_or_insert(system.timestamp);
+        if !system.content.is_empty() {
+            content.push(system.content.clone());
+        }
+        for removed in &system.tools_removed {
+            if let Some(position) = positions.remove(&removed.name) {
+                tools.remove(position);
+                for mapped in positions.values_mut() {
+                    if *mapped > position {
+                        *mapped -= 1;
+                    }
+                }
+            }
+        }
+        for tool in &system.tools_added {
+            if let Some(position) = positions.remove(&tool.name) {
+                positions.insert(tool.name.clone(), position);
+                tools[position] = tool.clone();
+            } else {
+                positions.insert(tool.name.clone(), tools.len());
+                tools.push(tool.clone());
+            }
+        }
+    }
+    if timestamp.is_none() && tools.is_empty() {
+        return None;
+    }
+    Some(SystemMessage {
+        role: "system".to_string(),
+        content: content.join("\n\n"),
+        tools_added: tools,
+        tools_removed: Vec::new(),
+        timestamp: timestamp.unwrap_or(0),
+    })
+}
+
 /// Stateful wrapper around the low-level agent loop。
 ///
 /// `Agent` owns the current transcript, emits lifecycle events, executes tools,
@@ -404,6 +484,7 @@ impl Agent {
 
     fn build(state: AgentState, config: AgentLoopConfig, stream_fn: StreamFn) -> Agent {
         let mut state = state;
+        seed_initial_system_message(&mut state);
         state.is_streaming = false;
         state.streaming_message = None;
         state.pending_tool_calls = HashSet::new();
@@ -446,13 +527,29 @@ impl Agent {
         lock(&self.inner.state).clone()
     }
 
-    /// 当前 system prompt。
+    /// 当前 system prompt(从 transcript 的 system 消息回放)。
     pub fn system_prompt(&self) -> String {
-        lock(&self.inner.state).system_prompt.clone()
+        current_system_prompt(&lock(&self.inner.state).messages)
     }
 
     pub fn set_system_prompt(&self, system_prompt: impl Into<String>) {
-        lock(&self.inner.state).system_prompt = system_prompt.into();
+        let mut state = lock(&self.inner.state);
+        let content = system_prompt.into();
+        match state.messages.first_mut() {
+            Some(AgentMessage::Message(TypedMessage::System(system))) => {
+                system.content = content;
+            }
+            _ => {
+                if !content.is_empty() || !state.tools.is_empty() {
+                    let message = create_initial_system_message(&content, &state.tools);
+                    if let Some(message) = message {
+                        state
+                            .messages
+                            .insert(0, AgentMessage::Message(TypedMessage::System(message)));
+                    }
+                }
+            }
+        }
     }
 
     pub fn model(&self) -> Model {
@@ -583,7 +680,10 @@ impl Agent {
         }
         {
             let mut state = lock(&self.inner.state);
-            state.messages.clear();
+            state.messages = current_system_message(&state.messages)
+                .into_iter()
+                .map(|message| AgentMessage::Message(TypedMessage::System(message)))
+                .collect();
             state.is_streaming = false;
             state.streaming_message = None;
             state.pending_tool_calls.clear();

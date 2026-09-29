@@ -184,7 +184,7 @@ pub(super) fn build_session(
         convert_to_llm: default_convert_to_llm(),
         transform_context: None,
         get_api_key: None,
-        should_stop_after_turn: None,
+        finish_turn: None,
         prepare_next_turn: Some(prepare_next_turn),
         get_steering_messages: None,
         get_follow_up_messages: None,
@@ -196,6 +196,7 @@ pub(super) fn build_session(
             sink_cell.clone(),
         )),
         after_tool_call: None,
+        prepare_request: None,
     };
     let agent = Arc::new(Agent::new(
         state,
@@ -254,11 +255,12 @@ pub(super) fn default_convert_to_llm() -> ConvertToLlmFn {
             messages
                 .into_iter()
                 .filter_map(|message| match message {
-                    AgentMessage::Message(typed) => Some(match typed {
-                        TypedMessage::User(user) => Message::User(user),
-                        TypedMessage::Assistant(assistant) => Message::Assistant(assistant),
-                        TypedMessage::ToolResult(result) => Message::ToolResult(result),
-                    }),
+                    AgentMessage::Message(typed) => match typed {
+                        TypedMessage::User(user) => Some(Message::User(user)),
+                        TypedMessage::Assistant(assistant) => Some(Message::Assistant(assistant)),
+                        TypedMessage::ToolResult(result) => Some(Message::ToolResult(result)),
+                        TypedMessage::System(_) => None,
+                    },
                     AgentMessage::Custom(map) => compaction_summary_to_llm(map),
                 })
                 .collect::<Vec<_>>()

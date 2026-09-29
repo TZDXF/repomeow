@@ -20,7 +20,6 @@ pub(crate) const BUILTIN_SKILLS: &[BuiltinSkill] = &[BuiltinSkill {
             "SKILL.md",
             include_str!("../../../skills/repomeow/SKILL.md"),
         ),
-
         (
             "references/project.md",
             include_str!("../../../skills/repomeow/references/project.md"),

@@ -512,6 +512,7 @@ mod runtime_tests {
             parameters: serde_json::json!({"type": "object"}),
             execution_mode: None,
             prepare_arguments: None,
+            replay: None,
             execute: Arc::new(|_id, _params, _signal, _update| {
                 Box::pin(async { Ok(AgentToolResult::text("ok")) })
             }),
@@ -543,6 +544,7 @@ mod runtime_tests {
                     AgentMessage::Message(TypedMessage::User(_)) => Some("user"),
                     AgentMessage::Message(TypedMessage::Assistant(_)) => Some("assistant"),
                     AgentMessage::Message(TypedMessage::ToolResult(_)) => Some("toolResult"),
+                    AgentMessage::Message(TypedMessage::System(_)) => Some("system"),
                     AgentMessage::Custom(_) => Some("custom"),
                 },
                 _ => None,

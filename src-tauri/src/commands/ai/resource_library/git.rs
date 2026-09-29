@@ -650,11 +650,9 @@ pub(super) fn import_remote(lib: &Library, url: &str, force: bool) -> RlResult<I
         Ok(())
     };
     match run() {
-        Ok(()) => {
-            Ok(ImportResult {
-                backup: backup.map(|b| b.to_string_lossy().into_owned()),
-            })
-        }
+        Ok(()) => Ok(ImportResult {
+            backup: backup.map(|b| b.to_string_lossy().into_owned()),
+        }),
         Err(e) => {
             if let Some(backup) = &backup {
                 // 清理半成品并恢复原目录

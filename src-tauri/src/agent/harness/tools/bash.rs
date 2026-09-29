@@ -1,12 +1,14 @@
 //! bash 工具:对齐 `packages/agent/src/harness/tools/bash.ts`。
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use futures::future::BoxFuture;
 use serde_json::{json, Value};
+use tokio::runtime::Handle;
 
 use crate::agent::harness::types::{ExecutionEnv, SimpleError};
+use crate::agent::harness::utils::adaptive_publisher::AdaptivePublisher;
 use crate::agent::harness::utils::shell_output::{
     execute_shell_with_capture, ShellCaptureOptions, ShellCaptureProgress,
 };
@@ -17,8 +19,6 @@ use crate::agent::types::{AbortSignal, AgentTool, AgentToolResult, ToolExecution
 
 /// bash 最长超时(秒;对齐 TS `MAX_TIMEOUT_SECONDS`)。
 pub const MAX_TIMEOUT_SECONDS: f64 = 2_147_483_647.0 / 1000.0;
-
-const BASH_UPDATE_THROTTLE_MS: u64 = 100;
 
 /// bash 工具详情(对齐 TS `BashToolDetails`)。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -58,58 +58,125 @@ pub struct BashToolInput {
     pub timeout: Option<f64>,
 }
 
-struct UpdateThrottle {
-    last_update_at: AtomicU64,
-    pending: Mutex<bool>,
+type ProgressSink = Arc<dyn Fn(&ShellCaptureProgress) + Send + Sync>;
+
+enum PublishAction {
+    Immediate,
+    Delayed { generation: u64, delay: Duration },
+    Skip,
 }
 
-impl UpdateThrottle {
+struct SharedPublisherState {
+    publisher: AdaptivePublisher,
+    progress: Option<ShellCaptureProgress>,
+    generation: u64,
+    emit_in_flight: bool,
+}
+
+/// 将 TS OutputCapture/AdaptivePublisher 的“只发最新快照”模式桥接到同步回调。
+struct UpdatePublisher {
+    state: Mutex<SharedPublisherState>,
+}
+
+impl UpdatePublisher {
     fn new() -> Self {
         Self {
-            last_update_at: AtomicU64::new(0),
-            pending: Mutex::new(false),
+            state: Mutex::new(SharedPublisherState {
+                publisher: AdaptivePublisher::new(),
+                progress: None,
+                generation: 0,
+                emit_in_flight: false,
+            }),
         }
     }
 
-    /// 立即或标记节流;返回是否本次应立即发出。
-    fn schedule(&self) -> bool {
-        let now = now_ms_u64();
-        let last = self.last_update_at.load(Ordering::SeqCst);
-        let delay = BASH_UPDATE_THROTTLE_MS.saturating_sub(now.saturating_sub(last));
-        if delay == 0 {
-            self.last_update_at.store(now, Ordering::SeqCst);
-            *self
-                .pending
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()) = false;
-            true
-        } else {
-            *self
-                .pending
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
-            false
+    fn record_progress(&self, progress: ShellCaptureProgress) -> PublishAction {
+        let mut state = self.lock();
+        state.progress = Some(progress);
+        if state.emit_in_flight {
+            return PublishAction::Skip;
+        }
+        let size = state
+            .progress
+            .as_ref()
+            .map_or(0, |progress| progress.output.len() as u64);
+        match state.publisher.mark_dirty(size) {
+            Some(delay) => PublishAction::Delayed {
+                generation: state.generation,
+                delay,
+            },
+            None => {
+                state.emit_in_flight = true;
+                PublishAction::Immediate
+            }
         }
     }
 
-    /// 终态冲刷:无论节流都允许发出。
-    fn flush(&self) -> bool {
-        self.last_update_at.store(now_ms_u64(), Ordering::SeqCst);
-        let mut pending = self
-            .pending
+    fn publish_progress(self: &Arc<Self>, progress: ShellCaptureProgress, sink: ProgressSink) {
+        match self.record_progress(progress) {
+            PublishAction::Skip => {}
+            PublishAction::Immediate => self.emit(sink),
+            PublishAction::Delayed { generation, delay } => {
+                if let Ok(handle) = Handle::try_current() {
+                    let publisher = self.clone();
+                    handle.spawn(async move {
+                        tokio::time::sleep(delay).await;
+                        publisher.flush_if_current(generation, sink);
+                    });
+                }
+            }
+        }
+    }
+
+    fn flush_if_current(self: &Arc<Self>, expected_generation: u64, sink: ProgressSink) {
+        {
+            let mut state = self.lock();
+            if state.generation != expected_generation
+                || state.emit_in_flight
+                || !state.publisher.should_flush()
+            {
+                return;
+            }
+            state.emit_in_flight = true;
+        }
+        self.emit(sink);
+    }
+
+    /// 终态强制发布;generation 失效所有仍在等待的尾随任务。
+    fn flush_final(&self, progress: Option<ShellCaptureProgress>, sink: ProgressSink) {
+        {
+            let mut state = self.lock();
+            if let Some(progress) = progress {
+                state.progress = Some(progress);
+            }
+            state.generation += 1;
+            state.emit_in_flight = true;
+        }
+        self.emit(sink);
+    }
+
+    fn emit(&self, sink: ProgressSink) {
+        let progress = {
+            let mut state = self.lock();
+            let progress = state.progress.clone();
+            let size = progress
+                .as_ref()
+                .map_or(0, |progress| progress.output.len() as u64);
+            state.publisher.record_flush(size);
+            state.generation += 1;
+            state.emit_in_flight = false;
+            progress
+        };
+        if let Some(progress) = progress {
+            sink(&progress);
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, SharedPublisherState> {
+        self.state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let was_pending = *pending;
-        *pending = false;
-        was_pending || true
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
-}
-
-fn now_ms_u64() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or(0)
 }
 
 fn validate_timeout(timeout: Option<f64>) -> Result<(), ToolExecutionError> {
@@ -155,6 +222,7 @@ pub fn create_bash_tool(env: Arc<dyn ExecutionEnv>, options: Option<BashToolOpti
         }),
         execution_mode: None,
         prepare_arguments: None,
+        replay: None,
         execute: Arc::new(move |_tool_call_id, params, signal, on_update| {
             let env = env.clone();
             let options = options.clone();
@@ -176,15 +244,17 @@ pub fn create_bash_tool(env: Arc<dyn ExecutionEnv>, options: Option<BashToolOpti
                     prepare(&mut execution, signal.clone()).await;
                 }
 
-                let throttle = Arc::new(UpdateThrottle::new());
+                let publisher = Arc::new(UpdatePublisher::new());
                 let on_chunk: Arc<dyn Fn(&str, ShellCaptureProgress) + Send + Sync> = {
-                    let throttle = throttle.clone();
+                    let publisher = publisher.clone();
                     let on_update = on_update.clone();
                     Arc::new(move |_text, progress| {
                         if let Some(on_update) = on_update.as_ref() {
-                            if throttle.schedule() {
-                                on_update(partial_result_from_progress(&progress));
-                            }
+                            let on_update = on_update.clone();
+                            let sink: ProgressSink = Arc::new(move |progress| {
+                                on_update(partial_result_from_progress(progress));
+                            });
+                            publisher.publish_progress(progress, sink);
                         }
                     })
                 };
@@ -223,10 +293,13 @@ pub fn create_bash_tool(env: Arc<dyn ExecutionEnv>, options: Option<BashToolOpti
                     full_output_path: capture.full_output_path.clone(),
                     last_line_bytes: capture.last_line_bytes,
                 });
-                if let (Some(on_update), Some(progress)) = (&on_update, &final_progress) {
-                    if throttle.flush() {
+                if let Some(on_update) = on_update.as_ref() {
+                    let on_update = on_update.clone();
+                    // 终态强制冲刷;执行失败时也发布已捕获的最新输出。
+                    let sink: ProgressSink = Arc::new(move |progress| {
                         on_update(partial_result_from_progress(progress));
-                    }
+                    });
+                    publisher.flush_final(final_progress, sink);
                 }
 
                 let capture = capture?;

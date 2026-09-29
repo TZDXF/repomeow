@@ -296,6 +296,7 @@ pub fn create_find_tool(env: Arc<dyn ExecutionEnv>) -> AgentTool {
                 })
             })
         }),
+        replay: None,
     }
 }
 

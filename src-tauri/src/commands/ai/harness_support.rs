@@ -249,7 +249,7 @@ pub(crate) async fn create_harness(
         stream_options: Default::default(),
         retry: Some(RetryPolicy {
             enabled: true,
-            max_retries: 2,
+            max_retries: 10,
             base_delay_ms: 1000,
         }),
         compaction: None,

@@ -103,6 +103,16 @@ pub fn sanitize_binary_output(text: &str) -> String {
         .collect()
 }
 
+/// 被信号终止时 `ExitStatus::code()` 为 `None`;按 TS pi 的 shell 约定映射为 128。
+/// Windows 的异常终止通常仍带控制码,但未知失败也不允许折叠成成功码 0。
+pub fn normalize_exit_code(exit_code: Option<i32>, success: bool) -> i32 {
+    match exit_code {
+        Some(code) => code,
+        None if !success => 128,
+        None => 0,
+    }
+}
+
 /// 把文本裁剪到最近 max_bytes 个 UTF-8 字节(对齐 TS `trimToLastUtf8Bytes`)。
 fn trim_to_last_utf8_bytes(text: &str, max_bytes: usize) -> String {
     if text.len() <= max_bytes {
@@ -417,6 +427,14 @@ mod tests {
         );
         assert_eq!(sanitize_binary_output("a\u{FFF9}b\u{FFFB}c"), "abc");
         assert_eq!(sanitize_binary_output("é中\u{7F}"), "é中\u{7F}");
+    }
+
+    #[test]
+    fn normalize_exit_code_preserves_signal_failure() {
+        assert_eq!(normalize_exit_code(Some(0), true), 0);
+        assert_eq!(normalize_exit_code(Some(137), false), 137);
+        assert_eq!(normalize_exit_code(None, false), 128);
+        assert_eq!(normalize_exit_code(None, true), 0);
     }
 
     #[test]

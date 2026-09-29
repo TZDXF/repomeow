@@ -5,6 +5,7 @@ use super::*;
 use crate::agent::llm::overflow::{is_context_overflow, is_recoverable_length};
 use crate::agent::llm::retry::{
     is_retryable_assistant_error, retry_delay_ms, sleep_with_cancel, DEFAULT_BASE_DELAY_MS,
+    DEFAULT_MAX_AGENT_RETRY_DELAY_MS,
 };
 use crate::agent::llm::{AssistantMessage, StopReason};
 use crate::agent::types::{AgentMessage, TypedMessage};
@@ -13,11 +14,8 @@ use tauri::ipc::Channel;
 use tokio_util::sync::CancellationToken;
 
 /// 项目问答回合的自动重试次数上限(provider/transport 瞬态错误,指数退避;
-/// 蓝本 pi 默认 3 次,见 agent::llm::retry::DEFAULT_MAX_RETRIES)。
+/// 用户要求统一放宽到 10 次)。
 pub(super) const CHAT_MAX_RETRIES: u32 = 10;
-
-/// 问答层退避上限:蓝本指数退避无封顶,10 次重试下尾段等待过长,钳到 60 秒。
-pub(super) const CHAT_MAX_RETRY_DELAY_MS: u64 = 60_000;
 
 /// 溢出恢复动作(对齐 pi `_checkCompaction` case 1 的分支语义)。
 enum OverflowAction {
@@ -114,8 +112,11 @@ pub(super) async fn run_chat_prompt_with_policy(
 
                 retry_attempt += 1;
                 remove_last_failed_assistant(agent);
-                let delay_ms =
-                    retry_delay_ms(base_delay_ms, retry_attempt).min(CHAT_MAX_RETRY_DELAY_MS);
+                let delay_ms = retry_delay_ms(
+                    base_delay_ms,
+                    retry_attempt,
+                    Some(DEFAULT_MAX_AGENT_RETRY_DELAY_MS),
+                );
                 emit(ChatEvent::RetryScheduled {
                     attempt: retry_attempt,
                     max_attempts: max_retries,

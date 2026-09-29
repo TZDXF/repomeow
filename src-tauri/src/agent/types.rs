@@ -1,4 +1,4 @@
-//! pi-agent-core 核心类型契约:对齐 `packages/agent/src/types.ts`(0.84.4)。
+//! pi-agent-core 核心类型契约:对齐 `packages/agent/src/types.ts`(0.87.1)。
 //!
 //! 序列化格式与 TS 版 JSON 兼容;`AgentMessage` 通过 untagged 双层建模支持
 //! TS 的 declaration-merging 自定义消息(未知 role 落入 `Custom` 的 JSON map)。
@@ -50,6 +50,48 @@ pub enum ToolExecutionMode {
     Parallel,
 }
 
+/// 工具结果引入的工具引用(当前仅保留名称)。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolReference {
+    pub name: String,
+}
+
+/// 工具声明变更;`toolsAdded` 为完整定义,`toolsRemoved` 仅引用名称。
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolStateChanges {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools_added: Vec<Tool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools_removed: Vec<ToolReference>,
+}
+
+/// transcript 中的 system 指令与工具声明。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemMessage {
+    pub role: String, // 恒为 "system"(tag 承载)
+    #[serde(default)]
+    pub content: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools_added: Vec<Tool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools_removed: Vec<ToolReference>,
+    /// Unix 时间戳(毫秒)。
+    pub timestamp: i64,
+}
+
+/// 工具回放安全策略:never 表示不可重放,safe 表示可安全重放。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ToolReplay {
+    #[serde(rename = "never")]
+    Never,
+    #[serde(rename = "safe")]
+    Safe,
+}
+
 /// 排队用户消息在 drain 点的注入数量。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -98,6 +140,8 @@ pub struct AgentTool {
     pub prepare_arguments: Option<PrepareArgumentsFn>,
     /// 执行工具;失败时返回 Err(转为 error 工具结果)。
     pub execute: ToolExecuteFn,
+    /// 效果已落库但结果未知时的回放策略。
+    pub replay: Option<ToolReplay>,
 }
 
 impl std::fmt::Debug for AgentTool {
@@ -133,9 +177,6 @@ pub struct AgentToolResult {
     /// 工具自身执行的用量(如可用)。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<Usage>,
-    /// 本结果引入的新工具名(延迟加载语义)。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub added_tool_names: Option<Vec<String>>,
     /// 本批次全部结果都置位时,agent 在本批后提前终止。
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub terminate: bool,
@@ -171,6 +212,8 @@ pub enum TypedMessage {
     Assistant(AssistantMessage),
     #[serde(rename = "toolResult")]
     ToolResult(ToolResultMessage),
+    #[serde(rename = "system")]
+    System(SystemMessage),
 }
 
 impl AgentMessage {
@@ -187,6 +230,7 @@ impl AgentMessage {
             AgentMessage::Message(TypedMessage::User(_)) => "user",
             AgentMessage::Message(TypedMessage::Assistant(_)) => "assistant",
             AgentMessage::Message(TypedMessage::ToolResult(_)) => "toolResult",
+            AgentMessage::Message(TypedMessage::System(_)) => "system",
             AgentMessage::Custom(map) => {
                 map.get("role").and_then(Value::as_str).unwrap_or("custom")
             }
@@ -198,6 +242,7 @@ impl AgentMessage {
             AgentMessage::Message(TypedMessage::User(m)) => m.timestamp,
             AgentMessage::Message(TypedMessage::Assistant(m)) => m.timestamp,
             AgentMessage::Message(TypedMessage::ToolResult(m)) => m.timestamp,
+            AgentMessage::Message(TypedMessage::System(m)) => m.timestamp,
             AgentMessage::Custom(map) => map
                 .get("timestamp")
                 .and_then(Value::as_i64)
@@ -209,7 +254,6 @@ impl AgentMessage {
 /// 传入低层 agent loop 的上下文快照。
 #[derive(Clone, Default)]
 pub struct AgentContext {
-    pub system_prompt: String,
     pub messages: Vec<AgentMessage>,
     pub tools: Vec<AgentTool>,
 }
@@ -265,8 +309,9 @@ pub struct AfterToolCallContext {
     pub context: AgentContext,
 }
 
-/// `shouldStopAfterTurn` / `prepareNextTurn` 收到的上下文。
-pub struct ShouldStopAfterTurnContext {
+/// `finishTurn` / `prepareNextTurn` 收到的上下文。
+#[derive(Clone)]
+pub struct AgentTurnContext {
     pub message: AssistantMessage,
     pub tool_results: Vec<ToolResultMessage>,
     pub context: AgentContext,
@@ -274,7 +319,7 @@ pub struct ShouldStopAfterTurnContext {
     pub new_messages: Vec<AgentMessage>,
 }
 
-pub type PrepareNextTurnContext = ShouldStopAfterTurnContext;
+pub type PrepareNextTurnContext = AgentTurnContext;
 
 /// `prepareNextTurn` 返回的下一回合运行时状态替换。
 #[derive(Default)]
@@ -301,8 +346,43 @@ pub type TransformContextFn = Arc<
 
 pub type GetApiKeyFn = Arc<dyn Fn(String) -> BoxFuture<'static, Option<String>> + Send + Sync>;
 
-pub type ShouldStopAfterTurnFn =
-    Arc<dyn Fn(ShouldStopAfterTurnContext) -> BoxFuture<'static, bool> + Send + Sync>;
+pub type FinishTurnFn = Arc<
+    dyn Fn(AgentTurnContext, Option<AbortSignal>) -> BoxFuture<'static, Option<FinishTurnAction>>
+        + Send
+        + Sync,
+>;
+
+/// `finishTurn` 返回的动作;None 保持默认调度。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FinishTurnAction {
+    End,
+    Continue,
+}
+
+/// 每次 LLM 请求前传入的运行时状态。
+pub struct PrepareRequestPayload {
+    pub context: AgentContext,
+    pub model: Model,
+    pub thinking_level: ThinkingLevelWithOff,
+}
+
+/// 单次请求前的运行时状态替换;外层 None 表示不改,
+/// `thinking_level` 的内层 None 表示关闭 thinking。
+#[derive(Default)]
+pub struct PrepareRequestResult {
+    pub context: Option<AgentContext>,
+    pub model: Option<Model>,
+    pub thinking_level: Option<Option<ThinkingLevelWithOff>>,
+}
+
+pub type PrepareRequestFn = Arc<
+    dyn Fn(
+            PrepareRequestPayload,
+            Option<AbortSignal>,
+        ) -> BoxFuture<'static, Option<PrepareRequestResult>>
+        + Send
+        + Sync,
+>;
 
 pub type PrepareNextTurnFn = Arc<
     dyn Fn(PrepareNextTurnContext) -> BoxFuture<'static, Option<AgentLoopTurnUpdate>> + Send + Sync,
@@ -340,8 +420,10 @@ pub struct AgentLoopConfig {
     pub transform_context: Option<TransformContextFn>,
     /// 每次调用动态解析 API key(短时 OAuth token 场景)。
     pub get_api_key: Option<GetApiKeyFn>,
-    /// turn_end 后询问是否优雅停止(不发起新 LLM 调用)。
-    pub should_stop_after_turn: Option<ShouldStopAfterTurnFn>,
+    /// 回合结束且在 turn_end 前调用的终止/续跑决策。
+    pub finish_turn: Option<FinishTurnFn>,
+    /// 每次 LLM 请求前的 context/model/thinking 状态替换。
+    pub prepare_request: Option<PrepareRequestFn>,
     /// 将继续下一回合时、turn 开始前的状态替换(如 compaction)。
     pub prepare_next_turn: Option<PrepareNextTurnFn>,
     /// 回合工具执行完后注入 steering 消息。

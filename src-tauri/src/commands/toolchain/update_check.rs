@@ -82,7 +82,8 @@ fn winget_check(winget_id: &str) -> (ToolchainUpdateState, Option<String>) {
         "--disable-interactivity",
         "--accept-source-agreements",
     ];
-    let Some((true, output)) = run_with_timeout_in(Path::new("winget"), &args, REMOTE_CHECK_TIMEOUT)
+    let Some((true, output)) =
+        run_with_timeout_in(Path::new("winget"), &args, REMOTE_CHECK_TIMEOUT)
     else {
         return UNKNOWN;
     };
@@ -90,7 +91,10 @@ fn winget_check(winget_id: &str) -> (ToolchainUpdateState, Option<String>) {
 }
 
 /// winget list 数据行:<名称> <ID> <当前版本> [可用版本] [源];ID 之后第二个版本号即「可用」
-pub(super) fn parse_winget_list_row(output: &str, winget_id: &str) -> (ToolchainUpdateState, Option<String>) {
+pub(super) fn parse_winget_list_row(
+    output: &str,
+    winget_id: &str,
+) -> (ToolchainUpdateState, Option<String>) {
     for line in output.lines() {
         let tokens: Vec<&str> = line.split_whitespace().collect();
         let Some(pos) = tokens.iter().position(|token| *token == winget_id) else {
@@ -134,7 +138,10 @@ fn rustup_check(tool: &str) -> (ToolchainUpdateState, Option<String>) {
 /// `rustup check` 输出:`<工具链|rustup> - up to date(:| :) x` 或 `... - update available: a -> b`;
 /// 大小写与冒号间距随 rustup 版本不一(旧版首字母大写),统一小写匹配;
 /// rustup 行看 rustup 自身,rustc/cargo 看工具链行(任一可更新即提示)
-pub(super) fn parse_rustup_check(output: &str, tool: &str) -> (ToolchainUpdateState, Option<String>) {
+pub(super) fn parse_rustup_check(
+    output: &str,
+    tool: &str,
+) -> (ToolchainUpdateState, Option<String>) {
     let mut up_to_date = false;
     for line in output.lines() {
         let Some((name, rest)) = line.split_once(" - ") else {
@@ -195,7 +202,8 @@ fn brew_check(args: &[&str]) -> (ToolchainUpdateState, Option<String>) {
     }
     #[cfg(not(windows))]
     {
-        let Some((true, output)) = run_with_timeout_in(Path::new("brew"), args, REMOTE_CHECK_TIMEOUT)
+        let Some((true, output)) =
+            run_with_timeout_in(Path::new("brew"), args, REMOTE_CHECK_TIMEOUT)
         else {
             return UNKNOWN;
         };

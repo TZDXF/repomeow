@@ -116,7 +116,8 @@ fn record_event(pending: &Mutex<PendingChanges>, root: &Path, event: &notify::Ev
         if is_inside_git(path) {
             continue;
         }
-        p.paths.push(path.strip_prefix(root).unwrap_or(path).to_path_buf());
+        p.paths
+            .push(path.strip_prefix(root).unwrap_or(path).to_path_buf());
     }
     if p.paths.len() > MAX_REPORT_PATHS {
         p.overflow = true;

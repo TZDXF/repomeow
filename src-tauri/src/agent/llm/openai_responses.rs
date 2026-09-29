@@ -2248,6 +2248,25 @@ impl ResponsesAggregator {
         aborted: bool,
         stream_error: Option<String>,
     ) -> (AssistantMessageEvent, AssistantMessage) {
+        let mut stream_error = stream_error;
+        // 终态时禁止交付未收尾的工具调用:output_item.done 未到达意味着参数
+        // 可能被截断,或无 output_index 的并行调用发生串位。
+        if stream_error.is_none() && !aborted && self.output.stop_reason == StopReason::ToolUse {
+            for (content_index, block) in self.output.content.iter().enumerate() {
+                let AssistantContent::ToolCall(tool_call) = block else {
+                    continue;
+                };
+                let has_partial_json = self.tool_partial_json.contains_key(&content_index);
+                let has_custom_input = self.tool_custom_input.contains_key(&content_index);
+                if has_partial_json || has_custom_input {
+                    stream_error = Some(format!(
+                        "OpenAI Responses stream completed with an unfinished tool call: {} ({})",
+                        tool_call.name, tool_call.id
+                    ));
+                    break;
+                }
+            }
+        }
         let ResponsesAggregator {
             output: mut message,
             ..
@@ -3924,6 +3943,35 @@ mod tests {
             other => unreachable!("{other:?}"),
         }
         assert_eq!(message.stop_reason, StopReason::ToolUse);
+    }
+
+    #[test]
+    fn rejects_unfinished_tool_calls_on_completed_stream() {
+        let mut aggregator = aggregator_for("https://api.openai.com/v1");
+        aggregator
+            .apply_event(&ev(
+                "response.output_item.added",
+                json!({"output_index": 0, "item": {"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "bash", "arguments": "{\"command\":"}}),
+            ))
+            .unwrap();
+        aggregator
+            .finalize_response(&json!({"status": "completed"}))
+            .unwrap();
+        let (terminal, message) = aggregator.finish(false, None);
+        assert_eq!(message.stop_reason, StopReason::Error);
+        assert_eq!(
+            message.error_message.as_deref(),
+            Some(
+                "OpenAI Responses stream completed with an unfinished tool call: bash (call_1|fc_1)"
+            )
+        );
+        match terminal {
+            AssistantMessageEvent::Error { reason, error } => {
+                assert_eq!(reason, StopReason::Error);
+                assert_eq!(error.error_message, message.error_message);
+            }
+            other => unreachable!("{other:?}"),
+        }
     }
 
     #[test]

@@ -465,6 +465,7 @@ pub fn create_grep_tool(env: Arc<dyn ExecutionEnv>) -> AgentTool {
                 })
             })
         }),
+        replay: None,
     }
 }
 

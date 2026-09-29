@@ -22,7 +22,7 @@ pub fn detect_supported_image_mime_type(buffer: &[u8]) -> Option<&'static str> {
             None
         };
     }
-    if starts_with_ascii(buffer, 0, "GIF") {
+    if starts_with_ascii(buffer, 0, "GIF87a") || starts_with_ascii(buffer, 0, "GIF89a") {
         return Some("image/gif");
     }
     if starts_with_ascii(buffer, 0, "RIFF") && starts_with_ascii(buffer, 8, "WEBP") {
@@ -178,9 +178,14 @@ mod tests {
     #[test]
     fn detects_gif_webp_bmp() {
         assert_eq!(
+            detect_supported_image_mime_type(b"GIF87a"),
+            Some("image/gif")
+        );
+        assert_eq!(
             detect_supported_image_mime_type(b"GIF89a"),
             Some("image/gif")
         );
+        assert_eq!(detect_supported_image_mime_type(b"GIF"), None);
         let mut webp = b"RIFF".to_vec();
         webp.extend_from_slice(&[0, 0, 0, 0]);
         webp.extend_from_slice(b"WEBP");

@@ -230,6 +230,7 @@ pub fn convert_to_llm(messages: Vec<AgentMessage>) -> Vec<Message> {
                 TypedMessage::User(user) => Some(Message::User(user)),
                 TypedMessage::Assistant(assistant) => Some(Message::Assistant(assistant)),
                 TypedMessage::ToolResult(result) => Some(Message::ToolResult(result)),
+                TypedMessage::System(_) => None,
             },
             AgentMessage::Custom(map) => {
                 let role = map.get("role").and_then(Value::as_str).unwrap_or_default();

@@ -199,6 +199,7 @@ pub fn create_read_tool(env: Arc<dyn ExecutionEnv>, options: Option<ReadToolOpti
                 })
             })
         }),
+        replay: None,
     }
 }
 

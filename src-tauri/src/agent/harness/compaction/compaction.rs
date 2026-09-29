@@ -205,6 +205,9 @@ pub fn estimate_tokens(message: &AgentMessage) -> i64 {
                 }
             })
             .sum(),
+        AgentMessage::Message(TypedMessage::System(system)) => {
+            system.content.chars().count() as i64
+        }
         AgentMessage::Message(TypedMessage::ToolResult(result)) => result
             .content
             .iter()

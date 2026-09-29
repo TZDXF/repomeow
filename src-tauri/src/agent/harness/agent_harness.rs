@@ -946,7 +946,7 @@ impl AgentHarness {
             }),
             transform_context: None,
             get_api_key: None,
-            should_stop_after_turn: None,
+            finish_turn: None,
             prepare_next_turn,
             get_steering_messages: Some(make_queue_getter(
                 shared.clone(),
@@ -963,6 +963,7 @@ impl AgentHarness {
             tool_execution: snapshot.tool_execution,
             before_tool_call: None,
             after_tool_call: None,
+            prepare_request: None,
         };
         let agent_state = AgentState {
             system_prompt: snapshot.system_prompt.clone().unwrap_or_default(),
@@ -1096,7 +1097,11 @@ impl AgentHarness {
                 messages.pop();
             }
             agent.set_messages(messages);
-            if !sleep_with_cancel(retry_delay_ms(retry.base_delay_ms, retry_attempt), &signal).await
+            if !sleep_with_cancel(
+                retry_delay_ms(retry.base_delay_ms, retry_attempt, None),
+                &signal,
+            )
+            .await
             {
                 break;
             }

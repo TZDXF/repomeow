@@ -475,10 +475,21 @@ pub(super) fn unshallow_blocking(path: &str) -> AppResult<GitStatus> {
     args.extend([remote.as_str(), refspec.as_str()]);
     run_git(path, &args)?;
     // depth 隐含 single-branch,补全后也让后续 fetch 跟踪所有远端分支。
-    run_git(path, &["config", "--replace-all", &format!("remote.{remote}.fetch"), &refspec])?;
+    run_git(
+        path,
+        &[
+            "config",
+            "--replace-all",
+            &format!("remote.{remote}.fetch"),
+            &refspec,
+        ],
+    )?;
     let st = status(path)?;
     if st.is_shallow {
-        return Err(AppError::coded(ErrorCode::GitCommandFailed, "The remote repository is shallow; full history is unavailable."));
+        return Err(AppError::coded(
+            ErrorCode::GitCommandFailed,
+            "The remote repository is shallow; full history is unavailable.",
+        ));
     }
     cache_status(path, &st);
     Ok(st)

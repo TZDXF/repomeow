@@ -193,6 +193,7 @@ pub fn bind_harness_tool(
         execution_mode: tool.execution_mode,
         prepare_arguments: tool.prepare_arguments,
         execute: bound,
+        replay: None,
     }
 }
 

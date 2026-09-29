@@ -1288,9 +1288,7 @@ fn claim_local(
             name,
             description: description.unwrap_or_default(),
             source_path: source.to_string(),
-            source_paths: order_source_dirs(
-                copies.iter().map(|(_, dir, _)| dir.clone()).collect(),
-            ),
+            source_paths: order_source_dirs(copies.iter().map(|(_, dir, _)| dir.clone()).collect()),
             origin_agent: origin.id.to_string(),
         };
         return claim_local_skill(&state_path, &mut state, local, copies);

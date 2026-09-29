@@ -55,12 +55,29 @@ fn unshallow_restores_history_and_all_remote_branches() {
     let head = run_git(path, &["rev-parse", "HEAD"]).unwrap().stdout;
     std::fs::write(target.join("local.txt"), "keep me").unwrap();
     assert!(!unshallow_blocking(path).unwrap().is_shallow);
-    assert_eq!(run_git(path, &["rev-list", "--count", "HEAD"]).unwrap().stdout, b"2\n");
+    assert_eq!(
+        run_git(path, &["rev-list", "--count", "HEAD"])
+            .unwrap()
+            .stdout,
+        b"2\n"
+    );
     assert!(run_git(path, &["rev-parse", "--verify", "origin/feature"]).is_ok());
     assert_eq!(run_git(path, &["rev-parse", "HEAD"]).unwrap().stdout, head);
-    assert_eq!(std::fs::read_to_string(target.join("local.txt")).unwrap(), "keep me");
+    assert_eq!(
+        std::fs::read_to_string(target.join("local.txt")).unwrap(),
+        "keep me"
+    );
     assert!(!unshallow_blocking(path).unwrap().is_shallow);
-    assert_eq!(String::from_utf8(run_git(path, &["config", "--get-all", "remote.origin.fetch"]).unwrap().stdout).unwrap().trim(), "+refs/heads/*:refs/remotes/origin/*");
+    assert_eq!(
+        String::from_utf8(
+            run_git(path, &["config", "--get-all", "remote.origin.fetch"])
+                .unwrap()
+                .stdout
+        )
+        .unwrap()
+        .trim(),
+        "+refs/heads/*:refs/remotes/origin/*"
+    );
 }
 
 #[test]
@@ -74,7 +91,10 @@ fn unshallow_uses_upstream_remote_and_falls_back_without_tracking() {
         git(&source, &["branch", "feature"]);
         let target = temp_dir("unshallow-custom-target");
         let url = url::Url::from_directory_path(&source).unwrap().to_string();
-        git(&target, &["clone", "--origin", "upstream", "--depth", "1", &url, "."]);
+        git(
+            &target,
+            &["clone", "--origin", "upstream", "--depth", "1", &url, "."],
+        );
         if tracking {
             // 即使存在 origin，也应优先使用当前分支的 upstream。
             git(&target, &["remote", "add", "origin", "missing-repository"]);
@@ -84,8 +104,22 @@ fn unshallow_uses_upstream_remote_and_falls_back_without_tracking() {
         let path = target.to_str().unwrap();
         assert!(status(path).unwrap().is_shallow);
         assert!(!unshallow_blocking(path).unwrap().is_shallow);
-        assert_eq!(run_git(path, &["rev-list", "--count", "HEAD"]).unwrap().stdout, b"2\n");
+        assert_eq!(
+            run_git(path, &["rev-list", "--count", "HEAD"])
+                .unwrap()
+                .stdout,
+            b"2\n"
+        );
         assert!(run_git(path, &["rev-parse", "--verify", "upstream/feature"]).is_ok());
-        assert_eq!(String::from_utf8(run_git(path, &["config", "--get-all", "remote.upstream.fetch"]).unwrap().stdout).unwrap().trim(), "+refs/heads/*:refs/remotes/upstream/*");
+        assert_eq!(
+            String::from_utf8(
+                run_git(path, &["config", "--get-all", "remote.upstream.fetch"])
+                    .unwrap()
+                    .stdout
+            )
+            .unwrap()
+            .trim(),
+            "+refs/heads/*:refs/remotes/upstream/*"
+        );
     }
 }
