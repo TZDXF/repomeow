@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch, type Component } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRoute, useRouter } from "vue-router";
+import { useRoute } from "vue-router";
 import {
   Archive,
-  ArrowLeft,
   Boxes,
   CalendarClock,
   Cable,
@@ -21,7 +20,6 @@ import {
 } from "@lucide/vue";
 import { onClickOutside } from "@vueuse/core";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import ScrollArea from "@/components/common/ScrollArea.vue";
 import GeneralSettings from "@/components/settings/GeneralSettings.vue";
 import ToolchainPanel from "@/components/settings/ToolchainPanel.vue";
@@ -113,7 +111,6 @@ const categories: Category[] = [
   { id: "about", labelKey: "settings.categories.about", icon: Info, component: AboutSettings },
 ];
 
-const router = useRouter();
 const route = useRoute();
 // 支持从子页(如技能预览页)带 ?category=resources 回跳,直接落在原分类
 const initialCategory = String(route.query.category ?? "");
@@ -255,15 +252,6 @@ async function locateSetting(entry = searchResults.value[selectedIndex.value]) {
 <template>
   <div class="flex h-full flex-col">
     <header class="flex shrink-0 items-center gap-2 border-b px-4 py-2.5">
-      <Button
-        variant="ghost"
-        size="icon"
-        class="h-8 w-8"
-        :title="t('settings.back')"
-        @click="router.push('/')"
-      >
-        <ArrowLeft class="h-4 w-4" />
-      </Button>
       <h1 class="text-sm font-semibold">{{ t("settings.title") }}</h1>
       <div
         ref="searchRoot"

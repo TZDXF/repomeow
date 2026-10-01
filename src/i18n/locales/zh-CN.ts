@@ -253,6 +253,11 @@ export default {
     restore: "还原",
     maximize: "最大化",
     close: "关闭",
+    home: "首页",
+    reports: "报告",
+    settings: "设置",
+    closeTab: "关闭标签页",
+    noProjectTabs: "暂无打开的项目",
     checkUpdate: "检查更新",
     updateAvailable: "发现新版本 v{version}",
     downloading: "正在下载更新 {progress}%",
@@ -263,7 +268,6 @@ export default {
     agentsMdTask: "AGENTS.md",
     running: "进行中",
     taskCenter: "后台任务",
-    recentTasks: "最近任务 {count}",
     historyHint: "完成记录保留 24 小时，每类最多 10 条",
     activeTasks: "进行中的任务",
     recentCompleted: "最近完成",
@@ -468,7 +472,6 @@ export default {
       viewGrid: "网格视图",
       viewTable: "表格视图",
       addProject: "添加项目",
-      settings: "设置",
       emptyFiltered: "没有匹配的项目",
       emptyAll: "还没有项目,点击右上角「添加项目」",
     },
@@ -567,7 +570,6 @@ export default {
       success: "已移动到 {path}",
     },
     detail: {
-      backToList: "返回项目列表",
       editName: "点击编辑名称",
       editDesc: "点击编辑描述",
       descPlaceholder: "项目描述(可选)",
@@ -893,7 +895,6 @@ export default {
   },
   ai: {
     notConfigured: "请先在设置页配置 AI(接口地址、API Key、模型)",
-    entry: "报告",
   },
   chat: {
     entry: "项目问答",
@@ -1061,7 +1062,6 @@ export default {
   },
   reportHistory: {
     title: "报告历史",
-    back: "返回项目列表",
     empty: "暂无日报记录",
     emptyHint: "生成日报后将自动保存在这里",
     searchProject: "筛选项目...",

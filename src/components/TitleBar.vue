@@ -1,19 +1,27 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
+import { useRoute, useRouter } from "vue-router";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import { ArrowUpCircle, Copy, Minus, Square, X } from "@lucide/vue";
+import { ArrowUpCircle, Copy, FileText, Minus, Settings, Square, X } from "@lucide/vue";
 import BackgroundTasksMenu from "@/components/common/BackgroundTasksMenu.vue";
 import TerminalSessionsMenu from "@/components/common/TerminalSessionsMenu.vue";
+import TitleTabs from "@/components/common/TitleTabs.vue";
 import UpdateDialog from "@/components/update/UpdateDialog.vue";
 import { useUpdateStore } from "@/stores/update";
 
 const { t } = useI18n();
 const appWindow = getCurrentWindow();
+const route = useRoute();
+const router = useRouter();
 const isMaximized = ref(false);
 const updateStore = useUpdateStore();
 let unlistenResize: UnlistenFn | undefined;
+
+// 报告/设置是标题栏右侧的固定导航图标,按当前路由高亮(资源库技能预览归属设置)
+const reportsActive = computed(() => route.path.startsWith("/report-history"));
+const settingsActive = computed(() => route.path.startsWith("/settings"));
 
 /** 更新下载进度环几何(viewBox 36,半径 15.5) */
 const RING_R = 15.5;
@@ -56,15 +64,29 @@ function onDragRegionDblClick(event: MouseEvent) {
     @dblclick="onDragRegionDblClick"
     @pointerdown.stop
   >
-    <div
-      data-tauri-drag-region
-      class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-xs font-medium text-muted-foreground"
-    >
-      <span class="pointer-events-none shrink-0">{{ t("app.title") }} · {{ t("app.name") }}</span>
-      <BackgroundTasksMenu />
+    <div class="flex h-full min-w-0 flex-1 items-stretch">
+      <TitleTabs />
+      <div data-tauri-drag-region class="h-full min-w-0 flex-1" />
     </div>
     <div class="flex h-full items-stretch">
+      <BackgroundTasksMenu />
       <TerminalSessionsMenu />
+      <button
+        class="flex w-11 items-center justify-center transition-colors hover:bg-accent hover:text-foreground"
+        :class="reportsActive ? 'bg-accent text-foreground' : 'text-muted-foreground'"
+        :title="t('titleBar.reports')"
+        @click="router.push('/report-history')"
+      >
+        <FileText class="h-4 w-4" />
+      </button>
+      <button
+        class="flex w-11 items-center justify-center transition-colors hover:bg-accent hover:text-foreground"
+        :class="settingsActive ? 'bg-accent text-foreground' : 'text-muted-foreground'"
+        :title="t('titleBar.settings')"
+        @click="router.push('/settings')"
+      >
+        <Settings class="h-4 w-4" />
+      </button>
       <button
         v-if="updateStore.update"
         class="relative flex w-11 items-center justify-center text-primary transition-colors hover:bg-accent"

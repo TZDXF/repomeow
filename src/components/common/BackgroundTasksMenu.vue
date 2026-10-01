@@ -166,33 +166,23 @@ async function openTask(task: BackgroundTaskItem) {
     <PopoverTrigger as-child>
       <button
         type="button"
-        class="flex min-w-0 items-center gap-1.5 rounded px-1.5 py-0.5 font-normal transition-colors hover:bg-accent hover:text-foreground"
+        class="relative flex w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         :title="t('titleBar.taskCenter')"
         @mousedown.stop
         @dblclick.stop
       >
-        <template v-if="taskCount">
-          <span class="flex shrink-0 items-center gap-1 text-foreground/80">
-            <LoaderCircle class="h-3.5 w-3.5 animate-spin text-primary" />
-            {{ t("titleBar.backgroundTasks", { count: taskCount }) }}
-          </span>
-          <span
-            v-for="group in taskGroups"
-            :key="group.key"
-            class="max-w-36 truncate rounded bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground"
-          >
-            {{ group.label }}<template v-if="group.count > 1"> ×{{ group.count }}</template>
-            {{ group.progress }}
-          </span>
-        </template>
-        <template v-else>
-          <History class="h-3.5 w-3.5 text-muted-foreground" />
-          <span>{{ t("titleBar.recentTasks", { count: store.history.length }) }}</span>
-        </template>
+        <LoaderCircle v-if="taskCount" class="h-4 w-4 animate-spin text-primary" />
+        <History v-else class="h-4 w-4" />
+        <span
+          v-if="taskCount"
+          class="absolute right-1.5 top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold leading-none text-primary-foreground tabular-nums"
+        >
+          {{ taskCount }}
+        </span>
       </button>
     </PopoverTrigger>
 
-    <PopoverContent align="start" class="z-[70] w-96 gap-0 p-0" @mousedown.stop>
+    <PopoverContent align="end" class="z-[70] w-96 gap-0 p-0" @mousedown.stop>
       <div class="flex items-center justify-between border-b px-3 py-2.5">
         <div>
           <p class="font-medium">{{ t("titleBar.taskCenter") }}</p>
@@ -200,6 +190,18 @@ async function openTask(task: BackgroundTaskItem) {
         </div>
         <span v-if="taskCount" class="text-xs text-muted-foreground">
           {{ t("titleBar.backgroundTasks", { count: taskCount }) }}
+        </span>
+      </div>
+
+      <!-- 分类进度胶囊:从原标题栏触发按钮迁入,汇总各类任务的进行中数量与进度 -->
+      <div v-if="taskGroups.length" class="flex flex-wrap gap-1 border-b px-3 py-2">
+        <span
+          v-for="group in taskGroups"
+          :key="group.key"
+          class="max-w-36 truncate rounded bg-muted px-1.5 py-0.5 tabular-nums text-xs text-muted-foreground"
+        >
+          {{ group.label }}<template v-if="group.count > 1"> ×{{ group.count }}</template>
+          {{ group.progress }}
         </span>
       </div>
 

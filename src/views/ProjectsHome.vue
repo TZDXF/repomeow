@@ -1,16 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRouter } from "vue-router";
 import { watchDebounced } from "@vueuse/core";
 import {
   ArrowDownUp,
-  FileText,
   LayoutGrid,
   List,
   Plus,
   Search,
-  Settings,
   Settings2,
   Tags,
   X,
@@ -41,7 +38,6 @@ const { t } = useI18n();
 const store = useProjectsStore();
 const tagsStore = useTagsStore();
 const settings = useSettingsStore();
-const router = useRouter();
 
 // 搜索(防抖)
 const searchInput = ref(store.query);
@@ -202,25 +198,6 @@ const sortedProjects = computed(() => {
             {{ t("projects.home.addProject") }}
           </Button>
         </AddProjectDialog>
-        <Button
-          variant="outline"
-          size="sm"
-          class="h-8 gap-1.5"
-          :title="t('reportHistory.title')"
-          @click="router.push('/report-history')"
-        >
-          <FileText class="h-3.5 w-3.5" />
-          {{ t("ai.entry") }}
-        </Button>
-        <Button
-          variant="outline"
-          size="icon"
-          class="h-8 w-8"
-          :title="t('projects.home.settings')"
-          @click="router.push('/settings')"
-        >
-          <Settings class="h-3.5 w-3.5" />
-        </Button>
       </div>
     </header>
 

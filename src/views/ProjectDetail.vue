@@ -4,7 +4,6 @@ import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { toast } from "vue-sonner";
 import {
-  ArrowLeft,
   BookOpenText,
   Bot,
   FolderSync,
@@ -219,15 +218,6 @@ async function saveDesc() {
     <header class="shrink-0 border-b px-4 py-3">
       <div class="flex items-start justify-between gap-4">
         <div class="flex min-w-0 items-center gap-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            class="h-8 w-8 shrink-0"
-            :title="t('projects.detail.backToList')"
-            @click="router.push('/')"
-          >
-            <ArrowLeft class="h-4 w-4" />
-          </Button>
           <input
             v-if="editingName"
             ref="nameInput"
@@ -430,8 +420,5 @@ async function saveDesc() {
     class="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground"
   >
     <p>{{ t("projects.detail.notFound") }}</p>
-    <Button variant="outline" size="sm" @click="router.push('/')">{{
-      t("projects.detail.backToListShort")
-    }}</Button>
   </div>
 </template>

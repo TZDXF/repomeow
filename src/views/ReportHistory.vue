@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRouter } from "vue-router";
 import { toast } from "vue-sonner";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
-  ArrowLeft,
   CalendarIcon,
   ChevronRight,
   Download,
@@ -55,20 +53,15 @@ type TypeFilter = "all" | ReportPeriodType;
 
 /**
  * dotClass 让日报/周报筛选按钮兼任颜色图例,与日历标记、右侧列表徽章一致:
- * 日报=中性色、周报=紫色
+ * 日报=中性色、周报=紫色。日报点用 bg-current 跟随按钮文字色:
+ * 普通主题选中态按钮底为实心主色,玻璃拟态主题下为透明底+主色文字,
+ * 写死前景色会在其中一种形态里消失,跟随文字色则两种主题都保持可见。
  */
 const TYPE_OPTIONS: { value: TypeFilter; labelKey: string; dotClass?: string }[] = [
   { value: "all", labelKey: "reportHistory.typeAll" },
-  { value: "daily", labelKey: "reportHistory.typeDaily", dotClass: "bg-foreground/60" },
+  { value: "daily", labelKey: "reportHistory.typeDaily", dotClass: "bg-current opacity-60" },
   { value: "weekly", labelKey: "reportHistory.typeWeekly", dotClass: "bg-violet-500" },
 ];
-
-/** 类型筛选按钮上的色点:激活态按钮底色为主色,中性色日报点切换为主色前景保证对比;紫点保持不变 */
-function typeDotClass(opt: (typeof TYPE_OPTIONS)[number]): string {
-  if (!opt.dotClass) return "";
-  if (opt.value === "daily" && filterType.value === "daily") return "bg-primary-foreground/80";
-  return opt.dotClass;
-}
 
 /** 日历选中视角:日(单日) | 周(周一至周日) | 月(整月),决定右侧列表的日期范围 */
 const VIEW_OPTIONS: { value: ReportViewMode; labelKey: string }[] = [
@@ -78,7 +71,6 @@ const VIEW_OPTIONS: { value: ReportViewMode; labelKey: string }[] = [
 ];
 
 const { t } = useI18n();
-const router = useRouter();
 const settings = useSettingsStore();
 const projectStore = useProjectsStore();
 const tagsStore = useTagsStore();
@@ -461,15 +453,6 @@ watch(
   <div class="flex h-full flex-col">
     <!-- header -->
     <header class="flex shrink-0 items-center gap-2 border-b px-4 py-2.5">
-      <Button
-        variant="ghost"
-        size="icon"
-        class="h-8 w-8"
-        :title="t('reportHistory.back')"
-        @click="router.push('/')"
-      >
-        <ArrowLeft class="h-4 w-4" />
-      </Button>
       <h1 class="text-sm font-semibold">{{ t("reportHistory.title") }}</h1>
       <Button
         variant="outline"
@@ -505,7 +488,7 @@ watch(
                 <span
                   v-if="opt.dotClass"
                   class="h-1.5 w-1.5 rounded-full"
-                  :class="typeDotClass(opt)"
+                  :class="opt.dotClass"
                 />
                 {{ t(opt.labelKey) }}
               </Button>

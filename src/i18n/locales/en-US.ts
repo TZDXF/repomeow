@@ -270,6 +270,11 @@ export default {
     restore: "Restore",
     maximize: "Maximize",
     close: "Close",
+    home: "Home",
+    reports: "Reports",
+    settings: "Settings",
+    closeTab: "Close tab",
+    noProjectTabs: "No open projects",
     checkUpdate: "Check for updates",
     updateAvailable: "New version v{version} available",
     downloading: "Downloading update {progress}%",
@@ -280,7 +285,6 @@ export default {
     agentsMdTask: "AGENTS.md",
     running: "Running",
     taskCenter: "Background tasks",
-    recentTasks: "Recent tasks: {count}",
     historyHint: "Completed tasks are kept for 24 hours, up to 10 per type",
     activeTasks: "Active tasks",
     recentCompleted: "Recently completed",
@@ -494,7 +498,6 @@ export default {
       viewGrid: "Grid view",
       viewTable: "Table view",
       addProject: "Add project",
-      settings: "Settings",
       emptyFiltered: "No matching projects",
       emptyAll: 'No projects yet. Click "Add project" in the top right.',
     },
@@ -598,7 +601,6 @@ export default {
       success: "Moved to {path}",
     },
     detail: {
-      backToList: "Back to projects",
       editName: "Click to edit name",
       editDesc: "Click to edit description",
       descPlaceholder: "Project description (optional)",
@@ -935,7 +937,6 @@ export default {
   },
   ai: {
     notConfigured: "Configure AI integration in Settings first (base URL, API key, model)",
-    entry: "Report",
   },
   chat: {
     entry: "Project Q&A",
@@ -1105,7 +1106,6 @@ export default {
   },
   reportHistory: {
     title: "Report History",
-    back: "Back to project list",
     empty: "No report records yet",
     emptyHint: "Generated reports will be automatically saved here",
     searchProject: "Filter projects...",
