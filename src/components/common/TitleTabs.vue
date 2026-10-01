@@ -164,7 +164,7 @@ function selectFromMore(id: number) {
             role="tab"
             :aria-selected="isProjectActive(id)"
             :tabindex="0"
-            class="flex h-7 min-w-0 max-w-40 shrink-0 cursor-pointer items-center gap-1 rounded-md pr-1 pl-2.5 text-xs font-medium transition-colors"
+            class="group flex h-7 min-w-0 max-w-40 shrink-0 cursor-pointer items-center gap-1 rounded-md pr-1 pl-2.5 text-xs font-medium transition-colors"
             :class="
               isProjectActive(id)
                 ? 'bg-accent text-foreground'
@@ -186,12 +186,12 @@ function selectFromMore(id: number) {
             <span data-tab-label class="min-w-0 flex-1 overflow-hidden text-left whitespace-nowrap">
               <span class="inline-block whitespace-nowrap">{{ projectName(id) }}</span>
             </span>
-            <!-- 关闭按钮常驻占位,不再悬浮遮挡名称 -->
+            <!-- 关闭按钮常驻占位避免布局跳动,悬停 tab 时以透明度浮现 -->
             <span
               role="button"
               :aria-label="t('titleBar.closeTab')"
               :title="t('titleBar.closeTab')"
-              class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:text-destructive"
+              class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/70 opacity-0 transition-[opacity,color] group-hover:opacity-100 hover:text-destructive"
               @mousedown.stop
               @dblclick.stop
               @click.stop="onCloseTab($event, id)"
@@ -215,12 +215,12 @@ function selectFromMore(id: number) {
           <MoreHorizontal class="h-4 w-4" />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="end" class="z-[70] w-72 p-1.5" @mousedown.stop>
+      <PopoverContent align="end" class="z-[70] w-72 p-1" @mousedown.stop>
         <button
           v-for="id in tabsStore.openProjectIds"
           :key="id"
           type="button"
-          class="group flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent"
+          class="group flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs transition-colors hover:bg-accent"
           :class="isProjectActive(id) && 'bg-accent'"
           :title="tabTitle(id)"
           @click="selectFromMore(id)"
@@ -233,10 +233,10 @@ function selectFromMore(id: number) {
             role="button"
             :aria-label="t('titleBar.closeTab')"
             :title="t('titleBar.closeTab')"
-            class="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+            class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
             @click.stop="onCloseTab($event, id)"
           >
-            <X class="h-3.5 w-3.5" />
+            <X class="h-3 w-3" />
           </span>
         </button>
       </PopoverContent>
