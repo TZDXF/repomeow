@@ -297,7 +297,7 @@ async function saveDesc() {
       </div>
 
       <p
-        class="mt-1 truncate pl-10 text-sm text-muted-foreground"
+        class="mt-1 truncate text-sm text-muted-foreground"
         :title="(worktreeProject ?? project).path"
       >
         {{ (worktreeProject ?? project).path }}
@@ -305,7 +305,7 @@ async function saveDesc() {
 
       <div
         v-if="!project.path_exists"
-        class="ml-10 mt-2 flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        class="mt-2 flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
       >
         <TriangleAlert class="h-4 w-4 shrink-0" />
         <span class="min-w-0 flex-1">{{ t("projects.status.pathMissingHint") }}</span>
@@ -315,7 +315,7 @@ async function saveDesc() {
         </Button>
       </div>
 
-      <div class="mt-1 pl-10">
+      <div class="mt-1">
         <textarea
           v-if="editingDesc"
           ref="descInput"
@@ -341,7 +341,7 @@ async function saveDesc() {
         </p>
       </div>
 
-      <div class="mt-2.5 flex flex-wrap items-center gap-x-6 gap-y-2 pl-10">
+      <div class="mt-2.5 flex flex-wrap items-center gap-x-6 gap-y-2">
         <TagPicker :project="project" />
         <template v-if="project.path_exists">
           <GitStatusBar :project="worktreeProject ?? project" />
