@@ -91,6 +91,24 @@ describe("tabs store", () => {
     expect(store.openProjectIds).toEqual([]);
   });
 
+  it("reorderTabs 整体回写顺序并持久化到 localStorage", async () => {
+    await setRoute("/");
+    const setItem = vi.fn();
+    (globalThis as { localStorage?: unknown }).localStorage = {
+      getItem: vi.fn(() => null),
+      setItem,
+    };
+    const store = useTabsStore();
+    store.openProject(1);
+    store.openProject(2);
+    store.openProject(3);
+    expect(store.openProjectIds).toEqual([1, 2, 3]);
+
+    store.reorderTabs([3, 1, 2]);
+    expect(store.openProjectIds).toEqual([3, 1, 2]);
+    expect(setItem).toHaveBeenLastCalledWith("repomeow.tabs.v1", JSON.stringify([3, 1, 2]));
+  });
+
   it("打开的项目 tab 持久化到 localStorage 并在初始化时恢复", async () => {
     // mock 路由跨测试共享,先复位到首页,避免创建 store 时立即建档混入脏数据
     await setRoute("/");

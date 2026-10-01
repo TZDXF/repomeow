@@ -22,6 +22,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import TerminalView from "@/components/terminal/TerminalView.vue";
+import { VueDraggable } from "vue-draggable-plus";
 import {
   getTerminalCapabilities,
   terminalStatusDotClass,
@@ -125,38 +126,12 @@ function startResize(e: PointerEvent) {
 
 // ── 页签拖拽排序 ─────────────────────────────────────────────────
 
-const draggingId = ref<number | null>(null);
-const dropTargetId = ref<number | null>(null);
-
-function onTabDragStart(id: number, e: DragEvent) {
-  draggingId.value = id;
-  if (e.dataTransfer) {
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", String(id));
-  }
-}
-
-function onTabDragOver(id: number, e: DragEvent) {
-  if (draggingId.value === null || draggingId.value === id) return;
-  e.preventDefault();
-  dropTargetId.value = id;
-}
-
-function onTabDrop(id: number, e: DragEvent) {
-  e.preventDefault();
-  const from = draggingId.value;
-  if (from === null || from === id) return;
-  const ids = orderedList.value.map((s) => s.id);
-  const fromIdx = ids.indexOf(from);
-  const toIdx = ids.indexOf(id);
-  if (fromIdx < 0 || toIdx < 0) return;
-  ids.splice(toIdx, 0, ...ids.splice(fromIdx, 1));
-  store.setTabOrder(props.project.id, ids);
-}
-
-function onTabDragEnd() {
-  draggingId.value = null;
-  dropTargetId.value = null;
+/** VueDraggable 拖拽完成:把新顺序回写进 store(排序表内的优先,新会话按默认序附后) */
+function onTabReorder(sessions: TerminalSessionInfo[]) {
+  store.setTabOrder(
+    props.project.id,
+    sessions.map((s) => s.id),
+  );
 }
 
 // ── 会话操作 ─────────────────────────────────────────────────────
@@ -241,43 +216,45 @@ async function clearFinished() {
       <div class="flex h-9 shrink-0 items-center gap-1 border-b px-2">
         <SquareTerminal class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <div class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-          <div
-            v-for="s in orderedList"
-            :key="s.id"
-            draggable="true"
-            class="group flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent"
-            :class="[
-              active?.id === s.id && 'bg-accent text-foreground',
-              draggingId === s.id && 'opacity-50',
-              dropTargetId === s.id &&
-                draggingId !== s.id &&
-                'shadow-[inset_2px_0_0_0_var(--primary)]',
-            ]"
-            :title="`${s.command} · ${t(`terminal.status.${s.status}`)}`"
-            @click="store.activeId = s.id"
-            @dragstart="onTabDragStart(s.id, $event)"
-            @dragover="onTabDragOver(s.id, $event)"
-            @drop="onTabDrop(s.id, $event)"
-            @dragend="onTabDragEnd"
+          <!-- 页签拖拽排序走 VueDraggable(与标题栏项目 tab、设置页打开方式一致);
+               WebView2 下原生 HTML5 拖拽的 dragover 不可靠,用 forceFallback(pointer 事件驱动) -->
+          <VueDraggable
+            :model-value="orderedList"
+            :animation="150"
+            :force-fallback="true"
+            :fallback-on-body="true"
+            drag-class="opacity-50"
+            ghost-class="opacity-30"
+            class="flex items-center gap-1"
+            @update:model-value="onTabReorder"
           >
-            <span class="h-1.5 w-1.5 shrink-0 rounded-full" :class="terminalStatusDotClass(s)" />
-            <span class="max-w-40 truncate">{{ s.label }}</span>
-            <span
-              v-if="s.status === 'exited' && s.exit_code !== null && s.exit_code !== 0"
-              class="shrink-0 text-red-500"
+            <div
+              v-for="s in orderedList"
+              :key="s.id"
+              class="group flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent"
+              :class="active?.id === s.id && 'bg-accent text-foreground'"
+              :title="`${s.command} · ${t(`terminal.status.${s.status}`)}`"
+              @click="store.activeId = s.id"
             >
-              {{ s.exit_code }}
-            </span>
-            <!-- 关闭按钮常驻占位,悬停仅切换透明度,避免页签宽度跳变 -->
-            <button
-              type="button"
-              class="pointer-events-none flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100"
-              :title="t('terminal.remove')"
-              @click.stop="removeSession(s.id)"
-            >
-              <X class="h-3 w-3" />
-            </button>
-          </div>
+              <span class="h-1.5 w-1.5 shrink-0 rounded-full" :class="terminalStatusDotClass(s)" />
+              <span class="max-w-40 truncate">{{ s.label }}</span>
+              <span
+                v-if="s.status === 'exited' && s.exit_code !== null && s.exit_code !== 0"
+                class="shrink-0 text-red-500"
+              >
+                {{ s.exit_code }}
+              </span>
+              <!-- 关闭按钮常驻占位,悬停仅切换透明度,避免页签宽度跳变 -->
+              <button
+                type="button"
+                class="pointer-events-none flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100"
+                :title="t('terminal.remove')"
+                @click.stop="removeSession(s.id)"
+              >
+                <X class="h-3 w-3" />
+              </button>
+            </div>
+          </VueDraggable>
           <!-- 新建按钮:固定在最右一个页签之后;Windows 下可下拉选择 shell 类型 -->
           <DropdownMenu v-if="settings.embeddedTerminal && showShellPicker">
             <DropdownMenuTrigger as-child>

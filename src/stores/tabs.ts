@@ -84,6 +84,15 @@ export const useTabsStore = defineStore("title-tabs", () => {
     return { kind: "project", projectId: nextId };
   }
 
+  /**
+   * 拖拽排序:VueDraggable 拖拽完成后整体回写顺序并持久化。
+   * 首页 tab 固定第一位,不在回写列表内。
+   */
+  function reorderTabs(ids: number[]) {
+    openProjectIds.value = [...ids];
+    persist();
+  }
+
   watch(
     () => router.currentRoute.value.path,
     (path) => {
@@ -95,5 +104,5 @@ export const useTabsStore = defineStore("title-tabs", () => {
     { immediate: true },
   );
 
-  return { openProjectIds, openProject, closeTab };
+  return { openProjectIds, openProject, closeTab, reorderTabs };
 });

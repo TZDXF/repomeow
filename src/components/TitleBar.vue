@@ -64,10 +64,8 @@ function onDragRegionDblClick(event: MouseEvent) {
     @dblclick="onDragRegionDblClick"
     @pointerdown.stop
   >
-    <div class="flex h-full min-w-0 flex-1 items-stretch">
-      <TitleTabs />
-      <div data-tauri-drag-region class="h-full min-w-0 flex-1" />
-    </div>
+    <!-- tab 条占满左区,空白区域自身可拖拽(TitleTabs 内部带 data-tauri-drag-region) -->
+    <TitleTabs />
     <div class="flex h-full items-stretch">
       <BackgroundTasksMenu />
       <TerminalSessionsMenu />
