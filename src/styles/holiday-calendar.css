@@ -3,13 +3,33 @@
 
 /* 法定节假日:红色 */
 .report-calendar-holiday {
-  color: #f87171;
+  --holiday-color: #f87171;
+  color: var(--holiday-color);
 }
 /* 普通周末:淡红 */
 .report-calendar-weekend {
-  color: rgb(248 113 113 / 0.7);
+  --holiday-color: rgb(248 113 113 / 0.7);
+  color: var(--holiday-color);
 }
 /* 调休上班日:绿色 */
 .report-calendar-makeup {
-  color: #4ade80;
+  --holiday-color: #4ade80;
+  color: var(--holiday-color);
+}
+
+/* 选中格底色为主色实心(单日历的选中格、区间日历的起止格),
+   红/绿文字在实心底上不可读,让位 primary-foreground。 */
+.report-calendar-holiday[data-selected],
+.report-calendar-weekend[data-selected],
+.report-calendar-makeup[data-selected] {
+  color: var(--primary-foreground);
+}
+
+/* 区间日历(RangeCalendar)的中间日期也带 data-selected,但底色透明,
+   恢复红绿标注;仅起止格(另有 data-selection-start / data-selection-end)跟随主色前景。 */
+[data-slot="range-calendar"]
+  :is(.report-calendar-holiday, .report-calendar-weekend, .report-calendar-makeup)[data-selected]:not(
+    [data-selection-start]
+  ):not([data-selection-end]) {
+  color: var(--holiday-color);
 }

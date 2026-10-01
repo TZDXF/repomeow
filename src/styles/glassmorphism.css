@@ -180,12 +180,15 @@
   }
 }
 
-/* 主操作保留唯一的香槟强调,危险操作仍沿用 destructive 语义色。 */
+/* 主操作保留唯一的香槟强调,危险操作仍沿用 destructive 语义色。
+   日历格子触发器走 buttonVariants(ghost) 却没有 data-variant 属性,
+   会被 :not([data-variant]) 误判成默认变体按钮(全部格子被刷成主色淡底,
+   盖掉选中实心态与节假日红绿着色),按 data-slot 显式排除。 */
 [data-theme="glassmorphism"]
   :is([data-slot="button"], [class~="group/button"]):is(
     [data-variant="default"],
     :not([data-variant])
-  ) {
+  ):not([data-slot="calendar-cell-trigger"], [data-slot="range-calendar-trigger"]) {
   background-color: color-mix(in srgb, var(--primary) 15%, transparent);
   color: var(--primary);
   border: 1px solid color-mix(in srgb, var(--primary) 40%, transparent);
@@ -196,7 +199,9 @@
   :is([data-slot="button"], [class~="group/button"]):is(
     [data-variant="default"],
     :not([data-variant])
-  ):not(:disabled):hover {
+  ):not([data-slot="calendar-cell-trigger"], [data-slot="range-calendar-trigger"]):not(
+    :disabled
+  ):hover {
   background-color: color-mix(in srgb, var(--primary) 22%, transparent);
   border-color: var(--primary);
 }
