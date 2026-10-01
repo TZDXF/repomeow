@@ -133,7 +133,11 @@ const option = computed<EChartsCoreOption>(() => {
 
 <template>
   <div class="min-w-0 overflow-x-auto pb-1">
-    <div :class="{ 'mx-auto': centered }" :style="{ width: fitWidth ? '100%' : `${width}px` }">
+    <!-- max-width 兜底:容器比固定宽度窄(如 xl 双列下仅差 1px)时压缩重绘,避免 overflow-x 滚动条 -->
+    <div
+      :class="{ 'mx-auto': centered }"
+      :style="{ width: fitWidth ? '100%' : `${width}px`, maxWidth: '100%' }"
+    >
       <div :style="{ height: `${height}px` }">
         <EChart :option="option" />
       </div>
