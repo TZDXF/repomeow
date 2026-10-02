@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { Search } from "@lucide/vue";
 import { DropdownMenuCheckboxItem } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import ScrollArea from "@/components/common/ScrollArea.vue";
 import type { Tag } from "@/types";
 
@@ -11,7 +12,7 @@ const props = defineProps<{ tags: Tag[]; checkedIds: number[] }>();
 const emit = defineEmits<{ toggle: [tagId: number] }>();
 
 const keyword = ref("");
-const searchInput = ref<HTMLInputElement | null>(null);
+const searchInput = ref<InstanceType<typeof Input> | null>(null);
 
 const filtered = computed(() => {
   const kw = keyword.value.trim().toLowerCase();
@@ -25,7 +26,8 @@ function onSearchKeydown(e: KeyboardEvent) {
 }
 
 onMounted(() => {
-  nextTick(() => searchInput.value?.focus());
+  // Input 未 defineExpose,经 $el 取实际 input 元素
+  nextTick(() => (searchInput.value?.$el as HTMLInputElement | undefined)?.focus());
 });
 </script>
 
@@ -33,11 +35,11 @@ onMounted(() => {
   <div class="px-1 pb-1">
     <div class="relative">
       <Search class="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-      <input
+      <Input
         ref="searchInput"
         v-model="keyword"
         :placeholder="t('tags.checkList.searchPlaceholder')"
-        class="h-7 w-full rounded-md border border-input bg-transparent pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+        class="h-7 rounded-md pl-7 pr-2 text-xs md:text-xs"
         @keydown="onSearchKeydown"
       />
     </div>

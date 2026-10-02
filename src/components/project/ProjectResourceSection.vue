@@ -1,11 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
-import { toast } from "vue-sonner";
-import { Icon } from "@iconify/vue";
-import { Bot, Import, LoaderCircle, Package, Plug, Plus, Trash2, Wrench } from "@lucide/vue";
-import { agentBrandIcon } from "@/lib/agent-icons";
+import { LoaderCircle, Package, Plug, Plus, Trash2 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -17,25 +14,21 @@ import {
 } from "@/components/ui/dialog";
 import { useSettingsStore } from "@/stores/settings";
 import {
-  assignProjectResource,
-  claimLocalProjectResource,
-  deleteUnmanagedProjectResource,
-  importProjectResource,
-  loadProjectResources,
-  mergeSkillsByName,
-  removeProjectResource,
-  repairProjectResource,
-  resourceTree,
-  type RepairAction,
   type ProjectAiTarget,
-  type ResourceTreeGroup,
   type ProjectResourceKind,
-  type ProjectResourceSnapshot,
   type ResourceChoice,
-  type ResourceDeployment,
 } from "@/lib/project-ai-resources";
 import { joinPath } from "@/lib/path";
 import type { ProjectAiAssets } from "@/types";
+import {
+  useProjectResourceData,
+  type UnmanagedItem,
+} from "@/composables/project-resources/use-project-resource-data";
+import { useResourceActions } from "@/composables/project-resources/use-resource-actions";
+import { useResourceRepair } from "@/composables/project-resources/use-resource-repair";
+import ManagedResourceRow from "./resource-section/ManagedResourceRow.vue";
+import UnmanagedResourceRow from "./resource-section/UnmanagedResourceRow.vue";
+import RepairDialog from "./resource-section/RepairDialog.vue";
 import ProjectResourceAddDialog from "./ProjectResourceAddDialog.vue";
 
 const props = defineProps<{
@@ -51,254 +44,71 @@ const emit = defineEmits<{ preview: [path: string]; changed: [] }>();
 const { t } = useI18n();
 const router = useRouter();
 const settings = useSettingsStore();
-const data = ref<ProjectResourceSnapshot | null>(null);
-const loading = ref(false);
-const error = ref("");
+
+// ── 数据层 / 动作层 / 修复层(实现见 composables/project-resources/*) ──
+const {
+  data,
+  loading,
+  error,
+  activeFilter,
+  listed,
+  unmanaged,
+  filters,
+  filtered,
+  filteredUnmanaged,
+  groupCount,
+  records,
+} = useProjectResourceData({
+  projectPath: () => props.projectPath,
+  kind: () => props.kind,
+  revision: () => props.revision,
+  targets: () => props.targets,
+  assets: () => props.assets,
+});
+const {
+  removeTargets,
+  removing,
+  unmanagedRemoveTarget,
+  removingUnmanaged,
+  importing,
+  toggling,
+  toggleAgent,
+  configureUnmanaged,
+  importLocal,
+  importUnmanaged,
+  confirmRemove,
+  confirmRemoveUnmanaged,
+} = useResourceActions({
+  projectPath: () => props.projectPath,
+  kind: () => props.kind,
+  targets: () => props.targets,
+  data,
+  records,
+  changed,
+});
+const { repairResource, repairing, repairRecords, repairAgentName, applyUpdate, repairRecord } =
+  useResourceRepair({
+    projectPath: () => props.projectPath,
+    kind: () => props.kind,
+    targets: () => props.targets,
+    data,
+    records,
+    changed,
+  });
+
 const addOpen = ref(false);
-const removeTargets = ref<ResourceChoice[]>([]);
-const removing = ref(false);
-const unmanagedRemoveTarget = ref<UnmanagedItem | null>(null);
-const removingUnmanaged = ref(false);
-const importing = ref<string | null>(null);
-const toggling = ref("");
-const activeFilter = ref("");
-/** 非托管检测用的 assets 快照:仅在 load() 提交 deployments 时同步更新,保证两侧数据成对一致,杜绝刷新期间的幽灵行。 */
-const assetsSnapshot = ref<ProjectAiAssets | null>(null);
-let sequence = 0;
-onBeforeUnmount(() => sequence++);
-/** 已有数据时的刷新走静默模式(不闪 loading),配合父组件协调好的时序,避免整列视觉闪动。 */
-async function load() {
-  const seq = ++sequence;
-  const silent = !!data.value;
-  if (!silent) {
-    loading.value = true;
-  }
-  error.value = "";
-  try {
-    const next = await loadProjectResources(props.projectPath, props.kind);
-    if (seq === sequence) {
-      data.value = next;
-      assetsSnapshot.value = props.assets;
-    }
-  } catch (e) {
-    if (seq === sequence) {
-      error.value = String(e);
-      data.value = null;
-    }
-  } finally {
-    if (!silent && seq === sequence) {
-      loading.value = false;
-    }
-  }
-}
-watch(
-  () => [props.projectPath, props.kind, props.revision],
-  () => {
-    void load();
-  },
-  { immediate: true },
-);
 watch(
   () => [props.projectPath, props.kind],
   () => {
-    data.value = null;
-    assetsSnapshot.value = null;
     addOpen.value = false;
-    removeTargets.value = [];
-    unmanagedRemoveTarget.value = null;
-    activeFilter.value = "";
-    toggling.value = "";
   },
 );
-/** 项目资源列表 = 已添加(shortlist)∪ 已部署;来源被删除时回退部署记录里的名字。 */
-const listed = computed(() => {
-  const ids = new Set<string>(data.value?.shortlist ?? []);
-  for (const d of data.value?.deployments ?? []) {
-    ids.add(d.resourceId);
-  }
-  const resources: ResourceChoice[] = [];
-  for (const id of ids) {
-    const existing = data.value?.resources.find((r) => r.id === id);
-    if (existing) {
-      resources.push(existing);
-      continue;
-    }
-    const record = data.value?.deployments.find((d) => d.resourceId === id);
-    resources.push({
-      id,
-      name: record?.name ?? id,
-      description: "",
-      groupIds: [],
-      supportedAgents: [],
-    });
-  }
-  return resources;
-});
-const unmanagedSkills = computed(
-  () =>
-    assetsSnapshot.value?.skills.filter(
-      (s) => !data.value?.deployments.some((d) => d.path === s.dir),
-    ) ?? [],
-);
-const unmanagedMcp = computed(
-  () =>
-    assetsSnapshot.value?.mcp.flatMap((file) =>
-      file.servers
-        .filter(
-          (s) => !data.value?.deployments.some((d) => d.path === file.path && d.name === s.name),
-        )
-        .map((s) => ({ name: s.name, path: file.path })),
-    ) ?? [],
-);
-interface UnmanagedItem {
-  key: string;
-  name: string;
-  /** 技能描述(仅 skills 有;mcp 为空串)。 */
-  description: string;
-  /** 预览路径(skills 为主来源的 SKILL.md 路径,mcp 为配置文件路径)。 */
-  path: string;
-  /** 主来源:skills = 首个技能目录;mcp = 配置文件路径。 */
-  source: string;
-  /** 全部来源:skills 同名去重后的所有技能目录(含主来源);mcp 恒为单元素。 */
-  sources: string[];
+
+/** 变更后不自行刷新:通知父组件先重扫 assets,再由 revision 驱动本区静默刷新,避免托管/非托管数据错位导致的闪烁。 */
+function changed() {
+  emit("changed");
 }
-/** 非托管条目:skills 按名称跨 Agent 目录去重(扫描保留全部实例,合并只在展示层)。 */
-const unmanaged = computed<UnmanagedItem[]>(() =>
-  props.kind === "skills"
-    ? mergeSkillsByName(
-        unmanagedSkills.value,
-        props.targets.map((a) => a.skillPath),
-      ).map((s) => ({
-        key: `skill:${s.name}`,
-        name: s.name,
-        path: joinPath(s.dirs[0], "SKILL.md"),
-        source: s.dirs[0],
-        sources: s.dirs,
-        description: s.description,
-      }))
-    : unmanagedMcp.value.map((s) => ({
-        key: `mcp:${s.path}:${s.name}`,
-        name: s.name,
-        path: s.path,
-        source: s.path,
-        sources: [s.path],
-        description: "",
-      })),
-);
-/** 分组只作为筛选维度(skills):用户分组与市场来源(owner/repo)并列。 */
-const tree = computed(() =>
-  resourceTree(
-    props.kind === "skills" ? (data.value?.groups ?? []) : [],
-    listed.value,
-    t("projectAi.ungrouped"),
-  ).filter((g) => g.resources.length),
-);
-/** 未入库条目不单独区分:无未分组桶时补一个,使其计入筛选。 */
-const UNGROUPED_FILTER = "__ungrouped";
-const filters = computed(() => {
-  if (props.kind !== "skills") {
-    return [];
-  }
-  const groups = tree.value;
-  if (unmanaged.value.length && !groups.some((g) => g.id === UNGROUPED_FILTER)) {
-    return [...groups, { id: UNGROUPED_FILTER, name: t("projectAi.ungrouped"), resources: [] }];
-  }
-  return groups;
-});
-const filtered = computed(() => {
-  if (!activeFilter.value) {
-    return listed.value;
-  }
-  return tree.value.find((g) => g.id === activeFilter.value)?.resources ?? [];
-});
-watch(filters, (next) => {
-  if (activeFilter.value && !next.some((g) => g.id === activeFilter.value)) {
-    activeFilter.value = "";
-  }
-});
-/** 当前筛选下可见的未入库条目:全部与未分组筛选均展示。 */
-const filteredUnmanaged = computed(() =>
-  !activeFilter.value || activeFilter.value === UNGROUPED_FILTER ? unmanaged.value : [],
-);
-/** 分组计数:未分组桶并入未入库条目数。 */
-function groupCount(group: ResourceTreeGroup) {
-  return group.id === UNGROUPED_FILTER
-    ? group.resources.length + unmanaged.value.length
-    : group.resources.length;
-}
-function records(id: string) {
-  return data.value?.deployments.filter((d) => d.resourceId === id) ?? [];
-}
-function recordOf(resourceId: string, agentId: string): ResourceDeployment | undefined {
-  return data.value?.deployments.find((d) => d.resourceId === resourceId && d.agentId === agentId);
-}
-/** 可见 Agent:设置页未隐藏的目标 + 虽隐藏但已部署该资源的 Agent(允许解除配置)。 */
-function visibleAgents(resource: ResourceChoice) {
-  return props.targets.filter(
-    (a) =>
-      ((props.kind === "skills" || !!a.mcpPath) && !settings.hiddenResourceAgents.includes(a.id)) ||
-      recordOf(resource.id, a.id),
-  );
-}
-function supported(resource: ResourceChoice, agent: ProjectAiTarget) {
-  return resource.supportedAgents.includes(agent.id);
-}
-function selectable(resource: ResourceChoice, agent: ProjectAiTarget) {
-  return supported(resource, agent) || !!recordOf(resource.id, agent.id);
-}
-function chipClass(resource: ResourceChoice, agent: ProjectAiTarget) {
-  const record = recordOf(resource.id, agent.id);
-  if (record) {
-    return record.status === "configured"
-      ? "border-primary/40 bg-primary/10 text-primary"
-      : "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400";
-  }
-  return selectable(resource, agent)
-    ? "text-muted-foreground hover:bg-accent hover:text-foreground"
-    : "cursor-not-allowed opacity-40";
-}
-function chipTitle(resource: ResourceChoice, agent: ProjectAiTarget) {
-  const record = recordOf(resource.id, agent.id);
-  if (record) {
-    return `${agent.name} · ${record.path} · ${t(`projectAi.states.${record.status}`)}`;
-  }
-  if (!supported(resource, agent)) {
-    return `${agent.name} · ${t("projectAi.unsupported")}`;
-  }
-  return `${agent.name} · ${props.kind === "skills" ? agent.skillPath : agent.mcpPath}`;
-}
-/** 点击 Agent 标签即切换部署:新增勾选或解除该 Agent 的托管配置。 */
-async function toggleAgent(resource: ResourceChoice, agent: ProjectAiTarget) {
-  if (!data.value || toggling.value || !selectable(resource, agent)) {
-    return;
-  }
-  const current = new Set(records(resource.id).map((d) => d.agentId));
-  if (current.has(agent.id)) {
-    current.delete(agent.id);
-  } else {
-    current.add(agent.id);
-  }
-  toggling.value = `${resource.id}:${agent.id}`;
-  try {
-    const result = await assignProjectResource({
-      path: props.projectPath,
-      kind: props.kind,
-      resourceId: resource.id,
-      agentIds: [...current],
-      expectedRevision: data.value.revision,
-    });
-    if (result.failures.length) {
-      toast.error(
-        t("projectAi.partial", { count: result.applied, failed: result.failures.length }),
-      );
-    }
-    changed();
-  } catch (e) {
-    toast.error(String(e));
-  } finally {
-    toggling.value = "";
-  }
-}
+
 /** 技能预览页需要绝对目录:部署记录与资产扫描给出的都是项目相对路径,这里拼上项目根 */
 function absoluteSkillDir(dir: string): string {
   // 已是绝对路径(盘符/UNC/POSIX 根)时原样返回,防御未来来源变化
@@ -345,307 +155,6 @@ function previewUnmanaged(item: UnmanagedItem) {
     return;
   }
   emit("preview", item.path);
-}
-/** 非托管行的归属 Agent 集合:skills 同名合并后可有多个归属(每个目录前缀各算一个)。 */
-function unmanagedOwners(item: UnmanagedItem): string[] {
-  if (props.kind === "skills") {
-    return item.sources
-      .map((dir) => props.targets.find((a) => dir.startsWith(`${a.skillPath}/`))?.id)
-      .filter((id): id is string => !!id);
-  }
-  const owner = props.targets.find((a) => a.mcpPath === item.source);
-  return owner ? [owner.id] : [];
-}
-/** 该 Agent 名下的实例来源(skills 为其目录,mcp 为配置文件路径);非归属返回空。 */
-function unmanagedOwnerSource(item: UnmanagedItem, agentId: string): string {
-  const target = props.targets.find((a) => a.id === agentId);
-  if (!target) {
-    return "";
-  }
-  if (props.kind === "skills") {
-    return item.sources.find((dir) => dir.startsWith(`${target.skillPath}/`)) ?? "";
-  }
-  return target.mcpPath === item.source ? item.source : "";
-}
-/** 非托管行可见 Agent:跟随设置显隐(扫描与显隐无关,只在展示层过滤,全行表现一致)。 */
-function unmanagedChips() {
-  return props.targets.filter(
-    (a) =>
-      (props.kind === "skills" || !!a.mcpPath) && !settings.hiddenResourceAgents.includes(a.id),
-  );
-}
-function unmanagedChipTitle(item: UnmanagedItem, agent: ProjectAiTarget) {
-  const owned = unmanagedOwnerSource(item, agent.id);
-  if (owned) {
-    return `${agent.name} · ${owned} · ${t("projectAi.states.configured")}`;
-  }
-  return `${agent.name} · ${props.kind === "skills" ? agent.skillPath : agent.mcpPath}`;
-}
-/**
- * 非托管资源直接配置 Agent:先认领为项目本地来源(记录来源、不入库,
- * 来源 Agent 按现状登记),再把目标集合设为「现状 ∪ 点击的 Agent」一次 assign。
- * skills 同名合并行:其余归属 Agent 一并并入目标集合,同名副本统一纳入同一托管记录。
- */
-async function configureUnmanaged(item: UnmanagedItem, agent: ProjectAiTarget) {
-  if (!data.value || toggling.value) {
-    return;
-  }
-  toggling.value = `${item.key}:${agent.id}`;
-  try {
-    const outcome = await claimLocalProjectResource({
-      path: props.projectPath,
-      kind: props.kind,
-      source: item.source,
-      name: props.kind === "mcp" ? item.name : undefined,
-      expectedRevision: data.value.revision,
-    });
-    const snapshot = await loadProjectResources(props.projectPath, props.kind);
-    const current = new Set(
-      snapshot.deployments.filter((d) => d.resourceId === outcome.resourceId).map((d) => d.agentId),
-    );
-    for (const owner of unmanagedOwners(item)) {
-      current.add(owner);
-    }
-    current.add(agent.id);
-    const result = await assignProjectResource({
-      path: props.projectPath,
-      kind: props.kind,
-      resourceId: outcome.resourceId,
-      agentIds: [...current],
-      expectedRevision: snapshot.revision,
-    });
-    if (result.failures.length) {
-      toast.error(
-        t("projectAi.partial", { count: result.applied, failed: result.failures.length }),
-      );
-    } else {
-      toast.success(t("projectAi.applied", { count: result.applied }));
-    }
-    changed();
-  } catch (e) {
-    toast.error(String(e));
-  } finally {
-    toggling.value = "";
-  }
-}
-/**
- * 已认领的本地来源(配置到其他 Agent 后进入托管列表的 local: 资源)仍可随时收入资源库:
- * 后端 import 会经 migrate_local 把部署记录改挂到库资源 ID,本地来源记录随之清除。
- * 来源与名称优先取部署记录;无部署记录时从 local id 解析(local:skills:<dir> / local:mcp:<path>#<name>)。
- */
-function localImportTarget(resource: ResourceChoice): { source: string; name?: string } | null {
-  if (!resource.id.startsWith("local:")) {
-    return null;
-  }
-  const rest = resource.id.slice(`local:${props.kind}:`.length);
-  if (props.kind === "skills") {
-    // 同名多副本时以主来源(id 内嵌的认领目录)为准,而非首个部署记录。
-    return rest ? { source: rest } : null;
-  }
-  const record = records(resource.id)[0];
-  if (record) {
-    return { source: record.path, name: record.name };
-  }
-  const hash = rest.lastIndexOf("#");
-  return hash > 0 ? { source: rest.slice(0, hash), name: rest.slice(hash + 1) } : null;
-}
-async function importLocal(resource: ResourceChoice) {
-  const target = localImportTarget(resource);
-  if (!data.value || importing.value || !target) {
-    return;
-  }
-  importing.value = resource.id;
-  try {
-    await importProjectResource({
-      path: props.projectPath,
-      kind: props.kind,
-      source: target.source,
-      name: target.name,
-      expectedRevision: data.value.revision,
-    });
-    toast.success(t("projectAi.imported", { name: resource.name }));
-    changed();
-  } catch (e) {
-    toast.error(String(e));
-  } finally {
-    importing.value = null;
-  }
-}
-
-async function importUnmanaged(item: UnmanagedItem) {
-  if (!data.value || importing.value) {
-    return;
-  }
-  importing.value = item.key;
-  try {
-    // skills 同名合并行:逐目录导入(同名复用同一库条目,各目录归属 Agent 按现状认领);
-    // 每次导入会使 revision 失效,逐项重取快照。
-    for (const source of item.sources) {
-      const snapshot = await loadProjectResources(props.projectPath, props.kind);
-      await importProjectResource({
-        path: props.projectPath,
-        kind: props.kind,
-        source,
-        name: props.kind === "mcp" ? item.name : undefined,
-        expectedRevision: snapshot.revision,
-      });
-    }
-    toast.success(t("projectAi.imported", { name: item.name }));
-    changed();
-  } catch (e) {
-    toast.error(String(e));
-  } finally {
-    importing.value = null;
-  }
-}
-/** 删除非托管资源:经后端校验未托管后直接清理磁盘文件/配置条目,成功后走父组件统一刷新。 */
-async function confirmRemoveUnmanaged() {
-  const target = unmanagedRemoveTarget.value;
-  if (!target || !data.value || removingUnmanaged.value) {
-    return;
-  }
-  removingUnmanaged.value = true;
-  try {
-    // skills 同名合并行:逐目录删除;每次删除会使 revision 失效,逐项重取快照。
-    for (const source of target.sources) {
-      const snapshot = await loadProjectResources(props.projectPath, props.kind);
-      await deleteUnmanagedProjectResource({
-        path: props.projectPath,
-        kind: props.kind,
-        source,
-        name: props.kind === "mcp" ? target.name : undefined,
-        expectedRevision: snapshot.revision,
-      });
-    }
-    toast.success(t("projectAi.removed", { name: target.name }));
-    unmanagedRemoveTarget.value = null;
-    changed();
-  } catch (e) {
-    toast.error(String(e));
-  } finally {
-    removingUnmanaged.value = false;
-  }
-}
-/** 批量移除:逐项执行,每项执行前重取快照拿到最新 revision(上一次移除会使其失效)。 */
-async function confirmRemove() {
-  const targets = removeTargets.value;
-  if (!targets.length || removing.value) {
-    return;
-  }
-  removing.value = true;
-  let removed = 0;
-  let failed = 0;
-  try {
-    for (const target of targets) {
-      try {
-        const snapshot = await loadProjectResources(props.projectPath, props.kind);
-        const result = await removeProjectResource({
-          path: props.projectPath,
-          kind: props.kind,
-          resourceId: target.id,
-          expectedRevision: snapshot.revision,
-        });
-        if (result.failures.length) {
-          failed += result.failures.length;
-        } else {
-          removed++;
-        }
-      } catch (e) {
-        failed++;
-        toast.error(String(e));
-      }
-    }
-    if (failed) {
-      toast.error(t("projectAi.partial", { count: removed, failed }));
-    } else if (targets.length === 1) {
-      toast.success(t("projectAi.removed", { name: targets[0].name }));
-    } else {
-      toast.success(t("projectAi.removedCount", { count: removed }));
-    }
-    removeTargets.value = [];
-    changed();
-  } finally {
-    removing.value = false;
-  }
-}
-/** 有明确修复出路的异常状态:应用更新(可更新/缺失)、覆盖更新或强制解除(本地已修改)、强制解除(需检查配置)。 */
-const REPAIRABLE: ResourceDeployment["status"][] = ["update", "modified", "missing", "conflict"];
-function repairableRecords(id: string) {
-  return records(id).filter((d) => REPAIRABLE.includes(d.status));
-}
-const repairResource = ref<ResourceChoice | null>(null);
-const repairing = ref("");
-const repairRecords = computed(() =>
-  repairResource.value ? repairableRecords(repairResource.value.id) : [],
-);
-watch(repairRecords, (next) => {
-  if (repairResource.value && !next.length) {
-    repairResource.value = null;
-  }
-});
-function repairAgentName(agentId: string) {
-  return props.targets.find((a) => a.id === agentId)?.name ?? agentId;
-}
-/** 「可更新/缺失」的修复:以完整目标集合再 assign 一次,走正常部署管线写入来源最新定义。 */
-async function applyUpdate(record: ResourceDeployment) {
-  const resource = repairResource.value;
-  if (!resource || !data.value || repairing.value) {
-    return;
-  }
-  repairing.value = `${record.resourceId}:${record.agentId}:update`;
-  try {
-    const current = new Set(records(resource.id).map((d) => d.agentId));
-    const result = await assignProjectResource({
-      path: props.projectPath,
-      kind: props.kind,
-      resourceId: resource.id,
-      agentIds: [...current],
-      expectedRevision: data.value.revision,
-    });
-    if (result.failures.length) {
-      toast.error(
-        t("projectAi.partial", { count: result.applied, failed: result.failures.length }),
-      );
-    } else {
-      toast.success(t("projectAi.applied", { count: result.applied }));
-    }
-    changed();
-  } catch (e) {
-    toast.error(String(e));
-  } finally {
-    repairing.value = "";
-  }
-}
-/** 「本地已修改/需检查配置」的修复:reapply 覆盖更新(丢弃本地修改),detach 仅解除托管记录、保留项目文件。 */
-async function repairRecord(record: ResourceDeployment, action: RepairAction) {
-  if (!data.value || repairing.value) {
-    return;
-  }
-  repairing.value = `${record.resourceId}:${record.agentId}:${action}`;
-  try {
-    await repairProjectResource({
-      path: props.projectPath,
-      kind: props.kind,
-      resourceId: record.resourceId,
-      agentId: record.agentId,
-      action,
-      expectedRevision: data.value.revision,
-    });
-    toast.success(
-      t(action === "reapply" ? "projectAi.reapplied" : "projectAi.detached", {
-        name: record.name,
-      }),
-    );
-    changed();
-  } catch (e) {
-    toast.error(String(e));
-  } finally {
-    repairing.value = "";
-  }
-}
-/** 变更后不自行刷新:通知父组件先重扫 assets,再由 revision 驱动本区静默刷新,避免托管/非托管数据错位导致的闪烁。 */
-function changed() {
-  emit("changed");
 }
 </script>
 
@@ -721,166 +230,35 @@ function changed() {
     </p>
     <template v-if="filtered.length || filteredUnmanaged.length">
       <div class="divide-y rounded-md border">
-        <div
+        <ManagedResourceRow
           v-for="resource in filtered"
           :key="resource.id"
-          class="flex flex-wrap items-center gap-2 px-3 py-2.5"
-        >
-          <button
-            v-if="kind === 'skills' || records(resource.id).length"
-            class="min-w-0 flex-1 text-left hover:text-primary"
-            :title="t('projectAi.preview')"
-            @click="preview(resource)"
-          >
-            <p class="truncate text-xs font-medium">{{ resource.name }}</p>
-            <p v-if="resource.description" class="mt-1 truncate text-xs text-muted-foreground">
-              {{ resource.description }}
-            </p>
-            <p
-              v-if="resource.sourceDirs && resource.sourceDirs.length > 1"
-              class="mt-1 truncate font-mono text-[10px] text-muted-foreground"
-              :title="resource.sourceDirs.join('\n')"
-            >
-              {{ resource.sourceDirs.join(" · ") }}
-            </p>
-          </button>
-          <div v-else class="min-w-0 flex-1">
-            <p class="truncate text-xs font-medium">{{ resource.name }}</p>
-            <p v-if="resource.description" class="mt-1 truncate text-xs text-muted-foreground">
-              {{ resource.description }}
-            </p>
-            <p
-              v-if="resource.sourceDirs && resource.sourceDirs.length > 1"
-              class="mt-1 truncate font-mono text-[10px] text-muted-foreground"
-              :title="resource.sourceDirs.join('\n')"
-            >
-              {{ resource.sourceDirs.join(" · ") }}
-            </p>
-          </div>
-          <div class="flex flex-wrap gap-1">
-            <button
-              v-for="agent in visibleAgents(resource)"
-              :key="agent.id"
-              class="flex size-6 items-center justify-center rounded border"
-              :class="chipClass(resource, agent)"
-              :disabled="!selectable(resource, agent)"
-              :title="chipTitle(resource, agent)"
-              @click="toggleAgent(resource, agent)"
-            >
-              <Icon
-                v-if="agentBrandIcon(agent.id)"
-                :icon="agentBrandIcon(agent.id)!"
-                class="size-3.5"
-              />
-              <Bot v-else class="size-3.5" />
-            </button>
-            <span
-              v-if="!visibleAgents(resource).length"
-              class="text-[10px] text-muted-foreground"
-              >{{ t("projectAi.noAgents") }}</span
-            >
-          </div>
-          <Button
-            v-if="repairableRecords(resource.id).length"
-            variant="outline"
-            size="sm"
-            class="h-7 px-2 text-xs text-amber-600 hover:text-amber-600 dark:text-amber-400 dark:hover:text-amber-400"
-            :title="t('projectAi.repairHint')"
-            @click="repairResource = resource"
-            ><Wrench class="size-3.5" />{{ t("projectAi.repair") }}</Button
-          >
-          <Button
-            v-if="localImportTarget(resource)"
-            variant="outline"
-            size="sm"
-            class="h-7 px-2 text-xs"
-            :disabled="importing === resource.id"
-            :title="t('projectAi.importHint')"
-            @click="importLocal(resource)"
-            ><LoaderCircle v-if="importing === resource.id" class="size-3.5 animate-spin" /><Import
-              v-else
-              class="size-3.5"
-            />{{ t("projectAi.import") }}</Button
-          >
-          <Button
-            variant="ghost"
-            size="icon"
-            class="size-7 text-destructive hover:text-destructive"
-            :title="t('projectAi.remove')"
-            @click="removeTargets = [resource]"
-            ><Trash2 class="size-3.5"
-          /></Button>
-        </div>
-        <div
+          :resource="resource"
+          :kind="kind"
+          :targets="targets"
+          :records="records(resource.id)"
+          :hidden-agents="settings.hiddenResourceAgents"
+          :importing="importing"
+          @preview="preview(resource)"
+          @toggle-agent="(agent) => toggleAgent(resource, agent)"
+          @repair="repairResource = resource"
+          @import-local="importLocal(resource)"
+          @remove="removeTargets = [resource]"
+        />
+        <UnmanagedResourceRow
           v-for="item in filteredUnmanaged"
           :key="item.key"
-          class="flex flex-wrap items-center gap-2 px-3 py-2.5"
-        >
-          <button
-            v-if="kind === 'skills'"
-            class="min-w-0 flex-1 text-left hover:text-primary"
-            :title="t('projectAi.preview')"
-            @click="previewUnmanaged(item)"
-          >
-            <p class="truncate text-xs font-medium">{{ item.name }}</p>
-            <p v-if="item.description" class="mt-1 truncate text-xs text-muted-foreground">
-              {{ item.description }}
-            </p>
-            <p v-else class="mt-1 truncate font-mono text-[10px] text-muted-foreground">
-              {{ item.path }}
-            </p>
-          </button>
-          <div v-else class="min-w-0 flex-1">
-            <p class="truncate text-xs font-medium">{{ item.name }}</p>
-            <p class="mt-1 truncate font-mono text-[10px] text-muted-foreground">{{ item.path }}</p>
-          </div>
-          <div class="flex flex-wrap gap-1">
-            <button
-              v-for="agent in unmanagedChips()"
-              :key="agent.id"
-              class="flex size-6 items-center justify-center rounded border"
-              :class="
-                unmanagedOwnerSource(item, agent.id)
-                  ? 'border-primary/40 bg-primary/10 text-primary'
-                  : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-              "
-              :disabled="!!toggling || !!unmanagedOwnerSource(item, agent.id)"
-              :title="unmanagedChipTitle(item, agent)"
-              @click="configureUnmanaged(item, agent)"
-            >
-              <LoaderCircle
-                v-if="toggling === `${item.key}:${agent.id}`"
-                class="size-3.5 animate-spin"
-              />
-              <Icon
-                v-else-if="agentBrandIcon(agent.id)"
-                :icon="agentBrandIcon(agent.id)!"
-                class="size-3.5"
-              />
-              <Bot v-else class="size-3.5" />
-            </button>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            class="h-7 px-2 text-xs"
-            :disabled="importing === item.key"
-            :title="t('projectAi.importHint')"
-            @click="importUnmanaged(item)"
-            ><LoaderCircle v-if="importing === item.key" class="size-3.5 animate-spin" /><Import
-              v-else
-              class="size-3.5"
-            />{{ t("projectAi.import") }}</Button
-          >
-          <Button
-            variant="ghost"
-            size="icon"
-            class="size-7 text-destructive hover:text-destructive"
-            :title="t('projectAi.remove')"
-            @click="unmanagedRemoveTarget = item"
-            ><Trash2 class="size-3.5"
-          /></Button>
-        </div>
+          :item="item"
+          :kind="kind"
+          :targets="targets"
+          :hidden-agents="settings.hiddenResourceAgents"
+          :toggling="toggling"
+          :importing="importing"
+          @preview="previewUnmanaged(item)"
+          @configure="(agent) => configureUnmanaged(item, agent)"
+          @import="importUnmanaged(item)"
+          @remove="unmanagedRemoveTarget = item"
+        />
       </div>
     </template>
     <ProjectResourceAddDialog
@@ -955,95 +333,14 @@ function changed() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-    <Dialog
-      :open="!!repairResource"
-      @update:open="
-        (value) => {
-          if (!repairing && !value) repairResource = null;
-        }
-      "
-    >
-      <DialogContent class="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{{
-            t("projectAi.repairTitle", { name: repairResource?.name })
-          }}</DialogTitle>
-          <DialogDescription>{{ t("projectAi.repairHint") }}</DialogDescription>
-        </DialogHeader>
-        <div class="divide-y rounded-md border">
-          <div
-            v-for="record in repairRecords"
-            :key="record.agentId"
-            class="flex flex-wrap items-center gap-2 px-3 py-2.5"
-          >
-            <span
-              class="flex size-6 shrink-0 items-center justify-center rounded border text-muted-foreground"
-            >
-              <Icon
-                v-if="agentBrandIcon(record.agentId)"
-                :icon="agentBrandIcon(record.agentId)!"
-                class="size-3.5"
-              />
-              <Bot v-else class="size-3.5" />
-            </span>
-            <div class="min-w-0 flex-1">
-              <p class="truncate text-xs font-medium">
-                {{ repairAgentName(record.agentId) }} ·
-                <span class="text-amber-600 dark:text-amber-400">{{
-                  t(`projectAi.states.${record.status}`)
-                }}</span>
-              </p>
-              <p class="mt-1 truncate font-mono text-[10px] text-muted-foreground">
-                {{ record.path }}
-              </p>
-            </div>
-            <div class="flex gap-1">
-              <Button
-                v-if="record.status === 'update' || record.status === 'missing'"
-                size="sm"
-                class="h-7 px-2 text-xs"
-                :disabled="!!repairing"
-                :title="t('projectAi.applyUpdateHint')"
-                @click="applyUpdate(record)"
-                ><LoaderCircle
-                  v-if="repairing === `${record.resourceId}:${record.agentId}:update`"
-                  class="size-3.5 animate-spin"
-                />{{ t("projectAi.applyUpdate") }}</Button
-              >
-              <Button
-                v-if="record.status === 'modified'"
-                size="sm"
-                class="h-7 px-2 text-xs"
-                :disabled="!!repairing"
-                :title="t('projectAi.forceApplyHint')"
-                @click="repairRecord(record, 'reapply')"
-                ><LoaderCircle
-                  v-if="repairing === `${record.resourceId}:${record.agentId}:reapply`"
-                  class="size-3.5 animate-spin"
-                />{{ t("projectAi.forceApply") }}</Button
-              >
-              <Button
-                v-if="record.status === 'modified' || record.status === 'conflict'"
-                variant="outline"
-                size="sm"
-                class="h-7 px-2 text-xs"
-                :disabled="!!repairing"
-                :title="t('projectAi.detachHint')"
-                @click="repairRecord(record, 'detach')"
-                ><LoaderCircle
-                  v-if="repairing === `${record.resourceId}:${record.agentId}:detach`"
-                  class="size-3.5 animate-spin"
-                />{{ t("projectAi.detach") }}</Button
-              >
-            </div>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="ghost" :disabled="!!repairing" @click="repairResource = null">{{
-            t("common.cancel")
-          }}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <RepairDialog
+      :resource="repairResource"
+      :records="repairRecords"
+      :repairing="repairing"
+      :agent-name="repairAgentName"
+      @close="repairResource = null"
+      @apply-update="applyUpdate"
+      @repair="repairRecord"
+    />
   </section>
 </template>

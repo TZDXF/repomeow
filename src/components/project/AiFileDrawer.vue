@@ -18,19 +18,21 @@ import {
 import { Markdown } from "vue-stream-markdown";
 import { Button } from "@/components/ui/button";
 import ScrollArea from "@/components/common/ScrollArea.vue";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { useMarkdownTranslation } from "@/composables/useMarkdownTranslation";
 import CodeViewer from "@/components/files/CodeViewer.vue";
 import { cmd } from "@/lib/tauri";
 import { joinPath } from "@/lib/path";
 import { FILE_REF_CLASS, linkifyFileRefs, resolveRefPath } from "@/lib/ai-file-refs";
 import { formatTokenCount } from "@/lib/chat";
-import { getCachedTranslation, putCachedTranslation } from "@/lib/translation-cache";
 import { useSettingsStore } from "@/stores/settings";
 import type { FilePreview } from "@/types";
 
 /**
  * AI 面板的文件右侧抽屉:经 read_file_preview 读取项目内文件,
  * Markdown 默认渲染态(可切编辑),其余文件代码态;编辑经 CodeViewer
- * editable 模式 + save_text_file 落盘,Esc/遮罩关闭(编辑中有改动时 Esc 不生效)。
+ * editable 模式 + save_text_file 落盘;基于 Dialog 获得模态语义/焦点圈定/焦点恢复,
+ * Esc/外点关闭(有未保存改动或保存中时守卫拦截不关闭)。
  * 渲染态正文里的 `@path/to/file` 引用会被 linkify 成按钮,点击经 navigate
  * 事件让父组件把抽屉切到被引用文件(解析相对当前文件所在目录)。
  * Markdown 渲染态头部提供「翻译」按钮(经后端 ai_translate_markdown 按界面语言
@@ -150,23 +152,20 @@ function requestClose() {
   emit("close");
 }
 
-function onKeydown(e: KeyboardEvent) {
-  if (e.key === "Escape" && open.value) {
-    e.stopPropagation();
-    requestClose();
-  }
+/** Dialog open 受控于 relPath;关闭请求(Esc/外点/右上角)统一走 requestClose,不直接改 open */
+function onDialogOpenUpdate(value: boolean) {
+  if (!value) requestClose();
 }
-watch(
-  open,
-  (v) => {
-    // capture:先于 CodeViewer 内的编辑器键处理拿到 Esc
-    if (v) window.addEventListener("keydown", onKeydown, true);
-    else window.removeEventListener("keydown", onKeydown, true);
-  },
-  { immediate: true },
-);
+
+/** Esc / 外点守卫:有未保存改动或保存中时阻止 Dialog 默认关闭 */
+function onEscapeKeyDown(e: KeyboardEvent) {
+  if (saving.value || isDirty()) e.preventDefault();
+}
+function onOutsideInteract(e: Event) {
+  if (saving.value || isDirty()) e.preventDefault();
+}
+
 onBeforeUnmount(() => {
-  window.removeEventListener("keydown", onKeydown, true);
   for (const cleanup of drawerResizeCleanups) cleanup();
   drawerResizeCleanups = [];
   resetTranslation();
@@ -218,95 +217,24 @@ async function openExternal() {
   }
 }
 
-// ── Markdown 翻译(渲染态专属;走设置页默认模型,经后端 ai_translate_markdown) ──
-const translating = ref(false);
-const translatedText = ref<string | null>(null);
-const showTranslated = ref(false);
-/** 当前在途翻译的 runId(ai_cancel_run 的取消句柄);空 = 无在途请求 */
-let translateRunId = "";
-/** 翻译轮次序号:取消/换文件后自增,使仍在途的缓存查询结果作废 */
-let translateSeq = 0;
+// ── Markdown 翻译(渲染态专属;后端 ai_translate_markdown 优先用翻译专用配置、
+//  未配置回退设置页默认模型;与技能预览/远程审计共用 useMarkdownTranslation)──
+const translation = useMarkdownTranslation({
+  getIdentity: () => props.relPath,
+  getText: () => preview.value?.text ?? null,
+  getLanguage: () => settingsStore.language,
+});
+const {
+  translating,
+  translatedText,
+  showTranslated,
+  toggle: toggleTranslate,
+  retranslate,
+  reset: resetTranslation,
+} = translation;
 
 /** 渲染态正文:译文激活时展示译文,否则原文 */
-const displayContent = computed(() =>
-  showTranslated.value && translatedText.value !== null
-    ? translatedText.value
-    : (preview.value?.text ?? ""),
-);
-
-function resetTranslation() {
-  translateSeq += 1;
-  if (translateRunId) {
-    void cmd<void>("ai_cancel_run", { runId: translateRunId }).catch(() => {});
-    translateRunId = "";
-  }
-  translating.value = false;
-  translatedText.value = null;
-  showTranslated.value = false;
-}
-
-async function toggleTranslate() {
-  // 翻译中再点 = 取消;已有译文 = 原文/译文切换
-  if (translating.value) {
-    resetTranslation();
-    return;
-  }
-  if (showTranslated.value) {
-    showTranslated.value = false;
-    return;
-  }
-  if (translatedText.value !== null) {
-    showTranslated.value = true;
-    return;
-  }
-  const rel = props.relPath;
-  const text = preview.value?.text;
-  if (!rel || !text) return;
-  await runTranslation(rel, text, false);
-}
-
-/** 重新翻译:跳过缓存强制再调 AI,成功后覆盖缓存 */
-async function retranslate() {
-  const rel = props.relPath;
-  const text = preview.value?.text;
-  if (!rel || !text || translating.value) return;
-  await runTranslation(rel, text, true);
-}
-
-async function runTranslation(rel: string, text: string, skipCache: boolean) {
-  const seq = ++translateSeq;
-  if (!skipCache) {
-    // 先查 IndexedDB 缓存(键 = 界面语言 + 正文内容 hash,保留 30 天):
-    // 命中直接展示、不再调 AI,未命中才走后端翻译并回填缓存
-    const cached = await getCachedTranslation(text, settingsStore.language);
-    if (seq !== translateSeq || props.relPath !== rel) return;
-    if (cached !== null) {
-      translatedText.value = cached;
-      showTranslated.value = true;
-      return;
-    }
-  }
-  translating.value = true;
-  const runId = `translate-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  translateRunId = runId;
-  try {
-    const result = await cmd<string | null>("ai_translate_markdown", {
-      request: { text, language: settingsStore.language, runId },
-    });
-    // 在途期间切换文件/关闭抽屉:丢弃过期结果(取消后返回 null,同样忽略)
-    if (props.relPath !== rel || result === null) return;
-    translatedText.value = result;
-    showTranslated.value = true;
-    void putCachedTranslation(text, settingsStore.language, result);
-  } catch (e) {
-    toast.error(String(e));
-  } finally {
-    if (translateRunId === runId) {
-      translateRunId = "";
-      translating.value = false;
-    }
-  }
-}
+const displayContent = computed(() => translation.displayContent(preview.value?.text ?? ""));
 
 // ── 正文 @ 文件引用 linkify(渲染态 Markdown 专属) ──────────────────────────
 const mdBody = ref<HTMLElement | null>(null);
@@ -331,179 +259,163 @@ function onMarkdownClick(e: MouseEvent) {
 </script>
 
 <template>
-  <Teleport to="body">
-    <Transition name="ai-drawer">
-      <div v-if="open" class="fixed inset-0 z-40" @click="requestClose">
-        <div class="absolute inset-0 bg-black/40" />
-        <!--
-          抽屉是 teleport 到 body 的 fixed 层,顶部须避让 TitleBar(h-9, z-[60] 在其上),
-          否则抽屉头部会被标题栏盖住
-        -->
-        <aside
-          class="absolute bottom-0 right-0 top-9 flex max-w-[92vw] flex-col border-l border-t bg-background shadow-xl"
-          :style="{ width: `${drawerWidth}px` }"
-          @click.stop
+  <Dialog :open="open" @update:open="onDialogOpenUpdate">
+    <!--
+      复用 Dialog(reka-ui)获得模态语义/焦点圈定/焦点恢复,视觉仍是右侧抽屉:
+      顶部避让 TitleBar(h-9,z-[60] 在弹层之上)。Esc/外点由守卫拦截——
+      有未保存改动或保存中时 preventDefault;可关闭时经 update:open 走 requestClose。
+    -->
+    <DialogContent
+      :show-close-button="false"
+      class="top-9 right-0 bottom-0 left-auto flex max-w-[92vw] translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-l border-t bg-background p-0 shadow-xl sm:max-w-[92vw]"
+      :style="{ width: `${drawerWidth}px` }"
+      @escape-key-down="onEscapeKeyDown"
+      @pointer-down-outside="onOutsideInteract"
+      @interact-outside="onOutsideInteract"
+    >
+      <DialogTitle class="sr-only">{{ relPath }}</DialogTitle>
+      <DialogDescription class="sr-only">{{ relPath }}</DialogDescription>
+      <div
+        class="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize touch-none transition-colors hover:bg-primary/50"
+        @pointerdown="startDrawerResize"
+      />
+      <header class="flex shrink-0 items-center gap-2 border-b px-4 py-3">
+        <FileCode class="h-4 w-4 shrink-0 text-muted-foreground" />
+        <span class="min-w-0 flex-1 truncate font-mono text-xs" :title="relPath ?? ''">
+          {{ relPath }}
+        </span>
+        <!-- token 数仅对 Markdown 文档展示(指令/SKILL.md 等喂给 AI 的场景) -->
+        <span
+          v-if="isMarkdown && preview?.tokenCount !== null && preview?.tokenCount !== undefined"
+          class="shrink-0 text-xs tabular-nums text-muted-foreground"
+          :title="
+            descriptionTokenCount !== null && descriptionTokenCount !== undefined
+              ? t('aiAssets.skillTokenUsageFull', {
+                  description: descriptionTokenCount,
+                  total: preview.tokenCount,
+                })
+              : t('aiAssets.drawer.fileTokensFull', { count: preview.tokenCount })
+          "
         >
-          <div
-            class="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize touch-none transition-colors hover:bg-primary/50"
-            @pointerdown="startDrawerResize"
-          />
-          <header class="flex shrink-0 items-center gap-2 border-b px-4 py-3">
-            <FileCode class="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span class="min-w-0 flex-1 truncate font-mono text-xs" :title="relPath ?? ''">
-              {{ relPath }}
-            </span>
-            <!-- token 数仅对 Markdown 文档展示(指令/SKILL.md 等喂给 AI 的场景) -->
-            <span
-              v-if="isMarkdown && preview?.tokenCount !== null && preview?.tokenCount !== undefined"
-              class="shrink-0 text-xs tabular-nums text-muted-foreground"
-              :title="
-                descriptionTokenCount !== null && descriptionTokenCount !== undefined
-                  ? t('aiAssets.skillTokenUsageFull', {
-                      description: descriptionTokenCount,
-                      total: preview.tokenCount,
-                    })
-                  : t('aiAssets.drawer.fileTokensFull', { count: preview.tokenCount })
-              "
-            >
-              {{
-                descriptionTokenCount !== null && descriptionTokenCount !== undefined
-                  ? t("aiAssets.skillTokenUsage", {
-                      description: formatTokenCount(descriptionTokenCount),
-                      total: formatTokenCount(preview.tokenCount),
-                    })
-                  : t("aiAssets.drawer.fileTokens", { count: formatTokenCount(preview.tokenCount) })
-              }}
-            </span>
-            <Button
-              v-if="isMarkdown && !editing && translatedText !== null"
-              size="sm"
-              variant="ghost"
-              :disabled="translating"
-              :title="t('aiAssets.drawer.retranslate')"
-              @click="retranslate"
-            >
-              <RefreshCw class="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              v-if="isMarkdown && !editing && preview?.text"
-              size="sm"
-              variant="ghost"
-              class="text-xs"
-              :title="
-                translating
-                  ? t('aiAssets.drawer.translateCancel')
-                  : showTranslated
-                    ? t('aiAssets.drawer.showOriginal')
-                    : t('aiAssets.drawer.translate')
-              "
-              @click="toggleTranslate"
-            >
-              <LoaderCircle v-if="translating" class="h-3.5 w-3.5 animate-spin" />
-              <Languages v-else class="h-3.5 w-3.5" />
-              {{
-                translating
-                  ? t("aiAssets.drawer.translating")
-                  : showTranslated
-                    ? t("aiAssets.drawer.showOriginal")
-                    : t("aiAssets.drawer.translate")
-              }}
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              :title="t('aiAssets.drawer.externalOpen')"
-              @click="openExternal"
-            >
-              <ExternalLink class="h-4 w-4" />
-            </Button>
-            <Button
-              v-if="!editing && !readOnly"
-              size="sm"
-              variant="outline"
-              :disabled="!preview || preview.text === null"
-              @click="startEdit"
-            >
-              <Pencil class="h-3.5 w-3.5" />
-              {{ t("aiAssets.drawer.edit") }}
-            </Button>
-            <template v-else-if="editing && !readOnly">
-              <Button size="sm" variant="ghost" :disabled="saving" @click="cancelEdit">
-                <Undo2 class="h-3.5 w-3.5" />
-                {{ t("common.cancel") }}
-              </Button>
-              <Button size="sm" :disabled="saving" @click="save">
-                <LoaderCircle v-if="saving" class="h-3.5 w-3.5 animate-spin" />
-                <Save v-else class="h-3.5 w-3.5" />
-                {{ saving ? t("common.saving") : t("common.save") }}
-              </Button>
-            </template>
-            <Button size="sm" variant="ghost" :title="t('common.close')" @click="requestClose">
-              <X class="h-4 w-4" />
-            </Button>
-          </header>
+          {{
+            descriptionTokenCount !== null && descriptionTokenCount !== undefined
+              ? t("aiAssets.skillTokenUsage", {
+                  description: formatTokenCount(descriptionTokenCount),
+                  total: formatTokenCount(preview.tokenCount),
+                })
+              : t("aiAssets.drawer.fileTokens", { count: formatTokenCount(preview.tokenCount) })
+          }}
+        </span>
+        <Button
+          v-if="isMarkdown && !editing && translatedText !== null"
+          size="sm"
+          variant="ghost"
+          :disabled="translating"
+          :title="t('aiAssets.drawer.retranslate')"
+          @click="retranslate"
+        >
+          <RefreshCw class="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          v-if="isMarkdown && !editing && preview?.text"
+          size="sm"
+          variant="ghost"
+          class="text-xs"
+          :title="
+            translating
+              ? t('aiAssets.drawer.translateCancel')
+              : showTranslated
+                ? t('aiAssets.drawer.showOriginal')
+                : t('aiAssets.drawer.translate')
+          "
+          @click="toggleTranslate"
+        >
+          <LoaderCircle v-if="translating" class="h-3.5 w-3.5 animate-spin" />
+          <Languages v-else class="h-3.5 w-3.5" />
+          {{
+            translating
+              ? t("aiAssets.drawer.translating")
+              : showTranslated
+                ? t("aiAssets.drawer.showOriginal")
+                : t("aiAssets.drawer.translate")
+          }}
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          :title="t('aiAssets.drawer.externalOpen')"
+          @click="openExternal"
+        >
+          <ExternalLink class="h-4 w-4" />
+        </Button>
+        <Button
+          v-if="!editing && !readOnly"
+          size="sm"
+          variant="outline"
+          :disabled="!preview || preview.text === null"
+          @click="startEdit"
+        >
+          <Pencil class="h-3.5 w-3.5" />
+          {{ t("aiAssets.drawer.edit") }}
+        </Button>
+        <template v-else-if="editing && !readOnly">
+          <Button size="sm" variant="ghost" :disabled="saving" @click="cancelEdit">
+            <Undo2 class="h-3.5 w-3.5" />
+            {{ t("common.cancel") }}
+          </Button>
+          <Button size="sm" :disabled="saving" @click="save">
+            <LoaderCircle v-if="saving" class="h-3.5 w-3.5 animate-spin" />
+            <Save v-else class="h-3.5 w-3.5" />
+            {{ saving ? t("common.saving") : t("common.save") }}
+          </Button>
+        </template>
+        <Button size="sm" variant="ghost" :title="t('common.close')" @click="requestClose">
+          <X class="h-4 w-4" />
+        </Button>
+      </header>
 
-          <div v-if="loading" class="flex flex-1 items-center justify-center">
-            <LoaderCircle class="h-5 w-5 animate-spin text-muted-foreground" />
-          </div>
-          <p
-            v-else-if="!preview || preview.text === null"
-            class="flex flex-1 items-center justify-center text-sm text-muted-foreground"
-          >
-            {{ t("files.binary") }}
-          </p>
-          <!-- 编辑态一律走 CodeViewer(editable);非编辑态 Markdown 渲染、其余代码只读 -->
-          <div v-else-if="editing || !isMarkdown" class="flex min-h-0 flex-1 flex-col">
-            <p
-              v-if="preview.truncated"
-              class="shrink-0 border-b px-4 py-1 text-xs text-muted-foreground"
-            >
-              {{ t("files.truncated") }}
-            </p>
-            <CodeViewer
-              :key="`${relPath}:${resetSeq}`"
-              ref="viewer"
-              :text="preview.text"
-              :path="relPath ?? ''"
-              :wrap="false"
-              :editable="editing"
-            />
-          </div>
-          <ScrollArea v-else class="min-h-0 flex-1">
-            <div ref="mdBody" class="px-6 py-4" @click="onMarkdownClick">
-              <Markdown
-                mode="static"
-                :content="displayContent"
-                :locale="settingsStore.language"
-                :theme-element="themeElement"
-              />
-            </div>
-          </ScrollArea>
-        </aside>
+      <div v-if="loading" class="flex flex-1 items-center justify-center">
+        <LoaderCircle class="h-5 w-5 animate-spin text-muted-foreground" />
       </div>
-    </Transition>
-  </Teleport>
+      <p
+        v-else-if="!preview || preview.text === null"
+        class="flex flex-1 items-center justify-center text-sm text-muted-foreground"
+      >
+        {{ t("files.binary") }}
+      </p>
+      <!-- 编辑态一律走 CodeViewer(editable);非编辑态 Markdown 渲染、其余代码只读 -->
+      <div v-else-if="editing || !isMarkdown" class="flex min-h-0 flex-1 flex-col">
+        <p
+          v-if="preview.truncated"
+          class="shrink-0 border-b px-4 py-1 text-xs text-muted-foreground"
+        >
+          {{ t("files.truncated") }}
+        </p>
+        <CodeViewer
+          :key="`${relPath}:${resetSeq}`"
+          ref="viewer"
+          :text="preview.text"
+          :path="relPath ?? ''"
+          :wrap="false"
+          :editable="editing"
+        />
+      </div>
+      <ScrollArea v-else class="min-h-0 flex-1">
+        <div ref="mdBody" class="px-6 py-4" @click="onMarkdownClick">
+          <Markdown
+            mode="static"
+            :content="displayContent"
+            :locale="settingsStore.language"
+            :theme-element="themeElement"
+          />
+        </div>
+      </ScrollArea>
+    </DialogContent>
+  </Dialog>
 </template>
 
 <style scoped>
 :deep(.stream-markdown [data-stream-markdown="code-block-header"]) {
   background-color: var(--color-muted);
-}
-
-.ai-drawer-enter-active,
-.ai-drawer-leave-active {
-  transition: opacity 0.15s ease;
-}
-.ai-drawer-enter-active aside,
-.ai-drawer-leave-active aside {
-  transition: transform 0.15s ease;
-}
-.ai-drawer-enter-from,
-.ai-drawer-leave-to {
-  opacity: 0;
-}
-.ai-drawer-enter-from aside,
-.ai-drawer-leave-to aside {
-  transform: translateX(100%);
 }
 </style>

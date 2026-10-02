@@ -20,16 +20,21 @@
 //! - `tools/`      ← harness/tools/**
 //! - `utils/`      ← harness/utils/**(truncate/shell-output)
 //! - `env.rs`      ← harness/env/nodejs.ts(TokioEnv,tokio::fs + tokio::process)
-//! - `agent_harness.rs` ← harness/agent-harness.ts(公开契约;运行方法已接线)
+//! - `agent_harness.rs` ← harness/agent-harness.ts(公开契约 + 状态容器 + 队列/观测)
+//! - `run.rs`       ← agent-harness.ts 的 prompt 运行管线(本仓库按阶段拆分)
+//! - `compaction_runner.rs` ← compact/autoCompaction 执行(自 agent_harness 拆出)
+//! - `lifecycle.rs` ← create 崩溃恢复归约/resume/abort(自 agent_harness 拆出)
 //! - `runtime.rs`   ← 本仓库扩展:AgentHarness 运行时(prompt/abort/队列/事件)
 //! - `uuid.rs`     ← 蓝本 `@earendil-works/pi-ai` 的 uuidv7(蓝本依赖,本地补实现)
 
-// 说明:`agent` 模块当前是 crate 内部消费(harness 的公开 API 面尚未被上层
-// 接线,与蓝本 WIP 状态一致),dead_code 允许避免对刻意保留的契约面报警。
+// 说明:`agent` 模块已由 commands/ai 消费(wiki 生成/资源库安全扫描经
+// harness_support.rs 组装 AgentHarness);其余刻意保留的契约面(对齐蓝本)
+// 尚未接线,dead_code 允许避免报警。
 #[allow(dead_code)]
 pub mod agent_harness;
 #[allow(dead_code)]
 pub mod compaction;
+pub(crate) mod compaction_runner;
 pub mod context;
 #[allow(dead_code)]
 pub mod env;
@@ -39,6 +44,7 @@ pub mod errors;
 pub mod events;
 pub mod execution;
 pub mod hooks;
+pub(crate) mod lifecycle;
 #[allow(dead_code)]
 pub mod messages;
 #[allow(dead_code)]
@@ -49,6 +55,7 @@ pub mod reducer;
 pub mod restricted_env;
 #[allow(dead_code)]
 pub mod result;
+pub(crate) mod run;
 #[allow(dead_code)]
 pub mod runtime;
 #[allow(dead_code)]

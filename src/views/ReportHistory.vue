@@ -3,23 +3,12 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { save } from "@tauri-apps/plugin-dialog";
-import {
-  CalendarIcon,
-  ChevronRight,
-  Download,
-  FileText,
-  FolderGit2,
-  Loader2,
-  Search,
-  Tags,
-  Trash2,
-} from "@lucide/vue";
+import { CalendarIcon, Download, FileText, Loader2, Tags } from "@lucide/vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import { Markdown, type ControlsConfig } from "vue-stream-markdown";
+import type { ControlsConfig } from "vue-stream-markdown";
 import { Badge } from "@/components/ui/badge";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { Button } from "@/components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,9 +17,11 @@ import {
 import ScrollArea from "@/components/common/ScrollArea.vue";
 import DailyReportDialog from "@/components/report/DailyReportDialog.vue";
 import ReportCalendar from "@/components/report/ReportCalendar.vue";
+import ProjectFilterSelect from "@/components/report/history/ProjectFilterSelect.vue";
+import ReportCard from "@/components/report/history/ReportCard.vue";
 import TagCheckList from "@/components/tags/TagCheckList.vue";
 import { cmd, onListen } from "@/lib/tauri";
-import { formatCommitTime, formatDate, formatLocalDateTime, parseDateStr } from "@/lib/format";
+import { formatDate, formatLocalDateTime, parseDateStr } from "@/lib/format";
 import { localizedHolidayName } from "@/lib/holidays";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
 import {
@@ -107,7 +98,6 @@ const viewMode = ref<ReportViewMode>("day");
 const filterProjectIds = ref<number[]>([]);
 const filterTagIds = ref<number[]>([]);
 const filterType = ref<TypeFilter>("all");
-const projectKeyword = ref("");
 
 /** 当前选中范围(闭区间 "YYYY-MM-DD"):日视角为单日,周视角为周一至周日,月视角为整月 */
 const selectedRange = computed<{ from: string; to: string } | null>(() => {
@@ -133,14 +123,6 @@ const selectedRange = computed<{ from: string; to: string } | null>(() => {
 /** 传给后端的类型过滤参数("all" 时不过滤) */
 const reportTypeParam = computed(() => (filterType.value === "all" ? null : filterType.value));
 
-const filteredProjects = computed(() => {
-  const kw = projectKeyword.value.trim().toLowerCase();
-  if (!kw) return activeProjects.value;
-  return activeProjects.value.filter(
-    (p) => p.name.toLowerCase().includes(kw) || p.path.toLowerCase().includes(kw),
-  );
-});
-
 function toggleProjectFilter(id: number) {
   filterProjectIds.value = filterProjectIds.value.includes(id)
     ? filterProjectIds.value.filter((x) => x !== id)
@@ -156,11 +138,6 @@ function toggleTagFilter(id: number) {
 /** 已选标签对象列表 */
 const selectedTags = computed(() =>
   tagsStore.tags.filter((t) => filterTagIds.value.includes(t.id)),
-);
-
-/** 已选项目对象列表 */
-const selectedProjects = computed(() =>
-  activeProjects.value.filter((p) => filterProjectIds.value.includes(p.id)),
 );
 
 const reports = ref<ReportHistoryDetail[]>([]);
@@ -195,7 +172,6 @@ onUnmounted(() => {
 // ── expand state ────────────────────────────────────────────────────────
 
 const expandedReportId = ref<number | null>(null);
-const commitOpen = ref<Record<string, boolean>>({});
 
 /** 当前展开的报告;周报时在日历上高亮整个时间范围 */
 const highlightRange = computed(() => {
@@ -313,7 +289,6 @@ async function loadReports(from: string, to: string) {
   const token = ++reportsRequestToken;
   reportsLoading.value = true;
   expandedReportId.value = null;
-  commitOpen.value = {};
   try {
     const result = await cmd<ReportHistoryDetail[]>("get_reports_by_range", {
       dateFrom: from,
@@ -485,97 +460,16 @@ watch(
                 class="h-7 flex-1 px-2 text-xs"
                 @click="filterType = opt.value"
               >
-                <span
-                  v-if="opt.dotClass"
-                  class="h-1.5 w-1.5 rounded-full"
-                  :class="opt.dotClass"
-                />
+                <span v-if="opt.dotClass" class="h-1.5 w-1.5 rounded-full" :class="opt.dotClass" />
                 {{ t(opt.labelKey) }}
               </Button>
             </div>
           </div>
-          <div>
-            <label class="mb-1 block text-[11px] text-muted-foreground">
-              {{ t("reportHistory.searchProject") }}
-            </label>
-            <DropdownMenu>
-              <DropdownMenuTrigger as-child>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  class="h-7 w-full justify-start gap-1.5 px-2 text-xs font-normal"
-                >
-                  <FolderGit2 class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  <span class="truncate">{{ t("reportHistory.searchProject") }}</span>
-                  <span
-                    v-if="filterProjectIds.length"
-                    class="ml-auto rounded-full bg-primary px-1.5 text-[11px] leading-4 text-primary-foreground"
-                    >{{ filterProjectIds.length }}</span
-                  >
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" class="w-52">
-                <div class="px-1 pb-1">
-                  <div class="relative">
-                    <Search
-                      class="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
-                    />
-                    <input
-                      v-model="projectKeyword"
-                      :placeholder="t('projects.home.searchPlaceholder')"
-                      class="h-7 w-full rounded-md border border-input bg-transparent pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
-                      @keydown="
-                        (e: KeyboardEvent) => {
-                          if (e.key !== 'Escape') e.stopPropagation();
-                        }
-                      "
-                    />
-                  </div>
-                </div>
-                <ScrollArea class="max-h-56">
-                  <div
-                    v-for="p in filteredProjects"
-                    :key="p.id"
-                    class="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
-                    @click="toggleProjectFilter(p.id)"
-                    @keydown.enter="toggleProjectFilter(p.id)"
-                  >
-                    <input
-                      type="checkbox"
-                      class="h-3.5 w-3.5 shrink-0 accent-primary"
-                      :checked="filterProjectIds.includes(p.id)"
-                      @click.stop
-                      @change="toggleProjectFilter(p.id)"
-                    />
-                    <span class="truncate">{{ p.name }}</span>
-                  </div>
-                  <p
-                    v-if="!activeProjects.length"
-                    class="px-2 py-1.5 text-xs text-muted-foreground"
-                  >
-                    {{ t("projects.home.emptyAll") }}
-                  </p>
-                  <p
-                    v-else-if="!filteredProjects.length"
-                    class="px-2 py-1.5 text-xs text-muted-foreground"
-                  >
-                    {{ t("projects.home.emptyFiltered") }}
-                  </p>
-                </ScrollArea>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <div v-if="selectedProjects.length" class="mt-1.5 flex flex-wrap gap-1">
-              <span
-                v-for="p in selectedProjects"
-                :key="p.id"
-                class="inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[11px] cursor-pointer hover:bg-accent"
-                @click="toggleProjectFilter(p.id)"
-              >
-                {{ p.name }}
-                <span class="ml-0.5 text-muted-foreground">&times;</span>
-              </span>
-            </div>
-          </div>
+          <ProjectFilterSelect
+            :projects="activeProjects"
+            :checked-ids="filterProjectIds"
+            @toggle="toggleProjectFilter"
+          />
           <div>
             <label class="mb-1 block text-[11px] text-muted-foreground">
               {{ t("reportHistory.filterTag") }}
@@ -728,134 +622,20 @@ watch(
               </div>
 
               <!-- report cards -->
-              <Collapsible
+              <ReportCard
                 v-for="r in reports"
                 :key="r.id"
+                :report="r"
                 :open="expandedReportId === r.id"
+                :exporting="exporting"
+                :controls="controls"
+                :theme-element="themeElement"
+                :locale="settings.language"
+                :before-download="beforeDownload"
                 @update:open="expandedReportId = $event ? r.id : null"
-                class="rounded-lg border"
-              >
-                <CollapsibleTrigger
-                  class="group flex w-full cursor-pointer items-center gap-2 px-3 py-2.5 text-left hover:bg-accent/50 rounded-t-lg"
-                  :class="expandedReportId !== r.id && 'rounded-b-lg'"
-                >
-                  <ChevronRight
-                    class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform"
-                    :class="{ 'rotate-90': expandedReportId === r.id }"
-                  />
-                  <span class="min-w-0 flex-1 truncate text-xs">
-                    <span class="font-medium"
-                      >{{ r.projectNames.slice(0, 3).join(", ")
-                      }}{{
-                        r.projectNames.length > 3 ? ` +${r.projectNames.length - 3}` : ""
-                      }}</span
-                    >
-                    <span
-                      class="ml-2 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-                    >
-                      {{ formatLocalDateTime(r.createdAt) }}
-                    </span>
-                  </span>
-                  <Badge
-                    variant="outline"
-                    class="text-[11px] shrink-0"
-                    :class="
-                      r.periodType === 'weekly'
-                        ? 'border-violet-500/40 bg-violet-500/10 text-violet-600 dark:text-violet-400'
-                        : ''
-                    "
-                  >
-                    {{
-                      t(
-                        r.periodType === "weekly"
-                          ? "reportHistory.typeWeekly"
-                          : "reportHistory.typeDaily",
-                      )
-                    }}
-                  </Badge>
-                  <Badge variant="secondary" class="text-[11px] shrink-0">
-                    {{ t("reportHistory.totalCommits", { count: r.totalCommits }) }}
-                  </Badge>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    class="h-5 w-5 shrink-0 text-muted-foreground"
-                    :title="t('reportHistory.export')"
-                    :disabled="exporting"
-                    @click.stop="exportReports([r])"
-                  >
-                    <Download class="h-3 w-3" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    class="h-5 w-5 shrink-0 text-muted-foreground hover:text-destructive"
-                    :title="t('common.delete')"
-                    @click.stop="deleteReport(r.id)"
-                  >
-                    <Trash2 class="h-3 w-3" />
-                  </Button>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div class="border-t">
-                    <!-- Markdown -->
-                    <div class="px-4 py-3 text-sm">
-                      <Markdown
-                        mode="static"
-                        :content="r.result"
-                        :controls="controls"
-                        :theme-element="themeElement"
-                        :locale="settings.language"
-                        :before-download="beforeDownload"
-                      />
-                    </div>
-                    <!-- Commits within this report -->
-                    <div v-if="r.commits.length" class="border-t">
-                      <Collapsible
-                        v-for="c in r.commits"
-                        :key="c.projectName"
-                        v-slot="{ open: expanded }"
-                        :open="commitOpen[`${r.id}-${c.projectName}`]"
-                        @update:open="commitOpen[`${r.id}-${c.projectName}`] = $event"
-                      >
-                        <CollapsibleTrigger
-                          class="flex w-full cursor-pointer items-center gap-1.5 px-4 py-1.5 text-left text-xs hover:bg-accent/50"
-                        >
-                          <ChevronRight
-                            class="h-3 w-3 shrink-0 text-muted-foreground transition-transform"
-                            :class="{ 'rotate-90': expanded }"
-                          />
-                          <span class="min-w-0 flex-1 truncate font-medium">{{
-                            c.projectName
-                          }}</span>
-                          <span class="shrink-0 text-muted-foreground">{{ c.commits.length }}</span>
-                        </CollapsibleTrigger>
-                        <CollapsibleContent>
-                          <ScrollArea class="ml-5 max-h-40 border-l">
-                            <div
-                              v-for="commit in c.commits"
-                              :key="commit.hash + commit.date"
-                              class="flex min-w-0 items-center gap-1.5 border-b px-2 py-0.5 text-[11px]"
-                            >
-                              <code
-                                class="shrink-0 rounded bg-muted px-1 py-px font-mono text-[10px]"
-                              >
-                                {{ commit.hash }}
-                              </code>
-                              <span class="min-w-0 flex-1 truncate" :title="commit.subject">
-                                {{ commit.subject }}
-                              </span>
-                              <span class="shrink-0 text-muted-foreground">
-                                {{ formatCommitTime(commit.date) }}
-                              </span>
-                            </div>
-                          </ScrollArea>
-                        </CollapsibleContent>
-                      </Collapsible>
-                    </div>
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
+                @export="exportReports([$event])"
+                @delete="deleteReport"
+              />
             </div>
           </ScrollArea>
         </template>

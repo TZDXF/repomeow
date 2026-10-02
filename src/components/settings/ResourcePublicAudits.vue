@@ -16,8 +16,7 @@ import MdLink from "@/components/markdown/MdLink.vue";
 import type { SupportedLocale } from "@/i18n";
 import { hasScheme, safeLinkHref } from "@/lib/markdown";
 import { formatAuditDate } from "@/lib/format";
-import { cmd } from "@/lib/tauri";
-import { getCachedTranslation, putCachedTranslation } from "@/lib/translation-cache";
+import { useMarkdownTranslation } from "@/composables/useMarkdownTranslation";
 import { useSettingsStore } from "@/stores/settings";
 
 const props = withDefaults(
@@ -50,29 +49,31 @@ const detailError = ref("");
 const detailCache = new Map<string, { markdown: string; auditedAt: string }>();
 const original = ref("");
 const auditedAt = ref("");
-const translated = ref("");
-const showTranslation = ref(false);
-const translating = ref(false);
 let listSeq = 0;
 let detailSeq = 0;
-let translationSeq = 0;
-let runId = "";
-function cancelTranslation() {
-  translationSeq++;
-  if (runId) {
-    void cmd("ai_cancel_run", { runId }).catch(() => {});
-  }
-  runId = "";
-  translating.value = false;
-}
+// 翻译状态机与技能预览页/AI 文件抽屉共用(取消/切换/卸载废弃旧结果)
+const translation = useMarkdownTranslation({
+  getIdentity: () =>
+    props.marketplaceId && selection.value !== "local"
+      ? `${props.marketplaceId}:${selection.value}`
+      : null,
+  getText: () => original.value || null,
+  getLanguage: () => settings.language,
+  runIdPrefix: "audit-translation",
+});
+const {
+  translating,
+  translatedText: translated,
+  showTranslated: showTranslation,
+  toggle: translate,
+  reset: resetTranslation,
+} = translation;
 function resetDetail() {
   detailSeq++;
-  cancelTranslation();
+  resetTranslation();
   detailCache.clear();
   selection.value = "local";
   original.value = "";
-  translated.value = "";
-  showTranslation.value = false;
   detailError.value = "";
   detailLoading.value = false;
 }
@@ -104,7 +105,7 @@ async function load() {
 }
 function selectLocal() {
   detailSeq++;
-  cancelTranslation();
+  resetTranslation();
   // 复位详情加载态:作废旧请求后其 finally 不再复位,不清理会卡死后续切换
   detailLoading.value = false;
   detailError.value = "";
@@ -115,10 +116,8 @@ async function selectAudit(audit: ResourcePublicAudit) {
     return;
   }
   detailSeq++;
-  cancelTranslation();
+  resetTranslation();
   selection.value = audit.provider;
-  translated.value = "";
-  showTranslation.value = false;
   detailError.value = "";
   // 已缓存的来源直接命中,切回不重复请求
   const cached = detailCache.get(audit.provider);
@@ -149,46 +148,6 @@ async function selectAudit(audit: ResourcePublicAudit) {
   } finally {
     if (seq === detailSeq) {
       detailLoading.value = false;
-    }
-  }
-}
-async function translate() {
-  if (translating.value || !original.value) {
-    return;
-  }
-  if (translated.value) {
-    showTranslation.value = !showTranslation.value;
-    return;
-  }
-  const seq = ++translationSeq;
-  const text = original.value;
-  const language = settings.language;
-  translating.value = true;
-  try {
-    const cached = await getCachedTranslation(text, language);
-    if (seq !== translationSeq) {
-      return;
-    }
-    runId = `audit-translation-${crypto.randomUUID()}`;
-    const result =
-      cached ??
-      (await cmd<string | null>("ai_translate_markdown", { request: { text, language, runId } }));
-    if (seq !== translationSeq || result === null) {
-      return;
-    }
-    translated.value = result;
-    showTranslation.value = true;
-    if (cached === null) {
-      void putCachedTranslation(text, language, result).catch(() => {});
-    }
-  } catch (e) {
-    if (seq === translationSeq) {
-      toast.error(String(e));
-    }
-  } finally {
-    if (seq === translationSeq) {
-      translating.value = false;
-      runId = "";
     }
   }
 }
@@ -254,12 +213,11 @@ const localStatusClass = computed(() => {
   }
 });
 watch(() => props.marketplaceId, load, { immediate: true });
+// 界面语言切换:旧语言译文作废,再点翻译按新语言重译
 watch(
   () => settings.language,
   () => {
-    cancelTranslation();
-    translated.value = "";
-    showTranslation.value = false;
+    resetTranslation();
   },
 );
 onBeforeUnmount(() => {
@@ -312,7 +270,7 @@ onBeforeUnmount(() => {
         <div v-else class="audit-markdown mt-3 text-sm leading-relaxed" @click="onMarkdownClick">
           <Markdown
             mode="static"
-            :content="showTranslation ? translated : original"
+            :content="showTranslation && translated ? translated : original"
             :theme-element="themeElement"
             :locale="language"
             :node-renderers="nodeRenderers"

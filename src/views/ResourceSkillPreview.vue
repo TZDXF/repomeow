@@ -15,33 +15,25 @@ import {
   ListPlus,
   RefreshCw,
   ShieldAlert,
-  ShieldCheck,
 } from "@lucide/vue";
 import { Markdown, type ControlsConfig, type NodeRenderers } from "vue-stream-markdown";
 import ResourcePublicAudits from "@/components/settings/ResourcePublicAudits.vue";
 import FileTreeList from "@/components/common/FileTreeList.vue";
-import {
-  ModelSelector,
-  modelDisplayName,
-  parseModelOptionValue,
-  type ModelSelectorGroup,
-} from "@/components/ai-elements/model-selector";
 import CodeViewer from "@/components/files/CodeViewer.vue";
 import ImageViewer from "@/components/files/ImageViewer.vue";
 import VideoViewer from "@/components/files/VideoViewer.vue";
 import MdLink from "@/components/markdown/MdLink.vue";
 import type { SupportedLocale } from "@/i18n";
 import { buildFileTree, flattenVisibleTree, type FileTreeRow } from "@/lib/file-tree";
-import { formatRelativeTime } from "@/lib/format";
 import { createBeforeDownload } from "@/lib/markdown-download";
 import { hasScheme, resolvePath, safeLinkHref } from "@/lib/markdown";
 import { extOf, IMAGE_EXTS, VIDEO_EXTS } from "@/lib/file-kind";
 import { joinPath } from "@/lib/path";
 import { useImagePreview } from "@/composables/files/useImagePreview";
-import { getCachedScanReport, putCachedScanReport } from "@/lib/scan-cache";
-import { cmd } from "@/lib/tauri";
-import { getCachedTranslation, putCachedTranslation } from "@/lib/translation-cache";
-import { useAiConfigStore } from "@/stores/ai-config";
+import SkillScanPanel from "@/components/skill-preview/SkillScanPanel.vue";
+import { scanLevelClass, scanLevelLabel } from "@/components/skill-preview/scan-labels";
+import { useMarkdownTranslation } from "@/composables/useMarkdownTranslation";
+import { useSkillScan, type SkillScanModelRef } from "@/composables/useSkillScan";
 import { useSettingsStore } from "@/stores/settings";
 import {
   marketplaceAuditId,
@@ -57,12 +49,9 @@ import {
   updateResourceSkillGroups,
   type ResourceSkill,
   type ResourceSkillGroup,
-  type ResourceSkillScanFinding,
-  type ResourceSkillScanReport,
   type ResourceSkillTokenFile,
   type ResourceSkillTokenReport,
 } from "@/lib/resource-library";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -78,7 +67,6 @@ const route = useRoute();
 const router = useRouter();
 const { t, te, locale } = useI18n();
 const settingsStore = useSettingsStore();
-const aiConfig = useAiConfigStore();
 
 const skillId = computed(() => String(route.params.id ?? ""));
 /** 本地目录模式(项目内非托管技能):query.dir 为技能目录绝对路径,不经资源库 */
@@ -105,13 +93,11 @@ const selectedFilePath = computed(() =>
 );
 /** 资源库技能的磁盘目录(图片拼绝对路径用;本地模式直接用 localDir) */
 const librarySkillDir = ref<string | null>(null);
-const { isImage, isSvg, svgMode, svgSource, imageSrc, onSelectImage, isVideo, videoSrc } = useImagePreview(
-  selectedFilePath,
-  (path) => {
+const { isImage, isSvg, svgMode, svgSource, imageSrc, onSelectImage, isVideo, videoSrc } =
+  useImagePreview(selectedFilePath, (path) => {
     const root = isLocal.value ? localDir.value : librarySkillDir.value;
     return root ? joinPath(root, path) : null;
-  },
-);
+  });
 
 // ── Markdown 渲染(与 AI 抽屉同一套配置)────────────────────────────────
 const language = computed(() => locale.value as SupportedLocale);
@@ -130,8 +116,6 @@ const nodeRenderers: NodeRenderers = { link: MdLink };
 onMounted(() => {
   void loadSkill();
   void loadTokens();
-  // 安全扫描的模型选择器数据源(已加载时复用内存副本)
-  aiConfig.ensureLoaded().catch(() => {});
 });
 
 async function loadSkill() {
@@ -426,193 +410,30 @@ async function onMarkdownClick(e: MouseEvent) {
   }
 }
 
-// ── 右侧:翻译(md 文件;走设置页默认模型,经后端 ai_translate_markdown;译文按内容 hash 缓存 30 天)──
-const translating = ref(false);
-/** 已缓存译文的文件路径;与当前选中文件不符时不显示译文 */
-const translatedFor = ref<string | null>(null);
-const translatedText = ref<string | null>(null);
-const showTranslated = ref(false);
-/** 当前在途翻译的 runId(ai_cancel_run 的取消句柄);空 = 无在途请求 */
-let translateRunId = "";
-/** 翻译轮次序号:取消/换文件后自增,使仍在途的缓存查询结果作废 */
-let translateSeq = 0;
+// ── 右侧:翻译(md 文件;后端 ai_translate_markdown 优先用翻译专用配置、未配置回退
+//  设置页默认模型;译文按内容 hash 缓存 30 天;状态机与 AI 抽屉/远程审计共用)──
+const translation = useMarkdownTranslation({
+  getIdentity: () => (selected.value.kind === "file" ? selected.value.path : null),
+  getText: () => fileContent.value,
+  getLanguage: () => settingsStore.language,
+});
+const {
+  translating,
+  showTranslated,
+  hasTranslation,
+  toggle: toggleTranslate,
+  retranslate,
+  reset: resetTranslation,
+} = translation;
 
 const isTranslatable = computed(
   () => selected.value.kind === "file" && isMarkdown(selected.value.path),
 );
 
-/** 当前选中文件是否已有译文(用于「重新翻译」按钮显隐) */
-const hasTranslation = computed(
-  () =>
-    translatedText.value !== null &&
-    translatedFor.value === (selected.value.kind === "file" ? selected.value.path : null),
-);
+const displayContent = computed(() => translation.displayContent(fileContent.value ?? ""));
 
-const displayContent = computed(() => {
-  if (showTranslated.value && hasTranslation.value && translatedText.value !== null) {
-    return translatedText.value;
-  }
-  return fileContent.value ?? "";
-});
-
-function resetTranslation() {
-  translateSeq += 1;
-  if (translateRunId) {
-    void cmd<void>("ai_cancel_run", { runId: translateRunId }).catch(() => {});
-    translateRunId = "";
-  }
-  translating.value = false;
-  translatedText.value = null;
-  translatedFor.value = null;
-  showTranslated.value = false;
-}
-
-async function toggleTranslate() {
-  // 翻译中再点 = 取消;已有译文 = 原文/译文切换
-  if (translating.value) {
-    resetTranslation();
-    return;
-  }
-  if (showTranslated.value) {
-    showTranslated.value = false;
-    return;
-  }
-  const path = selected.value.kind === "file" ? selected.value.path : null;
-  const text = fileContent.value;
-  if (!path || !text) return;
-  if (translatedFor.value === path) {
-    showTranslated.value = true;
-    return;
-  }
-  await runTranslation(path, text, false);
-}
-
-/** 重新翻译:跳过缓存强制再调 AI,成功后覆盖缓存 */
-async function retranslate() {
-  const path = selected.value.kind === "file" ? selected.value.path : null;
-  const text = fileContent.value;
-  if (!path || !text || translating.value) return;
-  await runTranslation(path, text, true);
-}
-
-async function runTranslation(path: string, text: string, skipCache: boolean) {
-  const seq = ++translateSeq;
-  if (!skipCache) {
-    // 先查 IndexedDB 缓存(键 = 界面语言 + 内容 hash,保留 30 天):
-    // 命中直接展示、不再调 AI,未命中才走后端翻译并回填缓存
-    const cached = await getCachedTranslation(text, settingsStore.language);
-    if (seq !== translateSeq || selected.value.kind !== "file" || selected.value.path !== path) {
-      return;
-    }
-    if (cached !== null) {
-      translatedText.value = cached;
-      translatedFor.value = path;
-      showTranslated.value = true;
-      return;
-    }
-  }
-  translating.value = true;
-  const runId = `translate-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  translateRunId = runId;
-  try {
-    const result = await cmd<string | null>("ai_translate_markdown", {
-      request: { text, language: settingsStore.language, runId },
-    });
-    // 取消后返回 null,同样忽略;换文件/切到扫描后的在途结果作废
-    if (result === null || selected.value.kind !== "file" || selected.value.path !== path) return;
-    translatedText.value = result;
-    translatedFor.value = path;
-    showTranslated.value = true;
-    void putCachedTranslation(text, settingsStore.language, result);
-  } catch (e) {
-    toast.error(String(e));
-  } finally {
-    if (translateRunId === runId) {
-      translateRunId = "";
-      translating.value = false;
-    }
-  }
-}
-
-// ── 右侧:安全扫描(静态规则 + 内置 Agent 语义层)──────────────────────
-const scanning = ref(false);
-const scanReport = ref<ResourceSkillScanReport | null>(null);
-let scanRunId = "";
-
-/** 扫描进行中的已用时长(秒),驱动进度面板的计时显示 */
-const scanElapsed = ref(0);
-let scanElapsedTimer: ReturnType<typeof setInterval> | null = null;
-
-watch(scanning, (on) => {
-  if (scanElapsedTimer) {
-    clearInterval(scanElapsedTimer);
-    scanElapsedTimer = null;
-  }
-  if (on) {
-    scanElapsed.value = 0;
-    scanElapsedTimer = setInterval(() => {
-      scanElapsed.value += 1;
-    }, 1000);
-  }
-});
-
-onBeforeUnmount(() => {
-  if (scanElapsedTimer) clearInterval(scanElapsedTimer);
-});
-
-const scanElapsedLabel = computed(() => {
-  const minutes = Math.floor(scanElapsed.value / 60);
-  const seconds = scanElapsed.value % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-});
-
-// ── 扫描模型选择:复合值 "providerId/modelId",缺省跟随设置页默认模型 ──
-// 显式引用失效(厂商/模型被删)时后端会回退默认模型,前端在配置加载后
-// 把选项归位,保证触发器显示与实际生效模型一致。
-const SCAN_MODEL_STORAGE_KEY = "repomeow.rl-scan-model";
-/** 通用选项哨兵值:不含 "/",parseModelOptionValue 解析为 null = 跟随默认模型 */
-const SCAN_MODEL_DEFAULT = "default";
-const scanModelValue = ref(localStorage.getItem(SCAN_MODEL_STORAGE_KEY) ?? SCAN_MODEL_DEFAULT);
-
-const scanDefaultModelLabel = computed(() => {
-  const model = aiConfig.defaultModel?.model;
-  return model
-    ? t("settings.resources.skills.previewPage.scan.modelDefaultNamed", {
-        model: modelDisplayName(model),
-      })
-    : t("settings.resources.skills.previewPage.scan.modelDefault");
-});
-
-const scanModelGroups = computed<ModelSelectorGroup[]>(() => {
-  const config = aiConfig.config;
-  if (!config) return [];
-  return Object.entries(config.providers).map(([providerId, provider]) => ({
-    providerId,
-    providerName: provider.name || providerId,
-    models: provider.models,
-  }));
-});
-
-watch(
-  () => aiConfig.loaded,
-  (loaded) => {
-    if (!loaded || scanModelValue.value === SCAN_MODEL_DEFAULT) return;
-    const valid = scanModelGroups.value.some((group) =>
-      group.models.some((model) => `${group.providerId}/${model.id}` === scanModelValue.value),
-    );
-    if (!valid) scanModelValue.value = SCAN_MODEL_DEFAULT;
-  },
-  { immediate: true },
-);
-
-watch(scanModelValue, (value) => {
-  if (value === SCAN_MODEL_DEFAULT) {
-    localStorage.removeItem(SCAN_MODEL_STORAGE_KEY);
-  } else {
-    localStorage.setItem(SCAN_MODEL_STORAGE_KEY, value);
-  }
-});
-
+// ── 右侧:安全扫描(静态规则 + 内置 Agent 语义层;生命周期由 useSkillScan 持有,
+//  结果展示在 components/skill-preview/SkillScanPanel)────────────────────
 /** 命令错误优先走 errors.<code> i18n 通道,回落原始字符串 */
 function translateError(e: unknown): string {
   const code = (e as { code?: string } | null)?.code;
@@ -622,120 +443,42 @@ function translateError(e: unknown): string {
   return String(e);
 }
 
-/** 打开页面即恢复上次扫描报告(IndexedDB 缓存,内容指纹一致才命中) */
-function hydrateScanCache() {
-  const fingerprint = tokens.value?.hash;
-  if (!fingerprint || scanReport.value || scanning.value) return;
-  void getCachedScanReport(scanCacheId.value, fingerprint).then((cached) => {
-    if (cached && !scanReport.value && !scanning.value) {
-      scanReport.value = cached;
-    }
-  });
+const {
+  scanning,
+  scanReport,
+  scanElapsedLabel,
+  runScan,
+  cancelScan,
+  hydrateCache: hydrateScanCache,
+  dispose: disposeScan,
+} = useSkillScan({
+  scan: (options) =>
+    isLocal.value
+      ? scanSkillDir(localDir.value, options)
+      : scanResourceSkill(skillId.value, options),
+  getLanguage: () => settingsStore.language,
+  getCacheId: () => scanCacheId.value,
+  getFingerprint: () => tokens.value?.hash,
+  formatError: translateError,
+});
+
+/** 面板发起扫描:model 为 null 时跟随默认模型(后端回退) */
+function onRunScan(model: SkillScanModelRef | null) {
+  void runScan(model);
 }
 
-async function runScan() {
-  if (scanning.value) return;
-  scanning.value = true;
-  scanReport.value = null;
-  const runId = `scan-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  scanRunId = runId;
-  const modelRef =
-    scanModelValue.value === SCAN_MODEL_DEFAULT
-      ? null
-      : parseModelOptionValue(scanModelValue.value);
-  try {
-    const options = {
-      language: settingsStore.language,
-      runId,
-      providerId: modelRef?.providerId,
-      modelId: modelRef?.modelId,
-    };
-    const report = isLocal.value
-      ? await scanSkillDir(localDir.value, options)
-      : await scanResourceSkill(skillId.value, options);
-    if (scanRunId === runId) {
-      scanReport.value = report;
-      // 成功后写入缓存;技能内容变化会改变指纹,旧缓存自动失效
-      const fingerprint = tokens.value?.hash;
-      if (fingerprint) void putCachedScanReport(scanCacheId.value, fingerprint, report);
-    }
-  } catch (e) {
-    toast.error(translateError(e));
-  } finally {
-    if (scanRunId === runId) {
-      scanRunId = "";
-      scanning.value = false;
-    }
-  }
+/** 侧栏扫描入口徽标(配色/等级标签与结果面板共用 scan-labels) */
+function levelBadgeClass(level: string): string {
+  return scanLevelClass(level);
+}
+function levelBadgeLabel(level: string): string {
+  return scanLevelLabel({ t, te }, level);
 }
 
-function cancelScan() {
-  if (scanRunId) {
-    void cmd<void>("ai_cancel_run", { runId: scanRunId }).catch(() => {});
-  }
-}
-
-const SEVERITY_CLASSES: Record<string, string> = {
-  critical: "border-red-600/30 bg-red-600/10 text-red-600 dark:text-red-400",
-  high: "border-orange-500/30 bg-orange-500/10 text-orange-600 dark:text-orange-400",
-  medium: "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  low: "border-border bg-muted text-muted-foreground",
-};
-
-const LEVEL_CLASSES: Record<string, string> = {
-  low: "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  medium: "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  high: "border-orange-500/30 bg-orange-500/10 text-orange-600 dark:text-orange-400",
-  critical: "border-red-600/30 bg-red-600/10 text-red-600 dark:text-red-400",
-};
-
-function severityClass(severity: string): string {
-  return SEVERITY_CLASSES[severity] ?? SEVERITY_CLASSES.medium;
-}
-
-function levelClass(level: string): string {
-  return LEVEL_CLASSES[level] ?? LEVEL_CLASSES.medium;
-}
-
-function levelLabel(level: string): string {
-  const key = `settings.resources.skills.previewPage.scan.level.${level}`;
-  return te(key) ? t(key) : level;
-}
-
-function severityLabel(severity: string): string {
-  const key = `settings.resources.skills.previewPage.scan.severity.${severity}`;
-  return te(key) ? t(key) : severity;
-}
-
-function categoryLabel(finding: ResourceSkillScanFinding): string {
-  const key = `settings.resources.skills.previewPage.scan.category.${finding.category}`;
-  return te(key) ? t(key) : finding.category;
-}
-
-/** 静态发现标题走规则 i18n;AI 发现直接用模型输出标题 */
-function findingTitle(finding: ResourceSkillScanFinding): string {
-  if (finding.ruleId) {
-    const key = `settings.resources.skills.previewPage.scan.rules.${finding.ruleId}`;
-    if (te(key)) return t(key);
-  }
-  return finding.title || finding.category;
-}
-
-const llmNotice = computed(() => {
-  const report = scanReport.value;
-  if (!report) return "";
-  if (report.llmStatus === "skipped") {
-    return t("settings.resources.skills.previewPage.scan.llmSkipped");
-  }
-  if (report.llmStatus === "canceled") {
-    return t("settings.resources.skills.previewPage.scan.llmCanceled");
-  }
-  if (report.llmStatus === "failed") {
-    return t("settings.resources.skills.previewPage.scan.llmFailed", {
-      error: report.llmErrorMessage || report.llmErrorCode || "",
-    });
-  }
-  return "";
+// 离开页面:取消在途翻译与扫描并作废晚到结果(旧实现只清了计时器,任务仍在跑)
+onBeforeUnmount(() => {
+  resetTranslation();
+  disposeScan();
 });
 </script>
 
@@ -881,9 +624,9 @@ const llmNotice = computed(() => {
             <span
               v-else-if="scanReport"
               class="shrink-0 rounded-full border px-1.5 py-0.5 text-[11px] font-medium"
-              :class="levelClass(scanReport.level)"
+              :class="levelBadgeClass(scanReport.level)"
             >
-              {{ levelLabel(scanReport.level) }} {{ scanReport.score }}
+              {{ levelBadgeLabel(scanReport.level) }} {{ scanReport.score }}
             </span>
           </button>
         </div>
@@ -952,7 +695,7 @@ const llmNotice = computed(() => {
                     ? "settings.resources.skills.previewPage.translate.translating"
                     : showTranslated
                       ? "settings.resources.skills.previewPage.translate.showOriginal"
-                      : translatedFor !== null
+                      : hasTranslation
                         ? "settings.resources.skills.previewPage.translate.showTranslation"
                         : "settings.resources.skills.previewPage.translate.trigger",
                 )
@@ -970,178 +713,13 @@ const llmNotice = computed(() => {
           :scanning="scanning"
         >
           <template #local>
-            <!-- 扫描控制:模型选择 + 运行/重新扫描(原右侧头部工具行迁入) -->
-            <div class="flex items-center justify-end gap-1.5">
-              <span :title="t('settings.resources.skills.previewPage.scan.modelLabel')">
-                <ModelSelector
-                  v-model="scanModelValue"
-                  :groups="scanModelGroups"
-                  :disabled="scanning"
-                  :generic-option="{
-                    value: SCAN_MODEL_DEFAULT,
-                    label: scanDefaultModelLabel,
-                  }"
-                  trigger-class="text-muted-foreground min-w-0 max-w-96"
-                />
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                class="h-7 shrink-0 gap-1 px-2 text-xs"
-                :disabled="scanning"
-                @click="runScan"
-              >
-                <ShieldCheck v-if="!scanReport" class="h-3.5 w-3.5" />
-                <RefreshCw v-else class="h-3.5 w-3.5" />
-                {{
-                  t(
-                    scanReport
-                      ? "settings.resources.skills.previewPage.scan.rerun"
-                      : "settings.resources.skills.previewPage.scan.run",
-                  )
-                }}
-              </Button>
-            </div>
-            <div v-if="scanning" class="flex flex-col items-center gap-4 px-6 py-16 text-center">
-              <div class="relative flex h-14 w-14 items-center justify-center">
-                <span class="scan-pulse absolute inset-0 rounded-full bg-primary/15" />
-                <span class="absolute inset-2 rounded-full border border-primary/25" />
-                <ShieldCheck class="h-6 w-6 text-primary" />
-              </div>
-              <div class="space-y-1">
-                <p class="text-sm font-medium">
-                  {{ t("settings.resources.skills.previewPage.scan.running") }}
-                </p>
-                <p class="text-xs text-muted-foreground">
-                  {{ t("settings.resources.skills.previewPage.scan.runningHint") }}
-                </p>
-              </div>
-              <div class="h-0.5 w-52 overflow-hidden rounded-full bg-muted">
-                <div class="scan-indeterminate h-full w-1/3 rounded-full bg-primary/70" />
-              </div>
-              <p class="font-mono text-[11px] tabular-nums text-muted-foreground/70">
-                {{ scanElapsedLabel }}
-              </p>
-              <Button variant="ghost" size="sm" class="h-7 px-3 text-xs" @click="cancelScan">
-                {{ t("settings.resources.skills.previewPage.scan.cancel") }}
-              </Button>
-            </div>
-
-            <template v-else-if="scanReport">
-              <div class="flex flex-wrap items-center gap-2">
-                <span
-                  class="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium"
-                  :class="levelClass(scanReport.level)"
-                >
-                  {{ levelLabel(scanReport.level) }}
-                  <span class="font-mono">{{ scanReport.score }}</span>
-                </span>
-                <span class="text-xs text-muted-foreground">
-                  {{
-                    t("settings.resources.skills.previewPage.scan.filesScanned", {
-                      count: scanReport.filesScanned,
-                    })
-                  }}
-                </span>
-                <span class="text-xs text-muted-foreground">
-                  {{
-                    t("settings.resources.skills.previewPage.scan.scannedAt", {
-                      time: formatRelativeTime(scanReport.scannedAt),
-                    })
-                  }}
-                </span>
-                <span v-if="scanReport.suppressedCount > 0" class="text-xs text-muted-foreground">
-                  {{
-                    t("settings.resources.skills.previewPage.scan.suppressed", {
-                      count: scanReport.suppressedCount,
-                    })
-                  }}
-                </span>
-              </div>
-
-              <p v-if="llmNotice" class="text-xs text-amber-600 dark:text-amber-400">
-                {{ llmNotice }}
-              </p>
-              <div
-                v-else-if="scanReport.llmSummary"
-                class="rounded-md border bg-muted/40 p-2.5 text-xs"
-              >
-                <span class="font-medium">
-                  {{ t("settings.resources.skills.previewPage.scan.summary") }}
-                </span>
-                <span class="text-muted-foreground">{{ scanReport.llmSummary }}</span>
-              </div>
-
-              <p
-                v-if="!scanReport.findings.length"
-                class="rounded-md border border-dashed px-3 py-8 text-center text-xs text-muted-foreground"
-              >
-                {{ t("settings.resources.skills.previewPage.scan.noFindings") }}
-              </p>
-              <div v-else class="space-y-2">
-                <div
-                  v-for="(finding, index) in scanReport.findings"
-                  :key="`${finding.ruleId ?? 'llm'}-${index}`"
-                  class="rounded-md border p-3"
-                >
-                  <div class="flex flex-wrap items-center gap-1.5">
-                    <span
-                      class="rounded-full border px-2 py-0.5 text-[11px] font-medium"
-                      :class="severityClass(finding.severity)"
-                    >
-                      {{ severityLabel(finding.severity) }}
-                    </span>
-                    <span
-                      class="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground"
-                    >
-                      {{ categoryLabel(finding) }}
-                    </span>
-                    <Badge
-                      variant="outline"
-                      :title="
-                        t(
-                          finding.source === 'llm'
-                            ? 'settings.resources.skills.previewPage.scan.llmAnalysis'
-                            : 'settings.resources.skills.previewPage.scan.staticRules',
-                        )
-                      "
-                    >
-                      {{
-                        t(
-                          finding.source === "llm"
-                            ? "settings.resources.skills.previewPage.scan.source.llm"
-                            : "settings.resources.skills.previewPage.scan.source.static",
-                        )
-                      }}
-                    </Badge>
-                    <span
-                      v-if="finding.location"
-                      class="ml-auto min-w-0 truncate font-mono text-[11px] text-muted-foreground"
-                      :title="finding.location"
-                    >
-                      {{ finding.location }}
-                    </span>
-                  </div>
-                  <p class="mt-2 text-sm font-medium">{{ findingTitle(finding) }}</p>
-                  <p v-if="finding.detail" class="mt-1 text-xs text-muted-foreground">
-                    {{ finding.detail }}
-                  </p>
-                  <code
-                    v-if="finding.evidence"
-                    class="mt-2 block max-h-24 overflow-auto rounded bg-muted px-2 py-1.5 font-mono text-xs"
-                  >
-                    {{ finding.evidence }}
-                  </code>
-                </div>
-              </div>
-            </template>
-
-            <p
-              v-else
-              class="rounded-md border border-dashed px-3 py-8 text-center text-xs text-muted-foreground"
-            >
-              {{ t("settings.resources.skills.previewPage.scan.notScanned") }}
-            </p>
+            <SkillScanPanel
+              :scanning="scanning"
+              :report="scanReport"
+              :elapsed-label="scanElapsedLabel"
+              @run="onRunScan"
+              @cancel="cancelScan"
+            />
           </template>
         </ResourcePublicAudits>
 
@@ -1262,35 +840,3 @@ const llmNotice = computed(() => {
     </Dialog>
   </div>
 </template>
-
-<style scoped>
-/* 扫描进行中:细进度条滑动 + 盾牌外圈脉冲 */
-@keyframes scan-slide {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(400%);
-  }
-}
-
-.scan-indeterminate {
-  animation: scan-slide 1.4s ease-in-out infinite;
-}
-
-@keyframes scan-pulse {
-  0% {
-    transform: scale(0.85);
-    opacity: 0.9;
-  }
-  70%,
-  100% {
-    transform: scale(1.4);
-    opacity: 0;
-  }
-}
-
-.scan-pulse {
-  animation: scan-pulse 1.8s ease-out infinite;
-}
-</style>

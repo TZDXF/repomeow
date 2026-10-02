@@ -17,6 +17,8 @@ import {
 } from "@lucide/vue";
 import { useLocalStorage } from "@vueuse/core";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import ScrollArea from "@/components/common/ScrollArea.vue";
 import GitStatusBar from "@/components/git/GitStatusBar.vue";
 import GitRemoteLink from "@/components/git/GitRemoteLink.vue";
@@ -165,13 +167,14 @@ async function toggleFavorite() {
 // --- 名称内联编辑 ---
 const editingName = ref(false);
 const draftName = ref("");
-const nameInput = ref<HTMLInputElement | null>(null);
+const nameInput = ref<InstanceType<typeof Input> | null>(null);
 
 function startEditName() {
   if (!project.value) return;
   draftName.value = project.value.name;
   editingName.value = true;
-  nextTick(() => nameInput.value?.select());
+  // Input 未 defineExpose,经 $el 取实际 input 元素
+  nextTick(() => (nameInput.value?.$el as HTMLInputElement | undefined)?.select());
 }
 
 async function saveName() {
@@ -190,13 +193,14 @@ async function saveName() {
 // --- 描述内联编辑 ---
 const editingDesc = ref(false);
 const draftDesc = ref("");
-const descInput = ref<HTMLTextAreaElement | null>(null);
+const descInput = ref<InstanceType<typeof Textarea> | null>(null);
 
 function startEditDesc() {
   if (!project.value) return;
   draftDesc.value = project.value.description;
   editingDesc.value = true;
-  nextTick(() => descInput.value?.focus());
+  // Textarea 未 defineExpose,经 $el 取实际 textarea 元素
+  nextTick(() => (descInput.value?.$el as HTMLTextAreaElement | undefined)?.focus());
 }
 
 async function saveDesc() {
@@ -218,11 +222,11 @@ async function saveDesc() {
     <header class="shrink-0 border-b px-4 py-3">
       <div class="flex items-start justify-between gap-4">
         <div class="flex min-w-0 items-center gap-2">
-          <input
+          <Input
             v-if="editingName"
             ref="nameInput"
             v-model="draftName"
-            class="h-8 w-72 max-w-full rounded-md border border-input bg-transparent px-2 text-lg font-semibold outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            class="h-8 w-72 max-w-full rounded-md px-2 text-lg font-semibold md:text-lg"
             @keydown.enter.prevent="saveName"
             @keydown.esc="editingName = false"
             @blur="saveName"
@@ -316,13 +320,13 @@ async function saveDesc() {
       </div>
 
       <div class="mt-1">
-        <textarea
+        <Textarea
           v-if="editingDesc"
           ref="descInput"
           v-model="draftDesc"
           rows="2"
           :placeholder="t('projects.detail.descPlaceholder')"
-          class="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+          class="min-h-0 w-full rounded-md px-3 py-2 text-sm"
           @keydown.esc="editingDesc = false"
           @keydown.enter.ctrl.prevent="saveDesc"
           @blur="saveDesc"

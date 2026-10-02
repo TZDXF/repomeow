@@ -15,7 +15,18 @@ import ScrollArea from "@/components/common/ScrollArea.vue";
 import TagCheckList from "@/components/tags/TagCheckList.vue";
 import type { Project, Tag } from "@/types";
 
-const props = defineProps<{ projects: Project[]; tags: Tag[] }>();
+const props = withDefaults(
+  defineProps<{
+    projects: Project[];
+    tags: Tag[];
+    /**
+     * true 时列表纵向撑满父容器(配合外层 class 控制高度,用于高对话框右列);
+     * 默认 false 保持 max-h-36 紧凑高度(DailyReportDialog 行为不变)
+     */
+    fillHeight?: boolean;
+  }>(),
+  { fillHeight: false },
+);
 const selectedIds = defineModel<number[]>({ required: true });
 const { t } = useI18n();
 
@@ -70,6 +81,8 @@ function selectVisible() {
         </Button>
       </div>
     </div>
+    <!-- 调用方附加控件(如定时报告的「按标签包含」),渲染在搜索/筛选行之前 -->
+    <slot name="controls" />
     <div class="flex items-center gap-1.5">
       <div class="relative flex-1">
         <Search
@@ -120,8 +133,10 @@ function selectVisible() {
         <X class="h-2.5 w-2.5" />
       </button>
     </div>
-    <ScrollArea class="max-h-36 rounded-md border">
-      <div class="grid grid-cols-1 gap-x-2 p-2">
+    <ScrollArea
+      :class="fillHeight ? 'min-h-40 flex-1 rounded-md border' : 'max-h-36 rounded-md border'"
+    >
+      <div class="grid grid-cols-1 gap-x-2 p-2" :class="{ 'content-start': fillHeight }">
         <label
           v-for="project in visibleProjects"
           :key="project.id"

@@ -10,9 +10,10 @@
 //! - [`SseDecoder`] + [`AnthropicAggregator`]:SSE 文本解码与事件聚合均为纯逻辑,便于单测。
 //!
 //! 与蓝本的已知偏差:
-//! - `Model.compat` 仍是 `OpenAICompletionsCompat`,Anthropic 专属 compat 用
-//!   [`get_anthropic_compat`] 的文件内默认值(forceAdaptiveThinking/supportsMidConvoEffort
-//!   恒 false,adaptive thinking/effort/fallbacks 路径未实现,待类型整合后接入)。
+//! - `Model.compat` 共用 `OpenAICompletionsCompat`,Anthropic 开关经
+//!   [`get_anthropic_compat`] 读取显式配置并补默认值;`forceAdaptiveThinking`
+//!   已接入兼容开关,但 adaptive thinking 请求路径尚未实现。
+//!   `supportsMidConvoEffort` 仍恒 false,effort/fallbacks 路径未实现。
 //! - 无 `tool.constrainedSampling` 建模 → strict tools 恒不启用。
 //! - `providerThinkingLevel`/`insertThinkingLevelMessages`/`input_transformations`
 //!   诊断/Rust 类型未建模,不实现;fallback 模型成本重映射不实现。
