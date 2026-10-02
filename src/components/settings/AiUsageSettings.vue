@@ -262,6 +262,7 @@ function ioTitle(entry: AiUsageEntry): string {
         }}</label>
         <CalendarHeatmap
           fit-width
+          size="md"
           class="mt-2"
           :weeks="heatmap.weeks"
           :month-labels="heatmap.monthLabels"

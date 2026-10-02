@@ -8,11 +8,12 @@ const props = withDefaults(
     weeks: T[][];
     monthLabels: { col: number; month: number }[];
     cellTitle: (cell: T) => string;
+    size?: "sm" | "md";
     centered?: boolean;
     fitWidth?: boolean;
     showLegend?: boolean;
   }>(),
-  { centered: false, fitWidth: false, showLegend: false },
+  { size: "sm", centered: false, fitWidth: false, showLegend: false },
 );
 const { t } = useI18n();
 const weekdayKeys = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
@@ -49,6 +50,7 @@ const rows = computed(() =>
     :rows="rows"
     :row-labels="rowLabels"
     :column-labels="columnLabels"
+    :size="size"
     :centered="centered"
     :fit-width="fitWidth"
     :legend="

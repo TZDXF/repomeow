@@ -44,6 +44,13 @@ const cell = computed(() => {
 });
 const height = computed(() => 18 + props.rows.length * cell.value);
 
+/** fitWidth 且容器有富余时把网格（连同两侧标签）整体居中，多余空间平分到左右。 */
+const gridLeft = computed(() => {
+  const contentWidth = left.value + props.columnLabels.length * cell.value + gridRight;
+  if (!props.fitWidth || wrapWidth.value <= contentWidth) return left.value;
+  return Math.round(left.value + (wrapWidth.value - contentWidth) / 2);
+});
+
 /** 采样为 sRGB，避免 ECharts 不支持 oklch / color-mix 等主题颜色。 */
 function resolveColor(css: string, fallback: string): string {
   const ctx = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
@@ -95,7 +102,7 @@ const option = computed<EChartsCoreOption>(() => {
   return {
     animation: false,
     grid: {
-      left: left.value,
+      left: gridLeft.value,
       top: 18,
       width: props.columnLabels.length * cell.value,
       height: props.rows.length * cell.value,
