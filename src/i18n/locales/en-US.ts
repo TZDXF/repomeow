@@ -468,6 +468,8 @@ export default {
   pins: {
     mark: "Pin as frequent command (quick run from tray popup)",
     unmark: "Unpin frequent command",
+    pin: "Pin",
+    unpin: "Unpin",
     started: 'Started "{name}" in terminal',
   },
   update: {
@@ -1503,6 +1505,7 @@ export default {
     },
     item: {
       runTitle: "Run in terminal: {command}",
+      run: "Run",
       copy: "Copy command",
       edit: "Edit",
       delete: "Delete",

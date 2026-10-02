@@ -23,6 +23,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import { ContextMenuSeparator } from "reka-ui";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -390,246 +397,385 @@ async function confirmExport() {
             :class="{ 'mt-2 border-t border-border pt-2': i > 0 }"
             @update:open="onToggle(d.file, $event)"
           >
-            <div
-              class="group flex items-center gap-2 rounded-md px-2 py-1.5"
-              :class="{ 'opacity-50': d.hidden }"
-            >
-              <!-- 多文件时文件名区域可点击折叠;单文件保持静态展示 -->
-              <CollapsibleTrigger
-                v-if="files.length > 1"
-                class="flex min-w-0 flex-1 cursor-pointer items-center gap-2 self-stretch rounded-md text-left hover:bg-accent"
-                :title="open ? t('common.collapse') : t('common.expand')"
-              >
-                <ChevronRight
-                  class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform"
-                  :class="{ 'rotate-90': open }"
-                />
-                <FileCode class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <span class="min-w-0 flex-1 truncate font-mono text-xs" :title="d.file.path">
-                  {{ d.file.path }}
-                </span>
-              </CollapsibleTrigger>
-              <template v-else>
-                <FileCode class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <span class="min-w-0 flex-1 truncate font-mono text-xs" :title="d.file.path">
-                  {{ d.file.path }}
-                </span>
-              </template>
-              <Button
-                variant="ghost"
-                size="icon"
-                class="h-7 w-7 shrink-0"
-                :class="
-                  pinsStore.isPinned(project.id, 'composeFile', d.file.path)
-                    ? 'text-yellow-500'
-                    : 'hidden group-hover:inline-flex'
-                "
-                :title="
-                  pinsStore.isPinned(project.id, 'composeFile', d.file.path)
-                    ? t('pins.unmark')
-                    : t('pins.mark')
-                "
-                @click="toggleFilePin(d.file)"
-              >
-                <Star
-                  class="h-3.5 w-3.5"
-                  :class="{
-                    'fill-yellow-400': pinsStore.isPinned(project.id, 'composeFile', d.file.path),
-                  }"
-                />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                class="h-7 w-7 shrink-0"
-                :class="d.hidden ? 'text-muted-foreground' : 'hidden group-hover:inline-flex'"
-                :title="d.hidden ? t('common.unhide') : t('docker.hideFile')"
-                @click="toggleFileHidden(d.file.path, d.hidden)"
-              >
-                <Eye v-if="d.hidden" class="h-3.5 w-3.5" />
-                <EyeOff v-else class="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                class="h-7 w-7 shrink-0 text-emerald-600"
-                :title="t('docker.up')"
-                @click="run(d.file, 'up -d')"
-              >
-                <Play class="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                class="h-7 w-7 shrink-0 text-red-600"
-                :title="t('docker.stop')"
-                @click="run(d.file, 'down')"
-              >
-                <Square class="h-3.5 w-3.5" />
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger as-child>
+            <!-- 文件行右键菜单:聚合全部 compose 操作(与悬停按钮、「更多」菜单一致) -->
+            <ContextMenu>
+              <ContextMenuTrigger as-child>
+                <div
+                  class="group flex items-center gap-2 rounded-md px-2 py-1.5"
+                  :class="{ 'opacity-50': d.hidden }"
+                >
+                  <!-- 多文件时文件名区域可点击折叠;单文件保持静态展示 -->
+                  <CollapsibleTrigger
+                    v-if="files.length > 1"
+                    class="flex min-w-0 flex-1 cursor-pointer items-center gap-2 self-stretch rounded-md text-left hover:bg-accent"
+                    :title="open ? t('common.collapse') : t('common.expand')"
+                  >
+                    <ChevronRight
+                      class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform"
+                      :class="{ 'rotate-90': open }"
+                    />
+                    <FileCode class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span class="min-w-0 flex-1 truncate font-mono text-xs" :title="d.file.path">
+                      {{ d.file.path }}
+                    </span>
+                  </CollapsibleTrigger>
+                  <template v-else>
+                    <FileCode class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span class="min-w-0 flex-1 truncate font-mono text-xs" :title="d.file.path">
+                      {{ d.file.path }}
+                    </span>
+                  </template>
                   <Button
                     variant="ghost"
                     size="icon"
-                    class="h-7 w-7 shrink-0 text-muted-foreground"
-                    :title="t('docker.more')"
+                    class="h-7 w-7 shrink-0"
+                    :class="
+                      pinsStore.isPinned(project.id, 'composeFile', d.file.path)
+                        ? 'text-yellow-500'
+                        : 'hidden group-hover:inline-flex'
+                    "
+                    :title="
+                      pinsStore.isPinned(project.id, 'composeFile', d.file.path)
+                        ? t('pins.unmark')
+                        : t('pins.mark')
+                    "
+                    @click="toggleFilePin(d.file)"
                   >
-                    <MoreHorizontal class="h-3.5 w-3.5" />
+                    <Star
+                      class="h-3.5 w-3.5"
+                      :class="{
+                        'fill-yellow-400': pinsStore.isPinned(
+                          project.id,
+                          'composeFile',
+                          d.file.path,
+                        ),
+                      }"
+                    />
                   </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" class="w-40">
-                  <DropdownMenuItem class="gap-2 text-xs" @click="run(d.file, 'build')">
-                    <Hammer class="h-3.5 w-3.5 text-sky-600" />
-                    {{ t("docker.build") }}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem class="gap-2 text-xs" @click="run(d.file, 'up -d --build')">
-                    <Hammer class="h-3.5 w-3.5 text-emerald-600" />
-                    {{ t("docker.buildUp") }}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem class="gap-2 text-xs" @click="run(d.file, 'restart')">
-                    <RotateCw class="h-3.5 w-3.5 text-amber-600" />
-                    {{ t("docker.restart") }}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    class="gap-2 text-xs"
-                    @click="openExportOptions(d.file, '', 'container')"
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    class="h-7 w-7 shrink-0"
+                    :class="d.hidden ? 'text-muted-foreground' : 'hidden group-hover:inline-flex'"
+                    :title="d.hidden ? t('common.unhide') : t('docker.hideFile')"
+                    @click="toggleFileHidden(d.file.path, d.hidden)"
                   >
-                    <Download class="h-3.5 w-3.5" />
-                    {{ t("docker.exportContainer") }}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    class="gap-2 text-xs"
-                    @click="openExportOptions(d.file, '', 'image')"
+                    <Eye v-if="d.hidden" class="h-3.5 w-3.5" />
+                    <EyeOff v-else class="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    class="h-7 w-7 shrink-0 text-emerald-600"
+                    :title="t('docker.up')"
+                    @click="run(d.file, 'up -d')"
                   >
-                    <ImageDown class="h-3.5 w-3.5" />
-                    {{ t("docker.exportImage") }}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-            <CollapsibleContent>
-              <div
-                v-for="s in d.file.services"
-                :key="s.name"
-                class="group flex min-h-10 items-center gap-2 rounded-md px-2 py-1.5 pl-7 hover:bg-accent"
-              >
-                <span
-                  class="h-2 w-2 shrink-0 rounded-full"
-                  :class="dotClass(d.file, s.name)"
-                  :title="stateTitle(d.file, s.name)"
-                />
-                <span class="min-w-0 truncate font-mono text-sm" :title="s.name">
-                  {{ s.name }}
-                </span>
-                <button
-                  v-for="p in s.ports"
-                  :key="p.published"
-                  class="shrink-0 rounded border border-border px-1 font-mono text-[10px] leading-4 text-sky-600 hover:bg-accent dark:text-sky-400"
-                  :title="t('docker.openPort')"
-                  @click.stop="openPort(p.published)"
+                    <Play class="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    class="h-7 w-7 shrink-0 text-red-600"
+                    :title="t('docker.stop')"
+                    @click="run(d.file, 'down')"
+                  >
+                    <Square class="h-3.5 w-3.5" />
+                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger as-child>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        class="h-7 w-7 shrink-0 text-muted-foreground"
+                        :title="t('docker.more')"
+                      >
+                        <MoreHorizontal class="h-3.5 w-3.5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" class="w-40">
+                      <DropdownMenuItem class="gap-2 text-xs" @click="run(d.file, 'build')">
+                        <Hammer class="h-3.5 w-3.5 text-sky-600" />
+                        {{ t("docker.build") }}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem class="gap-2 text-xs" @click="run(d.file, 'up -d --build')">
+                        <Hammer class="h-3.5 w-3.5 text-emerald-600" />
+                        {{ t("docker.buildUp") }}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem class="gap-2 text-xs" @click="run(d.file, 'restart')">
+                        <RotateCw class="h-3.5 w-3.5 text-amber-600" />
+                        {{ t("docker.restart") }}
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        class="gap-2 text-xs"
+                        @click="openExportOptions(d.file, '', 'container')"
+                      >
+                        <Download class="h-3.5 w-3.5" />
+                        {{ t("docker.exportContainer") }}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        class="gap-2 text-xs"
+                        @click="openExportOptions(d.file, '', 'image')"
+                      >
+                        <ImageDown class="h-3.5 w-3.5" />
+                        {{ t("docker.exportImage") }}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent class="w-44">
+                <ContextMenuItem class="gap-2 text-xs" @select="run(d.file, 'up -d')">
+                  <Play class="h-3.5 w-3.5 text-emerald-600" />
+                  {{ t("docker.up") }}
+                </ContextMenuItem>
+                <ContextMenuItem class="gap-2 text-xs" @select="run(d.file, 'up -d --build')">
+                  <Hammer class="h-3.5 w-3.5 text-emerald-600" />
+                  {{ t("docker.buildUp") }}
+                </ContextMenuItem>
+                <ContextMenuItem class="gap-2 text-xs" @select="run(d.file, 'build')">
+                  <Hammer class="h-3.5 w-3.5 text-sky-600" />
+                  {{ t("docker.build") }}
+                </ContextMenuItem>
+                <ContextMenuItem class="gap-2 text-xs" @select="run(d.file, 'restart')">
+                  <RotateCw class="h-3.5 w-3.5 text-amber-600" />
+                  {{ t("docker.restart") }}
+                </ContextMenuItem>
+                <ContextMenuItem class="gap-2 text-xs" @select="run(d.file, 'down')">
+                  <Square class="h-3.5 w-3.5 text-red-600" />
+                  {{ t("docker.down") }}
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem
+                  class="gap-2 text-xs"
+                  @select="openExportOptions(d.file, '', 'container')"
                 >
-                  {{ p.published }}:{{ p.target }}
-                </button>
-                <span class="min-w-0 flex-1" />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  class="h-7 w-7 shrink-0"
-                  :class="
-                    pinsStore.isPinned(project.id, 'composeService', stateKey(d.file, s.name))
-                      ? 'text-yellow-500'
-                      : 'hidden group-hover:inline-flex'
-                  "
-                  :title="
-                    pinsStore.isPinned(project.id, 'composeService', stateKey(d.file, s.name))
-                      ? t('pins.unmark')
-                      : t('pins.mark')
-                  "
-                  @click="toggleServicePin(d.file, s.name)"
+                  <Download class="h-3.5 w-3.5" />
+                  {{ t("docker.exportContainer") }}
+                </ContextMenuItem>
+                <ContextMenuItem
+                  class="gap-2 text-xs"
+                  @select="openExportOptions(d.file, '', 'image')"
                 >
+                  <ImageDown class="h-3.5 w-3.5" />
+                  {{ t("docker.exportImage") }}
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem class="gap-2 text-xs" @select="toggleFilePin(d.file)">
                   <Star
                     class="h-3.5 w-3.5"
                     :class="{
-                      'fill-yellow-400': pinsStore.isPinned(
+                      'fill-yellow-400 text-yellow-500': pinsStore.isPinned(
                         project.id,
-                        'composeService',
-                        stateKey(d.file, s.name),
+                        'composeFile',
+                        d.file.path,
                       ),
                     }"
                   />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  class="h-7 w-7 shrink-0 text-emerald-600 hidden group-hover:inline-flex"
-                  :title="t('docker.up')"
-                  @click="run(d.file, 'up -d', s.name)"
+                  {{
+                    pinsStore.isPinned(project.id, "composeFile", d.file.path)
+                      ? t("pins.unpin")
+                      : t("pins.pin")
+                  }}
+                </ContextMenuItem>
+                <ContextMenuItem
+                  class="gap-2 text-xs"
+                  @select="toggleFileHidden(d.file.path, d.hidden)"
                 >
-                  <Play class="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  class="h-7 w-7 shrink-0 text-red-600 hidden group-hover:inline-flex"
-                  :title="t('docker.stop')"
-                  @click="run(d.file, 'stop', s.name)"
-                >
-                  <Square class="h-3.5 w-3.5" />
-                </Button>
-                <DropdownMenu
-                  @update:open="(v: boolean) => onMoreOpenChange(stateKey(d.file, s.name), v)"
-                >
-                  <DropdownMenuTrigger as-child>
+                  <Eye v-if="d.hidden" class="h-3.5 w-3.5" />
+                  <EyeOff v-else class="h-3.5 w-3.5" />
+                  {{ d.hidden ? t("common.unhide") : t("docker.hideFile") }}
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
+            <CollapsibleContent>
+              <!-- 服务行右键菜单:聚合该服务的全部 compose 操作 -->
+              <ContextMenu v-for="s in d.file.services" :key="s.name">
+                <ContextMenuTrigger as-child>
+                  <div
+                    class="group flex min-h-10 items-center gap-2 rounded-md px-2 py-1.5 pl-7 hover:bg-accent"
+                  >
+                    <span
+                      class="h-2 w-2 shrink-0 rounded-full"
+                      :class="dotClass(d.file, s.name)"
+                      :title="stateTitle(d.file, s.name)"
+                    />
+                    <span class="min-w-0 truncate font-mono text-sm" :title="s.name">
+                      {{ s.name }}
+                    </span>
+                    <button
+                      v-for="p in s.ports"
+                      :key="p.published"
+                      class="shrink-0 rounded border border-border px-1 font-mono text-[10px] leading-4 text-sky-600 hover:bg-accent dark:text-sky-400"
+                      :title="t('docker.openPort')"
+                      @click.stop="openPort(p.published)"
+                    >
+                      {{ p.published }}:{{ p.target }}
+                    </button>
+                    <span class="min-w-0 flex-1" />
                     <Button
                       variant="ghost"
                       size="icon"
-                      class="h-7 w-7 shrink-0 text-muted-foreground"
+                      class="h-7 w-7 shrink-0"
                       :class="
-                        openMoreKey === stateKey(d.file, s.name)
-                          ? 'inline-flex'
+                        pinsStore.isPinned(project.id, 'composeService', stateKey(d.file, s.name))
+                          ? 'text-yellow-500'
                           : 'hidden group-hover:inline-flex'
                       "
-                      :title="t('docker.more')"
+                      :title="
+                        pinsStore.isPinned(project.id, 'composeService', stateKey(d.file, s.name))
+                          ? t('pins.unmark')
+                          : t('pins.mark')
+                      "
+                      @click="toggleServicePin(d.file, s.name)"
                     >
-                      <MoreHorizontal class="h-3.5 w-3.5" />
+                      <Star
+                        class="h-3.5 w-3.5"
+                        :class="{
+                          'fill-yellow-400': pinsStore.isPinned(
+                            project.id,
+                            'composeService',
+                            stateKey(d.file, s.name),
+                          ),
+                        }"
+                      />
                     </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" class="w-40">
-                    <DropdownMenuItem class="gap-2 text-xs" @click="run(d.file, 'build', s.name)">
-                      <Hammer class="h-3.5 w-3.5 text-sky-600" />
-                      {{ t("docker.build") }}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      class="gap-2 text-xs"
-                      @click="run(d.file, 'up -d --build', s.name)"
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="h-7 w-7 shrink-0 text-emerald-600 hidden group-hover:inline-flex"
+                      :title="t('docker.up')"
+                      @click="run(d.file, 'up -d', s.name)"
                     >
-                      <Hammer class="h-3.5 w-3.5 text-emerald-600" />
-                      {{ t("docker.buildUp") }}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem class="gap-2 text-xs" @click="run(d.file, 'restart', s.name)">
-                      <RotateCw class="h-3.5 w-3.5 text-amber-600" />
-                      {{ t("docker.restart") }}
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      class="gap-2 text-xs"
-                      @click="openExportOptions(d.file, s.name, 'container')"
+                      <Play class="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="h-7 w-7 shrink-0 text-red-600 hidden group-hover:inline-flex"
+                      :title="t('docker.stop')"
+                      @click="run(d.file, 'stop', s.name)"
                     >
-                      <Download class="h-3.5 w-3.5" />
-                      {{ t("docker.exportContainer") }}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      class="gap-2 text-xs"
-                      @click="openExportOptions(d.file, s.name, 'image')"
+                      <Square class="h-3.5 w-3.5" />
+                    </Button>
+                    <DropdownMenu
+                      @update:open="(v: boolean) => onMoreOpenChange(stateKey(d.file, s.name), v)"
                     >
-                      <ImageDown class="h-3.5 w-3.5" />
-                      {{ t("docker.exportImage") }}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
+                      <DropdownMenuTrigger as-child>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          class="h-7 w-7 shrink-0 text-muted-foreground"
+                          :class="
+                            openMoreKey === stateKey(d.file, s.name)
+                              ? 'inline-flex'
+                              : 'hidden group-hover:inline-flex'
+                          "
+                          :title="t('docker.more')"
+                        >
+                          <MoreHorizontal class="h-3.5 w-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" class="w-40">
+                        <DropdownMenuItem
+                          class="gap-2 text-xs"
+                          @click="run(d.file, 'build', s.name)"
+                        >
+                          <Hammer class="h-3.5 w-3.5 text-sky-600" />
+                          {{ t("docker.build") }}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          class="gap-2 text-xs"
+                          @click="run(d.file, 'up -d --build', s.name)"
+                        >
+                          <Hammer class="h-3.5 w-3.5 text-emerald-600" />
+                          {{ t("docker.buildUp") }}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          class="gap-2 text-xs"
+                          @click="run(d.file, 'restart', s.name)"
+                        >
+                          <RotateCw class="h-3.5 w-3.5 text-amber-600" />
+                          {{ t("docker.restart") }}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          class="gap-2 text-xs"
+                          @click="openExportOptions(d.file, s.name, 'container')"
+                        >
+                          <Download class="h-3.5 w-3.5" />
+                          {{ t("docker.exportContainer") }}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          class="gap-2 text-xs"
+                          @click="openExportOptions(d.file, s.name, 'image')"
+                        >
+                          <ImageDown class="h-3.5 w-3.5" />
+                          {{ t("docker.exportImage") }}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent class="w-44">
+                  <ContextMenuItem class="gap-2 text-xs" @select="run(d.file, 'up -d', s.name)">
+                    <Play class="h-3.5 w-3.5 text-emerald-600" />
+                    {{ t("docker.up") }}
+                  </ContextMenuItem>
+                  <ContextMenuItem class="gap-2 text-xs" @select="run(d.file, 'stop', s.name)">
+                    <Square class="h-3.5 w-3.5 text-red-600" />
+                    {{ t("docker.stop") }}
+                  </ContextMenuItem>
+                  <ContextMenuItem
+                    class="gap-2 text-xs"
+                    @select="run(d.file, 'up -d --build', s.name)"
+                  >
+                    <Hammer class="h-3.5 w-3.5 text-emerald-600" />
+                    {{ t("docker.buildUp") }}
+                  </ContextMenuItem>
+                  <ContextMenuItem class="gap-2 text-xs" @select="run(d.file, 'build', s.name)">
+                    <Hammer class="h-3.5 w-3.5 text-sky-600" />
+                    {{ t("docker.build") }}
+                  </ContextMenuItem>
+                  <ContextMenuItem class="gap-2 text-xs" @select="run(d.file, 'restart', s.name)">
+                    <RotateCw class="h-3.5 w-3.5 text-amber-600" />
+                    {{ t("docker.restart") }}
+                  </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem
+                    class="gap-2 text-xs"
+                    @select="openExportOptions(d.file, s.name, 'container')"
+                  >
+                    <Download class="h-3.5 w-3.5" />
+                    {{ t("docker.exportContainer") }}
+                  </ContextMenuItem>
+                  <ContextMenuItem
+                    class="gap-2 text-xs"
+                    @select="openExportOptions(d.file, s.name, 'image')"
+                  >
+                    <ImageDown class="h-3.5 w-3.5" />
+                    {{ t("docker.exportImage") }}
+                  </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem class="gap-2 text-xs" @select="toggleServicePin(d.file, s.name)">
+                    <Star
+                      class="h-3.5 w-3.5"
+                      :class="{
+                        'fill-yellow-400 text-yellow-500': pinsStore.isPinned(
+                          project.id,
+                          'composeService',
+                          stateKey(d.file, s.name),
+                        ),
+                      }"
+                    />
+                    {{
+                      pinsStore.isPinned(project.id, "composeService", stateKey(d.file, s.name))
+                        ? t("pins.unpin")
+                        : t("pins.pin")
+                    }}
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
             </CollapsibleContent>
           </Collapsible>
         </div>

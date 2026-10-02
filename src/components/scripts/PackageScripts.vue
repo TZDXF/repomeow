@@ -2,13 +2,16 @@
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
-import { ChevronRight, Eye, EyeOff, Folder, Package } from "@lucide/vue";
+import { ChevronRight, Copy, Eye, EyeOff, Folder, Package, Play, Star } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { ContextMenuItem } from "@/components/ui/context-menu";
+import { ContextMenuSeparator } from "reka-ui";
 import ScrollArea from "@/components/common/ScrollArea.vue";
 import ScriptItem from "@/components/scripts/ScriptItem.vue";
 import { useCollapsibleOpen } from "@/composables/useCollapsibleOpen";
+import { copyToClipboard } from "@/lib/utils";
 import { cmd } from "@/lib/tauri";
 import { usePinsStore } from "@/stores/pins";
 import { useTerminalStore } from "@/stores/terminal";
@@ -159,6 +162,11 @@ async function run(group: PackageScriptsGroup, script: PackageScript) {
   }
 }
 
+/** 右键菜单复制:复制完整可执行命令,与终端里实际执行的一致 */
+function copyScript(script: PackageScript) {
+  void copyToClipboard(`npm run ${script.name}`);
+}
+
 /** 切换单条脚本的「常用命令」标记(托盘弹窗中可快速执行) */
 async function togglePin(group: PackageScriptsGroup, script: PackageScript) {
   const key = scriptKey(group.dir, script.name);
@@ -277,7 +285,48 @@ async function togglePin(group: PackageScriptsGroup, script: PackageScript) {
                 @run="run(d.group, x.script)"
                 @toggle-hide="toggleScriptHidden(d.group.dir, x.script.name, x.hidden)"
                 @toggle-pin="togglePin(d.group, x.script)"
-              />
+              >
+                <template #menu>
+                  <ContextMenuItem class="gap-2 text-xs" @select="run(d.group, x.script)">
+                    <Play class="h-3.5 w-3.5 text-emerald-600" />
+                    {{ t("scripts.item.run") }}
+                  </ContextMenuItem>
+                  <ContextMenuItem class="gap-2 text-xs" @select="copyScript(x.script)">
+                    <Copy class="h-3.5 w-3.5" />
+                    {{ t("scripts.item.copy") }}
+                  </ContextMenuItem>
+                  <ContextMenuItem class="gap-2 text-xs" @select="togglePin(d.group, x.script)">
+                    <Star
+                      class="h-3.5 w-3.5"
+                      :class="{
+                        'fill-yellow-400 text-yellow-500': pinsStore.isPinned(
+                          project.id,
+                          'packageScript',
+                          scriptKey(d.group.dir, x.script.name),
+                        ),
+                      }"
+                    />
+                    {{
+                      pinsStore.isPinned(
+                        project.id,
+                        "packageScript",
+                        scriptKey(d.group.dir, x.script.name),
+                      )
+                        ? t("pins.unpin")
+                        : t("pins.pin")
+                    }}
+                  </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem
+                    class="gap-2 text-xs"
+                    @select="toggleScriptHidden(d.group.dir, x.script.name, x.hidden)"
+                  >
+                    <Eye v-if="x.hidden" class="h-3.5 w-3.5" />
+                    <EyeOff v-else class="h-3.5 w-3.5" />
+                    {{ x.hidden ? t("common.unhide") : t("common.hide") }}
+                  </ContextMenuItem>
+                </template>
+              </ScriptItem>
             </CollapsibleContent>
           </Collapsible>
         </div>

@@ -442,6 +442,8 @@ export default {
   pins: {
     mark: "标记为常用命令(托盘弹窗中可快速执行)",
     unmark: "取消常用标记",
+    pin: "标记",
+    unpin: "取消标记",
     started: "已在终端启动「{name}」",
   },
   update: {
@@ -1446,6 +1448,7 @@ export default {
     },
     item: {
       runTitle: "在终端运行: {command}",
+      run: "运行",
       copy: "复制命令",
       edit: "编辑",
       delete: "删除",

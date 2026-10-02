@@ -2,11 +2,13 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
-import { Ban, Plus, TerminalSquare } from "@lucide/vue";
+import { Ban, Copy, Pencil, Play, Plus, Star, TerminalSquare, Trash2 } from "@lucide/vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ContextMenuItem } from "@/components/ui/context-menu";
+import { ContextMenuSeparator } from "reka-ui";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +22,7 @@ import CommandEditor from "@/components/scripts/CommandEditor.vue";
 import ScriptItem from "@/components/scripts/ScriptItem.vue";
 import { COMMAND_ICONS } from "@/lib/command-icons";
 import { cmd, onListen } from "@/lib/tauri";
+import { copyToClipboard } from "@/lib/utils";
 import { usePinsStore } from "@/stores/pins";
 import { useTerminalStore } from "@/stores/terminal";
 import { useProjectOverviewStore } from "@/stores/project-overview";
@@ -191,7 +194,44 @@ async function togglePin(c: CustomCommand) {
             @edit="openEdit(c)"
             @delete="remove(c)"
             @toggle-pin="togglePin(c)"
-          />
+          >
+            <template #menu>
+              <ContextMenuItem class="gap-2 text-xs" @select="run(c)">
+                <Play class="h-3.5 w-3.5 text-emerald-600" />
+                {{ t("scripts.item.run") }}
+              </ContextMenuItem>
+              <ContextMenuItem class="gap-2 text-xs" @select="copyToClipboard(c.command)">
+                <Copy class="h-3.5 w-3.5" />
+                {{ t("scripts.item.copy") }}
+              </ContextMenuItem>
+              <ContextMenuItem class="gap-2 text-xs" @select="togglePin(c)">
+                <Star
+                  class="h-3.5 w-3.5"
+                  :class="{
+                    'fill-yellow-400 text-yellow-500': pinsStore.isPinned(
+                      project.id,
+                      'customCommand',
+                      String(c.id),
+                    ),
+                  }"
+                />
+                {{
+                  pinsStore.isPinned(project.id, "customCommand", String(c.id))
+                    ? t("pins.unpin")
+                    : t("pins.pin")
+                }}
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem class="gap-2 text-xs" @select="openEdit(c)">
+                <Pencil class="h-3.5 w-3.5" />
+                {{ t("scripts.item.edit") }}
+              </ContextMenuItem>
+              <ContextMenuItem class="gap-2 text-xs" variant="destructive" @select="remove(c)">
+                <Trash2 class="h-3.5 w-3.5" />
+                {{ t("scripts.item.delete") }}
+              </ContextMenuItem>
+            </template>
+          </ScriptItem>
         </div>
       </ScrollArea>
     </CardContent>

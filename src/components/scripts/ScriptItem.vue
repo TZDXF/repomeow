@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { Eye, EyeOff, Copy, Pencil, Play, Star, Trash2 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { commandIcon } from "@/lib/command-icons";
 import { copyToClipboard } from "@/lib/utils";
 
@@ -39,77 +40,88 @@ async function copyCommand() {
 </script>
 
 <template>
-  <div
-    class="group flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent"
-    :class="{ 'opacity-50': dimmed }"
-  >
-    <Button
-      variant="ghost"
-      size="icon"
-      class="h-7 w-7 shrink-0 text-emerald-600"
-      :title="t('scripts.item.runTitle', { command })"
-      @click="emit('run')"
-    >
-      <component :is="iconComponent" v-if="iconComponent" class="h-3.5 w-3.5" />
-      <Play v-else class="h-3.5 w-3.5" />
-    </Button>
-    <span class="w-32 shrink-0 truncate text-sm font-medium" :title="description || name">
-      {{ name }}
-    </span>
-    <span class="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground" :title="command">
-      {{ command }}
-    </span>
-    <Button
-      v-if="pinnable"
-      variant="ghost"
-      size="icon"
-      class="h-7 w-7 shrink-0"
-      :class="pinned ? 'text-yellow-500' : 'hidden group-hover:inline-flex'"
-      :title="pinned ? t('pins.unmark') : t('pins.mark')"
-      @click="emit('togglePin')"
-    >
-      <Star class="h-3.5 w-3.5" :class="{ 'fill-yellow-400': pinned }" />
-    </Button>
-    <Button
-      v-if="hidable"
-      variant="ghost"
-      size="icon"
-      class="h-7 w-7 shrink-0"
-      :class="dimmed ? 'text-muted-foreground' : 'hidden group-hover:inline-flex'"
-      :title="dimmed ? t('common.unhide') : t('common.hide')"
-      @click="emit('toggleHide')"
-    >
-      <Eye v-if="dimmed" class="h-3.5 w-3.5" />
-      <EyeOff v-else class="h-3.5 w-3.5" />
-    </Button>
-    <template v-if="editable">
-      <Button
-        variant="ghost"
-        size="icon"
-        class="h-7 w-7 shrink-0 hidden group-hover:inline-flex"
-        :title="t('scripts.item.copy')"
-        @click="copyCommand"
+  <!-- 调用方通过 #menu 提供右键菜单项;未提供时不渲染菜单内容,仅右键屏蔽默认浏览器菜单 -->
+  <ContextMenu>
+    <ContextMenuTrigger as-child>
+      <div
+        class="group flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent"
+        :class="{ 'opacity-50': dimmed }"
       >
-        <Copy class="h-3.5 w-3.5" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        class="h-7 w-7 shrink-0 hidden group-hover:inline-flex"
-        :title="t('scripts.item.edit')"
-        @click="emit('edit')"
-      >
-        <Pencil class="h-3.5 w-3.5" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        class="h-7 w-7 shrink-0 hidden group-hover:inline-flex"
-        :title="t('scripts.item.delete')"
-        @click="emit('delete')"
-      >
-        <Trash2 class="h-3.5 w-3.5" />
-      </Button>
-    </template>
-  </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          class="h-7 w-7 shrink-0 text-emerald-600"
+          :title="t('scripts.item.runTitle', { command })"
+          @click="emit('run')"
+        >
+          <component :is="iconComponent" v-if="iconComponent" class="h-3.5 w-3.5" />
+          <Play v-else class="h-3.5 w-3.5" />
+        </Button>
+        <span class="w-32 shrink-0 truncate text-sm font-medium" :title="description || name">
+          {{ name }}
+        </span>
+        <span
+          class="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground"
+          :title="command"
+        >
+          {{ command }}
+        </span>
+        <Button
+          v-if="pinnable"
+          variant="ghost"
+          size="icon"
+          class="h-7 w-7 shrink-0"
+          :class="pinned ? 'text-yellow-500' : 'hidden group-hover:inline-flex'"
+          :title="pinned ? t('pins.unmark') : t('pins.mark')"
+          @click="emit('togglePin')"
+        >
+          <Star class="h-3.5 w-3.5" :class="{ 'fill-yellow-400': pinned }" />
+        </Button>
+        <Button
+          v-if="hidable"
+          variant="ghost"
+          size="icon"
+          class="h-7 w-7 shrink-0"
+          :class="dimmed ? 'text-muted-foreground' : 'hidden group-hover:inline-flex'"
+          :title="dimmed ? t('common.unhide') : t('common.hide')"
+          @click="emit('toggleHide')"
+        >
+          <Eye v-if="dimmed" class="h-3.5 w-3.5" />
+          <EyeOff v-else class="h-3.5 w-3.5" />
+        </Button>
+        <template v-if="editable">
+          <Button
+            variant="ghost"
+            size="icon"
+            class="h-7 w-7 shrink-0 hidden group-hover:inline-flex"
+            :title="t('scripts.item.copy')"
+            @click="copyCommand"
+          >
+            <Copy class="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            class="h-7 w-7 shrink-0 hidden group-hover:inline-flex"
+            :title="t('scripts.item.edit')"
+            @click="emit('edit')"
+          >
+            <Pencil class="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            class="h-7 w-7 shrink-0 hidden group-hover:inline-flex"
+            :title="t('scripts.item.delete')"
+            @click="emit('delete')"
+          >
+            <Trash2 class="h-3.5 w-3.5" />
+          </Button>
+        </template>
+      </div>
+    </ContextMenuTrigger>
+    <ContextMenuContent v-if="$slots.menu" class="w-44">
+      <slot name="menu" />
+    </ContextMenuContent>
+  </ContextMenu>
 </template>
