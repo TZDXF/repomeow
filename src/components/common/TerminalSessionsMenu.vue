@@ -86,16 +86,19 @@ async function clearFinished() {
     <PopoverTrigger as-child>
       <button
         type="button"
-        class="relative flex items-center gap-1.5 px-2.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        class="relative flex w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         :title="t('terminal.menuTitle')"
         @mousedown.stop
+        @dblclick.stop
       >
-        <SquareTerminal class="h-4 w-4" />
-        <LoaderCircle
+        <LoaderCircle v-if="runningCount" class="h-4 w-4 animate-spin text-primary" />
+        <SquareTerminal v-else class="h-4 w-4" />
+        <span
           v-if="runningCount"
-          class="h-3 w-3 animate-spin text-emerald-600 dark:text-emerald-400"
-        />
-        <span class="text-xs tabular-nums">{{ runningCount || sessions.length }}</span>
+          class="absolute right-1.5 top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold leading-none text-primary-foreground tabular-nums"
+        >
+          {{ runningCount }}
+        </span>
       </button>
     </PopoverTrigger>
 
@@ -116,7 +119,7 @@ async function clearFinished() {
             class="flex items-center gap-1.5 px-1 pb-1.5 text-xs font-medium text-muted-foreground"
           >
             <span class="min-w-0 flex-1 truncate">{{ g.projectName }}</span>
-            <span v-if="g.running" class="shrink-0 text-emerald-600 dark:text-emerald-400">
+            <span v-if="g.running" class="shrink-0 text-primary">
               {{ t("terminal.runningCount", { count: g.running }) }}
             </span>
           </h3>

@@ -62,26 +62,58 @@ export const useTabsStore = defineStore("title-tabs", () => {
     persist();
   }
 
-  /**
-   * 关闭项目 tab。关闭的是当前激活 tab 时导航到相邻项目 tab(优先右侧),没有项目 tab 了则回首页;
-   * 关闭的是后台 tab 则停留原页面。返回导航去向(单测断言用)。
-   */
-  function closeTab(id: number): ResolvedTab | null {
-    const index = openProjectIds.value.indexOf(id);
-    if (index === -1) return null;
-    openProjectIds.value.splice(index, 1);
+  /** 批量移除 tab,仅持久化和导航一次,避免中间路由重新打开已关闭的 tab。 */
+  function closeTabs(ids: number[]): ResolvedTab | null {
+    const closingIds = new Set(ids);
+    const previousIds = openProjectIds.value;
+    const remainingIds = previousIds.filter((id) => !closingIds.has(id));
+    if (remainingIds.length === previousIds.length) return null;
+    openProjectIds.value = remainingIds;
     persist();
+
     const active = resolveTabFromPath(router.currentRoute.value.path);
-    if (active.kind !== "project" || active.projectId !== id) {
+    if (
+      active.kind !== "project" ||
+      active.projectId === undefined ||
+      !closingIds.has(active.projectId)
+    ) {
       return null;
     }
-    const nextId = openProjectIds.value[Math.min(index, openProjectIds.value.length - 1)];
+    const index = previousIds.indexOf(active.projectId);
+    // 从原激活位置向右寻找保留的 tab,没有则向左寻找。
+    const nextId =
+      previousIds.slice(index + 1).find((id) => !closingIds.has(id)) ??
+      previousIds
+        .slice(0, index)
+        .reverse()
+        .find((id) => !closingIds.has(id));
     if (nextId === undefined) {
       void router.push("/");
       return { kind: "home" };
     }
     void router.push(`/projects/${nextId}`);
     return { kind: "project", projectId: nextId };
+  }
+
+  /** 关闭激活 tab 时切到相邻项目(优先右侧),后台 tab 关闭时保留当前页面。 */
+  function closeTab(id: number): ResolvedTab | null {
+    return closeTabs([id]);
+  }
+
+  function closeOtherTabs(id: number): ResolvedTab | null {
+    if (!openProjectIds.value.includes(id)) return null;
+    return closeTabs(openProjectIds.value.filter((projectId) => projectId !== id));
+  }
+
+  function closeAllTabs(): ResolvedTab | null {
+    return closeTabs(openProjectIds.value);
+  }
+
+  /** 以当前显示顺序为准,首页不在可关闭列表内。 */
+  function closeTabsToRight(id: number): ResolvedTab | null {
+    const index = openProjectIds.value.indexOf(id);
+    if (index === -1) return null;
+    return closeTabs(openProjectIds.value.slice(index + 1));
   }
 
   /**
@@ -104,5 +136,13 @@ export const useTabsStore = defineStore("title-tabs", () => {
     { immediate: true },
   );
 
-  return { openProjectIds, openProject, closeTab, reorderTabs };
+  return {
+    openProjectIds,
+    openProject,
+    closeTab,
+    closeOtherTabs,
+    closeAllTabs,
+    closeTabsToRight,
+    reorderTabs,
+  };
 });

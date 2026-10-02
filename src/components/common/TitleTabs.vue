@@ -9,6 +9,8 @@ import { useProjectsStore } from "@/stores/projects";
 import { useBackgroundTasksStore } from "@/stores/background-tasks";
 import { resolveTabFromPath, useTabsStore } from "@/stores/tabs";
 
+import TitleTabContextMenu from "./TitleTabContextMenu.vue";
+
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
@@ -61,9 +63,7 @@ function onCloseTab(event: MouseEvent, id: number) {
 
 /** 悬停文本 tab 时,若名称溢出则实测溢出距离并驱动横向滚动展示全名 */
 function onTabHoverEnter(event: MouseEvent) {
-  const label = (event.currentTarget as HTMLElement).querySelector<HTMLElement>(
-    "[data-tab-label]",
-  );
+  const label = (event.currentTarget as HTMLElement).querySelector<HTMLElement>("[data-tab-label]");
   if (!label) return;
   const distance = label.scrollWidth - label.clientWidth;
   if (distance <= 0) return;
@@ -74,9 +74,7 @@ function onTabHoverEnter(event: MouseEvent) {
 }
 
 function onTabHoverLeave(event: MouseEvent) {
-  const label = (event.currentTarget as HTMLElement).querySelector<HTMLElement>(
-    "[data-tab-label]",
-  );
+  const label = (event.currentTarget as HTMLElement).querySelector<HTMLElement>("[data-tab-label]");
   if (label) {
     delete label.dataset.scrolling;
   }
@@ -158,47 +156,50 @@ function selectFromMore(id: number) {
           class="flex items-center gap-1"
           @update:model-value="tabsStore.reorderTabs"
         >
-          <div
-            v-for="id in tabsStore.openProjectIds"
-            :key="id"
-            role="tab"
-            :aria-selected="isProjectActive(id)"
-            :tabindex="0"
-            class="group flex h-7 min-w-0 max-w-40 shrink-0 cursor-pointer items-center gap-1 rounded-md pr-1 pl-2.5 text-xs font-medium transition-colors"
-            :class="
-              isProjectActive(id)
-                ? 'bg-accent text-foreground'
-                : 'bg-muted/70 text-foreground/80 hover:bg-accent hover:text-foreground'
-            "
-            :title="tabTitle(id)"
-            @mousedown.stop
-            @dblclick.stop
-            @click="openProject(id)"
-            @keydown.enter.prevent="openProject(id)"
-            @keydown.space.prevent="openProject(id)"
-            @mouseenter="onTabHoverEnter"
-            @mouseleave="onTabHoverLeave"
-          >
-            <LoaderCircle
-              v-if="runningCount(id)"
-              class="h-3.5 w-3.5 shrink-0 animate-spin text-primary"
-            />
-            <span data-tab-label class="min-w-0 flex-1 overflow-hidden text-left whitespace-nowrap">
-              <span class="inline-block whitespace-nowrap">{{ projectName(id) }}</span>
-            </span>
-            <!-- 关闭按钮常驻占位避免布局跳动,悬停 tab 时以透明度浮现 -->
-            <span
-              role="button"
-              :aria-label="t('titleBar.closeTab')"
-              :title="t('titleBar.closeTab')"
-              class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/70 opacity-0 transition-[opacity,color] group-hover:opacity-100 hover:text-destructive"
+          <TitleTabContextMenu v-for="id in tabsStore.openProjectIds" :key="id" :project-id="id">
+            <div
+              role="tab"
+              :aria-selected="isProjectActive(id)"
+              :tabindex="0"
+              class="group flex h-7 min-w-0 max-w-40 shrink-0 cursor-pointer items-center gap-1 rounded-md pr-1 pl-2.5 text-xs font-medium transition-colors"
+              :class="
+                isProjectActive(id)
+                  ? 'bg-accent text-foreground'
+                  : 'bg-muted/70 text-foreground/80 hover:bg-accent hover:text-foreground'
+              "
+              :title="tabTitle(id)"
               @mousedown.stop
               @dblclick.stop
-              @click.stop="onCloseTab($event, id)"
+              @click="openProject(id)"
+              @keydown.enter.prevent="openProject(id)"
+              @keydown.space.prevent="openProject(id)"
+              @mouseenter="onTabHoverEnter"
+              @mouseleave="onTabHoverLeave"
             >
-              <X class="h-3 w-3" />
-            </span>
-          </div>
+              <LoaderCircle
+                v-if="runningCount(id)"
+                class="h-3.5 w-3.5 shrink-0 animate-spin text-primary"
+              />
+              <span
+                data-tab-label
+                class="min-w-0 flex-1 overflow-hidden text-left whitespace-nowrap"
+              >
+                <span class="inline-block whitespace-nowrap">{{ projectName(id) }}</span>
+              </span>
+              <!-- 关闭按钮常驻占位避免布局跳动,悬停 tab 时以透明度浮现 -->
+              <span
+                role="button"
+                :aria-label="t('titleBar.closeTab')"
+                :title="t('titleBar.closeTab')"
+                class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/70 opacity-0 transition-[opacity,color] group-hover:opacity-100 hover:text-destructive"
+                @mousedown.stop
+                @dblclick.stop
+                @click.stop="onCloseTab($event, id)"
+              >
+                <X class="h-3 w-3" />
+              </span>
+            </div>
+          </TitleTabContextMenu>
         </VueDraggable>
       </div>
     </div>
@@ -216,29 +217,29 @@ function selectFromMore(id: number) {
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" class="z-[70] w-72 p-1" @mousedown.stop>
-        <button
-          v-for="id in tabsStore.openProjectIds"
-          :key="id"
-          type="button"
-          class="group flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs transition-colors hover:bg-accent"
-          :class="isProjectActive(id) && 'bg-accent'"
-          :title="tabTitle(id)"
-          @click="selectFromMore(id)"
-        >
-          <span class="flex h-4 w-4 shrink-0 items-center justify-center">
-            <LoaderCircle v-if="runningCount(id)" class="h-3.5 w-3.5 animate-spin text-primary" />
-          </span>
-          <span class="min-w-0 flex-1 truncate">{{ projectName(id) }}</span>
-          <span
-            role="button"
-            :aria-label="t('titleBar.closeTab')"
-            :title="t('titleBar.closeTab')"
-            class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
-            @click.stop="onCloseTab($event, id)"
+        <TitleTabContextMenu v-for="id in tabsStore.openProjectIds" :key="id" :project-id="id">
+          <button
+            type="button"
+            class="group flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs transition-colors hover:bg-accent"
+            :class="isProjectActive(id) && 'bg-accent'"
+            :title="tabTitle(id)"
+            @click="selectFromMore(id)"
           >
-            <X class="h-3 w-3" />
-          </span>
-        </button>
+            <span class="flex h-4 w-4 shrink-0 items-center justify-center">
+              <LoaderCircle v-if="runningCount(id)" class="h-3.5 w-3.5 animate-spin text-primary" />
+            </span>
+            <span class="min-w-0 flex-1 truncate">{{ projectName(id) }}</span>
+            <span
+              role="button"
+              :aria-label="t('titleBar.closeTab')"
+              :title="t('titleBar.closeTab')"
+              class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+              @click.stop="onCloseTab($event, id)"
+            >
+              <X class="h-3 w-3" />
+            </span>
+          </button>
+        </TitleTabContextMenu>
       </PopoverContent>
     </Popover>
   </div>

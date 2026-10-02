@@ -91,6 +91,91 @@ describe("tabs store", () => {
     expect(store.openProjectIds).toEqual([]);
   });
 
+  it("关闭其他以右键目标为准,只保留目标并且仅导航一次", async () => {
+    await setRoute("/projects/3/wiki");
+    const setItem = vi.fn();
+    (globalThis as { localStorage?: unknown }).localStorage = {
+      getItem: vi.fn(() => null),
+      setItem,
+    };
+    const store = useTabsStore();
+    store.reorderTabs([1, 2, 3, 4]);
+    setItem.mockClear();
+
+    expect(store.closeOtherTabs(2)).toEqual({ kind: "project", projectId: 2 });
+    expect(store.openProjectIds).toEqual([2]);
+    expect(pushMock).toHaveBeenCalledExactlyOnceWith("/projects/2");
+    expect(setItem).toHaveBeenCalledExactlyOnceWith("repomeow.tabs.v1", "[2]");
+  });
+
+  it("关闭其他时保留激活项目及其子页,不重复导航", async () => {
+    await setRoute("/projects/2/files");
+    const store = useTabsStore();
+    store.reorderTabs([1, 2, 3]);
+
+    expect(store.closeOtherTabs(2)).toBeNull();
+    expect(store.openProjectIds).toEqual([2]);
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it("关闭所有清空项目 tab,激活项目时仅导航一次回首页", async () => {
+    await setRoute("/projects/2/graph");
+    const store = useTabsStore();
+    store.reorderTabs([1, 2, 3]);
+
+    expect(store.closeAllTabs()).toEqual({ kind: "home" });
+    expect(store.openProjectIds).toEqual([]);
+    expect(pushMock).toHaveBeenCalledExactlyOnceWith("/");
+  });
+
+  it.each(["/", "/settings", "/report-history"])("关闭所有时保留非项目页面 %s", async (path) => {
+    await setRoute(path);
+    const store = useTabsStore();
+    store.reorderTabs([1, 2, 3]);
+
+    expect(store.closeAllTabs()).toBeNull();
+    expect(store.openProjectIds).toEqual([]);
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it("关闭右侧遵循拖拽后的顺序,激活页被关闭时切到保留的最近 tab", async () => {
+    await setRoute("/projects/1/wiki");
+    const store = useTabsStore();
+    store.reorderTabs([4, 2, 3, 1]);
+
+    expect(store.closeTabsToRight(2)).toEqual({ kind: "project", projectId: 2 });
+    expect(store.openProjectIds).toEqual([4, 2]);
+    expect(pushMock).toHaveBeenCalledExactlyOnceWith("/projects/2");
+  });
+
+  it("关闭右侧不影响左侧激活页", async () => {
+    await setRoute("/projects/4/files");
+    const store = useTabsStore();
+    store.reorderTabs([4, 2, 3, 1]);
+
+    expect(store.closeTabsToRight(2)).toBeNull();
+    expect(store.openProjectIds).toEqual([4, 2]);
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it("目标不存在、没有右侧或其他 tab 时安全忽略", async () => {
+    await setRoute("/projects/2");
+    const store = useTabsStore();
+
+    expect(store.closeOtherTabs(99)).toBeNull();
+    expect(store.closeTabsToRight(99)).toBeNull();
+    expect(store.closeTab(99)).toBeNull();
+    expect(store.closeOtherTabs(2)).toBeNull();
+    expect(store.closeTabsToRight(2)).toBeNull();
+    expect(store.openProjectIds).toEqual([2]);
+    expect(pushMock).not.toHaveBeenCalled();
+
+    await setRoute("/");
+    store.closeAllTabs();
+    expect(store.closeAllTabs()).toBeNull();
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
   it("reorderTabs 整体回写顺序并持久化到 localStorage", async () => {
     await setRoute("/");
     const setItem = vi.fn();
