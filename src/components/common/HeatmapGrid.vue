@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import type { EChartsCoreOption } from "echarts/core";
 import EChart from "@/components/common/EChart.vue";
 import { useChartTheme } from "@/composables/useChartTheme";
@@ -20,8 +20,29 @@ const props = withDefaults(
 const { themeStamp } = useChartTheme();
 const step = computed(() => (props.size === "sm" ? 15 : 19));
 const left = computed(() => (props.size === "sm" ? 22 : 51));
-const width = computed(() => left.value + props.columnLabels.length * step.value + 12);
-const height = computed(() => 18 + props.rows.length * step.value);
+const gridRight = 12;
+const width = computed(() => left.value + props.columnLabels.length * step.value + gridRight);
+
+/** 实测容器宽（maxWidth 收窄后也走这里），供 fitWidth / 被压缩时钳制格子保持正方形。 */
+const wrapRef = ref<HTMLElement>();
+const wrapWidth = ref(0);
+let wrapObserver: ResizeObserver | undefined;
+onMounted(() => {
+  if (!wrapRef.value) return;
+  wrapObserver = new ResizeObserver(() => {
+    wrapWidth.value = wrapRef.value?.clientWidth ?? 0;
+  });
+  wrapObserver.observe(wrapRef.value);
+});
+onBeforeUnmount(() => wrapObserver?.disconnect());
+
+/** 格子边长：期望 step；容器不够宽时按可用宽度均分收窄（fitWidth 更宽时不放大），下限兜底避免消失。 */
+const cell = computed(() => {
+  if (!wrapWidth.value) return step.value;
+  const avail = (wrapWidth.value - left.value - gridRight) / Math.max(props.columnLabels.length, 1);
+  return Math.max(Math.min(step.value, avail), 4);
+});
+const height = computed(() => 18 + props.rows.length * cell.value);
 
 /** 采样为 sRGB，避免 ECharts 不支持 oklch / color-mix 等主题颜色。 */
 function resolveColor(css: string, fallback: string): string {
@@ -73,7 +94,12 @@ const option = computed<EChartsCoreOption>(() => {
   );
   return {
     animation: false,
-    grid: { left: left.value, right: 12, top: 18, bottom: 0 },
+    grid: {
+      left: left.value,
+      top: 18,
+      width: props.columnLabels.length * cell.value,
+      height: props.rows.length * cell.value,
+    },
     tooltip: {
       trigger: "item",
       renderMode: "richText",
@@ -135,6 +161,7 @@ const option = computed<EChartsCoreOption>(() => {
   <div class="min-w-0 overflow-x-auto pb-1">
     <!-- max-width 兜底:容器比固定宽度窄(如 xl 双列下仅差 1px)时压缩重绘,避免 overflow-x 滚动条 -->
     <div
+      ref="wrapRef"
       :class="{ 'mx-auto': centered }"
       :style="{ width: fitWidth ? '100%' : `${width}px`, maxWidth: '100%' }"
     >
