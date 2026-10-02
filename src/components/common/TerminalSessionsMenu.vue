@@ -2,9 +2,10 @@
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
-import { ChevronRight, LoaderCircle, SquareTerminal, Trash2 } from "@lucide/vue";
+import { ChevronRight, SquareTerminal, Trash2 } from "@lucide/vue";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import ScrollArea from "@/components/common/ScrollArea.vue";
+import TitleBarTaskIcon from "@/components/common/TitleBarTaskIcon.vue";
 import { formatRelativeTime } from "@/lib/format";
 import { terminalStatusDotClass } from "@/lib/terminal";
 import { useTerminalStore } from "@/stores/terminal";
@@ -86,19 +87,13 @@ async function clearFinished() {
     <PopoverTrigger as-child>
       <button
         type="button"
-        class="relative flex w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        class="flex items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        :class="runningCount ? 'px-3' : 'w-11'"
         :title="t('terminal.menuTitle')"
         @mousedown.stop
         @dblclick.stop
       >
-        <LoaderCircle v-if="runningCount" class="h-4 w-4 animate-spin text-primary" />
-        <SquareTerminal v-else class="h-4 w-4" />
-        <span
-          v-if="runningCount"
-          class="absolute right-1.5 top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold leading-none text-primary-foreground tabular-nums"
-        >
-          {{ runningCount }}
-        </span>
+        <TitleBarTaskIcon :icon="SquareTerminal" :running="runningCount > 0" :count="runningCount" />
       </button>
     </PopoverTrigger>
 

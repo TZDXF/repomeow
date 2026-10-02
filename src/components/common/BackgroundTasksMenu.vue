@@ -11,12 +11,12 @@ import {
   FileText,
   GitMerge,
   History,
-  LoaderCircle,
   Sparkles,
   Trash2,
 } from "@lucide/vue";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import ScrollArea from "@/components/common/ScrollArea.vue";
+import TitleBarTaskIcon from "@/components/common/TitleBarTaskIcon.vue";
 import { formatRelativeTime } from "@/lib/format";
 import {
   useBackgroundTasksStore,
@@ -166,19 +166,13 @@ async function openTask(task: BackgroundTaskItem) {
     <PopoverTrigger as-child>
       <button
         type="button"
-        class="relative flex w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        class="flex items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        :class="taskCount ? 'px-3' : 'w-11'"
         :title="t('titleBar.taskCenter')"
         @mousedown.stop
         @dblclick.stop
       >
-        <LoaderCircle v-if="taskCount" class="h-4 w-4 animate-spin text-primary" />
-        <History v-else class="h-4 w-4" />
-        <span
-          v-if="taskCount"
-          class="absolute right-1.5 top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold leading-none text-primary-foreground tabular-nums"
-        >
-          {{ taskCount }}
-        </span>
+        <TitleBarTaskIcon :icon="History" :running="taskCount > 0" :count="taskCount" />
       </button>
     </PopoverTrigger>
 
