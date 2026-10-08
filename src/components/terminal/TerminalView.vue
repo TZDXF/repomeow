@@ -129,14 +129,21 @@ onMounted(() => {
 
   // 复制粘贴:有选区时 Ctrl/Cmd+C 复制选区(无选区保持 ^C 语义);
   // Ctrl/Cmd+V 读取剪贴板走与键盘输入相同的写入路径(支持多行逐行提交)。
+  // 注意:回调返回 false 只能让 xterm 内部忽略按键,不能阻止浏览器默认行为,
+  // 否则原生 paste 事件仍会触发 xterm 内置粘贴(onData)导致内容写入两次,
+  // 因此命中 Ctrl+C/Ctrl+V 时必须显式 preventDefault 阻止默认粘贴/复制。
   term.attachCustomKeyEventHandler((e) => {
     if (e.type !== "keydown" || !(e.ctrlKey || e.metaKey)) return true;
     const key = e.key.toLowerCase();
     if (key === "c" && term?.hasSelection()) {
+      e.preventDefault();
+      e.stopPropagation();
       void navigator.clipboard.writeText(term.getSelection()).catch(() => {});
       return false;
     }
     if (key === "v") {
+      e.preventDefault();
+      e.stopPropagation();
       void navigator.clipboard
         .readText()
         .then((text) => {
