@@ -21,7 +21,15 @@ function main() {
     throw new Error("用法: node scripts/release/sync-notes.mjs v<version> [owner/repo]");
   }
   const gh = (...args) => execFileSync("gh", args, { encoding: "utf8" });
-  const release = JSON.parse(gh("api", `repos/${repo}/releases/tags/${tag}`));
+  let release;
+  try {
+    release = JSON.parse(gh("api", `repos/${repo}/releases/tags/${tag}`));
+  } catch {
+    // draft Release 在 by-tag 端点会 404,改走列表端点按 tag_name 过滤
+    const all = JSON.parse(gh("api", `repos/${repo}/releases?per_page=100`));
+    release = all.find((r) => r.tag_name === tag);
+    if (!release) throw new Error(`找不到 ${tag} 对应的 Release`);
+  }
   // 留存原文件用于审计/恢复；只改 notes，不重建安装包、不修改签名与下载地址。
   const dir = mkdtempSync(join(tmpdir(), "repomeow-release-notes-"));
   gh("release", "download", tag, "--repo", repo, "--pattern", "latest.json", "--dir", dir);
