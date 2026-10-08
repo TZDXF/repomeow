@@ -11,10 +11,10 @@
 //! 状态热切换方法就地生效(会话历史保留),模型与密钥由 StreamFn 每次
 //! LLM 调用时重读。
 //!
-//! ask 权限(硬确认):工具集与 all 相同,但五个有副作用工具
+//! ask 权限(硬确认):工具集与 all 相同,但七个有副作用工具
 //! (`update_wiki` / `regenerate_wiki` / `add_custom_command` /
-//! `generate_report` / `set_wiki_model`)执行前经 `AgentLoopConfig.before_tool_call`
-//! 钩子拦截,
+//! `update_custom_command` / `delete_custom_command` / `generate_report` /
+//! `set_wiki_model`)执行前经 `AgentLoopConfig.before_tool_call` 钩子拦截,
 //! 推 `ToolPermissionRequest` 事件并等待 `chat_tool_permission_respond`
 //! 决策(允许继续 / 拒绝或 2 分钟超时则 block);这些工具均带 sequential
 //! 标记,含它们的批次整体顺序执行,确认一次最多挂起一个。

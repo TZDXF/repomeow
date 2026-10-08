@@ -977,6 +977,8 @@ export default {
       regenerate_wiki: "整本重生成 Wiki",
       list_custom_commands: "自定义命令清单",
       add_custom_command: "新增自定义命令",
+      update_custom_command: "编辑自定义命令",
+      delete_custom_command: "删除自定义命令",
       generate_report: "生成日报/周报",
       list_reports: "报告历史",
       read_project_file: "读项目文件",

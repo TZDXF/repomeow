@@ -7,12 +7,14 @@ use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
-/// ask 权限下执行前需用户硬确认的工具(有副作用:写入 wiki / 自定义命令 /
-/// 生成报告 / 修改 wiki 生成配置)。
-pub(super) const CONFIRM_REQUIRED_TOOLS: [&str; 5] = [
+/// ask 权限下执行前需用户硬确认的工具(有副作用:写入/删除/修改自定义命令 /
+/// 写入 wiki / 生成报告 / 修改 wiki 生成配置)。
+pub(super) const CONFIRM_REQUIRED_TOOLS: [&str; 7] = [
     "update_wiki",
     "regenerate_wiki",
     "add_custom_command",
+    "update_custom_command",
+    "delete_custom_command",
     "generate_report",
     "set_wiki_model",
 ];

@@ -323,16 +323,18 @@ fn truncate_last_user_turn_drops_the_last_turn() {
 }
 
 #[test]
-fn gated_tool_list_is_exactly_the_five_side_effect_tools() {
+fn gated_tool_list_is_exactly_the_seven_side_effect_tools() {
     let mut tools = CONFIRM_REQUIRED_TOOLS.to_vec();
     tools.sort_unstable();
     assert_eq!(
         tools,
         vec![
             "add_custom_command",
+            "delete_custom_command",
             "generate_report",
             "regenerate_wiki",
             "set_wiki_model",
+            "update_custom_command",
             "update_wiki"
         ]
     );

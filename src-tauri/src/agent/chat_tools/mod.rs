@@ -72,6 +72,8 @@ pub fn chat_tools(app: AppHandle, ctx: ChatToolContext) -> Vec<AgentTool> {
         regenerate_wiki_tool(&app, &ctx),
         list_custom_commands_tool(&app, &ctx),
         add_custom_command_tool(&app, &ctx),
+        update_custom_command_tool(&app, &ctx),
+        delete_custom_command_tool(&app, &ctx),
         generate_report_tool(&app, &ctx),
         list_reports_tool(&app, &ctx),
         read_project_file_tool(&ctx),

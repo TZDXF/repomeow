@@ -58,6 +58,8 @@ const PRIMARY_ARGS: Record<string, string[]> = {
   sem_relations: ["entity"],
   read_wiki: ["page_id"],
   add_custom_command: ["name"],
+  update_custom_command: ["name"],
+  delete_custom_command: ["name"],
   generate_report: ["date_from", "date_to"],
   read_project_file: ["path"],
   set_wiki_model: ["model_id"],

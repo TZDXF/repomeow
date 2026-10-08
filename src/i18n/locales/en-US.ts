@@ -1019,6 +1019,8 @@ export default {
       regenerate_wiki: "Regenerate wiki",
       list_custom_commands: "Custom commands",
       add_custom_command: "Add custom command",
+      update_custom_command: "Edit custom command",
+      delete_custom_command: "Delete custom command",
       generate_report: "Generate report",
       list_reports: "Report history",
       read_project_file: "Read project file",
