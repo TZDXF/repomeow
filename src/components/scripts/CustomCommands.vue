@@ -245,7 +245,8 @@ async function togglePin(c: CustomCommand) {
           editingId == null ? t("scripts.custom.dialogNew") : t("scripts.custom.dialogEdit")
         }}</DialogTitle>
       </DialogHeader>
-      <form class="flex flex-col gap-3" @submit.prevent="submit">
+      <!-- field-sizing:content 的 textarea intrinsic 宽度会撑开 grid 轨道,form 作为 grid item 必须 min-w-0 截断(实测无它则长命令溢出弹窗) -->
+      <form class="flex min-w-0 flex-col gap-3" @submit.prevent="submit">
         <div class="flex flex-col gap-1.5">
           <label class="text-sm font-medium">{{ t("scripts.custom.nameLabel") }}</label>
           <Input v-model="formName" :placeholder="t('scripts.custom.namePlaceholder')" />
