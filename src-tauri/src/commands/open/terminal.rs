@@ -60,6 +60,12 @@ pub(crate) fn spawn_terminal_with_env(
         bash: bash.as_deref(),
         ps,
     };
+    // 注册表环境刷新(改环境变量后无需重启应用)与调用方注入(工具链 PATH)
+    // 合成为统一配置,wt 与 start 兑底共用,保证两条拉起路径环境一致
+    let configure = move |cmd: &mut Command| {
+        crate::env_refresh::apply_to_command(cmd);
+        configure(cmd);
+    };
     let command = flatten_multiline(command, shell.separator());
     let command = command.as_deref();
     if let Some(wt) = find_wt() {

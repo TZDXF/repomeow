@@ -314,6 +314,9 @@ fn spawn_err(e: impl std::fmt::Display) -> AppError {
 fn launch_session(app: &AppHandle, spec: &SessionSpec) -> AppResult<Launched> {
     if !spec.interactive {
         let mut cmd = build_shell_command(app, &spec.command);
+        // 先用注册表最新环境覆盖(改环境变量后无需重启应用),应用显式注入
+        // (FORCE_COLOR/JAVA_HOME 等)在其后写入,优先级保持最高
+        crate::env_refresh::apply_to_command(&mut cmd);
         cmd.current_dir(&spec.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

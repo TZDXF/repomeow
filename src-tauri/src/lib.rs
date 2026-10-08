@@ -4,6 +4,7 @@ mod background_task;
 pub mod cli;
 mod commands;
 mod db;
+mod env_refresh;
 mod error;
 mod models;
 mod path_util;
