@@ -31,7 +31,7 @@ const store = useProjectsStore();
 
 const project = computed(() => {
   const id = Number(route.params.id);
-  return Number.isFinite(id) ? store.projects.find((p) => p.id === id) : undefined;
+  return Number.isFinite(id) ? store.getProjectById(id) : undefined;
 });
 
 /** git_graph_log 流式批次(done = true 表示提交序列结束) */

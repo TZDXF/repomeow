@@ -21,7 +21,8 @@ const backgroundTasksStore = useBackgroundTasksStore();
 const resolved = computed(() => resolveTabFromPath(route.path));
 
 function projectName(id: number): string {
-  return projectsStore.projects.find((p) => p.id === id)?.name ?? `#${id}`;
+  // 走全量索引,首页搜索/标签筛选裁剪列表时不回退 #id
+  return projectsStore.getProjectById(id)?.name ?? `#${id}`;
 }
 
 function isProjectActive(id: number): boolean {

@@ -30,7 +30,7 @@ const wiki = useWikiStore();
 
 const project = computed<Project | undefined>(() => {
   const id = Number(route.params.id);
-  return Number.isFinite(id) ? store.projects.find((p) => p.id === id) : undefined;
+  return Number.isFinite(id) ? store.getProjectById(id) : undefined;
 });
 
 // 首次渲染前启动加载，避免把尚未读取的数据误判为空；也响应项目切换。

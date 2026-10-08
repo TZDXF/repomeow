@@ -58,7 +58,7 @@ const settingsStore = useSettingsStore();
 
 const project = computed<Project | undefined>(() => {
   const id = Number(route.params.id);
-  return Number.isFinite(id) ? store.projects.find((p) => p.id === id) : undefined;
+  return Number.isFinite(id) ? store.getProjectById(id) : undefined;
 });
 
 // ── 工作区跟随:与 ProjectDetail 同一 localStorage 键(projectId -> worktree 绝对路径) ──

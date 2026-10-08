@@ -44,7 +44,7 @@ const store = useProjectsStore();
 
 const project = computed(() => {
   const id = Number(route.params.id);
-  return Number.isFinite(id) ? store.projects.find((p) => p.id === id) : undefined;
+  return Number.isFinite(id) ? store.getProjectById(id) : undefined;
 });
 
 // 选中项目进入详情页时刷新本地工作区状态(走后端 15s 缓存,大仓库不重复跑 git status;

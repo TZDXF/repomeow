@@ -1,4 +1,4 @@
-import { computed, ref } from "vue";
+import { ref } from "vue";
 import { defineStore } from "pinia";
 import { cmd } from "@/lib/tauri";
 import type {
@@ -16,10 +16,27 @@ import type {
 
 export const useProjectsStore = defineStore("projects", () => {
   const projects = ref<Project[]>([]);
+  /** 全量项目索引(id → Project):不受搜索/标签筛选裁剪。按 id 查项目(标题栏 tab 名、
+   * 详情页/文件/Wiki/提交图路由反查、报告任务名等)统一走 getProjectById,
+   * 避免首页搜索期间这些场景误判「项目不存在」而回退 #id 或误报 not-found */
+  const projectsById = ref(new Map<number, Project>());
   const archivedProjects = ref<Project[]>([]);
   const loading = ref(false);
   const query = ref("");
   const selectedTagIds = ref<number[]>([]);
+
+  /** 写入全量索引;替换时保留旧 git 状态(后端仅在列表拉取时附带) */
+  function upsertProjects(list: Project[]) {
+    for (const p of list) {
+      p.git = p.git ?? projectsById.value.get(p.id)?.git ?? null;
+      projectsById.value.set(p.id, p);
+    }
+  }
+
+  /** 按 id 查项目(全量索引,不受搜索/标签筛选影响;项目删除/归档后返回 undefined) */
+  function getProjectById(id: number): Project | undefined {
+    return projectsById.value.get(id);
+  }
 
   /**
    * 拉取项目列表。
@@ -34,16 +51,15 @@ export const useProjectsStore = defineStore("projects", () => {
         query: query.value.trim() ? query.value.trim() : null,
         tagIds: selectedTagIds.value.length ? selectedTagIds.value : null,
       });
+      const prevGit = new Map(projects.value.map((p) => [p.id, p.git] as const));
+      list.forEach((p) => {
+        p.git = prevGit.get(p.id) ?? p.git;
+      });
+      projects.value = list;
+      upsertProjects(list);
       if (withGit) {
-        projects.value = list;
         // Git 状态后台补齐,不阻塞列表渲染(一次批量 IPC,后端带缓存)
         refreshAllGitStatus();
-      } else {
-        const prevGit = new Map(projects.value.map((p) => [p.id, p.git]));
-        list.forEach((p) => {
-          p.git = prevGit.get(p.id) ?? p.git;
-        });
-        projects.value = list;
       }
     } finally {
       loading.value = false;
@@ -68,7 +84,7 @@ export const useProjectsStore = defineStore("projects", () => {
     fetchProjects({ withGit: false });
   }
 
-  /** 重新拉取单个项目(保留已有的 git 状态,后端不返回) */
+  /** 重新拉取单个项目(保留已有的 git 状态,后端不返回);无论是否在当前筛选结果内都同步全量索引 */
   async function refreshProject(id: number) {
     const fresh = await cmd<Project>("get_project", { id });
     const idx = projects.value.findIndex((p) => p.id === id);
@@ -76,23 +92,28 @@ export const useProjectsStore = defineStore("projects", () => {
       fresh.git = projects.value[idx].git;
       projects.value[idx] = fresh;
     }
+    upsertProjects([fresh]);
     return fresh;
   }
 
   /**
-   * 兜底注入:托盘弹窗跳详情时,主窗口 store 可能因搜索/标签筛选被裁剪,
-   * 导致 ProjectDetail 按 id 找不到而误报「项目不存在或已被删除」。
-   * 这里强制按 id 单点拉取并写入列表(替换保留 git,新增直接 push)。
+   * 兜底注入:托盘弹窗跳详情时,主窗口列表可能因搜索/标签筛选被裁剪,
+   * 这里强制按 id 单点拉取写入全量索引,保证详情页/标题栏 tab 能查到;
+   * 无筛选时同步进列表,筛选中则只进索引,避免污染搜索结果。
    * 后端真实找不到时向上抛错,调用方决定是否降级跳转到 not-found 页。
    */
   async function ensureProjectLoaded(id: number) {
     const fresh = await cmd<Project>("get_project", { id });
-    const idx = projects.value.findIndex((p) => p.id === id);
-    if (idx >= 0) {
-      fresh.git = projects.value[idx].git ?? fresh.git;
-      projects.value[idx] = fresh;
-    } else {
-      projects.value.push(fresh);
+    upsertProjects([fresh]);
+    const filtered = query.value.trim().length > 0 || selectedTagIds.value.length > 0;
+    if (!filtered) {
+      const idx = projects.value.findIndex((p) => p.id === id);
+      if (idx >= 0) {
+        fresh.git = fresh.git ?? projects.value[idx].git;
+        projects.value[idx] = fresh;
+      } else {
+        projects.value.push(fresh);
+      }
     }
     return fresh;
   }
@@ -211,6 +232,7 @@ export const useProjectsStore = defineStore("projects", () => {
     const project = await cmd<Project>("update_project", { id, name, description });
     const idx = projects.value.findIndex((p) => p.id === id);
     if (idx >= 0) projects.value[idx] = project;
+    upsertProjects([project]);
     return project;
   }
 
@@ -219,6 +241,7 @@ export const useProjectsStore = defineStore("projects", () => {
     const project = await cmd<Project>("update_project_path", { id, path });
     const idx = projects.value.findIndex((p) => p.id === id);
     if (idx >= 0) projects.value[idx] = project;
+    upsertProjects([project]);
     if (project.path_exists) {
       // 路径刚变更,绕过缓存强制重查新路径状态
       await refreshGitStatus(project, { force: true });
@@ -231,6 +254,7 @@ export const useProjectsStore = defineStore("projects", () => {
     const project = await cmd<Project>("move_project_dir", { id, targetParent, dirName });
     const idx = projects.value.findIndex((p) => p.id === id);
     if (idx >= 0) projects.value[idx] = project;
+    upsertProjects([project]);
     await refreshGitStatus(project, { force: true });
     return project;
   }
@@ -239,6 +263,7 @@ export const useProjectsStore = defineStore("projects", () => {
   async function archiveProject(id: number) {
     await cmd("archive_project", { id });
     projects.value = projects.value.filter((p) => p.id !== id);
+    projectsById.value.delete(id);
   }
 
   /** 设置/取消收藏:成功后就地更新 favorited_at,列表排序由 computed 响应 */
@@ -284,6 +309,7 @@ export const useProjectsStore = defineStore("projects", () => {
   async function deleteProject(id: number) {
     await cmd("delete_project", { id });
     archivedProjects.value = archivedProjects.value.filter((p) => p.id !== id);
+    projectsById.value.delete(id);
   }
 
   // --- Git 写操作:错误向上抛出由 UI toast,成功后用返回的最新状态就地更新 ---
@@ -467,12 +493,9 @@ export const useProjectsStore = defineStore("projects", () => {
     }
   }
 
-  const byId = computed(() => {
-    return (id: number) => projects.value.find((p) => p.id === id);
-  });
-
   return {
     projects,
+    projectsById,
     archivedProjects,
     loading,
     query,
@@ -483,6 +506,7 @@ export const useProjectsStore = defineStore("projects", () => {
     clearTagFilters,
     refreshProject,
     ensureProjectLoaded,
+    getProjectById,
     addProject,
     cloneProject,
     cancelClone,
@@ -515,6 +539,5 @@ export const useProjectsStore = defineStore("projects", () => {
     abortMerge,
     rebaseBranch,
     abortRebase,
-    byId,
   };
 });

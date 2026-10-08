@@ -6,7 +6,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatLocalDateTime } from "@/lib/format";
 import {
-  projectNames,
   tagNames,
   weekdayModeOf,
   weekdayShortNames,
@@ -31,7 +30,6 @@ const projectStore = useProjectsStore();
 const tagsStore = useTagsStore();
 
 const weekdayNames = computed(() => weekdayShortNames(locale.value));
-const activeProjects = computed(() => projectStore.projects.filter((p) => !p.archived_at));
 
 function weekdayLabel(mode: WeekdayMode) {
   if (mode === "chineseWorkday") return t("reportSchedule.chineseWorkdayOnly");
@@ -46,7 +44,11 @@ function weeklyLabel(s: ReportSchedule) {
 }
 
 function scheduleProjectNames(ids: number[]) {
-  return projectNames(ids, activeProjects.value);
+  // 走全量索引,首页搜索/标签筛选裁剪列表时任务名不缺失;已归档项目不显示
+  return ids
+    .map((id) => projectStore.getProjectById(id))
+    .filter((p) => p != null && !p.archived_at)
+    .map((p) => p!.name);
 }
 
 function scheduleTagNames(ids: number[]) {

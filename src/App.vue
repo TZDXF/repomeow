@@ -150,10 +150,9 @@ onMounted(async () => {
   });
   // 托盘弹窗/菜单请求跳转到项目详情页
   onListen<{ projectId: number }>("main://navigate", async (payload) => {
-    // 主窗口 store 可能正被搜索/标签筛选裁剪;若列表里没该项目,
-    // 单点拉取并注入后再跳转,避免详情页误报「项目不存在或已被删除」。
+    // 全量索引里没有时才单点拉取注入(搜索/标签筛选不影响索引,不会误判);
     // 后端 get_project 抛出 project_not_found 时跳过注入,详情页会显示 not-found。
-    if (!store.projects.some((p) => p.id === payload.projectId)) {
+    if (!store.getProjectById(payload.projectId)) {
       try {
         await store.ensureProjectLoaded(payload.projectId);
       } catch {
