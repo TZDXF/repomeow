@@ -132,7 +132,8 @@ export const useChatStore = defineStore("chat", () => {
     if (existing) return existing;
     const created = defaultSession();
     sessions.value[path] = created;
-    return created;
+    // 必须返回 ref 容器里的代理,首次创建的原始对象无法追踪 busy/error 等更新。
+    return sessions.value[path]!;
   }
 
   function onChatEvent(path: string, event: ChatEvent) {
@@ -290,7 +291,10 @@ export const useChatStore = defineStore("chat", () => {
   function send(path: string, project: ChatProject, text: string): Promise<boolean> {
     const trimmed = text.trim();
     if (!trimmed) return Promise.resolve(false);
-    if (activeRuns.has(path)) return Promise.resolve(false);
+    if (activeRuns.has(path)) {
+      ensureSession(path).error = friendlyChatError("ai_request_failed", "chat_busy");
+      return Promise.resolve(false);
+    }
 
     const controller = new AbortController();
     controllers.set(path, controller);

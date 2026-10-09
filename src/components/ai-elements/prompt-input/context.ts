@@ -8,7 +8,7 @@ export function usePromptInputProvider(props: {
   maxFiles?: number;
   maxFileSize?: number;
   accept?: string;
-  onSubmit?: (message: PromptInputMessage) => void | Promise<void>;
+  onSubmit?: (message: PromptInputMessage) => void | boolean | Promise<void | boolean>;
   onError?: (err: { code: string; message: string }) => void;
 }) {
   const textInput = ref(props.initialInput || "");
@@ -176,7 +176,12 @@ export function usePromptInputProvider(props: {
         files: processedFiles,
       };
 
-      await props.onSubmit(message);
+      const accepted = await props.onSubmit(message);
+      if (accepted === false) {
+        // 前置校验/忙时守卫拒绝提交不算成功,保留附件并恢复草稿,但不覆盖新输入。
+        if (textInput.value === "") setTextInput(submittedText);
+        return;
+      }
 
       clearSubmittedFiles(submittedIds);
     } catch (e) {

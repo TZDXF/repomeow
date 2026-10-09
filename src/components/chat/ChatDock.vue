@@ -69,7 +69,7 @@ const {
   copyText,
   copyTurn,
   submitStatus,
-} = useChatMessageActions({ project: props.project, session, aiReady });
+} = useChatMessageActions({ project: () => props.project, session, aiReady });
 </script>
 
 <template>

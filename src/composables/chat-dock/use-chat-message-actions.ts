@@ -1,12 +1,12 @@
-import { computed, ref, type ComputedRef } from "vue";
+import { computed, ref, toValue, type ComputedRef, type MaybeRefOrGetter } from "vue";
 import type { ChatStatus, PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { copyToClipboard } from "@/lib/utils";
-import { useChatStore, type ChatSessionState } from "@/stores/chat";
+import { friendlyChatError, useChatStore, type ChatSessionState } from "@/stores/chat";
 import type { Project } from "@/types";
 import type { TurnView } from "./use-chat-timeline";
 
 export interface ChatMessageActionsOptions {
-  project: Project;
+  project: MaybeRefOrGetter<Project>;
   session: ComputedRef<ChatSessionState>;
   aiReady: ComputedRef<boolean>;
 }
@@ -21,24 +21,34 @@ export function useChatMessageActions(options: ChatMessageActionsOptions) {
 
   // --- 发送 / 停止 / 新会话 ---
   function onSubmit(message: PromptInputMessage) {
-    sendText(message.text);
+    return sendText(message.text);
   }
 
   function sendText(text: string) {
     const trimmed = text.trim();
-    if (!trimmed || !options.aiReady.value || options.session.value.busy) return;
+    if (!trimmed) return false;
+    if (!options.aiReady.value) {
+      options.session.value.error = friendlyChatError("ai_not_configured", "");
+      return false;
+    }
+    if (options.session.value.busy) {
+      options.session.value.error = friendlyChatError("ai_request_failed", "chat_busy");
+      return false;
+    }
     cancelEdit();
-    void chat.send(options.project.path, options.project, trimmed);
+    // props 会在切换项目/工作树时被替换,发送时才解析,不能保存 setup 时的快照。
+    const project = toValue(options.project);
+    return chat.send(project.path, project, trimmed);
   }
 
   function abort() {
-    chat.abort(options.project.path);
+    chat.abort(toValue(options.project).path);
   }
 
   function startNewSession() {
     // 忙时直接清:store 内部先中止在途请求,等待落地后重置前后端会话
     cancelEdit();
-    void chat.newSession(options.project.path);
+    void chat.newSession(toValue(options.project).path);
   }
 
   // --- 编辑上一条提问:最后一条用户消息悬停出现编辑钮,气泡内联编辑,
@@ -61,7 +71,8 @@ export function useChatMessageActions(options: ChatMessageActionsOptions) {
     const text = editText.value.trim();
     if (!text || !options.aiReady.value || options.session.value.busy) return;
     cancelEdit();
-    void chat.editLastUserMessage(options.project.path, options.project, text);
+    const project = toValue(options.project);
+    void chat.editLastUserMessage(project.path, project, text);
   }
 
   // --- 复制:提问复制原文;回答复制该回合的全部正文段(流式中不显示,

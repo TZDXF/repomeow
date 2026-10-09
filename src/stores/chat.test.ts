@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
+import { computed, isReactive } from "vue";
 import { respondToolPermission, sendChatMessage, truncateChatLastTurn } from "@/lib/chat";
 import type { ChatEvent, ChatUsageSummary } from "@/lib/chat";
 import { useChatStore } from "@/stores/chat";
@@ -61,6 +62,34 @@ describe("chat store", () => {
     vi.clearAllMocks();
     chatHarness.pending.clear();
     setActivePinia(createPinia());
+  });
+
+  it("首次创建返回响应式会话,computed 能跟踪首轮 busy/消息/错误变化", async () => {
+    const store = useChatStore();
+    const session = store.ensureSession(PATH);
+    const status = computed(() => ({
+      busy: session.busy,
+      count: session.messages.length,
+      error: session.error,
+    }));
+    expect(isReactive(session)).toBe(true);
+    expect(status.value).toEqual({ busy: false, count: 0, error: null });
+    const run = store.send(PATH, PROJECT, "问题");
+    expect(status.value).toMatchObject({ busy: true, count: 1 });
+    fail(PATH, new Error("请求失败详情"));
+    await run;
+    expect(status.value).toMatchObject({ busy: false, error: "请求失败详情" });
+  });
+
+  it("在途请求拒绝重复发送时不新增消息,且向用户显示忙提示", async () => {
+    const store = useChatStore();
+    const run = store.send(PATH, PROJECT, "第一个问题");
+    await expect(store.send(PATH, PROJECT, "第二个问题")).resolves.toBe(false);
+    expect(store.ensureSession(PATH).error).toBeTruthy();
+    expect(store.ensureSession(PATH).messages).toHaveLength(1);
+    expect(sendChatMessage).toHaveBeenCalledTimes(1);
+    finish(PATH);
+    await run;
   });
 
   it("textDelta 累积 streamingText,toolCall/toolResult 写入 toolRuns", async () => {
