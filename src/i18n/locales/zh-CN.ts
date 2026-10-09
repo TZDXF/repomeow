@@ -1502,6 +1502,7 @@ export default {
     title: "终端",
     empty: "暂无终端会话",
     create: "新建终端",
+    selectType: "选择终端类型",
     emptyHint: "点击 + 创建终端，或运行脚本、自定义命令后在此查看输出",
     expand: "展开终端面板",
     collapse: "收起终端面板",

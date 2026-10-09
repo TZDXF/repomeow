@@ -1559,6 +1559,7 @@ export default {
     title: "Terminal",
     empty: "No terminal sessions",
     create: "New terminal",
+    selectType: "Select terminal type",
     emptyHint: "Click + to create a terminal, or run a script or custom command to see its output",
     expand: "Expand terminal panel",
     collapse: "Collapse terminal panel",

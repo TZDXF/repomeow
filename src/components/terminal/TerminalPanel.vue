@@ -252,50 +252,51 @@ async function clearFinished() {
               </button>
             </div>
           </VueDraggable>
-          <!-- 新建按钮:固定在最右一个页签之后;Windows 下可下拉选择 shell 类型 -->
-          <DropdownMenu v-if="showShellPicker">
-            <DropdownMenuTrigger as-child>
-              <Button
-                variant="ghost"
-                size="icon"
-                class="h-7 w-7 shrink-0"
-                :disabled="creating"
-                :title="t('terminal.create')"
-                :aria-label="t('terminal.create')"
-              >
-                <LoaderCircle v-if="creating" class="h-3.5 w-3.5 animate-spin" />
-                <Plus v-else class="h-3.5 w-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" class="w-44">
-              <DropdownMenuItem
-                v-for="choice in shellChoices"
-                :key="choice.kind"
-                class="flex items-center justify-between gap-2"
-                :disabled="capabilities?.shells[choice.kind] === false"
-                @click="createTerminal(choice.kind)"
-              >
-                <span>{{ choice.label }}</span>
-                <Check
-                  v-if="settings.terminal === choice.kind"
-                  class="h-3.5 w-3.5 text-muted-foreground"
-                />
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button
-            v-else
-            variant="ghost"
-            size="icon"
-            class="h-7 w-7 shrink-0"
-            :disabled="creating"
-            :title="t('terminal.create')"
-            :aria-label="t('terminal.create')"
-            @click="createTerminal()"
-          >
-            <LoaderCircle v-if="creating" class="h-3.5 w-3.5 animate-spin" />
-            <Plus v-else class="h-3.5 w-3.5" />
-          </Button>
+          <!-- 新建按钮:主按钮直接创建默认终端,旁边的箭头单独选择 shell 类型 -->
+          <div class="flex shrink-0 items-center">
+            <Button
+              variant="ghost"
+              size="icon"
+              class="h-7 w-7"
+              :class="showShellPicker && 'rounded-r-none'"
+              :disabled="creating"
+              :title="t('terminal.create')"
+              :aria-label="t('terminal.create')"
+              @click="createTerminal()"
+            >
+              <LoaderCircle v-if="creating" class="h-3.5 w-3.5 animate-spin" />
+              <Plus v-else class="h-3.5 w-3.5" />
+            </Button>
+            <DropdownMenu v-if="showShellPicker">
+              <DropdownMenuTrigger as-child>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="h-7 w-5 rounded-l-none"
+                  :disabled="creating"
+                  :title="t('terminal.selectType')"
+                  :aria-label="t('terminal.selectType')"
+                >
+                  <ChevronDown class="h-3 w-3" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" class="w-44">
+                <DropdownMenuItem
+                  v-for="choice in shellChoices"
+                  :key="choice.kind"
+                  class="flex items-center justify-between gap-2"
+                  :disabled="capabilities?.shells[choice.kind] === false"
+                  @click="createTerminal(choice.kind)"
+                >
+                  <span>{{ choice.label }}</span>
+                  <Check
+                    v-if="settings.terminal === choice.kind"
+                    class="h-3.5 w-3.5 text-muted-foreground"
+                  />
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
         <!-- 交互式 Shell 没有停止/启动状态,仅命令会话展示停止与重启 -->
         <template v-if="active && !active.interactive">
