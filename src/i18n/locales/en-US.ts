@@ -515,9 +515,11 @@ export default {
       tags: "Tags",
       actions: "Actions",
       clean: "Clean",
+      unpushed: "Unpushed commits",
       remoteAhead: "Remote ahead",
     },
     card: {
+      unpushed: "Unpushed commits",
       remoteAhead: "Remote ahead",
     },
     status: {

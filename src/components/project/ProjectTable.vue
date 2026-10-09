@@ -80,6 +80,9 @@ function open(id: number) {
             <span v-if="p.git.staged" class="text-emerald-600">+{{ p.git.staged }}</span>
             <span v-if="p.git.modified" class="text-amber-600">~{{ p.git.modified }}</span>
             <span v-if="p.git.untracked" class="text-sky-600">?{{ p.git.untracked }}</span>
+            <span v-if="p.git.ahead" class="text-sky-600" :title="t('projects.table.unpushed')">
+              ↑{{ p.git.ahead }}
+            </span>
             <span
               v-if="p.git.remote_ahead"
               class="text-amber-600"
@@ -88,7 +91,13 @@ function open(id: number) {
               ↓{{ p.git.remote_ahead }}
             </span>
             <span
-              v-if="!p.git.staged && !p.git.modified && !p.git.untracked && !p.git.remote_ahead"
+              v-if="
+                !p.git.staged &&
+                !p.git.modified &&
+                !p.git.untracked &&
+                !p.git.ahead &&
+                !p.git.remote_ahead
+              "
               class="text-muted-foreground"
             >
               {{ t("projects.table.clean") }}

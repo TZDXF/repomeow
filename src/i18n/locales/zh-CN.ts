@@ -489,9 +489,11 @@ export default {
       tags: "标签",
       actions: "操作",
       clean: "干净",
+      unpushed: "未推送提交",
       remoteAhead: "远端领先",
     },
     card: {
+      unpushed: "未推送提交",
       remoteAhead: "远端领先",
     },
     status: {

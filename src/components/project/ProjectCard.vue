@@ -61,6 +61,9 @@ function open() {
       <span v-if="project.git.staged" class="text-emerald-600"> +{{ project.git.staged }} </span>
       <span v-if="project.git.modified" class="text-amber-600"> ~{{ project.git.modified }} </span>
       <span v-if="project.git.untracked" class="text-sky-600"> ?{{ project.git.untracked }} </span>
+      <span v-if="project.git.ahead" class="text-sky-600" :title="t('projects.card.unpushed')">
+        ↑{{ project.git.ahead }}
+      </span>
       <span
         v-if="project.git.remote_ahead"
         class="text-amber-600"
