@@ -1,7 +1,7 @@
 /* Inspired by StyleKit Nocturne Glassmorphism:
    https://www.stylekit.top/zh/styles/glassmorphism
    仅皮肤作用域内生效;模糊限制在主要表面,不改变滚动容器/定位层的 containing block。 */
-:root[data-theme="glassmorphism"] {
+:is(:root, .theme-preview)[data-theme="glassmorphism"] {
   --background: #e8eef4;
   --foreground: #203047;
   --card: rgb(255 255 255 / 10%);
@@ -45,7 +45,7 @@
     radial-gradient(ellipse at 35% 35%, rgb(228 184 99 / 12%), transparent 55%);
 }
 
-:root[data-theme="glassmorphism"].dark {
+:is(:root, .theme-preview)[data-theme="glassmorphism"].dark {
   --background: #0b1322;
   --foreground: #edf2f8;
   --popover: #16233a;

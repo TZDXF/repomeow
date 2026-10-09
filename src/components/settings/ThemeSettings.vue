@@ -1,11 +1,28 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
-import type { Component } from "vue";
-import { Check, Monitor, Moon, Sun } from "@lucide/vue";
+import { computed, onMounted, onUnmounted, ref, type Component } from "vue";
+import { Monitor, Moon, Sun } from "@lucide/vue";
 import { useSettingsStore, type ThemeMode, type ThemeSkin } from "@/stores/settings";
+
+import ThemeChoicePreview from "./ThemeChoicePreview.vue";
 
 const { t } = useI18n();
 const store = useSettingsStore();
+const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
+const prefersDark = ref(systemDark.matches);
+const previewMode = computed(() => {
+  if (store.theme !== "system") {
+    return store.theme;
+  }
+  return prefersDark.value ? "dark" : "light";
+});
+
+function syncSystemDark(event: MediaQueryListEvent) {
+  prefersDark.value = event.matches;
+}
+
+onMounted(() => systemDark.addEventListener("change", syncSystemDark));
+onUnmounted(() => systemDark.removeEventListener("change", syncSystemDark));
 
 const OPTIONS: { value: ThemeMode; labelKey: string; descriptionKey: string; icon: Component }[] = [
   {
@@ -28,37 +45,31 @@ const OPTIONS: { value: ThemeMode; labelKey: string; descriptionKey: string; ico
   },
 ];
 
-// 色点顺序: 背景 / 主色 / 文字
-const SKINS: { value: ThemeSkin; labelKey: string; descriptionKey: string; swatches: string[] }[] =
-  [
-    {
-      value: "default",
-      labelKey: "settings.skin.default",
-      descriptionKey: "settings.skin.defaultDesc",
-      swatches: ["#ffffff", "#171717", "#525252"],
-    },
-    {
-      // 设计来源: Animal Island UI https://guokaigdg.github.io/animal-island-ui/#/skill
-      value: "island",
-      labelKey: "settings.skin.island",
-      descriptionKey: "settings.skin.islandDesc",
-      swatches: ["#f8f8f0", "#19c8b9", "#794f27"],
-    },
-    {
-      // 设计来源: StyleKit Pixel Art https://www.stylekit.top/zh/styles/pixel-art
-      value: "pixel",
-      labelKey: "settings.skin.pixel",
-      descriptionKey: "settings.skin.pixelDesc",
-      swatches: ["#f4f4f4", "#ff004d", "#1a1c2c"],
-    },
-    {
-      // 设计来源: https://www.stylekit.top/zh/styles/glassmorphism
-      value: "glassmorphism",
-      labelKey: "settings.skin.glassmorphism",
-      descriptionKey: "settings.skin.glassmorphismDesc",
-      swatches: ["#0b1322", "#e4b863", "#7c9cc4"],
-    },
-  ];
+const SKINS: { value: ThemeSkin; labelKey: string; descriptionKey: string }[] = [
+  {
+    value: "default",
+    labelKey: "settings.skin.default",
+    descriptionKey: "settings.skin.defaultDesc",
+  },
+  {
+    // 设计来源: Animal Island UI https://guokaigdg.github.io/animal-island-ui/#/skill
+    value: "island",
+    labelKey: "settings.skin.island",
+    descriptionKey: "settings.skin.islandDesc",
+  },
+  {
+    // 设计来源: StyleKit Pixel Art https://www.stylekit.top/zh/styles/pixel-art
+    value: "pixel",
+    labelKey: "settings.skin.pixel",
+    descriptionKey: "settings.skin.pixelDesc",
+  },
+  {
+    // 设计来源: https://www.stylekit.top/zh/styles/glassmorphism
+    value: "glassmorphism",
+    labelKey: "settings.skin.glassmorphism",
+    descriptionKey: "settings.skin.glassmorphismDesc",
+  },
+];
 </script>
 
 <template>
@@ -68,21 +79,17 @@ const SKINS: { value: ThemeSkin; labelKey: string; descriptionKey: string; swatc
     </h2>
     <p class="mt-1 text-sm text-muted-foreground">{{ t("settings.general.themeDescription") }}</p>
     <div class="mt-4 flex flex-col gap-2">
-      <button
+      <ThemeChoicePreview
         v-for="opt in OPTIONS"
         :key="opt.value"
-        type="button"
-        class="theme-choice flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors hover:bg-accent"
-        :class="store.theme === opt.value && 'border-primary'"
-        @click="store.setTheme(opt.value)"
-      >
-        <component :is="opt.icon" class="h-4 w-4 shrink-0 text-muted-foreground" />
-        <span class="flex-1">
-          <span class="block text-sm font-medium">{{ t(opt.labelKey) }}</span>
-          <span class="block text-xs text-muted-foreground">{{ t(opt.descriptionKey) }}</span>
-        </span>
-        <Check v-if="store.theme === opt.value" class="h-4 w-4 shrink-0 text-primary" />
-      </button>
+        :skin="store.themeSkin"
+        :mode="opt.value"
+        :selected="store.theme === opt.value"
+        :icon="opt.icon"
+        :label="t(opt.labelKey)"
+        :description="t(opt.descriptionKey)"
+        @select="store.setTheme(opt.value)"
+      />
     </div>
 
     <h2 data-setting="settings.skin.title" class="mt-8 text-base font-semibold">
@@ -90,29 +97,16 @@ const SKINS: { value: ThemeSkin; labelKey: string; descriptionKey: string; swatc
     </h2>
     <p class="mt-1 text-sm text-muted-foreground">{{ t("settings.skin.description") }}</p>
     <div class="mt-4 flex flex-col gap-2">
-      <button
+      <ThemeChoicePreview
         v-for="skin in SKINS"
         :key="skin.value"
-        :aria-pressed="store.themeSkin === skin.value"
-        type="button"
-        class="theme-choice flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors hover:bg-accent"
-        :class="store.themeSkin === skin.value && 'border-primary'"
-        @click="store.setThemeSkin(skin.value)"
-      >
-        <span class="flex shrink-0 items-center -space-x-1.5">
-          <span
-            v-for="color in skin.swatches"
-            :key="color"
-            class="h-4 w-4 rounded-full border border-black/10"
-            :style="{ backgroundColor: color }"
-          />
-        </span>
-        <span class="flex-1">
-          <span class="block text-sm font-medium">{{ t(skin.labelKey) }}</span>
-          <span class="block text-xs text-muted-foreground">{{ t(skin.descriptionKey) }}</span>
-        </span>
-        <Check v-if="store.themeSkin === skin.value" class="h-4 w-4 shrink-0 text-primary" />
-      </button>
+        :skin="skin.value"
+        :mode="previewMode"
+        :selected="store.themeSkin === skin.value"
+        :label="t(skin.labelKey)"
+        :description="t(skin.descriptionKey)"
+        @select="store.setThemeSkin(skin.value)"
+      />
     </div>
   </section>
 </template>

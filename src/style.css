@@ -45,7 +45,9 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-:root {
+/* 选项预览重用正式主题令牌,并重置父主题继承的颜色、字体与圆角。 */
+:root,
+.theme-preview {
   --font-app:
     "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "PingFang SC",
     "Microsoft YaHei", sans-serif;
