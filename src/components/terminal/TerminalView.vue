@@ -5,6 +5,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { resizeCommandSession, writeCommandSession } from "@/lib/terminal";
 import { useTerminalStore } from "@/stores/terminal";
+import { terminalAnsiColors, TERMINAL_MINIMUM_CONTRAST_RATIO } from "@/lib/terminal-theme";
 
 /**
  * 单会话 xterm 视图:挂载时回放 store 输出缓存,此后经 onOutput 增量写入。
@@ -57,8 +58,7 @@ function currentTheme() {
     cursor: foreground,
     cursorAccent: background,
     selectionBackground: withAlpha(foreground, 0.25),
-    // ANSI 亮黑(常作暗灰提示色)对齐主题的弱化文字色
-    brightBlack: mutedForeground,
+    ...terminalAnsiColors(isDark, mutedForeground),
   };
 }
 
@@ -98,6 +98,7 @@ onMounted(() => {
     fontSize: 13,
     cursorBlink: false,
     scrollback: 5000,
+    minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
     theme: syncTheme(),
   });
   fit = new FitAddon();
