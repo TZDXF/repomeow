@@ -62,6 +62,11 @@ const PRIMARY_ARGS: Record<string, string[]> = {
   delete_custom_command: ["name"],
   generate_report: ["date_from", "date_to"],
   read_project_file: ["path"],
+  bash: ["command"],
+  create_terminal_tab: ["command"],
+  stop_terminal_tab: ["id"],
+  restart_terminal_tab: ["id"],
+  read_terminal_tab_output: ["id"],
   set_wiki_model: ["model_id"],
 };
 

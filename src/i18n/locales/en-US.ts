@@ -1025,6 +1025,12 @@ export default {
       list_reports: "Report history",
       read_project_file: "Read project file",
       get_ai_config: "AI config",
+      bash: "Run Bash",
+      list_terminal_tabs: "Terminal tabs",
+      read_terminal_tab_output: "Read terminal output",
+      create_terminal_tab: "Create terminal tab",
+      stop_terminal_tab: "Stop terminal tab",
+      restart_terminal_tab: "Restart terminal tab",
       set_wiki_model: "Switch wiki model",
     },
     reasoning: {

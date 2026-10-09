@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 /// ask 权限下执行前需用户硬确认的工具(有副作用:写入/删除/修改自定义命令 /
 /// 写入 wiki / 生成报告 / 修改 wiki 生成配置)。
-pub(super) const CONFIRM_REQUIRED_TOOLS: [&str; 7] = [
+pub(super) const CONFIRM_REQUIRED_TOOLS: [&str; 11] = [
     "update_wiki",
     "regenerate_wiki",
     "add_custom_command",
@@ -17,6 +17,10 @@ pub(super) const CONFIRM_REQUIRED_TOOLS: [&str; 7] = [
     "delete_custom_command",
     "generate_report",
     "set_wiki_model",
+    "bash",
+    "create_terminal_tab",
+    "stop_terminal_tab",
+    "restart_terminal_tab",
 ];
 
 /// 只读采用允许名单:新增工具默认不可用,必须审核无副作用后加入。
@@ -33,6 +37,8 @@ pub(super) fn tool_allowed(permission: ChatPermission, name: &str) -> bool {
                 | "list_reports"
                 | "read_project_file"
                 | "get_ai_config"
+                | "list_terminal_tabs"
+                | "read_terminal_tab_output"
         )
 }
 

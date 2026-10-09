@@ -323,17 +323,21 @@ fn truncate_last_user_turn_drops_the_last_turn() {
 }
 
 #[test]
-fn gated_tool_list_is_exactly_the_seven_side_effect_tools() {
+fn gated_tool_list_is_exactly_the_side_effect_tools() {
     let mut tools = CONFIRM_REQUIRED_TOOLS.to_vec();
     tools.sort_unstable();
     assert_eq!(
         tools,
         vec![
             "add_custom_command",
+            "bash",
+            "create_terminal_tab",
             "delete_custom_command",
             "generate_report",
             "regenerate_wiki",
+            "restart_terminal_tab",
             "set_wiki_model",
+            "stop_terminal_tab",
             "update_custom_command",
             "update_wiki"
         ]
@@ -348,6 +352,8 @@ fn gated_tool_list_is_exactly_the_seven_side_effect_tools() {
         "sem_diff",
         "read_project_file",
         "get_ai_config",
+        "list_terminal_tabs",
+        "read_terminal_tab_output",
     ] {
         assert!(
             !CONFIRM_REQUIRED_TOOLS.contains(&name),
@@ -593,6 +599,8 @@ async fn readonly_permission_blocks_side_effects_without_confirmation() {
         "list_reports",
         "read_project_file",
         "get_ai_config",
+        "list_terminal_tabs",
+        "read_terminal_tab_output",
     ] {
         assert!(tool_allowed(ChatPermission::ReadOnly, name));
         assert!(hook(permission_context("read", name), None).await.is_none());

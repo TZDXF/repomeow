@@ -5,13 +5,17 @@ use crate::db::Db;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::CustomCommand;
 use rusqlite::Connection;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 // ── 自定义命令 ───────────────────────────────────────────────────────
 
 /// 按名称定位当前项目的自定义命令(项目内名称唯一,冲突在写入侧报 CommandNameConflict)。
-fn find_command_by_name(conn: &Connection, project_id: i64, name: &str) -> AppResult<CustomCommand> {
+fn find_command_by_name(
+    conn: &Connection,
+    project_id: i64,
+    name: &str,
+) -> AppResult<CustomCommand> {
     script::list_commands(conn, project_id)?
         .into_iter()
         .find(|command| command.name == name)
@@ -19,7 +23,7 @@ fn find_command_by_name(conn: &Connection, project_id: i64, name: &str) -> AppRe
 }
 
 /// 可选字符串参数:未传返回 None;传了但为空白视为无效参数。
-fn non_empty_opt(args: &Value, key: &str) -> Result<Option<String>, ToolExecutionError> {
+pub(super) fn non_empty_opt(args: &Value, key: &str) -> Result<Option<String>, ToolExecutionError> {
     match arg_str(args, key) {
         Some(value) if !value.trim().is_empty() => Ok(Some(value.trim().to_string())),
         Some(_) => Err(tool_err(invalid_arg(key))),

@@ -983,6 +983,12 @@ export default {
       list_reports: "报告历史",
       read_project_file: "读项目文件",
       get_ai_config: "AI 配置",
+      bash: "执行 Bash",
+      list_terminal_tabs: "终端 Tab 清单",
+      read_terminal_tab_output: "读终端输出",
+      create_terminal_tab: "创建终端 Tab",
+      stop_terminal_tab: "停止终端 Tab",
+      restart_terminal_tab: "重启终端 Tab",
       set_wiki_model: "切换 Wiki 模型",
     },
     reasoning: {

@@ -666,29 +666,57 @@ pub fn run_command_session(
     kind: Option<String>,
     label: Option<String>,
 ) -> AppResult<TerminalSessionInfo> {
+    run_command_session_impl(
+        &app,
+        manager.inner(),
+        project_id,
+        &project_name,
+        &path,
+        &command,
+        cwd.as_deref(),
+        java_home.as_deref(),
+        kind.as_deref(),
+        label.as_deref(),
+    )
+}
+
+/// 内嵌命令会话的创建入口:前端 IPC 与项目问答工具共用。
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_command_session_impl(
+    app: &AppHandle,
+    manager: &Arc<TerminalManager>,
+    project_id: i64,
+    project_name: &str,
+    path: &str,
+    command: &str,
+    cwd: Option<&str>,
+    java_home: Option<&str>,
+    kind: Option<&str>,
+    label: Option<&str>,
+) -> AppResult<TerminalSessionInfo> {
     let work_dir = cwd.unwrap_or(path);
     if !std::path::Path::new(&work_dir).is_dir() {
         return Err(AppError::coded(ErrorCode::ScriptDirNotFound, work_dir));
     }
-    let mgr = manager.inner().clone();
+    let mgr = manager.clone();
     let id = mgr.next_id.fetch_add(1, Ordering::Relaxed) + 1;
     let spec = SessionSpec {
-        command,
-        cwd: work_dir,
-        java_home,
+        command: command.to_string(),
+        cwd: work_dir.to_string(),
+        java_home: java_home.map(str::to_string),
         interactive: false,
         shell: None,
     };
-    let launched = launch_session(&app, &spec)?;
+    let launched = launch_session(app, &spec)?;
     let info = TerminalSessionInfo {
         id,
         project_id,
-        project_name,
+        project_name: project_name.to_string(),
         label: label
             .map(|l| l.trim().to_string())
             .filter(|l| !l.is_empty())
             .unwrap_or_else(|| spec.command.clone()),
-        kind: kind.unwrap_or_else(|| "shell".into()),
+        kind: kind.unwrap_or_else(|| "shell").to_string(),
         command: spec.command.clone(),
         interactive: false,
         cwd: spec.cwd.clone(),
@@ -697,7 +725,7 @@ pub fn run_command_session(
         started_at: now_ts(),
         finished_at: None,
     };
-    let info = register_launch(&app, &mgr, 0, info, spec, launched);
+    let info = register_launch(app, &mgr, 0, info, spec, launched);
     mgr.prune();
     Ok(info)
 }
@@ -756,6 +784,13 @@ pub fn create_shell_session(
 /// 全部会话:运行中优先,其余按启动时间倒序
 #[tauri::command]
 pub fn list_command_sessions(manager: State<'_, Arc<TerminalManager>>) -> Vec<TerminalSessionInfo> {
+    list_command_sessions_impl(manager.inner())
+}
+
+/// 全部会话:运行中优先,其余按启动时间倒序。
+pub(crate) fn list_command_sessions_impl(
+    manager: &Arc<TerminalManager>,
+) -> Vec<TerminalSessionInfo> {
     let sessions = manager.lock();
     let mut list: Vec<TerminalSessionInfo> = sessions.values().map(|e| e.info.clone()).collect();
     list.sort_by(|a, b| {
@@ -772,6 +807,14 @@ pub fn get_command_session_output(
     manager: State<'_, Arc<TerminalManager>>,
     id: u64,
 ) -> AppResult<String> {
+    get_command_session_output_impl(manager.inner(), id)
+}
+
+/// 回放会话输出缓冲(前端打开详情页时一次性拉取,此后走事件增量)。
+pub(crate) fn get_command_session_output_impl(
+    manager: &Arc<TerminalManager>,
+    id: u64,
+) -> AppResult<String> {
     let sessions = manager.lock();
     let entry = sessions.get(&id).ok_or_else(|| session_not_found(id))?;
     Ok(entry.output.iter().map(String::as_str).collect())
@@ -780,6 +823,11 @@ pub fn get_command_session_output(
 /// 停止会话(整棵树);进程退出后 waiter 把状态归为 stopped
 #[tauri::command]
 pub fn stop_command_session(manager: State<'_, Arc<TerminalManager>>, id: u64) -> AppResult<()> {
+    stop_command_session_impl(manager.inner(), id)
+}
+
+/// 停止会话(整棵树);进程退出后 waiter 把状态归为 stopped。
+pub(crate) fn stop_command_session_impl(manager: &Arc<TerminalManager>, id: u64) -> AppResult<()> {
     let mut sessions = manager.lock();
     let entry = sessions.get_mut(&id).ok_or_else(|| session_not_found(id))?;
     if entry.info.status == TerminalSessionStatus::Running {
@@ -797,7 +845,17 @@ pub fn restart_command_session(
     manager: State<'_, Arc<TerminalManager>>,
     id: u64,
 ) -> AppResult<TerminalSessionInfo> {
-    let mgr = manager.inner().clone();
+    restart_command_session_impl(&app, manager.inner(), id)
+}
+
+/// 重启会话:运行中先整棵树停止,再以原参数重新拉起;会话 id 不变,
+/// 输出缓冲清空,代数递增使旧线程迟到事件失效。前端 IPC 与项目问答工具共用。
+pub(crate) fn restart_command_session_impl(
+    app: &AppHandle,
+    manager: &Arc<TerminalManager>,
+    id: u64,
+) -> AppResult<TerminalSessionInfo> {
+    let mgr = manager.clone();
     let spec = {
         let mut sessions = mgr.lock();
         let entry = sessions.get_mut(&id).ok_or_else(|| session_not_found(id))?;
@@ -813,7 +871,7 @@ pub fn restart_command_session(
             shell: entry.spec.shell,
         }
     };
-    let launched = match launch_session(&app, &spec) {
+    let launched = match launch_session(app, &spec) {
         Ok(l) => l,
         Err(e) => {
             // 重启拉起失败:会话标记为启动失败,保留在列表里供用户查看/重试

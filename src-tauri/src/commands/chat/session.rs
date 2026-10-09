@@ -189,7 +189,7 @@ pub(super) fn build_session(
         get_steering_messages: None,
         get_follow_up_messages: None,
         tool_execution: ToolExecutionMode::Parallel,
-        // ask 权限下拦截五个有副作用工具的硬确认门禁(通用 agent core 不动)。
+        // ask 权限下拦截需要确认的副作用工具(通用 agent core 不动)。
         before_tool_call: Some(build_permission_hook(
             pending_cell.clone(),
             prefs_cell.clone(),

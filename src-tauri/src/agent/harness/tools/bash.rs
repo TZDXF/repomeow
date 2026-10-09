@@ -401,3 +401,12 @@ fn partial_result_from_progress(progress: &ShellCaptureProgress) -> AgentToolRes
         ..Default::default()
     }
 }
+
+/// 便捷构造:以 cwd 构造 bash env 并创建工具(powershell 同款便捷入口)。
+pub fn create_local_bash_tool(
+    cwd: impl Into<std::path::PathBuf>,
+    options: Option<BashToolOptions>,
+) -> AgentTool {
+    let env: Arc<dyn ExecutionEnv> = Arc::new(crate::agent::harness::env::TokioEnv::new(cwd));
+    create_bash_tool(env, options)
+}

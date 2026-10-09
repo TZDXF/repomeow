@@ -15,6 +15,7 @@ mod config;
 mod file;
 mod report;
 mod sem;
+mod terminal;
 #[cfg(test)]
 mod tests;
 mod util;
@@ -25,6 +26,7 @@ use config::*;
 use file::*;
 use report::*;
 use sem::*;
+use terminal::*;
 use util::*;
 use wiki::*;
 
@@ -62,6 +64,9 @@ impl ChatToolContext {
 
 /// 构建项目问答工具集(每个工具的 description 面向 LLM,写明何时用与参数含义)。
 pub fn chat_tools(app: AppHandle, ctx: ChatToolContext) -> Vec<AgentTool> {
+    let mut bash_tool =
+        crate::agent::harness::tools::bash::create_local_bash_tool(ctx.work_dir(), None);
+    bash_tool.execution_mode = Some(crate::agent::types::ToolExecutionMode::Sequential);
     vec![
         sem_find_tool(&app, &ctx),
         sem_context_tool(&app, &ctx),
@@ -78,6 +83,12 @@ pub fn chat_tools(app: AppHandle, ctx: ChatToolContext) -> Vec<AgentTool> {
         list_reports_tool(&app, &ctx),
         read_project_file_tool(&ctx),
         get_ai_config_tool(&app, &ctx),
+        bash_tool,
+        list_terminal_tabs_tool(&app, &ctx),
+        read_terminal_tab_output_tool(&app, &ctx),
+        create_terminal_tab_tool(&app, &ctx),
+        stop_terminal_tab_tool(&app, &ctx),
+        restart_terminal_tab_tool(&app, &ctx),
         set_wiki_model_tool(&app, &ctx),
     ]
 }
