@@ -1,7 +1,7 @@
 //! 项目内嵌终端:在项目目录内直接执行命令(npm scripts / docker compose / 自定义命令),
 //! 输出经 `terminal://output` 事件流式推送前端(xterm 渲染),
 //! 支持实时输出查看、stdin 写入、停止(Windows 整棵树 taskkill)与重启。
-//! 与「系统终端新窗口」模式(run_in_terminal)并存,由设置项 embeddedTerminal 分流。
+//! npm scripts / docker compose / 自定义命令等统一在应用内终端执行。
 //!
 //! 两种会话形态:
 //! - 命令会话:管道捕获 stdout/stderr(避免 ConPTY 屏幕重绘序列污染输出回放缓冲);
@@ -650,7 +650,7 @@ fn register_launch(
     info
 }
 
-/// 在项目内嵌终端执行命令(默认模式;设置关闭时前端走 run_in_terminal 系统终端)。
+/// 在项目内置终端执行命令。
 /// cwd 缺省为项目根 path(monorepo 子包内执行 npm run 时传子目录);
 /// java_home 非空时以进程环境注入 JAVA_HOME;kind/label 仅用于前端分组展示。
 #[tauri::command]

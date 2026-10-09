@@ -290,7 +290,7 @@ async function run(
       label: service ?? file.file_name,
     });
     toast.success(t("docker.started", { name: service ?? file.file_name }));
-    // 命令异步执行(内嵌终端或系统终端新窗口),延迟刷新一次状态(拉取镜像时可能仍偏早,可手动刷新)
+    // 命令在内置终端异步执行,延迟刷新一次状态(拉取镜像时可能仍偏早,可手动刷新)
     setTimeout(loadStatuses, 4000);
   } catch (e) {
     toast.error(String(e));

@@ -1,7 +1,6 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use tauri::{AppHandle, Emitter, State};
 
-use crate::commands::open::{resolve_shell, spawn_terminal, ShellKind};
 use crate::commands::walk;
 use crate::db::Db;
 use crate::error::{AppError, AppResult, ErrorCode};
@@ -250,60 +249,6 @@ pub fn delete_custom_command(app: AppHandle, db: State<'_, Db>, id: i64) -> AppR
     let _ = app.emit("projects://pins-changed", serde_json::json!({}));
     emit_custom_commands_changed(&app);
     Ok(())
-}
-
-/// 在系统终端执行命令(新窗口,跑完不关),终端类型跟随设置项 `terminal`。
-/// cwd 指定工作目录(缺省用项目根 path),用于 monorepo 子包内执行 npm run。
-/// java_home 非空时在命令前注入 JAVA_HOME(mvn.cmd 与 gradlew 均原生读取),
-/// 用命令前缀而非进程环境注入:对 wt / start 兜底路径与 macOS Terminal 一致生效,
-/// 且用户能在终端里直接看到当前生效的 JAVA_HOME。
-#[tauri::command]
-pub fn run_in_terminal(
-    app: tauri::AppHandle,
-    path: String,
-    project_name: String,
-    command: String,
-    cwd: Option<String>,
-    java_home: Option<String>,
-) -> AppResult<()> {
-    let work_dir = cwd.unwrap_or(path);
-    if !std::path::Path::new(&work_dir).is_dir() {
-        return Err(AppError::coded(ErrorCode::ScriptDirNotFound, work_dir));
-    }
-    let shell = resolve_shell(&app);
-    let command = match java_home
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        Some(home) => {
-            let home = home.replace('"', "");
-            format!("{}{command}", java_home_prefix(&home, shell))
-        }
-        None => command,
-    };
-    spawn_terminal(
-        &work_dir,
-        &format!("Project: {project_name}"),
-        Some(&command),
-        shell,
-    )
-}
-
-/// JAVA_HOME 注入前缀,按目标 shell 拼对应语法
-/// (cmd 用 set、PowerShell 用 $env:、git bash 与非 Windows 一致用 export)
-fn java_home_prefix(home: &str, shell: ShellKind) -> String {
-    match shell {
-        ShellKind::PowerShell => format!("$env:JAVA_HOME=\"{home}\"; "),
-        ShellKind::GitBash => format!("export JAVA_HOME=\"{home}\" && "),
-        ShellKind::Cmd => {
-            if cfg!(windows) {
-                format!("set \"JAVA_HOME={home}\" && ")
-            } else {
-                format!("export JAVA_HOME=\"{home}\" && ")
-            }
-        }
-    }
 }
 
 #[cfg(test)]

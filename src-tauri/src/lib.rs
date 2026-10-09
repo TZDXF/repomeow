@@ -241,7 +241,6 @@ pub fn run() {
             commands::script::create_custom_command,
             commands::script::update_custom_command,
             commands::script::delete_custom_command,
-            commands::script::run_in_terminal,
             commands::terminal::run_command_session,
             commands::terminal::create_shell_session,
             commands::terminal::list_command_sessions,

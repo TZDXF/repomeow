@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import { onListen, runInTerminal } from "@/lib/tauri";
+import { onListen } from "@/lib/tauri";
 import {
   TERMINAL_OUTPUT_EVENT,
   TERMINAL_SESSION_CHANGED_EVENT,
@@ -14,7 +14,7 @@ import {
   stopCommandSession,
   type RunCommandOptions,
 } from "@/lib/terminal";
-import { useSettingsStore, type TerminalKind } from "@/stores/settings";
+import type { TerminalKind } from "@/stores/settings";
 import type { Project, TerminalSessionInfo } from "@/types";
 
 /** 输出增量回调(TerminalView 注册,按会话 id 过滤后写入 xterm) */
@@ -35,8 +35,6 @@ function sortSessions(list: TerminalSessionInfo[]) {
  * open / activeId 是每个 webview 窗口自己的 UI 状态,不跨窗口同步。
  */
 export const useTerminalStore = defineStore("terminal", () => {
-  const settings = useSettingsStore();
-
   /** 全部会话(排序与后端一致) */
   const sessions = ref<TerminalSessionInfo[]>([]);
   /** 终端面板是否展开 */
@@ -103,27 +101,19 @@ export const useTerminalStore = defineStore("terminal", () => {
     for (const l of outputListeners) l(id, chunk);
   }
 
-  /**
-   * 统一执行入口:内嵌终端开启时在应用内执行并展开面板,关闭时弹系统终端新窗口。
-   * 返回实际执行方式,便于调用方做差异化处理(如延迟刷新状态)。
-   */
+  /** 统一执行入口:所有命令在应用内终端执行,并展开面板选中新会话。 */
   async function run(
     project: Project,
     command: string,
     opts: RunCommandOptions = {},
-  ): Promise<"embedded" | "system"> {
+  ): Promise<void> {
     await init();
-    if (!settings.embeddedTerminal) {
-      await runInTerminal(project, command, opts.cwd, opts.javaHome);
-      return "system";
-    }
     const info = await runCommandSession(project, command, opts);
     activeId.value = info.id;
     open.value = true;
-    return "embedded";
   }
 
-  /** 主动创建交互式 Shell,独立于命令执行偏好(只有内嵌面板提供此入口);shell 显式指定类型 */
+  /** 主动创建应用内交互式 Shell;shell 显式指定类型,缺省使用设置中的默认 Shell */
   async function create(project: Project, shell?: TerminalKind) {
     await init();
     const info = await createShellSession(project, shell);

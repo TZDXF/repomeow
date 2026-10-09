@@ -1737,11 +1737,9 @@ export default {
       closeToExitHint: "Closing the window quits the app",
     },
     terminal: {
-      title: "Terminal for Commands",
-      description: "Terminal used to run npm scripts, custom commands, and more",
-      embedded: "Embedded terminal",
-      embeddedHint:
-        "Run commands in the terminal panel at the bottom of the app with live output, input, and stop support; turn off to open a system terminal window",
+      title: "Built-in Terminal",
+      description:
+        "npm scripts, custom commands, and more always run in the app's bottom terminal panel with live output, input, and stop support; choose the default shell on Windows",
       available: "Available",
       notDetected: "Not detected",
       selectedUnavailable: "The selected shell was not detected; commands will fall back to cmd",

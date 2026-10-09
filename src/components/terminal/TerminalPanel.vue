@@ -82,9 +82,6 @@ const orderedList = computed(() => {
 const runningCount = computed(() => list.value.filter((s) => s.status === "running").length);
 const hasFinished = computed(() => list.value.some((s) => s.status !== "running"));
 
-// 内嵌终端关闭且无任何会话时不渲染,避免底部常驻一条无用细条
-const visible = computed(() => settings.embeddedTerminal || list.value.length > 0);
-
 const active = computed(
   () => list.value.find((s) => s.id === store.activeId) ?? list.value[0] ?? null,
 );
@@ -184,7 +181,7 @@ async function clearFinished() {
 </script>
 
 <template>
-  <div v-if="visible" class="shrink-0">
+  <div class="shrink-0">
     <!-- 收起态:底部细条,显示运行中数量 -->
     <button
       v-if="!store.open"
@@ -256,7 +253,7 @@ async function clearFinished() {
             </div>
           </VueDraggable>
           <!-- 新建按钮:固定在最右一个页签之后;Windows 下可下拉选择 shell 类型 -->
-          <DropdownMenu v-if="settings.embeddedTerminal && showShellPicker">
+          <DropdownMenu v-if="showShellPicker">
             <DropdownMenuTrigger as-child>
               <Button
                 variant="ghost"
@@ -287,7 +284,7 @@ async function clearFinished() {
             </DropdownMenuContent>
           </DropdownMenu>
           <Button
-            v-else-if="settings.embeddedTerminal"
+            v-else
             variant="ghost"
             size="icon"
             class="h-7 w-7 shrink-0"

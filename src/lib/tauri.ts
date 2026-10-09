@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { Project } from "@/types";
 import { i18n } from "@/i18n";
 
 type SerializedAppError = {
@@ -117,23 +116,4 @@ export async function cmd<T>(name: string, args?: Record<string, unknown>): Prom
 /** 监听后端事件 */
 export function onListen<T>(event: string, handler: (payload: T) => void): Promise<UnlistenFn> {
   return listen<T>(event, (e) => handler(e.payload));
-}
-
-/**
- * 在系统终端里执行命令(新窗口,跑完不关);cwd 缺省为项目根目录。
- * javaHome 非空时后端在命令前注入 JAVA_HOME(Spring Boot 运行用)。
- */
-export function runInTerminal(
-  project: Project,
-  command: string,
-  cwd?: string,
-  javaHome?: string,
-): Promise<unknown> {
-  return cmd("run_in_terminal", {
-    path: project.path,
-    projectName: project.name,
-    command,
-    ...(cwd ? { cwd } : {}),
-    ...(javaHome ? { javaHome } : {}),
-  });
 }

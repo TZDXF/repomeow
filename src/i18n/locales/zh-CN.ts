@@ -1673,11 +1673,9 @@ export default {
       closeToExitHint: "关闭窗口即退出应用",
     },
     terminal: {
-      title: "执行命令的终端",
-      description: "运行 npm 脚本、自定义命令等所用的终端",
-      embedded: "内嵌终端",
-      embeddedHint:
-        "开启后命令在应用底部的终端面板内执行,可实时查看输出、写入输入与停止;关闭则弹出系统终端窗口",
+      title: "内置终端",
+      description:
+        "npm 脚本、自定义命令等统一在应用底部的终端面板执行,支持实时输出、输入与停止;Windows 下可选择默认 Shell",
       available: "可用",
       notDetected: "未检测到",
       selectedUnavailable: "当前选择未检测到,执行时将回退到 cmd",

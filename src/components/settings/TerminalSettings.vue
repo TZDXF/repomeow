@@ -2,11 +2,10 @@
 import { Check, GitBranch, SquareTerminal, Terminal } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { Badge } from "@/components/ui/badge";
-import { Switch } from "@/components/ui/switch";
 import type { TerminalCapabilities } from "@/lib/terminal";
 import { useSettingsStore, type TerminalKind } from "@/stores/settings";
 
-// availability 为 null 时(探测失败或非 Windows)仅展示内嵌终端开关
+// availability 为 null 时(探测失败)或非 Windows 时仅展示内置终端说明
 defineProps<{ availability: TerminalCapabilities | null }>();
 
 const { t } = useI18n();
@@ -41,21 +40,6 @@ const OPTIONS: { value: TerminalKind; icon: typeof Terminal; labelKey: string; d
     <p class="mt-1 text-sm text-muted-foreground">
       {{ t("settings.terminal.description") }}
     </p>
-    <div class="mt-4 flex items-center justify-between gap-4">
-      <div>
-        <label for="embedded-terminal" class="text-sm font-medium">
-          {{ t("settings.terminal.embedded") }}
-        </label>
-        <p class="mt-0.5 text-xs text-muted-foreground">
-          {{ t("settings.terminal.embeddedHint") }}
-        </p>
-      </div>
-      <Switch
-        id="embedded-terminal"
-        :checked="store.embeddedTerminal"
-        @update:checked="store.setEmbeddedTerminal"
-      />
-    </div>
     <template v-if="availability?.isWindows">
       <p
         v-if="store.terminal !== 'cmd' && !availability.shells[store.terminal]"
