@@ -363,7 +363,7 @@ pub struct TerminalSessionInfo {
     /// 来源分类:npm / docker / custom / java / shell
     pub kind: String,
     pub command: String,
-    /// 是否为主动创建的交互式 Shell(区别于一次性命令会话)
+    /// 是否为手动新建的常驻 Shell;一次性命令同样支持 PTY 交互
     pub interactive: bool,
     /// 实际工作目录(绝对路径)
     pub cwd: String,

@@ -73,9 +73,9 @@ function sessionOf(id: number) {
   return store.sessions.find((s) => s.id === id);
 }
 
-/** 把 xterm 当前尺寸同步给交互式会话的 PTY(命令会话是管道,无尺寸概念) */
+/** 把 xterm 当前尺寸同步给会话 PTY(脚本与常驻 Shell 共用) */
 function syncPtySize() {
-  if (!term || !sessionOf(props.sessionId)?.interactive) return;
+  if (!term || sessionOf(props.sessionId)?.status !== "running") return;
   if (term.cols === syncedCols && term.rows === syncedRows) return;
   syncedCols = term.cols;
   syncedRows = term.rows;
@@ -92,9 +92,8 @@ function renderBuffer() {
 onMounted(() => {
   if (!container.value) return;
   term = new Terminal({
-    // 命令会话是管道输出(只有 \n):交给 xterm 转成 CRLF 才能正确换行;
-    // 交互式会话走 ConPTY,输出已含 \r\n,不能重复转换
-    convertEol: !sessionOf(props.sessionId)?.interactive,
+    // 所有会话均使用 PTY,换行与回显由终端驱动/子进程处理。
+    convertEol: false,
     fontSize: 13,
     cursorBlink: false,
     scrollback: 5000,
@@ -117,13 +116,8 @@ onMounted(() => {
   function handleInput(data: string) {
     const session = sessionOf(props.sessionId);
     if (session?.status !== "running") return;
-    // 交互式 PTY 会话原样透传:回显/行编辑/^C 展示全部由 shell 自绘;
-    // 命令会话(管道)无回显,本地补显键入字符,便于向运行中的进程回答提示。
+    // PTY 统一处理回显、行编辑与 Ctrl+C,前端不能补画输入,否则会重复回显。
     void writeCommandSession(props.sessionId, data).catch(() => {});
-    if (!session.interactive) {
-      if (data === "\r") term?.write("\r\n");
-      else if (data >= " ") term?.write(data);
-    }
   }
 
   term.onData(handleInput);

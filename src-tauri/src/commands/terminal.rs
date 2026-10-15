@@ -4,14 +4,14 @@
 //! npm scripts / docker compose / 自定义命令等统一在应用内终端执行。
 //!
 //! 两种会话形态:
-//! - 命令会话:管道捕获 stdout/stderr(避免 ConPTY 屏幕重绘序列污染输出回放缓冲);
-//! - 交互式 Shell:ConPTY 伪终端,提示符/回显/行编辑由 shell 自绘(pwsh 走 PSReadLine)。
+//! - 命令会话:在 PTY 内执行命令,结束后退出,支持 CLI 快捷键与交互提示;
+//! - 常驻 Shell:在 PTY 内持续接收命令,提示符/回显/行编辑由 shell 自绘。
 //!
 //! 会话仅存内存:应用退出即清空,不做持久化。
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -40,6 +40,7 @@ struct SessionSpec {
     command: String,
     cwd: String,
     java_home: Option<String>,
+    /// 是否为手动新建的常驻 Shell;命令会话同样使用 PTY。
     interactive: bool,
     /// 手动新建终端时前端显式选择的 shell;None 表示按设置项解析(命令会话)
     shell: Option<ShellKind>,
@@ -51,9 +52,9 @@ struct SessionEntry {
     /// 避免旧进程退出事件把新会话误标为 stopped
     generation: u64,
     pid: u32,
-    /// 命令会话的 stdin 或交互式会话的 PTY 输入端
+    /// PTY 输入端(命令与常驻 Shell 共用)
     writer: Option<Arc<Mutex<Box<dyn Write + Send>>>>,
-    /// 交互式会话的 PTY 主端(resize 用);进程退出后关闭以释放 ConPTY 句柄
+    /// PTY 主端(resize 用);进程退出后关闭以释放 ConPTY 句柄
     master: Option<Box<dyn MasterPty + Send>>,
     /// 重启所需的完整参数(java_home 不入 info,只在后端留存)
     spec: SessionSpec,
@@ -94,36 +95,10 @@ impl TerminalManager {
     }
 }
 
-/// 会话子进程句柄:命令会话是普通管道子进程,交互式是 ConPTY 子进程;
-/// 统一 wait/pid 供 waiter 线程与注册表使用
-enum SessionChild {
-    Piped(std::process::Child),
-    Pty(Box<dyn portable_pty::Child + Send + Sync>),
-}
+/// 命令与常驻 Shell 均使用 PTY 子进程,共用等待退出与进程树管理逻辑。
+type SessionChild = Box<dyn portable_pty::Child + Send + Sync>;
 
-impl SessionChild {
-    fn pid(&self) -> u32 {
-        match self {
-            SessionChild::Piped(c) => c.id(),
-            SessionChild::Pty(c) => c.process_id().unwrap_or(0),
-        }
-    }
-
-    /// 等待退出并取退出码(信号终止等无码场景为 None)
-    fn wait(&mut self) -> Option<i32> {
-        match self {
-            SessionChild::Piped(c) => c.wait().ok().and_then(|s| s.code()),
-            // portable-pty 的退出码为 u32,截回 i32 与管道会话同型
-            SessionChild::Pty(c) => {
-                c.wait()
-                    .ok()
-                    .map(|s| if s.success() { 0 } else { s.exit_code() as i32 })
-            }
-        }
-    }
-}
-
-/// 一次拉起的全部句柄:子进程 + 输出流(PTY 单流,管道 stdout/stderr 双流)+ 输入端 + PTY 主端
+/// 一次拉起的全部句柄:子进程 + PTY 输出流 + 输入端 + PTY 主端
 struct Launched {
     child: SessionChild,
     readers: Vec<Box<dyn Read + Send>>,
@@ -217,56 +192,61 @@ impl StreamDecoder {
     }
 }
 
-/// 按设置的 shell 构造内嵌执行命令(管道模式,无窗口)。
-/// 与 spawn_terminal 的窗口模式共用 shell 选择与可用性回退。
-fn build_shell_command(app: &AppHandle, command: &str) -> Command {
-    let shell = resolve_shell(app);
+/// 构造一次性命令的 PTY 启动参数。与常驻 Shell 分离,命令执行完即退出。
+fn build_command_pty_command(shell: ShellKind, command: &str, cwd: &str) -> CommandBuilder {
     #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        match shell {
-            ShellKind::Cmd => {
-                let mut c = hidden(Command::new("cmd"));
-                // raw_arg:命令原样拼接,等价于在 cmd 里逐字输入(不加额外引号);
-                // 多行先摊平(cmd /C 遇换行即截断)
-                let flat =
-                    crate::commands::open::flatten_multiline(Some(command), shell.separator());
-                c.raw_arg(format!("/C {}", flat.as_deref().unwrap_or(command)));
-                c
+    let mut cmd = match shell {
+        ShellKind::Cmd => {
+            let mut c = CommandBuilder::new("cmd");
+            let flat = crate::commands::open::flatten_multiline(Some(command), shell.separator());
+            let command = flat.as_deref().unwrap_or(command);
+            // portable-pty 按 MSVC 规则把内嵌双引号转义为 \"，cmd 不识别这种转义。
+            // 先用环境变量占位,让 cmd 在剥掉 /S /C 的外层引号后再还原,
+            // 保留带空格的可执行路径、参数引号及原有 %VAR% 展开语义。
+            let mut argument = command.replace('"', "%REPOMEOW_CMD_QUOTE%");
+            // MSVC 规则还会翻倍被外层引号包裹的尾部反斜杠,同样延后还原。
+            if argument.ends_with('\\') {
+                argument.pop();
+                argument.push_str("%REPOMEOW_CMD_BACKSLASH%");
             }
-            ShellKind::PowerShell => {
-                let ps = crate::commands::open::find_powershell().unwrap_or("powershell");
-                // EncodedCommand 规避命令文本在外层进程与 powershell 之间的引号转义;
-                // 前缀把管道输出编码切到 UTF-8,减少中文输出按 GBK 写出的场景
-                let script =
-                    format!("[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; {command}");
-                let utf16: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
-                use base64::Engine as _;
-                let b64 = base64::engine::general_purpose::STANDARD.encode(utf16);
-                let mut c = hidden(Command::new(ps));
-                c.raw_arg(format!("-NoProfile -EncodedCommand {b64}"));
-                c
-            }
-            ShellKind::GitBash => {
-                let bash = crate::commands::open::find_git_bash().unwrap_or_else(|| "bash".into());
-                use base64::Engine as _;
-                let b64 = base64::engine::general_purpose::STANDARD.encode(command.as_bytes());
-                // base64 负载不经 bash 分词,命令中的引号/特殊字符原样保留;
-                // source 的退出码即命令退出码(与窗口模式的 exec bash 保活不同,这里跑完即退)
-                let mut c = hidden(Command::new(bash));
-                c.arg("-c").arg(format!("source <(echo {b64} | base64 -d)"));
-                c
-            }
+            c.args(["/D", "/S", "/C"]);
+            c.arg(argument);
+            c.env("REPOMEOW_CMD_QUOTE", "\"");
+            c.env("REPOMEOW_CMD_BACKSLASH", "\\");
+            c
         }
-    }
+        ShellKind::PowerShell => {
+            let ps = crate::commands::open::find_powershell().unwrap_or("powershell");
+            let script =
+                format!("[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; {command}");
+            let utf16: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+            use base64::Engine as _;
+            let b64 = base64::engine::general_purpose::STANDARD.encode(utf16);
+            let mut c = CommandBuilder::new(ps);
+            c.args(["-NoLogo", "-NoProfile", "-EncodedCommand", &b64]);
+            c
+        }
+        ShellKind::GitBash => {
+            let bash = crate::commands::open::find_git_bash().unwrap_or_else(|| "bash".into());
+            use base64::Engine as _;
+            let b64 = base64::engine::general_purpose::STANDARD.encode(command.as_bytes());
+            let mut c = CommandBuilder::new(bash);
+            c.arg("-c");
+            c.arg(format!("source <(echo {b64} | base64 -d)"));
+            c
+        }
+    };
     #[cfg(not(windows))]
-    {
-        // 非 Windows 无 shell 选择(resolve_shell 恒为 Cmd),sh -c 原生支持多行脚本
+    let mut cmd = {
         let _ = shell;
-        let mut c = Command::new("sh");
-        c.arg("-c").arg(command);
+        let mut c = CommandBuilder::new("sh");
+        c.arg("-c");
+        c.arg(command);
         c
-    }
+    };
+    cmd.cwd(cwd);
+    cmd.env("TERM", "xterm-256color");
+    cmd
 }
 
 /// 交互式 shell 的 ConPTY 启动参数。伪终端下提示符/回显/行编辑由 shell 自绘
@@ -309,60 +289,15 @@ fn spawn_err(e: impl std::fmt::Display) -> AppError {
     AppError::coded(ErrorCode::TerminalSpawnFailed, e.to_string())
 }
 
-/// 按会话形态拉起子进程:交互式走 ConPTY(初值 120x30,前端 fit 后经 resize 同步),
-/// 命令会话走管道
+/// 所有会话均通过 PTY 拉起,保证子进程检测到 TTY 并启用交互能力。
 fn launch_session(app: &AppHandle, spec: &SessionSpec) -> AppResult<Launched> {
-    if !spec.interactive {
-        let mut cmd = build_shell_command(app, &spec.command);
-        // 先用注册表最新环境覆盖(改环境变量后无需重启应用),应用显式注入
-        // (FORCE_COLOR/JAVA_HOME 等)在其后写入,优先级保持最高
-        crate::env_refresh::apply_to_command(&mut cmd);
-        cmd.current_dir(&spec.cwd)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            // 管道模式下 npm(chalk)等检测到非 TTY 默认关颜色,强制开启
-            // (xterm 前端能渲染 ANSI 序列;不支持的工具会自行忽略这些变量)
-            .env("FORCE_COLOR", "1")
-            .env("CLICOLOR_FORCE", "1")
-            .env("TERM", "xterm-256color");
-        // JAVA_HOME 用进程环境注入(窗口模式因跨 wt/start 只能拼命令前缀,管道模式无此限制)
-        if let Some(home) = spec
-            .java_home
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
-            cmd.env("JAVA_HOME", home.replace('"', ""));
-        }
-        let mut child = cmd.spawn().map_err(spawn_err)?;
-        let writer = child
-            .stdin
-            .take()
-            .map(|s| Arc::new(Mutex::new(Box::new(s) as Box<dyn Write + Send>)));
-        let readers = [
-            child
-                .stdout
-                .take()
-                .map(|r| Box::new(r) as Box<dyn Read + Send>),
-            child
-                .stderr
-                .take()
-                .map(|r| Box::new(r) as Box<dyn Read + Send>),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
-        return Ok(Launched {
-            child: SessionChild::Piped(child),
-            readers,
-            writer,
-            master: None,
-        });
-    }
-
     let shell = spec.shell.unwrap_or_else(|| resolve_shell(app));
-    let mut cmd = build_interactive_pty_command(shell, &spec.cwd);
+    let mut cmd = if spec.interactive {
+        build_interactive_pty_command(shell, &spec.cwd)
+    } else {
+        build_command_pty_command(shell, &spec.command, &spec.cwd)
+    };
+    // CommandBuilder 在 Windows 构造时已实时读取注册表环境;显式 JAVA_HOME 最后覆盖。
     if let Some(home) = spec
         .java_home
         .as_deref()
@@ -371,6 +306,11 @@ fn launch_session(app: &AppHandle, spec: &SessionSpec) -> AppResult<Launched> {
     {
         cmd.env("JAVA_HOME", home.replace('"', ""));
     }
+    launch_pty(cmd)
+}
+
+/// 独立于 AppHandle 的 PTY 启动路径,便于对真实子进程交互做回归验证。
+fn launch_pty(cmd: CommandBuilder) -> AppResult<Launched> {
     let pair = native_pty_system()
         .openpty(PtySize {
             rows: 30,
@@ -391,7 +331,7 @@ fn launch_session(app: &AppHandle, spec: &SessionSpec) -> AppResult<Launched> {
     // 从端句柄在 spawn 后立即释放,避免句柄占用影响子进程退出检测
     drop(pair.slave);
     Ok(Launched {
-        child: SessionChild::Pty(child),
+        child,
         readers: vec![Box::new(reader)],
         writer: Some(writer),
         master: Some(pair.master),
@@ -584,7 +524,13 @@ fn spawn_waiter(
     mut child: SessionChild,
 ) {
     std::thread::spawn(move || {
-        let exit_code = child.wait();
+        let exit_code = child.wait().ok().map(|status| {
+            if status.success() {
+                0
+            } else {
+                status.exit_code() as i32
+            }
+        });
         let info = {
             let mut sessions = mgr.lock();
             let Some(entry) = sessions.get_mut(&id) else {
@@ -624,7 +570,7 @@ fn register_launch(
         writer,
         master,
     } = launched;
-    let pid = child.pid();
+    let pid = child.process_id().unwrap_or(0);
     {
         let mut sessions = mgr.lock();
         sessions.insert(
@@ -896,7 +842,7 @@ pub(crate) fn restart_command_session_impl(
         let mut sessions = mgr.lock();
         let entry = sessions.get_mut(&id).ok_or_else(|| session_not_found(id))?;
         entry.generation += 1;
-        entry.pid = child.pid();
+        entry.pid = child.process_id().unwrap_or(0);
         entry.writer = writer;
         entry.master = master;
         entry.stop_requested = false;
@@ -916,41 +862,37 @@ pub(crate) fn restart_command_session_impl(
     Ok(info)
 }
 
-/// 向会话输入端写入(xterm 键盘输入);会话已结束时静默忽略。
-/// 交互式 PTY 会话按终端输入语义把换行统一成 \r(Enter/粘贴多行);
-/// 命令会话原样透传 stdin。
+/// PTY 输入统一换行:Enter、LF/CRLF 多行粘贴均映射为单个 CR。
+/// 焦点上报不是键盘输入,不应写进 ConPTY 被显示成字面字符。
+fn normalize_pty_input(data: &str) -> Option<String> {
+    if data == "\x1b[I" || data == "\x1b[O" {
+        return None;
+    }
+    Some(data.replace("\r\n", "\n").replace('\n', "\r"))
+}
+
+/// 向会话 PTY 输入端写入(xterm 键盘输入);会话已结束时静默忽略。
 #[tauri::command]
 pub fn write_command_session(
     manager: State<'_, Arc<TerminalManager>>,
     id: u64,
     data: String,
 ) -> AppResult<()> {
-    let (writer, interactive) = {
+    let writer = {
         let sessions = manager.lock();
         let entry = sessions.get(&id).ok_or_else(|| session_not_found(id))?;
-        (entry.writer.clone(), entry.spec.interactive)
+        entry.writer.clone()
     };
-    if let Some(writer) = writer {
+    if let (Some(writer), Some(input)) = (writer, normalize_pty_input(&data)) {
         let mut guard = writer.lock().unwrap();
-        // 子进程已退出但 waiter 尚未清理句柄时写入会 EPIPE,按静默处理
-        let input = if interactive {
-            // ConPTY 不识别焦点上报事件(ESC[I/ESC[O),会当作字面键入显示;
-            // 输出端已拦截 1004 开关,此处兜底丢弃。xterm 每次焦点变化都单独
-            // 发送完整序列,不会与键盘输入粘连,精确匹配不会误伤 ESC 按键
-            if data == "\x1b[I" || data == "\x1b[O" {
-                return Ok(());
-            }
-            data.replace('\n', "\r")
-        } else {
-            data
-        };
+        // 子进程已退出但 waiter 尚未清理句柄时写入会 EPIPE,按静默处理。
         let _ = guard.write_all(input.as_bytes());
         let _ = guard.flush();
     }
     Ok(())
 }
 
-/// 同步交互式会话的 PTY 尺寸(前端 xterm fit 后调用);命令会话是管道无尺寸,静默忽略
+/// 同步会话的 PTY 尺寸(前端 xterm fit 后调用)。
 #[tauri::command]
 pub fn resize_command_session(
     manager: State<'_, Arc<TerminalManager>>,
@@ -989,6 +931,195 @@ pub fn remove_command_session(manager: State<'_, Arc<TerminalManager>>, id: u64)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pty_input_normalizes_enter_and_paste_without_duplicate_lines() {
+        assert_eq!(normalize_pty_input("o\r").as_deref(), Some("o\r"));
+        assert_eq!(
+            normalize_pty_input("a\nb\r\nc\r").as_deref(),
+            Some("a\rb\rc\r")
+        );
+        assert_eq!(normalize_pty_input("\x03").as_deref(), Some("\x03"));
+        assert_eq!(normalize_pty_input("\x1b[A").as_deref(), Some("\x1b[A"));
+        assert_eq!(normalize_pty_input("\x1b[I"), None);
+        assert_eq!(normalize_pty_input("\x1b[O"), None);
+    }
+
+    /// 使用真实 PTY 读写,同时验证命令退出后不会留下常驻 Shell。
+    fn exercise_pty_command(cmd: CommandBuilder, input: Option<(&str, &str)>) -> (String, i32) {
+        let Launched {
+            mut child,
+            readers,
+            writer,
+            mut master,
+        } = launch_pty(cmd).unwrap();
+        let (tx, rx) = mpsc::channel();
+        for mut reader in readers {
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                let mut buf = [0u8; 4096];
+                while let Ok(n) = reader.read(&mut buf) {
+                    if n == 0 || tx.send(buf[..n].to_vec()).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        drop(tx);
+        let mut output = Vec::new();
+        let mut sent = false;
+        let mut exit_code = None;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while std::time::Instant::now() < deadline {
+            match rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                Ok(chunk) => output.extend(chunk),
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(mpsc::RecvTimeoutError::Timeout) if exit_code.is_some() => break,
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+            }
+            if let Some((prompt, data)) = input {
+                if !sent && String::from_utf8_lossy(&output).contains(prompt) {
+                    let mut guard = writer.as_ref().unwrap().lock().unwrap();
+                    guard
+                        .write_all(normalize_pty_input(data).unwrap().as_bytes())
+                        .unwrap();
+                    guard.flush().unwrap();
+                    sent = true;
+                }
+            }
+            if exit_code.is_none() {
+                if let Some(status) = child.try_wait().unwrap() {
+                    exit_code = Some(status.exit_code() as i32);
+                    // ConPTY 的最后一屏在关闭主端时排空,reader 继续收集到 EOF。
+                    master.take();
+                }
+            }
+        }
+        let text = String::from_utf8_lossy(&output).into_owned();
+        if exit_code.is_none() {
+            // reader 也可能先于 try_wait 观察到退出;有界等待,失败时杀掉测试进程。
+            while std::time::Instant::now() < deadline {
+                if let Some(status) = child.try_wait().unwrap() {
+                    exit_code = Some(status.exit_code() as i32);
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            if exit_code.is_none() {
+                kill_tree(child.process_id().unwrap_or(0));
+                let _ = child.wait();
+            }
+        }
+        drop(master);
+        assert!(input.is_none() || sent, "未收到输入提示: {text:?}");
+        (
+            text.clone(),
+            exit_code.unwrap_or_else(|| panic!("命令未自动退出: {text:?}")),
+        )
+    }
+
+    #[test]
+    fn command_pty_accepts_input_and_preserves_exit_code() {
+        #[cfg(windows)]
+        let command = "set /p REPOMEOW_INPUT=READY_FOR_INPUT: & set REPOMEOW_INPUT & exit /b 7";
+        #[cfg(not(windows))]
+        let command = "printf READY_FOR_INPUT:; read REPOMEOW_INPUT; printf 'REPOMEOW_INPUT=%s\\n' \"$REPOMEOW_INPUT\"; exit 7";
+        let cmd = build_command_pty_command(ShellKind::Cmd, command, ".");
+        let (output, exit_code) =
+            exercise_pty_command(cmd, Some(("READY_FOR_INPUT:", "hello-pty\r")));
+        assert!(
+            output.contains("REPOMEOW_INPUT=hello-pty"),
+            "输入未被命令处理: {output:?}"
+        );
+        assert_eq!(exit_code, 7);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn command_pty_cmd_preserves_quotes_variables_and_trailing_backslash() {
+        let command = "echo \"quoted %REPOMEOW_TEST_VALUE%\"\necho C:\\test\\";
+        let mut cmd = build_command_pty_command(ShellKind::Cmd, command, ".");
+        cmd.env("REPOMEOW_TEST_VALUE", "expanded value");
+        let (output, exit_code) = exercise_pty_command(cmd, None);
+        assert!(
+            output.contains("\"quoted expanded value\""),
+            "引号或变量展开错误: {output:?}"
+        );
+        assert!(
+            output.contains("C:\\test\\\r\n"),
+            "尾部反斜杠被改写: {output:?}"
+        );
+        assert_eq!(exit_code, 0);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn command_pty_cmd_supports_quoted_executable_path() {
+        let command = format!("\"{}\" /D /C exit 9", std::env::var("COMSPEC").unwrap());
+        let (output, exit_code) = exercise_pty_command(
+            build_command_pty_command(ShellKind::Cmd, &command, "."),
+            None,
+        );
+        assert_eq!(exit_code, 9, "带引号的可执行路径未正确执行: {output:?}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn command_pty_powershell_sees_console_and_accepts_input() {
+        let command = "Write-Output ('TTY:' + (-not [Console]::IsInputRedirected) + ':' + (-not [Console]::IsOutputRedirected)); $value = Read-Host 'READY_FOR_INPUT:'; Write-Output ('INPUT_RECEIVED:' + $value); exit 6";
+        let (output, exit_code) = exercise_pty_command(
+            build_command_pty_command(ShellKind::PowerShell, command, "."),
+            Some(("READY_FOR_INPUT:", "hello-pty\r")),
+        );
+        assert!(
+            output.contains("TTY:True:True"),
+            "子进程未检测到 TTY: {output:?}"
+        );
+        assert!(
+            output.contains("INPUT_RECEIVED:hello-pty"),
+            "输入未被命令处理: {output:?}"
+        );
+        assert_eq!(exit_code, 6);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn command_pty_gitbash_sees_tty_and_accepts_input() {
+        // Git Bash 是可选 Shell;没有安装时由生产路径回退到 cmd。
+        if crate::commands::open::find_git_bash().is_none() {
+            return;
+        }
+        let command = "test -t 0 && test -t 1 && printf 'TTY:yes\\n'; printf READY_FOR_INPUT:; IFS= read -r value; printf 'INPUT_RECEIVED:%s\\n' \"$value\"; exit 8";
+        let (output, exit_code) = exercise_pty_command(
+            build_command_pty_command(ShellKind::GitBash, command, "."),
+            Some(("READY_FOR_INPUT:", "hello-pty\r")),
+        );
+        assert!(output.contains("TTY:yes"), "子进程未检测到 TTY: {output:?}");
+        assert!(
+            output.contains("INPUT_RECEIVED:hello-pty"),
+            "输入未被命令处理: {output:?}"
+        );
+        assert_eq!(exit_code, 8);
+    }
+
+    /// 需要本机已安装 Node/pnpm 和前端依赖;不启动浏览器,只验证真实 Vite CLI 的 q 指令。
+    #[cfg(windows)]
+    #[test]
+    #[ignore]
+    fn command_pty_vite_shortcut_smoke() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap();
+        let mut cmd = build_command_pty_command(
+            ShellKind::Cmd,
+            "pnpm exec vite --host 127.0.0.1 --port 0 --strictPort --clearScreen false",
+            root.to_str().unwrap(),
+        );
+        cmd.env_remove("CI");
+        let (output, exit_code) = exercise_pty_command(cmd, Some(("show help", "q\r")));
+        assert!(output.contains("Local:"), "Vite 启动失败: {output:?}");
+        assert_eq!(exit_code, 0, "Vite 快捷键退出失败: {output:?}");
+    }
 
     #[test]
     fn decoder_utf8_split_multibyte() {
