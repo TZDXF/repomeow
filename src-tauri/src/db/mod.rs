@@ -72,6 +72,8 @@ mod tests {
             "hidden_items",
             "ai_usage_log",
             "system_schedules",
+            "chat_history",
+            "chat_active_sessions",
         ] {
             let count: i64 = conn
                 .query_row(

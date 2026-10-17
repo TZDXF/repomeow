@@ -905,6 +905,11 @@ export default {
     notConfigured: "请先在设置页配置 AI(接口地址、API Key、模型)",
   },
   chat: {
+    historyTitle: "对话历史",
+    historyEmpty: "暂无历史对话，发送消息后会自动保存",
+    historyLoadFailed: "加载对话历史失败",
+    historySaveFailed: "保存对话历史失败，当前对话尚未丢弃",
+    historyRetry: "重试",
     responding: "正在回答",
     entry: "项目问答",
     title: "项目问答",

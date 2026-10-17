@@ -1,7 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { computed, isReactive } from "vue";
-import { respondToolPermission, sendChatMessage, truncateChatLastTurn } from "@/lib/chat";
+import {
+  getChatHistory,
+  saveChatHistory,
+  selectChatHistory,
+  newChatSession,
+  respondToolPermission,
+  sendChatMessage,
+  truncateChatLastTurn,
+} from "@/lib/chat";
 import type { ChatEvent, ChatUsageSummary } from "@/lib/chat";
 import { useChatStore } from "@/stores/chat";
 
@@ -29,6 +37,13 @@ vi.mock("@/lib/chat", () => ({
   ),
   abortChat: vi.fn(async () => {}),
   newChatSession: vi.fn(async () => {}),
+  getChatHistory: vi.fn(async () => ({ entries: [], active: null })),
+  saveChatHistory: vi.fn(async (_path: string, id: string, title: string) => ({
+    id,
+    title,
+    updatedAt: 1,
+  })),
+  selectChatHistory: vi.fn(),
   respondToolPermission: vi.fn(async () => true),
   truncateChatLastTurn: vi.fn(async () => {}),
 }));
@@ -599,7 +614,7 @@ describe("chat store", () => {
     // 不立即 await:返回的 promise 要等重发回合结束才兑现
     const edit = store.editLastUserMessage(PATH, PROJECT, "第二问(改)");
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(vi.mocked(truncateChatLastTurn)).toHaveBeenCalledWith(PATH);
+    expect(vi.mocked(truncateChatLastTurn)).toHaveBeenCalledWith(PATH, PROJECT.name);
 
     const session = store.sessions[PATH];
     // 截掉「第二问+第二答」后以新文本重新入列;发送中的回合待 finish
@@ -691,5 +706,133 @@ describe("chat store", () => {
     await expect(store.editLastUserMessage(PATH, PROJECT, "   ")).resolves.toBe(false);
     expect(vi.mocked(truncateChatLastTurn)).not.toHaveBeenCalled();
     expect(vi.mocked(sendChatMessage)).not.toHaveBeenCalled();
+  });
+});
+
+describe("chat history", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    chatHarness.pending.clear();
+    setActivePinia(createPinia());
+  });
+
+  function snapshot(id = "saved-one") {
+    return {
+      entry: { id, title: "历史问题", updatedAt: 100 },
+      state: {
+        messages: [{ id: "u1", role: "user" as const, content: "历史问题", toolRunIds: [] }],
+        toolRuns: {},
+        lastUsage: USAGE,
+        contextTokens: 120,
+        contextBreakdown: null,
+        cacheHitInputTokens: 100,
+        cacheHitCachedTokens: 10,
+      },
+    };
+  }
+
+  it("整轮结束自动保存稳定消息、思考、工具和统计,不保存运行中状态", async () => {
+    const store = useChatStore();
+    const run = store.send(PATH, PROJECT, "需要保留的问题");
+    emit(PATH, { kind: "thinkingDelta", delta: "思考" });
+    emit(PATH, { kind: "textDelta", delta: "回答" });
+    emit(PATH, { kind: "toolCall", id: "t1", name: "read_file", args: {} });
+    emit(PATH, { kind: "toolResult", id: "t1", ok: true, summary: "内容" });
+    emit(PATH, { kind: "turnEnd", contextTokens: 120 });
+    finish(PATH);
+    await run;
+
+    const saved = vi.mocked(saveChatHistory).mock.calls[0];
+    expect(saved[0]).toBe(PATH);
+    expect(saved[2]).toBe("需要保留的问题");
+    expect(saved[3].messages.map((message) => message.content)).toEqual(["需要保留的问题", "回答"]);
+    expect(saved[3].messages[1].thinking).toBe("思考");
+    expect(saved[3].toolRuns.t1.ok).toBe(true);
+    expect(saved[3]).not.toHaveProperty("busy");
+    expect(saved[3]).not.toHaveProperty("streamingText");
+    expect(store.ensureHistory(PATH).entries).toHaveLength(1);
+  });
+
+  it("重启后恢复所选历史,同一项目的并发读取只请求一次", async () => {
+    const saved = snapshot();
+    vi.mocked(getChatHistory).mockResolvedValueOnce({ entries: [saved.entry], active: saved });
+    const store = useChatStore();
+    const first = store.loadHistory(PATH);
+    const second = store.loadHistory(PATH);
+    await Promise.all([first, second]);
+    expect(getChatHistory).toHaveBeenCalledTimes(1);
+    expect(store.ensureSession(PATH).messages).toEqual(saved.state.messages);
+    expect(store.ensureSession(PATH).busy).toBe(false);
+    expect(store.ensureSession(PATH).contextTokens).toBe(120);
+    expect(store.ensureHistory(PATH).activeId).toBe(saved.entry.id);
+    await store.loadHistory(PATH);
+    expect(getChatHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it("新会话保留旧记录且后续消息使用不同的历史 ID", async () => {
+    const store = useChatStore();
+    const first = store.send(PATH, PROJECT, "第一段");
+    finish(PATH);
+    await first;
+    const firstId = store.ensureHistory(PATH).activeId;
+    await store.newSession(PATH);
+    expect(store.ensureSession(PATH).messages).toEqual([]);
+    expect(store.ensureHistory(PATH).activeId).toBeNull();
+    expect(store.ensureHistory(PATH).entries[0].id).toBe(firstId);
+    const next = store.send(PATH, PROJECT, "第二段");
+    finish(PATH);
+    await next;
+    expect(store.ensureHistory(PATH).activeId).not.toBe(firstId);
+    expect(store.ensureHistory(PATH).entries).toHaveLength(2);
+  });
+
+  it("保存失败时新会话不清空原消息和后端上下文", async () => {
+    const store = useChatStore();
+    store.ensureSession(PATH).messages = snapshot().state.messages;
+    vi.mocked(saveChatHistory).mockRejectedValueOnce(new Error("disk full"));
+    await store.newSession(PATH);
+    expect(store.ensureSession(PATH).messages).toHaveLength(1);
+    expect(newChatSession).not.toHaveBeenCalled();
+    expect(store.ensureHistory(PATH).error).toContain("disk full");
+    expect(store.ensureHistory(PATH).changing).toBe(false);
+  });
+
+  it("运行中切换历史先停止并保存残缺回复,切换期间拒绝新消息", async () => {
+    const store = useChatStore();
+    const saved = snapshot();
+    vi.mocked(selectChatHistory).mockResolvedValueOnce(saved);
+    const run = store.send(PATH, PROJECT, "当前问题");
+    emit(PATH, { kind: "textDelta", delta: "尚未结束的回复" });
+    const switching = store.selectHistory(PATH, saved.entry.id);
+    await expect(store.send(PATH, PROJECT, "不应发送")).resolves.toBe(false);
+    expect(selectChatHistory).not.toHaveBeenCalled();
+    finish(PATH);
+    await run;
+    await switching;
+    expect(saveChatHistory).toHaveBeenCalled();
+    expect(vi.mocked(saveChatHistory).mock.calls[0][3].messages[1]).toMatchObject({
+      content: "尚未结束的回复",
+      partial: true,
+    });
+    expect(store.ensureSession(PATH).messages).toEqual(saved.state.messages);
+    expect(store.ensureHistory(PATH).activeId).toBe(saved.entry.id);
+    expect(store.ensureHistory(PATH).changing).toBe(false);
+  });
+
+  it("切换失败保留当前对话;读取失败可重试且项目历史互不覆盖", async () => {
+    const store = useChatStore();
+    store.ensureSession(PATH).messages = snapshot().state.messages;
+    vi.mocked(selectChatHistory).mockRejectedValueOnce(new Error("missing history"));
+    await store.selectHistory(PATH, "missing");
+    expect(store.ensureSession(PATH).messages[0].content).toBe("历史问题");
+    expect(store.ensureHistory(PATH).error).toContain("missing history");
+
+    vi.mocked(getChatHistory).mockRejectedValueOnce(new Error("read failed"));
+    await store.loadHistory("other-project");
+    expect(store.ensureHistory("other-project").loaded).toBe(false);
+    await store.loadHistory("other-project");
+    expect(store.ensureHistory("other-project").loaded).toBe(true);
+    expect(store.ensureSession("other-project").messages).toEqual([]);
+    expect(store.ensureSession(PATH).messages).toHaveLength(1);
   });
 });

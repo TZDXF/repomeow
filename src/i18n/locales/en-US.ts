@@ -947,6 +947,11 @@ export default {
     notConfigured: "Configure AI integration in Settings first (base URL, API key, model)",
   },
   chat: {
+    historyTitle: "Conversation history",
+    historyEmpty: "No conversations yet. Messages are saved automatically.",
+    historyLoadFailed: "Failed to load conversation history",
+    historySaveFailed: "Failed to save conversation history. The current conversation has been kept.",
+    historyRetry: "Retry",
     responding: "Responding",
     entry: "Project Q&A",
     title: "Project Q&A",

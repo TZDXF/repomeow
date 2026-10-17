@@ -20,6 +20,13 @@ vi.mock("@/lib/chat", () => ({
     },
   ),
   newChatSession: vi.fn(async () => {}),
+  getChatHistory: vi.fn(async () => ({ entries: [], active: null })),
+  saveChatHistory: vi.fn(async (_path: string, id: string, title: string) => ({
+    id,
+    title,
+    updatedAt: 1,
+  })),
+  selectChatHistory: vi.fn(),
   respondToolPermission: vi.fn(async () => true),
   truncateChatLastTurn: vi.fn(async () => {}),
 }));

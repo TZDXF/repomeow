@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
+import { computed, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { RouterLink } from "vue-router";
 import { FoldVertical, Square, TriangleAlert } from "@lucide/vue";
@@ -48,10 +48,23 @@ const aiReady = computed(() => aiConfig.chatReady);
 // --- 会话状态(按项目路径隔离,离开页面不清空) ---
 const session = computed(() => chat.ensureSession(props.project.path));
 
+const history = computed(() => chat.ensureHistory(props.project.path));
+watch(
+  () => props.project.path,
+  (path) => void chat.loadHistory(path),
+  { immediate: true },
+);
+const historyPending = computed(() => history.value.loading || history.value.changing);
+
+function selectHistory(id: string) {
+  cancelEdit();
+  void chat.selectHistory(props.project.path, id);
+}
+
 const isEmpty = computed(() => session.value.messages.length === 0 && !session.value.busy);
 
 // ── 面板布局 / 时间线视图 / 消息动作(实现见 composables/chat-dock/*) ──
-const { expanded, toggleExpanded, panelStyle, resizing, startResize } = useChatDockLayout(open);
+const { panelStyle, resizing, startResize } = useChatDockLayout(open);
 const { timeline, retrySeconds } = useChatTimeline(session);
 const {
   onSubmit,
@@ -73,24 +86,44 @@ const {
   <aside
     v-show="open"
     ref="chatPanel"
-    class="chat-panel relative flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-l bg-background"
+    class="chat-panel relative flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-l"
     :class="{ 'chat-panel-resizing': resizing }"
     :style="panelStyle"
     :aria-label="t('chat.title')"
   >
     <ChatDockHeader
-      :project-name="project.name"
-      :expanded="expanded"
+      :entries="history.entries"
+      :active-id="history.activeId"
+      :disabled="historyPending || !history.loaded"
       @new-session="startNewSession"
-      @toggle-expanded="toggleExpanded"
-      @close="open = false"
+      @select-history="selectHistory"
     />
 
+    <div
+      v-if="history.error"
+      class="flex shrink-0 items-center gap-2 border-b px-3 py-2 text-xs text-destructive"
+      role="alert"
+    >
+      <span class="min-w-0 flex-1 break-words">{{ history.error }}</span>
+      <button
+        v-if="!history.loaded"
+        type="button"
+        class="shrink-0 underline"
+        :disabled="historyPending"
+        @click="chat.loadHistory(project.path)"
+      >
+        {{ t("chat.historyRetry") }}
+      </button>
+    </div>
+
     <!-- 消息区 -->
-    <Conversation class="min-h-0 flex-1">
+    <Conversation :key="`${project.path}:${history.activeId ?? 'new'}`" class="min-h-0 flex-1">
       <ConversationContent class="gap-4 px-3">
-        <ConversationEmptyState v-if="isEmpty">
-          <ChatDockEmptyState :ai-ready="aiReady" @send="sendText" />
+        <ConversationEmptyState v-if="isEmpty && history.loaded">
+          <ChatDockEmptyState
+            :ai-ready="aiReady && history.loaded && !historyPending"
+            @send="sendText"
+          />
         </ConversationEmptyState>
 
         <template v-else>
@@ -101,7 +134,7 @@ const {
               :content="view.content"
               :editable="view.editable"
               :editing="editingKey === view.key"
-              :ai-ready="aiReady"
+              :ai-ready="aiReady && history.loaded && !historyPending"
               @start-edit="startEdit(view)"
               @confirm="confirmEdit"
               @cancel="cancelEdit"
@@ -154,12 +187,15 @@ const {
           <PromptInputTextarea
             class="min-h-9"
             :placeholder="t('chat.composer.placeholder')"
-            :disabled="!aiReady"
+            :disabled="!aiReady || !history.loaded || historyPending"
           />
         </PromptInputBody>
         <PromptInputFooter class="px-2 pb-2">
           <PromptInputTools class="min-w-0 flex-1 flex-nowrap">
-            <ChatDockPrefs :busy="session.busy" :ai-ready="aiReady" />
+            <ChatDockPrefs
+              :busy="session.busy"
+              :ai-ready="aiReady && history.loaded && !historyPending"
+            />
           </PromptInputTools>
           <div class="flex shrink-0 items-center gap-1">
             <ChatContextMeter :session="session" />
@@ -168,7 +204,7 @@ const {
               <PromptInputSubmit
                 v-show="!session.busy"
                 :status="submitStatus"
-                :disabled="!aiReady || session.busy"
+                :disabled="!aiReady || session.busy || !history.loaded || historyPending"
               />
               <PromptInputButton
                 v-if="session.busy"

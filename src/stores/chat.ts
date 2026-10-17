@@ -3,6 +3,11 @@ import { defineStore } from "pinia";
 import { i18n } from "@/i18n";
 import {
   newChatSession,
+  getChatHistory,
+  saveChatHistory,
+  selectChatHistory,
+  type ChatHistoryEntry,
+  type ChatStoredState,
   respondToolPermission as respondToolPermissionCmd,
   sendChatMessage,
   truncateChatLastTurn,
@@ -23,7 +28,7 @@ export interface ChatRetryState {
   message: string;
 }
 
-/** 单个项目的会话状态(离开页面不清空,内存会话随应用退出丢弃) */
+/** 单个项目的会话状态(离开页面不清空,稳定消息与上下文会持久化) */
 export interface ChatSessionState {
   messages: ChatMessage[];
   phase: ChatPhase;
@@ -49,6 +54,15 @@ export interface ChatSessionState {
   retry: ChatRetryState | null;
   /** 自动压缩进行中(compactionStart/compactionEnd 之间) */
   compacting: boolean;
+}
+
+export interface ChatHistoryState {
+  entries: ChatHistoryEntry[];
+  activeId: string | null;
+  loaded: boolean;
+  loading: boolean;
+  changing: boolean;
+  error: string | null;
 }
 
 interface ChatProject {
@@ -123,7 +137,9 @@ export function friendlyChatError(code: string, message: string): string {
 export const useChatStore = defineStore("chat", () => {
   // key = clean 后的项目路径(与 ChatDock 传入的 project.path 一致)
   const sessions = ref<Record<string, ChatSessionState>>({});
-  // 非响应式运行簿:AbortController 与在途 promise,仅作取消/会话清空的协调
+  const histories = ref<Record<string, ChatHistoryState>>({});
+  // 非响应式运行簿:协调加载、取消、保存与会话切换。
+  const historyLoads = new Map<string, Promise<void>>();
   const controllers = new Map<string, AbortController>();
   const activeRuns = new Map<string, Promise<void>>();
 
@@ -134,6 +150,88 @@ export const useChatStore = defineStore("chat", () => {
     sessions.value[path] = created;
     // 必须返回 ref 容器里的代理,首次创建的原始对象无法追踪 busy/error 等更新。
     return sessions.value[path]!;
+  }
+
+  function ensureHistory(path: string): ChatHistoryState {
+    histories.value[path] ??= {
+      entries: [],
+      activeId: null,
+      loaded: false,
+      loading: false,
+      changing: false,
+      error: null,
+    };
+    return histories.value[path]!;
+  }
+
+  function restoreSession(state: ChatStoredState): ChatSessionState {
+    const session = { ...defaultSession(), ...state };
+    resetApprovalStates(session);
+    return session;
+  }
+
+  function historyError(
+    path: string,
+    key: "historyLoadFailed" | "historySaveFailed",
+    error: unknown,
+  ) {
+    const { message } = extractChatError(error);
+    ensureHistory(path).error = `${i18n.global.t(`chat.${key}`)}${message ? `: ${message}` : ""}`;
+  }
+
+  function loadHistory(path: string): Promise<void> {
+    const history = ensureHistory(path);
+    if (history.loaded) return Promise.resolve();
+    const pending = historyLoads.get(path);
+    if (pending) return pending;
+    history.loading = true;
+    history.error = null;
+    const run = (async () => {
+      try {
+        const saved = await getChatHistory(path);
+        history.entries = saved.entries;
+        const session = ensureSession(path);
+        // 已在内存中产生新消息时不让迟到的读取覆盖它。
+        if (!session.busy && session.messages.length === 0 && saved.active) {
+          sessions.value[path] = restoreSession(saved.active.state);
+          history.activeId = saved.active.entry.id;
+        }
+        history.loaded = true;
+      } catch (error) {
+        historyError(path, "historyLoadFailed", error);
+      } finally {
+        history.loading = false;
+        historyLoads.delete(path);
+      }
+    })();
+    historyLoads.set(path, run);
+    return run;
+  }
+
+  async function persistSession(path: string): Promise<boolean> {
+    const session = ensureSession(path);
+    if (!session.messages.length) return true;
+    const history = ensureHistory(path);
+    history.activeId ??= messageId();
+    const title = session.messages.find((message) => message.role === "user")?.content ?? "";
+    const state: ChatStoredState = {
+      messages: session.messages,
+      toolRuns: session.toolRuns,
+      lastUsage: session.lastUsage,
+      contextTokens: session.contextTokens,
+      contextBreakdown: session.contextBreakdown,
+      cacheHitInputTokens: session.cacheHitInputTokens,
+      cacheHitCachedTokens: session.cacheHitCachedTokens,
+    };
+    try {
+      const entry = await saveChatHistory(path, history.activeId, title.slice(0, 80), state);
+      history.entries = [entry, ...history.entries.filter((item) => item.id !== entry.id)];
+      history.error = null;
+      return true;
+    } catch (error) {
+      historyError(path, "historySaveFailed", error);
+      return false;
+    }
   }
 
   function onChatEvent(path: string, event: ChatEvent) {
@@ -291,7 +389,7 @@ export const useChatStore = defineStore("chat", () => {
   function send(path: string, project: ChatProject, text: string): Promise<boolean> {
     const trimmed = text.trim();
     if (!trimmed) return Promise.resolve(false);
-    if (activeRuns.has(path)) {
+    if (activeRuns.has(path) || ensureHistory(path).changing) {
       ensureSession(path).error = friendlyChatError("ai_request_failed", "chat_busy");
       return Promise.resolve(false);
     }
@@ -357,6 +455,7 @@ export const useChatStore = defineStore("chat", () => {
         if (session.phase === "streaming") {
           session.phase = "idle";
         }
+        await persistSession(path);
       }
     })();
 
@@ -387,7 +486,7 @@ export const useChatStore = defineStore("chat", () => {
   ): Promise<boolean> {
     const trimmed = text.trim();
     if (!trimmed) return false;
-    if (activeRuns.has(path)) return false;
+    if (activeRuns.has(path) || ensureHistory(path).changing) return false;
     const session = ensureSession(path);
     const index = session.messages.map((message) => message.role).lastIndexOf("user");
     if (index < 0) return send(path, project, trimmed);
@@ -403,7 +502,7 @@ export const useChatStore = defineStore("chat", () => {
     session.error = null;
 
     try {
-      await truncateChatLastTurn(path);
+      await truncateChatLastTurn(path, project.name);
     } catch (error) {
       session.messages = previousMessages;
       session.toolRuns = previousToolRuns;
@@ -476,26 +575,55 @@ export const useChatStore = defineStore("chat", () => {
     return accepted;
   }
 
-  /** 新会话:忙时先中止并等待落地,再清空前端内存与后端会话 */
+  async function settleRun(path: string) {
+    controllers.get(path)?.abort();
+    await activeRuns.get(path)?.catch(() => {});
+  }
+
+  /** 新会话只重置当前上下文,旧对话先保存;保存失败时不丢弃当前内容。 */
   async function newSession(path: string) {
-    const controller = controllers.get(path);
-    if (controller) {
-      controller.abort();
-      const run = activeRuns.get(path);
-      if (run) {
-        await run.catch(() => {});
-      }
-    }
-    sessions.value[path] = defaultSession();
+    const history = ensureHistory(path);
+    if (history.changing || history.loading) return;
+    history.changing = true;
     try {
+      await settleRun(path);
+      if (!(await persistSession(path))) return;
       await newChatSession(path);
-    } catch {
-      /* 后端清理失败不阻断前端清空:下一次发送会以新会话语义重试 */
+      sessions.value[path] = defaultSession();
+      history.activeId = null;
+      history.error = null;
+    } catch (error) {
+      historyError(path, "historyLoadFailed", error);
+    } finally {
+      history.changing = false;
+    }
+  }
+
+  /** 切换历史前停止在途回合,保存当前对话,再同步切换前后端上下文。 */
+  async function selectHistory(path: string, id: string) {
+    const history = ensureHistory(path);
+    if (history.changing || history.loading || history.activeId === id) return;
+    history.changing = true;
+    try {
+      await settleRun(path);
+      if (!(await persistSession(path))) return;
+      const snapshot = await selectChatHistory(path, id);
+      sessions.value[path] = restoreSession(snapshot.state);
+      history.activeId = snapshot.entry.id;
+      history.error = null;
+    } catch (error) {
+      historyError(path, "historyLoadFailed", error);
+    } finally {
+      history.changing = false;
     }
   }
 
   return {
     sessions,
+    histories,
+    ensureHistory,
+    loadHistory,
+    selectHistory,
     ensureSession,
     send,
     abort,

@@ -150,14 +150,14 @@ export function abortChat(runId: string): Promise<void> {
   return cmd<void>("chat_abort", { runId });
 }
 
-/** 清空后端会话上下文(新会话) */
+/** 重置当前后端上下文,保留已保存的历史记录(新会话) */
 export function newChatSession(projectPath: string): Promise<void> {
   return cmd<void>("chat_new_session", { projectPath });
 }
 
 /** 编辑重发:丢弃后端会话里最后一条用户消息及其后的整个回答回合 */
-export function truncateChatLastTurn(projectPath: string): Promise<void> {
-  return cmd<void>("chat_truncate_last_turn", { projectPath });
+export function truncateChatLastTurn(projectPath: string, projectName: string): Promise<void> {
+  return cmd<void>("chat_truncate_last_turn", { projectPath, projectName });
 }
 
 /** 回应工具权限请求:allow=true 允许本次执行,false 拒绝(后端仍会以 toolResult 收尾) */
@@ -167,4 +167,51 @@ export function respondToolPermission(
   allow: boolean,
 ): Promise<boolean> {
   return cmd<boolean>("chat_tool_permission_respond", { projectPath, toolCallId, allow });
+}
+
+/** 持久化时只保留稳定内容,不保存运行中/审批中等瞬态标记。 */
+export interface ChatStoredState {
+  messages: ChatMessage[];
+  toolRuns: Record<string, ChatToolRun>;
+  lastUsage: ChatUsageSummary | null;
+  contextTokens: number | null;
+  contextBreakdown: ChatContextBreakdown | null;
+  cacheHitInputTokens: number;
+  cacheHitCachedTokens: number;
+}
+
+export interface ChatHistoryEntry {
+  id: string;
+  title: string;
+  updatedAt: number;
+}
+
+export interface ChatHistorySnapshot {
+  entry: ChatHistoryEntry;
+  state: ChatStoredState;
+}
+
+export interface ChatHistory {
+  entries: ChatHistoryEntry[];
+  active: ChatHistorySnapshot | null;
+}
+
+export function getChatHistory(projectPath: string): Promise<ChatHistory> {
+  return cmd<ChatHistory>("chat_history_get", { projectPath });
+}
+
+export function saveChatHistory(
+  projectPath: string,
+  sessionId: string,
+  title: string,
+  state: ChatStoredState,
+): Promise<ChatHistoryEntry> {
+  return cmd<ChatHistoryEntry>("chat_history_save", { projectPath, sessionId, title, state });
+}
+
+export function selectChatHistory(
+  projectPath: string,
+  sessionId: string,
+): Promise<ChatHistorySnapshot> {
+  return cmd<ChatHistorySnapshot>("chat_history_select", { projectPath, sessionId });
 }

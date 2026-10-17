@@ -3,7 +3,8 @@
 //! 前端经 `chat_send` 发送消息,Rust 侧用 pi Agent(按模型 api 分派的 provider
 //! 流 + RepoMeow 工具集)跑完整个对话回合,经 `Channel<ChatEvent>` 回推增量事件;会话按
 //! 项目路径隔离,跨消息保留上下文。`chat_abort` 取消进行中的回合,
-//! `chat_new_session` 丢弃会话上下文。每次 `chat_send` 结束后把聚合的
+//! `chat_new_session` 重置当前上下文但保留 SQLite 历史;历史时间线与完整
+//! Agent 上下文一并保存,重启后可恢复续聊。每次 `chat_send` 结束后把聚合的
 //! token 用量写入 `ai_usage_log`(task_type = "chat")。
 //!
 //! 模型/思考强度/工具权限来自 `ai-config.json` 的 `chat` 段(缺省回退
@@ -40,6 +41,8 @@ use crate::path_util::clean_str;
 use crate::time_util::now_ts_nanos;
 mod compaction;
 mod events;
+mod history;
+pub use history::*;
 mod permission;
 mod session;
 mod stream;
@@ -235,6 +238,27 @@ impl Drop for RegisteredChatRun {
     }
 }
 
+/// 发送与编辑重发共用恢复入口,保证重启后第一次操作是编辑时也能截断旧上下文。
+fn get_or_build_session(
+    app: &AppHandle,
+    db: &Db,
+    project_path: &str,
+    project_name: &str,
+) -> AppResult<ChatSession> {
+    let session_key = clean_str(project_path);
+    let existing = chat_sessions().lock().unwrap().get(&session_key).cloned();
+    if let Some(session) = existing {
+        return Ok(session);
+    }
+    let session = build_session(app, db, project_path, project_name)?;
+    history::restore_active_context(db, &session_key, &session)?;
+    chat_sessions()
+        .lock()
+        .unwrap()
+        .insert(session_key, session.clone());
+    Ok(session)
+}
+
 // ── Tauri 命令 ───────────────────────────────────────────────────────
 
 /// 发送一条用户消息并跑完整个 agent 回合(可能多轮 LLM 调用 + 工具执行)。
@@ -250,19 +274,7 @@ pub async fn chat_send(
     on_event: Channel<ChatEvent>,
 ) -> AppResult<Option<ChatUsageSummary>> {
     let session_key = clean_str(&project_path);
-    let existing = chat_sessions().lock().unwrap().get(&session_key).cloned();
-    let session = match existing {
-        Some(session) => session,
-        None => {
-            let session = build_session(&app, &db, &project_path, &project_name)?;
-            chat_sessions()
-                .lock()
-                .unwrap()
-                .entry(session_key.clone())
-                .or_insert(session)
-                .clone()
-        }
-    };
+    let session = get_or_build_session(&app, &db, &project_path, &project_name)?;
 
     if session
         .busy
@@ -377,8 +389,9 @@ pub async fn chat_tool_permission_respond(
 /// 丢弃某项目的会话上下文(下一条消息从零开始)。若该会话回合仍在跑,
 /// 先取消再移除。
 #[tauri::command]
-pub async fn chat_new_session(project_path: String) -> AppResult<()> {
+pub async fn chat_new_session(db: State<'_, Db>, project_path: String) -> AppResult<()> {
     let session_key = clean_str(&project_path);
+    history::clear_active(&db, &session_key)?;
     let removed = chat_sessions().lock().unwrap().remove(&session_key);
     if let Some(session) = removed {
         let run_id = session.run_id.lock().unwrap().clone();
@@ -398,15 +411,16 @@ pub async fn chat_new_session(project_path: String) -> AppResult<()> {
 }
 
 /// 编辑上一条提问:丢弃会话里最后一条用户消息及其后的整个回答回合
-/// (前端随后以新文本重新发送)。会话不存在或无用户消息时幂等空操作;
-/// 回合进行中拒绝(busy)。
+/// (前端随后以新文本重新发送)。内存会话不存在时先恢复所选历史,
+/// 无用户消息时幂等空操作;回合进行中拒绝(busy)。
 #[tauri::command]
-pub async fn chat_truncate_last_turn(project_path: String) -> AppResult<()> {
-    let session_key = clean_str(&project_path);
-    let session = chat_sessions().lock().unwrap().get(&session_key).cloned();
-    let Some(session) = session else {
-        return Ok(());
-    };
+pub async fn chat_truncate_last_turn(
+    app: AppHandle,
+    db: State<'_, Db>,
+    project_path: String,
+    project_name: String,
+) -> AppResult<()> {
+    let session = get_or_build_session(&app, &db, &project_path, &project_name)?;
     if session.busy.load(Ordering::SeqCst) {
         return Err(AppError::coded(
             ErrorCode::AiRequestFailed,
