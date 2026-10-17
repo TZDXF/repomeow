@@ -9,6 +9,7 @@ import {
   FolderSync,
   FolderTree,
   LayoutGrid,
+  MessageCircleMore,
   Pencil,
   Radar,
   Star,
@@ -34,6 +35,7 @@ import CustomCommands from "@/components/scripts/CustomCommands.vue";
 import PackageScripts from "@/components/scripts/PackageScripts.vue";
 import TagPicker from "@/components/tags/TagPicker.vue";
 import TerminalPanel from "@/components/terminal/TerminalPanel.vue";
+import { useChatStore } from "@/stores/chat";
 import { useProjectsStore } from "@/stores/projects";
 import type { Project } from "@/types";
 
@@ -41,6 +43,8 @@ const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const store = useProjectsStore();
+const chatOpen = ref(false);
+const chat = useChatStore();
 
 const project = computed(() => {
   const id = Number(route.params.id);
@@ -227,195 +231,224 @@ async function saveDesc() {
 </script>
 
 <template>
-  <div v-if="project" class="flex h-full flex-col overflow-hidden">
-    <header class="shrink-0 border-b px-4 py-3">
-      <div class="flex items-start justify-between gap-4">
-        <div class="flex min-w-0 items-center gap-2">
-          <Input
-            v-if="editingName"
-            ref="nameInput"
-            v-model="draftName"
-            class="h-8 w-72 max-w-full rounded-md px-2 text-lg font-semibold md:text-lg"
-            @keydown.enter.prevent="saveName"
-            @keydown.esc="editingName = false"
-            @blur="saveName"
-          />
-          <h1
-            v-else
-            class="group flex min-w-0 cursor-pointer items-center gap-1.5 text-lg font-semibold"
-            :title="t('projects.detail.editName')"
-            @click="startEditName"
-          >
-            <span class="truncate">{{ project.name }}</span>
-            <span
-              v-if="project.auto_pull"
-              class="shrink-0"
-              :title="t('git.tracking.hint')"
-              @click.stop
+  <div v-if="project" class="flex h-full overflow-hidden">
+    <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <header class="shrink-0 border-b px-4 py-3">
+        <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+          <div class="flex min-w-0 flex-1 basis-48 items-center gap-2">
+            <Input
+              v-if="editingName"
+              ref="nameInput"
+              v-model="draftName"
+              class="h-8 w-72 max-w-full rounded-md px-2 text-lg font-semibold md:text-lg"
+              @keydown.enter.prevent="saveName"
+              @keydown.esc="editingName = false"
+              @blur="saveName"
+            />
+            <h1
+              v-else
+              class="group flex min-w-0 cursor-pointer items-center gap-1.5 text-lg font-semibold"
+              :title="t('projects.detail.editName')"
+              @click="startEditName"
             >
-              <Radar class="h-3.5 w-3.5 text-muted-foreground" />
-            </span>
+              <span class="truncate">{{ project.name }}</span>
+              <span
+                v-if="project.auto_pull"
+                class="shrink-0"
+                :title="t('git.tracking.hint')"
+                @click.stop
+              >
+                <Radar class="h-3.5 w-3.5 text-muted-foreground" />
+              </span>
+              <Pencil
+                class="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+              />
+            </h1>
+            <!-- 打开远程仓库与工作区切换:跟随项目名展示(remote 为仓库级配置,与当前工作区无关) -->
+            <template v-if="project.path_exists && project.git?.is_repo">
+              <GitRemoteLink :project="project" />
+              <WorktreeSwitcher
+                ref="switcherRef"
+                v-model:path="activeWorktreePath"
+                :project="project"
+                @manage="worktreeOpen = true"
+              />
+            </template>
+          </div>
+          <div class="flex max-w-full flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              class="h-9 w-9"
+              :title="
+                t(
+                  project.favorited_at
+                    ? 'projects.actions.unfavorite'
+                    : 'projects.actions.favorite',
+                )
+              "
+              @click="toggleFavorite"
+            >
+              <Star
+                class="h-4 w-4"
+                :class="project.favorited_at ? 'fill-yellow-400 text-yellow-400' : ''"
+              />
+            </Button>
+            <Button
+              v-if="project.path_exists"
+              variant="outline"
+              size="sm"
+              :title="t('files.entry')"
+              @click="router.push(`/projects/${project.id}/files`)"
+            >
+              <FolderTree class="h-4 w-4" />
+              {{ t("files.entry") }}
+            </Button>
+            <Button
+              v-if="project.path_exists"
+              variant="outline"
+              size="sm"
+              :title="t('wiki.entry')"
+              @click="router.push(`/projects/${project.id}/wiki`)"
+            >
+              <BookOpenText class="h-4 w-4" />
+              {{ t("wiki.entry") }}
+            </Button>
+            <Button
+              v-if="project.path_exists"
+              :variant="chatOpen ? 'secondary' : 'outline'"
+              size="sm"
+              :title="chatOpen ? t('chat.close') : t('chat.entry')"
+              :aria-label="t('chat.entry')"
+              :aria-expanded="chatOpen"
+              @click="chatOpen = !chatOpen"
+            >
+              <MessageCircleMore class="h-4 w-4" />
+              {{ t("chat.entry") }}
+              <span
+                v-if="chat.sessions[(worktreeProject ?? project).path]?.busy"
+                class="size-2 animate-pulse rounded-full bg-green-500"
+                :title="t('chat.responding')"
+              />
+            </Button>
+            <OpenWithMenu v-if="project.path_exists" :project="worktreeProject ?? project" />
+          </div>
+        </div>
+
+        <p
+          class="mt-1 truncate text-sm text-muted-foreground"
+          :title="(worktreeProject ?? project).path"
+        >
+          {{ (worktreeProject ?? project).path }}
+        </p>
+
+        <div
+          v-if="!project.path_exists"
+          class="mt-2 flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        >
+          <TriangleAlert class="h-4 w-4 shrink-0" />
+          <span class="min-w-0 flex-1">{{ t("projects.status.pathMissingHint") }}</span>
+          <Button variant="outline" size="sm" class="shrink-0" @click="relocateOpen = true">
+            <FolderSync class="h-4 w-4" />
+            {{ t("projects.actions.relocate") }}
+          </Button>
+        </div>
+
+        <div class="mt-1">
+          <Textarea
+            v-if="editingDesc"
+            ref="descInput"
+            v-model="draftDesc"
+            rows="2"
+            :placeholder="t('projects.detail.descPlaceholder')"
+            class="min-h-0 w-full rounded-md px-3 py-2 text-sm"
+            @keydown.esc="editingDesc = false"
+            @keydown.enter.ctrl.prevent="saveDesc"
+            @blur="saveDesc"
+          />
+          <p
+            v-else
+            class="group flex w-fit cursor-pointer items-center gap-1.5 text-sm"
+            :class="project.description ? '' : 'text-muted-foreground'"
+            :title="t('projects.detail.editDesc')"
+            @click="startEditDesc"
+          >
+            {{ project.description || t("projects.detail.addDesc") }}
             <Pencil
-              class="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+              class="h-3 w-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
             />
-          </h1>
-          <!-- 打开远程仓库与工作区切换:跟随项目名展示(remote 为仓库级配置,与当前工作区无关) -->
-          <template v-if="project.path_exists && project.git?.is_repo">
-            <GitRemoteLink :project="project" />
-            <WorktreeSwitcher
-              ref="switcherRef"
-              v-model:path="activeWorktreePath"
-              :project="project"
-              @manage="worktreeOpen = true"
-            />
+          </p>
+        </div>
+
+        <div class="mt-2.5 flex flex-wrap items-center gap-x-6 gap-y-2">
+          <TagPicker :project="project" />
+          <template v-if="project.path_exists">
+            <GitStatusBar :project="worktreeProject ?? project" />
+            <Button
+              v-if="project.git?.is_repo"
+              variant="outline"
+              size="xs"
+              @click="router.push(`/projects/${project.id}/graph`)"
+            >
+              <Waypoints class="h-3.5 w-3.5" />
+              {{ t("git.graph.title") }}
+            </Button>
+            <!-- 视图切换:执行(卡片网格)/ AI(全宽非卡片),固定在头部右下角 -->
+            <div class="segmented-control view-toggle ml-auto flex gap-1 rounded-lg bg-muted p-1">
+              <button
+                type="button"
+                class="view-toggle-btn flex items-center gap-1.5 rounded-md px-3 py-1 text-sm transition-colors"
+                :class="
+                  detailView === 'overview'
+                    ? 'bg-background shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                "
+                :data-active="detailView === 'overview' || undefined"
+                :aria-pressed="detailView === 'overview'"
+                @click="detailView = 'overview'"
+              >
+                <LayoutGrid class="h-3.5 w-3.5" />
+                {{ t("projects.detail.viewOverview") }}
+              </button>
+              <button
+                type="button"
+                class="view-toggle-btn flex items-center gap-1.5 rounded-md px-3 py-1 text-sm transition-colors"
+                :class="
+                  detailView === 'ai'
+                    ? 'bg-background shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                "
+                :data-active="detailView === 'ai' || undefined"
+                :aria-pressed="detailView === 'ai'"
+                @click="detailView = 'ai'"
+              >
+                <Bot class="h-3.5 w-3.5" />
+                {{ t("projects.detail.viewAi") }}
+              </button>
+            </div>
           </template>
         </div>
-        <div class="flex shrink-0 items-center gap-2">
-          <Button
-            variant="outline"
-            size="icon"
-            class="h-9 w-9"
-            :title="
-              t(project.favorited_at ? 'projects.actions.unfavorite' : 'projects.actions.favorite')
-            "
-            @click="toggleFavorite"
-          >
-            <Star
-              class="h-4 w-4"
-              :class="project.favorited_at ? 'fill-yellow-400 text-yellow-400' : ''"
-            />
-          </Button>
-          <Button
-            v-if="project.path_exists"
-            variant="outline"
-            size="sm"
-            :title="t('files.entry')"
-            @click="router.push(`/projects/${project.id}/files`)"
-          >
-            <FolderTree class="h-4 w-4" />
-            {{ t("files.entry") }}
-          </Button>
-          <Button
-            v-if="project.path_exists"
-            variant="outline"
-            size="sm"
-            :title="t('wiki.entry')"
-            @click="router.push(`/projects/${project.id}/wiki`)"
-          >
-            <BookOpenText class="h-4 w-4" />
-            {{ t("wiki.entry") }}
-          </Button>
-          <OpenWithMenu v-if="project.path_exists" :project="worktreeProject ?? project" />
-        </div>
-      </div>
+      </header>
 
-      <p
-        class="mt-1 truncate text-sm text-muted-foreground"
-        :title="(worktreeProject ?? project).path"
-      >
-        {{ (worktreeProject ?? project).path }}
-      </p>
-
-      <div
-        v-if="!project.path_exists"
-        class="mt-2 flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-      >
-        <TriangleAlert class="h-4 w-4 shrink-0" />
-        <span class="min-w-0 flex-1">{{ t("projects.status.pathMissingHint") }}</span>
-        <Button variant="outline" size="sm" class="shrink-0" @click="relocateOpen = true">
-          <FolderSync class="h-4 w-4" />
-          {{ t("projects.actions.relocate") }}
-        </Button>
-      </div>
-
-      <div class="mt-1">
-        <Textarea
-          v-if="editingDesc"
-          ref="descInput"
-          v-model="draftDesc"
-          rows="2"
-          :placeholder="t('projects.detail.descPlaceholder')"
-          class="min-h-0 w-full rounded-md px-3 py-2 text-sm"
-          @keydown.esc="editingDesc = false"
-          @keydown.enter.ctrl.prevent="saveDesc"
-          @blur="saveDesc"
-        />
-        <p
-          v-else
-          class="group flex w-fit cursor-pointer items-center gap-1.5 text-sm"
-          :class="project.description ? '' : 'text-muted-foreground'"
-          :title="t('projects.detail.editDesc')"
-          @click="startEditDesc"
+      <ScrollArea v-if="project.path_exists" class="min-h-0 flex-1">
+        <div
+          v-if="detailView === 'overview'"
+          class="grid items-start gap-4 p-6 [grid-template-columns:repeat(auto-fill,minmax(min(100%,360px),1fr))]"
         >
-          {{ project.description || t("projects.detail.addDesc") }}
-          <Pencil
-            class="h-3 w-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-          />
-        </p>
-      </div>
-
-      <div class="mt-2.5 flex flex-wrap items-center gap-x-6 gap-y-2">
-        <TagPicker :project="project" />
-        <template v-if="project.path_exists">
-          <GitStatusBar :project="worktreeProject ?? project" />
-          <Button
-            v-if="project.git?.is_repo"
-            variant="outline"
-            size="xs"
-            @click="router.push(`/projects/${project.id}/graph`)"
-          >
-            <Waypoints class="h-3.5 w-3.5" />
-            {{ t("git.graph.title") }}
-          </Button>
-          <!-- 视图切换:执行(卡片网格)/ AI(全宽非卡片),固定在头部右下角 -->
-          <div class="segmented-control view-toggle ml-auto flex gap-1 rounded-lg bg-muted p-1">
-            <button
-              type="button"
-              class="view-toggle-btn flex items-center gap-1.5 rounded-md px-3 py-1 text-sm transition-colors"
-              :class="
-                detailView === 'overview'
-                  ? 'bg-background shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
-              "
-              :data-active="detailView === 'overview' || undefined"
-              :aria-pressed="detailView === 'overview'"
-              @click="detailView = 'overview'"
-            >
-              <LayoutGrid class="h-3.5 w-3.5" />
-              {{ t("projects.detail.viewOverview") }}
-            </button>
-            <button
-              type="button"
-              class="view-toggle-btn flex items-center gap-1.5 rounded-md px-3 py-1 text-sm transition-colors"
-              :class="
-                detailView === 'ai'
-                  ? 'bg-background shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
-              "
-              :data-active="detailView === 'ai' || undefined"
-              :aria-pressed="detailView === 'ai'"
-              @click="detailView = 'ai'"
-            >
-              <Bot class="h-3.5 w-3.5" />
-              {{ t("projects.detail.viewAi") }}
-            </button>
-          </div>
-        </template>
-      </div>
-    </header>
-
-    <ScrollArea v-if="project.path_exists" class="min-h-0 flex-1">
-      <div
-        v-if="detailView === 'overview'"
-        class="grid items-start gap-4 p-6 [grid-template-columns:repeat(auto-fill,minmax(360px,1fr))]"
-      >
-        <PackageScripts :project="worktreeProject ?? project" />
-        <DockerCompose :project="worktreeProject ?? project" />
-        <SpringBootCard :project="worktreeProject ?? project" />
-        <CustomCommands :project="worktreeProject ?? project" />
-      </div>
-      <AiAssetsView v-else :project="worktreeProject ?? project" />
-    </ScrollArea>
+          <PackageScripts :project="worktreeProject ?? project" />
+          <DockerCompose :project="worktreeProject ?? project" />
+          <SpringBootCard :project="worktreeProject ?? project" />
+          <CustomCommands :project="worktreeProject ?? project" />
+        </div>
+        <AiAssetsView v-else :project="worktreeProject ?? project" />
+      </ScrollArea>
+      <TerminalPanel v-if="project.path_exists" :project="worktreeProject ?? project" />
+    </div>
+    <ChatDock
+      v-if="project.path_exists"
+      v-model:open="chatOpen"
+      :project="worktreeProject ?? project"
+    />
 
     <RelocateProjectDialog v-model:open="relocateOpen" :project="project" />
     <WorktreePanel
@@ -424,8 +457,6 @@ async function saveDesc() {
       :active-path="activeWorktreePath"
       @changed="onWorktreeChanged"
     />
-    <TerminalPanel v-if="project.path_exists" :project="worktreeProject ?? project" />
-    <ChatDock v-if="project.path_exists" :project="worktreeProject ?? project" />
   </div>
 
   <div

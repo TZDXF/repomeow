@@ -905,6 +905,7 @@ export default {
     notConfigured: "请先在设置页配置 AI(接口地址、API Key、模型)",
   },
   chat: {
+    responding: "正在回答",
     entry: "项目问答",
     title: "项目问答",
     close: "收起",

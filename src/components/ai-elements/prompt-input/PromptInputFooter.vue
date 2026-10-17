@@ -14,9 +14,9 @@ const props = defineProps<Props>();
 
 <template>
   <InputGroupAddon
-    align="block-end"
-    :class="cn('justify-between gap-1', props.class)"
     v-bind="props"
+    align="block-end"
+    :class="cn('min-w-0 flex-nowrap justify-between gap-1', props.class)"
   >
     <slot />
   </InputGroupAddon>

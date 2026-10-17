@@ -947,6 +947,7 @@ export default {
     notConfigured: "Configure AI integration in Settings first (base URL, API key, model)",
   },
   chat: {
+    responding: "Responding",
     entry: "Project Q&A",
     title: "Project Q&A",
     close: "Collapse",

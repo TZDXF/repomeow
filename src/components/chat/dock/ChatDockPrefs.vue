@@ -2,12 +2,10 @@
 import { SelectContent } from "@/components/common/project-floating-content";
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRouter } from "vue-router";
 import { toast } from "vue-sonner";
 import { Brain, Eye, Wrench } from "@lucide/vue";
 import { ModelSelector, type ModelSelectorGroup } from "@/components/ai-elements/model-selector";
 import { Select, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Button } from "@/components/ui/button";
 import { CHAT_THINKING_LEVELS, type ChatPermission, type ChatThinkingLevel } from "@/lib/ai-config";
 import { useAiConfigStore } from "@/stores/ai-config";
 
@@ -19,7 +17,6 @@ const props = defineProps<{
   aiReady: boolean;
 }>();
 const { t } = useI18n();
-const router = useRouter();
 const aiConfig = useAiConfigStore();
 
 const modelGroups = computed<ModelSelectorGroup[]>(() => {
@@ -72,12 +69,12 @@ function onPermissionChange(value: unknown) {
   >
     <SelectTrigger
       size="sm"
-      class="text-muted-foreground h-7 gap-1 px-2 text-xs"
+      class="text-muted-foreground h-7 min-w-0 gap-1 px-2 text-xs"
       :title="permissionTitle"
     >
       <Eye v-if="aiConfig.chatPermission !== 'all'" class="size-3.5 shrink-0" />
       <Wrench v-else class="size-3.5 shrink-0" />
-      <span>
+      <span class="truncate">
         {{ t(`chat.permission.${aiConfig.chatPermission}Short`) }}
       </span>
     </SelectTrigger>
@@ -98,6 +95,7 @@ function onPermissionChange(value: unknown) {
     :groups="modelGroups"
     :disabled="!props.aiReady || props.busy"
     :placeholder="t('chat.modelPlaceholder')"
+    trigger-class="min-w-16 max-w-44 flex-1"
     @update:model-value="onModelChange"
   />
   <Select
@@ -107,11 +105,11 @@ function onPermissionChange(value: unknown) {
   >
     <SelectTrigger
       size="sm"
-      class="text-muted-foreground h-7 gap-1 px-2 text-xs"
+      class="text-muted-foreground h-7 min-w-0 gap-1 px-2 text-xs"
       :title="thinkingTitle"
     >
       <Brain class="size-3.5 shrink-0" />
-      <SelectValue />
+      <SelectValue class="min-w-0 truncate" />
     </SelectTrigger>
     <SelectContent :disable-outside-pointer-events="false" :body-lock="false">
       <SelectItem v-for="level in CHAT_THINKING_LEVELS" :key="level" :value="level" class="text-xs">
@@ -120,10 +118,4 @@ function onPermissionChange(value: unknown) {
       </SelectItem>
     </SelectContent>
   </Select>
-  <p v-if="!props.aiReady" class="text-muted-foreground w-full text-xs">
-    {{ t("chat.notConfigured") }}
-    <Button variant="link" size="sm" class="h-auto p-0 text-xs" @click="router.push('/settings')">
-      {{ t("chat.goSettings") }}
-    </Button>
-  </p>
 </template>
