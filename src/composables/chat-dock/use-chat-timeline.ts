@@ -12,6 +12,8 @@ export interface TurnView {
   key: string;
   groups: ChatProcessGroup[];
   contents: string[];
+  /** 最后一段正文的固化时间(Unix 毫秒),未知时不展示 */
+  completedAt: number | null;
   /** 过程仍在产出(本轮正文尚未开始):驱动折叠块保持展开跟随流式 */
   active: boolean;
   /** 回合仍在流式产出:附流式正文 / 重试等待 / Loader */
@@ -37,12 +39,19 @@ function emptyTurn(key: string): TurnView {
     key,
     groups: [],
     contents: [],
+    completedAt: null,
     active: false,
     live: false,
     streamingText: "",
     retry: null,
     compacting: false,
   };
+}
+
+/** 旧历史未保存 createdAt,但消息 ID 中包含当时的毫秒时间戳。 */
+function messageTimestamp(message: { id: string; createdAt?: number }): number | null {
+  const timestamp = message.createdAt ?? Number(/^chat-msg-(\d+)-/.exec(message.id)?.[1]);
+  return Number.isFinite(timestamp) && timestamp > 0 && timestamp <= 8.64e15 ? timestamp : null;
 }
 
 export function buildTimeline(s: ChatSessionState): TimelineView[] {
@@ -87,7 +96,10 @@ export function buildTimeline(s: ChatSessionState): TimelineView[] {
     }
     // 纯空白的正文(工具调用轮常夹带 "\n\n")不进渲染列表,否则空段落
     // 逐个叠加 flex gap,折叠块与正文之间会出现大段空白
-    if (message.content.trim()) turn.contents.push(message.content);
+    if (message.content.trim()) {
+      turn.contents.push(message.content);
+      turn.completedAt = messageTimestamp(message);
+    }
   }
   // 忙时:流式状态并入末尾回合(没有则新建),整轮共用同一个折叠块
   if (s.busy) {

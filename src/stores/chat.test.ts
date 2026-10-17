@@ -153,6 +153,7 @@ describe("chat store", () => {
     expect(session.messages[1]).toMatchObject({
       role: "assistant",
       content: "前端 Vue + Rust",
+      createdAt: expect.any(Number),
       toolRunIds: ["t1"],
     });
 
@@ -417,6 +418,7 @@ describe("chat store", () => {
     expect(session.messages[1]).toMatchObject({
       role: "assistant",
       content: "写到一半",
+      createdAt: expect.any(Number),
       partial: true,
     });
     expect(session.streamingText).toBe("");

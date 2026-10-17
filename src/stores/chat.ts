@@ -314,6 +314,7 @@ export const useChatStore = defineStore("chat", () => {
           const message: ChatMessage = {
             id: messageId(),
             role: "assistant",
+            createdAt: Date.now(),
             content,
             thinking: thinking || undefined,
             toolRunIds,
@@ -436,6 +437,7 @@ export const useChatStore = defineStore("chat", () => {
           const message: ChatMessage = {
             id: messageId(),
             role: "assistant",
+            createdAt: Date.now(),
             content: session.streamingText,
             thinking: session.streamingThinking || undefined,
             toolRunIds: [...session.pendingToolRunIds],

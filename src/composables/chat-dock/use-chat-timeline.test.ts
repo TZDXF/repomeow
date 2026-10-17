@@ -46,6 +46,37 @@ describe("buildTimeline", () => {
     expect(turn.live).toBe(false);
   });
 
+  it("回答时间取最后一段正文,不被后续纯工具消息覆盖", () => {
+    const views = buildTimeline(
+      session({
+        messages: [
+          msg({ id: "a1", role: "assistant", content: "第一段", createdAt: 1000 }),
+          msg({ id: "a2", role: "assistant", content: "第二段", createdAt: 2000 }),
+          msg({ id: "a3", role: "assistant", thinking: "检查", createdAt: 3000 }),
+          msg({ id: "u1", role: "user", content: "新问题" }),
+          msg({ id: "a4", role: "assistant", content: "新回答", createdAt: 4000 }),
+        ],
+      }),
+    );
+    expect((views[0] as TurnView).completedAt).toBe(2000);
+    expect((views[2] as TurnView).completedAt).toBe(4000);
+  });
+
+  it("旧历史从消息 ID 恢复时间,未知或无效时间不显示", () => {
+    for (const [message, expected] of [
+      [
+        msg({ id: "chat-msg-1792200000000-abc", role: "assistant", content: "旧回答" }),
+        1792200000000,
+      ],
+      [msg({ id: "a1", role: "assistant", content: "无时间" }), null],
+      [msg({ id: "a2", role: "assistant", content: "坏时间", createdAt: NaN }), null],
+      [msg({ id: "a3", role: "assistant", content: "超出范围", createdAt: 9e15 }), null],
+    ] as const) {
+      const turn = buildTimeline(session({ messages: [message] }))[0] as TurnView;
+      expect(turn.completedAt).toBe(expected);
+    }
+  });
+
   it("仅最后一条用户提问可编辑;忙时一律不可编辑", () => {
     const views = buildTimeline(
       session({

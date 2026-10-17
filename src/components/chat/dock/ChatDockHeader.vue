@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { PopoverContent } from "@/components/common/project-floating-content";
 import ScrollArea from "@/components/common/ScrollArea.vue";
-import { formatLocalDateTime } from "@/lib/format";
+import { formatLocalDateTime, formatRelativeTime } from "@/lib/format";
 import type { ChatHistoryEntry } from "@/lib/chat";
 
 defineProps<{
@@ -68,10 +68,13 @@ function selectHistory(id: string) {
             :title="entry.title"
             @click="selectHistory(entry.id)"
           >
-            <div class="min-w-0 flex-1">
-              <p class="truncate text-sm">{{ entry.title }}</p>
-              <p class="mt-0.5 text-xs text-muted-foreground">
-                {{ formatLocalDateTime(entry.updatedAt) }}
+            <div class="flex min-w-0 flex-1 items-center gap-2">
+              <p class="min-w-0 flex-1 truncate text-sm">{{ entry.title }}</p>
+              <p
+                class="shrink-0 whitespace-nowrap text-xs text-muted-foreground"
+                :title="formatLocalDateTime(entry.updatedAt)"
+              >
+                {{ formatRelativeTime(entry.updatedAt) }}
               </p>
             </div>
             <Check v-if="entry.id === activeId" class="size-3.5 shrink-0 text-primary" />

@@ -57,6 +57,8 @@ export type ChatRole = "user" | "assistant";
 export interface ChatMessage {
   id: string;
   role: ChatRole;
+  /** 消息固化时间(Unix 毫秒);旧历史可能缺省 */
+  createdAt?: number;
   content: string;
   /** 该条消息的思考过程原文(reasoning 模型;无思考输出时缺省) */
   thinking?: string;
