@@ -70,6 +70,11 @@ export interface WikiGenerationState {
   startedAt: number;
 }
 
+export interface WikiDocumentState {
+  data: WikiData | null;
+  loading: boolean;
+}
+
 export interface WikiBackgroundTask {
   id: string;
   action: "generate" | "update" | "page";
@@ -144,13 +149,17 @@ function buildGenOptions(language: SupportedLocale): WikiGenOptions {
 /**
  * 项目 wiki 的查看与生成状态。wiki 文件落盘在 ~/.repomeow/wiki/<目录>。
  * store 是全局单例:**离开 wiki 页面不中止生成**——生成状态按项目路径隔离,
- * 不同项目可以同时生成;加载的 wiki 数据(dataFor)仍只对应当前查看的项目。
+ * 不同项目可以同时生成;阅读数据也按归一化项目路径隔离,供缓存页面独立订阅。
  */
 export const useWikiStore = defineStore("wiki", () => {
-  const data = ref<WikiData | null>(null);
-  /** data 所属的项目路径 */
-  const dataFor = ref<string | null>(null);
-  const loading = ref(false);
+  const documents = reactive<Record<string, WikiDocumentState>>({});
+  const loadVersions = new Map<string, number>();
+
+  function documentFor(projectPath: string): WikiDocumentState {
+    const key = generationKey(projectPath);
+    documents[key] ??= { data: null, loading: false };
+    return documents[key]!;
+  }
   const unreadPages = reactive<Record<string, string[]>>(loadUnreadPages());
 
   function isPageUnread(projectPath: string, pageId: string): boolean {
@@ -236,15 +245,18 @@ export const useWikiStore = defineStore("wiki", () => {
   });
 
   async function load(projectPath: string) {
-    // 切换到另一个项目时先清空,避免旧项目内容闪现
-    if (dataFor.value !== projectPath) data.value = null;
-    dataFor.value = projectPath;
-    loading.value = true;
+    const key = generationKey(projectPath);
+    const document = documentFor(projectPath);
+    const version = (loadVersions.get(key) ?? 0) + 1;
+    loadVersions.set(key, version);
+    document.loading = true;
     try {
-      data.value = await loadWiki(projectPath);
-      if (data.value) {
-        const key = generationKey(projectPath);
-        const validIds = new Set(data.value.pages.map((page) => page.id));
+      const data = await loadWiki(projectPath);
+      // 同项目重叠读取/删除后,迟到的旧响应不能覆盖较新的内容。
+      if (loadVersions.get(key) !== version) return;
+      document.data = data;
+      if (data) {
+        const validIds = new Set(data.pages.map((page) => page.id));
         const validUnread = (unreadPages[key] ?? []).filter((id) => validIds.has(id));
         if (validUnread.length !== (unreadPages[key]?.length ?? 0)) {
           if (validUnread.length) unreadPages[key] = validUnread;
@@ -253,11 +265,11 @@ export const useWikiStore = defineStore("wiki", () => {
         }
       }
     } finally {
-      loading.value = false;
+      if (loadVersions.get(key) === version) document.loading = false;
     }
   }
 
-  /** 整本生成;同一项目避免重复启动,不同项目可并行;结束后按当前查看项目刷新展示 */
+  /** 整本生成;同一项目避免重复启动,不同项目可并行;结束后刷新该项目已缓存的阅读数据 */
   function generate(project: WikiTaskProject, language: SupportedLocale) {
     const key = generationKey(project.path);
     if (isGenerating(project.path)) return generationRuns.get(key) ?? Promise.resolve();
@@ -336,8 +348,8 @@ export const useWikiStore = defineStore("wiki", () => {
       generationControllers.delete(key);
       generationRuns.delete(key);
       // 取消/失败时已生成的页面文件仍在磁盘(无 meta 则整本无效),统一以落盘状态为准;
-      // 用户已切到别的项目时不回写 data,避免覆盖其正在查看的 wiki
-      if (dataFor.value === project.path) {
+      // 仅刷新已被页面读取过的项目,后台完成不会覆盖其他项目的数据。
+      if (documents[key]) {
         await load(project.path).catch(() => {});
       }
     }
@@ -369,7 +381,7 @@ export const useWikiStore = defineStore("wiki", () => {
     };
     try {
       await regenerateWikiPage(project, page, language, new AbortController().signal);
-      if (dataFor.value === project.path) await load(project.path);
+      if (documents[generationKey(project.path)]) await load(project.path);
     } finally {
       regeneratingPage.value = null;
       pageRegeneration.value = null;
@@ -384,7 +396,7 @@ export const useWikiStore = defineStore("wiki", () => {
   const updating = ref(false);
   const updateProgress = ref<WikiUpdateProgress | null>(null);
   async function update(project: WikiTaskProject, language: SupportedLocale): Promise<number> {
-    if (!data.value || updating.value || isGenerating(project.path)) return 0;
+    if (!documentFor(project.path).data || updating.value || isGenerating(project.path)) return 0;
     const options = buildGenOptions(language);
     updating.value = true;
     updateProgress.value = {
@@ -401,7 +413,7 @@ export const useWikiStore = defineStore("wiki", () => {
         }
       });
       markPagesUnread(project.path, result.updatedPageIds);
-      if (dataFor.value === project.path) await load(project.path);
+      if (documents[generationKey(project.path)]) await load(project.path);
       return result.updatedPageIds.length;
     } finally {
       updating.value = false;
@@ -452,7 +464,7 @@ export const useWikiStore = defineStore("wiki", () => {
         }
       });
       markPagesUnread(project.path, result.updatedPageIds);
-      if (dataFor.value === project.path) await load(project.path);
+      if (documents[generationKey(project.path)]) await load(project.path);
       return result.updatedPageIds.length;
     } finally {
       updating.value = false;
@@ -472,13 +484,16 @@ export const useWikiStore = defineStore("wiki", () => {
     await deleteWiki(projectPath);
     clearUnreadPages(projectPath);
     delete generations[key];
-    if (dataFor.value === projectPath) data.value = null;
+    loadVersions.set(key, (loadVersions.get(key) ?? 0) + 1);
+    const document = documents[key];
+    if (document) {
+      document.data = null;
+      document.loading = false;
+    }
   }
 
   return {
-    data,
-    dataFor,
-    loading,
+    documentFor,
     generationFor,
     isGenerating,
     generating,

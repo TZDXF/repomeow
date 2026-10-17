@@ -19,6 +19,7 @@ import type { WikiGenPhase } from "@/lib/wiki-generator";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
 import { useWikiStore } from "@/stores/wiki";
+import { onProjectPageReactivated, useProjectPageActive } from "@/composables/useProjectPageState";
 import type { Project, WikiPageData } from "@/types";
 
 const { t } = useI18n();
@@ -27,10 +28,19 @@ const router = useRouter();
 const store = useProjectsStore();
 const settings = useSettingsStore();
 const wiki = useWikiStore();
+const active = useProjectPageActive();
 
 const project = computed<Project | undefined>(() => {
   const id = Number(route.params.id);
   return Number.isFinite(id) ? store.getProjectById(id) : undefined;
+});
+
+const wikiData = computed(() => (project.value ? wiki.documentFor(project.value.path).data : null));
+const wikiLoading = computed(() =>
+  project.value ? wiki.documentFor(project.value.path).loading : false,
+);
+onProjectPageReactivated(() => {
+  if (project.value) return wiki.load(project.value.path);
 });
 
 // 首次渲染前启动加载，避免把尚未读取的数据误判为空；也响应项目切换。
@@ -55,7 +65,7 @@ const generatingHere = computed(() => {
 
 // ── 页面选择 ──────────────────────────────────────────────────────────────
 
-const pages = computed(() => wiki.data?.pages ?? []);
+const pages = computed(() => wikiData.value?.pages ?? []);
 const selectedId = ref<string | null>(null);
 watch(
   [pages, generatingHere],
@@ -184,11 +194,15 @@ function selectPage(id: string) {
 }
 
 /** 页面进入正文视口即视为已读；也覆盖首次打开和更新后仍停留在当前页的情况。 */
-watch(current, (page) => {
-  if (page && project.value && !generatingHere.value) {
-    wiki.markPageRead(project.value.path, page.id);
-  }
-});
+watch(
+  [current, active, generatingHere],
+  ([page, visible, generating]) => {
+    if (visible && page && project.value && !generating) {
+      wiki.markPageRead(project.value.path, page.id);
+    }
+  },
+  { immediate: true },
+);
 
 /** 从正文底部跳转相关页面,与普通切换共用同一条选中路径 */
 function selectRelatedPage(id: string) {
@@ -298,8 +312,8 @@ async function updateWiki() {
       :project-name="project.name"
       :generating="generatingHere"
       :elapsed-text="elapsedText"
-      :stale="wiki.data?.stale ?? false"
-      :has-data="!!wiki.data"
+      :stale="wikiData?.stale ?? false"
+      :has-data="!!wikiData"
       :updating="wiki.updating"
       @back="router.push(`/projects/${project.id}`)"
       @update="updateWiki"
@@ -310,7 +324,7 @@ async function updateWiki() {
     />
 
     <!-- 主体:左侧页面列表 + 右侧内容;生成中复用同一布局(列表带单页状态,右侧阅读已完成页面) -->
-    <div v-if="generatingHere || wiki.data" class="flex min-h-0 flex-1">
+    <div v-if="generatingHere || wikiData" class="flex min-h-0 flex-1">
       <WikiPageNavigation
         :items="navItems"
         :active-id="activeId"
@@ -391,7 +405,7 @@ async function updateWiki() {
 
     <!-- 已有内容刷新时不隐藏；首次读取结束前不展示空态。 -->
     <div
-      v-else-if="wiki.loading"
+      v-else-if="wikiLoading"
       class="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground"
       role="status"
     >

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onProjectPageReactivated } from "@/composables/useProjectPageState";
 import Dialog from "@/components/common/ProjectDialog.vue";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -47,6 +48,7 @@ async function load() {
 }
 
 watch(() => props.project.id, load, { immediate: true });
+onProjectPageReactivated(load);
 pinsStore.ensureLoaded();
 
 // 问答的 add_custom_command 工具与本组件的增删改都会广播该事件,收到即重载列表,

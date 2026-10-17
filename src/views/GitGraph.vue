@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef, triggerRef, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  shallowRef,
+  triggerRef,
+  watch,
+} from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { toast } from "vue-sonner";
@@ -8,7 +17,9 @@ import { useElementSize, useLocalStorage, useVirtualList } from "@vueuse/core";
 import { Loader2, PanelRightOpen } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { createGraphLayouter, type GraphEdgeLayout, type GraphNodeLayout } from "@/lib/git-graph";
-import { cmd } from "@/lib/tauri";
+import { cmd, onListen } from "@/lib/tauri";
+import { toForwardSlash } from "@/lib/path";
+import { onProjectPageReactivated, useProjectPageActive } from "@/composables/useProjectPageState";
 import { useProjectsStore } from "@/stores/projects";
 import {
   useGitGraphColumnSizing,
@@ -22,12 +33,13 @@ import GitGraphHeader from "@/components/git/GitGraphHeader.vue";
 import GitGraphSidebar from "@/components/git/GitGraphSidebar.vue";
 import GitGraphTable from "@/components/git/GitGraphTable.vue";
 import GitAnalysisPanel from "@/components/git/analysis/GitAnalysisPanel.vue";
-import type { GitBranches, GitGraphCommit } from "@/types";
+import type { GitBranches, GitGraphCommit, GitProjectChangedPayload } from "@/types";
 
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const store = useProjectsStore();
+const active = useProjectPageActive();
 
 const project = computed(() => {
   const id = Number(route.params.id);
@@ -82,7 +94,7 @@ const GRAPH_PAD = 4;
 const BATCH_SIZE = 500;
 
 // --- 增量泳道布局:push 就地追加,批次到达后 triggerRef 触发视图更新 ---
-const layouter = createGraphLayouter();
+let layouter = createGraphLayouter();
 const nodes = shallowRef<GraphNodeLayout[]>(layouter.nodes);
 const edges = shallowRef<GraphEdgeLayout[]>([]);
 const laneCount = ref(1);
@@ -187,40 +199,55 @@ const matchHashes = computed(() => new Set(searchResults.value.map((c) => c.hash
 // 递增序号使过期流的批次被丢弃(切换筛选/项目时旧流不污染新数据)
 let loadSeq = 0;
 
-function appendBatch(batch: GitGraphCommit[]) {
-  if (!batch.length) {
-    return;
-  }
-  layouter.push(batch);
+function publishLayout() {
+  nodes.value = layouter.nodes;
   triggerRef(nodes);
   edges.value = layouter.edges();
   laneCount.value = layouter.laneCount;
 }
 
-async function load() {
-  if (!project.value) {
-    return;
-  }
+async function load(preserveView = false) {
+  const currentProject = project.value;
+  if (!currentProject) return;
+  preserveView = preserveView && streamDone.value;
   const seq = ++loadSeq;
+  const nextLayout = createGraphLayouter();
   loading.value = true;
   loadError.value = "";
-  streamDone.value = false;
-  selected.value = null;
-  layouter.reset();
-  nodes.value = layouter.nodes;
-  edges.value = [];
-  laneCount.value = layouter.laneCount;
+  if (!preserveView) {
+    streamDone.value = false;
+    selected.value = null;
+    layouter = nextLayout;
+    publishLayout();
+  }
   let autoLocated = false;
   try {
     const channel = new Channel<GitGraphBatch>();
     channel.onmessage = (batch) => {
-      if (seq !== loadSeq) {
-        return;
+      if (seq !== loadSeq) return;
+      nextLayout.push(batch.commits);
+      if (!preserveView) publishLayout();
+      // 重新激活时后台构建新图,完成后原子替换,不因清空列表丢失滚动和详情选择。
+      if (batch.done && preserveView) {
+        const scrollTop = containerProps.ref.value?.scrollTop ?? 0;
+        const hash = selected.value?.hash;
+        layouter = nextLayout;
+        publishLayout();
+        selected.value = nextLayout.nodes.find((node) => node.commit.hash === hash)?.commit ?? null;
+        void nextTick(() => {
+          if (seq === loadSeq && containerProps.ref.value) {
+            containerProps.ref.value.scrollTop = scrollTop;
+          }
+        });
       }
-      appendBatch(batch.commits);
-      // 单分支筛选模式下自动定位到目标分支的顶端提交
-      if (!autoLocated && filterValue.value === "current" && selectedBranch.value) {
-        const tip = layouter.nodes.find((n) => n.commit.refs.includes(selectedBranch.value));
+      // 主动切换筛选时自动定位到分支顶端,后台刷新不改变阅读位置。
+      if (
+        !preserveView &&
+        !autoLocated &&
+        filterValue.value === "current" &&
+        selectedBranch.value
+      ) {
+        const tip = nextLayout.nodes.find((n) => n.commit.refs.includes(selectedBranch.value));
         if (tip) {
           autoLocated = true;
           locateNode(tip);
@@ -232,22 +259,51 @@ async function load() {
       }
     };
     const [branchData] = await Promise.all([
-      cmd<GitBranches>("list_git_branches", { path: project.value.path }),
+      cmd<GitBranches>("list_git_branches", { path: currentProject.path }),
       cmd("git_graph_log", {
-        path: project.value.path,
+        path: currentProject.path,
         ...graphParams.value,
         batchSize: BATCH_SIZE,
         onBatch: channel,
       }),
     ]);
-    branches.value = branchData;
+    if (seq === loadSeq) branches.value = branchData;
   } catch (e) {
     if (seq === loadSeq) {
-      loadError.value = String(e);
+      if (preserveView) toast.error(`${t("git.graph.loadFailed")}: ${String(e)}`);
+      else loadError.value = String(e);
       loading.value = false;
     }
   }
 }
+
+async function refreshCachedData() {
+  await load(true);
+  if (analysisActivated.value) await analysisPanel.value?.reload();
+}
+onProjectPageReactivated(refreshCachedData);
+
+let unlistenGit: (() => void) | undefined;
+let disposed = false;
+onMounted(async () => {
+  const unlisten = await onListen<GitProjectChangedPayload>("git://project-changed", (payload) => {
+    if (
+      active.value &&
+      payload.head_changed &&
+      project.value &&
+      toForwardSlash(payload.path) === toForwardSlash(project.value.path)
+    ) {
+      void refreshCachedData();
+    }
+  });
+  if (disposed) unlisten();
+  else unlistenGit = unlisten;
+});
+onBeforeUnmount(() => {
+  disposed = true;
+  loadSeq++;
+  unlistenGit?.();
+});
 
 // 切换项目时重置筛选与选择状态
 watch(
@@ -259,7 +315,7 @@ watch(
   },
 );
 
-watch([() => project.value?.id, filterValue], load, { immediate: true });
+watch([() => project.value?.id, filterValue], () => load(), { immediate: true });
 
 // 筛选模式下切换左侧选中分支需要重新拉取该分支的日志
 watch(selectedBranch, () => {
@@ -392,7 +448,7 @@ function tagName(refName: string) {
           class="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground"
         >
           <p>{{ t("git.graph.loadFailed") }}:{{ loadError }}</p>
-          <Button variant="outline" size="sm" @click="load">{{ t("git.graph.refresh") }}</Button>
+          <Button variant="outline" size="sm" @click="load()">{{ t("git.graph.refresh") }}</Button>
         </div>
         <div
           v-else-if="streamDone && !totalCount"

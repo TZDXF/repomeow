@@ -21,3 +21,17 @@ export function watchProjectPageDeactivation(active: Readonly<Ref<boolean>>, clo
     { immediate: true },
   );
 }
+
+/** 缓存页面重新可见时校验业务数据;首次挂载仍由原有初始化逻辑负责。 */
+export function watchProjectPageReactivation(
+  active: Readonly<Ref<boolean>>,
+  refresh: () => void | Promise<unknown>,
+) {
+  return watch(active, (value, previous) => {
+    if (value && !previous) return refresh();
+  });
+}
+
+export function onProjectPageReactivated(refresh: () => void | Promise<unknown>) {
+  return watchProjectPageReactivation(useProjectPageActive(), refresh);
+}

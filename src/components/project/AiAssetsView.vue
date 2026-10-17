@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onProjectPageReactivated } from "@/composables/useProjectPageState";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
@@ -60,6 +61,7 @@ watch(
   },
   { immediate: true },
 );
+onProjectPageReactivated(resourcesChanged);
 const files = computed(
   () => assets.value?.files.filter((f) => !targets.value.some((a) => a.mcpPath === f.path)) ?? [],
 );

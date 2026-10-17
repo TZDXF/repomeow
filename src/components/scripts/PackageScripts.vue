@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onProjectPageReactivated } from "@/composables/useProjectPageState";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
@@ -71,31 +72,37 @@ const displayGroups = computed<DisplayGroup[]>(() =>
 
 // path 一并作为 watch 源:详情页切换工作区(worktree)时传入的是 id 相同、
 // path 不同的 project 副本,需要按新工作目录重新扫描
+let loadSeq = 0;
+async function load(resetView = true) {
+  const seq = ++loadSeq;
+  const currentProject = props.project;
+  if (resetView) showHidden.value = false;
+  pinsStore.ensureLoaded();
+  // stale-while-revalidate:旧扫描结果与旧隐藏项都齐备时,立即按旧数据渲染
+  // (隐藏项必须先就位,否则已隐藏分组会在首屏闪现再消失),
+  // 后台刷新完成后 groups / 隐藏项自动替换;仅首次进入(无旧数据)才等首轮请求
+  const staleOverview = overviewStore.cached(currentProject.id);
+  if (staleOverview) applyHiddenItems(staleOverview.hidden_items);
+  const hasStale = !!assetsStore.assetsOf(currentProject) && !!staleOverview;
+  loaded.value = hasStale;
+  if (hasStale) resetOpenStates();
+  // refresh 内部去重:与 DockerCompose / CustomCommands 同时挂载只触发一次
+  // scan_project_assets / get_project_overview;两者失败均回退旧数据/空数据,不抛错
+  const [, overview] = await Promise.all([
+    assetsStore.refresh(currentProject),
+    overviewStore.refresh(currentProject.id),
+  ]);
+  if (seq !== loadSeq) return;
+  applyHiddenItems(overview.hidden_items);
+  loaded.value = true;
+  resetOpenStates();
+}
 watch(
   () => [props.project.id, props.project.path],
-  async () => {
-    showHidden.value = false;
-    pinsStore.ensureLoaded();
-    // stale-while-revalidate:旧扫描结果与旧隐藏项都齐备时,立即按旧数据渲染
-    // (隐藏项必须先就位,否则已隐藏分组会在首屏闪现再消失),
-    // 后台刷新完成后 groups / 隐藏项自动替换;仅首次进入(无旧数据)才等首轮请求
-    const staleOverview = overviewStore.cached(props.project.id);
-    if (staleOverview) applyHiddenItems(staleOverview.hidden_items);
-    const hasStale = !!assetsStore.assetsOf(props.project) && !!staleOverview;
-    loaded.value = hasStale;
-    if (hasStale) resetOpenStates();
-    // refresh 内部去重:与 DockerCompose / CustomCommands 同时挂载只触发一次
-    // scan_project_assets / get_project_overview;两者失败均回退旧数据/空数据,不抛错
-    const [, overview] = await Promise.all([
-      assetsStore.refresh(props.project),
-      overviewStore.refresh(props.project.id),
-    ]);
-    applyHiddenItems(overview.hidden_items);
-    loaded.value = true;
-    resetOpenStates();
-  },
+  () => load(),
   { immediate: true },
 );
+onProjectPageReactivated(() => load(false));
 
 function applyHiddenItems(items: HiddenItem[]) {
   hiddenGroups.value = new Set(
