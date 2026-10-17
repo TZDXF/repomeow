@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { DropdownMenuContent, SelectContent } from "@/components/common/project-floating-content";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
@@ -17,15 +18,9 @@ import {
 import type { AcceptableValue } from "reka-ui";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
   Select,
-  SelectContent,
   SelectGroup,
   SelectItem,
   SelectLabel,

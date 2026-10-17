@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Dialog from "@/components/common/ProjectDialog.vue";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
@@ -9,13 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ContextMenuItem } from "@/components/ui/context-menu";
 import { ContextMenuSeparator } from "reka-ui";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import ScrollArea from "@/components/common/ScrollArea.vue";
 import CommandEditor from "@/components/scripts/CommandEditor.vue";

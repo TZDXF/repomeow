@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { SelectContent } from "@/components/common/project-floating-content";
 import type { HTMLAttributes } from "vue";
-import { SelectContent } from "@/components/ui/select";
+
 import { cn } from "@/lib/utils";
 
 type SelectContentProps = InstanceType<typeof SelectContent>["$props"];

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { DropdownMenuContent } from "@/components/common/project-floating-content";
 import { computed, nextTick, ref, shallowRef, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useLocalStorage } from "@vueuse/core";
@@ -17,7 +18,6 @@ import SplitDiffView from "@/components/git/SplitDiffView.vue";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,

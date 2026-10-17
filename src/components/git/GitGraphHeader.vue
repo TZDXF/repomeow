@@ -1,11 +1,11 @@
 <script setup lang="ts">
+import { DropdownMenuContent } from "@/components/common/project-floating-content";
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { ArrowLeft, ChevronDown, ListFilter, Loader2, RefreshCw, Search, X } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Dialog from "@/components/common/ProjectDialog.vue";
 import { computed, nextTick, ref, watch, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
@@ -18,7 +19,7 @@ import {
 import { Markdown } from "vue-stream-markdown";
 import { Button } from "@/components/ui/button";
 import ScrollArea from "@/components/common/ScrollArea.vue";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { useMarkdownTranslation } from "@/composables/useMarkdownTranslation";
 import CodeViewer from "@/components/files/CodeViewer.vue";
 import { cmd } from "@/lib/tauri";

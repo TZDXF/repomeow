@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import {
+  ContextMenuContent,
+  DropdownMenuContent,
+} from "@/components/common/project-floating-content";
+import Dialog from "@/components/common/ProjectDialog.vue";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
@@ -22,15 +27,9 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+import { ContextMenu, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { ContextMenuSeparator } from "reka-ui";
 import {
-  Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -39,7 +38,6 @@ import {
 } from "@/components/ui/dialog";
 import {
   DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,

@@ -1,13 +1,8 @@
 <script setup lang="ts">
+import { SelectContent } from "@/components/common/project-floating-content";
 import { computed, onMounted } from "vue";
 import { useI18n } from "vue-i18n";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   ModelSelector,
   modelDisplayName,

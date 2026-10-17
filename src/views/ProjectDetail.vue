@@ -144,9 +144,18 @@ function onWorktreeChanged() {
 }
 
 // --- 视图切换:执行(脚本/服务/命令卡片网格)与 AI(项目 AI 资产,全宽非卡片) ---
-// 全局记忆(UI 偏好,不按项目区分),与 worktree-selection 同走 localStorage
+// 各项目独立记忆视图,避免另一个 tab 的选择覆盖当前项目。
 type DetailView = "overview" | "ai";
-const detailView = useLocalStorage<DetailView>("repomeow.project-detail-view", "overview");
+const detailViews = useLocalStorage<Record<string, DetailView>>(
+  "repomeow.project-detail-views",
+  {},
+);
+const detailView = computed<DetailView>({
+  get: () => detailViews.value[String(project.value?.id)] ?? "overview",
+  set: (value) => {
+    if (project.value) detailViews.value = { ...detailViews.value, [project.value.id]: value };
+  },
+});
 
 // --- 收藏切换(收藏项目在列表中置顶) ---
 async function toggleFavorite() {

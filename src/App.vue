@@ -6,6 +6,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { toast } from "vue-sonner";
 import { Toaster } from "@/components/ui/sonner";
+import WorkspaceRouterView from "@/components/common/WorkspaceRouterView.vue";
 import TitleBar from "@/components/TitleBar.vue";
 import BatchProgressFloat from "@/components/report/BatchProgressFloat.vue";
 import { onListen } from "@/lib/tauri";
@@ -180,7 +181,7 @@ onUnmounted(() => {
   >
     <TitleBar v-if="!isTrayPopup" />
     <div class="min-h-0 flex-1">
-      <router-view />
+      <WorkspaceRouterView />
     </div>
   </main>
   <Toaster position="bottom-right" />

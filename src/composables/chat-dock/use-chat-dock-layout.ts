@@ -1,4 +1,5 @@
 import { computed, nextTick, ref, useTemplateRef, watch, type WatchSource } from "vue";
+import { useProjectPageActive } from "@/composables/useProjectPageState";
 import { useEventListener } from "@vueuse/core";
 
 // --- 放大/还原与边缘拖拽:面板尺寸由响应式宽高驱动;默认 500x640,放大铺满高度 ---
@@ -22,9 +23,10 @@ const PANEL_TOOLS_OVERHEAD = 110;
 export function useChatDockLayout(measureTriggers: WatchSource<unknown>[]) {
   // --- 开合:收起为圆形入口,展开为右下角固定面板;ESC 或关闭钮收起 ---
   const open = ref(false);
+  const active = useProjectPageActive();
 
   useEventListener(window, "keydown", (event: KeyboardEvent) => {
-    if (open.value && event.key === "Escape") {
+    if (active.value && open.value && event.key === "Escape") {
       event.stopPropagation();
       open.value = false;
     }
@@ -77,8 +79,8 @@ export function useChatDockLayout(measureTriggers: WatchSource<unknown>[]) {
     );
   }
 
-  watch([open, ...measureTriggers], () => {
-    if (open.value) void measureMinPanelWidth();
+  watch([open, active, ...measureTriggers], () => {
+    if (active.value && open.value) void measureMinPanelWidth();
   });
 
   const panelStyle = computed(() => ({

@@ -1,8 +1,8 @@
 <script setup lang="ts">
+import Dialog from "@/components/common/ProjectDialog.vue";
 import { useI18n } from "vue-i18n";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,

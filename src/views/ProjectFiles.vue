@@ -36,6 +36,7 @@ import { openPathWith, sortOpenWithOptions } from "@/lib/open-with";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
 import { toForwardSlash } from "@/lib/path";
 import type { FindQuery } from "@/lib/text-search";
+import { useProjectPageActive } from "@/composables/useProjectPageState";
 import { useFileFind } from "@/composables/files/useFileFind";
 import { useImagePreview } from "@/composables/files/useImagePreview";
 import { useLazyProjectFiles } from "@/composables/files/useLazyProjectFiles";
@@ -50,6 +51,7 @@ import type {
   SemanticFileEntity,
 } from "@/types";
 
+const active = useProjectPageActive();
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
@@ -107,8 +109,17 @@ watch(rootPath, () => {
 const MD_EXTS = new Set(["md", "markdown"]);
 
 // 图片预览公共逻辑(与 ResourceSkillPreview 共用):asset 直显 + svg 预览/源码切换
-const { selectedExt, isImage, isSvg, svgMode, svgSource, imageSrc, onSelectImage, isVideo, videoSrc } =
-  useImagePreview(selected, (path) => (project.value ? resolvePath(rootPath.value, path) : null));
+const {
+  selectedExt,
+  isImage,
+  isSvg,
+  svgMode,
+  svgSource,
+  imageSrc,
+  onSelectImage,
+  isVideo,
+  videoSrc,
+} = useImagePreview(selected, (path) => (project.value ? resolvePath(rootPath.value, path) : null));
 const isMarkdown = computed(() => MD_EXTS.has(selectedExt.value));
 
 // 切换文件不显示 loading:本地读取很快,loading 只会闪烁;
@@ -215,7 +226,10 @@ const leftView = ref<"tree" | "search" | "outline">("tree");
 // ── 结构视图(sem 语义导航):仅当前文件为可预览文本时可用 ──────────────────────
 const outlineEnabled = computed(
   () =>
-    !!selected.value && !previewBinary.value && !isVideo.value && (!isImage.value || svgSource.value),
+    !!selected.value &&
+    !previewBinary.value &&
+    !isVideo.value &&
+    (!isImage.value || svgSource.value),
 );
 watch(outlineEnabled, (enabled) => {
   if (!enabled && leftView.value === "outline") leftView.value = "tree";
@@ -424,6 +438,7 @@ watch([selected, previewText, codeVisible], () => void nextTick(tryJump), { flus
 
 // ── 快捷键:Ctrl+F 文件内查找 / Ctrl+Shift+F 全文搜索 / F3 与 Esc ────────────
 function onKeydown(e: KeyboardEvent) {
+  if (!active.value) return;
   const key = e.key.toLowerCase();
   if (e.ctrlKey && key === "f") {
     if (e.shiftKey) {
@@ -693,11 +708,7 @@ function startTreeResize(e: PointerEvent) {
           <p v-else-if="previewBinary" class="p-6 text-sm text-muted-foreground">
             {{ t("files.binary") }}
           </p>
-          <VideoViewer
-            v-else-if="isVideo"
-            :src="videoSrc"
-            :name="selected ?? undefined"
-          />
+          <VideoViewer v-else-if="isVideo" :src="videoSrc" :name="selected ?? undefined" />
           <ImageViewer
             v-else-if="isImage && !svgSource"
             :src="imageSrc"

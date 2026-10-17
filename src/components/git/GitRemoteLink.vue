@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { DropdownMenuContent } from "@/components/common/project-floating-content";
 import { computed, ref, watch, type Component } from "vue";
 import { useI18n } from "vue-i18n";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -7,12 +8,7 @@ import { ChevronDown, Globe } from "@lucide/vue";
 import GithubIcon from "@/components/icons/GithubIcon.vue";
 import GiteeIcon from "@/components/icons/GiteeIcon.vue";
 import GitlabIcon from "@/components/icons/GitlabIcon.vue";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cmd } from "@/lib/tauri";
 import { parseGitRemote, type GitProvider, type GitRemoteInfo } from "@/lib/git-remote";
 import type { GitRemote, Project } from "@/types";

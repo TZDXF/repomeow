@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { DropdownMenuContent } from "@/components/common/project-floating-content";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { Settings2, Tags, X } from "@lucide/vue";
@@ -6,7 +7,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";

@@ -1,17 +1,12 @@
 <script setup lang="ts">
+import { SelectContent } from "@/components/common/project-floating-content";
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { toast } from "vue-sonner";
 import { Brain, Eye, Wrench } from "@lucide/vue";
 import { ModelSelector, type ModelSelectorGroup } from "@/components/ai-elements/model-selector";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { CHAT_THINKING_LEVELS, type ChatPermission, type ChatThinkingLevel } from "@/lib/ai-config";
 import { useAiConfigStore } from "@/stores/ai-config";

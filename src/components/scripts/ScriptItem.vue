@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import { ContextMenuContent } from "@/components/common/project-floating-content";
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { Eye, EyeOff, Copy, Pencil, Play, Star, Trash2 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
+import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { commandIcon } from "@/lib/command-icons";
 import { copyToClipboard } from "@/lib/utils";
 

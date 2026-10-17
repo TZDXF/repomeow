@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Dialog from "@/components/common/ProjectDialog.vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
@@ -8,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import ScrollArea from "@/components/common/ScrollArea.vue";
 import {
-  Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,

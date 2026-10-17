@@ -48,6 +48,13 @@ function loadStoredProjectIds(): number[] {
 export const useTabsStore = defineStore("title-tabs", () => {
   const openProjectIds = ref<number[]>(loadStoredProjectIds());
 
+  // 页面和草稿仅在当前打开周期保留,不把临时编辑内容写入持久化存储。
+  const lastProjectPaths = ref<Record<number, string>>({});
+
+  function getProjectPath(id: number): string {
+    return lastProjectPaths.value[id] ?? `/projects/${id}`;
+  }
+
   function persist() {
     try {
       globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(openProjectIds.value));
@@ -69,6 +76,7 @@ export const useTabsStore = defineStore("title-tabs", () => {
     const remainingIds = previousIds.filter((id) => !closingIds.has(id));
     if (remainingIds.length === previousIds.length) return null;
     openProjectIds.value = remainingIds;
+    for (const id of closingIds) delete lastProjectPaths.value[id];
     persist();
 
     const active = resolveTabFromPath(router.currentRoute.value.path);
@@ -91,7 +99,7 @@ export const useTabsStore = defineStore("title-tabs", () => {
       void router.push("/");
       return { kind: "home" };
     }
-    void router.push(`/projects/${nextId}`);
+    void router.push(getProjectPath(nextId));
     return { kind: "project", projectId: nextId };
   }
 
@@ -126,11 +134,12 @@ export const useTabsStore = defineStore("title-tabs", () => {
   }
 
   watch(
-    () => router.currentRoute.value.path,
+    () => router.currentRoute.value.fullPath ?? router.currentRoute.value.path,
     (path) => {
-      const resolved = resolveTabFromPath(path);
+      const resolved = resolveTabFromPath(router.currentRoute.value.path);
       if (resolved.kind === "project" && resolved.projectId !== undefined) {
         openProject(resolved.projectId);
+        lastProjectPaths.value[resolved.projectId] = path;
       }
     },
     { immediate: true },
@@ -138,6 +147,7 @@ export const useTabsStore = defineStore("title-tabs", () => {
 
   return {
     openProjectIds,
+    getProjectPath,
     openProject,
     closeTab,
     closeOtherTabs,

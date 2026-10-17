@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { DropdownMenuContent } from "@/components/common/project-floating-content";
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
@@ -15,12 +16,7 @@ import {
   X,
 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import TerminalView from "@/components/terminal/TerminalView.vue";
 import { VueDraggable } from "vue-draggable-plus";
 import {
@@ -28,6 +24,7 @@ import {
   terminalStatusDotClass,
   type TerminalCapabilities,
 } from "@/lib/terminal";
+import { useProjectPageActive } from "@/composables/useProjectPageState";
 import { useSettingsStore, type TerminalKind } from "@/stores/settings";
 import { useTerminalStore } from "@/stores/terminal";
 import type { Project, TerminalSessionInfo } from "@/types";
@@ -36,6 +33,7 @@ import type { Project, TerminalSessionInfo } from "@/types";
  * 项目详情页底部内嵌终端面板:按项目过滤会话,页签可拖拽排序,
  * 顶部边缘拖拽调整高度;交互式 Shell 无停止/重启按钮;收起为底部细条。
  */
+const pageActive = useProjectPageActive();
 const props = defineProps<{ project: Project }>();
 
 const { t } = useI18n();
@@ -88,9 +86,9 @@ const active = computed(
 
 // 选中会话被移除/切换项目时,顺延到当前项目首个会话
 watch(
-  () => [props.project.id, list.value.length],
+  () => [props.project.id, list.value.length, pageActive.value],
   () => {
-    if (active.value && store.activeId !== active.value.id) {
+    if (pageActive.value && active.value && store.activeId !== active.value.id) {
       store.activeId = active.value.id;
     }
   },

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { DropdownMenuContent } from "@/components/common/project-floating-content";
 // 托盘弹窗项目行下方行内展开的「常用命令」列表:行均不可点击,点运行图标才执行。
 // npm/自定义命令与详情页 ScriptItem 对齐:行首常显绿色 Play 按钮(text-emerald-600)执行,
 // 自定义命令带图标时按钮内渲染其自定义图标(与 ScriptItem 一致);
@@ -10,12 +11,7 @@ import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { Container, FileCode, Hammer, MoreHorizontal, Play, RotateCw, Square } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { commandIcon } from "@/lib/command-icons";
 import { resolveJavaHome } from "@/lib/jdk";
 import { useSettingsStore } from "@/stores/settings";

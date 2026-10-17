@@ -1,8 +1,9 @@
 <script setup lang="ts">
+import Dialog from "@/components/common/ProjectDialog.vue";
 import { computed, nextTick, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { FileCode, LoaderCircle } from "@lucide/vue";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import CodeViewer from "@/components/files/CodeViewer.vue";
 import { cmd } from "@/lib/tauri";
 import type { FilePreview } from "@/types";

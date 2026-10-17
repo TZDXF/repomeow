@@ -54,7 +54,7 @@ function openHome() {
 }
 
 function openProject(id: number) {
-  void router.push(`/projects/${id}`);
+  void router.push(tabsStore.getProjectPath(id));
 }
 
 function onCloseTab(event: MouseEvent, id: number) {

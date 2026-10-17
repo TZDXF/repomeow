@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { SelectContent } from "@/components/ui/select";
+import { SelectContent } from "@/components/common/project-floating-content";
 
 type CodeBlockLanguageSelectorContentProps = InstanceType<typeof SelectContent>["$props"];
 

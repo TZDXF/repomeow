@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useProjectPageActive } from "@/composables/useProjectPageState";
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -11,6 +12,7 @@ import { terminalAnsiColors, TERMINAL_MINIMUM_CONTRAST_RATIO } from "@/lib/termi
  * 单会话 xterm 视图:挂载时回放 store 输出缓存,此后经 onOutput 增量写入。
  * 会话重启(started_at 变化)时重新渲染;由父组件 :key 控制会话切换时的重建。
  */
+const pageActive = useProjectPageActive();
 const props = defineProps<{ sessionId: number }>();
 const store = useTerminalStore();
 
@@ -106,7 +108,7 @@ onMounted(() => {
   fit.fit();
   syncPtySize();
   renderBuffer();
-  term.focus();
+  if (pageActive.value) term.focus();
 
   detachOutput = store.onOutput((id, chunk) => {
     if (id === props.sessionId) term?.write(chunk);
@@ -151,6 +153,7 @@ onMounted(() => {
   });
 
   resizeObserver = new ResizeObserver(() => {
+    if (!pageActive.value) return;
     fit?.fit();
     syncPtySize();
   });

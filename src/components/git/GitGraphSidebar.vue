@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ContextMenuContent } from "@/components/common/project-floating-content";
 import { computed, ref, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 import {
@@ -14,12 +15,7 @@ import {
   Tag as TagIcon,
   Trash2,
 } from "@lucide/vue";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+import { ContextMenu, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { buildBranchTree, type BranchTreeNode } from "@/lib/branch-tree";
 import type { GitBranches, GitBranchTrack } from "@/types";
 import GitBranchTrackBadges from "./GitBranchTrackBadges.vue";

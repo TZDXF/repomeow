@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Dialog from "@/components/common/ProjectDialog.vue";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
@@ -6,7 +7,6 @@ import { Plus, Trash2 } from "@lucide/vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,

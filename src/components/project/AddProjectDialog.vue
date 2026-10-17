@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { DropdownMenuContent, PopoverContent } from "@/components/common/project-floating-content";
+import Dialog from "@/components/common/ProjectDialog.vue";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
@@ -8,7 +10,6 @@ import { Check, ChevronDown, FolderOpen, FolderGit2, KeyRound, Loader2 } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -18,14 +19,13 @@ import {
 } from "@/components/ui/dialog";
 import {
   DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import ScrollArea from "@/components/common/ScrollArea.vue";
 import {
   getGhCliAccount,

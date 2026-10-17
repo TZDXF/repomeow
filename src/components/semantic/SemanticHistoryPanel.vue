@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import Dialog from "@/components/common/ProjectDialog.vue";
 import { computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { Loader2, RefreshCw } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import ScrollArea from "@/components/common/ScrollArea.vue";
 import { useSemanticRequest } from "@/composables/useSemanticRequest";
 import { cmd } from "@/lib/tauri";

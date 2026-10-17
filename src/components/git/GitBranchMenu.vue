@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { DropdownMenuContent, SelectContent } from "@/components/common/project-floating-content";
+import Dialog from "@/components/common/ProjectDialog.vue";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
@@ -14,16 +16,9 @@ import {
   Radar,
 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -33,7 +28,6 @@ import { Input } from "@/components/ui/input";
 import ScrollArea from "@/components/common/ScrollArea.vue";
 import {
   Select,
-  SelectContent,
   SelectGroup,
   SelectItem,
   SelectLabel,

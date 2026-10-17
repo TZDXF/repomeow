@@ -1,15 +1,10 @@
 <script setup lang="ts">
+import Dialog from "@/components/common/ProjectDialog.vue";
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { Loader2 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const { t } = useI18n();
 // remote=false: 删除本地分支(-d,未合并时由父组件把 needsForce 置 true 切换为 -D 强删确认)

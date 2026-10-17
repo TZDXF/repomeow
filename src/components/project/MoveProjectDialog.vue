@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Dialog from "@/components/common/ProjectDialog.vue";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -6,7 +7,6 @@ import { toast } from "vue-sonner";
 import { FolderOpen } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,

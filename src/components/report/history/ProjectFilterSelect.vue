@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { DropdownMenuContent } from "@/components/common/project-floating-content";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { FolderGit2, Search } from "@lucide/vue";
@@ -7,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
-  DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import ScrollArea from "@/components/common/ScrollArea.vue";

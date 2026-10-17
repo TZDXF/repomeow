@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import { PopoverContent } from "@/components/common/project-floating-content";
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { getLocalTimeZone, today as calendarToday } from "@internationalized/date";
 import { Calendar as CalendarIcon } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import HolidayCalendar from "@/components/report/HolidayCalendar.vue";
 import HolidayRangeCalendar from "@/components/report/HolidayRangeCalendar.vue";

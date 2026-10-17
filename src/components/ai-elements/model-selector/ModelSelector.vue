@@ -1,9 +1,9 @@
 <script setup lang="ts">
+import { SelectContent } from "@/components/common/project-floating-content";
 import { computed } from "vue";
 import { Sparkles } from "@lucide/vue";
 import {
   Select,
-  SelectContent,
   SelectGroup,
   SelectItem,
   SelectLabel,

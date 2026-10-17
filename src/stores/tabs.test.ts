@@ -54,6 +54,38 @@ describe("tabs store", () => {
     setActivePinia(createPinia());
   });
 
+  it("切换 tab 时恢复项目最后停留的子页和 query", async () => {
+    await setRoute("/projects/1");
+    const store = useTabsStore();
+    routeRef.value = {
+      path: "/projects/1/graph",
+      fullPath: "/projects/1/graph?commit=abc",
+    } as typeof routeRef.value;
+    await nextTick();
+    await setRoute("/projects/2/files");
+    expect(store.getProjectPath(1)).toBe("/projects/1/graph?commit=abc");
+    expect(store.getProjectPath(2)).toBe("/projects/2/files");
+    expect(store.getProjectPath(3)).toBe("/projects/3");
+  });
+
+  it("关闭激活 tab 时也恢复相邻项目原来的子页", async () => {
+    await setRoute("/projects/1/files");
+    const store = useTabsStore();
+    await setRoute("/projects/2/wiki");
+    store.closeTab(2);
+    expect(pushMock).toHaveBeenCalledWith("/projects/1/files");
+    expect(store.getProjectPath(2)).toBe("/projects/2");
+  });
+
+  it("关闭后台 tab 后清除该 tab 的页面位置", async () => {
+    await setRoute("/projects/1/files");
+    const store = useTabsStore();
+    await setRoute("/projects/2");
+    store.closeTab(1);
+    store.openProject(1);
+    expect(store.getProjectPath(1)).toBe("/projects/1");
+  });
+
   it("路由进入项目页时自动建档,重复进入不重复建", async () => {
     await setRoute("/projects/3");
     const store = useTabsStore();

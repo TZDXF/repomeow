@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import Dialog from "@/components/common/ProjectDialog.vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { ClipboardCopy, Loader2, Network, RefreshCw, X } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import ScrollArea from "@/components/common/ScrollArea.vue";
 import SemanticEntityList from "@/components/semantic/SemanticEntityList.vue";
 import SemanticMiniGraph from "@/components/semantic/SemanticMiniGraph.vue";

@@ -1,11 +1,11 @@
 <script setup lang="ts">
+import Dialog from "@/components/common/ProjectDialog.vue";
 import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import { Bot, LoaderCircle } from "@lucide/vue";
 import { agentBrandIcon } from "@/lib/agent-icons";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,

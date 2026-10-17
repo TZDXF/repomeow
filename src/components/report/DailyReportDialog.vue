@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Dialog from "@/components/common/ProjectDialog.vue";
 import { computed, ref, shallowRef, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
@@ -6,7 +7,6 @@ import { Loader2, Sparkles } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import ScrollArea from "@/components/common/ScrollArea.vue";
 import {
-  Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
