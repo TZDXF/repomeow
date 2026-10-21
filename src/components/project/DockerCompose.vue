@@ -799,13 +799,13 @@ async function confirmExport() {
       <div class="flex flex-col gap-4">
         <div v-if="!exportRequest.service" class="flex items-center justify-between gap-4">
           <label for="docker-export-merge" class="text-sm">{{ t("docker.exportMerge") }}</label>
-          <Switch id="docker-export-merge" v-model:checked="exportMerge" />
+          <Switch id="docker-export-merge" v-model="exportMerge" />
         </div>
         <div class="flex items-center justify-between gap-4">
           <label for="docker-export-compress" class="text-sm">{{
             t("docker.exportCompress")
           }}</label>
-          <Switch id="docker-export-compress" v-model:checked="exportCompress" />
+          <Switch id="docker-export-compress" v-model="exportCompress" />
         </div>
       </div>
       <DialogFooter>
