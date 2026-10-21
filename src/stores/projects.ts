@@ -201,6 +201,8 @@ export const useProjectsStore = defineStore("projects", () => {
       name,
       description: description?.trim() ? description.trim() : null,
     });
+    // 新项目可能被当前搜索/标签筛选排除,先写入索引供详情页与标题栏查询。
+    upsertProjects([project]);
     await fetchProjects();
     return project;
   }

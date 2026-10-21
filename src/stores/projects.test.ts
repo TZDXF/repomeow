@@ -138,6 +138,44 @@ describe("projects store 全量索引", () => {
     expect(store.projects.map((p) => p.id)).toEqual([1, 3]);
   });
 
+  it.each([
+    { label: "搜索", query: "repo-a", tagIds: [], visible: false },
+    { label: "标签筛选", query: "", tagIds: [7], visible: false },
+    { label: "搜索与标签筛选", query: "repo-a", tagIds: [7], visible: false },
+    { label: "匹配搜索条件", query: "repo", tagIds: [], visible: true },
+    { label: "无筛选", query: "", tagIds: [], visible: true },
+  ])("$label 时新增项目可按 id 查询,列表仍遵循筛选结果", async ({ query, tagIds, visible }) => {
+    const store = useProjectsStore();
+    const existing = makeProject(1, "repo-a");
+    const added = makeProject(40, "repo-b");
+    cmdMock.mockImplementation(async (command: string) => {
+      switch (command) {
+        case "add_project":
+          return added;
+        case "list_projects":
+          return visible ? [existing, added] : [existing];
+        case "check_git_status":
+          return [];
+        default:
+          throw new Error(`Unexpected command: ${command}`);
+      }
+    });
+    store.query = query;
+    store.selectedTagIds = tagIds;
+
+    const result = await store.addProject(added.path, added.name);
+
+    expect(result).toEqual(added);
+    expect(store.getProjectById(40)?.name).toBe("repo-b");
+    expect(store.projects.map((p) => p.id)).toEqual(visible ? [1, 40] : [1]);
+    expect(store.query).toBe(query);
+    expect(store.selectedTagIds).toEqual(tagIds);
+    expect(cmdMock).toHaveBeenCalledWith("list_projects", {
+      query: query || null,
+      tagIds: tagIds.length ? tagIds : null,
+    });
+  });
+
   it("归档/删除后从全量索引移除,刷新单项目同步索引", async () => {
     const store = useProjectsStore();
     cmdMock.mockResolvedValueOnce([makeProject(1, "repo-a"), makeProject(2, "repo-b")]);
