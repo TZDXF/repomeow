@@ -134,7 +134,8 @@ impl McpTarget {
 /// mcp_servers 表、opencode=`opencode.json` 的 mcp 键、zcode=`.zcode/config.json`
 /// 的嵌套 mcp.servers 键(服务器对象与 claude 同形,复用 claude 方言);
 /// Kimi Code 的 `.kimi-code/mcp.json` 复用 JSON 结构,transport 字段单独映射;
-/// DSH 需插件配置、MiniMax 尚未接入项目级 MCP、Pi 无内置 MCP,故不在列)。
+/// Pi: packages/coding-agent/docs/mcp.md,仅支持 stdio / Streamable HTTP。
+/// DSH 需插件配置、MiniMax 尚未接入项目级 MCP,故不在列。
 pub(super) const MCP_TARGETS: &[McpTarget] = &[
     McpTarget {
         path: ".mcp.json",
@@ -183,6 +184,12 @@ pub(super) const MCP_TARGETS: &[McpTarget] = &[
         dialect: "claude",
         key: "mcpServers",
         agents: &["kimi"],
+    },
+    McpTarget {
+        path: ".pi/mcp.json",
+        dialect: "claude",
+        key: "mcpServers",
+        agents: &["pi"],
     },
 ];
 

@@ -1111,3 +1111,115 @@ fn kimi_mcp_transport_roundtrip() {
         assert!(value.get("type").is_none());
     }
 }
+
+#[test]
+fn pi_mcp_deploy_scan_and_remove_preserves_existing_config() {
+    let f = Fixture::new();
+    f.mcp();
+    fs::create_dir_all(f.root.join(".pi")).unwrap();
+    let file = f.root.join(".pi/mcp.json");
+    let original = json!({"custom": true, "mcpServers": {
+        "existing": {"url": "https://example.com/mcp", "oauth": {"enabled": true}}
+    }});
+    fs::write(&file, original.to_string()).unwrap();
+    assert_eq!(target("pi").unwrap().mcp_path, ".pi/mcp.json");
+    let result = f.apply("mcp", "pi", &["m1"]);
+    assert!(result.failures.is_empty());
+    assert_eq!(result.applied, 1);
+    let doc: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    assert_eq!(doc["mcpServers"]["context"]["command"], "node");
+    assert_eq!(doc["mcpServers"]["context"]["type"], "stdio");
+    assert_eq!(f.apply("mcp", "pi", &["m1"]).applied, 0);
+    let snap = snapshot(&f.library, &f.root, "mcp").unwrap();
+    assert_eq!(snap.deployments.len(), 1);
+    assert_eq!(f.apply("mcp", "pi", &[]).applied, 1);
+    let doc: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    assert_eq!(doc, original);
+}
+
+#[test]
+fn pi_mcp_transport_roundtrip_and_validation() {
+    let target = mcp_target("pi").unwrap();
+    for (transport, config) in [
+        (
+            "stdio",
+            json!({"command": "node", "args": ["server.js"], "env": {"TOKEN": "${TOKEN}"}}),
+        ),
+        (
+            "http",
+            json!({"url": "https://example.com/mcp", "type": "streamable-http", "headers": {"Authorization": "Bearer ${TOKEN}"}}),
+        ),
+    ] {
+        let input = parse_server_value(target, "my-server", &config).unwrap();
+        assert_eq!(input.transport, transport);
+        let mut value = serde_json::to_value(&input).unwrap();
+        value["id"] = json!("m1");
+        value["createdAt"] = json!(0);
+        value["updatedAt"] = json!(0);
+        let server: McpServer = serde_json::from_value(value).unwrap();
+        let generated = definition(&server, target).unwrap();
+        let parsed = parse_server_value(target, "my-server", &generated).unwrap();
+        assert_eq!(parsed.transport, transport);
+        assert_eq!(parsed.env, input.env);
+        assert_eq!(parsed.headers, input.headers);
+        assert_eq!(parsed.args, input.args);
+        assert_eq!(parsed.url, input.url);
+        let mut unsupported = server.clone();
+        unsupported.transport = "sse".into();
+        assert!(definition(&unsupported, target).is_err());
+        unsupported = server;
+        unsupported.name = "invalid.name".into();
+        assert!(definition(&unsupported, target).is_err());
+    }
+    assert!(parse_server_value(
+        target,
+        "remote",
+        &json!({"type":"sse", "url":"https://example.com/sse"})
+    )
+    .is_err());
+    assert!(parse_server_value(target, "invalid.name", &json!({"command":"node"})).is_err());
+    assert!(
+        parse_server_value(target, "remote", &json!({"type":"http", "command":"node"})).is_err()
+    );
+}
+
+#[test]
+fn pi_mcp_rejects_normalized_name_collision() {
+    let f = Fixture::new();
+    fs::create_dir_all(f.root.join(".pi")).unwrap();
+    let file = f.root.join(".pi/mcp.json");
+    let original = json!({"mcpServers": {"my_server": {"command": "node"}}}).to_string();
+    fs::write(&file, &original).unwrap();
+    let target = mcp_target("pi").unwrap();
+    let doc = super::super::deployment_mcp::McpDocument::read(&f.root, target).unwrap();
+    assert!(doc
+        .edit(target, "my-server", Some(&json!({"command": "node"})))
+        .is_err());
+    assert_eq!(fs::read_to_string(file).unwrap(), original);
+}
+
+#[test]
+fn pi_mcp_scan_claim_and_assign() {
+    let f = Fixture::new();
+    fs::create_dir_all(f.root.join(".pi")).unwrap();
+    let file = f.root.join(".pi/mcp.json");
+    let original = json!({"mcpServers": {"docs": {"url": "https://example.com/mcp", "type": "streamable-http"}}}).to_string();
+    fs::write(&file, &original).unwrap();
+    let entries = super::super::read_mcp_servers(&file, mcp_target("pi").unwrap());
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "docs");
+    let outcome = claim_local(&f.library, &f.root, "mcp", ".pi/mcp.json", Some("docs")).unwrap();
+    assert_eq!(outcome.resource_id, "local:mcp:.pi/mcp.json#docs");
+    let result = assign(
+        &f.library,
+        &f.root,
+        "mcp",
+        &outcome.resource_id,
+        &["pi".into(), "claude".into()],
+    )
+    .unwrap();
+    assert!(result.failures.is_empty());
+    let doc: Value = serde_json::from_slice(&fs::read(f.root.join(".mcp.json")).unwrap()).unwrap();
+    assert_eq!(doc["mcpServers"]["docs"]["type"], "http");
+    assert_eq!(fs::read_to_string(file).unwrap(), original);
+}

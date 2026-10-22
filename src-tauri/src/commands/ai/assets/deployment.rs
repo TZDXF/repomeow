@@ -93,7 +93,7 @@ const TARGETS: &[ProjectAiTarget] = &[
         id: "pi",
         name: "Pi",
         skill_path: ".pi/skills",
-        mcp_path: "",
+        mcp_path: ".pi/mcp.json",
     },
 ];
 

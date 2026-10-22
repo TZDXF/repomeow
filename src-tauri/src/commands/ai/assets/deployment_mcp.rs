@@ -9,14 +9,30 @@ use serde_json::{json, Value};
 use std::{collections::HashMap, fs, path::Path};
 use toml_edit::{DocumentMut, Item, Table};
 
+// Pi 使用服务器名构造工具名,不接受空格、点号或非 ASCII 字符。
+fn validate_pi_name(name: &str) -> RlResult<()> {
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
+    {
+        return Err(problem(format!("Pi: invalid MCP server name: {name}")));
+    }
+    Ok(())
+}
+
 pub(super) fn definition(server: &McpServer, target: &McpTarget) -> RlResult<Value> {
+    if target.agents.contains(&"pi") {
+        validate_pi_name(&server.name)?;
+    }
     if !server.enabled {
         return Err(problem(format!("disabled MCP: {}", server.name)));
     }
     if server.transport == "sse"
         && (target.dialect == "codex"
             || target.dialect == "opencode"
-            || target.agents.contains(&"copilot"))
+            || target.agents.contains(&"copilot")
+            || target.agents.contains(&"pi"))
     {
         return Err(problem(format!("{}: SSE unsupported", target.path)));
     }
@@ -130,6 +146,17 @@ pub(super) fn parse_server_value(
         enabled: true,
     };
     let obj = value.as_object().ok_or_else(|| problem(name))?;
+    if target.agents.contains(&"pi") {
+        validate_pi_name(name)?;
+        if let Some(kind) = obj.get("type") {
+            match kind.as_str() {
+                Some("stdio") if obj.contains_key("command") => {}
+                Some("http" | "streamable-http")
+                    if !obj.contains_key("command") && obj.contains_key("url") => {}
+                _ => return Err(problem("Pi: unsupported MCP type or mismatched transport")),
+            }
+        }
+    }
     if target.dialect == "opencode" {
         return match obj.get("type").and_then(Value::as_str) {
             Some("local") => {
@@ -335,6 +362,16 @@ impl McpDocument {
             }
             let map = cursor.as_object_mut().ok_or_else(|| problem(target.path))?;
             if let Some(value) = value {
+                if target.agents.contains(&"pi") {
+                    validate_pi_name(name)?;
+                    let normalized = name.replace('-', "_");
+                    if map
+                        .keys()
+                        .any(|key| key != name && key.replace('-', "_") == normalized)
+                    {
+                        return Err(problem(format!("Pi: conflicting MCP server name: {name}")));
+                    }
+                }
                 map.insert(name.to_string(), value.clone());
             } else {
                 map.remove(name);
