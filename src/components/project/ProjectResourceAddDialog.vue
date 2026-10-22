@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import Dialog from "@/components/common/ProjectDialog.vue";
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { toast } from "vue-sonner";
@@ -151,14 +151,18 @@ async function add() {
     saving.value = false;
   }
 }
-function manage() {
+async function manage() {
   open.value = false;
-  void router.push({ name: "settings", query: { category: "resources" } });
+  // 等待 v-if 卸载模态层、释放交互锁后再切换缓存页面,不依赖退出动画完成。
+  await nextTick();
+  await router.push({ name: "settings", query: { category: "resources" } });
 }
 </script>
 
 <template>
+  <!-- 主动关闭时直接销毁浮层,避免缓存页面切换后遗留模态交互锁。 -->
   <Dialog
+    v-if="open"
     :open="open"
     @update:open="
       (value) => {
