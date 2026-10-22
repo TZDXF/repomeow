@@ -3,6 +3,8 @@ import { useProjectPageActive } from "@/composables/useProjectPageState";
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebLinksAddon } from "@xterm/addon-web-links";
+import { activateTerminalLink } from "@/lib/terminal-links";
 import "@xterm/xterm/css/xterm.css";
 import { resizeCommandSession, writeCommandSession } from "@/lib/terminal";
 import { useTerminalStore } from "@/stores/terminal";
@@ -96,6 +98,7 @@ onMounted(() => {
   term = new Terminal({
     // 所有会话均使用 PTY,换行与回显由终端驱动/子进程处理。
     convertEol: false,
+    linkHandler: { activate: activateTerminalLink },
     fontSize: 13,
     cursorBlink: false,
     scrollback: 5000,
@@ -104,6 +107,7 @@ onMounted(() => {
   });
   fit = new FitAddon();
   term.loadAddon(fit);
+  term.loadAddon(new WebLinksAddon(activateTerminalLink));
   term.open(container.value);
   fit.fit();
   syncPtySize();
