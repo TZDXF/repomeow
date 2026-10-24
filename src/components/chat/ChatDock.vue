@@ -31,6 +31,10 @@ import ChatUserMessage from "@/components/chat/dock/ChatUserMessage.vue";
 import ChatAssistantTurn from "@/components/chat/dock/ChatAssistantTurn.vue";
 import ChatDockPrefs from "@/components/chat/dock/ChatDockPrefs.vue";
 import ChatContextMeter from "@/components/chat/dock/ChatContextMeter.vue";
+import ChatVirtualMessage from "@/components/chat/ChatVirtualMessage.vue";
+
+// 时间线末尾固定保持真实挂载的条数,保证吸底定位与流式内容始终可见
+const PINNED_TAIL = 4;
 
 const props = defineProps<{ project: Project }>();
 const open = defineModel<boolean>("open", { default: false });
@@ -132,44 +136,64 @@ const {
         </ConversationEmptyState>
 
         <template v-else>
-          <template v-for="view in timeline" :key="view.key">
-            <ChatUserMessage
-              v-if="view.kind === 'user'"
-              v-model:edit-text="editText"
-              :content="view.content"
-              :editable="view.editable"
-              :editing="editingKey === view.key"
-              :ai-ready="aiReady && history.loaded && !historyPending"
-              @start-edit="startEdit(view)"
-              @confirm="confirmEdit"
-              @cancel="cancelEdit"
-              @copy="copyText(view.content)"
-            />
-            <!-- 自动压缩时间线标记(分隔条样式,居中) -->
-            <div
-              v-else-if="view.kind === 'compaction'"
-              class="flex items-center gap-2 px-2 py-1 text-muted-foreground text-xs"
-              :title="t('chat.compactionDoneTitle')"
+          <template v-for="(view, vi) in timeline" :key="view.key">
+            <!--
+              虚拟化壳 + v-memo:已提交视图对象 identity 稳定(use-chat-timeline
+              记忆化),配合 v-memo 让流式增量只重建 live 一项的 vnode,其余条目
+              整体跳过;离开视口的条目由 ChatVirtualMessage 卸载为占位壳。
+            -->
+            <ChatVirtualMessage
+              v-memo="[
+                view,
+                vi >= timeline.length - PINNED_TAIL,
+                view.kind === 'turn' && view.live,
+                editingKey === view.key,
+                editingKey === view.key ? editText : null,
+                aiReady,
+                historyPending,
+                view.kind === 'turn' && view.live ? retrySeconds : 0,
+              ]"
+              :pinned="vi >= timeline.length - PINNED_TAIL"
+              :live="view.kind === 'turn' && view.live"
             >
-              <div class="h-px flex-1 bg-border" />
-              <FoldVertical class="size-3.5 shrink-0" />
-              <span>
-                {{
-                  t("chat.compactionDone", {
-                    before: formatTokenCount(view.tokensBefore),
-                    after: formatTokenCount(view.tokensAfter),
-                  })
-                }}
-              </span>
-              <div class="h-px flex-1 bg-border" />
-            </div>
-            <ChatAssistantTurn
-              v-else
-              :turn="view"
-              :retry-seconds="retrySeconds"
-              :project-path="project.path"
-              @copy="copyTurn(view)"
-            />
+              <ChatUserMessage
+                v-if="view.kind === 'user'"
+                v-model:edit-text="editText"
+                :content="view.content"
+                :editable="view.editable"
+                :editing="editingKey === view.key"
+                :ai-ready="aiReady && history.loaded && !historyPending"
+                @start-edit="startEdit(view)"
+                @confirm="confirmEdit"
+                @cancel="cancelEdit"
+                @copy="copyText(view.content)"
+              />
+              <!-- 自动压缩时间线标记(分隔条样式,居中) -->
+              <div
+                v-else-if="view.kind === 'compaction'"
+                class="flex items-center gap-2 px-2 py-1 text-muted-foreground text-xs"
+                :title="t('chat.compactionDoneTitle')"
+              >
+                <div class="h-px flex-1 bg-border" />
+                <FoldVertical class="size-3.5 shrink-0" />
+                <span>
+                  {{
+                    t("chat.compactionDone", {
+                      before: formatTokenCount(view.tokensBefore),
+                      after: formatTokenCount(view.tokensAfter),
+                    })
+                  }}
+                </span>
+                <div class="h-px flex-1 bg-border" />
+              </div>
+              <ChatAssistantTurn
+                v-else
+                :turn="view"
+                :retry-seconds="view.live ? retrySeconds : 0"
+                :project-path="project.path"
+                @copy="copyTurn(view)"
+              />
+            </ChatVirtualMessage>
           </template>
         </template>
       </ConversationContent>

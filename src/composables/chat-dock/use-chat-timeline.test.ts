@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { ChatMessage } from "@/lib/chat";
+import type { ChatMessage, ChatToolRun } from "@/lib/chat";
 import type { ChatSessionState } from "@/stores/chat";
-import { buildTimeline, retryRemainingSeconds, type TurnView } from "./use-chat-timeline";
+import {
+  buildCommittedTimeline,
+  buildTimeline,
+  retryRemainingSeconds,
+  type TurnView,
+} from "./use-chat-timeline";
 
 function msg(partial: Partial<ChatMessage> & Pick<ChatMessage, "id" | "role">): ChatMessage {
   return { content: "", toolRunIds: [], ...partial };
@@ -139,7 +144,7 @@ describe("buildTimeline", () => {
     expect(turn.groups[0].runs.map((r) => r.id)).toEqual(["r1"]);
   });
 
-  it("忙时流式状态并入末尾回合:正文已开始则过程块收起", () => {
+  it("忙时流式状态作为独立 live 回合追加,不并入已提交回合", () => {
     const views = buildTimeline(
       session({
         busy: true,
@@ -154,11 +159,18 @@ describe("buildTimeline", () => {
         ],
       }),
     );
-    expect(views).toHaveLength(2);
-    const turn = views[1] as TurnView;
+    expect(views).toHaveLength(3);
+    // 已提交回合保持固化内容,不受流式影响
+    const committed = views[1] as TurnView;
+    expect(committed.key).toBe("a1");
+    expect(committed.live).toBe(false);
+    expect(committed.contents).toEqual(["已固化"]);
+    // 流式正文/工具调用收在末尾的 live 回合
+    const turn = views[2] as TurnView;
+    expect(turn.key).toBe("live");
     expect(turn.live).toBe(true);
     expect(turn.streamingText).toBe("流式中");
-    expect(turn.contents).toEqual(["已固化"]);
+    expect(turn.contents).toEqual([]);
     // 有待固化工具调用 → 过程仍在产出,折叠块保持展开
     expect(turn.active).toBe(true);
     expect(turn.groups[turn.groups.length - 1].runs.map((r) => r.id)).toEqual(["r1"]);
@@ -170,7 +182,7 @@ describe("buildTimeline", () => {
     );
     expect(views).toHaveLength(2);
     const turn = views[1] as TurnView;
-    expect(turn.key).toBe("1:live");
+    expect(turn.key).toBe("live");
     expect(turn.live).toBe(true);
     expect(turn.active).toBe(true);
   });
@@ -190,6 +202,40 @@ describe("buildTimeline", () => {
     expect(turn.groups[0]).toMatchObject({ thinking: "思考中", thinkingStreaming: true });
     expect(turn.retry).toEqual(retry);
     expect(turn.compacting).toBe(true);
+  });
+});
+
+describe("buildCommittedTimeline 记忆化", () => {
+  it("依赖未变时复用同一视图对象;工具运行更新才重建对应回合", () => {
+    const run: ChatToolRun = {
+      id: "r1",
+      name: "bash",
+      args: {},
+      ok: null,
+      summary: "",
+      permission: "pending",
+    };
+    const state = session({
+      messages: [
+        msg({ id: "u1", role: "user", content: "问" }),
+        msg({ id: "a1", role: "assistant", content: "答", toolRunIds: ["r1"] }),
+      ],
+      toolRuns: { r1: run },
+    });
+    const cache = new Map();
+    const first = buildCommittedTimeline(state, cache);
+    // 全量重建后依赖全等:视图对象 identity 不变(流式期间不触发下游重绘的关键)
+    expect(buildCommittedTimeline(state, cache)).toEqual(first);
+    expect(buildCommittedTimeline(state, cache)[1]).toBe(first[1]);
+
+    // run 对象被替换(权限状态流转):仅引用它的回合重建
+    const resolved = { ...run, permission: "allowed" as const };
+    const updated = buildCommittedTimeline(
+      session({ ...state, toolRuns: { r1: resolved } }),
+      cache,
+    );
+    expect(updated[0]).toBe(first[0]);
+    expect(updated[1]).not.toBe(first[1]);
   });
 });
 

@@ -3,6 +3,7 @@ import type { HTMLAttributes } from "vue";
 import { cn } from "@/lib/utils";
 import { reactiveOmit } from "@vueuse/core";
 import { StickToBottom } from "vue-stick-to-bottom";
+import ConversationBottomPin from "./ConversationBottomPin.vue";
 
 interface Props {
   ariaLabel?: string;
@@ -32,6 +33,8 @@ const delegatedProps = reactiveOmit(props, "class");
     :class="cn('relative flex-1 overflow-y-hidden', props.class)"
     role="log"
   >
+    <!-- 流式内容增长时在 paint 前同步钉住 scrollTop,消除库 rAF 修正的滚动条弹跳 -->
+    <ConversationBottomPin />
     <slot />
   </StickToBottom>
 </template>
