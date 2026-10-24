@@ -265,6 +265,16 @@ export function openPathWith(
   return cmd("open_in_editor", { path, kind: option.kind, line });
 }
 
+/**
+ * 以系统默认程序打开本地文件/目录(Markdown 链接、文件抽屉、技能目录)。
+ * 不用 opener 插件的前端 openPath:那是 `opener:allow-open-path` 通配授权,
+ * 等价于把任意路径(含 .exe/.bat/.js)交给系统执行;改走后端 open_path 命令,
+ * 由 Rust 侧校验扩展名黑名单后再交给默认处理程序。
+ */
+export function openLocalPath(path: string): Promise<void> {
+  return cmd("open_path", { path });
+}
+
 /** 平台内置方式,无需探测 */
 const ALWAYS_AVAILABLE: ReadonlySet<EditorKind> = new Set(["explorer", "terminal"]);
 

@@ -542,3 +542,43 @@ fn terminal_launchers_receive_configured_environment() {
         assert_eq!(command.get_args().count(), 0);
     }
 }
+
+#[test]
+fn open_path_validation_blocks_executables_and_traversal() {
+    use super::path::validate_open_path;
+    use crate::time_util::now_ts_nanos;
+
+    // 普通数据文件/目录放行,返回归一化路径
+    let dir = std::env::temp_dir().join(format!("repomeow-open-path-{}", now_ts_nanos()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("readme.md");
+    std::fs::write(&file, "hi").unwrap();
+    assert_eq!(
+        validate_open_path(&file.to_string_lossy()).unwrap(),
+        clean_str_for_test(&file.to_string_lossy())
+    );
+    assert_eq!(
+        validate_open_path(dir.to_str().unwrap()).unwrap(),
+        clean_str_for_test(dir.to_str().unwrap())
+    );
+
+    // 可执行/脚本类扩展名拒绝(大小写不敏感)
+    for name in ["a.exe", "a.EXE", "a.bat", "a.ps1", "a.js", "a.vbs", "a.lnk", "a.hta"] {
+        let p = dir.join(name).to_string_lossy().to_string();
+        assert!(validate_open_path(&p).is_err(), "{name} 应被拒绝");
+    }
+    // 无扩展名与数据类扩展名放行
+    assert!(validate_open_path(dir.join("Makefile").to_str().unwrap()).is_ok());
+    assert!(validate_open_path(dir.join("a.tar.gz").to_str().unwrap()).is_ok());
+
+    // `..` 穿越与设备路径拒绝
+    assert!(validate_open_path("C:/repo/../secret.txt").is_err());
+    assert!(validate_open_path("C:/repo/../../etc/passwd").is_err());
+    assert!(validate_open_path(r"\\.\PhysicalDrive0").is_err());
+    assert!(validate_open_path(r"\\?\C:\Windows\System32\cmd.exe").is_err());
+    assert!(validate_open_path("").is_err());
+}
+
+fn clean_str_for_test(s: &str) -> String {
+    crate::path_util::clean_str(s)
+}

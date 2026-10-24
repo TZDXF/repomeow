@@ -6,6 +6,7 @@ use std::os::windows::process::CommandExt;
 use crate::models::EditorKind;
 
 mod editor;
+mod path;
 mod shell;
 mod terminal;
 #[cfg(test)]
@@ -13,6 +14,7 @@ mod tests;
 
 pub(crate) use editor::open_explorer;
 pub use editor::*;
+pub use path::*;
 pub use shell::*;
 pub(crate) use shell::{resolve_shell, resolve_shell_choice, ShellKind};
 pub(crate) use terminal::find_wt;

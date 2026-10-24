@@ -3,7 +3,7 @@ import Dialog from "@/components/common/ProjectDialog.vue";
 import { computed, nextTick, ref, watch, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
-import { openPath } from "@tauri-apps/plugin-opener";
+import { openLocalPath } from "@/lib/open-with";
 import { useLocalStorage } from "@vueuse/core";
 import {
   ExternalLink,
@@ -16,7 +16,7 @@ import {
   Undo2,
   X,
 } from "@lucide/vue";
-import { Markdown } from "vue-stream-markdown";
+import SafeMarkdown from "@/components/markdown/SafeMarkdown.vue";
 import { Button } from "@/components/ui/button";
 import ScrollArea from "@/components/common/ScrollArea.vue";
 import { DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -212,7 +212,7 @@ async function save() {
 async function openExternal() {
   if (!props.relPath) return;
   try {
-    await openPath(joinPath(props.root, props.relPath));
+    await openLocalPath(joinPath(props.root, props.relPath));
   } catch (e) {
     toast.error(String(e));
   }
@@ -403,7 +403,7 @@ function onMarkdownClick(e: MouseEvent) {
       </div>
       <ScrollArea v-else class="min-h-0 flex-1">
         <div ref="mdBody" class="px-6 py-4" @click="onMarkdownClick">
-          <Markdown
+          <SafeMarkdown
             mode="static"
             :content="displayContent"
             :locale="settingsStore.language"

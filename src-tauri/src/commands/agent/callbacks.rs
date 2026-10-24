@@ -197,16 +197,13 @@ pub(super) fn push_activity(sink: &SharedSink, text: String) {
     }
 }
 
+/// 权限门禁采用允许名单而非取反黑名单:kind 完全由上游 agent 自报,可被伪造
+/// 或省略,黑名单之外的任何取值(含缺失的 None 与未知的 Other)一律不自动放行,
+/// 走拒绝路径;仅显式无副作用的只读类 kind 免确认。
 pub(super) fn permission_allowed(kind: Option<&ToolKind>) -> bool {
-    !matches!(
+    matches!(
         kind,
-        Some(
-            ToolKind::Edit
-                | ToolKind::Delete
-                | ToolKind::Move
-                | ToolKind::Execute
-                | ToolKind::SwitchMode
-        )
+        Some(ToolKind::Read | ToolKind::Search | ToolKind::Think)
     )
 }
 

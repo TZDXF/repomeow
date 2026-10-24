@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
-import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { toast } from "vue-sonner";
 import {
   ArrowLeft,
@@ -16,19 +16,20 @@ import {
   RefreshCw,
   ShieldAlert,
 } from "@lucide/vue";
-import { Markdown, type ControlsConfig, type NodeRenderers } from "vue-stream-markdown";
+import type { ControlsConfig } from "vue-stream-markdown";
+import SafeMarkdown from "@/components/markdown/SafeMarkdown.vue";
 import ResourcePublicAudits from "@/components/settings/ResourcePublicAudits.vue";
 import FileTreeList from "@/components/common/FileTreeList.vue";
 import CodeViewer from "@/components/files/CodeViewer.vue";
 import ImageViewer from "@/components/files/ImageViewer.vue";
 import VideoViewer from "@/components/files/VideoViewer.vue";
-import MdLink from "@/components/markdown/MdLink.vue";
 import type { SupportedLocale } from "@/i18n";
 import { buildFileTree, flattenVisibleTree, type FileTreeRow } from "@/lib/file-tree";
 import { createBeforeDownload } from "@/lib/markdown-download";
 import { hasScheme, resolvePath, safeLinkHref } from "@/lib/markdown";
 import { extOf, IMAGE_EXTS, VIDEO_EXTS } from "@/lib/file-kind";
 import { joinPath } from "@/lib/path";
+import { openLocalPath } from "@/lib/open-with";
 import { useImagePreview } from "@/composables/files/useImagePreview";
 import SkillScanPanel from "@/components/skill-preview/SkillScanPanel.vue";
 import { scanLevelClass, scanLevelLabel } from "@/components/skill-preview/scan-labels";
@@ -109,9 +110,8 @@ const beforeDownload = createBeforeDownload(t);
 // 传游离元素,避免 Markdown 库将 island/pixel 的十六进制主题变量写成无效的 hsl(#…)
 const detachedThemeEl = document.createElement("div");
 const themeElement = () => detachedThemeEl;
-// 自定义链接渲染器:绕过库内置 harden(裸相对路径如 references/x.md 会被误判拦截),
-// 输出真实 href,点击行为统一由 onMarkdownClick 拦截(同 ProjectFiles)
-const nodeRenderers: NodeRenderers = { link: MdLink };
+// 链接白名单与点击拦截:SafeMarkdown 默认以 MdLink 接管 a 标签(safeLinkHref
+// 放行裸相对路径),点击统一由 onMarkdownClick 拦截(同 ProjectFiles)
 
 onMounted(() => {
   void loadSkill();
@@ -188,7 +188,7 @@ function openSourcePage() {
 async function openDir() {
   try {
     if (isLocal.value) {
-      await openPath(localDir.value);
+      await openLocalPath(localDir.value);
     } else {
       await openResourceSkillDir(skillId.value);
     }
@@ -761,14 +761,13 @@ onBeforeUnmount(() => {
             class="mx-auto max-w-3xl p-4"
             @click="onMarkdownClick"
           >
-            <Markdown
+            <SafeMarkdown
               mode="static"
               :content="displayContent"
               :controls="controls"
               :theme-element="themeElement"
               :locale="language"
               :before-download="beforeDownload"
-              :node-renderers="nodeRenderers"
             />
           </div>
           <div v-else class="h-full">

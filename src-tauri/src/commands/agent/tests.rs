@@ -107,14 +107,21 @@ fn tool_activity_summarizes_raw_input_inline() {
 }
 
 #[test]
-fn read_only_sessions_reject_write_and_execute_tools() {
+fn permission_gate_is_default_deny() {
+    // 无副作用的只读类 kind 免确认放行。
+    assert!(permission_allowed(Some(&ToolKind::Read)));
+    assert!(permission_allowed(Some(&ToolKind::Search)));
+    assert!(permission_allowed(Some(&ToolKind::Think)));
+    // 破坏性 kind 拒绝。
     assert!(!permission_allowed(Some(&ToolKind::Edit)));
     assert!(!permission_allowed(Some(&ToolKind::Delete)));
     assert!(!permission_allowed(Some(&ToolKind::Move)));
     assert!(!permission_allowed(Some(&ToolKind::Execute)));
     assert!(!permission_allowed(Some(&ToolKind::SwitchMode)));
-    assert!(permission_allowed(Some(&ToolKind::Read)));
-    assert!(permission_allowed(None));
+    // 网络取数与其他一切未知/缺失 kind 一律拒绝(默认拒绝,不信自报分类)。
+    assert!(!permission_allowed(Some(&ToolKind::Fetch)));
+    assert!(!permission_allowed(Some(&ToolKind::Other)));
+    assert!(!permission_allowed(None));
 }
 
 #[test]

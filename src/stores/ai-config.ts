@@ -112,8 +112,8 @@ export const useAiConfigStore = defineStore("ai-config", () => {
     return isChatThinkingLevel(value) ? value : "medium";
   });
 
-  /** 当前问答工具权限 */
-  const chatPermission = computed<ChatPermission>(() => config.value?.chat.permission ?? "all");
+  /** 当前问答工具权限(缺省回退 ask:写操作前确认) */
+  const chatPermission = computed<ChatPermission>(() => config.value?.chat.permission ?? "ask");
 
   async function updateChat(patch: {
     providerId?: string | null;

@@ -151,18 +151,18 @@ impl Default for ChatPrefs {
 
 /// 问答工具权限:
 /// - `all`:全部工具直接执行;
-/// - `ask`:全部工具可用,但七个有副作用工具(`update_wiki` /
+/// - `ask`(默认):全部工具可用,但有副作用工具(`update_wiki` /
 ///   `regenerate_wiki` / `add_custom_command` / `update_custom_command` /
-///   `delete_custom_command` / `generate_report` / `set_wiki_model`)执行前
-///   由应用弹出硬确认(见 `commands/chat/permission.rs` 的 before_tool_call
-///   门禁)。
+///   `delete_custom_command` / `generate_report` / `set_wiki_model` / `bash` /
+///   终端标签页管理)执行前由应用弹出硬确认(见 `commands/chat/permission.rs`
+///   的 before_tool_call 门禁);默认要求确认,把"完全访问"变成用户的显式选择。
 ///
 /// - `readOnly`:仅允许无副作用工具,旧配置保留只读语义。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ChatPermission {
-    #[default]
     All,
+    #[default]
     Ask,
     ReadOnly,
 }
@@ -669,7 +669,7 @@ mod tests {
         assert!(config.chat.provider_id.is_none());
         assert!(config.chat.model_id.is_none());
         assert_eq!(config.chat.thinking, "medium");
-        assert_eq!(config.chat.permission, ChatPermission::All);
+        assert_eq!(config.chat.permission, ChatPermission::Ask);
         assert_eq!(config.providers["openai"].api, "openai-responses");
         assert_eq!(config.providers["deepseek"].api, API_OPENAI_COMPLETIONS);
     }
@@ -781,8 +781,8 @@ mod tests {
 
     #[test]
     fn chat_permission_preserves_readonly_and_round_trips() {
-        // 默认仍为 All。
-        assert_eq!(ChatPermission::default(), ChatPermission::All);
+        // 默认为 Ask:写操作前需确认,"完全访问"须用户显式选择。
+        assert_eq!(ChatPermission::default(), ChatPermission::Ask);
         // 当前取值 all / ask / readOnly。
         assert_eq!(
             serde_json::from_str::<ChatPermission>("\"all\"").unwrap(),
@@ -797,9 +797,9 @@ mod tests {
             serde_json::from_str::<ChatPermission>("\"readOnly\"").unwrap(),
             ChatPermission::ReadOnly
         );
-        // ChatPrefs 缺省 permission → All;旧 readOnly 保持只读。
+        // ChatPrefs 缺省 permission → Ask;旧 readOnly 保持只读。
         let prefs: ChatPrefs = serde_json::from_str("{}").unwrap();
-        assert_eq!(prefs.permission, ChatPermission::All);
+        assert_eq!(prefs.permission, ChatPermission::Ask);
         let prefs: ChatPrefs = serde_json::from_str(r#"{"permission":"readOnly"}"#).unwrap();
         assert_eq!(prefs.permission, ChatPermission::ReadOnly);
         assert_eq!(

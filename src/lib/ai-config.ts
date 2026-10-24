@@ -147,9 +147,9 @@ export interface AiConfigFile {
   taskModels?: AiTaskModels;
 }
 
-/** 创建一份带默认值的空 chat 偏好(配置损坏回退用) */
+/** 创建一份带默认值的空 chat 偏好(配置损坏回退用);权限默认 ask(写操作前确认) */
 export function emptyChatPrefs(): ChatPrefs {
-  return { providerId: null, modelId: null, thinking: "medium", permission: "all" };
+  return { providerId: null, modelId: null, thinking: "medium", permission: "ask" };
 }
 
 /** 读取配置;后端文件缺失时自动播种(含旧 settings.json 三键迁移) */

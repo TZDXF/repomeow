@@ -2,7 +2,8 @@
 import { ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { ChevronRight, Download, Trash2 } from "@lucide/vue";
-import { Markdown, type ControlsConfig } from "vue-stream-markdown";
+import type { ControlsConfig } from "vue-stream-markdown";
+import SafeMarkdown from "@/components/markdown/SafeMarkdown.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -93,7 +94,7 @@ const commitOpen = ref<Record<string, boolean>>({});
       <div class="border-t">
         <!-- Markdown -->
         <div class="px-4 py-3 text-sm">
-          <Markdown
+          <SafeMarkdown
             mode="static"
             :content="report.result"
             :controls="controls"

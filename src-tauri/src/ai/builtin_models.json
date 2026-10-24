@@ -507,6 +507,6 @@
     "providerId": null,
     "modelId": null,
     "thinking": "off",
-    "permission": "all"
+    "permission": "ask"
   }
 }

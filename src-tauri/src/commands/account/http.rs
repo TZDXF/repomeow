@@ -9,7 +9,8 @@ pub(super) fn http_client() -> reqwest::Client {
         .unwrap_or_else(|_| reqwest::Client::new())
 }
 
-/// 鉴权方式:GitHub/GitLab 走请求头,Gitee 走 access_token 查询参数(在 URL 里拼)
+/// 鉴权方式:GitHub/GitLab/Gitee 均走请求头(令牌不进 URL,避免落入服务端
+/// 访问日志、中间代理日志与客户端错误串;Gitee v5 支持 Authorization: Bearer)
 pub(super) fn apply_auth(
     req: reqwest::RequestBuilder,
     provider: &str,
@@ -20,15 +21,34 @@ pub(super) fn apply_auth(
             .header("Authorization", format!("Bearer {token}"))
             .header("Accept", "application/vnd.github+json"),
         "gitlab" => req.header("PRIVATE-TOKEN", token),
+        "gitee" => req.header("Authorization", format!("Bearer {token}")),
         _ => req,
     }
 }
 
+/// 防御性脱敏:历史配置的自定义 base_url 场景下若仍有令牌以查询参数出现在
+/// 错误串里,抹掉其值后再传前端/日志
+fn scrub_access_token(msg: &str) -> String {
+    let mut out = String::with_capacity(msg.len());
+    let mut rest = msg;
+    while let Some(pos) = rest.find("access_token=") {
+        let value_start = pos + "access_token=".len();
+        let value_end = rest[value_start..]
+            .find(['&', ' ', '\'', '"'])
+            .map(|i| value_start + i)
+            .unwrap_or(rest.len());
+        out.push_str(&rest[..value_start]);
+        out.push_str("***");
+        rest = &rest[value_end..];
+    }
+    out.push_str(rest);
+    out
+}
+
 pub(super) async fn send(req: reqwest::RequestBuilder) -> AppResult<reqwest::Response> {
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| AppError::coded(ErrorCode::PlatformConnectionFailed, e.to_string()))?;
+    let resp = req.send().await.map_err(|e| {
+        AppError::coded(ErrorCode::PlatformConnectionFailed, scrub_access_token(&e.to_string()))
+    })?;
     let status = resp.status();
     if status.is_success() {
         return Ok(resp);
@@ -78,10 +98,7 @@ pub(super) async fn fetch_username(
     token: &str,
 ) -> AppResult<String> {
     let api = api_base(provider, base_url);
-    let url = match provider {
-        "gitee" => format!("{api}/user?access_token={token}"),
-        _ => format!("{api}/user"),
-    };
+    let url = format!("{api}/user");
     let resp = send(apply_auth(http_client().get(&url), provider, token)).await?;
     let v: serde_json::Value = resp
         .json()
@@ -229,8 +246,7 @@ pub(super) async fn fetch_repos_page(
             "{api}/user/repos?affiliation=owner,collaborator,organization_member&sort=updated&direction=desc&page={page}&per_page={per_page}"
         ),
         "gitee" => format!(
-            "{api}/user/repos?access_token={}&sort=updated&direction=desc&page={page}&per_page={per_page}",
-            row.token
+            "{api}/user/repos?sort=updated&direction=desc&page={page}&per_page={per_page}"
         ),
         // gitlab
         _ => format!(
@@ -246,10 +262,7 @@ pub(super) async fn fetch_gitee_orgs(row: &AccountRow) -> AppResult<Vec<String>>
     let api = api_base("gitee", &row.base_url);
     let mut orgs = Vec::new();
     for page in 1..=10u32 {
-        let url = format!(
-            "{api}/user/orgs?access_token={}&page={page}&per_page=100",
-            row.token
-        );
+        let url = format!("{api}/user/orgs?page={page}&per_page=100");
         let items = fetch_json_array(&url, "gitee", &row.token).await?;
         let short = items.len() < 100;
         orgs.extend(
@@ -273,10 +286,7 @@ pub(super) async fn fetch_gitee_org_repos_page(
     per_page: u32,
 ) -> AppResult<Vec<RemoteRepo>> {
     let api = api_base("gitee", &row.base_url);
-    let url = format!(
-        "{api}/orgs/{org}/repos?access_token={}&page={page}&per_page={per_page}",
-        row.token
-    );
+    let url = format!("{api}/orgs/{org}/repos?page={page}&per_page={per_page}");
     let items = fetch_json_array(&url, "gitee", &row.token).await?;
     Ok(parse_repos("gitee", &items))
 }

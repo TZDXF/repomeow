@@ -3,8 +3,7 @@ import type { HTMLAttributes } from "vue";
 import { cn } from "@/lib/utils";
 import { computed, useSlots } from "vue";
 import { useI18n } from "vue-i18n";
-import { Markdown } from "vue-stream-markdown";
-import "vue-stream-markdown/index.css";
+import SafeMarkdown from "@/components/markdown/SafeMarkdown.vue";
 import { createBeforeDownload } from "@/lib/markdown-download";
 import type { SupportedLocale } from "@/i18n";
 
@@ -50,7 +49,7 @@ const md = computed(() => (slotContent.value ?? props.content ?? "") as string);
 </script>
 
 <template>
-  <Markdown
+  <SafeMarkdown
     :content="md"
     :mode="mode"
     :theme-element="themeElement"

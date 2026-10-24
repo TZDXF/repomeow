@@ -2,7 +2,8 @@
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { BookOpenText, FileCode, LoaderCircle, RefreshCw } from "@lucide/vue";
-import { Markdown, type ControlsConfig } from "vue-stream-markdown";
+import type { ControlsConfig } from "vue-stream-markdown";
+import SafeMarkdown from "@/components/markdown/SafeMarkdown.vue";
 import { Button } from "@/components/ui/button";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
 import { parseWikiSources } from "@/lib/wiki-parse";
@@ -99,7 +100,7 @@ function sourceRangeLabel(path: string): string {
   </div>
 
   <div v-if="page.content">
-    <Markdown
+    <SafeMarkdown
       mode="static"
       :content="parsed.body"
       :controls="controls"

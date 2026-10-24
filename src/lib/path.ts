@@ -60,3 +60,10 @@ export function displayRelativeTo(root: string, p: string): string {
   }
   return p;
 }
+
+/** p 是否位于 root 内(分隔符归一后前缀比较,大小写不敏感以覆盖 Windows 盘符路径) */
+export function isInsidePath(root: string, p: string): boolean {
+  const r = toForwardSlash(root).replace(/\/+$/, "").toLowerCase();
+  const c = toForwardSlash(p).toLowerCase();
+  return c === r || c.startsWith(`${r}/`);
+}

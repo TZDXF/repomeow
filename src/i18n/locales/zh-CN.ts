@@ -932,8 +932,8 @@ export default {
     permission: {
       readOnly: "工具权限:只读(禁止写入类工具)",
       readOnlyShort: "只读",
-      all: "工具权限:全部(允许写入类工具)",
-      ask: "工具权限:每次询问(写操作前确认)",
+      all: "工具权限:全部(允许写入类工具,不做确认)",
+      ask: "工具权限:每次询问(写操作前确认,默认)",
       allShort: "完全访问",
       askShort: "确认后执行",
     },

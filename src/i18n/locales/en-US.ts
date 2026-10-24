@@ -950,7 +950,8 @@ export default {
     historyTitle: "Conversation history",
     historyEmpty: "No conversations yet. Messages are saved automatically.",
     historyLoadFailed: "Failed to load conversation history",
-    historySaveFailed: "Failed to save conversation history. The current conversation has been kept.",
+    historySaveFailed:
+      "Failed to save conversation history. The current conversation has been kept.",
     historyRetry: "Retry",
     responding: "Responding",
     entry: "Project Q&A",
@@ -974,8 +975,8 @@ export default {
     permission: {
       readOnly: "Tool permission: read-only (write tools disabled)",
       readOnlyShort: "Read-only",
-      all: "Tool permission: full (write tools allowed)",
-      ask: "Tool permission: ask each time (confirm before write actions)",
+      all: "Tool permission: full (write tools allowed, no confirmation)",
+      ask: "Tool permission: ask each time (confirm before write actions, default)",
       allShort: "Full access",
       askShort: "Confirm before executing",
     },
@@ -2341,7 +2342,8 @@ export default {
       pixel: "8-Bit Pixel",
       pixelDesc: "Retro pixel-game look with PICO-8 palette and hard-edge shadows",
       glassPro: "Glassmorphism Pro",
-      glassProDesc: "Flowing auroras, iridescent highlights and layered frosted glass with luminous depth",
+      glassProDesc:
+        "Flowing auroras, iridescent highlights and layered frosted glass with luminous depth",
       glassmorphism: "Glassmorphism",
       glassmorphismDesc:
         "Soft light, frosted glass and champagne accents, with a nocturne dark mode",

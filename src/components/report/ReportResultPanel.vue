@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
 import { Copy } from "@lucide/vue";
-import { Markdown, type ControlsConfig } from "vue-stream-markdown";
+import type { ControlsConfig } from "vue-stream-markdown";
+import SafeMarkdown from "@/components/markdown/SafeMarkdown.vue";
 import { Button } from "@/components/ui/button";
 import ScrollArea from "@/components/common/ScrollArea.vue";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
@@ -58,7 +59,7 @@ const beforeDownload = createBeforeDownload(t);
         {{ generating ? t("report.generating") : "" }}
       </p>
       <div v-else class="p-4 text-sm">
-        <Markdown
+        <SafeMarkdown
           mode="static"
           :content="result"
           :controls="controls"

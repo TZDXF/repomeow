@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
-import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { toast } from "vue-sonner";
 import {
   ArrowLeft,
@@ -14,7 +14,8 @@ import {
   WrapText,
 } from "@lucide/vue";
 import { useLocalStorage } from "@vueuse/core";
-import { Markdown, type ControlsConfig, type NodeRenderers } from "vue-stream-markdown";
+import type { ControlsConfig } from "vue-stream-markdown";
+import SafeMarkdown from "@/components/markdown/SafeMarkdown.vue";
 import { Button } from "@/components/ui/button";
 import CodeViewer from "@/components/files/CodeViewer.vue";
 import FileNameSearch from "@/components/files/FileNameSearch.vue";
@@ -32,9 +33,9 @@ import { cmd, onListen } from "@/lib/tauri";
 import { extOf, IMAGE_EXTS, VIDEO_EXTS } from "@/lib/file-kind";
 import { invalidateSemanticCache } from "@/lib/semantic";
 import { hasScheme, resolvePath, safeLinkHref } from "@/lib/markdown";
-import { openPathWith, sortOpenWithOptions } from "@/lib/open-with";
+import { openLocalPath, openPathWith, sortOpenWithOptions } from "@/lib/open-with";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
-import { toForwardSlash } from "@/lib/path";
+import { isInsidePath, toForwardSlash } from "@/lib/path";
 import type { FindQuery } from "@/lib/text-search";
 import { useProjectPageActive } from "@/composables/useProjectPageState";
 import { useFileFind } from "@/composables/files/useFileFind";
@@ -471,9 +472,9 @@ const mdBasePath = computed(() =>
 );
 provide(MD_BASE_PATH_KEY, () => mdBasePath.value);
 
-const nodeRenderers: NodeRenderers = {
-  image: MdImage,
-  link: MdLink,
+const mdComponents = {
+  img: MdImage,
+  a: MdLink,
 };
 
 const controls: ControlsConfig = {
@@ -505,7 +506,11 @@ async function onBodyClick(e: MouseEvent) {
     if (hasScheme(href)) {
       await openUrl(href);
     } else {
-      await openPath(resolvePath(mdBasePath.value, href));
+      const resolved = resolvePath(mdBasePath.value, href);
+      // Markdown 链接来自不可信仓库内容:仅允许打开项目根内的路径,防止
+      // 绝对路径链接把本机任意文件交给系统默认程序
+      if (!isInsidePath(rootPath.value, resolved)) return;
+      await openLocalPath(resolved);
     }
   } catch {
     // 目标不存在等情况静默忽略
@@ -718,11 +723,11 @@ function startTreeResize(e: PointerEvent) {
           <!-- md 内容未就位(残留文本来自非 md 文件)时短暂空白,防止上一个文件的文本被当 Markdown 渲染闪现 -->
           <div v-else-if="!mdRenderable" />
           <div v-else class="p-6 text-sm" @click="onBodyClick">
-            <Markdown
+            <SafeMarkdown
               mode="static"
               :content="previewText ?? ''"
               :controls="controls"
-              :node-renderers="nodeRenderers"
+              :components="mdComponents"
               :theme-element="themeElement"
               :locale="settingsStore.language"
               :before-download="beforeDownload"

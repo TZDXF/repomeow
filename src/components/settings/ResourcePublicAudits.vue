@@ -11,8 +11,7 @@ import {
   type ResourcePublicAudit,
   type ResourceSkillScanReport,
 } from "@/lib/resource-library";
-import { Markdown, type NodeRenderers } from "vue-stream-markdown";
-import MdLink from "@/components/markdown/MdLink.vue";
+import SafeMarkdown from "@/components/markdown/SafeMarkdown.vue";
 import type { SupportedLocale } from "@/i18n";
 import { hasScheme, safeLinkHref } from "@/lib/markdown";
 import { formatAuditDate } from "@/lib/format";
@@ -30,7 +29,6 @@ const props = withDefaults(
 );
 const { t, te, locale } = useI18n();
 const language = computed(() => locale.value as SupportedLocale);
-const nodeRenderers: NodeRenderers = { link: MdLink };
 // 传游离元素,避免 Markdown 库把 island/pixel 主题变量写成无效 hsl(#…)(与技能预览一致)
 const detachedThemeEl = document.createElement("div");
 const themeElement = () => detachedThemeEl;
@@ -268,12 +266,11 @@ onBeforeUnmount(() => {
           }}</Button>
         </div>
         <div v-else class="audit-markdown mt-3 text-sm leading-relaxed" @click="onMarkdownClick">
-          <Markdown
+          <SafeMarkdown
             mode="static"
             :content="showTranslation && translated ? translated : original"
             :theme-element="themeElement"
             :locale="language"
-            :node-renderers="nodeRenderers"
           />
         </div>
       </template>
