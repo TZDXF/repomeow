@@ -117,7 +117,12 @@ const {
     </div>
 
     <!-- 消息区 -->
-    <Conversation :key="`${project.path}:${history.activeId ?? 'new'}`" class="min-h-0 flex-1">
+    <!-- initial="instant":打开/切换会话时直接定位到底部,不做动画滚动 -->
+    <Conversation
+      :key="`${project.path}:${history.activeId ?? 'new'}`"
+      initial="instant"
+      class="min-h-0 flex-1"
+    >
       <ConversationContent class="gap-4 px-3">
         <ConversationEmptyState v-if="isEmpty && history.loaded">
           <ChatDockEmptyState
