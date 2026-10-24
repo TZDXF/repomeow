@@ -225,19 +225,50 @@ function updateSplit(event: PointerEvent) {
   );
 }
 
-.theme-preview-choice[data-theme="glassmorphism"] {
+.theme-preview-choice:is([data-theme="glassmorphism"], [data-theme="glass-pro"]) {
   box-shadow: var(--glass-shadow);
 }
 
-.theme-preview-choice[data-theme="glassmorphism"][aria-pressed="true"],
-.theme-preview-choice[data-theme="glassmorphism"]:hover {
+.theme-preview-choice:is(
+    [data-theme="glassmorphism"],
+    [data-theme="glass-pro"]
+  )[aria-pressed="true"],
+.theme-preview-choice:is([data-theme="glassmorphism"], [data-theme="glass-pro"]):hover {
   box-shadow:
     var(--glass-shadow),
     0 0 0 1px var(--primary);
 }
 
-.theme-preview-choice[data-theme="glassmorphism"] .theme-preview-surface {
+.theme-preview-choice:is([data-theme="glassmorphism"], [data-theme="glass-pro"])
+  .theme-preview-surface {
   background-image: var(--glass-scene);
+}
+
+.theme-preview-choice[data-theme="glass-pro"] .theme-preview-surface {
+  background-image: var(--glass-pro-aurora), var(--glass-scene);
+  background-size:
+    180% 180%,
+    auto;
+  animation: glass-pro-preview 16s ease-in-out infinite alternate;
+}
+
+@keyframes glass-pro-preview {
+  from {
+    background-position:
+      0% 0%,
+      0 0;
+  }
+  to {
+    background-position:
+      100% 100%,
+      0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-preview-choice[data-theme="glass-pro"] .theme-preview-surface {
+    animation: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

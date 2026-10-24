@@ -2340,6 +2340,8 @@ export default {
       islandDesc: "Creamy picture-book style with teal accents",
       pixel: "8-Bit Pixel",
       pixelDesc: "Retro pixel-game look with PICO-8 palette and hard-edge shadows",
+      glassPro: "Glassmorphism Pro",
+      glassProDesc: "Flowing auroras, iridescent highlights and layered frosted glass with luminous depth",
       glassmorphism: "Glassmorphism",
       glassmorphismDesc:
         "Soft light, frosted glass and champagne accents, with a nocturne dark mode",

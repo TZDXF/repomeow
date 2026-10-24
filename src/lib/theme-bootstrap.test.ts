@@ -32,7 +32,7 @@ describe("首帧主题缓存恢复", () => {
     expect(result.dark).toBe(theme !== "light");
   });
 
-  it.each(["island", "pixel"])("保留已有 %s 皮肤", (themeSkin) => {
+  it.each(["island", "pixel", "glass-pro"])("保留已有 %s 皮肤", (themeSkin) => {
     expect(applyCache(JSON.stringify({ themeSkin })).attributes.get("data-theme")).toBe(themeSkin);
   });
 

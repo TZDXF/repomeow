@@ -69,6 +69,11 @@ const SKINS: { value: ThemeSkin; labelKey: string; descriptionKey: string }[] = 
     labelKey: "settings.skin.glassmorphism",
     descriptionKey: "settings.skin.glassmorphismDesc",
   },
+  {
+    value: "glass-pro",
+    labelKey: "settings.skin.glassPro",
+    descriptionKey: "settings.skin.glassProDesc",
+  },
 ];
 </script>
 

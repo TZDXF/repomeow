@@ -45,6 +45,23 @@ pub(crate) fn runtime_data_root() -> std::path::PathBuf {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Windows WebView2 默认不启用 WebGPU(与 Edge 浏览器策略不同),
+    // 玻璃拟态 Pro 的 shaders 动态背景依赖它。WebView2 官方支持经环境变量
+    // 追加浏览器参数,必须在创建任何 WebView 之前设置;保留用户已有参数。
+    #[cfg(target_os = "windows")]
+    {
+        const ARGS_KEY: &str = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS";
+        const WEBGPU_ARGS: &str = "--enable-features=WebGPU --enable-unsafe-webgpu";
+        let existing = std::env::var(ARGS_KEY).unwrap_or_default();
+        if !existing.contains("--enable-unsafe-webgpu") {
+            let merged = if existing.is_empty() {
+                WEBGPU_ARGS.to_string()
+            } else {
+                format!("{existing} {WEBGPU_ARGS}")
+            };
+            std::env::set_var(ARGS_KEY, merged);
+        }
+    }
     tauri::Builder::default()
         // 单实例:必须最先注册,第二次启动时聚焦已有窗口并退出新进程
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {

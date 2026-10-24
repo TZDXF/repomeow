@@ -13,7 +13,7 @@ const THEME_CHANGED_EVENT = "settings://theme-changed";
 const OPEN_WITH_CHANGED_EVENT = "settings://open-with-changed";
 
 export type ThemeMode = "system" | "light" | "dark";
-export type ThemeSkin = "default" | "island" | "pixel" | "glassmorphism";
+export type ThemeSkin = "default" | "island" | "pixel" | "glassmorphism" | "glass-pro";
 export type MdTheme = "default" | "github" | "notion" | "serif";
 export type Language = SupportedLocale;
 export type ProjectsViewMode = "grid" | "table";
@@ -158,7 +158,8 @@ export const useSettingsStore = defineStore("settings", () => {
       snapshot.themeSkin === "default" ||
       snapshot.themeSkin === "island" ||
       snapshot.themeSkin === "pixel" ||
-      snapshot.themeSkin === "glassmorphism"
+      snapshot.themeSkin === "glassmorphism" ||
+      snapshot.themeSkin === "glass-pro"
     ) {
       themeSkin.value = snapshot.themeSkin;
     }
@@ -385,7 +386,8 @@ export const useSettingsStore = defineStore("settings", () => {
       savedSkin === "default" ||
       savedSkin === "island" ||
       savedSkin === "pixel" ||
-      savedSkin === "glassmorphism"
+      savedSkin === "glassmorphism" ||
+      savedSkin === "glass-pro"
     ) {
       themeSkin.value = savedSkin;
     }

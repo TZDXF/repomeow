@@ -1,0 +1,198 @@
+/* Pro shares the accessible glass controls, adding a cool aurora material system.
+   The actual animated scene is powered by shader-effects-inc/shaders (MeshGradient). */
+:is(:root, .theme-preview)[data-theme="glass-pro"] {
+  --background: #e8eef8;
+  --foreground: #202e49;
+  --card: rgb(255 255 255 / 48%);
+  --popover: #f2f5fc;
+  --primary: #4b50a5;
+  --primary-foreground: #fff;
+  --muted-foreground: #53627c;
+  --accent: rgb(134 151 228 / 18%);
+  --secondary: rgb(255 255 255 / 35%);
+  --border: rgb(103 124 173 / 25%);
+  --input: rgb(87 107 159 / 35%);
+  --sidebar: rgb(244 248 255 / 45%);
+  --chart-1: #595cba;
+  --chart-2: #218b93;
+  --chart-3: #a866ab;
+  --chart-4: #597ec4;
+  --chart-5: #a57940;
+  --glass-shadow:
+    0 12px 32px rgb(49 64 115 / 10%), inset 0 1px 0 rgb(255 255 255 / 85%),
+    inset 0 -1px 0 rgb(132 165 214 / 20%);
+  --glass-scene:
+    radial-gradient(ellipse at 10% 10%, #b9caf6 0, transparent 55%),
+    radial-gradient(ellipse at 90% 30%, #b8e5df 0, transparent 60%),
+    radial-gradient(ellipse at 50% 100%, #ddc7ef 0, transparent 65%);
+}
+:is(:root, .theme-preview)[data-theme="glass-pro"].dark {
+  --background: #10192c;
+  --foreground: #edf3ff;
+  --card: rgb(25 38 64 / 62%);
+  --popover: #1c2943;
+  --primary: #b7baff;
+  --primary-foreground: #1a2146;
+  --muted-foreground: #b4c3dc;
+  --accent: rgb(153 168 243 / 16%);
+  --secondary: rgb(151 175 225 / 10%);
+  --border: rgb(181 205 255 / 20%);
+  --input: rgb(181 205 255 / 30%);
+  --sidebar: rgb(19 31 54 / 55%);
+  --chart-1: #b7baff;
+  --chart-2: #7cdad2;
+  --chart-3: #d5a7e9;
+  --chart-4: #8fb5fa;
+  --chart-5: #e7c58e;
+  --glass-shadow:
+    0 16px 44px rgb(3 8 24 / 30%), inset 0 1px 0 rgb(215 233 255 / 23%),
+    inset 0 -1px 0 rgb(151 127 221 / 13%);
+  --glass-scene:
+    radial-gradient(ellipse at 10% 10%, #283c69 0, transparent 55%),
+    radial-gradient(ellipse at 90% 30%, #20565e 0, transparent 60%),
+    radial-gradient(ellipse at 50% 100%, #473657 0, transparent 65%);
+}
+[data-theme="glass-pro"] .app-surface {
+  position: relative;
+  isolation: isolate;
+}
+.glass-pro-atmosphere {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+.glass-pro-atmosphere canvas {
+  display: block;
+  opacity: 0;
+  transition: opacity 900ms ease;
+}
+.glass-pro-atmosphere canvas.is-ready {
+  opacity: 0.85;
+}
+/* Fixed, non-interactive highlights give the scene depth even without WebGPU. */
+.glass-pro-atmosphere::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 65% -20%, rgb(255 255 255 / 22%), transparent 65%),
+    linear-gradient(120deg, transparent 30%, rgb(180 198 255 / 8%) 50%, transparent 70%);
+}
+[data-theme="glass-pro"] :is([data-slot="card"], .project-card, .theme-choice, .chat-fab) {
+  background-color: var(--card);
+  background-image: linear-gradient(
+    125deg,
+    rgb(213 232 255 / 13%),
+    transparent 40%,
+    rgb(202 173 239 / 9%)
+  );
+  backdrop-filter: blur(24px) saturate(145%);
+  -webkit-backdrop-filter: blur(24px) saturate(145%);
+}
+[data-theme="glass-pro"] .project-card:hover {
+  background-color: color-mix(in srgb, var(--card) 85%, var(--primary) 15%);
+  box-shadow:
+    var(--glass-shadow),
+    0 0 22px color-mix(in srgb, var(--primary) 14%, transparent);
+}
+[data-theme="glass-pro"] .app-surface > [data-tauri-drag-region] {
+  background: var(--sidebar);
+  border-bottom: 1px solid var(--border);
+}
+[data-theme="glass-pro"]
+  :is([data-slot="button"], [class~="group/button"])[data-variant="default"] {
+  background-image: linear-gradient(120deg, rgb(255 255 255 / 16%), transparent 70%);
+  box-shadow:
+    0 3px 12px color-mix(in srgb, var(--primary) 16%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 25%);
+}
+@supports not (backdrop-filter: blur(24px)) {
+  [data-theme="glass-pro"] :is([data-slot="card"], .project-card, .theme-choice, .chat-fab) {
+    background: var(--popover);
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  [data-theme="glass-pro"] :is([data-slot="card"], .project-card, .theme-choice, .chat-fab) {
+    background: var(--popover);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .glass-pro-atmosphere {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .glass-pro-atmosphere canvas {
+    transition: none;
+  }
+}
+
+/* 保底极光层:WebGPU 不可用时也有可感知的流动背景;
+   WebGPU 就绪后 shader 画布叠加在其上方,两层共同构成更丰富的纵深。 */
+:is(:root, .theme-preview)[data-theme="glass-pro"] {
+  --glass-pro-aurora:
+    radial-gradient(38% 46% at 18% 22%, rgb(122 167 255 / 70%), transparent 70%),
+    radial-gradient(34% 42% at 82% 18%, rgb(96 224 192 / 60%), transparent 70%),
+    radial-gradient(42% 48% at 55% 88%, rgb(196 148 246 / 60%), transparent 72%),
+    radial-gradient(30% 36% at 88% 72%, rgb(247 205 138 / 55%), transparent 70%);
+}
+
+:is(:root, .theme-preview)[data-theme="glass-pro"].dark {
+  --glass-pro-aurora:
+    radial-gradient(38% 46% at 18% 22%, rgb(76 108 230 / 60%), transparent 70%),
+    radial-gradient(34% 42% at 82% 18%, rgb(26 148 138 / 55%), transparent 70%),
+    radial-gradient(42% 48% at 55% 88%, rgb(138 76 214 / 55%), transparent 72%),
+    radial-gradient(30% 36% at 88% 72%, rgb(180 124 50 / 45%), transparent 70%);
+}
+
+[data-theme="glass-pro"] .app-surface::before {
+  content: "";
+  position: absolute;
+  inset: -30%;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--glass-pro-aurora);
+  filter: blur(80px) saturate(130%);
+  animation: glass-pro-aurora 24s ease-in-out infinite alternate;
+}
+
+@keyframes glass-pro-aurora {
+  0% {
+    transform: translate3d(-5%, -3%, 0) rotate(-4deg) scale(1);
+  }
+  50% {
+    transform: translate3d(4%, 5%, 0) rotate(3deg) scale(1.08);
+  }
+  100% {
+    transform: translate3d(5%, -4%, 0) rotate(5deg) scale(1.03);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-theme="glass-pro"] .app-surface::before {
+    animation: none;
+  }
+}
+
+/* Keep the simulation canvas aligned with pointer coordinates. */
+@media (prefers-reduced-motion: no-preference) and (prefers-reduced-transparency: no-preference) and (pointer: fine) {
+  [data-theme="glass-pro"] [data-glass-pointer] {
+    background-image:
+      radial-gradient(
+        280px circle at var(--glass-pointer-x) var(--glass-pointer-y),
+        rgb(222 239 255 / 22%),
+        transparent 75%
+      ),
+      linear-gradient(125deg, rgb(213 232 255 / 13%), transparent 40%, rgb(202 173 239 / 9%));
+    border-color: color-mix(in srgb, var(--primary) 38%, var(--border));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .glass-pro-atmosphere canvas {
+    translate: none;
+    scale: none;
+    transition: none;
+  }
+}

@@ -7,6 +7,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { toast } from "vue-sonner";
 import { Toaster } from "@/components/ui/sonner";
 import WorkspaceRouterView from "@/components/common/WorkspaceRouterView.vue";
+import GlassProBackground from "@/components/common/GlassProBackground.vue";
 import TitleBar from "@/components/TitleBar.vue";
 import BatchProgressFloat from "@/components/report/BatchProgressFloat.vue";
 import { onListen } from "@/lib/tauri";
@@ -179,6 +180,7 @@ onUnmounted(() => {
     class="flex h-screen flex-col overflow-hidden text-foreground"
     :class="isTrayPopup ? 'bg-transparent' : 'app-surface bg-background'"
   >
+    <GlassProBackground v-if="!isTrayPopup && settingsStore.themeSkin === 'glass-pro'" />
     <TitleBar v-if="!isTrayPopup" />
     <div class="min-h-0 flex-1">
       <WorkspaceRouterView />
