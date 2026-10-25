@@ -430,7 +430,9 @@ async function saveDesc() {
               </template>
             </div>
           </header>
-          <ScrollArea v-if="project.path_exists" class="min-h-0 flex-1">
+          <!-- clip-path 限制玻璃卡片的背景采样边界,避免下方终端输出变化在卡片下沿形成闪烁暗带。
+               单纯 overflow 裁剪或 contain:paint 无法隔离 backdrop-filter 的背景采样。 -->
+          <ScrollArea v-if="project.path_exists" class="min-h-0 flex-1 [clip-path:inset(0)]">
             <div
               v-if="detailView === 'overview'"
               class="grid items-start gap-4 p-6 [grid-template-columns:repeat(auto-fill,minmax(min(100%,360px),1fr))]"
