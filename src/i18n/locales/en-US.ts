@@ -495,6 +495,7 @@ export default {
   projects: {
     home: {
       searchPlaceholder: "Search name or description...",
+      clearSearch: "Clear search",
       filterTags: "Filter tags",
       clearFilter: "Clear filter",
       removeFilterTag: "Remove filter: {name}",

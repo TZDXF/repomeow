@@ -2,16 +2,7 @@
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { watchDebounced } from "@vueuse/core";
-import {
-  ArrowDownUp,
-  LayoutGrid,
-  List,
-  Plus,
-  Search,
-  Settings2,
-  Tags,
-  X,
-} from "@lucide/vue";
+import { ArrowDownUp, LayoutGrid, List, Plus, Search, Settings2, Tags, X } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -41,7 +32,13 @@ const settings = useSettingsStore();
 
 // 搜索(防抖)
 const searchInput = ref(store.query);
+const searchInputRef = ref<InstanceType<typeof Input> | null>(null);
 watchDebounced(searchInput, (value) => store.setQuery(value), { debounce: 250 });
+
+function clearSearch() {
+  searchInput.value = "";
+  searchInputRef.value?.$el.focus();
+}
 
 // 视图模式与排序方式持久化到 settings store
 const viewMode = computed<ProjectsViewMode>({
@@ -92,10 +89,24 @@ const sortedProjects = computed(() => {
           class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
         />
         <Input
+          ref="searchInputRef"
           v-model="searchInput"
           :placeholder="t('projects.home.searchPlaceholder')"
-          class="h-8 pl-8 text-sm"
+          class="h-8 pl-8 pr-8 text-sm"
         />
+        <Button
+          v-if="searchInput"
+          type="button"
+          variant="ghost"
+          size="icon"
+          class="absolute right-1 top-1/2 h-6 w-6 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          :aria-label="t('projects.home.clearSearch')"
+          :title="t('projects.home.clearSearch')"
+          @mousedown.prevent
+          @click="clearSearch"
+        >
+          <X class="h-3.5 w-3.5" />
+        </Button>
       </div>
       <div class="flex flex-wrap items-center gap-1.5">
         <DropdownMenu>

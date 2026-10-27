@@ -469,6 +469,7 @@ export default {
   projects: {
     home: {
       searchPlaceholder: "搜索名称或描述...",
+      clearSearch: "清除搜索",
       filterTags: "筛选标签",
       clearFilter: "清除筛选",
       removeFilterTag: "移除筛选: {name}",
