@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   listCommandSessions: vi.fn(),
   runCommandSession: vi.fn(),
   createShellSession: vi.fn(),
+  restartCommandSession: vi.fn(),
   runInTerminal: vi.fn(),
   useSettingsStore: vi.fn(() => ({ embeddedTerminal: false })),
 }));
@@ -25,10 +26,10 @@ vi.mock("@/lib/terminal", () => ({
   TERMINAL_SESSION_CHANGED_EVENT: "terminal://session-changed",
   appendCapped: vi.fn(),
   createShellSession: mocks.createShellSession,
-  getCommandSessionOutput: vi.fn(),
+  getCommandSessionOutput: vi.fn().mockResolvedValue(""),
   listCommandSessions: mocks.listCommandSessions,
   removeCommandSession: vi.fn(),
-  restartCommandSession: vi.fn(),
+  restartCommandSession: mocks.restartCommandSession,
   runCommandSession: mocks.runCommandSession,
   stopCommandSession: vi.fn(),
 }));
@@ -126,5 +127,26 @@ describe("内置终端统一执行", () => {
     expect(mocks.createShellSession).toHaveBeenCalledExactlyOnceWith(project, "powershell");
     expect(store.activeId).toBe(43);
     expect(store.open).toBe(true);
+  });
+});
+
+describe("终端会话顺序", () => {
+  it("重启和后续状态事件不会改变已有会话顺序", async () => {
+    const first = { ...session, id: 1, started_at: 3 };
+    const second = { ...session, id: 2, status: "exited" as const, started_at: 2 };
+    const third = { ...session, id: 3, status: "exited" as const, started_at: 1 };
+    mocks.listCommandSessions.mockResolvedValueOnce([first, second, third]);
+    const restarted = { ...second, status: "running" as const, started_at: 4 };
+    mocks.restartCommandSession.mockResolvedValueOnce(restarted);
+    const store = useTerminalStore();
+    await store.init();
+
+    await store.restart(second.id);
+    const onChanged = mocks.onListen.mock.calls[0]![1];
+    onChanged(restarted);
+    onChanged({ ...restarted, status: "exited" });
+
+    expect(store.sessions.map((s) => s.id)).toEqual([1, 2, 3]);
+    expect(store.sessions[1]?.status).toBe("exited");
   });
 });

@@ -20,22 +20,13 @@ import type { Project, TerminalSessionInfo } from "@/types";
 /** 输出增量回调(TerminalView 注册,按会话 id 过滤后写入 xterm) */
 type OutputListener = (id: number, chunk: string) => void;
 
-/** 与后端 list_command_sessions 一致:运行中优先,其余按启动时间倒序 */
-function sortSessions(list: TerminalSessionInfo[]) {
-  list.sort((a, b) => {
-    const ra = a.status === "running" ? 1 : 0;
-    const rb = b.status === "running" ? 1 : 0;
-    return rb - ra || b.started_at - a.started_at;
-  });
-}
-
 /**
  * 内嵌终端会话状态:订阅后端 `terminal://` 事件维护会话列表与输出缓存。
  * 会话仅存后端内存(应用退出即清空),前端缓存同生命周期;
  * open / activeId 是每个 webview 窗口自己的 UI 状态,不跨窗口同步。
  */
 export const useTerminalStore = defineStore("terminal", () => {
-  /** 全部会话(排序与后端一致) */
+  /** 全部会话(初始使用后端排序,已有会话更新时保持位置) */
   const sessions = ref<TerminalSessionInfo[]>([]);
   /** 终端面板是否展开 */
   const open = ref(false);
@@ -92,7 +83,6 @@ export const useTerminalStore = defineStore("terminal", () => {
     } else {
       sessions.value.unshift(info);
     }
-    sortSessions(sessions.value);
   }
 
   function appendOutput(id: number, chunk: string) {
