@@ -94,7 +94,7 @@ gh release create v0.1.0 \
 
 ## 与 CI 的关系
 
-`.github/workflows/release.yml` 的 `release-windows` job 通过 `tauri-apps/tauri-action@v0` 在 CI 里跑 `build → sign → release create` 同一套事。**自 v0.1.9 起,CI 已成为默认主流程**——本脚本是其**本地等价物**,仅在 CI 不可用或排查时使用。两个流程产物期望一致(都签同一把私钥,pubkey 都来自 `tauri.conf.json`)。
+`.github/workflows/release.yml` 的 `release` 矩阵 job(Windows NSIS / macOS dmg arm64+x64 / Linux deb+AppImage)通过 `tauri-apps/tauri-action@v0` 在 CI 里跑 `build → sign → release create` 同一套事。**自 v0.1.9 起,CI 已成为默认主流程**——本脚本是其**本地等价物**(仅覆盖 Windows NSIS 一路),仅在 CI 不可用或排查时使用。两个流程产物期望一致(都签同一把私钥,pubkey 都来自 `tauri.conf.json`)。
 
 ## 故障排查
 

@@ -7,7 +7,7 @@
 **RepoMeow(喵库)**:Tauri 2 + Vue 3 + TypeScript 桌面应用(当前版本 0.2.0),本地开发项目管理中心。功能包括:项目登记/归档、npm scripts 与自定义命令执行、Docker compose 服务管理、Git 状态与写操作(提交/拉取/推送/分支切换)、README Markdown 渲染、Wiki 生成、项目 AI 问答(chat)、AI 资源库、定时报告、标签、多编辑器打开、系统托盘。
 
 - 包管理器:**pnpm**(存在 `pnpm-lock.yaml` / `pnpm-workspace.yaml`,勿用 npm)。
-- 主要平台:Windows(存在 macOS 图标/交叉编译产物)。
+- 主要平台:Windows 本地开发为主;release.yml 以四 job 矩阵同时发布 Windows(NSIS)/ macOS(dmg,arm64+x64)/ Linux(deb+AppImage)。
 - 提交信息:**gitmoji + conventional 前缀 + 中文**,单行详细描述,参考 `git log`(例:`🐛 fix(project-ai): 修复…——原因与方案;验证:oxlint / pnpm build 通过`)。
 
 ## 常用命令

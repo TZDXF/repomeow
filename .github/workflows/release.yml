@@ -7,8 +7,31 @@ on:
   workflow_dispatch:
 
 jobs:
-  release-windows:
-    runs-on: windows-latest
+  release:
+    # 跨平台矩阵:四个构建目标并行,产物全部上传到同一个 draft Release,
+    # tauri-action 汇总各平台签名文件生成 latest.json(updater 端点)。
+    # 未做 Apple 公证:macOS 产物首次打开需右键 → 打开,或 `xattr -cr /Applications/RepoMeow.app`。
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows:NSIS 安装包(tauri.conf.json bundle.targets 默认 nsis)
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: "--bundles nsis"
+          # macOS:sem sidecar 无 universal 二进制,arm64 / x64 各构建一次;
+          # Apple 工具链可在 arm64 机器上原生编译 x86_64 目标,无需独立 Intel runner。
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            args: "--target aarch64-apple-darwin --bundles dmg"
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            args: "--target x86_64-apple-darwin --bundles dmg"
+          # Linux:选 22.04 而非 24.04——WebKitGTK 4.1 依赖齐全,AppImage 工具链(libfuse2)开箱可用
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            args: "--bundles deb appimage"
+    runs-on: ${{ matrix.platform }}
     # 显式声明环境,让 ${{ secrets.* }} 能拿到 update 这个 Environment 下的私钥;
     # 仓库级 Repository secrets 当前为空,如果不声明 environment,CI 读不到密钥。
     environment: update
@@ -42,18 +65,30 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-msvc
+          targets: ${{ matrix.target }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
+          # 两个 darwin job 同为 release job id,按 target 区分缓存键
+          key: ${{ matrix.target }}
+
+      # Tauri v2 Linux 构建前置依赖(官方 prerequisites 清单):WebKitGTK 4.1、
+      # 托盘(libayatana-appindicator)、SVG 渲染(librsvg)、AppImage 重打包(patchelf)
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      # sem:prepare 平台无关:按 --target 下载对应资产并校验 SHA-256
+      # (scripts/sem/manifest.json 固定 5 个 triple 的版本与哈希)
       - name: Prepare sem sidecar
-        run: pnpm sem:prepare --target x86_64-pc-windows-msvc
+        run: pnpm sem:prepare --target ${{ matrix.target }}
 
       - name: Build and publish release
         uses: tauri-apps/tauri-action@v0
@@ -68,3 +103,4 @@ jobs:
           releaseBody: "See the assets to download and install this version."
           releaseDraft: true
           prerelease: false
+          args: ${{ matrix.args }}

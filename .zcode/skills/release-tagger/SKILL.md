@@ -1,11 +1,11 @@
 ---
 name: release-tagger
-description: 在此仓库（tzdxf/repomeow，Tauri 2 + Vue 3）发布新版本。读取 `src-tauri/tauri.conf.json` 的 `version` 字段作为发布号，做一致性检查与构建验证后，走**CI 打包发布**：本机 bump → commit → push → push `v*` tag → `.github/workflows/release.yml` 在 CI 上用 tauri-action 构建 NSIS、安装包签名、生成 `latest.json` 并自动创建 draft Release；本机不需要打包、不需要私钥。CI 跑完后补充仅面向用户功能变化的版本更新说明并验证 draft Release，默认保持 draft 状态。在用户提及"发版"、"发布新版本"、"CI 打包"、"cut a release"、"v0.X.0"或想发起 GitHub Release 流程时调用此 skill——即便用户只是说"准备发版"，也走这条流程。
+description: 在此仓库（tzdxf/repomeow，Tauri 2 + Vue 3）发布新版本。读取 `src-tauri/tauri.conf.json` 的 `version` 字段作为发布号，做一致性检查与构建验证后，走**CI 打包发布**：本机 bump → commit → push → push `v*` tag → `.github/workflows/release.yml` 在 CI 上用 tauri-action 以四 job 矩阵构建 Windows NSIS / macOS dmg（arm64+x64）/ Linux deb+AppImage、安装包签名、生成 `latest.json` 并自动创建 draft Release；本机不需要打包、不需要私钥。CI 跑完后补充仅面向用户功能变化的版本更新说明并验证 draft Release，默认保持 draft 状态。在用户提及"发版"、"发布新版本"、"CI 打包"、"cut a release"、"v0.X.0"或想发起 GitHub Release 流程时调用此 skill——即便用户只是说"准备发版"，也走这条流程。
 ---
 
 # CI 打包发布工作流
 
-自 v0.1.9 起，发布流程全部由 **GitHub Actions** 完成：推送 `v*` tag 触发 `.github/workflows/release.yml`，在 `windows-latest` runner 上用 [`tauri-apps/tauri-action`](https://github.com/tauri-apps/tauri-action) 构建 NSIS 安装包、用 `update` Environment 下的 `TAURI_SIGNING_PRIVATE_KEY` 签名、上传 `RepoMeow_<ver>_x64-setup.exe` / `.sig` / `latest.json`，并创建 **draft Release**。本机负责 bump 版本号、push commit、push tag，以及 CI 完成后写入版本更新说明，**不需要 `~/.tauri/` 私钥，不需要跑 `pnpm release:all`**。
+自 v0.1.9 起，发布流程全部由 **GitHub Actions** 完成：推送 `v*` tag 触发 `.github/workflows/release.yml`，以**四 job 矩阵**（Windows NSIS / macOS arm64+x64 dmg / Linux deb+AppImage）在对应平台 runner 上用 [`tauri-apps/tauri-action`](https://github.com/tauri-apps/tauri-action) 构建、用 `update` Environment 下的 `TAURI_SIGNING_PRIVATE_KEY` 签名、上传各平台安装包 / updater `.sig` / `latest.json`，并创建 **draft Release**。本机负责 bump 版本号、push commit、push tag，以及 CI 完成后写入版本更新说明，**不需要 `~/.tauri/` 私钥，不需要跑 `pnpm release:all`**。
 
 旧的本地打包脚本 `scripts/release/release.mjs`（`pnpm release:all` 等）保留为可选项：仅在 CI 暂时不可用、本地需要复现构建、或排查签名问题时手动调用，**不纳入默认发版流程**。
 
@@ -98,7 +98,7 @@ git push github "v$VERSION"
 ```
 
 - 若 tag 已存在 → 中止并用 `git tag -l "v*"` 列出
-- **推送 tag 后 CI 会自动启动**：触发 `.github/workflows/release.yml` 的 `release-windows` job，在 `windows-latest` 上拉取、打包、签名、上传资产、创建 draft Release
+- **推送 tag 后 CI 会自动启动**：触发 `.github/workflows/release.yml` 的 `release` 矩阵——Windows(NSIS)/ macOS arm64+x64(dmg)/ Linux(deb+AppImage)四路并行，各自拉取、打包、签名、上传资产到同一个 draft Release
 - 本流程不调用 `pnpm release:all`、不调用 `gh release create`——这些事 CI 全做了
 
 ### 7. 等待 CI 完成
@@ -108,15 +108,15 @@ gh run list --workflow=release.yml --limit 1
 gh run watch <run-id>   # 同步等待,exit 0 即成功
 ```
 
-CI 步骤概要（详见 `.github/workflows/release.yml`）：
+CI 步骤概要（详见 `.github/workflows/release.yml`，四个平台 job 并行执行同一模板）：
 
 1. checkout + 装 pnpm 11.10.0 + 装 Node 22
 2. 设置 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""`（规避 Tauri 2.11.4 signer 静默 bug）
-3. 装 Rust stable + x86_64-pc-windows-msvc target + cache
-4. `pnpm install --frozen-lockfile`
-5. `tauri-action@v0` 用 `secrets.TAURI_SIGNING_PRIVATE_KEY` 签名、生成 `latest.json`、上传 `RepoMeow_<ver>_x64-setup.exe` / `.sig` / `latest.json`、创建 **draft** Release
+3. 装 Rust stable + 对应 target + cache（按 target 区分缓存键）；Linux job 额外装 WebKitGTK 4.1 / libayatana-appindicator 等 Tauri 系统依赖
+4. `pnpm install --frozen-lockfile` + `pnpm sem:prepare --target <矩阵 target>`（校验 sem sidecar 版本与 SHA-256）
+5. `tauri-action@v0` 用 `secrets.TAURI_SIGNING_PRIVATE_KEY` 签名、按 job 顺序合并生成 `latest.json`、上传各平台产物、创建 **draft** Release。产物名：`RepoMeow_<ver>_x64-setup.exe`、`RepoMeow_<ver>_aarch64.dmg` / `RepoMeow_<ver>_x64.dmg`、`RepoMeow_<ver>_aarch64.app.tar.gz(.sig)` / `RepoMeow_<ver>_x64.app.tar.gz(.sig)`、`repomeow_<ver>_amd64.deb`、`RepoMeow_<ver>_amd64.AppImage(.sig)`
 
-耗时主要在 Rust release 编译（约 1–3 分钟）。失败时 `gh run watch` 退出非 0，把日志贴回用户并建议查 `.github/workflows/release.yml` 排错。
+耗时主要在 Rust release 编译（Windows 约 1–3 分钟；macOS/Linux 冷缓存约 10–25 分钟，命中缓存后明显加快）。`fail-fast: false`，任一平台失败 `gh run watch` 退出非 0、其余平台继续，把失败 job 的日志贴回用户并建议查 `.github/workflows/release.yml` 排错。
 
 ### 8. 写入版本更新说明并验证 draft Release
 
@@ -137,7 +137,7 @@ gh release view "v$VERSION" --json isDraft,isPrerelease,assets
 期望：
 
 - `isDraft: true`
-- `assets` 含 `RepoMeow_<ver>_x64-setup.exe`、`.sig`、`latest.json` 三项
+- `assets` 至少含四平台安装包与签名：`RepoMeow_<ver>_x64-setup.exe`、`RepoMeow_<ver>_aarch64.dmg`、`RepoMeow_<ver>_x64.dmg`、`repomeow_<ver>_amd64.deb`、`RepoMeow_<ver>_amd64.AppImage`，以及各 updater `.sig` 与 `latest.json`（`latest.json` 的 `platforms` 应同时含 `windows-x86_64`、`darwin-aarch64`、`darwin-x86_64`、`linux-x86_64` 四项）
 - `isPrerelease: false`
 
 任何一项不符都先排查 CI 日志，不要把不完整的 Release 转正。

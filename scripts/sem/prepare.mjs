@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createReadStream, createWriteStream } from "node:fs";
+import { createReadStream, createWriteStream, existsSync } from "node:fs";
 import { access, chmod, copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
@@ -71,7 +71,16 @@ async function download(url, destination) {
 }
 
 function extractTarGz(archive, destination) {
-  const result = spawnSync("tar", ["-xzf", archive, "-C", destination], {
+  // Windows 下不用 PATH 里的 tar:Git Bash 命中的 GNU tar(cygwin 系)会把
+  // `C:\...` 解析为远程主机路径,也无法直接 chdir 反斜杠路径;系统自带的
+  // bsdtar(Win10 1803 起必有,CI PowerShell 命中的同样是它)原生接受
+  // Windows 路径,因此优先绝对路径调用,缺失时退回 PATH。
+  let program = "tar";
+  if (process.platform === "win32") {
+    const systemTar = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe");
+    if (existsSync(systemTar)) program = systemTar;
+  }
+  const result = spawnSync(program, ["-xzf", archive, "-C", destination], {
     encoding: "utf8",
   });
   if (result.status !== 0) {
