@@ -45,6 +45,7 @@ fn overflow_patterns() -> &'static [Regex] {
             r"(?i)too many tokens",               // 通用兜底
             r"(?i)token limit exceeded",          // 通用兜底
             r"(?i)^4(?:00|13)\s*(?:status code)?\s*\(no body\)", // Cerebras: 400/413 无 body
+            r"(?i)^413(?:\s|:|$)", // 所有 Provider 的 HTTP 413 均按上下文/请求溢出处理
         ]
         .iter()
         .map(|pattern| Regex::new(pattern).expect("overflow pattern must compile"))
@@ -129,6 +130,8 @@ mod tests {
             error_message: error.map(str::to_string),
             raw_stop_reason: None,
             end_turn: None,
+            duration_ms: None,
+            thinking_level: None,
             timestamp: 0,
         }
     }

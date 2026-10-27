@@ -134,6 +134,8 @@ pub struct AgentTool {
     pub description: String,
     /// 参数 JSON Schema(对齐 TypeBox schema 的序列化形状)。
     pub parameters: Value,
+    /// structuredContent 的输出 JSON Schema，不发送给模型。
+    pub output_schema: Option<Value>,
     /// 本工具的执行方式覆盖;缺省用 loop 默认值。
     pub execution_mode: Option<ToolExecutionMode>,
     /// 校验前对原始参数的兼容转换。
@@ -174,6 +176,12 @@ pub struct AgentToolResult {
     /// 供日志或 UI 的结构化 details。
     #[serde(default)]
     pub details: Value,
+    /// 符合 outputSchema 的机器可读结果，不作为模型 content 发送。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structured_content: Option<Value>,
+    /// 不抛异常地返回失败；保留 details/structuredContent 供 UI 和调用方使用。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_error: Option<bool>,
     /// 工具自身执行的用量(如可用)。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<Usage>,
@@ -287,6 +295,7 @@ pub struct BeforeToolCallResult {
 pub struct AfterToolCallResult {
     pub content: Option<Vec<TextOrImageContent>>,
     pub details: Option<Value>,
+    pub structured_content: Option<Value>,
     pub is_error: Option<bool>,
     pub usage: Option<Usage>,
     pub terminate: Option<bool>,
@@ -483,6 +492,8 @@ pub enum AgentEvent {
         tool_name: String,
         result: AgentToolResult,
         is_error: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
     },
 }
 

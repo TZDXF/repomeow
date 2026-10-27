@@ -24,6 +24,7 @@ pub(super) fn tool(
         label: label.to_string(),
         description: description.to_string(),
         parameters,
+        output_schema: None,
         execution_mode: sequential.then_some(ToolExecutionMode::Sequential),
         prepare_arguments: None,
         replay: None,

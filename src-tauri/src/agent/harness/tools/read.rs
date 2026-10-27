@@ -49,6 +49,7 @@ pub fn create_read_tool(env: Arc<dyn ExecutionEnv>, options: Option<ReadToolOpti
         name: "read".to_string(),
         label: "read".to_string(),
         description: read_tool_description(),
+        output_schema: None,
         parameters: json!({
             "type": "object",
             "properties": {

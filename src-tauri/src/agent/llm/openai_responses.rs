@@ -430,7 +430,7 @@ fn thinking_level_from_model(
 
 // ── 上下文预算估算 ────────────────────────────────────────────────────
 
-fn ceil_div4(chars: i64) -> i64 {
+fn ceil_div3_5(chars: i64) -> i64 {
     (chars + CHARS_PER_TOKEN - 1) / CHARS_PER_TOKEN
 }
 
@@ -474,7 +474,7 @@ fn estimate_message_tokens(message: &Message) -> i64 {
             })
             .sum(),
     };
-    ceil_div4(chars)
+    ceil_div3_5(chars)
 }
 
 fn estimate_tools_tokens<'a>(tools: impl Iterator<Item = &'a Tool>) -> i64 {
@@ -483,7 +483,7 @@ fn estimate_tools_tokens<'a>(tools: impl Iterator<Item = &'a Tool>) -> i64 {
         return 0;
     }
     let serialized = serde_json::to_string(&list).unwrap_or_default();
-    ceil_div4(serialized.chars().count() as i64)
+    ceil_div3_5(serialized.chars().count() as i64)
 }
 
 fn estimate_context_tokens(context: &Context) -> i64 {
@@ -539,7 +539,7 @@ fn estimate_context_tokens(context: &Context) -> i64 {
             let system = context
                 .system_prompt
                 .as_ref()
-                .map(|prompt| ceil_div4(prompt.chars().count() as i64))
+                .map(|prompt| ceil_div3_5(prompt.chars().count() as i64))
                 .unwrap_or(0);
             let tools = estimate_tools_tokens(context.tools.iter());
             messages + system + tools
@@ -674,10 +674,8 @@ fn transform_messages(
                                     thinking_signature,
                                     redacted,
                                 });
-                            } else {
-                                // 跨模型:thinking 转纯文本
-                                content.push(AssistantContent::text(thinking));
                             }
+                            // 跨模型 thinking 直接丢弃，避免新模型把它当作可见回复。
                         }
                         AssistantContent::Text {
                             text,
@@ -734,6 +732,7 @@ fn transform_messages(
                         usage: None,
                         added_tool_names: None,
                         is_error: true,
+                        duration_ms: None,
                         timestamp: now_ts_nanos() / 1_000_000,
                     }));
                 }
@@ -823,7 +822,7 @@ fn convert_tool_result_output(model: &Model, content: &[TextOrImageContent]) -> 
             _ => None,
         })
         .collect();
-    let has_text = !text_result.is_empty();
+    let has_text = !text_result.trim().is_empty();
 
     if images.is_empty() || !model.input.contains(&InputKind::Image) {
         let text = if has_text {
@@ -1518,7 +1517,7 @@ struct ResponsesAggregator {
     /// reasoning item id → thinking 块下标(供终态回填 encrypted_content)
     reasoning_blocks_by_id: HashMap<String, usize>,
     /// function_call 的参数增量暂存(不进消息块,避免污染回放数据)
-    tool_partial_json: HashMap<usize, String>,
+    tool_partial_json: HashMap<usize, super::tool_arguments::ToolCallArguments>,
     /// custom_tool_call 的 input 原文暂存
     tool_custom_input: HashMap<usize, String>,
     saw_terminal: bool,
@@ -1607,6 +1606,7 @@ impl ResponsesAggregator {
                         .get("namespace")
                         .and_then(Value::as_str)
                         .map(str::to_string),
+                    arguments_error: None,
                 };
                 self.output.content.push(AssistantContent::ToolCall(block));
                 let content_index = self.output.content.len() - 1;
@@ -1615,13 +1615,13 @@ impl ResponsesAggregator {
                     content_index,
                 };
                 self.slots.insert(output_index, slot);
-                self.tool_partial_json.insert(
-                    content_index,
+                let mut arguments = super::tool_arguments::ToolCallArguments::default();
+                arguments.push(
                     item.get("arguments")
                         .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string(),
+                        .unwrap_or_default(),
                 );
+                self.tool_partial_json.insert(content_index, arguments);
                 events.push(AssistantMessageEvent::ToolcallStart {
                     content_index: content_index as u32,
                     partial: self.output.clone(),
@@ -1654,6 +1654,7 @@ impl ResponsesAggregator {
                         .get("namespace")
                         .and_then(Value::as_str)
                         .map(str::to_string),
+                    arguments_error: None,
                 };
                 self.output.content.push(AssistantContent::ToolCall(block));
                 let content_index = self.output.content.len() - 1;
@@ -1700,6 +1701,14 @@ impl ResponsesAggregator {
             self.output.content.get_mut(content_index)
         {
             tool_call.arguments = arguments;
+        }
+    }
+
+    fn set_tool_arguments_error(&mut self, content_index: usize, error: Option<String>) {
+        if let Some(AssistantContent::ToolCall(tool_call)) =
+            self.output.content.get_mut(content_index)
+        {
+            tool_call.arguments_error = error;
         }
     }
 
@@ -1800,8 +1809,8 @@ impl ResponsesAggregator {
                         .tool_partial_json
                         .entry(slot.content_index)
                         .or_default();
-                    entry.push_str(delta);
-                    parse_streaming_json_object(entry)
+                    entry.push(delta);
+                    entry.preview()
                 };
                 self.set_tool_arguments(slot.content_index, parsed);
                 events.push(AssistantMessageEvent::ToolcallDelta {
@@ -1814,22 +1823,20 @@ impl ResponsesAggregator {
                 let Some(slot) = self.get_slot(output_index, SlotKind::ToolCall) else {
                     return Ok(events);
                 };
-                let Some(previous) = self.tool_partial_json.get(&slot.content_index) else {
+                let Some(arguments) = self.tool_partial_json.get_mut(&slot.content_index) else {
                     return Ok(events);
                 };
-                let previous = previous.clone();
+                let previous = arguments.raw().to_string();
                 let arguments_text = event
                     .get("arguments")
                     .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string();
-                self.tool_partial_json
-                    .insert(slot.content_index, arguments_text.clone());
-                let parsed = parse_streaming_json_object(&arguments_text);
-                self.set_tool_arguments(slot.content_index, parsed);
+                    .unwrap_or_default();
+                arguments.replace_raw(arguments_text);
+                arguments.push("");
+                let preview = arguments.preview();
+                self.set_tool_arguments(slot.content_index, preview);
                 // 最终参数是已累计前缀的延续时,补发剩余增量
-                if arguments_text.starts_with(previous.as_str()) {
-                    let delta = &arguments_text[previous.len()..];
+                if let Some(delta) = arguments_text.strip_prefix(&previous) {
                     if !delta.is_empty() {
                         events.push(AssistantMessageEvent::ToolcallDelta {
                             content_index: slot.content_index as u32,
@@ -2049,29 +2056,22 @@ impl ResponsesAggregator {
             ("function_call", SlotKind::ToolCall)
                 if self.tool_partial_json.contains_key(&slot.content_index) =>
             {
-                let partial = self
+                let mut arguments = self
                     .tool_partial_json
-                    .get(&slot.content_index)
-                    .cloned()
+                    .remove(&slot.content_index)
                     .unwrap_or_default();
                 let item_arguments = item
                     .get("arguments")
                     .and_then(Value::as_str)
                     .unwrap_or_default();
-                // TS:item.arguments 为空串时回退已累计 partialJson
-                let source = if item_arguments.is_empty() {
-                    if partial.is_empty() {
-                        "{}"
-                    } else {
-                        partial.as_str()
-                    }
-                } else {
-                    item_arguments
-                };
-                let parsed = parse_streaming_json_object(source);
+                // item.arguments 非空时以最终原文为准，空串沿用已累计原文。
+                if !item_arguments.is_empty() {
+                    arguments.replace_raw(item_arguments);
+                }
+                let (parsed, arguments_error) = arguments.finish();
                 self.set_tool_arguments(slot.content_index, parsed);
+                self.set_tool_arguments_error(slot.content_index, arguments_error);
                 self.set_tool_namespace_if_present(slot.content_index, item);
-                self.tool_partial_json.remove(&slot.content_index);
                 let tool_call = match self.output.content.get(slot.content_index) {
                     Some(AssistantContent::ToolCall(tool_call)) => tool_call.clone(),
                     _ => unreachable!("tool call slot content index invariant"),
@@ -2353,6 +2353,8 @@ fn new_assistant_message(model: &Model) -> AssistantMessage {
         error_message: None,
         raw_stop_reason: None,
         end_turn: None,
+        duration_ms: None,
+        thinking_level: None,
         timestamp: now_ts_nanos() / 1_000_000,
     }
 }
@@ -2388,7 +2390,7 @@ async fn run_stream(
     if signal.as_ref().is_some_and(|token| token.is_cancelled()) {
         let (event, message) = aggregator.finish(true, None);
         writer.push(event);
-        writer.end(message);
+        writer.end_timed(message);
         return;
     }
 
@@ -2417,7 +2419,7 @@ async fn run_stream(
         Err((message, aborted)) => {
             let (event, message) = aggregator.finish(aborted, Some(message));
             writer.push(event);
-            writer.end(message);
+            writer.end_timed(message);
             return;
         }
     };
@@ -2516,7 +2518,7 @@ async fn run_stream(
 
     let (event, message) = aggregator.finish(aborted, stream_error);
     writer.push(event);
-    writer.end(message);
+    writer.end_timed(message);
 }
 
 // ── 非流式入口 ────────────────────────────────────────────────────────
@@ -2843,23 +2845,21 @@ async fn send_responses_request(
         &mut headers,
     );
 
-    let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(15));
-    if let Some(timeout_ms) = options.and_then(|options| options.timeout_ms) {
-        builder = builder.timeout(Duration::from_millis(timeout_ms));
-    }
-    let http = builder.build().map_err(|error| {
-        // 客户端构造失败与环境相关,重试无意义
-        failure(format!("failed to build HTTP client: {error}"), false)
-    })?;
+    let http = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|error| {
+            // 客户端构造失败与环境相关,重试无意义
+            failure(format!("failed to build HTTP client: {error}"), false)
+        })?;
     let url = format!("{}/responses", model.base_url.trim_end_matches('/'));
-    let response = http
-        .post(&url)
-        .headers(headers)
-        .json(body)
-        .send()
-        .await
-        // 传输层错误无 status:对齐 TS 视为可重试
-        .map_err(|error| failure(error.to_string(), true))?;
+    let response = super::send_with_header_timeout(
+        http.post(&url).headers(headers).json(body),
+        options.and_then(|options| options.timeout_ms),
+    )
+    .await
+    // 传输层错误无 status:对齐 TS 视为可重试
+    .map_err(|error| failure(error, true))?;
 
     let status = response.status();
     if !status.is_success() {
@@ -2926,6 +2926,8 @@ mod tests {
             error_message: None,
             raw_stop_reason: None,
             end_turn: None,
+            duration_ms: None,
+            thinking_level: None,
             timestamp: 0,
         })
     }
@@ -2937,6 +2939,7 @@ mod tests {
             arguments: serde_json::from_value(arguments).unwrap(),
             thought_signature: None,
             namespace: None,
+            arguments_error: None,
         })
     }
 
@@ -2950,6 +2953,7 @@ mod tests {
             usage: None,
             added_tool_names: None,
             is_error: false,
+            duration_ms: None,
             timestamp: 0,
         })
     }
@@ -3462,6 +3466,7 @@ mod tests {
             usage: None,
             added_tool_names: None,
             is_error: false,
+            duration_ms: None,
             timestamp: 0,
         })];
         let body = build_request_body(&model, &context_of(messages.clone()), None);
@@ -3493,6 +3498,7 @@ mod tests {
             usage: None,
             added_tool_names: None,
             is_error: false,
+            duration_ms: None,
             timestamp: 0,
         })];
         let body = build_request_body(&model, &context_of(messages), None);
@@ -3521,6 +3527,7 @@ mod tests {
             usage: None,
             added_tool_names: None,
             is_error: false,
+            duration_ms: None,
             timestamp: 0,
         })];
         let body = build_request_body(&plain, &context_of(messages), None);

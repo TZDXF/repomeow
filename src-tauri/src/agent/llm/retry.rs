@@ -21,7 +21,7 @@ fn non_retryable_pattern() -> &'static Regex {
     static PATTERN: OnceLock<Regex> = OnceLock::new();
     PATTERN.get_or_init(|| {
         Regex::new(
-            "(?i)GoUsageLimitError|FreeUsageLimitError|Monthly usage limit reached|available balance|insufficient_quota|out of budget|quota exceeded|billing",
+            "(?i)GoUsageLimitError|FreeUsageLimitError|Monthly usage limit reached|available balance|insufficient_quota|out of budget|quota exceeded|billing|subscription_sharing_usage_limit_exceeded|subscription_sharing_workplace_individual_usage_limit_exceeded",
         )
         .expect("static non-retryable regex")
     })
@@ -31,7 +31,7 @@ fn retryable_pattern() -> &'static Regex {
     static PATTERN: OnceLock<Regex> = OnceLock::new();
     PATTERN.get_or_init(|| {
         Regex::new(
-            "(?i)overloaded|rate.?limit|too many requests|429|500|502|503|504|524|service.?unavailable|server.?error|internal.?error|provider.?returned.?error|exceeded request buffer limit while retrying upstream|network.?error|connection.?error|connection.?refused|connection.?lost|other side closed|fetch failed|getaddrinfo|ENOTFOUND|EAI_AGAIN|upstream.?connect|reset before headers|socket hang up|socket connection was closed|timed? out|timeout|terminated|websocket.?closed|websocket.?error|ended without|stream ended before message_stop|stream ended before a terminal response event|http2 request did not get a response|retry delay|you can retry your request|try your request again|please retry your request|ResourceExhausted",
+            "(?i)overloaded|server_busy|servers are currently busy|currently experiencing high demand|model is at capacity|rate.?limit|too many requests|(?:^|[^a-z0-9])(?:429|500|502|503|504|520|524)(?:$|[^a-z0-9])|service.?(?:is.?)?(?:temporarily.?)?unavailable|server.?error|internal.?error|provider.?returned.?(?:an.?)?error|exceeded request buffer limit while retrying upstream|unable to forward upstream|upstream.?request.?failed|upstream_stream_read_error|stream was interrupted|http/?2 stream failed|network.?error|connection.?error|connection.?refused|connection.?lost|other side closed|fetch failed|request to \\S+ failed, reason:|getaddrinfo|ENOTFOUND|EAI_AGAIN|upstream.?connect|reset before headers|socket hang up|socket connection was closed|timed? out|timeout|terminated|websocket.?closed|websocket.?error|ended without|stream ended before message_stop|stream ended before a terminal response event|http2 request did not get a response|stream disconnected before completion|pending stream has been canceled|retry delay|you can retry your request|try your request again|please retry your request|ResourceExhausted|subscription_sharing_usage_unavailable|subscription_sharing_user_unavailable",
         )
         .expect("static retryable regex")
     })
@@ -85,6 +85,8 @@ mod tests {
             error_message: message.map(str::to_string),
             raw_stop_reason: None,
             end_turn: None,
+            duration_ms: None,
+            thinking_level: None,
             timestamp: 0,
         }
     }
@@ -98,12 +100,33 @@ mod tests {
             "socket connection was closed",
             "stream ended before a terminal response event",
             "ResourceExhausted",
+            "upstream_error: Upstream request failed",
+            "upstream_stream_read_error",
+            "Unable to forward upstream stream",
+            "The service is temporarily unavailable",
+            "server_busy",
+            "stream disconnected before completion: stream closed before response.completed",
+            "HTTP/2 stream failed",
         ] {
             assert!(
                 is_retryable_assistant_error(&assistant_error(Some(message), StopReason::Error)),
                 "expected retryable: {message}",
             );
         }
+    }
+
+    #[test]
+    fn does_not_treat_digits_inside_ids_or_byte_counts_as_http_statuses() {
+        for message in ["req_011CU503xyz", "5242880 bytes", "request failed: x500y"] {
+            assert!(!is_retryable_assistant_error(&assistant_error(
+                Some(message),
+                StopReason::Error
+            )));
+        }
+        assert!(is_retryable_assistant_error(&assistant_error(
+            Some("503: upstream unavailable"),
+            StopReason::Error
+        )));
     }
 
     #[test]

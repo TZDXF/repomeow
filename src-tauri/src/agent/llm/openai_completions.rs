@@ -456,10 +456,8 @@ fn transform_messages(messages: &[Message], model: &Model) -> Vec<Message> {
                                     thinking_signature,
                                     redacted,
                                 });
-                            } else {
-                                // 跨模型:thinking 转纯文本
-                                content.push(AssistantContent::text(thinking));
                             }
+                            // 跨模型 thinking 直接丢弃，避免新模型把它当作可见回复。
                         }
                         AssistantContent::Text {
                             text,
@@ -516,6 +514,7 @@ fn transform_messages(messages: &[Message], model: &Model) -> Vec<Message> {
                         usage: None,
                         added_tool_names: None,
                         is_error: true,
+                        duration_ms: None,
                         timestamp: now_ts_nanos() / 1_000_000,
                     }));
                 }
@@ -661,7 +660,7 @@ fn convert_messages(model: &Model, context: &Context, compat: &ResolvedCompat) -
                         .content
                         .iter()
                         .any(|block| matches!(block, TextOrImageContent::Image { .. }));
-                    let tool_result_text = if !text_result.is_empty() {
+                    let tool_result_text = if !text_result.trim().is_empty() {
                         text_result
                     } else if has_images {
                         TOOL_RESULT_IMAGE_TEXT.to_string()
@@ -1244,7 +1243,7 @@ const ESTIMATED_IMAGE_CHARS: i64 = 4800;
 const CONTEXT_SAFETY_TOKENS: i64 = 4096;
 const MIN_MAX_TOKENS: i64 = 1;
 
-fn ceil_div4(chars: i64) -> i64 {
+fn ceil_div3_5(chars: i64) -> i64 {
     (chars + CHARS_PER_TOKEN - 1) / CHARS_PER_TOKEN
 }
 
@@ -1280,7 +1279,7 @@ fn estimate_message_tokens(message: &Message) -> i64 {
             })
             .sum(),
     };
-    ceil_div4(chars)
+    ceil_div3_5(chars)
 }
 
 fn estimate_tools_tokens<'a>(tools: impl Iterator<Item = &'a Tool>) -> i64 {
@@ -1289,7 +1288,7 @@ fn estimate_tools_tokens<'a>(tools: impl Iterator<Item = &'a Tool>) -> i64 {
         return 0;
     }
     let serialized = serde_json::to_string(&list).unwrap_or_default();
-    ceil_div4(serialized.chars().count() as i64)
+    ceil_div3_5(serialized.chars().count() as i64)
 }
 
 /// TS estimateContextTokens:优先用最近可用 assistant usage,补尾部增量。
@@ -1346,7 +1345,7 @@ fn estimate_context_tokens(context: &Context) -> i64 {
             let system = context
                 .system_prompt
                 .as_ref()
-                .map(|prompt| ceil_div4(prompt.chars().count() as i64))
+                .map(|prompt| ceil_div3_5(prompt.chars().count() as i64))
                 .unwrap_or(0);
             let tools = estimate_tools_tokens(context.tools.iter());
             messages + system + tools
@@ -1931,7 +1930,7 @@ struct StreamAggregator {
     thinking_open: Option<usize>,
     tool_blocks_by_index: HashMap<i64, usize>,
     tool_blocks_by_id: HashMap<String, usize>,
-    partial_args: HashMap<usize, String>,
+    partial_args: HashMap<usize, super::tool_arguments::ToolCallArguments>,
     has_finish_reason: bool,
     streamed_reasoning_details: Option<Vec<Value>>,
 }
@@ -2017,6 +2016,7 @@ impl StreamAggregator {
                 arguments: Map::new(),
                 thought_signature: None,
                 namespace: None,
+                arguments_error: None,
             }));
         let index = self.output.content.len() - 1;
         if let Some(stream_index) = stream_index {
@@ -2064,8 +2064,8 @@ impl StreamAggregator {
     fn append_tool_args(&mut self, index: usize, delta: &str) {
         let parsed = {
             let entry = self.partial_args.entry(index).or_default();
-            entry.push_str(delta);
-            parse_streaming_json_object(entry)
+            entry.push(delta);
+            entry.preview()
         };
         if let Some(AssistantContent::ToolCall(tool_call)) = self.output.content.get_mut(index) {
             tool_call.arguments = parsed;
@@ -2289,8 +2289,8 @@ impl StreamAggregator {
                     });
                 }
                 AssistantContent::ToolCall(mut tool_call) => {
-                    if let Some(raw) = self.partial_args.remove(&index) {
-                        tool_call.arguments = parse_streaming_json_object(&raw);
+                    if let Some(arguments) = self.partial_args.remove(&index) {
+                        (tool_call.arguments, tool_call.arguments_error) = arguments.finish();
                         self.output.content[index] = AssistantContent::ToolCall(tool_call.clone());
                     }
                     events.push(AssistantMessageEvent::ToolcallEnd {
@@ -2413,6 +2413,8 @@ fn new_assistant_message(model: &Model) -> AssistantMessage {
         error_message: None,
         raw_stop_reason: None,
         end_turn: None,
+        duration_ms: None,
+        thinking_level: None,
         timestamp: now_ts_nanos() / 1_000_000,
     }
 }
@@ -2645,23 +2647,21 @@ async fn send_completions_request(
         &mut headers,
     );
 
-    let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(15));
-    if let Some(timeout_ms) = options.and_then(|options| options.timeout_ms) {
-        builder = builder.timeout(Duration::from_millis(timeout_ms));
-    }
-    let http = builder.build().map_err(|error| {
-        // 客户端构造失败与环境相关,重试无意义
-        failure(format!("failed to build HTTP client: {error}"), false)
-    })?;
+    let http = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|error| {
+            // 客户端构造失败与环境相关,重试无意义
+            failure(format!("failed to build HTTP client: {error}"), false)
+        })?;
     let url = format!("{}/chat/completions", model.base_url.trim_end_matches('/'));
-    let response = http
-        .post(&url)
-        .headers(headers)
-        .json(body)
-        .send()
-        .await
-        // 传输层错误无 status:对齐 TS 视为可重试
-        .map_err(|error| failure(error.to_string(), true))?;
+    let response = super::send_with_header_timeout(
+        http.post(&url).headers(headers).json(body),
+        options.and_then(|options| options.timeout_ms),
+    )
+    .await
+    // 传输层错误无 status:对齐 TS 视为可重试
+    .map_err(|error| failure(error, true))?;
 
     let status = response.status();
     if !status.is_success() {
@@ -2840,7 +2840,7 @@ async fn run_stream(
         let (event, message) =
             aggregator.error_final(StopReason::Aborted, "Request was aborted".to_string());
         writer.push(event);
-        writer.end(message);
+        writer.end_timed(message);
         return;
     }
 
@@ -2874,7 +2874,7 @@ async fn run_stream(
             };
             let (event, message) = aggregator.error_final(reason, message);
             writer.push(event);
-            writer.end(message);
+            writer.end_timed(message);
             return;
         }
     };
@@ -2950,7 +2950,7 @@ async fn run_stream(
         writer.push(event);
     }
     writer.push(terminal);
-    writer.end(message);
+    writer.end_timed(message);
 }
 
 // ── 非流式入口 ────────────────────────────────────────────────────────
@@ -3138,12 +3138,15 @@ fn apply_completion_response(
                 .pointer("/function/arguments")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
+            let (arguments, arguments_error) =
+                super::tool_arguments::parse_tool_call_arguments(arguments);
             message.content.push(AssistantContent::ToolCall(ToolCall {
                 id: normalize_tool_call_id(id, &model.provider),
                 name: name.to_string(),
-                arguments: parse_streaming_json_object(arguments),
+                arguments,
                 thought_signature: None,
                 namespace: None,
+                arguments_error,
             }));
         }
     }
@@ -3203,6 +3206,7 @@ mod tests {
             arguments: serde_json::from_value(arguments).unwrap(),
             thought_signature: None,
             namespace: None,
+            arguments_error: None,
         })
     }
 
@@ -3220,6 +3224,8 @@ mod tests {
             error_message: None,
             raw_stop_reason: None,
             end_turn: None,
+            duration_ms: None,
+            thinking_level: None,
             timestamp: 0,
         })
     }
@@ -3234,6 +3240,7 @@ mod tests {
             usage: None,
             added_tool_names: None,
             is_error: false,
+            duration_ms: None,
             timestamp: 0,
         })
     }

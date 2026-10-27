@@ -189,6 +189,7 @@ pub fn bind_harness_tool(
         name: tool.name,
         label: tool.label,
         description: tool.description,
+        output_schema: None,
         parameters: tool.parameters,
         execution_mode: tool.execution_mode,
         prepare_arguments: tool.prepare_arguments,

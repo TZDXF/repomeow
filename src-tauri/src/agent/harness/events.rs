@@ -521,6 +521,8 @@ mod tests {
                     error_message: None,
                     raw_stop_reason: None,
                     end_turn: None,
+                    duration_ms: None,
+                    thinking_level: None,
                     timestamp: 1,
                 },
             },

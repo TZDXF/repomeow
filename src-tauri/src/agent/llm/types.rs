@@ -251,6 +251,9 @@ pub struct ToolCall {
     pub thought_signature: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub namespace: Option<String>,
+    /// 最终参数解析失败；保留原始错误，禁止把残缺参数交给工具执行。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arguments_error: Option<String>,
 }
 
 /// assistant 消息内容块(对齐 TS `(TextContent | ThinkingContent | ToolCall)[]`)。
@@ -454,6 +457,12 @@ pub struct AssistantMessage {
     /// provider 表明的显式结束标记;当前不影响 agent 控制流。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_turn: Option<bool>,
+    /// 本次请求到最终响应的耗时；延迟拉取的响应可为空。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    /// Agent Loop 请求该响应时使用的思考等级。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_level: Option<ModelThinkingLevel>,
     /// Unix 时间戳(毫秒)。
     pub timestamp: i64,
 }
@@ -475,6 +484,9 @@ pub struct ToolResultMessage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub added_tool_names: Option<Vec<String>>,
     pub is_error: bool,
+    /// 工具 execute 本身的耗时，不含 hooks。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
     pub timestamp: i64,
 }
 
@@ -793,6 +805,7 @@ mod tests {
                     arguments: serde_json::from_value(json!({"city": "Oslo"})).unwrap(),
                     thought_signature: None,
                     namespace: None,
+                    arguments_error: None,
                 }),
             ],
             api: "openai-completions".into(),
@@ -805,6 +818,8 @@ mod tests {
             error_message: None,
             raw_stop_reason: None,
             end_turn: None,
+            duration_ms: None,
+            thinking_level: None,
             timestamp: 1_700_000_000_000,
         };
 
@@ -830,6 +845,7 @@ mod tests {
             usage: None,
             added_tool_names: None,
             is_error: false,
+            duration_ms: None,
             timestamp: 1_700_000_000_001,
         };
         let value = serde_json::to_value(&result).unwrap();
@@ -855,6 +871,8 @@ mod tests {
             error_message: None,
             raw_stop_reason: None,
             end_turn: None,
+            duration_ms: None,
+            thinking_level: None,
             timestamp: 0,
         };
         let delta = AssistantMessageEvent::TextDelta {

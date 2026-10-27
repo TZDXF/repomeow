@@ -742,7 +742,14 @@ async fn stream_assistant_response(
                 .await;
             }
             AssistantMessageEvent::Done { .. } | AssistantMessageEvent::Error { .. } => {
-                return finalize_stream_message(&mut response, context, added_partial, emit).await;
+                return finalize_stream_message(
+                    &mut response,
+                    context,
+                    added_partial,
+                    thinking_level_from_reasoning(config.stream.reasoning),
+                    emit,
+                )
+                .await;
             }
             AssistantMessageEvent::TextStart { partial, .. }
             | AssistantMessageEvent::TextDelta { partial, .. }
@@ -772,7 +779,14 @@ async fn stream_assistant_response(
     }
 
     // 流在 done/error 之前结束(不符合契约的流):仍取终值收尾,对齐蓝本。
-    finalize_stream_message(&mut response, context, added_partial, emit).await
+    finalize_stream_message(
+        &mut response,
+        context,
+        added_partial,
+        thinking_level_from_reasoning(config.stream.reasoning),
+        emit,
+    )
+    .await
 }
 
 /// done/error(或流提前结束)后的收尾:最终消息替换/补推进 context 并发 message_end。
@@ -780,9 +794,11 @@ async fn finalize_stream_message(
     response: &mut AssistantMessageEventStream,
     context: &mut AgentContext,
     added_partial: bool,
+    thinking_level: ModelThinkingLevel,
     emit: &AgentEventSink,
 ) -> AssistantMessage {
-    let final_message = response.result().await;
+    let mut final_message = response.result().await;
+    final_message.thinking_level = Some(thinking_level);
     if added_partial {
         *context
             .messages
@@ -824,11 +840,14 @@ struct FinalizedToolCallOutcome {
     tool_call: ToolCall,
     result: AgentToolResult,
     is_error: bool,
+    duration_ms: Option<u64>,
 }
 
 struct ExecutedToolCallOutcome {
     result: AgentToolResult,
     is_error: bool,
+    /// None 表示 prepare/before hook 阶段已终止，execute 未运行。
+    duration_ms: Option<u64>,
 }
 
 struct PreparedToolCall {
@@ -873,7 +892,8 @@ async fn fail_tool_calls_from_truncated_message(
                 tool_call.name
             )),
             is_error: true,
-        };
+            duration_ms: None,
+};
         emit_tool_execution_end(&finalized, emit).await;
         let tool_result_message = create_tool_result_message(&finalized);
         emit_tool_result_message(&tool_result_message, emit).await;
@@ -961,6 +981,7 @@ async fn execute_tool_calls_sequential(
                 tool_call: tool_call.clone(),
                 result,
                 is_error,
+                duration_ms: None,
             },
             Preparation::Prepared { tool, args } => {
                 let prepared = PreparedToolCall {
@@ -1039,6 +1060,7 @@ async fn execute_tool_calls_parallel(
                     tool_call: tool_call.clone(),
                     result,
                     is_error,
+                    duration_ms: None,
                 };
                 emit_tool_execution_end(&finalized, emit).await;
                 entries.push(FinalizedEntry::Done(finalized));
@@ -1065,6 +1087,7 @@ async fn execute_tool_calls_parallel(
                             tool_call: prepared.tool_call.clone(),
                             result: create_error_tool_result("Operation aborted"),
                             is_error: true,
+                            duration_ms: None,
                         };
                         emit_tool_execution_end(&finalized, &emit).await;
                         return finalized;
@@ -1148,6 +1171,12 @@ async fn prepare_tool_call(
     let tool_call = tool_call.clone();
     let signal = signal.cloned();
     let inner = async move {
+        if let Some(error) = &tool_call.arguments_error {
+            return Err(format!(
+                "Invalid arguments for tool \"{}\": {error}",
+                tool_call.name
+            ));
+        }
         // prepareArguments:校验前对原始参数的兼容转换。
         let raw_args = Value::Object(tool_call.arguments.clone());
         let prepared_args = match &tool.prepare_arguments {
@@ -1247,6 +1276,7 @@ async fn execute_prepared_tool_call(
         })
     };
 
+    let started_at = std::time::Instant::now();
     let outcome = match (prepared.tool.execute)(
         prepared.tool_call.id.clone(),
         prepared.args.clone(),
@@ -1255,14 +1285,24 @@ async fn execute_prepared_tool_call(
     )
     .await
     {
-        Ok(result) => ExecutedToolCallOutcome {
-            result,
-            is_error: false,
-        },
+        Ok(result) => {
+            let is_error = result.is_error.unwrap_or(false);
+            ExecutedToolCallOutcome {
+                result,
+                is_error,
+                duration_ms: None,
+            }
+        }
         Err(error) => ExecutedToolCallOutcome {
             result: create_error_tool_result(&error.to_string()),
             is_error: true,
+            duration_ms: None,
         },
+    };
+    let duration_ms = Some(started_at.elapsed().as_millis() as u64);
+    let outcome = ExecutedToolCallOutcome {
+        duration_ms,
+        ..outcome
     };
 
     accepting.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -1284,6 +1324,7 @@ async fn finalize_executed_tool_call(
 ) -> FinalizedToolCallOutcome {
     let mut result = executed.result;
     let mut is_error = executed.is_error;
+    let duration_ms = executed.duration_ms;
 
     if let Some(after) = &config.after_tool_call {
         // TS 蓝本用 try/catch 包住钩子异常;Rust 契约要求钩子不抛(返回值即结果),
@@ -1303,6 +1344,13 @@ async fn finalize_executed_tool_call(
         {
             if let Some(content) = after_result.content {
                 result.content = content;
+                // content 被替换后，旧 structuredContent 可能已不再匹配。
+                if after_result.structured_content.is_none() {
+                    result.structured_content = None;
+                }
+            }
+            if let Some(structured_content) = after_result.structured_content {
+                result.structured_content = Some(structured_content);
             }
             // TS `??` 语义:显式 null 视为未提供,保留原值。
             if let Some(details) = after_result.details {
@@ -1326,6 +1374,7 @@ async fn finalize_executed_tool_call(
         tool_call: prepared.tool_call.clone(),
         result,
         is_error,
+        duration_ms,
     }
 }
 
@@ -1352,6 +1401,7 @@ fn create_tool_result_message(finalized: &FinalizedToolCallOutcome) -> ToolResul
         usage: finalized.result.usage.clone(),
         added_tool_names: None,
         is_error: finalized.is_error,
+        duration_ms: finalized.duration_ms,
         timestamp: now_ms(),
     }
 }
@@ -1362,6 +1412,7 @@ async fn emit_tool_execution_end(finalized: &FinalizedToolCallOutcome, emit: &Ag
         tool_name: finalized.tool_call.name.clone(),
         result: finalized.result.clone(),
         is_error: finalized.is_error,
+        duration_ms: finalized.duration_ms,
     })
     .await;
 }
@@ -1450,6 +1501,8 @@ pub(crate) mod testing {
             error_message: None,
             raw_stop_reason: None,
             end_turn: None,
+            duration_ms: None,
+            thinking_level: None,
             timestamp: 0,
         }
     }
@@ -1461,6 +1514,7 @@ pub(crate) mod testing {
             arguments: serde_json::from_value(arguments).unwrap(),
             thought_signature: None,
             namespace: None,
+            arguments_error: None,
         }
     }
 
@@ -1654,6 +1708,7 @@ pub(crate) mod testing {
             name: name.to_string(),
             label: name.to_string(),
             description: "test tool".to_string(),
+            output_schema: None,
             parameters: json!({"type": "object"}),
             execution_mode: None,
             prepare_arguments: None,
@@ -1839,6 +1894,10 @@ mod tests {
             other => panic!("expected agent_end, got {other:?}"),
         }
         assert_eq!(messages.len(), 2);
+        let AgentMessage::Message(TypedMessage::Assistant(assistant)) = &messages[1] else {
+            panic!("expected assistant message");
+        };
+        assert_eq!(assistant.thinking_level, Some(ModelThinkingLevel::Off));
     }
 
     #[tokio::test]
@@ -1885,6 +1944,7 @@ mod tests {
             vec![TextOrImageContent::text("echo:x")]
         );
         assert!(!tool_result.is_error);
+        assert!(tool_result.duration_ms.is_some());
 
         assert_eq!(
             event_kinds(&events.lock().unwrap()),
@@ -1983,6 +2043,50 @@ mod tests {
             }
             other => panic!("expected tool_execution_update, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn malformed_final_arguments_do_not_execute_tool() {
+        let mut tool_call = test_tool_call("call_1", "echo", json!({"path": "partial"}));
+        tool_call.arguments_error =
+            Some("unexpected end of JSON\n\nReceived arguments:\n{\"path\":\"partial".into());
+        let (stream_fn, _calls) = scripted_stream_fn(vec![
+            tool_call_script(vec![tool_call], ""),
+            text_script("ok"),
+        ]);
+        let (tool, tool_log) = make_tool("echo", ToolBehavior::Ok("ran".into()));
+        let (emit, events) = collecting_sink();
+        let context = AgentContext {
+            messages: Vec::new(),
+            tools: vec![tool],
+        };
+        let messages = run_agent_loop(
+            vec![user_message("run", 1_000)],
+            context,
+            test_loop_config(test_model()),
+            emit,
+            None,
+            stream_fn,
+        )
+        .await;
+
+        assert!(tool_log.lock().unwrap().is_empty());
+        let AgentMessage::Message(TypedMessage::ToolResult(result)) = &messages[3] else {
+            panic!("expected tool result");
+        };
+        assert!(result.is_error);
+        assert_eq!(result.duration_ms, None);
+        let text = match &result.content[0] {
+            TextOrImageContent::Text { text, .. } => text,
+            _ => panic!("expected text"),
+        };
+        assert!(text.contains("Invalid arguments for tool \"echo\""));
+        assert!(text.contains("Received arguments"));
+        let end = events.lock().unwrap().iter().find_map(|event| match event {
+            AgentEvent::ToolExecutionEnd { duration_ms, .. } => Some(*duration_ms),
+            _ => None,
+        });
+        assert_eq!(end, Some(None));
     }
 
     #[tokio::test]
@@ -2470,19 +2574,19 @@ mod tests {
                 "agent_end",
             ]
         );
+        let mut expected_first =
+            test_assistant(vec![AssistantContent::text("first")], StopReason::Stop);
+        expected_first.thinking_level = Some(ModelThinkingLevel::Off);
+        let mut expected_second =
+            test_assistant(vec![AssistantContent::text("second")], StopReason::Stop);
+        expected_second.thinking_level = Some(ModelThinkingLevel::Off);
         assert_eq!(
             messages,
             vec![
                 user_message("run", 1_000),
-                assistant_message_of(test_assistant(
-                    vec![AssistantContent::text("first")],
-                    StopReason::Stop
-                )),
+                assistant_message_of(expected_first),
                 user_message("follow-up", 2_000),
-                assistant_message_of(test_assistant(
-                    vec![AssistantContent::text("second")],
-                    StopReason::Stop
-                )),
+                assistant_message_of(expected_second),
             ]
         );
         let captured = calls.lock().unwrap();
@@ -3049,6 +3153,7 @@ mod tests {
             name: new_tool.name.clone(),
             label: "new".to_string(),
             description: new_tool.description.clone(),
+            output_schema: None,
             parameters: new_tool.parameters.clone(),
             execution_mode: None,
             prepare_arguments: None,
@@ -3117,6 +3222,7 @@ mod tests {
                 ..AgentToolResult::text("x")
             },
             is_error: false,
+            duration_ms: None,
         };
         assert!(!should_terminate_tool_batch(&[]));
         assert!(!should_terminate_tool_batch(&[make(true), make(false)]));

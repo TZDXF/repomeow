@@ -464,6 +464,7 @@ pub(crate) fn make_mirroring_listener(
                     tool_name,
                     result,
                     is_error,
+                    ..
                 } => {
                     shared.bus.emit(&HarnessEvent::Tool(ToolEvent {
                         lane: "main".to_string(),
@@ -557,6 +558,7 @@ mod runtime_tests {
             name: name.to_string(),
             label: name.to_string(),
             description: "noop".to_string(),
+            output_schema: None,
             parameters: serde_json::json!({"type": "object"}),
             execution_mode: None,
             prepare_arguments: None,
@@ -1081,6 +1083,7 @@ mod runtime_tests {
             arguments: serde_json::from_value(serde_json::json!({})).unwrap(),
             thought_signature: None,
             namespace: None,
+            arguments_error: None,
         };
         let (stream_fn, _calls) = scripted_stream_fn(vec![
             tool_call_script(vec![tool_call], "calling"),

@@ -10,6 +10,7 @@ pub mod openai_completions;
 pub mod openai_responses;
 pub mod overflow;
 pub mod retry;
+pub(crate) mod tool_arguments;
 pub mod types;
 pub mod validate;
 
@@ -19,6 +20,23 @@ use tokio_util::sync::CancellationToken;
 
 use crate::time_util::now_ts_nanos;
 use event_stream::event_stream;
+
+/// 发送请求并仅限制等待响应头的时间；响应后的流式正文不受该超时影响。
+pub(crate) async fn send_with_header_timeout(
+    request: reqwest::RequestBuilder,
+    timeout_ms: Option<u64>,
+) -> Result<reqwest::Response, String> {
+    let send = request.send();
+    match timeout_ms {
+        Some(timeout_ms) => {
+            match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), send).await {
+                Ok(result) => result.map_err(|error| error.to_string()),
+                Err(_) => Err(format!("request timed out after {timeout_ms}ms")),
+            }
+        }
+        None => send.await.map_err(|error| error.to_string()),
+    }
+}
 
 /// 按 `Model.api` 分派到与 pi 对齐的 `streamSimple` adapter。
 pub fn stream_simple(
@@ -54,7 +72,8 @@ pub async fn complete_simple(
     options: Option<SimpleStreamOptions>,
     signal: Option<CancellationToken>,
 ) -> AssistantMessage {
-    match model.api.as_str() {
+    let started_at = std::time::Instant::now();
+    let mut result = match model.api.as_str() {
         API_OPENAI_COMPLETIONS => {
             openai_completions::complete_openai_completions(model, context, options, signal).await
         }
@@ -69,7 +88,9 @@ pub async fn complete_simple(
                 .await
         }
         _ => unsupported_api_message(&model),
-    }
+    };
+    result.duration_ms = Some(started_at.elapsed().as_millis() as u64);
+    result
 }
 
 fn unsupported_api_message(model: &Model) -> AssistantMessage {
@@ -86,6 +107,8 @@ fn unsupported_api_message(model: &Model) -> AssistantMessage {
         error_message: Some(format!("No API provider registered for api: {}", model.api)),
         raw_stop_reason: None,
         end_turn: None,
+        duration_ms: None,
+        thinking_level: None,
         timestamp: now_ts_nanos() / 1_000_000,
     }
 }
@@ -100,6 +123,6 @@ fn unsupported_api_stream(model: Model) -> AssistantMessageEventStream {
         reason: StopReason::Error,
         error: error.clone(),
     });
-    writer.end(error);
+    writer.end_timed(error);
     stream
 }

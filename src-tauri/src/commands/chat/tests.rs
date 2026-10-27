@@ -42,6 +42,8 @@ fn ok_message(model: &Model, text: &str) -> AssistantMessage {
         error_message: None,
         raw_stop_reason: None,
         end_turn: None,
+        duration_ms: None,
+        thinking_level: None,
         timestamp: 0,
     }
 }
@@ -452,6 +454,7 @@ fn permission_context(id: &str, tool_name: &str) -> BeforeToolCallContext {
             arguments: serde_json::Map::new(),
             thought_signature: None,
             namespace: None,
+            arguments_error: None,
         },
         args: serde_json::json!({}),
         context: crate::agent::types::AgentContext::default(),
@@ -626,7 +629,8 @@ fn readonly_tool_filter_removes_writes_and_restores_full_set() {
             name: name.to_string(),
             label: name.to_string(),
             description: String::new(),
-            parameters: serde_json::json!({}),
+            output_schema: None,
+        parameters: serde_json::json!({}),
             execution_mode: None,
             prepare_arguments: None,
             execute: Arc::new(|_, _, _, _| {

@@ -167,6 +167,7 @@ pub fn create_find_tool(env: Arc<dyn ExecutionEnv>) -> AgentTool {
             "Search for files by glob pattern. Returns matching file paths relative to the search directory. Respects .gitignore. Output is truncated to {DEFAULT_LIMIT} results or {}KB (whichever is hit first).",
             DEFAULT_MAX_BYTES / 1024
         ),
+        output_schema: None,
         parameters: json!({
             "type": "object",
             "properties": {

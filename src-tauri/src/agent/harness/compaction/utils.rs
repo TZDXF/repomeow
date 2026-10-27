@@ -290,6 +290,7 @@ mod tests {
             usage: None,
             added_tool_names: None,
             is_error: false,
+            duration_ms: None,
             timestamp: 0,
         };
         let output = serialize_conversation(&[Message::ToolResult(result)]);

@@ -14,6 +14,7 @@ use tokio::sync::{mpsc, oneshot};
 
 /// 流的生产端。`push` 对齐 TS 的同步无界入队;`end` 发送终值并关闭事件队列。
 pub struct EventStreamWriter<E, R> {
+    started_at: std::time::Instant,
     tx: mpsc::UnboundedSender<E>,
     done: Option<oneshot::Sender<R>>,
 }
@@ -29,6 +30,14 @@ impl<E, R> EventStreamWriter<E, R> {
         if let Some(done) = self.done.take() {
             let _ = done.send(result);
         }
+    }
+}
+
+impl EventStreamWriter<super::AssistantMessageEvent, super::AssistantMessage> {
+    /// 结束 Assistant 流并记录从请求创建到最终消息的耗时。
+    pub fn end_timed(self, mut result: super::AssistantMessage) {
+        result.duration_ms = Some(self.started_at.elapsed().as_millis() as u64);
+        self.end(result);
     }
 }
 
@@ -62,6 +71,7 @@ pub fn event_stream<E, R>() -> (EventStream<E, R>, EventStreamWriter<E, R>) {
     (
         EventStream { rx, done: done_rx },
         EventStreamWriter {
+            started_at: std::time::Instant::now(),
             tx,
             done: Some(done_tx),
         },

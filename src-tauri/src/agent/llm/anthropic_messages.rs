@@ -254,7 +254,7 @@ const ESTIMATED_IMAGE_CHARS: i64 = 4800;
 const CONTEXT_SAFETY_TOKENS: i64 = 4096;
 const MIN_MAX_TOKENS: i64 = 1;
 
-fn ceil_div4(chars: i64) -> i64 {
+fn ceil_div3_5(chars: i64) -> i64 {
     (chars + CHARS_PER_TOKEN - 1) / CHARS_PER_TOKEN
 }
 
@@ -298,7 +298,7 @@ fn estimate_message_tokens(message: &Message) -> i64 {
             })
             .sum(),
     };
-    ceil_div4(chars)
+    ceil_div3_5(chars)
 }
 
 fn estimate_tools_tokens<'a>(tools: impl Iterator<Item = &'a Tool>) -> i64 {
@@ -307,7 +307,7 @@ fn estimate_tools_tokens<'a>(tools: impl Iterator<Item = &'a Tool>) -> i64 {
         return 0;
     }
     let serialized = serde_json::to_string(&list).unwrap_or_default();
-    ceil_div4(serialized.chars().count() as i64)
+    ceil_div3_5(serialized.chars().count() as i64)
 }
 
 fn estimate_context_tokens(context: &Context) -> i64 {
@@ -363,7 +363,7 @@ fn estimate_context_tokens(context: &Context) -> i64 {
             let system = context
                 .system_prompt
                 .as_ref()
-                .map(|prompt| ceil_div4(prompt.chars().count() as i64))
+                .map(|prompt| ceil_div3_5(prompt.chars().count() as i64))
                 .unwrap_or(0);
             let tools = estimate_tools_tokens(context.tools.iter());
             messages + system + tools
@@ -603,10 +603,8 @@ fn transform_messages(
                                         thinking_signature,
                                         redacted,
                                     });
-                                } else {
-                                    // 跨模型:thinking 转纯文本
-                                    content.push(AssistantContent::text(thinking));
                                 }
+                                // 跨模型 thinking 直接丢弃，避免新模型把它当作可见回复。
                             }
                         }
                         AssistantContent::Text {
@@ -662,6 +660,7 @@ fn transform_messages(
                         usage: None,
                         added_tool_names: None,
                         is_error: true,
+                        duration_ms: None,
                         timestamp: now_ts_nanos() / 1_000_000,
                     }));
                 }
@@ -1265,12 +1264,9 @@ fn request_url(model: &Model) -> String {
     format!("{}/v1/messages", model.base_url.trim_end_matches('/'))
 }
 
-fn build_http_client(options: Option<&SimpleStreamOptions>) -> Result<reqwest::Client, String> {
-    let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(15));
-    if let Some(timeout_ms) = options.and_then(|options| options.timeout_ms) {
-        builder = builder.timeout(Duration::from_millis(timeout_ms));
-    }
-    builder
+fn build_http_client(_options: Option<&SimpleStreamOptions>) -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
         .build()
         .map_err(|error| format!("failed to build HTTP client: {error}"))
 }
@@ -1886,7 +1882,7 @@ struct AnthropicAggregator {
     /// Anthropic 流块 index → output.content 下标。
     blocks: HashMap<i64, usize>,
     /// Anthropic 流块 index → 累积的 partial_json(仅 tool_use)。
-    partial_json: HashMap<i64, String>,
+    partial_json: HashMap<i64, super::tool_arguments::ToolCallArguments>,
 }
 
 impl AnthropicAggregator {
@@ -2058,10 +2054,11 @@ impl AnthropicAggregator {
                         arguments,
                         thought_signature: None,
                         namespace: None,
+                        arguments_error: None,
                     }));
                 let position = self.output.content.len() - 1;
                 self.blocks.insert(index, position);
-                self.partial_json.insert(index, String::new());
+                self.partial_json.insert(index, Default::default());
                 events.push(AssistantMessageEvent::ToolcallStart {
                     content_index: position as u32,
                     partial: self.output.clone(),
@@ -2141,9 +2138,9 @@ impl AnthropicAggregator {
                         .get("partial_json")
                         .and_then(Value::as_str)
                         .unwrap_or_default();
-                    let raw = self.partial_json.entry(index).or_default();
-                    raw.push_str(piece);
-                    let parsed = parse_streaming_json(raw);
+                    let arguments = self.partial_json.entry(index).or_default();
+                    arguments.push(piece);
+                    let parsed = arguments.preview();
                     if let Some(AssistantContent::ToolCall(tool_call)) =
                         self.output.content.get_mut(position)
                     {
@@ -2200,8 +2197,8 @@ impl AnthropicAggregator {
             }
             AssistantContent::ToolCall(mut tool_call) => {
                 // partialJson 只是流式暂存;完成后以解析结果为最终 arguments
-                let raw = self.partial_json.remove(&index).unwrap_or_default();
-                tool_call.arguments = parse_streaming_json(&raw);
+                let arguments = self.partial_json.remove(&index).unwrap_or_default();
+                (tool_call.arguments, tool_call.arguments_error) = arguments.finish();
                 self.output.content[position] = AssistantContent::ToolCall(tool_call.clone());
                 events.push(AssistantMessageEvent::ToolcallEnd {
                     content_index: position as u32,
@@ -2319,6 +2316,8 @@ fn new_assistant_message(model: &Model) -> AssistantMessage {
         error_message: None,
         raw_stop_reason: None,
         end_turn: None,
+        duration_ms: None,
+        thinking_level: None,
         timestamp: now_ts_nanos() / 1_000_000,
     }
 }
@@ -2513,7 +2512,7 @@ async fn run_stream(
         let (event, message) =
             aggregator.error_final(StopReason::Aborted, "Request was aborted".to_string());
         writer.push(event);
-        writer.end(message);
+        writer.end_timed(message);
         return;
     }
 
@@ -2547,7 +2546,7 @@ async fn run_stream(
             };
             let (event, message) = aggregator.error_final(reason, message);
             writer.push(event);
-            writer.end(message);
+            writer.end_timed(message);
             return;
         }
     };
@@ -2632,7 +2631,7 @@ async fn run_stream(
         None => aggregator.done_final(),
     };
     writer.push(terminal);
-    writer.end(message);
+    writer.end_timed(message);
 }
 
 /// Provider 内层重试连接(TS retryProviderRequest):每次重试都重新发请求;
@@ -2683,17 +2682,18 @@ async fn send_with_retry(
     let mut retries_remaining = max_retries;
     loop {
         let outcome: Result<reqwest::Response, ProviderRequestError> = async {
-            let response = http
-                .post(request_url(model))
-                .headers(headers.clone())
-                .body(payload.clone())
-                .send()
-                .await
-                .map_err(|error| ProviderRequestError {
-                    message: error.to_string(),
-                    status: None,
-                    headers: None,
-                })?;
+            let response = super::send_with_header_timeout(
+                http.post(request_url(model))
+                    .headers(headers.clone())
+                    .body(payload.clone()),
+                options.and_then(|options| options.timeout_ms),
+            )
+            .await
+            .map_err(|error| ProviderRequestError {
+                message: error,
+                status: None,
+                headers: None,
+            })?;
             let status = response.status();
             if !status.is_success() {
                 // SDK 行为:非 2xx 抛带 status/headers 的 APIError,进入重试判定
@@ -2903,6 +2903,7 @@ fn apply_message_response(
                             .unwrap_or_default(),
                         thought_signature: None,
                         namespace: None,
+                        arguments_error: None,
                     }));
                 }
                 _ => {}
@@ -2990,6 +2991,7 @@ mod tests {
             arguments: serde_json::from_value(arguments).unwrap(),
             thought_signature: None,
             namespace: None,
+            arguments_error: None,
         })
     }
 
@@ -3007,6 +3009,8 @@ mod tests {
             error_message: None,
             raw_stop_reason: None,
             end_turn: None,
+            duration_ms: None,
+            thinking_level: None,
             timestamp: 0,
         })
     }
@@ -3021,6 +3025,7 @@ mod tests {
             usage: None,
             added_tool_names: None,
             is_error: false,
+            duration_ms: None,
             timestamp: 0,
         })
     }
@@ -3270,7 +3275,7 @@ mod tests {
         assert_eq!(blocks[1]["type"], "redacted_thinking");
         assert_eq!(blocks[1]["data"], "ENCRYPTED");
 
-        // 跨模型:redacted 丢弃、签名 thinking 转纯文本
+        // 跨模型:redacted 与签名 thinking 均丢弃，不转成可见正文。
         let cross = cross_model_model("https://api.anthropic.com");
         let body = build_request_body(
             &cross,
@@ -3280,10 +3285,7 @@ mod tests {
             )]),
             None,
         );
-        let blocks = body["messages"][0]["content"].as_array().unwrap();
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0]["type"], "text");
-        assert_eq!(blocks[0]["text"], "hmm");
+        assert!(body["messages"].as_array().unwrap().is_empty());
 
         // 无签名的非空 thinking(中止残留)→ 转纯文本
         let unsigned = AssistantContent::Thinking {
@@ -3342,6 +3344,7 @@ mod tests {
                 usage: None,
                 added_tool_names: None,
                 is_error: false,
+                duration_ms: None,
                 timestamp: 0,
             }),
         ]);

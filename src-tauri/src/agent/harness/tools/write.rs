@@ -24,6 +24,7 @@ pub fn create_write_tool(env: Arc<dyn ExecutionEnv>) -> AgentTool {
         label: "write".to_string(),
         description: "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories."
             .to_string(),
+        output_schema: None,
         parameters: json!({
             "type": "object",
             "properties": {

@@ -506,10 +506,8 @@ fn transform_messages(
                                     thinking_signature,
                                     redacted,
                                 });
-                            } else {
-                                // 跨模型:thinking 降级为纯文本(不带标签,避免模仿)
-                                content.push(AssistantContent::text(thinking));
                             }
+                            // 跨模型 thinking 直接丢弃，避免新模型把它当作可见回复。
                         }
                         AssistantContent::Text {
                             text,
@@ -564,6 +562,7 @@ fn transform_messages(
                         usage: None,
                         added_tool_names: None,
                         is_error: true,
+                        duration_ms: None,
                         timestamp: now_ms(),
                     }));
                 }
@@ -767,7 +766,7 @@ fn convert_messages(model: &Model, context: &Context) -> Vec<Value> {
                 } else {
                     Vec::new()
                 };
-                let has_text = !text_result.is_empty();
+                let has_text = !text_result.trim().is_empty();
                 let has_images = !image_content.is_empty();
                 let multimodal = supports_multimodal_function_response(&model.id);
 
@@ -1483,6 +1482,7 @@ impl StreamAggregator {
                         arguments,
                         thought_signature: thought_signature.map(str::to_string),
                         namespace: None,
+                        arguments_error: None,
                     };
                     self.output
                         .content
@@ -1621,6 +1621,8 @@ fn new_assistant_message(model: &Model) -> AssistantMessage {
         error_message: None,
         raw_stop_reason: None,
         end_turn: None,
+        duration_ms: None,
+        thinking_level: None,
         timestamp: now_ms(),
     }
 }
@@ -1669,9 +1671,6 @@ fn build_client(
     if !headers.is_empty() {
         builder = builder.default_headers(headers);
     }
-    if let Some(timeout_ms) = options.and_then(|options| options.timeout_ms) {
-        builder = builder.timeout(Duration::from_millis(timeout_ms));
-    }
     builder
         .build()
         .map_err(|error| format!("failed to build HTTP client: {error}"))
@@ -1703,9 +1702,10 @@ async fn send_attempt(
     client: &reqwest::Client,
     url: &str,
     body: &Value,
+    timeout_ms: Option<u64>,
     signal: Option<&CancellationToken>,
 ) -> Result<reqwest::Response, ConnectFailure> {
-    let send = client.post(url).json(body).send();
+    let send = super::send_with_header_timeout(client.post(url).json(body), timeout_ms);
     let result = if let Some(token) = signal {
         tokio::select! {
             result = send => result,
@@ -1749,7 +1749,7 @@ async fn send_attempt(
             }
         }
         Err(error) => Err(ConnectFailure::Retryable {
-            message: error.to_string(),
+            message: error,
             headers: None,
         }),
     }
@@ -1843,7 +1843,7 @@ async fn run_stream(
             };
             aggregator.prepare_error(reason, $message);
             writer.push(aggregator.error_event(reason));
-            writer.end(aggregator.final_message());
+            writer.end_timed(aggregator.final_message());
             return;
         }};
     }
@@ -1891,7 +1891,7 @@ async fn run_stream(
             };
             aggregator.prepare_error(reason, message);
             writer.push(aggregator.error_event(reason));
-            writer.end(aggregator.final_message());
+            writer.end_timed(aggregator.final_message());
             return;
         }
     };
@@ -1952,7 +1952,7 @@ async fn run_stream(
         writer.push(event);
     }
     writer.push(terminal);
-    writer.end(message);
+    writer.end_timed(message);
 }
 
 /// 初始请求重试(蓝本 retryGoogleRequest → retryProviderRequest):
@@ -1968,7 +1968,15 @@ async fn send_with_retry(
     let max_retries = options.and_then(|options| options.max_retries).unwrap_or(0);
     let mut retries_remaining = max_retries;
     loop {
-        match send_attempt(client, url, body, signal).await {
+        match send_attempt(
+            client,
+            url,
+            body,
+            options.and_then(|options| options.timeout_ms),
+            signal,
+        )
+        .await
+        {
             Ok(response) => return Ok(response),
             Err(ConnectFailure::Aborted) => {
                 return Err(("Request was aborted".to_string(), true));
@@ -2142,6 +2150,8 @@ mod tests {
             error_message: None,
             raw_stop_reason: None,
             end_turn: None,
+            duration_ms: None,
+            thinking_level: None,
             timestamp: 0,
         })
     }
@@ -2156,6 +2166,7 @@ mod tests {
             usage: None,
             added_tool_names: None,
             is_error,
+            duration_ms: None,
             timestamp: 0,
         })
     }
@@ -2460,6 +2471,7 @@ mod tests {
                             arguments: serde_json::from_value(json!({"city": "Oslo"})).unwrap(),
                             thought_signature: Some("c2ln".into()),
                             namespace: None,
+                            arguments_error: None,
                         }),
                     ],
                     StopReason::ToolUse,
@@ -2502,6 +2514,7 @@ mod tests {
                         arguments: Map::new(),
                         thought_signature: None,
                         namespace: None,
+                        arguments_error: None,
                     })],
                     StopReason::ToolUse,
                 ),
@@ -2520,6 +2533,7 @@ mod tests {
                     usage: None,
                     added_tool_names: None,
                     is_error: false,
+                    duration_ms: None,
                     timestamp: 0,
                 }),
             ],
@@ -2559,6 +2573,7 @@ mod tests {
                         arguments: Map::new(),
                         thought_signature: None,
                         namespace: None,
+                        arguments_error: None,
                     })],
                     StopReason::ToolUse,
                 ),
@@ -2574,6 +2589,7 @@ mod tests {
                     usage: None,
                     added_tool_names: None,
                     is_error: false,
+                    duration_ms: None,
                     timestamp: 0,
                 }),
             ],
@@ -2613,6 +2629,7 @@ mod tests {
                             arguments: Map::new(),
                             thought_signature: None,
                             namespace: None,
+                            arguments_error: None,
                         }),
                         AssistantContent::ToolCall(ToolCall {
                             id: "call_2".into(),
@@ -2620,6 +2637,7 @@ mod tests {
                             arguments: Map::new(),
                             thought_signature: None,
                             namespace: None,
+                            arguments_error: None,
                         }),
                     ],
                     StopReason::ToolUse,
@@ -2650,6 +2668,7 @@ mod tests {
                         arguments: Map::new(),
                         thought_signature: None,
                         namespace: None,
+                        arguments_error: None,
                     })],
                     StopReason::ToolUse,
                 ),
@@ -2698,11 +2717,8 @@ mod tests {
         let same_part = &body["contents"][0]["parts"][0];
         assert_eq!(same_part["thought"], true);
         assert_eq!(same_part["thoughtSignature"], signature);
-        // 跨模型:降级纯文本,无 thought / 签名
-        let cross_part = &body["contents"][1]["parts"][0];
-        assert!(cross_part.get("thought").is_none());
-        assert!(cross_part.get("thoughtSignature").is_none());
-        assert_eq!(cross_part["text"], "pondering");
+        // 跨模型:thinking 整条丢弃，不降级成可见正文。
+        assert_eq!(body["contents"].as_array().unwrap().len(), 1);
 
         // 非法 base64(长度不齐 4)被丢弃
         let bad = vec![AssistantContent::Thinking {

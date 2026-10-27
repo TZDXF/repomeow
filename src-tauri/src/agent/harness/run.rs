@@ -979,6 +979,8 @@ fn synthetic_assistant(
         error_message: error,
         raw_stop_reason: None,
         end_turn: None,
+        duration_ms: None,
+        thinking_level: None,
         timestamp: now_ms(),
     }
 }
@@ -1167,6 +1169,7 @@ fn after_tool_hook(
                 Ok(Some(HookResult::AfterTool(Some(result)))) => Some(AfterToolCallResult {
                     content: result.content,
                     details: result.details,
+                    structured_content: None,
                     is_error: result.is_error,
                     usage: result.usage,
                     terminate: result.terminate,

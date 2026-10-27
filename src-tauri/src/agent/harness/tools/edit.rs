@@ -134,6 +134,7 @@ pub fn create_edit_tool(env: Arc<dyn ExecutionEnv>) -> AgentTool {
         label: "edit".to_string(),
         description: "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes."
             .to_string(),
+        output_schema: None,
         parameters: json!({
             "type": "object",
             "properties": {
