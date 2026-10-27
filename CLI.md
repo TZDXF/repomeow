@@ -1,6 +1,6 @@
 # RepoMeow CLI
 
-RepoMeow CLI 内置于主程序,不单独发布。首参数传入子命令即进入 CLI 模式(不启动桌面窗口),面向 AI agent 与脚本提供应用的管理能力:项目登记、Wiki、语义分析、标签、自定义命令、报告与调度、AI 配置/用量、提示词、Git 账号与项目文件。Git 与 Docker 等本机工具请直接使用其 CLI,RepoMeow CLI 不做包装。
+RepoMeow CLI 内置于主程序,不单独发布。首参数传入子命令即进入 CLI 模式,面向 AI agent 与脚本提供应用的管理能力:项目登记、Wiki、语义分析、标签、自定义命令、报告与调度、AI 配置/用量、提示词、Git 账号、项目文件与桌面终端 Tab。普通命令不启动桌面窗口;`terminal` 命令会启动或唤醒桌面应用。Git 与 Docker 等本机工具请直接使用其 CLI,RepoMeow CLI 不做包装。
 
 ## 输出约定
 
@@ -29,12 +29,14 @@ RepoMeow CLI 内置于主程序,不单独发布。首参数传入子命令即进
 repomeow wiki dir -p <项目目录>
 repomeow wiki pages -p <项目目录>
 repomeow wiki read -p <项目目录> --page-id <页面id>
+repomeow wiki generate -p <项目目录> [--language zh-CN|en-US] [--concurrency 2]
+repomeow wiki update -p <项目目录> [--language zh-CN|en-US]
 repomeow wiki config-get -p <项目目录>
 repomeow wiki config-set -p <项目目录> [--model providerId/modelId] [--thinking high] [--concurrency 4]
 repomeow wiki delete -p <项目目录>
 ```
 
-未生成 Wiki 时返回 `wiki_not_generated`;页面不存在返回 `wiki_page_not_found`。`stale=true` 表示 Wiki 落后于最新代码。`config-set` 覆盖式写入,字段不传即跟随应用默认。
+未生成 Wiki 时查询命令返回 `wiki_not_generated`;页面不存在返回 `wiki_page_not_found`。`stale=true` 表示 Wiki 落后于最新代码。`generate` 整本生成或重生成并覆盖现有页面,`update` 仅重生成受代码变更影响的页面;两者都会调用 AI、消耗额度并同步等待完成。`config-set` 覆盖式写入,字段不传即跟随应用默认。
 
 ### `sem`
 
@@ -160,6 +162,21 @@ repomeow file save -p <项目目录> --path docs/note.md (--content "内容" | -
 ```
 
 `save` 创建或覆盖项目内文本文件(上限 512KB,父目录必须已存在;拒绝绝对路径与 `..`)。
+
+### `terminal`
+
+```powershell
+repomeow terminal list [-p <项目目录>]
+repomeow terminal output --id 1 [-p <项目目录>]
+repomeow terminal input --id 1 --text "y" [--enter] [-p <项目目录>]
+repomeow terminal create npm -p <项目目录> --name dev [--package .]
+repomeow terminal create custom -p <项目目录> --id 1
+repomeow terminal start --id 1 [-p <项目目录>]
+repomeow terminal stop --id 1 [-p <项目目录>]
+repomeow terminal restart --id 1 [-p <项目目录>]
+```
+
+终端命令通过桌面应用内的真实 TerminalManager 执行;桌面未运行时会自动启动,已运行时会唤醒并显示主窗口。`output` 读取当前输出缓冲;`input` 向运行中 Tab 写入 PTY 输入,`--enter` 追加回车,已结束 Tab 返回 `written=false`;`create` 只能引用已发现的 npm script 或已登记自定义命令,由桌面端校验并生成命令,不接受任意命令文本;`start` 仅恢复已停止/退出的 Tab,运行中不会重复启动;`restart` 总是重启;`input/start/restart` 仅允许 npm/custom 类型 Tab,不能操作 Shell/Agent/Docker Tab 绕过限制;`stop` 停止整棵进程树。Tab ID、原命令和工作目录在启停后保留。会话仅保存在桌面进程内存中,应用退出后清空。
 
 ## 开发
 

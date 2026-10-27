@@ -2,9 +2,12 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 
+use crate::commands::ai::{
+    cli_generate_wiki, cli_update_wiki, GenerateWikiRequest, UpdateWikiRequest,
+};
 use crate::commands::wiki::{
-    has_wiki_in, load_config_in, load_wiki_at, remove_wiki_dir, save_config_in, wiki_dir_in,
-    WikiGenerationConfig,
+    has_wiki_in, load_config_in, load_wiki_at, remove_wiki_dir, save_config_in, wiki_dir_at,
+    wiki_dir_in, WikiGenerationConfig,
 };
 
 use super::types::{
@@ -12,7 +15,7 @@ use super::types::{
     WikiPageOutput, WikiPagesOutput,
 };
 use super::util::{
-    data_root_or_default, repomeow_data_root, truncate_text, ToolFailure, WIKI_DIR_NAME,
+    data_root_or_default, open_db, repomeow_data_root, truncate_text, ToolFailure, WIKI_DIR_NAME,
     WIKI_META_FILE,
 };
 use crate::path_util::clean_str;
@@ -141,6 +144,112 @@ pub(super) fn read_wiki_page_impl(
         content,
         truncated,
     })
+}
+
+// ── Wiki 生成与更新(对齐项目问答助手) ───────────────────────────────
+
+fn wiki_project_name(db: &crate::db::Db, project_directory: &str) -> String {
+    use rusqlite::OptionalExtension;
+
+    let registered = {
+        let conn = db.0.lock().unwrap();
+        conn.query_row(
+            "SELECT name FROM projects WHERE directory = ?1 AND archived = 0",
+            [project_directory],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .ok()
+        .flatten()
+    };
+    registered
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| {
+            project_directory
+                .rsplit(['\\', '/'])
+                .next()
+                .filter(|name| !name.is_empty())
+                .unwrap_or("项目")
+                .to_string()
+        })
+}
+
+pub(super) fn wiki_language(language: Option<String>) -> Result<String, ToolFailure> {
+    match language.as_deref().unwrap_or("zh-CN") {
+        "zh-CN" => Ok("zh-CN".to_string()),
+        "en-US" => Ok("en-US".to_string()),
+        _ => Err(ToolFailure::new(
+            "invalid_language",
+            "language 必须是 zh-CN 或 en-US",
+        )),
+    }
+}
+
+fn wiki_project_directory(project_directory: &str) -> Result<String, ToolFailure> {
+    let project_directory = clean_str(project_directory);
+    if project_directory.trim().is_empty() {
+        return Err(ToolFailure::new(
+            "invalid_project_directory",
+            "项目目录不能为空",
+        ));
+    }
+    Ok(project_directory)
+}
+
+pub(super) async fn generate_wiki_impl(
+    project_directory: String,
+    language: Option<String>,
+    concurrency: usize,
+    data_root: Option<&Path>,
+) -> Result<Value, ToolFailure> {
+    let project_directory = wiki_project_directory(&project_directory)?;
+    let language = wiki_language(language)?;
+    let data_root = data_root_or_default(data_root)?;
+    let db = open_db(&data_root)?;
+    let project_name = wiki_project_name(&db, &project_directory);
+    let request = GenerateWikiRequest {
+        run_id: format!("cli-{}", crate::time_util::now_ts_nanos()),
+        project_path: project_directory.clone(),
+        project_name,
+        language,
+        concurrency,
+    };
+    let page_ids = cli_generate_wiki(&data_root, &db, request)
+        .await
+        .map_err(|error| ToolFailure::from_app("生成 Wiki 失败", error))?;
+    Ok(json!({
+        "generated": true,
+        "projectDirectory": project_directory,
+        "wikiDirectory": wiki_dir_at(&data_root, &project_directory).to_string_lossy(),
+        "pageCount": page_ids.len(),
+        "pageIds": page_ids,
+    }))
+}
+
+pub(super) async fn update_wiki_impl(
+    project_directory: String,
+    language: Option<String>,
+    data_root: Option<&Path>,
+) -> Result<Value, ToolFailure> {
+    let project_directory = wiki_project_directory(&project_directory)?;
+    let language = wiki_language(language)?;
+    let data_root = data_root_or_default(data_root)?;
+    let db = open_db(&data_root)?;
+    let request = UpdateWikiRequest {
+        run_id: format!("cli-{}", crate::time_util::now_ts_nanos()),
+        project_path: project_directory.clone(),
+        language,
+        automatic: false,
+    };
+    let result = cli_update_wiki(&data_root, &db, request)
+        .await
+        .map_err(|error| ToolFailure::from_app("更新 Wiki 失败", error))?;
+    Ok(json!({
+        "updated": !result.updated_page_ids.is_empty(),
+        "projectDirectory": project_directory,
+        "updatedPageCount": result.updated_page_ids.len(),
+        "updatedPageIds": result.updated_page_ids,
+    }))
 }
 
 // ── Wiki 管理(配置与删除)───────────────────────────────────────────────

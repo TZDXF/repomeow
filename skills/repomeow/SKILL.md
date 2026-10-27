@@ -1,11 +1,11 @@
 ---
 name: repomeow
-description: 用 RepoMeow CLI 管理 RepoMeow 的本地开发项目:项目登记/归档、Wiki 查询与配置、代码语义分析、标签/自定义命令/常用标记/隐藏项、日报周报与调度、AI 配置/提示词/用量、Git 平台账号、项目文件搜索与写入。当任务涉及 RepoMeow 登记项目的管理或自动化操作时使用。
+description: 用 RepoMeow CLI 管理 RepoMeow 的本地开发项目:项目登记/归档、Wiki 生成/更新/查询与配置、代码语义分析、标签/自定义命令/常用标记/隐藏项、日报周报与调度、AI 配置/提示词/用量、Git 平台账号、项目文件搜索与写入、桌面终端 Tab 启停。当任务涉及 RepoMeow 登记项目的管理或自动化操作时使用。
 ---
 
 # RepoMeow CLI
 
-通过 PATH 直接调用 `repomeow`,无需指定可执行文件路径。首参数传入子命令即进入 CLI 模式,不打开窗口。
+通过 PATH 直接调用 `repomeow`,无需指定可执行文件路径。首参数传入子命令即进入 CLI 模式;普通命令不打开窗口,`terminal` 命令会启动或唤醒桌面应用。
 
 约定:成功结果以 JSON 写 stdout;失败以含 code/message/detail 字段的 JSON 写 stderr 且退出码非 0。`repomeow <分组> --help` 可查看各命令参数。
 
@@ -17,11 +17,12 @@ description: 用 RepoMeow CLI 管理 RepoMeow 的本地开发项目:项目登记
 
 | 分组 | 用途 | 参考 |
 | --- | --- | --- |
-| `wiki` / `project` | Wiki 查询与配置;项目登记管理(增删改查/归档/收藏/开关)、文件按行读取 | [references/project.md](references/project.md) |
+| `wiki` / `project` | Wiki 生成/更新/查询与配置;项目登记管理(增删改查/归档/收藏/开关)、文件按行读取 | [references/project.md](references/project.md) |
 | `sem` | 语义搜索代码实体、实体上下文、调用/引用关系、未提交变更汇总 | [references/sem.md](references/sem.md) |
 | `report` | 生成日报/周报、报告历史、报告调度与系统调度 | [references/report.md](references/report.md) |
 | `tag` / `script` / `pin` / `hidden` | 标签、自定义命令、常用命令标记、条目隐藏 | [references/manage.md](references/manage.md) |
 | `ai` / `prompt` / `account` / `file` | AI 配置/模型/连接测试/用量、提示词、Git 平台账号、项目文件搜索与写入 | [references/settings.md](references/settings.md) |
+| `terminal` | 桌面终端 Tab 列表、输出、输入、创建、启动、停止与重启 | [references/manage.md](references/manage.md) |
 
 ## 通用注意
 

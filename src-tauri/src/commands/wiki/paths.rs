@@ -36,6 +36,11 @@ pub(crate) fn wiki_dir_in(root: &Path, project_path: &str) -> PathBuf {
     root.join(folder_name(project_path))
 }
 
+/// 按应用数据根目录定位项目 Wiki,供桌面端与 headless CLI 共用。
+pub(crate) fn wiki_dir_at(data_root: &Path, project_path: &str) -> PathBuf {
+    wiki_dir_in(&data_root.join(WIKI_DIR_NAME), project_path)
+}
+
 pub(crate) fn wiki_dir(app: &AppHandle, project_path: &str) -> AppResult<PathBuf> {
     let home = app
         .path()

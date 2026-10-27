@@ -9,7 +9,7 @@ use crate::error::{AppError, AppResult, ErrorCode};
 use crate::path_util::{clean_str, repo_relative_str};
 use crate::time_util::now_ts_nanos;
 
-use super::paths::{head_sha, wiki_dir, wiki_dir_in, WIKI_DIR_NAME};
+use super::paths::{head_sha, wiki_dir, wiki_dir_at};
 use super::snapshot::{commit_message, commit_wiki_in};
 use super::types::{
     WikiCommitKind, WikiData, WikiGenerationConfig, WikiMeta, WikiOutlinePage, WikiPageData,
@@ -525,8 +525,21 @@ pub(super) fn has_wiki(app: AppHandle, project_path: String) -> AppResult<bool> 
     Ok(has_wiki_in(&wiki_dir(&app, &project_path)?))
 }
 
-pub(crate) fn begin_wiki(app: AppHandle, project_path: String) -> AppResult<()> {
-    begin_wiki_in(&wiki_dir(&app, &project_path)?)
+pub(crate) fn begin_wiki_at(data_root: &Path, project_path: &str) -> AppResult<()> {
+    begin_wiki_in(&wiki_dir_at(data_root, project_path))
+}
+
+pub(crate) fn load_wiki_config_at(
+    data_root: &Path,
+    project_path: &str,
+) -> AppResult<WikiGenerationConfig> {
+    let dir = wiki_dir_at(data_root, project_path);
+    if dir.join(CONFIG_FILE).is_file() {
+        return load_config_in(&dir);
+    }
+    let config = WikiGenerationConfig::default();
+    save_config_in(&dir, config.clone())?;
+    Ok(config)
 }
 
 pub(crate) fn load_wiki_config_internal(
@@ -542,21 +555,30 @@ pub(crate) fn load_wiki_config_internal(
     Ok(config)
 }
 
-pub(crate) fn save_wiki_meta(
-    app: AppHandle,
-    project_path: String,
+pub(crate) fn save_wiki_meta_at(
+    data_root: &Path,
+    project_path: &str,
+    meta: WikiMeta,
+    commit_kind: Option<WikiCommitKind>,
+) -> AppResult<()> {
+    let dir = wiki_dir_at(data_root, project_path);
+    save_wiki_meta_in(&dir, project_path, meta, commit_kind)
+}
+
+fn save_wiki_meta_in(
+    dir: &Path,
+    project_path: &str,
     mut meta: WikiMeta,
     commit_kind: Option<WikiCommitKind>,
 ) -> AppResult<()> {
     if meta.project_path.is_empty() {
-        meta.project_path = clean_str(&project_path);
+        meta.project_path = clean_str(project_path);
     }
-    let dir = wiki_dir(&app, &project_path)?;
     let kind = commit_kind.unwrap_or(WikiCommitKind::Generate);
-    let message = commit_message(kind, &meta, None, head_sha(&project_path).as_deref());
-    cleanup_wiki_page_staging_in(&dir)?;
-    save_meta_in(&dir, meta)?;
-    if let Err(e) = commit_wiki_in(&dir, &message) {
+    let message = commit_message(kind, &meta, None, head_sha(project_path).as_deref());
+    cleanup_wiki_page_staging_in(dir)?;
+    save_meta_in(dir, meta)?;
+    if let Err(e) = commit_wiki_in(dir, &message) {
         eprintln!("[wiki] git 快照提交失败({:?}): {e}", dir);
     }
     Ok(())
@@ -598,7 +620,7 @@ pub(super) fn load_wiki(app: AppHandle, project_path: String) -> AppResult<Optio
 /// 无 AppHandle 场景(内置 MCP server)按应用数据根目录读取 wiki;
 /// stale 判定口径与 load_wiki 一致。
 pub(crate) fn load_wiki_at(data_root: &Path, project_path: &str) -> Option<WikiData> {
-    let dir = wiki_dir_in(&data_root.join(WIKI_DIR_NAME), project_path);
+    let dir = wiki_dir_at(data_root, project_path);
     let (meta, pages) = load_wiki_in(&dir)?;
     let stale = match (&meta.head_sha, &head_sha(project_path)) {
         (Some(a), Some(b)) => a != b,

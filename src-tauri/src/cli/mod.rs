@@ -22,6 +22,7 @@ mod report_tool;
 mod script_tool;
 pub(crate) mod skills;
 mod tag_tool;
+mod terminal_tool;
 #[cfg(test)]
 mod tests;
 mod types;
@@ -90,6 +91,9 @@ enum Commands {
     /// 项目文件浏览/搜索/写入
     #[command(subcommand)]
     File(FileCommands),
+    /// 桌面应用内终端 Tab 查询与启停控制(桌面未运行时自动启动)
+    #[command(subcommand)]
+    Terminal(TerminalCommands),
 }
 
 #[derive(Debug, Subcommand)]
@@ -114,6 +118,27 @@ enum WikiCommands {
         /// 页面 id(来自 pages 的大纲清单)
         #[arg(long)]
         page_id: String,
+    },
+    /// 整本生成或重新生成 Wiki(等待全部页面完成,调用 AI 并消耗额度)
+    Generate {
+        /// 项目目录
+        #[arg(short = 'p', long)]
+        project_directory: String,
+        /// 生成语言:zh-CN(默认)/ en-US
+        #[arg(long)]
+        language: Option<String>,
+        /// 默认页面并发数(项目 Wiki 配置中的并发数优先,1-8)
+        #[arg(long, default_value_t = 2)]
+        concurrency: usize,
+    },
+    /// 按代码变更增量更新受影响的 Wiki 页面(等待完成,调用 AI 并消耗额度)
+    Update {
+        /// 项目目录
+        #[arg(short = 'p', long)]
+        project_directory: String,
+        /// 生成语言:zh-CN(默认)/ en-US
+        #[arg(long)]
+        language: Option<String>,
     },
     /// 读取项目 Wiki 生成配置(未配置过时返回默认配置)
     ConfigGet {
@@ -617,6 +642,97 @@ enum AccountCommands {
 }
 
 #[derive(Debug, Subcommand)]
+enum TerminalCommands {
+    /// 列出桌面应用内终端 Tab(-p 可限定项目)
+    List {
+        /// RepoMeow 中项目登记使用的目录
+        #[arg(short = 'p', long)]
+        project_directory: Option<String>,
+    },
+    /// 读取终端 Tab 当前输出缓冲(清理 PTY 控制字符)
+    Output {
+        /// 终端 Tab ID(来自 list)
+        #[arg(long)]
+        id: u64,
+        /// 限定项目,防止误操作其他项目的同名 ID
+        #[arg(short = 'p', long)]
+        project_directory: Option<String>,
+    },
+    /// 向运行中的终端 Tab 写入 PTY 输入(--enter 追加回车)
+    Input {
+        /// 终端 Tab ID(来自 list)
+        #[arg(long)]
+        id: u64,
+        /// 限定项目,防止误输入其他项目的 Tab
+        #[arg(short = 'p', long)]
+        project_directory: Option<String>,
+        /// 要写入的文本;传空字符串并配合 --enter 可仅发送回车
+        #[arg(long)]
+        text: String,
+        /// 在文本后追加回车,用于提交命令或交互确认
+        #[arg(long)]
+        enter: bool,
+    },
+    /// 新建终端 Tab 并执行项目已有的 npm/自定义命令
+    Create {
+        #[command(subcommand)]
+        command: TerminalCreateCommands,
+    },
+    /// 启动已停止/退出的 Tab(保留原 ID、命令与工作目录;运行中则不重复启动)
+    Start {
+        /// 终端 Tab ID(来自 list)
+        #[arg(long)]
+        id: u64,
+        /// 限定项目
+        #[arg(short = 'p', long)]
+        project_directory: Option<String>,
+    },
+    /// 停止运行中的 Tab(Windows 下停止整棵进程树)
+    Stop {
+        /// 终端 Tab ID(来自 list)
+        #[arg(long)]
+        id: u64,
+        /// 限定项目
+        #[arg(short = 'p', long)]
+        project_directory: Option<String>,
+    },
+    /// 无论当前状态如何都按原命令与工作目录重启 Tab
+    Restart {
+        /// 终端 Tab ID(来自 list)
+        #[arg(long)]
+        id: u64,
+        /// 限定项目
+        #[arg(short = 'p', long)]
+        project_directory: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum TerminalCreateCommands {
+    /// 执行已发现的 npm script
+    Npm {
+        /// RepoMeow 中项目登记使用的目录
+        #[arg(short = 'p', long)]
+        project_directory: String,
+        /// script 名称,如 dev
+        #[arg(long)]
+        name: String,
+        /// package.json 所在项目相对目录,根目录为 .
+        #[arg(long, default_value = ".")]
+        package: String,
+    },
+    /// 执行已登记的自定义命令(id 来自 script list)
+    Custom {
+        /// RepoMeow 中项目登记使用的目录
+        #[arg(short = 'p', long)]
+        project_directory: String,
+        /// 自定义命令 ID
+        #[arg(long)]
+        id: i64,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum FileCommands {
     /// 列出项目目录下一层条目(文件/文件夹)
     List {
@@ -697,6 +813,7 @@ fn is_cli_head(arg: &str) -> bool {
             | "prompt"
             | "account"
             | "file"
+            | "terminal"
             | "docker"
             | "help"
             | "-h"
@@ -812,6 +929,15 @@ async fn dispatch(command: Commands) -> Result<Value, ToolFailure> {
             },
             None
         )?)),
+        Commands::Wiki(WikiCommands::Generate {
+            project_directory,
+            language,
+            concurrency,
+        }) => generate_wiki_impl(project_directory, language, concurrency, None).await,
+        Commands::Wiki(WikiCommands::Update {
+            project_directory,
+            language,
+        }) => update_wiki_impl(project_directory, language, None).await,
         Commands::Sem(SemCommands::Find { directory, query }) => {
             let query = query.trim().to_string();
             if query.is_empty() {
@@ -1099,6 +1225,7 @@ async fn dispatch(command: Commands) -> Result<Value, ToolFailure> {
         }) => update_account_impl(id, &label, base_url.as_deref(), token.as_deref(), None).await,
         Commands::Account(AccountCommands::Remove { id }) => remove_account_impl(id, None),
         // ── 项目文件 / Docker ─────────────────────────────────────────
+        Commands::Terminal(command) => terminal_tool::execute(command).await,
         Commands::File(FileCommands::List {
             project_directory,
             dir,

@@ -34,13 +34,166 @@ fn temp_dir(tag: &str) -> PathBuf {
 fn cli_head_detection_only_accepts_known_subcommands() {
     for head in [
         "wiki", "sem", "project", "report", "tag", "script", "pin", "hidden", "ai", "prompt",
-        "account", "file",
+        "account", "file", "terminal",
     ] {
         assert!(is_cli_head(head), "should enter CLI mode: {head}");
     }
     for other in ["status", "commit_code", "--mcp", "--autostart", "repomeow"] {
         assert!(!is_cli_head(other), "should not enter CLI mode: {other}");
     }
+}
+
+#[test]
+fn cli_parses_terminal_tab_commands() {
+    let cli = Cli::try_parse_from([
+        "repomeow",
+        "terminal",
+        "create",
+        "npm",
+        "-p",
+        "D:/repo",
+        "--name",
+        "dev",
+        "--package",
+        "apps/web",
+    ])
+    .unwrap();
+    let Commands::Terminal(TerminalCommands::Create {
+        command:
+            TerminalCreateCommands::Npm {
+                project_directory,
+                name,
+                package,
+            },
+    }) = cli.command
+    else {
+        panic!("expected terminal create npm");
+    };
+    assert_eq!(project_directory, "D:/repo");
+    assert_eq!(name, "dev");
+    assert_eq!(package, "apps/web");
+
+    let cli = Cli::try_parse_from([
+        "repomeow", "terminal", "create", "custom", "-p", "D:/repo", "--id", "3",
+    ])
+    .unwrap();
+    assert!(matches!(
+        cli.command,
+        Commands::Terminal(TerminalCommands::Create {
+            command: TerminalCreateCommands::Custom { id: 3, .. }
+        })
+    ));
+
+    // 任意命令文本不再是 CLI 的合法入口。
+    assert!(Cli::try_parse_from([
+        "repomeow",
+        "terminal",
+        "create",
+        "-p",
+        "D:/repo",
+        "--command",
+        "pnpm dev",
+    ])
+    .is_err());
+
+    assert!(Cli::try_parse_from([
+        "repomeow",
+        "terminal",
+        "create",
+        "docker",
+        "-p",
+        "D:/repo",
+        "--file",
+        "compose.yml",
+    ])
+    .is_err());
+
+    let cli = Cli::try_parse_from([
+        "repomeow", "terminal", "input", "--id", "7", "--text", "y", "--enter",
+    ])
+    .unwrap();
+    let Commands::Terminal(TerminalCommands::Input {
+        id, text, enter, ..
+    }) = cli.command
+    else {
+        panic!("expected terminal input");
+    };
+    assert_eq!(id, 7);
+    assert_eq!(text, "y");
+    assert!(enter);
+
+    for action in ["start", "stop", "restart"] {
+        let cli = Cli::try_parse_from(["repomeow", "terminal", action, "--id", "7"]).unwrap();
+        let Commands::Terminal(command) = cli.command else {
+            panic!("expected terminal command");
+        };
+        match (action, command) {
+            ("start", TerminalCommands::Start { id: 7, .. })
+            | ("stop", TerminalCommands::Stop { id: 7, .. })
+            | ("restart", TerminalCommands::Restart { id: 7, .. }) => {}
+            _ => panic!("unexpected terminal action: {action}"),
+        }
+    }
+}
+
+#[test]
+fn cli_parses_wiki_generate_and_update() {
+    let cli = Cli::try_parse_from([
+        "repomeow",
+        "wiki",
+        "generate",
+        "-p",
+        "D:/repo",
+        "--language",
+        "en-US",
+        "--concurrency",
+        "4",
+    ])
+    .unwrap();
+    let Commands::Wiki(WikiCommands::Generate {
+        project_directory,
+        language,
+        concurrency,
+    }) = cli.command
+    else {
+        panic!("expected wiki generate");
+    };
+    assert_eq!(project_directory, "D:/repo");
+    assert_eq!(language.as_deref(), Some("en-US"));
+    assert_eq!(concurrency, 4);
+
+    let cli = Cli::try_parse_from(["repomeow", "wiki", "update", "-p", "D:/repo"]).unwrap();
+    assert!(matches!(
+        cli.command,
+        Commands::Wiki(WikiCommands::Update { .. })
+    ));
+}
+
+#[test]
+fn wiki_generate_language_is_validated() {
+    assert_eq!(wiki_language(None).unwrap(), "zh-CN");
+    assert_eq!(wiki_language(Some("en-US".into())).unwrap(), "en-US");
+    let error = wiki_language(Some("fr-FR".into())).unwrap_err();
+    assert_eq!(error.code, "invalid_language");
+}
+
+#[tokio::test]
+async fn wiki_update_without_generated_wiki_is_a_noop() {
+    let data_root = temp_dir("wiki-update-empty");
+    let project = temp_dir("wiki-update-project");
+    let result = update_wiki_impl(
+        project.to_string_lossy().into_owned(),
+        None,
+        Some(&data_root),
+    )
+    .await
+    .unwrap();
+    assert_eq!(result["updated"], json!(false));
+    assert_eq!(result["updatedPageCount"], json!(0));
+    assert_eq!(result["updatedPageIds"], json!([]));
+
+    let _ = fs::remove_dir_all(data_root);
+    let _ = fs::remove_dir_all(project);
 }
 
 #[test]

@@ -12,11 +12,37 @@ pub async fn ai_update_wiki(
     request: UpdateWikiRequest,
     on_event: Channel<WikiUpdateEvent>,
 ) -> AppResult<WikiUpdateResult> {
-    let run = RegisteredRun::new(request.run_id);
-    let Some(data) = wiki::load_wiki(app.clone(), request.project_path.clone())? else {
+    let run = RegisteredRun::new(request.run_id.clone());
+    let data_dir = crate::app_data_dir(&app)?;
+    update_wiki_at(&data_dir, &db, request, &run.id, &run.token, &|event| {
+        let _ = on_event.send(event);
+    })
+    .await
+}
+
+/// CLI(headless)增量更新:同步等待所有受影响页面生成完成。
+pub(crate) async fn cli_update_wiki(
+    data_dir: &std::path::Path,
+    db: &Db,
+    request: UpdateWikiRequest,
+) -> AppResult<WikiUpdateResult> {
+    let run_id = request.run_id.clone();
+    let token = CancellationToken::new();
+    update_wiki_at(data_dir, db, request, &run_id, &token, &|_| {}).await
+}
+
+async fn update_wiki_at(
+    data_dir: &std::path::Path,
+    db: &Db,
+    request: UpdateWikiRequest,
+    run_id: &str,
+    cancel: &CancellationToken,
+    on_event: &(dyn Fn(WikiUpdateEvent) + Send + Sync),
+) -> AppResult<WikiUpdateResult> {
+    let Some(data) = wiki::load_wiki_at(data_dir, &request.project_path) else {
         return Ok(WikiUpdateResult::default());
     };
-    let config = wiki::load_wiki_config_internal(&app, &request.project_path)?;
+    let config = wiki::load_wiki_config_at(data_dir, &request.project_path)?;
     let Some(from_sha) = data.meta.head_sha.clone() else {
         if request.automatic {
             return Ok(WikiUpdateResult::default());
@@ -51,7 +77,7 @@ pub async fn ai_update_wiki(
         .cloned()
         .collect();
     let total = affected.len();
-    let _ = on_event.send(WikiUpdateEvent {
+    on_event(WikiUpdateEvent {
         completed: 0,
         total,
     });
@@ -62,22 +88,22 @@ pub async fn ai_update_wiki(
         generated_generator = Some("builtin".into());
         for (index, page) in affected.iter().enumerate() {
             generated_model = generate_builtin_page_to_disk(
-                &app,
-                &db,
-                &run.id,
+                data_dir,
+                db,
+                run_id,
                 &request.project_path,
                 page,
                 &request.language,
                 &changed.files,
                 config.model.as_deref(),
                 config.thinking.as_deref(),
-                &run.token,
+                cancel,
                 Arc::new(|_| {}),
                 Arc::new(|_| {}),
                 Arc::new(|_| {}),
             )
             .await?;
-            let _ = on_event.send(WikiUpdateEvent {
+            on_event(WikiUpdateEvent {
                 completed: index + 1,
                 total,
             });
@@ -85,9 +111,9 @@ pub async fn ai_update_wiki(
     }
 
     if let Some(head_sha) = changed.head_sha {
-        wiki::save_wiki_meta(
-            app,
-            request.project_path.clone(),
+        wiki::save_wiki_meta_at(
+            data_dir,
+            &request.project_path,
             wiki::WikiMeta {
                 head_sha: Some(head_sha),
                 model: generated_model,

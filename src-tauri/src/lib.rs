@@ -9,6 +9,7 @@ mod error;
 mod models;
 mod path_util;
 mod scheduler;
+mod terminal_ipc;
 mod time_util;
 mod tray;
 mod workday;
@@ -64,7 +65,8 @@ pub fn run() {
     }
     tauri::Builder::default()
         // 单实例:必须最先注册,第二次启动时聚焦已有窗口并退出新进程
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            terminal_ipc::handle_desktop_args(app, &args);
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
                 let _ = window.show();
@@ -116,6 +118,12 @@ pub fn run() {
                     let _ = window.set_focus();
                 }
             }
+
+            // CLI 在桌面未运行时以内部参数启动本进程;待终端状态注册后再处理。
+            terminal_ipc::handle_desktop_args(
+                app.handle(),
+                &std::env::args().collect::<Vec<_>>(),
+            );
 
             // 启动日报/周报定时调度器(后台 tokio 任务,仅 App 运行时生效)
             let handle = app.handle().clone();

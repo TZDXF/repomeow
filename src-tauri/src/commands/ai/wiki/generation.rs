@@ -9,8 +9,36 @@ pub async fn ai_generate_wiki(
     request: GenerateWikiRequest,
     on_event: Channel<WikiGenerationEvent>,
 ) -> AppResult<()> {
-    let run = RegisteredRun::new(request.run_id);
-    let config = wiki::load_wiki_config_internal(&app, &request.project_path)?;
+    let run = RegisteredRun::new(request.run_id.clone());
+    let data_dir = crate::app_data_dir(&app)?;
+    let sink: WikiGenerationEventSink = Arc::new(move |event| {
+        let _ = on_event.send(event);
+    });
+    generate_wiki_at(&data_dir, &db, request, &run.id, &run.token, sink)
+        .await
+        .map(|_| ())
+}
+
+/// CLI(headless)整本生成:与桌面端共用完整管线,同步等待完成后返回页面 id。
+pub(crate) async fn cli_generate_wiki(
+    data_dir: &std::path::Path,
+    db: &Db,
+    request: GenerateWikiRequest,
+) -> AppResult<Vec<String>> {
+    let run_id = request.run_id.clone();
+    let token = CancellationToken::new();
+    generate_wiki_at(data_dir, db, request, &run_id, &token, Arc::new(|_| {})).await
+}
+
+async fn generate_wiki_at(
+    data_dir: &std::path::Path,
+    db: &Db,
+    request: GenerateWikiRequest,
+    run_id: &str,
+    cancel: &CancellationToken,
+    on_event: WikiGenerationEventSink,
+) -> AppResult<Vec<String>> {
+    let config = wiki::load_wiki_config_at(data_dir, &request.project_path)?;
     send_wiki_event(
         &on_event,
         WikiGenerationEvent::Phase {
@@ -19,7 +47,7 @@ pub async fn ai_generate_wiki(
     );
     let context = match wiki::collect_wiki_context(request.project_path.clone()) {
         Ok(context) => context,
-        Err(error) => return fail_wiki_generation(&on_event, &run.token, error),
+        Err(error) => return fail_wiki_generation(&on_event, cancel, error),
     };
     for paths in context.paths.chunks(24) {
         send_wiki_event(
@@ -64,15 +92,15 @@ pub async fn ai_generate_wiki(
         },
     );
     let pages_result = generate_builtin_outline_pages(
-        &app,
-        &db,
+        data_dir,
+        db,
         &context,
         &request.project_path,
         &request.project_name,
         &request.language,
         config.model.as_deref(),
         config.thinking.as_deref(),
-        &run.token,
+        cancel,
         {
             let channel = on_event.clone();
             Arc::new(move |text| {
@@ -106,7 +134,7 @@ pub async fn ai_generate_wiki(
     let (pages, meta_model) = match pages_result {
         Ok(value) => value,
         Err(error) => {
-            let phase = if run.token.is_cancelled() {
+            let phase = if cancel.is_cancelled() {
                 "cancelled"
             } else {
                 "failed"
@@ -120,18 +148,18 @@ pub async fn ai_generate_wiki(
             return Err(error);
         }
     };
-    if run.token.is_cancelled() {
+    if cancel.is_cancelled() {
         send_wiki_event(
             &on_event,
             WikiGenerationEvent::Phase {
                 phase: "cancelled".into(),
             },
         );
-        return Ok(());
+        return Ok(Vec::new());
     }
 
-    if let Err(error) = wiki::begin_wiki(app.clone(), request.project_path.clone()) {
-        return fail_wiki_generation(&on_event, &run.token, error);
+    if let Err(error) = wiki::begin_wiki_at(data_dir, &request.project_path) {
+        return fail_wiki_generation(&on_event, cancel, error);
     }
     for page in &pages {
         send_wiki_event(
@@ -152,7 +180,7 @@ pub async fn ai_generate_wiki(
     );
 
     let page_errors = Arc::new(Mutex::new(Vec::<AppError>::new()));
-    let run_id = run.id.clone();
+    let run_id = run_id.to_string();
     // 页面并发:项目配置优先,未配置沿用设置页全局 AI 并发
     let page_concurrency = config
         .concurrency
@@ -163,11 +191,11 @@ pub async fn ai_generate_wiki(
     let thinking = config.thinking.clone();
     stream::iter(pages.clone())
         .for_each_concurrent(page_concurrency, |page| {
-            let app = app.clone();
+            let data_dir = data_dir.to_path_buf();
             let db = &db;
             let project_path = request.project_path.clone();
             let language = request.language.clone();
-            let token = run.token.clone();
+            let token = cancel.clone();
             let run_id = run_id.clone();
             let channel = on_event.clone();
             let page_errors = page_errors.clone();
@@ -197,7 +225,7 @@ pub async fn ai_generate_wiki(
                 );
                 let activity_channel = channel.clone();
                 let result = generate_builtin_page_to_disk(
-                    &app,
+                    &data_dir,
                     db,
                     &run_id,
                     &project_path,
@@ -264,14 +292,14 @@ pub async fn ai_generate_wiki(
         })
         .await;
 
-    if run.token.is_cancelled() {
+    if cancel.is_cancelled() {
         send_wiki_event(
             &on_event,
             WikiGenerationEvent::Phase {
                 phase: "cancelled".into(),
             },
         );
-        return Ok(());
+        return Ok(Vec::new());
     }
     let page_error = {
         let mut errors = page_errors.lock().unwrap();
@@ -282,13 +310,14 @@ pub async fn ai_generate_wiki(
         }
     };
     if let Some(error) = page_error {
-        return fail_wiki_generation(&on_event, &run.token, error);
+        return fail_wiki_generation(&on_event, cancel, error);
     }
-    let save_result = wiki::save_wiki_meta(
-        app,
-        request.project_path.clone(),
+    let page_ids = pages.iter().map(|page| page.id.clone()).collect::<Vec<_>>();
+    let save_result = wiki::save_wiki_meta_at(
+        data_dir,
+        &request.project_path,
         wiki::WikiMeta {
-            project_path: request.project_path,
+            project_path: request.project_path.clone(),
             head_sha: context.head_sha,
             model: meta_model,
             language: request.language,
@@ -300,7 +329,7 @@ pub async fn ai_generate_wiki(
         Some(wiki::WikiCommitKind::Generate),
     );
     if let Err(error) = save_result {
-        return fail_wiki_generation(&on_event, &run.token, error);
+        return fail_wiki_generation(&on_event, cancel, error);
     }
     send_wiki_event(
         &on_event,
@@ -308,5 +337,5 @@ pub async fn ai_generate_wiki(
             phase: "done".into(),
         },
     );
-    Ok(())
+    Ok(page_ids)
 }

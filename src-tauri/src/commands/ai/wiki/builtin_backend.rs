@@ -13,8 +13,8 @@ use crate::agent::llm::types::{
 use crate::agent::types::StreamFn;
 use crate::commands::ai::harness_support::{
     assistant_text, builtin_stream_fn, collect_usage_events, create_harness,
-    effective_thinking_level, load_builtin_agent_model, prompt_with_timeout, read_tools,
-    record_collected_usage,
+    effective_thinking_level, prompt_with_timeout, read_tools, record_collected_usage,
+    resolve_builtin_model,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -27,7 +27,7 @@ type ActivityCallback = Arc<dyn Fn(String) + Send + Sync>;
 type RetryCallback = Arc<dyn Fn(WikiRetryNotice) + Send + Sync>;
 
 pub(super) async fn generate_builtin_outline_pages(
-    app: &AppHandle,
+    data_dir: &Path,
     db: &Db,
     context: &wiki::WikiContext,
     project_path: &str,
@@ -39,7 +39,8 @@ pub(super) async fn generate_builtin_outline_pages(
     on_activity: ActivityCallback,
     on_retry: RetryCallback,
 ) -> AppResult<(Vec<wiki::WikiOutlinePage>, String)> {
-    let configured = load_builtin_agent_model(app, model)?;
+    let configured =
+        resolve_builtin_model(&crate::ai::catalog::load_ai_config_file_at(data_dir), model)?;
     let stream_fn = builtin_stream_fn(configured.api_key.clone(), cancel.child_token());
     let thinking = effective_thinking_level(&configured.model, thinking);
     generate_outline_with(
@@ -140,7 +141,7 @@ pub(super) async fn generate_outline_with(
 }
 
 pub(super) async fn generate_builtin_page_to_disk(
-    app: &AppHandle,
+    data_dir: &Path,
     db: &Db,
     run_id: &str,
     project_path: &str,
@@ -154,9 +155,10 @@ pub(super) async fn generate_builtin_page_to_disk(
     on_activity: ActivityCallback,
     on_retry: RetryCallback,
 ) -> AppResult<String> {
-    let configured = load_builtin_agent_model(app, model)?;
+    let configured =
+        resolve_builtin_model(&crate::ai::catalog::load_ai_config_file_at(data_dir), model)?;
     let stream_fn = builtin_stream_fn(configured.api_key.clone(), cancel.child_token());
-    let wiki_dir = wiki::wiki_dir(app, project_path)?;
+    let wiki_dir = wiki::wiki_dir_at(data_dir, project_path);
     let thinking = effective_thinking_level(&configured.model, thinking);
     generate_page_with(
         db,

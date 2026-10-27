@@ -878,12 +878,21 @@ pub fn write_command_session(
     id: u64,
     data: String,
 ) -> AppResult<()> {
+    write_command_session_impl(manager.inner(), id, &data)
+}
+
+/// 前端键盘输入与 CLI 输入共用的 PTY 写入入口。
+pub(crate) fn write_command_session_impl(
+    manager: &Arc<TerminalManager>,
+    id: u64,
+    data: &str,
+) -> AppResult<()> {
     let writer = {
         let sessions = manager.lock();
         let entry = sessions.get(&id).ok_or_else(|| session_not_found(id))?;
         entry.writer.clone()
     };
-    if let (Some(writer), Some(input)) = (writer, normalize_pty_input(&data)) {
+    if let (Some(writer), Some(input)) = (writer, normalize_pty_input(data)) {
         let mut guard = writer.lock().unwrap();
         // 子进程已退出但 waiter 尚未清理句柄时写入会 EPIPE,按静默处理。
         let _ = guard.write_all(input.as_bytes());

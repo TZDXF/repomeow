@@ -40,6 +40,10 @@ repomeow wiki pages -p <项目目录>
 # 读某页正文(id 来自 pages;超长截断,truncated 标记)
 repomeow wiki read -p <项目目录> --page-id <页面id>
 
+# 整本生成/重生成(覆盖现有页面)与增量更新;均同步等待完成并消耗 AI 额度
+repomeow wiki generate -p <项目目录> [--language zh-CN|en-US] [--concurrency 2]
+repomeow wiki update -p <项目目录> [--language zh-CN|en-US]
+
 # 生成配置查询/覆盖式写入(字段不传即跟随应用默认)
 repomeow wiki config-get -p <项目目录>
 repomeow wiki config-set -p <项目目录> [--model providerId/modelId] [--thinking high] [--concurrency 4]
@@ -48,7 +52,7 @@ repomeow wiki config-set -p <项目目录> [--model providerId/modelId] [--think
 repomeow wiki delete -p <项目目录>
 ```
 
-未生成 Wiki 时查询类命令返回 `wiki_not_generated` 错误。建议流程:先 `pages` 拿大纲,再按需 `read` 具体页面。Wiki 的 AI 生成/更新仍在应用内或 `wiki_auto_update` 触发,CLI 不提供 generate 入口。
+未生成 Wiki 时查询类命令返回 `wiki_not_generated` 错误。建议流程:先 `pages` 拿大纲,再按需 `read` 具体页面。`generate` 会覆盖现有 Wiki 页面;只需同步代码变更时优先用 `update`。两者均同步等待完成,输出新增/更新页面 id 清单。
 
 ## 项目文件
 

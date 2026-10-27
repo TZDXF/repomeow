@@ -24,6 +24,8 @@ mod generation;
 mod types;
 mod update;
 
+pub(crate) type WikiGenerationEventSink = Arc<dyn Fn(WikiGenerationEvent) + Send + Sync>;
+
 use builtin_backend::*;
 pub use generation::*;
 pub use types::*;
@@ -159,17 +161,17 @@ fn builtin_agent_wiki_page_prompt(
     )
 }
 
-fn send_wiki_event(channel: &Channel<WikiGenerationEvent>, event: WikiGenerationEvent) {
-    let _ = channel.send(event);
+fn send_wiki_event(sink: &WikiGenerationEventSink, event: WikiGenerationEvent) {
+    sink(event);
 }
 
-fn fail_wiki_generation(
-    channel: &Channel<WikiGenerationEvent>,
+fn fail_wiki_generation<T>(
+    sink: &WikiGenerationEventSink,
     cancel: &CancellationToken,
     error: AppError,
-) -> AppResult<()> {
+) -> AppResult<T> {
     send_wiki_event(
-        channel,
+        sink,
         WikiGenerationEvent::Phase {
             phase: if cancel.is_cancelled() {
                 "cancelled".into()
@@ -199,10 +201,11 @@ pub async fn ai_regenerate_wiki_page(
 ) -> AppResult<RegeneratedWikiPage> {
     let run = RegisteredRun::new(request.run_id);
     let config = wiki::load_wiki_config_internal(&app, &request.project_path)?;
+    let data_dir = crate::app_data_dir(&app)?;
     let page_title = request.page.title.clone();
     let project_path = request.project_path.clone();
     let model_name = generate_builtin_page_to_disk(
-        &app,
+        &data_dir,
         &db,
         &run.id,
         &request.project_path,
