@@ -22,7 +22,7 @@ fn worktree_add_and_remove_roundtrip() {
     assert_eq!(added.len(), 2);
     let wt = added.iter().find(|w| !w.is_main).unwrap();
     assert_eq!(wt.branch.as_deref(), Some("feature/x"));
-    assert!(wt.path.replace('\\', "/").contains(".worktrees/feature-x"));
+    assert!(crate::path_util::forward_separators(&wt.path).contains(".worktrees/feature-x"));
     assert!(Path::new(&wt.path).join("a.txt").exists());
 
     // 分支已被 worktree 检出 → git_branch_checked_out

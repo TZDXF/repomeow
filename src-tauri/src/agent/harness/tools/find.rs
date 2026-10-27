@@ -51,7 +51,7 @@ fn relativize_result_path(result_path: &str, search_path: &str) -> String {
     } else {
         result_path.to_string()
     };
-    relative.replace('\\', "/")
+    crate::path_util::forward_separators(&relative)
 }
 
 /// 从搜索根向上找 `.git` 判定是否位于 git 仓库内(fd 据此决定
@@ -141,7 +141,7 @@ fn find_entries(
         }
         let absolute = path.to_string_lossy().to_string();
         let relative = relativize_result_path(&absolute, &root_text);
-        let absolute_posix = absolute.replace('\\', "/");
+        let absolute_posix = crate::path_util::forward_separators(&absolute);
         let file_name = path
             .file_name()
             .map(|name| name.to_string_lossy().to_string())
@@ -328,7 +328,7 @@ mod tests {
             let root = std::env::temp_dir().join(format!(
                 "repomeow-find-{}-{:?}",
                 std::process::id(),
-                std::time::SystemTime::now()
+                crate::time_util::now_system()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
                     .as_nanos()
@@ -350,7 +350,7 @@ mod tests {
         }
 
         fn root_text(&self) -> String {
-            self.root.to_string_lossy().replace('\\', "/")
+            crate::path_util::forward_separators(&self.root.to_string_lossy())
         }
     }
 

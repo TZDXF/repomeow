@@ -94,6 +94,7 @@ pub(crate) fn spawn_terminal_with_env(
     //   在同一窗口内依次执行,跑完窗口保留。
     // powershell / git bash 分支由 start 的 /D 参数指定工作目录,命令经
     // -EncodedCommand(base64) / 双引号包裹的 -c 负载传递。
+    super::editor::validate_cmd_path(path)?;
     let cmdline = build_start_cmdline(path, title, command, shell, tools);
     hidden(configured_terminal_command("cmd", &configure))
         .raw_arg(&cmdline)
@@ -143,10 +144,9 @@ pub(super) fn build_start_cmdline(
         }
         ShellKind::GitBash => {
             let bash = tools.bash.unwrap_or("bash");
-            // -c 负载整体包双引号:外层 cmd 会保护引号内的 & | < > 等元字符;
-            // 负载内嵌 `"` 会破坏配对,属已知限制(与 cmd 分支原样透传的约定同级)
+            // 编码负载，避免命令中的引号和元字符被外层 cmd 解析。
             let tail = match command {
-                Some(c) => format!("--login -i -c \"{c}; exec bash\""),
+                Some(c) => format!("--login -i -c \"{}\"", encode_bash_command(c)),
                 None => "--login -i".to_string(),
             };
             format!("/C start \"{title}\" /D \"{path}\" \"{bash}\" {tail}")
@@ -207,7 +207,7 @@ pub(super) fn is_continuation(line: &str) -> bool {
 #[cfg(windows)]
 pub(super) fn sanitize_cmd_text(s: &str) -> String {
     s.chars()
-        .filter(|c| !matches!(c, '"' | '&' | '|' | '<' | '>' | '^'))
+        .filter(|c| !matches!(c, '"' | '&' | '|' | '<' | '>' | '^' | '%' | '!' | '\r' | '\n'))
         .collect()
 }
 
@@ -237,7 +237,7 @@ pub(crate) fn find_wt() -> Option<String> {
 /// 与 Worktrunk 等同名 `wt.exe`;官方 MSIX 版会走上面的 WindowsApps 执行别名。
 #[cfg(any(windows, test))]
 pub(super) fn is_winget_link(path: &str) -> bool {
-    path.replace('/', "\\")
+    crate::path_util::windows_separators(path)
         .to_ascii_lowercase()
         .contains(r"\microsoft\winget\links\")
 }

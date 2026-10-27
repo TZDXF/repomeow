@@ -9,7 +9,7 @@
 
 use std::collections::HashSet;
 use std::fs;
-use std::io::{Cursor, Read};
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -20,7 +20,7 @@ use super::git;
 use super::models::{Skill, SkillImportOutcome, SkillImportSkip, SkillLibrary};
 use super::ops::{new_id, pick_skill_directory};
 use super::store::{remove_dir_tolerating_readonly, Library, DIR_SKILLS, FILE_SKILLS};
-use crate::commands::git::{friendly_git_error, git_command};
+use crate::commands::git::git_command;
 use crate::error::{AppError, ErrorCode};
 use crate::time_util::{now_ts, now_ts_nanos};
 
@@ -292,6 +292,7 @@ pub(super) fn clone_repo_with_checkout(
     timeout: Duration,
     checkout: bool,
 ) -> RlResult<()> {
+    crate::commands::git::validate_clone_url(url).map_err(RlError::App)?;
     let dir = workdir.to_string_lossy().into_owned();
     let target_str = target.to_string_lossy().into_owned();
     let mut command = git_command(&dir);
@@ -306,10 +307,8 @@ pub(super) fn clone_repo_with_checkout(
         .spawn()
         .map_err(RlError::Io)?;
     let drainer = child.stderr.take().map(|mut pipe| {
-        std::thread::spawn(move || -> Vec<u8> {
-            let mut buf = Vec::new();
-            let _ = pipe.read_to_end(&mut buf);
-            buf
+        std::thread::spawn(move || {
+            let _ = std::io::copy(&mut pipe, &mut std::io::sink());
         })
     });
     let deadline = Instant::now() + timeout;
@@ -320,7 +319,7 @@ pub(super) fn clone_repo_with_checkout(
                 if Instant::now() >= deadline {
                     kill_process_tree(&mut child);
                     let _ = child.wait();
-                    return Err(RlError::coded(codes::CLONE_TIMEOUT, url));
+                    return Err(RlError::coded(codes::CLONE_TIMEOUT, ""));
                 }
                 std::thread::sleep(Duration::from_millis(100));
             }
@@ -334,16 +333,11 @@ pub(super) fn clone_repo_with_checkout(
     if status.success() {
         return Ok(());
     }
-    let stderr = drainer.and_then(|t| t.join().ok()).unwrap_or_default();
-    let detail = String::from_utf8_lossy(&stderr).trim().to_string();
-    Err(RlError::App(if detail.is_empty() {
-        AppError::coded(
-            ErrorCode::GitCommandFailed,
-            format!("clone status={status}"),
-        )
-    } else {
-        friendly_git_error(&detail)
-    }))
+    // Git、凭据助手和远端均可能在 stderr 回显令牌，克隆错误只报告状态。
+    let _ = drainer.and_then(|t| t.join().ok());
+    Err(RlError::App(AppError::coded(
+        ErrorCode::GitCommandFailed, format!("clone status={status}"),
+    )))
 }
 
 /// 目录总字节数(跳过符号链接,与 copy/扫描口径一致)
@@ -415,4 +409,23 @@ pub(super) fn skill_import_url(lib: &Library, url: &str) -> RlResult<SkillImport
         return Err(RlError::coded(codes::URL_INVALID, url));
     }
     clone_and_import(lib, url)
+}
+
+#[cfg(test)]
+mod clone_security_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_credentials_before_starting_clone() {
+        let result = clone_repo_with_checkout(
+            Path::new("nonexistent-workdir"),
+            "https://user:secret@example.com/repo.git",
+            Path::new("unused-target"),
+            Duration::from_secs(1),
+            true,
+        );
+        let error = result.unwrap_err().to_string();
+        assert!(!error.contains("secret"));
+        assert!(error.contains("credentials"));
+    }
 }

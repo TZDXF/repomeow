@@ -5,12 +5,12 @@
 //! 依赖;用于会话/条目 id 生成,不用于安全用途)。
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn seed() -> u64 {
-    let nanos = SystemTime::now()
+    let nanos = crate::time_util::now_system()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos() as u64)
         .unwrap_or(0);
@@ -54,7 +54,7 @@ impl Xoshiro256 {
 
 /// 生成一个小写连字符格式的 UUIDv7 字符串。
 pub fn uuid_v7() -> String {
-    let timestamp_ms = SystemTime::now()
+    let timestamp_ms = crate::time_util::now_system()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0);

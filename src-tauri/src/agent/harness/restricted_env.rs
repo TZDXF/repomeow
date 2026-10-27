@@ -597,7 +597,7 @@ mod tests {
         std::env::temp_dir().join(format!(
             "repomeow-restricted-{tag}-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
+            crate::time_util::now_system()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()

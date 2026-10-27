@@ -14,11 +14,75 @@ pub(super) async fn remove_dir_all_retry(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// HTTP(S) URL 的查询、片段和 userinfo 均可能含令牌，会被 Git 保存或回显。
+pub(crate) fn validate_clone_url(url: &str) -> AppResult<()> {
+    if let Ok(parsed) = reqwest::Url::parse(url) {
+        if matches!(parsed.scheme(), "http" | "https")
+            && (!parsed.username().is_empty() || parsed.password().is_some()
+                || parsed.query().is_some() || parsed.fragment().is_some())
+        {
+            return Err(AppError::coded(ErrorCode::GitCloneUrlRequired, "HTTP URL must not contain credentials, query or fragment"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_clone_transport(url: &str, uses_account: bool) -> AppResult<()> {
+    if uses_account && reqwest::Url::parse(url).ok().is_some_and(|u| u.scheme() == "http") {
+        return Err(AppError::coded(ErrorCode::GitCloneFailed, "account authentication requires HTTPS"));
+    }
+    Ok(())
+}
+
+/// 构造仅匹配目标仓库的临时 HTTP Basic 配置。
+fn clone_auth_header(url: &str, provider: &str, username: &str, token: &str) -> Option<(String, String)> {
+    use base64::Engine as _;
+    let parsed = reqwest::Url::parse(url).ok()?;
+    if parsed.scheme() != "https" || parsed.host_str().is_none() {
+        return None;
+    }
+    let user = match provider {
+        "github" => "x-access-token",
+        "gitlab" => "oauth2",
+        "gitee" => username,
+        _ => return None,
+    };
+    let basic = base64::engine::general_purpose::STANDARD.encode(format!("{user}:{token}"));
+    Some((format!("http.{url}.extraheader"), format!("Authorization: Basic {basic}")))
+}
+
+#[cfg(test)]
+mod security_tests {
+    use super::{clone_auth_header, validate_clone_transport, validate_clone_url};
+
+    #[test]
+    fn clone_auth_is_scoped_and_not_embedded_in_url() {
+        let (key, value) = clone_auth_header("https://example.com/org/repo.git", "github", "user", "secret").unwrap();
+        assert_eq!(key, "http.https://example.com/org/repo.git.extraheader");
+        assert!(!key.contains("secret"));
+        assert!(value.starts_with("Authorization: Basic "));
+        assert!(clone_auth_header("git@example.com:org/repo.git", "github", "user", "secret").is_none());
+        assert!(clone_auth_header("http://example.com/repo", "github", "user", "secret").is_none());
+    }
+
+    #[test]
+    fn clone_url_rejects_possible_secrets() {
+        for url in ["https://user:secret@example.com/repo", "https://example.com/repo?access_token=secret", "https://example.com/repo?x=%73ecret", "https://example.com/repo#secret"] {
+            let error = validate_clone_url(url).unwrap_err().to_string();
+            assert!(!error.contains("secret"));
+        }
+        assert!(validate_clone_url("https://example.com/repo").is_ok());
+        assert!(validate_clone_url("git@example.com:org/repo.git").is_ok());
+        assert!(validate_clone_transport("http://example.com/repo", true).is_err());
+        assert!(validate_clone_transport("http://example.com/repo", false).is_ok());
+        assert!(validate_clone_transport("https://example.com/repo", true).is_ok());
+    }
+}
+
 /// 克隆仓库到本地目录,返回克隆后的路径。
 /// 期间可通过 cancel_git_clone(job_id) 中断;失败/取消都会清理半成品目录。
-/// 进度行刷在 stderr 但不透传(前端仅 loading),只保留末尾用于错误提示。
-/// account_id 传入时(从「账号仓库」入口克隆)用绑定账号的 token 拼认证 URL 克隆,
-/// 成功后把 origin 重置为干净 URL,避免 token 残留在 .git/config
+/// stderr 仅排空，不透传潜在敏感信息。
+/// account_id 传入时通过临时 Git 配置提供认证，origin 始终使用不含凭据的 URL。
 #[tauri::command]
 pub async fn git_clone(
     db: State<'_, Db>,
@@ -32,22 +96,18 @@ pub async fn git_clone(
     if url.is_empty() {
         return Err(AppError::coded(ErrorCode::GitCloneUrlRequired, ""));
     }
-    // 账号凭据拼进 clone URL(仅 http(s) 地址生效,ssh 地址原样使用)
-    let clone_url = match account_id {
-        // GitHub CLI 虚拟账号:不查库,token 取自 gh(必须先于查库分支)
-        Some(id) if id == account::GH_CLI_ACCOUNT_ID => {
-            let (provider, username, token) = account::gh_cli_git_credentials().await?;
-            account::build_authed_url(&provider, &username, &token, &url)
-        }
+    validate_clone_url(&url)?;
+    validate_clone_transport(&url, account_id.is_some())?;
+    let credentials = match account_id {
+        Some(id) if id == account::GH_CLI_ACCOUNT_ID => Some(account::gh_cli_git_credentials().await?),
         Some(id) => {
-            let (provider, username, token) = {
-                let conn = db.0.lock().unwrap();
-                account::get_credentials(&conn, id)?
-            };
-            account::build_authed_url(&provider, &username, &token, &url)
+            let conn = db.0.lock().unwrap();
+            Some(account::get_credentials(&conn, id)?)
         }
-        None => url.clone(),
+        None => None,
     };
+    let auth = credentials.as_ref().and_then(|(provider, username, token)|
+        clone_auth_header(&url, provider, username, token));
     let target = Path::new(&target_path);
     let parent = target
         .parent()
@@ -67,17 +127,24 @@ pub async fn git_clone(
 
     let mut command = tokio::process::Command::new("git");
     command.env("GIT_TERMINAL_PROMPT", "0");
-    // 用账号 token 克隆时禁用凭据助手:认证只走 URL 内嵌的 token,
-    // 避免 GCM 把 token 存进系统凭据管理器;后续 pull/push 由用户自己的凭据解决
-    if clone_url != url {
-        command.arg("-c").arg("credential.helper=");
+    // Git 的临时配置经环境变量传递，不出现在 argv 或仓库配置中。
+    // 按仓库 URL 限定 header，避免向其他主机发送凭据。
+    if let Some((key, value)) = &auth {
+        command.env("GIT_ALLOW_PROTOCOL", "https")
+            .env("GIT_CONFIG_COUNT", "3")
+            .env("GIT_CONFIG_KEY_0", "credential.helper")
+            .env("GIT_CONFIG_VALUE_0", "")
+            .env("GIT_CONFIG_KEY_1", key)
+            .env("GIT_CONFIG_VALUE_1", value)
+            .env("GIT_CONFIG_KEY_2", "http.followRedirects")
+            .env("GIT_CONFIG_VALUE_2", "false");
     }
     command.arg("clone");
     if shallow.unwrap_or(false) {
         command.args(["--depth", "1"]);
     }
     command
-        .args(["--", &clone_url, &target_path])
+        .args(["--", &url, &target_path])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
@@ -92,30 +159,12 @@ pub async fn git_clone(
     // 但 pid 已拷出为独立副本,不受句柄所有权转移影响)
     let _tracked = TrackedPid::new(child.id());
 
-    // stderr 由独立任务持续消费,避免管道写满阻塞子进程;
-    // 只保留末尾 8KB(进度行很长,且只需末尾的失败原因)
-    let stderr_buf = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    // 持续排空 stderr，但不保存或展示其中可能回显的秘密。
     if let Some(mut stderr) = child.stderr.take() {
-        let buf = stderr_buf.clone();
         tauri::async_runtime::spawn(async move {
             use tokio::io::AsyncReadExt;
             let mut chunk = [0u8; 4096];
-            loop {
-                match stderr.read(&mut chunk).await {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => {
-                        let mut text = buf.lock().unwrap();
-                        text.push_str(&String::from_utf8_lossy(&chunk[..n]));
-                        if text.len() > 8192 {
-                            let mut cut = text.len() - 4096;
-                            while !text.is_char_boundary(cut) {
-                                cut += 1;
-                            }
-                            text.drain(..cut);
-                        }
-                    }
-                }
-            }
+            while matches!(stderr.read(&mut chunk).await, Ok(n) if n > 0) {}
         });
     }
 
@@ -137,12 +186,8 @@ pub async fn git_clone(
             }
             Ok(Some(_)) => {
                 clone_jobs().lock().await.remove(&job_id);
-                let detail = stderr_buf.lock().unwrap().trim().to_string();
-                break Err(if detail.is_empty() {
-                    AppError::coded(ErrorCode::GitCloneFailed, "")
-                } else {
-                    friendly_git_error(&detail)
-                });
+                // stderr 可能包含重定向地址、服务端回显或凭据助手输出，不能安全透传。
+                break Err(AppError::coded(ErrorCode::GitCloneFailed, ""));
             }
             Ok(None) => tokio::time::sleep(std::time::Duration::from_millis(200)).await,
             Err(e) => {
@@ -158,10 +203,6 @@ pub async fn git_clone(
     // 失败/取消时清理半成品目录(取消场景子进程刚被 kill,句柄释放有延迟,靠重试覆盖)
     if result.is_err() && target.exists() {
         let _ = remove_dir_all_retry(target).await;
-    }
-    // 用账号凭据克隆成功后,把 origin 重置为干净 URL(token 不留在 .git/config)
-    if result.is_ok() && clone_url != url {
-        let _ = run_git(&target_path, &["remote", "set-url", "origin", &url]);
     }
     result.map(|()| target_path)
 }

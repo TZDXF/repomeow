@@ -27,3 +27,11 @@ export function debounce<A extends unknown[]>(fn: (...args: A) => void, ms: numb
   run.cancel = () => clearTimeout(timer);
   return run;
 }
+
+/** 返回切换指定元素后的新 Set，保留原集合以触发响应式更新。 */
+export function toggleInSet<T>(items: ReadonlySet<T>, item: T): Set<T> {
+  const next = new Set(items);
+  if (next.has(item)) next.delete(item);
+  else next.add(item);
+  return next;
+}

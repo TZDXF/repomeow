@@ -55,7 +55,7 @@ pub(super) fn generate_report_tool(app: &AppHandle, ctx: &ChatToolContext) -> Ag
                         _ => return Err(tool_err(invalid_arg("period_type (daily|weekly)"))),
                     }
                     .to_string();
-                    let today = Local::now().date_naive();
+                    let today = crate::time_util::now_local().date_naive();
                     let default_from = if period_type == "weekly" {
                         today - chrono::Duration::days(6)
                     } else {

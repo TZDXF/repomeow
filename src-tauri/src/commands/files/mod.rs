@@ -1,6 +1,7 @@
 mod compose;
 mod directory;
 mod filename_search;
+mod markdown_image;
 mod save;
 mod text_search;
 mod watch;
@@ -33,6 +34,12 @@ pub fn search_project_files(
     limit: Option<u32>,
 ) -> AppResult<Vec<ProjectFileEntry>> {
     filename_search::search_project_files(path, query, limit)
+}
+
+/// 验证 Markdown 本地图片的真实路径,防止符号链接逃逸。
+#[tauri::command]
+pub fn resolve_markdown_image(root: String, image_path: String) -> AppResult<String> {
+    markdown_image::resolve_markdown_image(root, image_path)
 }
 
 #[tauri::command]

@@ -159,7 +159,7 @@ fn search_directory(
 fn format_display_path(file_path: &str, search_path: &str, is_directory: bool) -> String {
     if is_directory {
         if let Ok(relative) = std::path::Path::new(file_path).strip_prefix(search_path) {
-            let text = relative.to_string_lossy().replace('\\', "/");
+            let text = crate::path_util::forward_separators(&relative.to_string_lossy());
             if !text.is_empty() && !text.starts_with("../") {
                 return text;
             }
@@ -496,7 +496,7 @@ mod tests {
             let root = std::env::temp_dir().join(format!(
                 "repomeow-grep-{}-{:?}",
                 std::process::id(),
-                std::time::SystemTime::now()
+                crate::time_util::now_system()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
                     .as_nanos()

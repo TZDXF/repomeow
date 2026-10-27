@@ -2,15 +2,42 @@ use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::error::{AppError, AppResult, ErrorCode};
-use crate::path_util::clean_str;
+use crate::path_util::{clean_str, to_forward_slash_str};
 
 /// 交给系统默认处理程序等于直接执行的扩展名(Windows 上 .js/.vbs/.lnk 等双击
 /// 即运行),拒绝用默认程序打开;文档/图片/源码等数据类文件不受影响。项目源码
 /// 应经编辑器打开(`open_in_editor`),不走这里。
 const BLOCKED_OPEN_EXTENSIONS: [&str; 30] = [
-    "exe", "msi", "msix", "appx", "appxbundle", "bat", "cmd", "com", "scr", "pif", "ps1", "psd1",
-    "psm1", "vbs", "vbe", "js", "jse", "ws", "wsf", "wsh", "hta", "lnk", "url", "jar", "cpl",
-    "msc", "reg", "chm", "application", "appref-ms",
+    "exe",
+    "msi",
+    "msix",
+    "appx",
+    "appxbundle",
+    "bat",
+    "cmd",
+    "com",
+    "scr",
+    "pif",
+    "ps1",
+    "psd1",
+    "psm1",
+    "vbs",
+    "vbe",
+    "js",
+    "jse",
+    "ws",
+    "wsf",
+    "wsh",
+    "hta",
+    "lnk",
+    "url",
+    "jar",
+    "cpl",
+    "msc",
+    "reg",
+    "chm",
+    "application",
+    "appref-ms",
 ];
 
 /// 校验用系统默认程序打开的本地路径:拒绝空路径、`..` 穿越组件、设备路径
@@ -23,10 +50,9 @@ pub(crate) fn validate_open_path(raw: &str) -> AppResult<String> {
         return Err(AppError::coded(ErrorCode::InvalidPath, raw.to_string()));
     }
     let clean = clean_str(raw);
-    let forward = clean.replace('\\', "/");
+    let forward = to_forward_slash_str(&clean);
     if forward.split('/').any(|part| part == "..")
-        || forward.starts_with("//./")
-        || forward.starts_with("//?/")
+        || forward.starts_with("//")
     {
         return Err(AppError::coded(ErrorCode::InvalidPath, raw.to_string()));
     }

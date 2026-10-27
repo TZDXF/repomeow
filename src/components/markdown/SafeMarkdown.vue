@@ -12,6 +12,7 @@ import {
 import { markdownExtensions, mergeSafePreviewers } from "@/lib/markdown-extensions";
 import MdImage from "./MdImage.vue";
 import MdLink from "./MdLink.vue";
+import { interceptMarkdownLink } from "./markdown-links";
 
 /**
  * vue-stream-markdown 的统一安全封装:全部渲染点必须经此组件,禁止直接使用
@@ -22,8 +23,7 @@ import MdLink from "./MdLink.vue";
  * - previewers:html 围栏代码块的预览 iframe 一律空沙箱(脚本不执行、表单/
  *   弹窗/同源全禁),保留预览外观;调用方仍可传 previewers 覆盖其他选项,
  *   但 html.sandbox 合并后仍以空沙箱兜底。
- * - components:默认接管 img(相对路径 → asset 协议)与 a(协议白名单),
- *   调用方可传 components 追加/覆盖其他标签。
+ * - components:强制接管 img 和 a,调用方可追加其他标签;所有链接点击在此拦截。
  * - extensions:全局共享的 code/mermaid/math 扩展实例(2.x 起需显式注册)。
  */
 interface Props {
@@ -46,24 +46,31 @@ const props = defineProps<Props>();
 const mergedPreviewers = computed<PreviewerConfig>(() => mergeSafePreviewers(props.previewers));
 
 const mergedComponents = computed<MarkdownComponents>(() => ({
+  ...props.components,
   img: MdImage,
   a: MdLink,
-  ...props.components,
 }));
 
 const mergedExtensions = computed<ExtensionOverrides>(() => props.extensions ?? markdownExtensions);
 </script>
 
 <template>
-  <Markdown
-    :content="content"
-    :mode="mode"
-    :controls="controls"
-    :theme-element="themeElement"
-    :locale="locale"
-    :before-download="beforeDownload"
-    :previewers="mergedPreviewers"
-    :components="mergedComponents"
-    :extensions="mergedExtensions"
-  />
+  <div
+    style="display: contents"
+    @click.capture="interceptMarkdownLink"
+    @auxclick.capture="interceptMarkdownLink"
+    @contextmenu.capture="interceptMarkdownLink"
+  >
+    <Markdown
+      :content="content"
+      :mode="mode"
+      :controls="controls"
+      :theme-element="themeElement"
+      :locale="locale"
+      :before-download="beforeDownload"
+      :previewers="mergedPreviewers"
+      :components="mergedComponents"
+      :extensions="mergedExtensions"
+    />
+  </div>
 </template>

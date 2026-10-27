@@ -83,6 +83,7 @@ pub use history_diff::*;
 mod stats;
 pub use stats::*;
 mod clone;
+pub(crate) use clone::validate_clone_url;
 pub use clone::*;
 #[cfg(test)]
 mod tests;

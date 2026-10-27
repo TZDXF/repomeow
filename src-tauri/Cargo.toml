@@ -65,6 +65,9 @@ regex = "1"
 scraper = "0.27"
 # JDK 在线安装(install_jdk)解压发行包 zip;仅 deflate 即可覆盖 Adoptium/Zulu 的归档
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
+# JDK 归档校验及有界 tar.gz 解压
+sha2 = "0.10"
+tar = "0.4"
 # 提交内图片预览(git_commit_file_blob):git blob 内容 base64 编码后经 IPC 传前端拼 data: URL
 base64 = "0.23"
 # docker 导出可选 gzip 压缩:纯 Rust 编码器,避免依赖系统 gzip(Windows 无内置)

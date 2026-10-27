@@ -33,12 +33,15 @@ pub(super) fn merge_blocking(
     squash: bool,
 ) -> AppResult<GitMergeResult> {
     let branch = branch.trim();
-    if branch.is_empty() {
+    if branch.is_empty() || branch.starts_with('-') {
         return Err(AppError::coded(ErrorCode::GitBranchNameRequired, ""));
     }
     // 合并执行位置:目标分支检出在哪个 worktree(含主工作区)就在哪里合并
     let mut merge_path = path.to_string();
     if let Some(t) = target.map(str::trim).filter(|s| !s.is_empty()) {
+        if t.starts_with('-') {
+            return Err(AppError::coded(ErrorCode::GitBranchNameRequired, ""));
+        }
         if t == branch {
             return Err(AppError::coded(
                 ErrorCode::GitCommandFailed,
@@ -134,7 +137,7 @@ pub async fn git_rebase(app: AppHandle, path: String, onto: String) -> AppResult
 
 pub(super) fn rebase_blocking(path: &str, onto: &str) -> AppResult<GitRebaseResult> {
     let onto = onto.trim();
-    if onto.is_empty() {
+    if onto.is_empty() || onto.starts_with('-') {
         return Err(AppError::coded(ErrorCode::GitBranchNameRequired, ""));
     }
     let result = git_command(path).args(["rebase", onto]).output()?;

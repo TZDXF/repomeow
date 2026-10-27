@@ -25,10 +25,12 @@ import { buildFileTree, flatFileRows, flattenVisibleTree } from "@/lib/file-tree
 import { extOf, imageMimeOf, isImagePath } from "@/lib/file-kind";
 import { openPathWith, sortOpenWithOptions } from "@/lib/open-with";
 import { baseName } from "@/lib/path";
-import { copyToClipboard } from "@/lib/utils";
+import { copyToClipboard, toggleInSet } from "@/lib/utils";
 import { cmd } from "@/lib/tauri";
+import { useLatestRequest } from "@/composables/useLatestRequest";
+import { useGitDiffLoader } from "@/composables/git/useGitDiffLoader";
 import { useSettingsStore } from "@/stores/settings";
-import type { GitCommitFile, GitCommitFileDiff, GitGraphCommit } from "@/types";
+import type { GitCommitFile, GitGraphCommit } from "@/types";
 
 const props = defineProps<{
   commit: GitGraphCommit;
@@ -45,6 +47,8 @@ const { t } = useI18n();
 const settings = useSettingsStore();
 
 // --- 文件列表 ---
+const filesRequest = useLatestRequest();
+const imageRequest = useLatestRequest();
 const files = ref<GitCommitFile[]>([]);
 const filesLoading = ref(false);
 const filesError = ref("");
@@ -54,9 +58,13 @@ const collapsedFolders = ref(new Set<string>());
 
 // --- 单文件 diff:本组件只负责取数,解析/着色/折叠/并排渲染全部在 DiffViewer ---
 const selectedPath = ref<string | null>(null);
-const diff = ref<GitCommitFileDiff | null>(null);
-const diffLoading = ref(false);
-const diffError = ref("");
+const {
+  diff,
+  loading: diffLoading,
+  error: diffError,
+  load: loadDiff,
+  reset: resetDiff,
+} = useGitDiffLoader({ keepPrevious: true });
 
 // --- 图片 diff:二进制图片无文本 diff 可渲染,新旧版本 blob 转 data URL 由
 //     ImageDiffPreview 直接预览(与 ProjectFiles 的图片查看同款交互) ---
@@ -86,32 +94,36 @@ const ignoreWs = useLocalStorage<"none" | "eol" | "change" | "all">(
 const isMerge = computed(() => props.commit.parents.length > 1);
 
 async function loadFiles() {
+  const isCurrent = filesRequest.begin();
+  imageRequest.invalidate();
+  imageLoading.value = false;
   filesLoading.value = true;
   filesError.value = "";
   files.value = [];
   selectedPath.value = null;
-  diff.value = null;
-  diffError.value = "";
+  resetDiff();
   imagePanes.value = [];
   imageError.value = "";
   try {
-    files.value = await cmd<GitCommitFile[]>("git_commit_files", {
+    const result = await cmd<GitCommitFile[]>("git_commit_files", {
       path: props.projectPath,
       hash: props.commit.hash,
     });
+    if (!isCurrent()) return;
+    files.value = result;
     // 默认选中第一个文件,直接展示 diff
     if (files.value.length) {
       void selectFile(files.value[0]);
     }
   } catch (e) {
-    filesError.value = String(e);
+    if (isCurrent()) filesError.value = String(e);
   } finally {
-    filesLoading.value = false;
+    if (isCurrent()) filesLoading.value = false;
   }
 }
 
 watch(
-  () => props.commit.hash,
+  () => [props.projectPath, props.commit.hash],
   () => void loadFiles(),
   { immediate: true },
 );
@@ -121,41 +133,30 @@ async function selectFile(file: GitCommitFile, force = false) {
     return;
   }
   selectedPath.value = file.path;
+  imageRequest.invalidate();
+  imageLoading.value = false;
   // 图片:不走文本 diff,取新旧版本 blob 预览(忽略空白模式对二进制无意义,不参与其重取)
   if (isImagePath(file.path)) {
-    diff.value = null;
-    diffError.value = "";
-    diffLoading.value = false;
+    resetDiff();
     void loadImageDiff(file);
     return;
   }
   imagePanes.value = [];
-  // 切文件不清空旧 diff、不转圈:旧内容保留到新结果落地后由 DiffViewer 同帧替换;
-  // 仅首次加载(没有任何旧内容)时 diffLoading 才为 true,给空区域一个转圈
-  diffLoading.value = !diff.value;
-  diffError.value = "";
-  try {
-    const result = await cmd<GitCommitFileDiff>("git_commit_file_diff", {
+  await loadDiff(() =>
+    cmd("git_commit_file_diff", {
       path: props.projectPath,
       hash: props.commit.hash,
       filePath: file.path,
       oldPath: file.old_path,
       ignoreWs: ignoreWs.value === "none" ? null : ignoreWs.value,
-    });
-    // 快速连点 A→B:旧响应可能晚于新选择返回,不做 stale 校验会把 A 的 diff 写到 B 的标题下
-    if (selectedPath.value !== file.path) return;
-    diff.value = result;
-  } catch (e) {
-    if (selectedPath.value !== file.path) return;
-    diffError.value = String(e);
-  } finally {
-    if (selectedPath.value === file.path) diffLoading.value = false;
-  }
+    }),
+  );
 }
 
 // 图片 diff 取数:新增文件无旧版本、删除文件无新版本,其余(含重命名/类型变更)两侧都取;
 // blob 在某一版本不存在时该侧直接不渲染。旧版本从父提交的树读,重命名走 old_path
 async function loadImageDiff(file: GitCommitFile) {
+  const isCurrent = imageRequest.begin();
   const wantOld = file.status !== "A";
   const wantNew = file.status !== "D";
   imageLoading.value = true;
@@ -179,7 +180,7 @@ async function loadImageDiff(file: GitCommitFile) {
           })
         : Promise.resolve(null),
     ]);
-    if (selectedPath.value !== file.path) return;
+    if (!isCurrent()) return;
     const panes: DiffImagePane[] = [];
     if (oldB64 !== null) {
       const p = file.old_path ?? file.path;
@@ -202,11 +203,11 @@ async function loadImageDiff(file: GitCommitFile) {
     }
     imagePanes.value = panes;
   } catch (e) {
-    if (selectedPath.value !== file.path) return;
+    if (!isCurrent()) return;
     imagePanes.value = [];
     imageError.value = String(e);
   } finally {
-    if (selectedPath.value === file.path) imageLoading.value = false;
+    if (isCurrent()) imageLoading.value = false;
   }
 }
 
@@ -230,13 +231,7 @@ const flatRows = computed(() =>
 );
 
 function toggleFolder(fullPath: string) {
-  const next = new Set(collapsedFolders.value);
-  if (next.has(fullPath)) {
-    next.delete(fullPath);
-  } else {
-    next.add(fullPath);
-  }
-  collapsedFolders.value = next;
+  collapsedFolders.value = toggleInSet(collapsedFolders.value, fullPath);
 }
 
 /** 当前选中文件(已删除的文件不提供 IDE 打开:工作区已不存在) */
@@ -331,6 +326,9 @@ function startListResize(e: PointerEvent) {
 }
 
 onBeforeUnmount(() => {
+  filesRequest.invalidate();
+  imageRequest.invalidate();
+  resetDiff();
   // 拖拽中组件被卸载:残留 pointermove/pointerup 监听器仍会引用已卸载组件的状态,显式移除避免泄漏
   for (const fn of listResizeCleanups) fn();
   listResizeCleanups = [];

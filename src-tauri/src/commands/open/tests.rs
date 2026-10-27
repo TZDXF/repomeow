@@ -323,7 +323,7 @@ fn start_cmdline_gitbash_wraps_command_in_quoted_c_payload() {
     // -c 负载整体包双引号,外层 cmd 不会切分引号内的 & 元字符
     assert_eq!(
         s,
-        r#"/C start "t" /D "D:\code\foo" "C:\Program Files\Git\bin\bash.exe" --login -i -c "npm run dev & echo done; exec bash""#
+        format!(r#"/C start "t" /D "D:\code\foo" "C:\Program Files\Git\bin\bash.exe" --login -i -c "{}""#, encode_bash_command("npm run dev & echo done"))
     );
 }
 
@@ -563,7 +563,9 @@ fn open_path_validation_blocks_executables_and_traversal() {
     );
 
     // 可执行/脚本类扩展名拒绝(大小写不敏感)
-    for name in ["a.exe", "a.EXE", "a.bat", "a.ps1", "a.js", "a.vbs", "a.lnk", "a.hta"] {
+    for name in [
+        "a.exe", "a.EXE", "a.bat", "a.ps1", "a.js", "a.vbs", "a.lnk", "a.hta",
+    ] {
         let p = dir.join(name).to_string_lossy().to_string();
         assert!(validate_open_path(&p).is_err(), "{name} 应被拒绝");
     }
@@ -581,4 +583,20 @@ fn open_path_validation_blocks_executables_and_traversal() {
 
 fn clean_str_for_test(s: &str) -> String {
     crate::path_util::clean_str(s)
+}
+
+#[test]
+fn system_open_rejects_unc_paths_before_filesystem_access() {
+    for path in [r"\\server\share\file.txt", "//server/share/file.txt", r"\\?\UNC\server\share\file.txt", r"\\.\PhysicalDrive0"] {
+        assert!(super::path::validate_open_path(path).is_err(), "{path}");
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn cmd_paths_reject_shell_metacharacters() {
+    assert!(validate_cmd_path(r"C:\safe folder\project").is_ok());
+    for path in [r"C:\a&whoami", r"C:\%PATH%", r"C:\a!b", "C:\\a\"&whoami", "C:\\a\nwhoami"] {
+        assert!(validate_cmd_path(path).is_err(), "{path}");
+    }
 }

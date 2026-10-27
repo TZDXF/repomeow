@@ -24,6 +24,9 @@ pub async fn git_init(
                 b
             }
         };
+        if branch.starts_with('-') {
+            return Err(AppError::coded(ErrorCode::GitBranchNameRequired, ""));
+        }
         if let Err(e) = run_git(&path, &["init", "-b", branch]) {
             let msg = e.to_string();
             if msg.contains("unknown switch") || msg.contains("unrecognized option") {
@@ -38,6 +41,9 @@ pub async fn git_init(
             .map(str::trim)
             .filter(|u| !u.is_empty())
         {
+            if url.starts_with('-') {
+                return Err(AppError::coded(ErrorCode::GitCloneUrlRequired, ""));
+            }
             // 先查 origin 是否存在:已存在走 set-url,不存在走 add,保证幂等
             if run_git(&path, &["remote", "get-url", "origin"]).is_ok() {
                 run_git(&path, &["remote", "set-url", "origin", url])?;
@@ -84,7 +90,7 @@ pub(super) fn checkout_blocking(
     start_point: Option<&str>,
 ) -> AppResult<GitStatus> {
     let branch = branch.trim();
-    if branch.is_empty() {
+    if branch.is_empty() || branch.starts_with('-') || start_point.map(str::trim).is_some_and(|s| s.starts_with('-')) {
         return Err(AppError::coded(ErrorCode::GitBranchNameRequired, ""));
     }
     if create {
@@ -263,6 +269,9 @@ pub(super) fn pull_blocking(path: &str) -> AppResult<GitPullResult> {
 /// 远端与源分支取该分支的 upstream;未配置 upstream 时回退到默认远端(优先 origin)
 /// 的同名分支。非快进(分叉)或被其他 worktree 检出时 git 报错,经 friendly_git_error 透传
 pub(super) fn pull_branch_blocking(path: &str, branch: &str) -> AppResult<GitPullResult> {
+    if branch.trim().starts_with('-') {
+        return Err(AppError::coded(ErrorCode::GitBranchNameRequired, ""));
+    }
     let (remote, src) = match upstream_of(path, branch) {
         Some(pair) => pair,
         None => {
@@ -271,7 +280,7 @@ pub(super) fn pull_branch_blocking(path: &str, branch: &str) -> AppResult<GitPul
             (remote, branch.to_string())
         }
     };
-    run_git(path, &["fetch", &remote, &format!("{src}:{branch}")])?;
+    run_git(path, &["fetch", "--", &remote, &format!("{src}:{branch}")])?;
     let st = status(path)?;
     cache_status(path, &st);
     Ok(GitPullResult {
@@ -361,14 +370,17 @@ pub async fn git_push(
 
 /// 推送非当前检出的本地分支(不影响工作区)
 pub(super) fn push_branch_blocking(path: &str, branch: &str) -> AppResult<GitStatus> {
+    if branch.trim().starts_with('-') {
+        return Err(AppError::coded(ErrorCode::GitBranchNameRequired, ""));
+    }
     match upstream_of(path, branch) {
         Some((remote, src)) => {
-            run_git(path, &["push", &remote, &format!("{branch}:{src}")])?;
+            run_git(path, &["push", "--", &remote, &format!("{branch}:{src}")])?;
         }
         None => {
             let remote = default_push_remote(path)
                 .ok_or_else(|| AppError::coded(ErrorCode::GitNoTracking, ""))?;
-            run_git(path, &["push", "-u", &remote, branch])?;
+            run_git(path, &["push", "-u", "--", &remote, branch])?;
         }
     }
     let st = status(path)?;
@@ -401,7 +413,7 @@ pub(super) fn branch_delete_blocking(
         return Err(AppError::coded(ErrorCode::GitBranchNameRequired, ""));
     }
     let flag = if force { "-D" } else { "-d" };
-    run_git(path, &["branch", flag, branch])?;
+    run_git(path, &["branch", flag, "--", branch])?;
     let st = status(path)?;
     cache_status(path, &st);
     Ok(st)
@@ -425,7 +437,7 @@ pub async fn git_remote_branch_delete(
 pub(super) fn remote_branch_delete_blocking(path: &str, branch: &str) -> AppResult<GitStatus> {
     let (remote, short) = split_remote_branch(branch.trim())
         .ok_or_else(|| AppError::coded(ErrorCode::GitBranchNameRequired, ""))?;
-    run_git(path, &["push", &remote, "--delete", &short])?;
+    run_git(path, &["push", "--delete", "--", &remote, &short])?;
     let st = status(path)?;
     cache_status(path, &st);
     Ok(st)
@@ -443,7 +455,7 @@ pub(super) fn push_blocking(path: &str) -> AppResult<GitStatus> {
             let Some(remote) = default_push_remote(path) else {
                 return Err(e);
             };
-            run_git(path, &["push", "-u", &remote, "HEAD"])?;
+            run_git(path, &["push", "-u", "--", &remote, "HEAD"])?;
         }
     }
     let st = status(path)?;
@@ -472,7 +484,7 @@ pub(super) fn unshallow_blocking(path: &str) -> AppResult<GitStatus> {
         .or_else(|| default_push_remote(path))
         .ok_or_else(|| AppError::coded(ErrorCode::GitNoTracking, ""))?;
     let refspec = format!("+refs/heads/*:refs/remotes/{remote}/*");
-    args.extend([remote.as_str(), refspec.as_str()]);
+    args.extend(["--", remote.as_str(), refspec.as_str()]);
     run_git(path, &args)?;
     // depth 隐含 single-branch,补全后也让后续 fetch 跟踪所有远端分支。
     run_git(

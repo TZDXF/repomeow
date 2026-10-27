@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { toggleInSet } from "@/lib/utils";
 import { DropdownMenuContent, SelectContent } from "@/components/common/project-floating-content";
 import Dialog from "@/components/common/ProjectDialog.vue";
 import { computed, ref, watch } from "vue";
@@ -158,13 +159,7 @@ function defaultCollapsed(): Set<string> {
 }
 
 function toggleFolder(key: string) {
-  const next = new Set(collapsedFolders.value);
-  if (next.has(key)) {
-    next.delete(key);
-  } else {
-    next.add(key);
-  }
-  collapsedFolders.value = next;
+  collapsedFolders.value = toggleInSet(collapsedFolders.value, key);
 }
 
 /** 远程分支去掉远端名前缀: "origin/team/x" -> "team/x" */

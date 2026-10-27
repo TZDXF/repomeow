@@ -26,7 +26,7 @@ pub struct WorkWeekRanges {
 pub async fn get_work_week_ranges() -> AppResult<WorkWeekRanges> {
     tokio::task::spawn_blocking(move || {
         let cache_root = workday::cache_root();
-        let today = chrono::Local::now().date_naive();
+        let today = crate::time_util::now_local().date_naive();
         let fmt = |d: NaiveDate| d.format("%Y-%m-%d").to_string();
 
         let this_start = crate::scheduler::work_week_start(today, &cache_root);

@@ -250,11 +250,13 @@ pub(super) fn worktree_add_blocking(
     base_branch: Option<&str>,
 ) -> AppResult<Vec<GitWorktree>> {
     let branch = branch.trim();
-    if branch.is_empty() {
+    if branch.is_empty() || branch.starts_with('-')
+        || start_point.map(str::trim).is_some_and(|s| s.starts_with('-'))
+    {
         return Err(AppError::coded(ErrorCode::GitBranchNameRequired, ""));
     }
     let input = worktree_path.trim();
-    if input.is_empty() {
+    if input.is_empty() || input.starts_with('-') {
         return Err(AppError::coded(ErrorCode::InvalidPath, ""));
     }
     let existing = list_worktrees_blocking(path)?;
@@ -397,6 +399,9 @@ pub(super) fn worktree_remove_blocking(
     delete_branch: bool,
     branch_hint: Option<&str>,
 ) -> AppResult<Vec<GitWorktree>> {
+    if worktree_path.trim().starts_with('-') {
+        return Err(AppError::coded(ErrorCode::InvalidPath, ""));
+    }
     let existing = list_worktrees_blocking(path)?;
     let target = existing.iter().find(|w| w.path == worktree_path);
     if let Some(t) = target {
@@ -430,7 +435,7 @@ pub(super) fn worktree_remove_blocking(
     if delete_branch {
         if let Some(b) = branch {
             let flag = if force { "-D" } else { "-d" };
-            run_git(path, &["branch", flag, &b])?;
+            run_git(path, &["branch", flag, "--", &b])?;
         }
     }
     list_worktrees_blocking(path)

@@ -139,7 +139,7 @@ fn split_search_globs(input: &str) -> Vec<String> {
 }
 
 fn normalize_search_glob(raw: &str) -> Option<String> {
-    let mut pattern = raw.trim().replace('\\', "/");
+    let mut pattern = crate::path_util::forward_separators(raw.trim());
     if pattern.is_empty() {
         return None;
     }

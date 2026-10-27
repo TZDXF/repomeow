@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::time::Duration;
+use std::io::Read;
 
 use serde::Deserialize;
 
@@ -16,10 +17,17 @@ const ZULU_LTS_MAJORS: [u32; 5] = [8, 11, 17, 21, 25];
 pub(super) struct RemoteAsset {
     pub(super) url: String,
     pub(super) file_name: String,
+    checksum: ChecksumSource,
     /// Windows 两个源都有 zip;非 Windows 的 Adoptium 只有 tar.gz(用系统 tar 解)
     pub(super) is_zip: bool,
     /// 展示用完整版本串(如 "17.0.20+8")
     version: String,
+}
+
+enum ChecksumSource {
+    Value(Option<String>),
+    Zulu(String),
+    Sidecar(String),
 }
 
 // -- API 响应结构(只建模用到的字段) --
@@ -50,6 +58,8 @@ struct AdoptiumBinary {
 struct AdoptiumPackage {
     name: String,
     link: String,
+    #[serde(default)]
+    checksum: Option<String>,
 }
 
 /// Azul `/metadata/v1/zulu/packages/` 的单条包
@@ -59,6 +69,15 @@ struct ZuluPackage {
     #[serde(default)]
     java_version: Vec<u64>,
     download_url: String,
+    #[serde(default)]
+    package_uuid: String,
+}
+
+#[derive(Deserialize)]
+struct ZuluDetails {
+    name: String,
+    download_url: String,
+    sha256_hash: String,
 }
 
 pub(super) fn http_client(timeout: Option<Duration>) -> AppResult<reqwest::blocking::Client> {
@@ -172,6 +191,7 @@ fn resolve_adoptium_asset(major: u32) -> AppResult<RemoteAsset> {
         .unwrap_or(&release.release_name)
         .to_string();
     Ok(RemoteAsset {
+        checksum: ChecksumSource::Value(package.checksum.clone()),
         url: package.link.clone(),
         file_name: package.name.clone(),
         is_zip: want_zip,
@@ -198,6 +218,7 @@ fn resolve_zulu_asset(major: u32) -> AppResult<RemoteAsset> {
             )
         })?;
     Ok(RemoteAsset {
+        checksum: ChecksumSource::Zulu(package.package_uuid.clone()),
         url: package.download_url.clone(),
         file_name: package.name.clone(),
         is_zip: true,
@@ -254,11 +275,45 @@ fn resolve_openjdk_asset(major: u32) -> AppResult<RemoteAsset> {
     let (platform, ext) = openjdk_platform().ok_or_else(unsupported)?;
     let file_name = openjdk_file_name(major, build, platform, ext);
     Ok(RemoteAsset {
+        checksum: ChecksumSource::Sidecar(format!("https://download.java.net/openjdk/jdk{major}/ri/{file_name}.sha256")),
         url: format!("https://download.java.net/openjdk/jdk{major}/ri/{file_name}"),
         is_zip: ext == "zip",
         version: format!("{major}+{build}"),
         file_name,
     })
+}
+
+/// 获取发行商提供的 SHA-256；缺失、格式错误或元数据不匹配均拒绝安装。
+pub(super) fn asset_checksum(asset: &RemoteAsset) -> AppResult<String> {
+    let checksum = match &asset.checksum {
+        ChecksumSource::Value(value) => value.clone().unwrap_or_default(),
+        ChecksumSource::Zulu(uuid) => {
+            if uuid.len() != 36 || !uuid.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-') {
+                return Err(AppError::coded(ErrorCode::JdkInstallFailed, "invalid Zulu package UUID"));
+            }
+            let details: ZuluDetails = http_json(&format!("https://api.azul.com/metadata/v1/zulu/packages/{uuid}"))?;
+            if details.name != asset.file_name || details.download_url != asset.url {
+                return Err(AppError::coded(ErrorCode::JdkInstallFailed, "Zulu package metadata mismatch"));
+            }
+            details.sha256_hash
+        }
+        ChecksumSource::Sidecar(url) => {
+            let mut response = http_client(Some(Duration::from_secs(20)))?.get(url).send()
+                .and_then(|r| r.error_for_status())
+                .map_err(|e| AppError::coded(ErrorCode::JdkInstallFailed, format!("checksum: {e}")))?;
+            let mut bytes = Vec::new();
+            response.by_ref().take(1025).read_to_end(&mut bytes)?;
+            if bytes.len() > 1024 {
+                return Err(AppError::coded(ErrorCode::JdkInstallFailed, "checksum response too large"));
+            }
+            String::from_utf8(bytes).map_err(|e| AppError::coded(ErrorCode::JdkInstallFailed, e.to_string()))?
+        }
+    };
+    let checksum = checksum.trim();
+    if checksum.len() != 64 || !checksum.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(AppError::coded(ErrorCode::JdkInstallFailed, "missing or invalid SHA-256 checksum"));
+    }
+    Ok(checksum.to_ascii_lowercase())
 }
 
 /// OpenJDK RI 可安装的大版本:常量表全量(已按新到旧排序),版本串为 "{major}+{build}"
@@ -362,4 +417,27 @@ pub(super) async fn list_remote_jdks(vendor: JdkVendor) -> AppResult<Vec<RemoteJ
     })
     .await
     .map_err(|e| AppError::coded(ErrorCode::IoError, e.to_string()))?
+}
+
+#[cfg(test)]
+mod checksum_tests {
+    use super::*;
+
+    fn asset(checksum: Option<&str>) -> RemoteAsset {
+        RemoteAsset {
+            url: "https://example.invalid/jdk.zip".into(),
+            file_name: "jdk.zip".into(),
+            checksum: ChecksumSource::Value(checksum.map(str::to_owned)),
+            is_zip: true,
+            version: "1".into(),
+        }
+    }
+
+    #[test]
+    fn checksum_metadata_is_required_and_validated() {
+        assert!(asset_checksum(&asset(None)).is_err());
+        assert!(asset_checksum(&asset(Some("bad"))).is_err());
+        assert!(asset_checksum(&asset(Some(&"x".repeat(64)))).is_err());
+        assert_eq!(asset_checksum(&asset(Some(&"A".repeat(64)))).unwrap(), "a".repeat(64));
+    }
 }

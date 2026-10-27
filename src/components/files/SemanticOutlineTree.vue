@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { toggleInSet } from "@/lib/utils";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { ChevronDown, ChevronRight, History, Network } from "@lucide/vue";
@@ -59,17 +60,11 @@ const expandedGroups = ref(new Set<string>());
 const collapsedNodes = ref(new Set<string>());
 
 function toggleGroup(type: string) {
-  const next = new Set(expandedGroups.value);
-  if (next.has(type)) next.delete(type);
-  else next.add(type);
-  expandedGroups.value = next;
+  expandedGroups.value = toggleInSet(expandedGroups.value, type);
 }
 
 function toggleNode(id: string) {
-  const next = new Set(collapsedNodes.value);
-  if (next.has(id)) next.delete(id);
-  else next.add(id);
-  collapsedNodes.value = next;
+  collapsedNodes.value = toggleInSet(collapsedNodes.value, id);
 }
 
 function nodeKey(node: SemanticOutlineNode): string {

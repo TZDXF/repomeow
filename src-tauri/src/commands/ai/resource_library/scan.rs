@@ -271,11 +271,9 @@ fn collect_files(root: &Path, dir: &Path, out: &mut Vec<(String, Vec<u8>)>, dept
         if !path.is_file() {
             continue;
         }
-        let rel = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .replace('\\', "/");
+        let rel = crate::path_util::forward_separators(
+            &path.strip_prefix(root).unwrap_or(&path).to_string_lossy(),
+        );
         // 防御性白名单(库内文件均由后端写入,理论恒满足)
         if !is_safe_relative_path(&rel) {
             continue;

@@ -5,8 +5,19 @@ use crate::models::EditorKind;
 use std::collections::HashMap;
 use std::process::Command;
 use tauri::{AppHandle, State};
+/// 拒绝会被 cmd.exe 二次解释的路径。
+#[cfg(windows)]
+pub(super) fn validate_cmd_path(path: &str) -> AppResult<()> {
+    if path.chars().any(|c| matches!(c, '"' | '%' | '!' | '&' | '|' | '<' | '>' | '^' | '\r' | '\n')) {
+        return Err(AppError::coded(ErrorCode::InvalidPath, "path contains cmd metacharacters"));
+    }
+    Ok(())
+}
+
 /// 通过编辑器 CLI 打开目录(命令需在 PATH 中)
 pub(super) fn open_editor(cli: &str, path: &str) -> AppResult<()> {
+    #[cfg(windows)]
+    validate_cmd_path(path)?;
     #[cfg(windows)]
     hidden(Command::new("cmd"))
         .args(["/C", cli, path])
@@ -72,6 +83,7 @@ pub fn open_with_custom_command(path: String, command: String, line: Option<u32>
     let rendered = render_custom_open_command(command, line);
     #[cfg(windows)]
     {
+        validate_cmd_path(&normalized)?;
         // `args(["/C", &rendered])` 会把整条 `code "路径"` 再包成一个参数,
         // cmd 随后按自己的首尾引号规则重解释,导致裸 CLI 命令收不到路径。
         // raw_arg 保留 `/C <完整命令>` 的原始命令尾部,与用户在 cmd 中手动输入一致。
@@ -153,6 +165,7 @@ pub fn open_in_editor(
                 let args = editor_open_args(other, &path, line);
                 #[cfg(windows)]
                 {
+                    validate_cmd_path(&path)?;
                     let mut full = vec!["/C".to_string(), cli.to_string()];
                     full.extend(args);
                     hidden(Command::new("cmd")).args(&full).spawn()?;

@@ -255,7 +255,7 @@ async fn find_powershell_on_path() -> Option<String> {
 }
 
 fn is_legacy_wsl_bash_path(path: &str) -> bool {
-    let normalized = path.replace('/', "\\").to_lowercase();
+    let normalized = crate::path_util::windows_separators(path).to_lowercase();
     normalized.starts_with("c:\\windows\\system32\\bash.exe")
         || normalized.starts_with("c:\\windows\\sysnative\\bash.exe")
 }

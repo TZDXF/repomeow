@@ -1223,3 +1223,22 @@ fn pi_mcp_scan_claim_and_assign() {
     assert_eq!(doc["mcpServers"]["docs"]["type"], "http");
     assert_eq!(fs::read_to_string(file).unwrap(), original);
 }
+
+#[test]
+fn manifest_round_trip_preserves_shortlist_and_revision() {
+    let f = Fixture::new();
+    f.skill("s1", "review", "# Review");
+    let before = snapshot(&f.library, &f.root, "skills").unwrap();
+    let result = add(&f.library, &f.root, "skills", &["s1".to_string()]).unwrap();
+    assert_eq!(result.applied, 1);
+    assert!(result.failures.is_empty());
+
+    let path = manifest_file(&f.library, &f.root);
+    let state = read_manifest(&path, &f.root).unwrap();
+    let revision = manifest_revision(&state).unwrap();
+    assert_ne!(revision, before.revision);
+    save_manifest(&path, &state).unwrap();
+    let loaded = read_manifest(&path, &f.root).unwrap();
+    assert_eq!(manifest_revision(&loaded).unwrap(), revision);
+    assert_eq!(snapshot(&f.library, &f.root, "skills").unwrap().shortlist, vec!["s1"]);
+}

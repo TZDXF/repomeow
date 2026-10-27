@@ -18,6 +18,12 @@ use crate::error::{AppError, AppResult, ErrorCode};
 const DEBOUNCE: Duration = Duration::from_millis(400);
 /// 单次上报的相对路径上限:超过即视为大规模变更,前端改为全量刷新
 const MAX_REPORT_PATHS: usize = 200;
+/// 限制同时保活的递归监听器，避免资源无限增长。
+const MAX_TREE_WATCHERS: usize = 64;
+
+fn watcher_limit_reached(current: usize, already_watched: bool) -> bool {
+    !already_watched && current >= MAX_TREE_WATCHERS
+}
 
 pub const TREE_CHANGED_EVENT: &str = "files://tree-changed";
 
@@ -53,7 +59,11 @@ pub(super) fn watch_project_files(app: AppHandle, root: String) -> AppResult<()>
     }
     let watchers = TREE_WATCHERS.get_or_init(|| Mutex::new(HashMap::new()));
     let mut map = watchers.lock().unwrap();
-    if map.contains_key(&root_path) {
+    let already_watched = map.contains_key(&root_path);
+    if watcher_limit_reached(map.len(), already_watched) {
+        return Err(AppError::coded(ErrorCode::IoError, "文件监听器数量已达上限"));
+    }
+    if already_watched {
         return Ok(());
     }
 
@@ -116,12 +126,13 @@ fn record_event(pending: &Mutex<PendingChanges>, root: &Path, event: &notify::Ev
         if is_inside_git(path) {
             continue;
         }
+        if p.paths.len() >= MAX_REPORT_PATHS {
+            p.overflow = true;
+            p.paths.clear();
+            return;
+        }
         p.paths
             .push(path.strip_prefix(root).unwrap_or(path).to_path_buf());
-    }
-    if p.paths.len() > MAX_REPORT_PATHS {
-        p.overflow = true;
-        p.paths.clear();
     }
 }
 
@@ -149,4 +160,27 @@ fn flush(app: &AppHandle, root: &Path, pending: &Mutex<PendingChanges>) {
         paths: if taken.overflow { Vec::new() } else { paths },
     };
     let _ = app.emit(TREE_CHANGED_EVENT, payload);
+}
+
+#[cfg(test)]
+mod hardening_tests {
+    use super::*;
+
+    #[test]
+    fn watcher_limit_preserves_idempotency() {
+        assert!(!watcher_limit_reached(MAX_TREE_WATCHERS - 1, false));
+        assert!(watcher_limit_reached(MAX_TREE_WATCHERS, false));
+        assert!(!watcher_limit_reached(MAX_TREE_WATCHERS, true));
+    }
+
+    #[test]
+    fn large_single_event_is_bounded() {
+        let pending = Mutex::new(PendingChanges::default());
+        let mut event = notify::Event::new(notify::EventKind::Any);
+        event.paths = (0..MAX_REPORT_PATHS + 1).map(|i| PathBuf::from(format!("/root/{i}"))).collect();
+        record_event(&pending, Path::new("/root"), &event);
+        let pending = pending.lock().unwrap();
+        assert!(pending.overflow);
+        assert!(pending.paths.is_empty());
+    }
 }

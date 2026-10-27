@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { toggleInSet } from "@/lib/utils";
 import Dialog from "@/components/common/ProjectDialog.vue";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -27,10 +28,12 @@ import {
 import { openPathWith, sortOpenWithOptions } from "@/lib/open-with";
 import { baseName, cleanPath } from "@/lib/path";
 import { cmd } from "@/lib/tauri";
+import { useLatestRequest } from "@/composables/useLatestRequest";
+import { useGitDiffLoader } from "@/composables/git/useGitDiffLoader";
 import { useCommitAndPush } from "@/composables/git/useCommitAndPush";
 import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
-import type { GitCommitFileDiff, GitWorktreeFile, Project } from "@/types";
+import type { GitWorktreeFile, Project } from "@/types";
 
 const { t } = useI18n();
 const props = defineProps<{ project: Project }>();
@@ -55,9 +58,13 @@ const files = ref<GitWorktreeFile[]>([]);
 const filesLoading = ref(false);
 const filesError = ref("");
 const selectedPath = ref<string | null>(null);
-const diff = ref<GitCommitFileDiff | null>(null);
-const diffLoading = ref(false);
-const diffError = ref("");
+const {
+  diff,
+  loading: diffLoading,
+  error: diffError,
+  load: loadDiff,
+  reset: resetDiff,
+} = useGitDiffLoader({ keepPrevious: true });
 
 /** 忽略空白差异模式(与提交详情面板同键同源):none 不忽略 / eol 行尾 / change 空白数量变化 / all 全部空白 */
 const ignoreWs = useLocalStorage<"none" | "eol" | "change" | "all">(
@@ -184,13 +191,7 @@ const flatRows = computed(() =>
 );
 
 function toggleFolder(fullPath: string) {
-  const next = new Set(collapsedFolders.value);
-  if (next.has(fullPath)) {
-    next.delete(fullPath);
-  } else {
-    next.add(fullPath);
-  }
-  collapsedFolders.value = next;
+  collapsedFolders.value = toggleInSet(collapsedFolders.value, fullPath);
 }
 
 /** 目录节点勾选信息(仅统计可提交文件;total = 0 时勾选框禁用),paths 供整目录勾选 */
@@ -262,17 +263,21 @@ const splitApplicable = computed(
   () => selectedFile.value?.status !== "A" && selectedFile.value?.status !== "D",
 );
 
+const filesRequest = useLatestRequest();
+
 async function loadChanges() {
+  const isCurrent = filesRequest.begin();
   filesLoading.value = true;
   filesError.value = "";
   files.value = [];
   selectedPath.value = null;
-  diff.value = null;
-  diffError.value = "";
+  resetDiff();
   try {
-    files.value = await cmd<GitWorktreeFile[]>("git_worktree_files", {
+    const result = await cmd<GitWorktreeFile[]>("git_worktree_files", {
       path: props.project.path,
     });
+    if (!isCurrent()) return;
+    files.value = result;
     // 可提交文件默认勾选;保留用户之前主动取消的选择(收起再展开不丢),新出现的文件默认勾选
     checkedPaths.value = new Set(
       committableFiles.value.filter((f) => !deselectedPaths.value.has(f.path)).map((f) => f.path),
@@ -282,9 +287,9 @@ async function loadChanges() {
       void selectFile(files.value[0]);
     }
   } catch (e) {
-    filesError.value = String(e);
+    if (isCurrent()) filesError.value = String(e);
   } finally {
-    filesLoading.value = false;
+    if (isCurrent()) filesLoading.value = false;
   }
 }
 
@@ -293,26 +298,14 @@ async function selectFile(file: GitWorktreeFile, force = false) {
     return;
   }
   selectedPath.value = file.path;
-  // 切文件不清空旧 diff、不转圈:旧内容保留到新结果落地后由 DiffViewer 同帧替换(与提交详情面板一致);
-  // 仅首次加载(没有任何旧内容)时 diffLoading 才为 true,给空区域一个转圈
-  diffLoading.value = !diff.value;
-  diffError.value = "";
-  try {
-    const result = await cmd<GitCommitFileDiff>("git_worktree_file_diff", {
+  await loadDiff(() =>
+    cmd("git_worktree_file_diff", {
       path: props.project.path,
       filePath: file.path,
       oldPath: file.old_path,
       ignoreWs: ignoreWs.value === "none" ? null : ignoreWs.value,
-    });
-    // 快速连点 A→B:旧响应可能晚于新选择返回,不做 stale 校验会把 A 的 diff 写到 B 的标题下
-    if (selectedPath.value !== file.path) return;
-    diff.value = result;
-  } catch (e) {
-    if (selectedPath.value !== file.path) return;
-    diffError.value = String(e);
-  } finally {
-    if (selectedPath.value === file.path) diffLoading.value = false;
-  }
+    }),
+  );
 }
 
 // 忽略空白模式变化:按新模式重取当前文件 diff(行集会变)
@@ -344,6 +337,11 @@ function toggleChanges() {
 // 每次打开时重置为初始状态(清空预览清单与取消记录,避免上次的勾选状态影响提交计数);
 // message 不在此清空:AI 生成或手动输入的提交信息在关闭再打开后保留,仅提交成功后清空
 watch(open, (v) => {
+  if (!v) {
+    filesRequest.invalidate();
+    resetDiff();
+    filesLoading.value = false;
+  }
   if (v) {
     includeUntracked.value = true;
     showChanges.value = false;

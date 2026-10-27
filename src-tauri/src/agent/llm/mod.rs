@@ -3,13 +3,17 @@
 //! 对齐蓝本:`D:\code\pi\packages\ai`。Rust 以静态 match 替代 TS provider registry;
 //! adapter 的请求转换、流事件与终态语义保持一致。
 
+mod adapter_utils;
 pub mod anthropic_messages;
 pub mod event_stream;
+mod estimate;
 pub mod google_generative_ai;
 pub mod openai_completions;
 pub mod openai_responses;
+mod openai_retry;
 pub mod overflow;
 pub mod retry;
+mod sse;
 pub(crate) mod tool_arguments;
 pub mod types;
 pub mod validate;

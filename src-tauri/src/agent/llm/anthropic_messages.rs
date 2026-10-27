@@ -31,6 +31,10 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde_json::{json, Map, Value};
 use tokio_util::sync::CancellationToken;
 
+use super::tool_arguments::repair_json;
+use super::adapter_utils::{calculate_cost, new_assistant_message, replace_images_with_placeholder};
+use super::estimate::clamp_max_tokens_to_context;
+use super::sse::next_line;
 use super::event_stream::{event_stream, EventStreamWriter};
 use super::types::{
     user_agent, AssistantContent, AssistantMessage, AssistantMessageEvent,
@@ -249,135 +253,6 @@ fn get_cache_control(
 
 // ── 上下文预算估算(TS utils/estimate.ts,与 openai 移植同源) ─────────
 
-const CHARS_PER_TOKEN: i64 = 4;
-const ESTIMATED_IMAGE_CHARS: i64 = 4800;
-const CONTEXT_SAFETY_TOKENS: i64 = 4096;
-const MIN_MAX_TOKENS: i64 = 1;
-
-fn ceil_div3_5(chars: i64) -> i64 {
-    (chars + CHARS_PER_TOKEN - 1) / CHARS_PER_TOKEN
-}
-
-fn message_timestamp(message: &Message) -> i64 {
-    match message {
-        Message::User(user) => user.timestamp,
-        Message::Assistant(assistant) => assistant.timestamp,
-        Message::ToolResult(result) => result.timestamp,
-    }
-}
-
-fn text_or_image_chars(content: &[TextOrImageContent]) -> i64 {
-    content
-        .iter()
-        .map(|block| match block {
-            TextOrImageContent::Text { text, .. } => text.chars().count() as i64,
-            TextOrImageContent::Image { .. } => ESTIMATED_IMAGE_CHARS,
-        })
-        .sum()
-}
-
-fn estimate_message_tokens(message: &Message) -> i64 {
-    let chars = match message {
-        Message::User(user) => match &user.content {
-            UserContent::Text(text) => text.chars().count() as i64,
-            UserContent::Blocks(blocks) => text_or_image_chars(blocks),
-        },
-        Message::ToolResult(result) => text_or_image_chars(&result.content),
-        Message::Assistant(assistant) => assistant
-            .content
-            .iter()
-            .map(|block| match block {
-                AssistantContent::Text { text, .. } => text.chars().count() as i64,
-                AssistantContent::Thinking { thinking, .. } => thinking.chars().count() as i64,
-                AssistantContent::ToolCall(tool_call) => {
-                    tool_call.name.chars().count() as i64
-                        + serde_json::to_string(&tool_call.arguments)
-                            .map(|serialized| serialized.chars().count() as i64)
-                            .unwrap_or(0)
-                }
-            })
-            .sum(),
-    };
-    ceil_div3_5(chars)
-}
-
-fn estimate_tools_tokens<'a>(tools: impl Iterator<Item = &'a Tool>) -> i64 {
-    let list: Vec<&Tool> = tools.collect();
-    if list.is_empty() {
-        return 0;
-    }
-    let serialized = serde_json::to_string(&list).unwrap_or_default();
-    ceil_div3_5(serialized.chars().count() as i64)
-}
-
-fn estimate_context_tokens(context: &Context) -> i64 {
-    let mut latest_prefix_timestamp = i64::MIN;
-    let mut usage_info: Option<(i64, usize)> = None;
-    for (index, message) in context.messages.iter().enumerate() {
-        if let Message::Assistant(assistant) = message {
-            let applies_to_prefix = assistant.timestamp >= latest_prefix_timestamp;
-            if applies_to_prefix
-                && assistant.stop_reason != StopReason::Aborted
-                && assistant.stop_reason != StopReason::Error
-            {
-                let usage = &assistant.usage;
-                let total = if usage.total_tokens > 0 {
-                    usage.total_tokens
-                } else {
-                    usage.input + usage.output + usage.cache_read + usage.cache_write
-                };
-                if total > 0 {
-                    usage_info = Some((total, index));
-                }
-            }
-        }
-        latest_prefix_timestamp = latest_prefix_timestamp.max(message_timestamp(message));
-    }
-
-    match usage_info {
-        Some((usage_tokens, index)) => {
-            let trailing: i64 = context.messages[index + 1..]
-                .iter()
-                .map(estimate_message_tokens)
-                .sum();
-            let mut added_names: HashSet<&str> = HashSet::new();
-            for message in &context.messages[index + 1..] {
-                if let Message::ToolResult(result) = message {
-                    if let Some(names) = &result.added_tool_names {
-                        for name in names {
-                            added_names.insert(name.as_str());
-                        }
-                    }
-                }
-            }
-            let added_tool_tokens = estimate_tools_tokens(
-                context
-                    .tools
-                    .iter()
-                    .filter(|tool| added_names.contains(tool.name.as_str())),
-            );
-            usage_tokens + trailing + added_tool_tokens
-        }
-        None => {
-            let messages: i64 = context.messages.iter().map(estimate_message_tokens).sum();
-            let system = context
-                .system_prompt
-                .as_ref()
-                .map(|prompt| ceil_div3_5(prompt.chars().count() as i64))
-                .unwrap_or(0);
-            let tools = estimate_tools_tokens(context.tools.iter());
-            messages + system + tools
-        }
-    }
-}
-
-fn clamp_max_tokens_to_context(model: &Model, context: &Context, max_tokens: i64) -> i64 {
-    if model.context_window <= 0 {
-        return max_tokens.max(MIN_MAX_TOKENS);
-    }
-    let available = model.context_window - estimate_context_tokens(context) - CONTEXT_SAFETY_TOKENS;
-    max_tokens.min(available.max(MIN_MAX_TOKENS))
-}
 
 // ── thinking 预算(TS api/simple-options.ts) ─────────────────────────
 
@@ -476,35 +351,6 @@ fn resolve_stream_options(
 }
 
 // ── 消息变换(TS api/transform-messages.ts) ──────────────────────────
-
-fn replace_images_with_placeholder(
-    content: &[TextOrImageContent],
-    placeholder: &str,
-) -> Vec<TextOrImageContent> {
-    let mut result: Vec<TextOrImageContent> = Vec::new();
-    let mut previous_was_placeholder = false;
-    for block in content {
-        match block {
-            TextOrImageContent::Image { .. } => {
-                if !previous_was_placeholder {
-                    result.push(TextOrImageContent::text(placeholder));
-                }
-                previous_was_placeholder = true;
-            }
-            TextOrImageContent::Text {
-                text,
-                text_signature,
-            } => {
-                result.push(TextOrImageContent::Text {
-                    text: text.clone(),
-                    text_signature: text_signature.clone(),
-                });
-                previous_was_placeholder = text == placeholder;
-            }
-        }
-    }
-    result
-}
 
 /// Anthropic 要求 id 匹配 ^[a-zA-Z0-9_-]+$ 且 ≤64 字符。
 fn normalize_tool_call_id(id: &str) -> String {
@@ -1365,7 +1211,7 @@ fn http_date_delay_ms(value: &str) -> f64 {
     let parsed = chrono::DateTime::parse_from_rfc2822(value.trim()).ok();
     match parsed {
         Some(date) => {
-            (date.with_timezone(&chrono::Utc) - chrono::Utc::now()).num_milliseconds() as f64
+            (date.with_timezone(&chrono::Utc) - crate::time_util::now_utc()).num_milliseconds() as f64
         }
         None => 0.0,
     }
@@ -1439,82 +1285,6 @@ fn retry_decision(
 }
 
 // ── 容错 JSON(TS utils/json-parse.ts,与 openai 移植同源) ───────────
-
-fn escape_control_character(ch: char) -> String {
-    match ch {
-        '\u{8}' => "\\b".to_string(),
-        '\u{c}' => "\\f".to_string(),
-        '\n' => "\\n".to_string(),
-        '\r' => "\\r".to_string(),
-        '\t' => "\\t".to_string(),
-        _ => format!("\\u{:04x}", ch as u32),
-    }
-}
-
-/// TS repairJson:转义字符串内的裸控制字符、把非法转义的双重化。
-fn repair_json(json_text: &str) -> String {
-    let mut repaired = String::with_capacity(json_text.len());
-    let chars: Vec<char> = json_text.chars().collect();
-    let mut in_string = false;
-    let mut index = 0usize;
-    while index < chars.len() {
-        let ch = chars[index];
-        if !in_string {
-            repaired.push(ch);
-            if ch == '"' {
-                in_string = true;
-            }
-            index += 1;
-            continue;
-        }
-        if ch == '"' {
-            repaired.push(ch);
-            in_string = false;
-            index += 1;
-            continue;
-        }
-        if ch == '\\' {
-            match chars.get(index + 1) {
-                None => {
-                    repaired.push_str("\\\\");
-                    index += 1;
-                }
-                Some('u') => {
-                    let hex: String = chars
-                        .get(index + 2..index + 6)
-                        .unwrap_or(&[])
-                        .iter()
-                        .collect();
-                    if hex.chars().count() == 4 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
-                        repaired.push_str("\\u");
-                        repaired.push_str(&hex);
-                        index += 6;
-                    } else {
-                        repaired.push_str("\\\\");
-                        index += 1;
-                    }
-                }
-                Some(next) if matches!(next, '"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't') => {
-                    repaired.push('\\');
-                    repaired.push(*next);
-                    index += 2;
-                }
-                Some(_) => {
-                    repaired.push_str("\\\\");
-                    index += 1;
-                }
-            }
-            continue;
-        }
-        if (ch as u32) < 0x20 {
-            repaired.push_str(&escape_control_character(ch));
-        } else {
-            repaired.push(ch);
-        }
-        index += 1;
-    }
-    repaired
-}
 
 #[derive(Clone, Copy)]
 enum JsonFrame {
@@ -1678,33 +1448,6 @@ fn parse_streaming_json(partial: &str) -> Map<String, Value> {
 
 // ── 用量与停止原因 ───────────────────────────────────────────────────
 
-/// TS calculateCost:每百万 token 费率,支持输入量分档;1h cache write 双倍输入价。
-fn calculate_cost(model: &Model, usage: &mut Usage) {
-    let input_tokens = usage.input + usage.cache_read + usage.cache_write;
-    let mut rates = &model.cost.rates;
-    let mut matched_threshold = -1i64;
-    if let Some(tiers) = &model.cost.tiers {
-        for tier in tiers {
-            if input_tokens > tier.input_tokens_above && tier.input_tokens_above > matched_threshold
-            {
-                rates = &tier.rates;
-                matched_threshold = tier.input_tokens_above;
-            }
-        }
-    }
-    let long_write = usage.cache_write_1h.unwrap_or(0);
-    let short_write = usage.cache_write - long_write;
-    let per_million = 1_000_000.0;
-    usage.cost.input = rates.input / per_million * usage.input as f64;
-    usage.cost.output = rates.output / per_million * usage.output as f64;
-    usage.cost.cache_read = rates.cache_read / per_million * usage.cache_read as f64;
-    usage.cost.cache_write = (rates.cache_write * short_write as f64
-        + rates.input * 2.0 * long_write as f64)
-        / per_million;
-    usage.cost.total =
-        usage.cost.input + usage.cost.output + usage.cost.cache_read + usage.cost.cache_write;
-}
-
 /// TS mapStopReason:未知 stop reason 视为流错误(蓝本 throw → catch 编码 error)。
 fn map_stop_reason(
     reason: &str,
@@ -1814,23 +1557,6 @@ impl SseDecoder {
         self.data.clear();
         Some(event)
     }
-}
-
-/// 返回 (行内容长度, 含换行的消费长度)。
-fn next_line(buffer: &[u8]) -> Option<(usize, usize)> {
-    let carriage_return = buffer.iter().position(|&byte| byte == b'\r');
-    let newline = buffer.iter().position(|&byte| byte == b'\n');
-    let index = match (carriage_return, newline) {
-        (Some(a), Some(b)) => a.min(b),
-        (Some(a), None) => a,
-        (None, Some(b)) => b,
-        (None, None) => return None,
-    };
-    let mut consumed = index + 1;
-    if buffer[index] == b'\r' && buffer.get(consumed) == Some(&b'\n') {
-        consumed += 1;
-    }
-    Some((index, consumed))
 }
 
 // ── SSE 事件分类(TS iterateAnthropicEvents) ─────────────────────────
@@ -2299,26 +2025,6 @@ impl AnthropicAggregator {
             message: self.output.clone(),
         };
         (event, self.output)
-    }
-}
-
-fn new_assistant_message(model: &Model) -> AssistantMessage {
-    AssistantMessage {
-        role: "assistant".to_string(),
-        content: Vec::new(),
-        api: model.api.clone(),
-        provider: model.provider.clone(),
-        model: model.id.clone(),
-        response_model: None,
-        response_id: None,
-        usage: Usage::zero(),
-        stop_reason: StopReason::Pending,
-        error_message: None,
-        raw_stop_reason: None,
-        end_turn: None,
-        duration_ms: None,
-        thinking_level: None,
-        timestamp: now_ts_nanos() / 1_000_000,
     }
 }
 
@@ -4115,7 +3821,7 @@ mod tests {
             delay(&[("retry-after", "Wed, 21 Oct 2015 07:28:00 GMT")], 60_000),
             Ok(0)
         );
-        let future = (chrono::Utc::now() + chrono::Duration::seconds(30))
+        let future = (crate::time_util::now_utc() + chrono::Duration::seconds(30))
             .format("%a, %d %b %Y %H:%M:%S GMT")
             .to_string();
         let delay_ms = delay(&[("retry-after", future.as_str())], 60_000).expect("future date");

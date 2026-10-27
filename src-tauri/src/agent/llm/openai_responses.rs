@@ -28,6 +28,15 @@ use std::time::Duration;
 use serde_json::{json, Map, Value};
 use tokio_util::sync::CancellationToken;
 
+use super::tool_arguments::repair_json;
+use super::openai_retry::{is_retryable_provider_error, RequestFailure};
+#[cfg(test)]
+use super::openai_retry::next_retry_delay_ms;
+#[cfg(test)]
+use super::openai_retry::exponential_retry_delay_ms;
+use super::adapter_utils::{calculate_cost, new_assistant_message, replace_images_with_placeholder};
+use super::estimate::clamp_max_tokens_to_context;
+use super::sse::DataSseDecoder as SseDecoder;
 use super::event_stream::{event_stream, EventStreamWriter};
 use super::types::{
     user_agent, AssistantContent, AssistantMessage, AssistantMessageEvent,
@@ -49,15 +58,9 @@ const SYNTHETIC_TOOL_RESULT_TEXT: &str = "No result provided";
 const MAX_PROVIDER_ERROR_BODY_CHARS: usize = 4000;
 /// Provider 内层重试默认次数(对齐 OpenAI SDK 默认)。
 const DEFAULT_PROVIDER_MAX_RETRIES: u32 = 2;
-/// 服务端要求重试延迟的上限,超过即失败(对齐 TS DEFAULT_MAX_RETRY_DELAY_MS;0 = 不限制)。
-const DEFAULT_MAX_RETRY_DELAY_MS: u64 = 60_000;
 
 // ── 上下文预算估算(TS utils/estimate.ts,与 openai_completions 同源) ──
 
-const CHARS_PER_TOKEN: i64 = 4;
-const ESTIMATED_IMAGE_CHARS: i64 = 4800;
-const CONTEXT_SAFETY_TOKENS: i64 = 4096;
-const MIN_MAX_TOKENS: i64 = 1;
 
 // ── 鉴权与 compat ─────────────────────────────────────────────────────
 
@@ -430,132 +433,6 @@ fn thinking_level_from_model(
 
 // ── 上下文预算估算 ────────────────────────────────────────────────────
 
-fn ceil_div3_5(chars: i64) -> i64 {
-    (chars + CHARS_PER_TOKEN - 1) / CHARS_PER_TOKEN
-}
-
-fn text_or_image_chars(content: &[TextOrImageContent]) -> i64 {
-    content
-        .iter()
-        .map(|block| match block {
-            TextOrImageContent::Text { text, .. } => text.chars().count() as i64,
-            TextOrImageContent::Image { .. } => ESTIMATED_IMAGE_CHARS,
-        })
-        .sum()
-}
-
-fn message_timestamp(message: &Message) -> i64 {
-    match message {
-        Message::User(user) => user.timestamp,
-        Message::Assistant(assistant) => assistant.timestamp,
-        Message::ToolResult(result) => result.timestamp,
-    }
-}
-
-fn estimate_message_tokens(message: &Message) -> i64 {
-    let chars = match message {
-        Message::User(user) => match &user.content {
-            UserContent::Text(text) => text.chars().count() as i64,
-            UserContent::Blocks(blocks) => text_or_image_chars(blocks),
-        },
-        Message::ToolResult(result) => text_or_image_chars(&result.content),
-        Message::Assistant(assistant) => assistant
-            .content
-            .iter()
-            .map(|block| match block {
-                AssistantContent::Text { text, .. } => text.chars().count() as i64,
-                AssistantContent::Thinking { thinking, .. } => thinking.chars().count() as i64,
-                AssistantContent::ToolCall(tool_call) => {
-                    tool_call.name.chars().count() as i64
-                        + serde_json::to_string(&tool_call.arguments)
-                            .map(|serialized| serialized.chars().count() as i64)
-                            .unwrap_or(0)
-                }
-            })
-            .sum(),
-    };
-    ceil_div3_5(chars)
-}
-
-fn estimate_tools_tokens<'a>(tools: impl Iterator<Item = &'a Tool>) -> i64 {
-    let list: Vec<&Tool> = tools.collect();
-    if list.is_empty() {
-        return 0;
-    }
-    let serialized = serde_json::to_string(&list).unwrap_or_default();
-    ceil_div3_5(serialized.chars().count() as i64)
-}
-
-fn estimate_context_tokens(context: &Context) -> i64 {
-    let mut latest_prefix_timestamp = i64::MIN;
-    let mut usage_info: Option<(i64, usize)> = None;
-    for (index, message) in context.messages.iter().enumerate() {
-        if let Message::Assistant(assistant) = message {
-            let applies_to_prefix = assistant.timestamp >= latest_prefix_timestamp;
-            if applies_to_prefix
-                && assistant.stop_reason != StopReason::Aborted
-                && assistant.stop_reason != StopReason::Error
-            {
-                let usage = &assistant.usage;
-                let total = if usage.total_tokens > 0 {
-                    usage.total_tokens
-                } else {
-                    usage.input + usage.output + usage.cache_read + usage.cache_write
-                };
-                if total > 0 {
-                    usage_info = Some((total, index));
-                }
-            }
-        }
-        latest_prefix_timestamp = latest_prefix_timestamp.max(message_timestamp(message));
-    }
-
-    match usage_info {
-        Some((usage_tokens, index)) => {
-            let trailing: i64 = context.messages[index + 1..]
-                .iter()
-                .map(estimate_message_tokens)
-                .sum();
-            let mut added_names: HashSet<&str> = HashSet::new();
-            for message in &context.messages[index + 1..] {
-                if let Message::ToolResult(result) = message {
-                    if let Some(names) = &result.added_tool_names {
-                        for name in names {
-                            added_names.insert(name.as_str());
-                        }
-                    }
-                }
-            }
-            let added_tool_tokens = estimate_tools_tokens(
-                context
-                    .tools
-                    .iter()
-                    .filter(|tool| added_names.contains(tool.name.as_str())),
-            );
-            usage_tokens + trailing + added_tool_tokens
-        }
-        None => {
-            let messages: i64 = context.messages.iter().map(estimate_message_tokens).sum();
-            let system = context
-                .system_prompt
-                .as_ref()
-                .map(|prompt| ceil_div3_5(prompt.chars().count() as i64))
-                .unwrap_or(0);
-            let tools = estimate_tools_tokens(context.tools.iter());
-            messages + system + tools
-        }
-    }
-}
-
-/// TS clampMaxTokensToContext(simple-options.ts)。
-fn clamp_max_tokens_to_context(model: &Model, context: &Context, max_tokens: i64) -> i64 {
-    if model.context_window <= 0 {
-        return max_tokens.max(MIN_MAX_TOKENS);
-    }
-    let available = model.context_window - estimate_context_tokens(context) - CONTEXT_SAFETY_TOKENS;
-    max_tokens.min(available.max(MIN_MAX_TOKENS))
-}
-
 fn insert_sampling_params(body: &mut Map<String, Value>, params: Option<&HashMap<String, Value>>) {
     let Some(params) = params else { return };
     // HashMap 无序:按 key 排序后应用,保证输出稳定(options 后写覆盖 model 先写)
@@ -569,35 +446,6 @@ fn insert_sampling_params(body: &mut Map<String, Value>, params: Option<&HashMap
 }
 
 // ── 消息序列化(TS transformMessages + convertResponsesMessages) ─────
-
-fn replace_images_with_placeholder(
-    content: &[TextOrImageContent],
-    placeholder: &str,
-) -> Vec<TextOrImageContent> {
-    let mut result: Vec<TextOrImageContent> = Vec::new();
-    let mut previous_was_placeholder = false;
-    for block in content {
-        match block {
-            TextOrImageContent::Image { .. } => {
-                if !previous_was_placeholder {
-                    result.push(TextOrImageContent::text(placeholder));
-                }
-                previous_was_placeholder = true;
-            }
-            TextOrImageContent::Text {
-                text,
-                text_signature,
-            } => {
-                result.push(TextOrImageContent::Text {
-                    text: text.clone(),
-                    text_signature: text_signature.clone(),
-                });
-                previous_was_placeholder = text == placeholder;
-            }
-        }
-    }
-    result
-}
 
 /// TS transformMessages:非图片模型降级图片;跨模型 replay 清理 thinking/签名与
 /// tool call id(归一回调由调用方注入);孤儿 tool call 合成错误结果;
@@ -1180,110 +1028,7 @@ pub fn build_request_body(
 
 // ── cost(TS calculateCost,与 openai_completions 同源) ───────────────
 
-/// 每百万 token 费率,支持输入量分档;1h cache write 双倍输入价。
-fn calculate_cost(model: &Model, usage: &mut Usage) {
-    let input_tokens = usage.input + usage.cache_read + usage.cache_write;
-    let mut rates = &model.cost.rates;
-    let mut matched_threshold = -1i64;
-    if let Some(tiers) = &model.cost.tiers {
-        for tier in tiers {
-            if input_tokens > tier.input_tokens_above && tier.input_tokens_above > matched_threshold
-            {
-                rates = &tier.rates;
-                matched_threshold = tier.input_tokens_above;
-            }
-        }
-    }
-    let long_write = usage.cache_write_1h.unwrap_or(0);
-    let short_write = usage.cache_write - long_write;
-    let per_million = 1_000_000.0;
-    usage.cost.input = rates.input / per_million * usage.input as f64;
-    usage.cost.output = rates.output / per_million * usage.output as f64;
-    usage.cost.cache_read = rates.cache_read / per_million * usage.cache_read as f64;
-    usage.cost.cache_write = (rates.cache_write * short_write as f64
-        + rates.input * 2.0 * long_write as f64)
-        / per_million;
-    usage.cost.total =
-        usage.cost.input + usage.cost.output + usage.cost.cache_read + usage.cost.cache_write;
-}
-
 // ── 部分容错 JSON(TS utils/json-parse.ts,与 openai_completions 同源) ─
-
-fn escape_control_character(ch: char) -> String {
-    match ch {
-        '\u{8}' => "\\b".to_string(),
-        '\u{c}' => "\\f".to_string(),
-        '\n' => "\\n".to_string(),
-        '\r' => "\\r".to_string(),
-        '\t' => "\\t".to_string(),
-        _ => format!("\\u{:04x}", ch as u32),
-    }
-}
-
-/// TS repairJson:转义字符串内的裸控制字符、把非法转义的双重化。
-fn repair_json(json_text: &str) -> String {
-    let mut repaired = String::with_capacity(json_text.len());
-    let chars: Vec<char> = json_text.chars().collect();
-    let mut in_string = false;
-    let mut index = 0usize;
-    while index < chars.len() {
-        let ch = chars[index];
-        if !in_string {
-            repaired.push(ch);
-            if ch == '"' {
-                in_string = true;
-            }
-            index += 1;
-            continue;
-        }
-        if ch == '"' {
-            repaired.push(ch);
-            in_string = false;
-            index += 1;
-            continue;
-        }
-        if ch == '\\' {
-            match chars.get(index + 1) {
-                None => {
-                    repaired.push_str("\\\\");
-                    index += 1;
-                }
-                Some('u') => {
-                    let hex: String = chars
-                        .get(index + 2..index + 6)
-                        .unwrap_or(&[])
-                        .iter()
-                        .collect();
-                    if hex.chars().count() == 4 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
-                        repaired.push_str("\\u");
-                        repaired.push_str(&hex);
-                        index += 6;
-                    } else {
-                        repaired.push_str("\\\\");
-                        index += 1;
-                    }
-                }
-                Some(next) if matches!(next, '"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't') => {
-                    repaired.push('\\');
-                    repaired.push(*next);
-                    index += 2;
-                }
-                Some(_) => {
-                    repaired.push_str("\\\\");
-                    index += 1;
-                }
-            }
-            continue;
-        }
-        if (ch as u32) < 0x20 {
-            repaired.push_str(&escape_control_character(ch));
-        } else {
-            repaired.push(ch);
-        }
-        index += 1;
-    }
-    repaired
-}
 
 /// 扫描部分 JSON,生成「补全闭合」候选并返回首个可解析者。
 fn close_partial_json(input: &str) -> Option<String> {
@@ -1432,64 +1177,6 @@ fn parse_streaming_json_object(partial: &str) -> Map<String, Value> {
 }
 
 // ── SSE 解码 ──────────────────────────────────────────────────────────
-
-/// 字节流 → SSE data 载荷。规范要点:按 `\n` 分行(容忍 `\r\n`),
-/// `data:` 行累积,空行分发事件(多行 data 以 `\n` 合并),
-/// `event:`/`id:`/注释(`:` keep-alive)忽略——Responses 事件的类型在
-/// data JSON 的 `type` 字段里。
-struct SseDecoder {
-    buffer: Vec<u8>,
-    data_lines: Vec<String>,
-}
-
-impl SseDecoder {
-    fn new() -> Self {
-        Self {
-            buffer: Vec::new(),
-            data_lines: Vec::new(),
-        }
-    }
-
-    /// 喂入一块字节,返回由此凑齐的事件 data 载荷(可能 0 个或多个)。
-    fn push(&mut self, chunk: &[u8]) -> Vec<String> {
-        let mut events = Vec::new();
-        self.buffer.extend_from_slice(chunk);
-        while let Some(position) = self.buffer.iter().position(|&byte| byte == b'\n') {
-            let line_bytes: Vec<u8> = self.buffer.drain(..=position).collect();
-            let line = String::from_utf8_lossy(&line_bytes[..line_bytes.len() - 1]);
-            let line = line.trim_end_matches('\r');
-            if line.is_empty() {
-                if !self.data_lines.is_empty() {
-                    events.push(std::mem::take(&mut self.data_lines).join("\n"));
-                }
-            } else if let Some(data) = line.strip_prefix("data:") {
-                self.data_lines
-                    .push(data.strip_prefix(' ').unwrap_or(data).to_string());
-            }
-        }
-        events
-    }
-
-    /// 流结束:EOF 视为终结残留 SSE 帧——不足一行的残余字节按行处理,
-    /// 未以空行收尾的 data 缓冲照样分发(对齐 TS #9047 / 0.85.0:终态
-    /// response 事件可能不带尾部空行,丢弃会把成功流误判为错误)。
-    fn finish(&mut self) -> Vec<String> {
-        let mut events = Vec::new();
-        if !self.buffer.is_empty() {
-            let line_bytes = std::mem::take(&mut self.buffer);
-            let line = String::from_utf8_lossy(&line_bytes);
-            let line = line.trim_end_matches('\r');
-            if let Some(data) = line.strip_prefix("data:") {
-                self.data_lines
-                    .push(data.strip_prefix(' ').unwrap_or(data).to_string());
-            }
-        }
-        if !self.data_lines.is_empty() {
-            events.push(std::mem::take(&mut self.data_lines).join("\n"));
-        }
-        events
-    }
-}
 
 // ── 流聚合器(TS processResponsesStream) ──────────────────────────────
 
@@ -2339,26 +2026,6 @@ fn map_stop_reason(
     }
 }
 
-fn new_assistant_message(model: &Model) -> AssistantMessage {
-    AssistantMessage {
-        role: "assistant".to_string(),
-        content: Vec::new(),
-        api: model.api.clone(),
-        provider: model.provider.clone(),
-        model: model.id.clone(),
-        response_model: None,
-        response_id: None,
-        usage: Usage::zero(),
-        stop_reason: StopReason::Pending,
-        error_message: None,
-        raw_stop_reason: None,
-        end_turn: None,
-        duration_ms: None,
-        thinking_level: None,
-        timestamp: now_ts_nanos() / 1_000_000,
-    }
-}
-
 // ── 流式入口 ──────────────────────────────────────────────────────────
 
 /// OpenAI Responses 流式生成:返回事件流(先 `start`,终止于 `done`/`error`)。
@@ -2632,115 +2299,6 @@ pub async fn complete_openai_responses(
 
 // ── Provider 内层重试(TS utils/provider-retry.ts) ────────────────────
 
-/// 单次请求失败:错误文案 + 重试判定所需的服务端提示。
-struct RequestFailure {
-    message: String,
-    retryable: bool,
-    /// `retry-after-ms` 原始值(毫秒浮点)
-    retry_after_ms: Option<String>,
-    /// `retry-after` 原始值(秒数或 HTTP 日期)
-    retry_after: Option<String>,
-}
-
-/// TS isRetryableProviderError:`x-should-retry` 优先(true 重试/false 不重试),
-/// 否则无 status(传输层错误)或 408/409/429/5xx 可重试。
-fn is_retryable_provider_error(status: Option<u16>, x_should_retry: Option<&str>) -> bool {
-    match x_should_retry {
-        Some("true") => return true,
-        Some("false") => return false,
-        _ => {}
-    }
-    match status {
-        None => true,
-        Some(status) => status == 408 || status == 409 || status == 429 || status >= 500,
-    }
-}
-
-/// `retry-after-ms` 浮点毫秒;非法值忽略(TS parseFloat NaN 检查)。
-fn parse_retry_after_ms(value: &str) -> Option<f64> {
-    value
-        .trim()
-        .parse::<f64>()
-        .ok()
-        .filter(|value| value.is_finite())
-}
-
-/// `retry-after`:秒数,或 HTTP 日期(IMF-fixdate,经 RFC 2822 解析)减当前时间。
-fn parse_retry_after(value: &str, now_ms: i64) -> Option<f64> {
-    let trimmed = value.trim();
-    if let Ok(seconds) = trimmed.parse::<f64>() {
-        return seconds.is_finite().then_some(seconds * 1000.0);
-    }
-    let target = chrono::DateTime::parse_from_rfc2822(trimmed).ok()?;
-    Some((target.timestamp_millis() - now_ms) as f64)
-}
-
-/// 指数退避(秒 → 毫秒,8s 封顶)× 随机抖动(jitter ∈ [0,1],衰减至 75% 起)。
-fn exponential_retry_delay_ms(retry_index: u32, jitter: f64) -> u64 {
-    let base = (0.5 * 2f64.powi(retry_index.min(16) as i32)).min(8.0) * 1000.0;
-    let jitter = jitter.clamp(0.0, 1.0);
-    (base * (1.0 - jitter * 0.25)) as u64
-}
-
-/// TS getRetryDelayMs + validateServerRetryDelayMs:服务端提示延迟优先
-/// (retry-after-ms → retry-after),不做抖动;超过 `max_retry_delay_ms`
-/// (缺省 60s,0 = 不限制)立即失败,文案对齐 TS;否则指数退避 + 抖动。
-/// Err 文案即为流内错误消息。
-fn next_retry_delay_ms(
-    retry_after_ms: Option<&str>,
-    retry_after: Option<&str>,
-    retry_index: u32,
-    max_retry_delay_ms: Option<u64>,
-    now_ms: i64,
-    jitter: f64,
-    provider_error_message: &str,
-) -> Result<u64, String> {
-    let validate = |delay_ms: f64| -> Result<u64, String> {
-        let max_delay = max_retry_delay_ms.unwrap_or(DEFAULT_MAX_RETRY_DELAY_MS) as f64;
-        if max_delay > 0.0 && delay_ms > max_delay {
-            return Err(format!(
-                "Server requested {}s retry delay (max: {}s). {}",
-                (delay_ms / 1000.0).ceil(),
-                (max_delay / 1000.0).ceil(),
-                provider_error_message
-            ));
-        }
-        Ok(delay_ms.max(0.0) as u64)
-    };
-    if let Some(delay_ms) = retry_after_ms.and_then(parse_retry_after_ms) {
-        return validate(delay_ms);
-    }
-    if let Some(delay_ms) = retry_after.and_then(|value| parse_retry_after(value, now_ms)) {
-        return validate(delay_ms);
-    }
-    Ok(exponential_retry_delay_ms(retry_index, jitter))
-}
-
-enum SleepWait {
-    Elapsed,
-    Aborted,
-}
-
-/// 退避睡眠;取消立即返回 [`SleepWait::Aborted`](对齐 TS abortableSleep)。
-async fn sleep_or_cancel(delay_ms: u64, signal: Option<&CancellationToken>) -> SleepWait {
-    let sleep = tokio::time::sleep(Duration::from_millis(delay_ms));
-    match signal {
-        None => {
-            sleep.await;
-            SleepWait::Elapsed
-        }
-        Some(token) => tokio::select! {
-            _ = sleep => SleepWait::Elapsed,
-            _ = token.cancelled() => SleepWait::Aborted,
-        },
-    }
-}
-
-/// 时间派生的伪随机抖动量(指数退避防惊群用,质量不作要求)。
-fn pseudo_random_jitter() -> f64 {
-    (now_ts_nanos() % 1_000_000) as f64 / 1_000_000.0
-}
-
 /// TS retryProviderRequest:循环重试连接请求。每次重试都重新构造并发送
 /// 全新请求;`options.max_retries` 缺省 2(OpenAI SDK 一致),可重试错误见
 /// [`is_retryable_provider_error`];服务端延迟超限立即失败;退避睡眠可被
@@ -2758,38 +2316,12 @@ async fn send_with_retry(
         .and_then(|options| options.max_retries)
         .unwrap_or(DEFAULT_PROVIDER_MAX_RETRIES);
     let max_retry_delay_ms = options.and_then(|options| options.max_retry_delay_ms);
-    let mut retries_remaining = max_retries;
-    let mut retry_index: u32 = 0;
-
-    loop {
-        match send_responses_request(model, options, body, &api_key, streaming).await {
-            Ok(response) => return Ok(response),
-            Err(failure) => {
-                if signal.is_some_and(|token| token.is_cancelled()) {
-                    return Err(("Request was aborted".to_string(), true));
-                }
-                if retries_remaining == 0 || !failure.retryable {
-                    return Err((failure.message, false));
-                }
-                retries_remaining -= 1;
-                let now_ms = now_ts_nanos() / 1_000_000;
-                let delay_ms = next_retry_delay_ms(
-                    failure.retry_after_ms.as_deref(),
-                    failure.retry_after.as_deref(),
-                    retry_index,
-                    max_retry_delay_ms,
-                    now_ms,
-                    pseudo_random_jitter(),
-                    &failure.message,
-                )
-                .map_err(|message| (message, false))?;
-                retry_index += 1;
-                if let SleepWait::Aborted = sleep_or_cancel(delay_ms, signal).await {
-                    return Err(("Request was aborted".to_string(), true));
-                }
-            }
-        }
-    }
+    super::openai_retry::send_with_retry(
+        || send_responses_request(model, options, body, &api_key, streaming),
+        max_retries,
+        max_retry_delay_ms,
+        signal,
+    ).await
 }
 
 /// 构造并发送 `POST {base_url}/responses` 请求,返回流式响应。

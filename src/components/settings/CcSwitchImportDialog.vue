@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { toggleInSet } from "@/lib/utils";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
@@ -60,10 +61,7 @@ watch(
 
 function toggleCcSwitchProvider(provider: CcSwitchProvider) {
   const key = ccSwitchKey(provider);
-  const next = new Set(ccSwitchChecked.value);
-  if (next.has(key)) next.delete(key);
-  else next.add(key);
-  ccSwitchChecked.value = next;
+  ccSwitchChecked.value = toggleInSet(ccSwitchChecked.value, key);
 }
 
 const ccSwitchAllChecked = computed(() => {

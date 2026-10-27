@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import { useLatestRequest } from "@/composables/useLatestRequest";
 import { onProjectPageReactivated } from "@/composables/useProjectPageState";
 import {
   ContextMenuContent,
   DropdownMenuContent,
 } from "@/components/common/project-floating-content";
 import Dialog from "@/components/common/ProjectDialog.vue";
+import ComposeActionMenu from "./ComposeActionMenu.vue";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
@@ -12,15 +14,11 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   ChevronRight,
   Container,
-  Download,
   Eye,
   EyeOff,
   FileCode,
-  Hammer,
-  ImageDown,
   MoreHorizontal,
   Play,
-  RotateCw,
   Square,
   Star,
 } from "@lucide/vue";
@@ -37,12 +35,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import ScrollArea from "@/components/common/ScrollArea.vue";
 import { Switch } from "@/components/ui/switch";
 import { useCollapsibleOpen } from "@/composables/useCollapsibleOpen";
@@ -102,9 +95,9 @@ const displayFiles = computed(() =>
 
 // path 一并作为 watch 源:详情页切换工作区(worktree)时传入的是 id 相同、
 // path 不同的 project 副本,需要按新工作目录重新扫描
-let loadSeq = 0;
+const loadRequest = useLatestRequest();
 async function load(resetView = true) {
-  const seq = ++loadSeq;
+  const isCurrent = loadRequest.begin();
   const currentProject = props.project;
   if (resetView) showHidden.value = false;
   pinsStore.ensureLoaded();
@@ -126,7 +119,7 @@ async function load(resetView = true) {
     assetsStore.refresh(currentProject),
     overviewStore.refresh(currentProject.id),
   ]);
-  if (seq !== loadSeq) return;
+  if (!isCurrent()) return;
   applyHiddenFiles(overview.hidden_items);
   loaded.value = true;
   resetOpenStates();
@@ -498,73 +491,23 @@ async function confirmExport() {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" class="w-40">
-                      <DropdownMenuItem class="gap-2 text-xs" @click="run(d.file, 'build')">
-                        <Hammer class="h-3.5 w-3.5 text-sky-600" />
-                        {{ t("docker.build") }}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem class="gap-2 text-xs" @click="run(d.file, 'up -d --build')">
-                        <Hammer class="h-3.5 w-3.5 text-emerald-600" />
-                        {{ t("docker.buildUp") }}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem class="gap-2 text-xs" @click="run(d.file, 'restart')">
-                        <RotateCw class="h-3.5 w-3.5 text-amber-600" />
-                        {{ t("docker.restart") }}
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        class="gap-2 text-xs"
-                        @click="openExportOptions(d.file, '', 'container')"
-                      >
-                        <Download class="h-3.5 w-3.5" />
-                        {{ t("docker.exportContainer") }}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        class="gap-2 text-xs"
-                        @click="openExportOptions(d.file, '', 'image')"
-                      >
-                        <ImageDown class="h-3.5 w-3.5" />
-                        {{ t("docker.exportImage") }}
-                      </DropdownMenuItem>
+                      <ComposeActionMenu
+                        kind="dropdown"
+                        :service="false"
+                        @run="run(d.file, $event)"
+                        @export="openExportOptions(d.file, '', $event)"
+                      />
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
               </ContextMenuTrigger>
               <ContextMenuContent class="w-44">
-                <ContextMenuItem class="gap-2 text-xs" @select="run(d.file, 'up -d')">
-                  <Play class="h-3.5 w-3.5 text-emerald-600" />
-                  {{ t("docker.up") }}
-                </ContextMenuItem>
-                <ContextMenuItem class="gap-2 text-xs" @select="run(d.file, 'up -d --build')">
-                  <Hammer class="h-3.5 w-3.5 text-emerald-600" />
-                  {{ t("docker.buildUp") }}
-                </ContextMenuItem>
-                <ContextMenuItem class="gap-2 text-xs" @select="run(d.file, 'build')">
-                  <Hammer class="h-3.5 w-3.5 text-sky-600" />
-                  {{ t("docker.build") }}
-                </ContextMenuItem>
-                <ContextMenuItem class="gap-2 text-xs" @select="run(d.file, 'restart')">
-                  <RotateCw class="h-3.5 w-3.5 text-amber-600" />
-                  {{ t("docker.restart") }}
-                </ContextMenuItem>
-                <ContextMenuItem class="gap-2 text-xs" @select="run(d.file, 'down')">
-                  <Square class="h-3.5 w-3.5 text-red-600" />
-                  {{ t("docker.down") }}
-                </ContextMenuItem>
-                <ContextMenuSeparator />
-                <ContextMenuItem
-                  class="gap-2 text-xs"
-                  @select="openExportOptions(d.file, '', 'container')"
-                >
-                  <Download class="h-3.5 w-3.5" />
-                  {{ t("docker.exportContainer") }}
-                </ContextMenuItem>
-                <ContextMenuItem
-                  class="gap-2 text-xs"
-                  @select="openExportOptions(d.file, '', 'image')"
-                >
-                  <ImageDown class="h-3.5 w-3.5" />
-                  {{ t("docker.exportImage") }}
-                </ContextMenuItem>
+                <ComposeActionMenu
+                  kind="context"
+                  :service="false"
+                  @run="run(d.file, $event)"
+                  @export="openExportOptions(d.file, '', $event)"
+                />
                 <ContextMenuSeparator />
                 <ContextMenuItem class="gap-2 text-xs" @select="toggleFilePin(d.file)">
                   <Star
@@ -682,85 +625,23 @@ async function confirmExport() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" class="w-40">
-                        <DropdownMenuItem
-                          class="gap-2 text-xs"
-                          @click="run(d.file, 'build', s.name)"
-                        >
-                          <Hammer class="h-3.5 w-3.5 text-sky-600" />
-                          {{ t("docker.build") }}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          class="gap-2 text-xs"
-                          @click="run(d.file, 'up -d --build', s.name)"
-                        >
-                          <Hammer class="h-3.5 w-3.5 text-emerald-600" />
-                          {{ t("docker.buildUp") }}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          class="gap-2 text-xs"
-                          @click="run(d.file, 'restart', s.name)"
-                        >
-                          <RotateCw class="h-3.5 w-3.5 text-amber-600" />
-                          {{ t("docker.restart") }}
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          class="gap-2 text-xs"
-                          @click="openExportOptions(d.file, s.name, 'container')"
-                        >
-                          <Download class="h-3.5 w-3.5" />
-                          {{ t("docker.exportContainer") }}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          class="gap-2 text-xs"
-                          @click="openExportOptions(d.file, s.name, 'image')"
-                        >
-                          <ImageDown class="h-3.5 w-3.5" />
-                          {{ t("docker.exportImage") }}
-                        </DropdownMenuItem>
+                        <ComposeActionMenu
+                          kind="dropdown"
+                          :service="true"
+                          @run="run(d.file, $event, s.name)"
+                          @export="openExportOptions(d.file, s.name, $event)"
+                        />
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
                 </ContextMenuTrigger>
                 <ContextMenuContent class="w-44">
-                  <ContextMenuItem class="gap-2 text-xs" @select="run(d.file, 'up -d', s.name)">
-                    <Play class="h-3.5 w-3.5 text-emerald-600" />
-                    {{ t("docker.up") }}
-                  </ContextMenuItem>
-                  <ContextMenuItem class="gap-2 text-xs" @select="run(d.file, 'stop', s.name)">
-                    <Square class="h-3.5 w-3.5 text-red-600" />
-                    {{ t("docker.stop") }}
-                  </ContextMenuItem>
-                  <ContextMenuItem
-                    class="gap-2 text-xs"
-                    @select="run(d.file, 'up -d --build', s.name)"
-                  >
-                    <Hammer class="h-3.5 w-3.5 text-emerald-600" />
-                    {{ t("docker.buildUp") }}
-                  </ContextMenuItem>
-                  <ContextMenuItem class="gap-2 text-xs" @select="run(d.file, 'build', s.name)">
-                    <Hammer class="h-3.5 w-3.5 text-sky-600" />
-                    {{ t("docker.build") }}
-                  </ContextMenuItem>
-                  <ContextMenuItem class="gap-2 text-xs" @select="run(d.file, 'restart', s.name)">
-                    <RotateCw class="h-3.5 w-3.5 text-amber-600" />
-                    {{ t("docker.restart") }}
-                  </ContextMenuItem>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem
-                    class="gap-2 text-xs"
-                    @select="openExportOptions(d.file, s.name, 'container')"
-                  >
-                    <Download class="h-3.5 w-3.5" />
-                    {{ t("docker.exportContainer") }}
-                  </ContextMenuItem>
-                  <ContextMenuItem
-                    class="gap-2 text-xs"
-                    @select="openExportOptions(d.file, s.name, 'image')"
-                  >
-                    <ImageDown class="h-3.5 w-3.5" />
-                    {{ t("docker.exportImage") }}
-                  </ContextMenuItem>
+                  <ComposeActionMenu
+                    kind="context"
+                    :service="true"
+                    @run="run(d.file, $event, s.name)"
+                    @export="openExportOptions(d.file, s.name, $event)"
+                  />
                   <ContextMenuSeparator />
                   <ContextMenuItem class="gap-2 text-xs" @select="toggleServicePin(d.file, s.name)">
                     <Star

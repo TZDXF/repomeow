@@ -641,9 +641,9 @@ pub fn dirname_env_path(path: &str) -> String {
 
 /// 相对路径(归一化为 `/`;对齐 TS `relativeEnvPath`)。
 pub fn relative_env_path(root: &str, path: &str) -> String {
-    let normalized_root: String = root.replace('\\', "/");
+    let normalized_root: String = crate::path_util::forward_separators(root);
     let normalized_root = normalized_root.trim_end_matches('/');
-    let normalized_path: String = path.replace('\\', "/");
+    let normalized_path: String = crate::path_util::forward_separators(path);
     let normalized_path = normalized_path.trim_end_matches('/');
     if normalized_path == normalized_root {
         return String::new();

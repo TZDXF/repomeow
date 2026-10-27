@@ -78,7 +78,10 @@ fn merge_registry_env(
 ) -> Vec<(String, String)> {
     let mut merged = system;
     for (name, value) in user {
-        match merged.iter_mut().find(|(k, _)| k.eq_ignore_ascii_case(&name)) {
+        match merged
+            .iter_mut()
+            .find(|(k, _)| k.eq_ignore_ascii_case(&name))
+        {
             Some((k, v)) if k.eq_ignore_ascii_case("path") => {
                 v.push(';');
                 v.push_str(&value);

@@ -36,6 +36,9 @@ use regex::Regex;
 use serde_json::{json, Map, Value};
 use tokio_util::sync::CancellationToken;
 
+use super::adapter_utils::{calculate_cost, replace_images_with_placeholder};
+use super::estimate::clamp_max_tokens_to_context;
+use super::sse::DataSseDecoder as SseDecoder;
 use super::event_stream::{event_stream, EventStreamWriter};
 use super::types::{
     user_agent, AssistantContent, AssistantMessage, AssistantMessageEvent,
@@ -58,10 +61,6 @@ const NON_VISION_TOOL_IMAGE_PLACEHOLDER: &str =
 const MAX_PROVIDER_ERROR_BODY_CHARS: usize = 4000;
 const DEFAULT_MAX_RETRY_DELAY_MS: u64 = 60_000;
 
-const CONTEXT_SAFETY_TOKENS: i64 = 4096;
-const MIN_MAX_TOKENS: i64 = 1;
-const CHARS_PER_TOKEN: i64 = 4;
-const ESTIMATED_IMAGE_CHARS: i64 = 4800;
 
 /// 工具调用合成 id 计数器(TS 模块级 `toolCallCounter`,从 1 起)。
 static TOOL_CALL_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -389,43 +388,6 @@ fn thinking_config_for(
 }
 
 // ── 消息预处理(TS transform-messages.ts) ─────────────────────────────
-
-fn message_timestamp(message: &Message) -> i64 {
-    match message {
-        Message::User(user) => user.timestamp,
-        Message::Assistant(assistant) => assistant.timestamp,
-        Message::ToolResult(result) => result.timestamp,
-    }
-}
-
-fn replace_images_with_placeholder(
-    content: &[TextOrImageContent],
-    placeholder: &str,
-) -> Vec<TextOrImageContent> {
-    let mut result: Vec<TextOrImageContent> = Vec::new();
-    let mut previous_was_placeholder = false;
-    for block in content {
-        match block {
-            TextOrImageContent::Image { .. } => {
-                if !previous_was_placeholder {
-                    result.push(TextOrImageContent::text(placeholder));
-                }
-                previous_was_placeholder = true;
-            }
-            TextOrImageContent::Text {
-                text,
-                text_signature,
-            } => {
-                result.push(TextOrImageContent::Text {
-                    text: text.clone(),
-                    text_signature: text_signature.clone(),
-                });
-                previous_was_placeholder = text == placeholder;
-            }
-        }
-    }
-    result
-}
 
 /// TS transformMessages:非图片模型降级图片;跨模型清理 thinking/签名并归一
 /// tool call id(normalize 回调由各 provider 注入);error/aborted 回合不回放;
@@ -941,150 +903,6 @@ fn resolve_google_function_calling_mode(
 
 // ── 上下文预算估算(TS utils/estimate.ts)与费用 ───────────────────────
 
-fn text_or_image_chars(content: &[TextOrImageContent]) -> i64 {
-    content
-        .iter()
-        .map(|block| match block {
-            TextOrImageContent::Text { text, .. } => text.chars().count() as i64,
-            TextOrImageContent::Image { .. } => ESTIMATED_IMAGE_CHARS,
-        })
-        .sum()
-}
-
-fn estimate_message_tokens(message: &Message) -> i64 {
-    let chars = match message {
-        Message::User(user) => match &user.content {
-            UserContent::Text(text) => text.chars().count() as i64,
-            UserContent::Blocks(blocks) => text_or_image_chars(blocks),
-        },
-        Message::ToolResult(result) => text_or_image_chars(&result.content),
-        Message::Assistant(assistant) => assistant
-            .content
-            .iter()
-            .map(|block| match block {
-                AssistantContent::Text { text, .. } => text.chars().count() as i64,
-                AssistantContent::Thinking { thinking, .. } => thinking.chars().count() as i64,
-                AssistantContent::ToolCall(tool_call) => {
-                    tool_call.name.chars().count() as i64
-                        + serde_json::to_string(&tool_call.arguments)
-                            .map(|serialized| serialized.chars().count() as i64)
-                            .unwrap_or(0)
-                }
-            })
-            .sum(),
-    };
-    (chars + CHARS_PER_TOKEN - 1) / CHARS_PER_TOKEN
-}
-
-fn estimate_tools_tokens<'a>(tools: impl Iterator<Item = &'a Tool>) -> i64 {
-    let list: Vec<&Tool> = tools.collect();
-    if list.is_empty() {
-        return 0;
-    }
-    let serialized = serde_json::to_string(&list).unwrap_or_default();
-    (serialized.chars().count() as i64 + CHARS_PER_TOKEN - 1) / CHARS_PER_TOKEN
-}
-
-/// TS estimateContextTokens:优先最近可用 assistant usage + 尾部增量。
-fn estimate_context_tokens(context: &Context) -> i64 {
-    let mut latest_prefix_timestamp = i64::MIN;
-    let mut usage_info: Option<(i64, usize)> = None;
-    for (index, message) in context.messages.iter().enumerate() {
-        if let Message::Assistant(assistant) = message {
-            let applies_to_prefix = assistant.timestamp >= latest_prefix_timestamp;
-            if applies_to_prefix
-                && assistant.stop_reason != StopReason::Aborted
-                && assistant.stop_reason != StopReason::Error
-            {
-                let usage = &assistant.usage;
-                let total = if usage.total_tokens > 0 {
-                    usage.total_tokens
-                } else {
-                    usage.input + usage.output + usage.cache_read + usage.cache_write
-                };
-                if total > 0 {
-                    usage_info = Some((total, index));
-                }
-            }
-        }
-        latest_prefix_timestamp = latest_prefix_timestamp.max(message_timestamp(message));
-    }
-
-    match usage_info {
-        Some((usage_tokens, index)) => {
-            let trailing: i64 = context.messages[index + 1..]
-                .iter()
-                .map(estimate_message_tokens)
-                .sum();
-            let mut added_names: HashSet<&str> = HashSet::new();
-            for message in &context.messages[index + 1..] {
-                if let Message::ToolResult(result) = message {
-                    if let Some(names) = &result.added_tool_names {
-                        for name in names {
-                            added_names.insert(name.as_str());
-                        }
-                    }
-                }
-            }
-            let added_tool_tokens = estimate_tools_tokens(
-                context
-                    .tools
-                    .iter()
-                    .filter(|tool| added_names.contains(tool.name.as_str())),
-            );
-            usage_tokens + trailing + added_tool_tokens
-        }
-        None => {
-            let messages: i64 = context.messages.iter().map(estimate_message_tokens).sum();
-            let system = context
-                .system_prompt
-                .as_ref()
-                .map(|prompt| {
-                    (prompt.chars().count() as i64 + CHARS_PER_TOKEN - 1) / CHARS_PER_TOKEN
-                })
-                .unwrap_or(0);
-            let tools = estimate_tools_tokens(context.tools.iter());
-            messages + system + tools
-        }
-    }
-}
-
-/// TS simple-options.ts clampMaxTokensToContext:maxTokens 恒 ≥ 1。
-fn clamp_max_tokens_to_context(model: &Model, context: &Context, max_tokens: i64) -> i64 {
-    if model.context_window <= 0 {
-        return max_tokens.max(MIN_MAX_TOKENS);
-    }
-    let available = model.context_window - estimate_context_tokens(context) - CONTEXT_SAFETY_TOKENS;
-    max_tokens.min(available.max(MIN_MAX_TOKENS))
-}
-
-/// TS calculateCost:每百万 token 费率,支持输入量分档;1h cache write 双倍输入价。
-fn calculate_cost(model: &Model, usage: &mut Usage) {
-    let input_tokens = usage.input + usage.cache_read + usage.cache_write;
-    let mut rates = &model.cost.rates;
-    let mut matched_threshold = -1i64;
-    if let Some(tiers) = &model.cost.tiers {
-        for tier in tiers {
-            if input_tokens > tier.input_tokens_above && tier.input_tokens_above > matched_threshold
-            {
-                rates = &tier.rates;
-                matched_threshold = tier.input_tokens_above;
-            }
-        }
-    }
-    let long_write = usage.cache_write_1h.unwrap_or(0);
-    let short_write = usage.cache_write - long_write;
-    let per_million = 1_000_000.0;
-    usage.cost.input = rates.input / per_million * usage.input as f64;
-    usage.cost.output = rates.output / per_million * usage.output as f64;
-    usage.cost.cache_read = rates.cache_read / per_million * usage.cache_read as f64;
-    usage.cost.cache_write = (rates.cache_write * short_write as f64
-        + rates.input * 2.0 * long_write as f64)
-        / per_million;
-    usage.cost.total =
-        usage.cost.input + usage.cost.output + usage.cost.cache_read + usage.cost.cache_write;
-}
-
 // ── 请求体构造(google-generative-ai.ts buildParams) ──────────────────
 
 /// streamGenerateContent 端点;model.baseUrl 已含版本路径时不追加 apiVersion。
@@ -1179,35 +997,6 @@ pub fn build_request_body(
 }
 
 // ── SSE 解码(Google `data: {json}` 流) ───────────────────────────────
-
-/// 增量 SSE 解码器:按行缓冲(容忍 UTF-8 多字节跨 chunk),空行分发事件;
-/// 多个 data 行以 "\n" 连接;event/id/注释行忽略;EOF 处的未完结事件按规范丢弃。
-#[derive(Default)]
-struct SseDecoder {
-    buffer: Vec<u8>,
-    data_lines: Vec<String>,
-}
-
-impl SseDecoder {
-    fn push(&mut self, bytes: &[u8]) -> Vec<String> {
-        self.buffer.extend_from_slice(bytes);
-        let mut events = Vec::new();
-        while let Some(position) = self.buffer.iter().position(|&byte| byte == b'\n') {
-            let line_bytes: Vec<u8> = self.buffer.drain(..=position).collect();
-            let cow = String::from_utf8_lossy(&line_bytes[..line_bytes.len() - 1]);
-            let line: &str = cow.strip_suffix('\r').unwrap_or(&cow);
-            if line.is_empty() {
-                if !self.data_lines.is_empty() {
-                    events.push(std::mem::take(&mut self.data_lines).join("\n"));
-                }
-            } else if let Some(rest) = line.strip_prefix("data:") {
-                let rest = rest.strip_prefix(' ').unwrap_or(rest);
-                self.data_lines.push(rest.to_string());
-            }
-        }
-        events
-    }
-}
 
 // ── chunk 解析与停止原因 ──────────────────────────────────────────────
 

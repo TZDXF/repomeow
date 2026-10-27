@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { debounce } from "@/lib/utils";
+import { debounce, toggleInSet } from "@/lib/utils";
 import { useI18n } from "vue-i18n";
 import { ChevronDown, ChevronRight, Loader2, Search } from "@lucide/vue";
 import { Icon } from "@iconify/vue";
@@ -121,10 +121,7 @@ async function runSearch() {
 }
 
 function toggleCollapse(path: string) {
-  const next = new Set(collapsed.value);
-  if (next.has(path)) next.delete(path);
-  else next.add(path);
-  collapsed.value = next;
+  collapsed.value = toggleInSet(collapsed.value, path);
 }
 
 /** 行片段按命中切分(span 渲染,内容经文本插值转义,无 XSS 面) */

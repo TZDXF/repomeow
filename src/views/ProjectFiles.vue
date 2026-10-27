@@ -26,7 +26,7 @@ import SemanticImpactPanel from "@/components/semantic/SemanticImpactPanel.vue";
 import SemanticHistoryPanel from "@/components/semantic/SemanticHistoryPanel.vue";
 import MdImage from "@/components/markdown/MdImage.vue";
 import MdLink from "@/components/markdown/MdLink.vue";
-import { MD_BASE_PATH_KEY } from "@/components/markdown/keys";
+import { MD_BASE_PATH_KEY, MD_ROOT_PATH_KEY } from "@/components/markdown/keys";
 import ImageViewer from "@/components/files/ImageViewer.vue";
 import VideoViewer from "@/components/files/VideoViewer.vue";
 import { cmd, onListen } from "@/lib/tauri";
@@ -471,6 +471,7 @@ const mdBasePath = computed(() =>
     : rootPath.value,
 );
 provide(MD_BASE_PATH_KEY, () => mdBasePath.value);
+provide(MD_ROOT_PATH_KEY, () => rootPath.value);
 
 const mdComponents = {
   img: MdImage,

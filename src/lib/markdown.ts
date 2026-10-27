@@ -1,6 +1,6 @@
 /** Markdown 内容中 URL/路径的处理工具(README 图片解析、链接拦截共用) */
 
-import { cleanPath } from "@/lib/path";
+import { cleanPath, isInsidePath, toForwardSlash } from "@/lib/path";
 
 /** Windows 盘符绝对路径(C:\ 或 C:/) */
 const WINDOWS_ABS = /^[a-zA-Z]:[\\/]/;
@@ -18,7 +18,7 @@ function normalizeSegments(path: string): string {
   const isUnc = path.startsWith("\\\\") || path.startsWith("//");
   const out: string[] = [];
   // 根部长度:盘符("D:")为 1,UNC 头(server/share)为 2;.. 不得弹出根之外
-  const rootLen = isUnc ? 2 : 1;
+  const rootLen = isUnc ? 2 : path.startsWith("/") ? 0 : 1;
   for (const part of path.split(/[\\/]+/)) {
     if (!part || part === ".") continue;
     if (part === "..") {
@@ -27,7 +27,7 @@ function normalizeSegments(path: string): string {
     }
     out.push(part);
   }
-  return (isUnc ? "//" : "") + out.join("/");
+  return (isUnc ? "//" : path.startsWith("/") ? "/" : "") + out.join("/");
 }
 
 /**
@@ -71,4 +71,53 @@ export function safeLinkHref(url: string | null | undefined): string | null {
   if (!hasScheme(compact)) return trimmed;
   const scheme = compact.slice(0, compact.indexOf(":") + 1).toLowerCase();
   return SAFE_LINK_SCHEMES.has(scheme) ? trimmed : null;
+}
+
+/** 仅允许 http(s) 图片和可信根目录内的本地图片;没有根目录时禁用本地图片。 */
+export function safeMarkdownImage(url: string, base: string, root: string): string | null {
+  const value = url.trim();
+  // eslint-disable-next-line no-control-regex -- 拒绝路径内控制字符
+  if (!value || /[\u0000-\u001f\u007f]/.test(value)) return null;
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      const parsed = new URL(value);
+      return parsed.protocol === "http:" || parsed.protocol === "https:" ? value : null;
+    } catch {
+      return null;
+    }
+  }
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(value).split(/[?#]/, 1)[0];
+  } catch {
+    return null;
+  }
+  // 不允许网络路径、asset/file 等协议或没有可信根目录的本地路径。
+  if (
+    !root ||
+    !base ||
+    // eslint-disable-next-line no-control-regex -- 同时检查 URL 解码后的控制字符
+    /[\u0000-\u001f\u007f]/.test(decoded) ||
+    /^[\\/]{2}/.test(decoded) ||
+    hasScheme(decoded)
+  )
+    return null;
+  const normalize = (path: string): string => {
+    const forward = toForwardSlash(path);
+    const prefix = forward.startsWith("/") ? "/" : "";
+    const parts: string[] = [];
+    for (const part of forward.split("/")) {
+      if (!part || part === ".") continue;
+      if (part === "..") parts.pop();
+      else parts.push(part);
+    }
+    return prefix + parts.join("/");
+  };
+  const cleanRoot = normalize(root);
+  const cleanBase = normalize(base);
+  if (!cleanRoot || !isInsidePath(cleanRoot, cleanBase)) return null;
+  const path = WINDOWS_ABS.test(decoded)
+    ? normalize(decoded)
+    : normalize(`${cleanBase}/${decoded.replace(/^[\\/]+/, "")}`);
+  return isInsidePath(cleanRoot, path) ? path : null;
 }

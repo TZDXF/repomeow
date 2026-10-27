@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useLatestRequest } from "@/composables/useLatestRequest";
 import { onProjectPageReactivated } from "@/composables/useProjectPageState";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -72,9 +73,9 @@ const displayGroups = computed<DisplayGroup[]>(() =>
 
 // path 一并作为 watch 源:详情页切换工作区(worktree)时传入的是 id 相同、
 // path 不同的 project 副本,需要按新工作目录重新扫描
-let loadSeq = 0;
+const loadRequest = useLatestRequest();
 async function load(resetView = true) {
-  const seq = ++loadSeq;
+  const isCurrent = loadRequest.begin();
   const currentProject = props.project;
   if (resetView) showHidden.value = false;
   pinsStore.ensureLoaded();
@@ -92,7 +93,7 @@ async function load(resetView = true) {
     assetsStore.refresh(currentProject),
     overviewStore.refresh(currentProject.id),
   ]);
-  if (seq !== loadSeq) return;
+  if (!isCurrent()) return;
   applyHiddenItems(overview.hidden_items);
   loaded.value = true;
   resetOpenStates();

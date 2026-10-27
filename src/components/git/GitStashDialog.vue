@@ -19,8 +19,10 @@ import {
 import { formatLocalDateTime } from "@/lib/format";
 import { statusClass } from "@/lib/git-status";
 import { cmd } from "@/lib/tauri";
+import { useGitDiffLoader } from "@/composables/git/useGitDiffLoader";
+import { useLatestRequest } from "@/composables/useLatestRequest";
 import { useProjectsStore } from "@/stores/projects";
-import type { GitCommitFile, GitCommitFileDiff, GitStash, GitStatus, Project } from "@/types";
+import type { GitCommitFile, GitStash, GitStatus, Project } from "@/types";
 
 const props = defineProps<{ project: Project }>();
 const open = defineModel<boolean>("open", { required: true });
@@ -38,14 +40,18 @@ const stashFiles = ref<GitCommitFile[]>([]);
 const stashFilesLoading = ref(false);
 const stashFilesError = ref("");
 const selectedFile = ref<GitCommitFile | null>(null);
-const stashDiff = ref<GitCommitFileDiff | null>(null);
-const stashDiffLoading = ref(false);
-const stashDiffError = ref("");
+const {
+  diff: stashDiff,
+  loading: stashDiffLoading,
+  error: stashDiffError,
+  load: loadDiff,
+  reset: resetDiff,
+} = useGitDiffLoader({ keepPrevious: false });
+const filesRequest = useLatestRequest();
 const ignoreWs = useLocalStorage<"none" | "eol" | "change" | "all">(
   "repomeow:commit-diff-ignore-ws",
   "none",
 );
-let diffLoadSeq = 0;
 const createMessage = ref("");
 const includeUntracked = ref(false);
 const creating = ref(false);
@@ -74,7 +80,17 @@ watch(open, (value) => {
     confirmOpen.value = false;
     createOpen.value = false;
     diffOpen.value = false;
+    filesRequest.invalidate();
+    resetDiff();
     pending.value = null;
+  }
+});
+
+watch(diffOpen, (value) => {
+  if (!value) {
+    filesRequest.invalidate();
+    resetDiff();
+    stashFilesLoading.value = false;
   }
 });
 
@@ -105,6 +121,8 @@ function shortOid(oid: string) {
 }
 
 async function openStashDiff(stash: GitStash) {
+  const isCurrent = filesRequest.begin();
+  resetDiff();
   diffTarget.value = stash;
   diffOpen.value = true;
   stashFiles.value = [];
@@ -118,7 +136,7 @@ async function openStashDiff(stash: GitStash) {
       path: props.project.path,
       oid: stash.oid,
     });
-    if (diffTarget.value?.oid !== stash.oid) {
+    if (!isCurrent()) {
       return;
     }
     stashFiles.value = files;
@@ -126,9 +144,9 @@ async function openStashDiff(stash: GitStash) {
       await selectStashFile(files[0]);
     }
   } catch (error) {
-    stashFilesError.value = String(error);
+    if (isCurrent()) stashFilesError.value = String(error);
   } finally {
-    if (diffTarget.value?.oid === stash.oid) {
+    if (isCurrent()) {
       stashFilesLoading.value = false;
     }
   }
@@ -144,30 +162,15 @@ async function loadSelectedDiff(file: GitCommitFile) {
   if (!target) {
     return;
   }
-  const seq = ++diffLoadSeq;
-  stashDiff.value = null;
-  stashDiffError.value = "";
-  stashDiffLoading.value = true;
-  try {
-    const result = await cmd<GitCommitFileDiff>("git_stash_file_diff", {
+  await loadDiff(() =>
+    cmd("git_stash_file_diff", {
       path: props.project.path,
       oid: target.oid,
       filePath: file.path,
       oldPath: file.old_path,
       ignoreWs: ignoreWs.value,
-    });
-    if (seq === diffLoadSeq) {
-      stashDiff.value = result;
-    }
-  } catch (error) {
-    if (seq === diffLoadSeq) {
-      stashDiffError.value = String(error);
-    }
-  } finally {
-    if (seq === diffLoadSeq) {
-      stashDiffLoading.value = false;
-    }
-  }
+    }),
+  );
 }
 
 function openCreateDialog() {

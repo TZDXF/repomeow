@@ -376,3 +376,16 @@ fn list_branches_reports_upstream_tracking() {
     let _ = fs::remove_dir_all(&clone_a);
     let _ = fs::remove_dir_all(&clone_b);
 }
+
+#[test]
+fn rejects_git_option_injection_before_running_commands() {
+    let path = "nonexistent-repository";
+    assert!(checkout_blocking(path, "--orphan", false, false, None).unwrap_err().is_code(ErrorCode::GitBranchNameRequired));
+    assert!(checkout_blocking(path, "topic", true, false, Some("--force")).unwrap_err().is_code(ErrorCode::GitBranchNameRequired));
+    assert!(merge_blocking(path, "--abort", None, false).unwrap_err().is_code(ErrorCode::GitBranchNameRequired));
+    assert!(merge_blocking(path, "topic", Some("--force"), false).unwrap_err().is_code(ErrorCode::GitBranchNameRequired));
+    assert!(rebase_blocking(path, "--abort").unwrap_err().is_code(ErrorCode::GitBranchNameRequired));
+    assert!(worktree_add_blocking(path, "--force", "topic", false, None, None).unwrap_err().is_code(ErrorCode::InvalidPath));
+    assert!(worktree_add_blocking(path, "worktree", "topic", true, Some("--force"), None).unwrap_err().is_code(ErrorCode::GitBranchNameRequired));
+    assert!(worktree_remove_blocking(path, "--force", false, false, None).unwrap_err().is_code(ErrorCode::InvalidPath));
+}

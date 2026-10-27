@@ -55,7 +55,7 @@ pub(super) fn save_page_in(dir: &Path, file_name: &str, content: &str) -> AppRes
 
 pub(super) fn save_meta_in(dir: &Path, mut meta: WikiMeta) -> AppResult<()> {
     meta.version = META_VERSION;
-    meta.generated_at = chrono::Utc::now().to_rfc3339();
+    meta.generated_at = crate::time_util::now_utc().to_rfc3339();
     fs::create_dir_all(dir)?;
     let target = dir.join(META_FILE);
     let tmp = dir.join(format!("{META_FILE}.tmp"));

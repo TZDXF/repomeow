@@ -47,7 +47,10 @@ fn scrub_access_token(msg: &str) -> String {
 
 pub(super) async fn send(req: reqwest::RequestBuilder) -> AppResult<reqwest::Response> {
     let resp = req.send().await.map_err(|e| {
-        AppError::coded(ErrorCode::PlatformConnectionFailed, scrub_access_token(&e.to_string()))
+        AppError::coded(
+            ErrorCode::PlatformConnectionFailed,
+            scrub_access_token(&e.to_string()),
+        )
     })?;
     let status = resp.status();
     if status.is_success() {

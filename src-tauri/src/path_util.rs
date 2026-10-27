@@ -44,6 +44,16 @@ pub fn clean(path: &Path) -> PathBuf {
     PathBuf::from(clean_str(&path.to_string_lossy()))
 }
 
+/// 仅转换分隔符，不裁剪空格或尾部分隔符。
+pub fn forward_separators(s: &str) -> String {
+    s.replace('\\', "/")
+}
+
+/// 仅转换为 Windows 分隔符，不改变其他字符。
+pub fn windows_separators(s: &str) -> String {
+    s.replace('/', "\\")
+}
+
 /// 归一化为 `/` 分隔字符串(IPC 输出、git pathspec、与 libgit2 输出对齐用)。
 /// 输入已是 `/` 分隔时仅去尾随分隔符
 pub fn to_forward_slash(path: &Path) -> String {
@@ -74,6 +84,13 @@ pub fn to_native_separator(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn separator_only_conversion_preserves_whitespace_and_trailing_slashes() {
+        assert_eq!(forward_separators("  a\\b\\  "), "  a/b/  ");
+        assert_eq!(forward_separators(""), "");
+        assert_eq!(windows_separators("  a/b/  "), "  a\\b\\  ");
+    }
 
     #[test]
     fn forward_slash_normalizes_and_trims() {

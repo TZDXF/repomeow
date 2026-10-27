@@ -21,7 +21,7 @@
 //! - terminate 语义:整批全部 terminate 才提前终止。
 
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 use futures::future::{join_all, BoxFuture};
 use futures::StreamExt;
@@ -1449,7 +1449,7 @@ fn message_tool_calls(message: &AssistantMessage) -> Vec<ToolCall> {
 
 /// Unix 时间戳(毫秒)。
 pub(crate) fn now_ms() -> i64 {
-    SystemTime::now()
+    crate::time_util::now_system()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as i64)
         .unwrap_or(0)

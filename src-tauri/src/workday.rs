@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use chrono::{Datelike, NaiveDate, Utc};
+use chrono::{Datelike, NaiveDate};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
@@ -97,7 +97,7 @@ pub fn load_data(cache_root: &PathBuf) -> AppResult<WorkdayData> {
 fn try_load_envelope(cache_path: &Path) -> Option<WorkdayData> {
     let raw = fs::read_to_string(cache_path).ok()?;
     let (parsed, ts) = parse_cache(&raw)?;
-    let age = Utc::now().timestamp().saturating_sub(ts);
+    let age = crate::time_util::now_ts().saturating_sub(ts);
     if age >= 0 && age < CACHE_TTL_SECS {
         Some(parsed)
     } else {
@@ -109,7 +109,7 @@ fn try_load_envelope(cache_path: &Path) -> Option<WorkdayData> {
 /// 写盘失败仅记录日志,不影响本次返回。
 fn write_cache(cache_path: &std::path::Path, body: &str) {
     let envelope = serde_json::json!({
-        "downloaded_at": Utc::now().timestamp(),
+        "downloaded_at": crate::time_util::now_ts(),
         "data": serde_json::from_str::<serde_json::Value>(body).unwrap_or_else(|_| serde_json::Value::String(body.to_string())),
     });
     if let Ok(s) = serde_json::to_string(&envelope) {
@@ -481,7 +481,7 @@ mod tests {
         let raw = std::fs::read_to_string(&path).unwrap();
         let (data, ts) = parse_cache(&raw).expect("应解析刚刚写入的包络");
         // 时间戳应接近现在(±10 秒)
-        let now = Utc::now().timestamp();
+        let now = crate::time_util::now_ts();
         assert!(
             (now - ts).abs() < 10,
             "downloaded_at 应为当前时刻(now={now}, ts={ts})"
@@ -498,7 +498,7 @@ mod tests {
     #[test]
     fn ttl_boundary_for_envelope() {
         // 验证:now - downloaded_at < TTL 通过,>= TTL 失败(由调用方负责)
-        let now = Utc::now().timestamp();
+        let now = crate::time_util::now_ts();
         let fresh = now - 10;
         let just_inside = now - (CACHE_TTL_SECS - 1);
         let just_outside = now - (CACHE_TTL_SECS + 1);
@@ -512,7 +512,7 @@ mod tests {
             ("just_outside", make(just_outside), false),
         ] {
             let (_data, ts) = parse_cache(&raw).unwrap();
-            let age = Utc::now().timestamp().saturating_sub(ts);
+            let age = crate::time_util::now_ts().saturating_sub(ts);
             assert_eq!(
                 age < CACHE_TTL_SECS,
                 expected_age_lt_ttl,

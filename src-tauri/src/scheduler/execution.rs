@@ -2,7 +2,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use chrono::{Datelike, Local};
+use chrono::Datelike;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::commands::git::{run_git_current_user, run_git_log};
@@ -42,7 +42,7 @@ pub fn load_project_paths(app: &AppHandle) -> AppResult<HashMap<i64, (String, St
 /// 更新 last_run_at,并要求恰好命中一个定时任务。
 /// 调用方传入 AppHandle 托管的数据库连接,避免使用独立连接。
 pub fn mark_last_run(conn: &rusqlite::Connection, schedule_id: &str) -> AppResult<()> {
-    let now_ts = Local::now().timestamp();
+    let now_ts = crate::time_util::now_local().timestamp();
     let updated = conn.execute(
         "UPDATE report_schedules SET last_run_at = ?1 WHERE id = ?2",
         rusqlite::params![now_ts, schedule_id],
@@ -98,7 +98,7 @@ pub(crate) async fn fire_schedule(
     eprintln!(
         "[scheduler] 触发任务({}) @ {}",
         schedule.report_type,
-        Local::now().format("%Y-%m-%d %H:%M")
+        crate::time_util::now_local().format("%Y-%m-%d %H:%M")
     );
 
     // 1. 读取项目路径(复用 AppHandle 托管 Db 锁)
@@ -166,7 +166,7 @@ pub(crate) async fn fire_schedule(
     background_task.set_completed(1);
 
     // 4. 计算日期范围
-    let today = Local::now().date_naive();
+    let today = crate::time_util::now_local().date_naive();
     let today_str = today.format("%Y-%m-%d").to_string();
     let (date_from, date_to) = if is_weekly {
         if schedule.weekly_workweek {

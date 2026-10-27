@@ -1,5 +1,6 @@
 import { ref, shallowRef, type Ref, type ShallowRef } from "vue";
 import { cmd } from "@/lib/tauri";
+import { useLatestRequest } from "@/composables/useLatestRequest";
 
 /**
  * 语义分析请求的通用状态机:loading / error / result + requestId 取消与防串位。
@@ -34,7 +35,7 @@ export function useSemanticRequest<TArgs extends unknown[], TResult>(
   const error = ref("");
   const errorCode = ref<string | null>(null);
   const result = shallowRef<TResult | null>(null);
-  let seq = 0;
+  const request = useLatestRequest();
   let currentRequestId: string | null = null;
 
   function cancel() {
@@ -46,7 +47,7 @@ export function useSemanticRequest<TArgs extends unknown[], TResult>(
   }
 
   async function run(...args: TArgs): Promise<TResult | null> {
-    const mySeq = ++seq;
+    const isCurrent = request.begin();
     cancel();
     const requestId = crypto.randomUUID();
     currentRequestId = requestId;
@@ -55,11 +56,11 @@ export function useSemanticRequest<TArgs extends unknown[], TResult>(
     errorCode.value = null;
     try {
       const value = await invoke(requestId, ...args);
-      if (mySeq !== seq) return null;
+      if (!isCurrent()) return null;
       result.value = value;
       return value;
     } catch (e) {
-      if (mySeq !== seq || isSemanticCanceled(e)) return null;
+      if (!isCurrent() || isSemanticCanceled(e)) return null;
       error.value = e instanceof Error ? e.message : String(e);
       errorCode.value =
         e && typeof e === "object" && typeof (e as { code?: unknown }).code === "string"
@@ -67,7 +68,7 @@ export function useSemanticRequest<TArgs extends unknown[], TResult>(
           : null;
       return null;
     } finally {
-      if (mySeq === seq) {
+      if (isCurrent()) {
         loading.value = false;
         if (currentRequestId === requestId) currentRequestId = null;
       }
@@ -75,7 +76,7 @@ export function useSemanticRequest<TArgs extends unknown[], TResult>(
   }
 
   function reset() {
-    seq += 1;
+    request.invalidate();
     cancel();
     loading.value = false;
     error.value = "";

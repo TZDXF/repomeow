@@ -1,4 +1,3 @@
-use chrono::Local;
 
 use serde_json::{json, Value};
 
@@ -34,7 +33,7 @@ pub(super) async fn generate_report_impl(
             "projectDirectories 至少需要一个项目目录",
         ));
     }
-    let today = Local::now().date_naive();
+    let today = crate::time_util::now_local().date_naive();
     let default_from = if period_type == "weekly" {
         today - chrono::Duration::days(6)
     } else {

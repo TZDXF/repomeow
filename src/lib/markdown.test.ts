@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { safeLinkHref } from "./markdown";
+import { resolvePath, safeLinkHref, safeMarkdownImage } from "./markdown";
 
 describe("safeLinkHref", () => {
   it("放行 http/https/mailto 外链", () => {
@@ -40,5 +40,49 @@ describe("safeLinkHref", () => {
     expect(safeLinkHref(undefined)).toBeNull();
     expect(safeLinkHref("")).toBeNull();
     expect(safeLinkHref("   ")).toBeNull();
+  });
+});
+
+describe("safeMarkdownImage", () => {
+  const root = "C:/work/project";
+  const base = "C:/work/project/docs";
+  it("允许项目内图片并规范化路径", () => {
+    expect(safeMarkdownImage("../images/a.png?raw=1#x", base, root)).toBe(
+      "C:/work/project/images/a.png",
+    );
+    expect(safeMarkdownImage("C:/work/project/img.png", base, root)).toBe(
+      "C:/work/project/img.png",
+    );
+    expect(safeMarkdownImage("https://example.com/a.png", "", "")).toBe(
+      "https://example.com/a.png",
+    );
+    expect(safeMarkdownImage("../a.png", "/home/u/project/docs", "/home/u/project")).toBe(
+      "/home/u/project/a.png",
+    );
+  });
+  it("拒绝越界、协议和缺失根目录", () => {
+    for (const url of [
+      "../../secret.png",
+      "%2e%2e/%2e%2e/secret",
+      "C:/work/project/../secret.png",
+      "C:/work/project-other/a.png",
+      "\\\\server\\share\\a.png",
+      "//server/share/a.png",
+      "asset://localhost/C:/secret",
+      "file:///secret",
+      "data:image/png;base64,AA",
+      "%5c%5cserver%5cshare",
+      "a%00.png",
+    ]) {
+      expect(safeMarkdownImage(url, base, root), url).toBeNull();
+    }
+    expect(safeMarkdownImage("a.png", "", "")).toBeNull();
+    expect(safeMarkdownImage("a.png", "C:/other", root)).toBeNull();
+  });
+});
+
+describe("resolvePath", () => {
+  it("保留 POSIX 绝对路径的根斜杠", () => {
+    expect(resolvePath("/home/user/project", "docs/a.md")).toBe("/home/user/project/docs/a.md");
   });
 });

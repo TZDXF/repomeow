@@ -83,7 +83,7 @@ fn mark_last_run_writes_timestamp_on_success() {
         .find(|s| s.id == "s-ok")
         .expect("schedule 存在");
     let ts = s.last_run_at.expect("last_run_at 应被更新");
-    let now = chrono::Local::now().timestamp();
+    let now = crate::time_util::now_local().timestamp();
     // 允许 ±2s 抖动
     assert!(
         (ts - now).abs() <= 2,

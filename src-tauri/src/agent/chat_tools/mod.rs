@@ -15,7 +15,7 @@ mod config;
 mod file;
 mod report;
 mod sem;
-mod terminal;
+pub(crate) mod terminal;
 #[cfg(test)]
 mod tests;
 mod util;

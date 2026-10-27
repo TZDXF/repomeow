@@ -116,6 +116,8 @@ pub(super) fn error_assistant_message(model: &Model, message: &str) -> Assistant
         error_message: Some(message.to_string()),
         raw_stop_reason: None,
         end_turn: None,
+        duration_ms: None,
+        thinking_level: None,
         timestamp: now_ts_nanos() / 1_000_000,
     }
 }

@@ -280,6 +280,7 @@ pub fn run() {
             commands::files::list_project_files,
             commands::files::search_project_files,
             commands::files::read_file_preview,
+            commands::files::resolve_markdown_image,
             commands::files::watch_project_files,
             commands::files::unwatch_project_files,
             commands::files::project_file_exists,
