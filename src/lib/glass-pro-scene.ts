@@ -1,4 +1,4 @@
-/** Homepage-style directional liquid, followed by a restrained glass refraction pass. */
+/** 鼠标流光后叠加玻璃折射;静态 CSS 高光继续补充玻璃表面纹理。 */
 export const glassProInteractiveLayers = [
   {
     id: "cursor-flow",

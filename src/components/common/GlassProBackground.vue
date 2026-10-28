@@ -4,7 +4,12 @@ import type { ShaderInstance } from "shaders/js";
 import { attachGlassPointer } from "@/lib/glass-pointer";
 import { glassProInteractiveLayers } from "@/lib/glass-pro-scene";
 
+const IDLE_PAUSE_MS = 1800;
+
 let detachPointer: (() => void) | undefined;
+let surface: HTMLElement | null = null;
+let idleTimer: number | undefined;
+let idle = false;
 
 const canvas = ref<HTMLCanvasElement>();
 const ready = ref(false);
@@ -25,11 +30,43 @@ function palette() {
   ).map((color, index) => ({ color, position: index / 4 }));
 }
 
+function setReady(value: boolean) {
+  ready.value = value;
+  if (value) surface?.setAttribute("data-glass-shader-ready", "");
+  else surface?.removeAttribute("data-glass-shader-ready");
+}
+
+function clearIdleTimer() {
+  if (idleTimer !== undefined) window.clearTimeout(idleTimer);
+  idleTimer = undefined;
+}
+
+function scheduleIdlePause() {
+  clearIdleTimer();
+  if (!shader || disposed || document.hidden || motion.matches) return;
+  idleTimer = window.setTimeout(() => {
+    idleTimer = undefined;
+    shader?.pause();
+    idle = true;
+  }, IDLE_PAUSE_MS);
+}
+
+function handleActivity() {
+  if (disposed || document.hidden || motion.matches) return;
+  if (idle) {
+    shader?.resume();
+    idle = false;
+  }
+  scheduleIdlePause();
+}
+
 function destroy() {
   generation++;
-  ready.value = false;
+  clearIdleTimer();
+  setReady(false);
   shader?.destroy();
   shader = undefined;
+  idle = false;
 }
 
 async function sync() {
@@ -75,10 +112,10 @@ async function sync() {
         disableTelemetry: true,
         observeElement: false,
         onReady: () => {
-          if (current === generation) ready.value = true;
+          if (current === generation) setReady(true);
         },
         onError: () => {
-          if (current === generation) ready.value = false;
+          if (current === generation) setReady(false);
         },
       },
     );
@@ -88,7 +125,8 @@ async function sync() {
     }
     shader = instance;
     resize();
-    ready.value = !instance.getFailureReason();
+    setReady(!instance.getFailureReason());
+    scheduleIdlePause();
   } catch {
     // The CSS aurora remains visible if initialization or GPU allocation fails.
     if (current === generation) destroy();
@@ -108,8 +146,12 @@ function resize() {
 }
 
 onMounted(() => {
-  const surface = canvas.value?.closest<HTMLElement>(".app-surface");
-  if (surface) detachPointer = attachGlassPointer(surface);
+  surface = canvas.value?.closest<HTMLElement>(".app-surface") ?? null;
+  if (surface) {
+    detachPointer = attachGlassPointer(surface);
+    surface.addEventListener("pointermove", handleActivity, { passive: true });
+    surface.addEventListener("pointerdown", handleActivity, { passive: true });
+  }
   motion = window.matchMedia("(prefers-reduced-motion: reduce)");
   motion.addEventListener("change", sync);
   document.addEventListener("visibilitychange", sync);
@@ -121,6 +163,8 @@ onMounted(() => {
 });
 onUnmounted(() => {
   detachPointer?.();
+  surface?.removeEventListener("pointermove", handleActivity);
+  surface?.removeEventListener("pointerdown", handleActivity);
 
   disposed = true;
   destroy();
@@ -128,6 +172,7 @@ onUnmounted(() => {
   resizeObserver?.disconnect();
   motion?.removeEventListener("change", sync);
   document.removeEventListener("visibilitychange", sync);
+  surface = null;
 });
 </script>
 

@@ -77,6 +77,12 @@
   position: absolute;
   inset: 0;
   background:
+    repeating-linear-gradient(
+      105deg,
+      transparent 0 46px,
+      rgb(255 255 255 / 4%) 48px,
+      transparent 52px 92px
+    ),
     radial-gradient(ellipse at 65% -20%, rgb(255 255 255 / 22%), transparent 65%),
     linear-gradient(120deg, transparent 30%, rgb(180 198 255 / 8%) 50%, transparent 70%);
 }
@@ -88,8 +94,8 @@
     transparent 40%,
     rgb(202 173 239 / 9%)
   );
-  backdrop-filter: blur(24px) saturate(145%);
-  -webkit-backdrop-filter: blur(24px) saturate(145%);
+  backdrop-filter: blur(16px) saturate(135%);
+  -webkit-backdrop-filter: blur(16px) saturate(135%);
 }
 [data-theme="glass-pro"] .project-card:hover {
   background-color: color-mix(in srgb, var(--card) 85%, var(--primary) 15%);
@@ -129,8 +135,7 @@
   }
 }
 
-/* 保底极光层:WebGPU 不可用时也有可感知的流动背景;
-   WebGPU 就绪后 shader 画布叠加在其上方,两层共同构成更丰富的纵深。 */
+/* 保底极光层:WebGPU 不可用时提供流动背景;就绪后停止 CSS 动画,避免重复渲染。 */
 :is(:root, .theme-preview)[data-theme="glass-pro"] {
   --glass-pro-aurora:
     radial-gradient(38% 46% at 18% 22%, rgb(122 167 255 / 70%), transparent 70%),
@@ -150,12 +155,16 @@
 [data-theme="glass-pro"] .app-surface::before {
   content: "";
   position: absolute;
-  inset: -30%;
+  inset: -10%;
   z-index: -1;
   pointer-events: none;
   background: var(--glass-pro-aurora);
   filter: blur(80px) saturate(130%);
   animation: glass-pro-aurora 24s ease-in-out infinite alternate;
+}
+
+[data-theme="glass-pro"] .app-surface[data-glass-shader-ready]::before {
+  animation: none;
 }
 
 @keyframes glass-pro-aurora {

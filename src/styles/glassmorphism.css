@@ -80,8 +80,8 @@
 /* 终端文字画布保持透明,在整个面板(含工具栏)下统一做磨砂,避免只模糊输出区。 */
 :is([data-theme="glassmorphism"], [data-theme="glass-pro"]) [data-terminal-panel] {
   background-color: var(--card);
-  -webkit-backdrop-filter: blur(24px) saturate(145%);
-  backdrop-filter: blur(24px) saturate(145%);
+  -webkit-backdrop-filter: blur(16px) saturate(135%);
+  backdrop-filter: blur(16px) saturate(135%);
 }
 
 /* 不覆盖 body:托盘窗口外围必须保持透明。噪点作为背景层而非遮挡交互的覆盖层。 */
@@ -99,8 +99,8 @@
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' opacity='.025' filter='url(%23n)'/%3E%3C/svg%3E");
   border-radius: 1rem;
   box-shadow: var(--glass-shadow);
-  -webkit-backdrop-filter: blur(40px) saturate(180%);
-  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(135%);
+  backdrop-filter: blur(16px) saturate(135%);
   transition:
     background-color 500ms cubic-bezier(0.16, 1, 0.3, 1),
     border-color 500ms cubic-bezier(0.16, 1, 0.3, 1),
@@ -270,8 +270,8 @@
   background-color: rgb(255 255 255 / 10%);
   border-color: var(--border);
   box-shadow: var(--glass-shadow);
-  -webkit-backdrop-filter: blur(40px) saturate(180%);
-  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(135%);
+  backdrop-filter: blur(16px) saturate(135%);
   transition:
     background-color 500ms cubic-bezier(0.16, 1, 0.3, 1),
     border-color 500ms cubic-bezier(0.16, 1, 0.3, 1),
