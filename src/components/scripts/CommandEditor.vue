@@ -30,8 +30,12 @@ watch(
         defaultColor: false,
       });
       if (mySeq === seq) highlighted.value = html;
-    } catch {
-      highlighted.value = "";
+    } catch (error) {
+      // 高亮失败时保留空 highlighted,模板会回退纯文本层,避免透明文字完全隐形
+      if (mySeq === seq) {
+        highlighted.value = "";
+        console.error("[CommandEditor] Shiki 高亮失败,已回退纯文本", error);
+      }
     }
   },
   { immediate: true },
@@ -94,6 +98,11 @@ async function onKeydown(e: KeyboardEvent) {
           class="min-w-0 whitespace-pre-wrap break-words py-2 pl-2.5 pr-2.5 font-mono text-sm leading-5"
           v-html="highlighted"
         />
+        <!-- 高亮失败时回退纯文本层(与 Shiki pre 同排版),textarea 文字透明,不能让两层同时为空 -->
+        <pre
+          v-else-if="model"
+          class="min-w-0 whitespace-pre-wrap break-words py-2 pl-2.5 pr-2.5 font-mono text-sm leading-5"
+          >{{ model }}</pre>
       </div>
       <textarea
         ref="textareaEl"
