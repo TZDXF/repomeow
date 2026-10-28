@@ -20,6 +20,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import { TimeField } from "@/components/ui/time-field";
 import ReportProjectSelector from "@/components/report/ReportProjectSelector.vue";
 import TagCheckList from "@/components/tags/TagCheckList.vue";
@@ -79,210 +80,216 @@ function submit() {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent class="sm:max-w-3xl">
-      <DialogHeader>
+    <DialogContent
+      class="flex max-h-[calc(100dvh-3rem)] flex-col sm:max-w-[min(48rem,calc(100%-2rem))]"
+    >
+      <DialogHeader class="shrink-0">
         <DialogTitle>{{
           editing ? t("reportSchedule.edit") : t("reportSchedule.create")
         }}</DialogTitle>
         <DialogDescription>{{ t("reportSchedule.description") }}</DialogDescription>
       </DialogHeader>
 
-      <div class="grid gap-x-6 gap-y-4 py-2 sm:grid-cols-2">
-        <!-- 左列:基本设置 -->
-        <div class="flex min-w-0 flex-col gap-4">
-          <!-- name -->
-          <div class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium">{{ t("reportSchedule.nameLabel") }}</label>
-            <Input
-              v-model="form.name"
-              :placeholder="t('reportSchedule.namePlaceholder')"
-              class="h-8"
-            />
-          </div>
-
-          <!-- report type -->
-          <div class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium">{{ t("reportSchedule.reportType") }}</label>
-            <div class="flex gap-1.5">
-              <Button
-                size="sm"
-                class="h-7 text-xs"
-                :variant="form.reportType === 'daily' ? 'default' : 'outline'"
-                @click="form.reportType = 'daily'"
-              >
-                {{ t("reportSchedule.typeDaily") }}
-              </Button>
-              <Button
-                size="sm"
-                class="h-7 text-xs"
-                :variant="form.reportType === 'weekly' ? 'default' : 'outline'"
-                @click="form.reportType = 'weekly'"
-              >
-                {{ t("reportSchedule.typeWeekly") }}
-              </Button>
+      <div
+        class="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-x-6 gap-y-4 py-2 sm:grid-cols-2 sm:grid-rows-[minmax(0,1fr)]"
+      >
+        <!-- 左列:基本设置;外层限高后内部滚动,保证小窗口下标题/按钮仍可见 -->
+        <ScrollArea class="min-h-0">
+          <div class="flex min-w-0 flex-col gap-4 pr-1">
+            <!-- name -->
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">{{ t("reportSchedule.nameLabel") }}</label>
+              <Input
+                v-model="form.name"
+                :placeholder="t('reportSchedule.namePlaceholder')"
+                class="h-8"
+              />
             </div>
-            <p class="text-[11px] text-muted-foreground">
-              {{
-                form.reportType === "daily"
-                  ? t("reportSchedule.typeDailyHint")
-                  : t("reportSchedule.typeWeeklyHint")
-              }}
-            </p>
-          </div>
 
-          <!-- time -->
-          <div class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium">{{ t("reportSchedule.timeLabel") }}</label>
-            <TimeField v-model="form.time" class="w-24" />
-          </div>
-
-          <!-- 日报范围(daily):前一天(次日生成)或当天 -->
-          <div v-if="form.reportType === 'daily'" class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium">{{ t("reportSchedule.dailyRangeLabel") }}</label>
-            <div class="flex gap-1.5">
-              <Button
-                size="sm"
-                class="h-7 text-xs"
-                :variant="form.previousDay ? 'default' : 'outline'"
-                @click="form.previousDay = true"
-              >
-                {{ t("reportSchedule.dailyRangePrevious") }}
-              </Button>
-              <Button
-                size="sm"
-                class="h-7 text-xs"
-                :variant="!form.previousDay ? 'default' : 'outline'"
-                @click="form.previousDay = false"
-              >
-                {{ t("reportSchedule.dailyRangeToday") }}
-              </Button>
-            </div>
-            <p v-if="!form.previousDay" class="text-[11px] text-muted-foreground">
-              {{ t("reportSchedule.dailyTodayHint") }}
-            </p>
-          </div>
-
-          <!-- weekday filter(daily) -->
-          <div v-if="form.reportType === 'daily'" class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium">{{ t("reportSchedule.weekdayLabel") }}</label>
-            <div class="flex flex-wrap gap-1.5">
-              <Button
-                size="sm"
-                class="h-7 text-xs"
-                :variant="form.weekdayMode === 'everyday' ? 'default' : 'outline'"
-                @click="form.weekdayMode = 'everyday'"
-              >
-                {{ t("reportSchedule.everyday") }}
-              </Button>
-              <Button
-                size="sm"
-                class="h-7 text-xs"
-                :variant="form.weekdayMode === 'weekdays' ? 'default' : 'outline'"
-                @click="form.weekdayMode = 'weekdays'"
-              >
-                {{ t("reportSchedule.weekdaysOnly") }}
-              </Button>
-              <Button
-                size="sm"
-                class="h-7 text-xs"
-                :variant="form.weekdayMode === 'chineseWorkday' ? 'default' : 'outline'"
-                @click="form.weekdayMode = 'chineseWorkday'"
-              >
-                {{ t("reportSchedule.chineseWorkdayOnly") }}
-              </Button>
-            </div>
-            <p
-              v-if="form.weekdayMode === 'chineseWorkday'"
-              class="text-[11px] text-muted-foreground"
-            >
-              {{ t("reportSchedule.chineseWorkdayHint") }}
-            </p>
-          </div>
-
-          <!-- weekly 周期模式:工作周(自动识别连续工作周期) 或 自定义周几~周几 -->
-          <div v-else class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium">{{ t("reportSchedule.weeklyMode") }}</label>
-            <div class="flex gap-1.5">
-              <Button
-                size="sm"
-                class="h-7 text-xs"
-                :variant="form.weeklyWorkweek ? 'default' : 'outline'"
-                @click="form.weeklyWorkweek = true"
-              >
-                {{ t("reportSchedule.weeklyModeWorkweek") }}
-              </Button>
-              <Button
-                size="sm"
-                class="h-7 text-xs"
-                :variant="!form.weeklyWorkweek ? 'default' : 'outline'"
-                @click="form.weeklyWorkweek = false"
-              >
-                {{ t("reportSchedule.weeklyModeCustom") }}
-              </Button>
-            </div>
-            <p v-if="form.weeklyWorkweek" class="text-[11px] text-muted-foreground">
-              {{ t("reportSchedule.workweekHint") }}
-            </p>
-            <template v-else>
-              <div class="flex flex-wrap items-center gap-1.5">
-                <span class="text-xs text-muted-foreground">
-                  {{ t("reportSchedule.weeklyStart") }}
-                </span>
+            <!-- report type -->
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">{{ t("reportSchedule.reportType") }}</label>
+              <div class="flex gap-1.5">
                 <Button
-                  v-for="(name, i) in weekdayNames"
-                  :key="i"
                   size="sm"
-                  class="h-7 px-2 text-xs"
-                  :variant="form.weeklyStart === i + 1 ? 'default' : 'outline'"
-                  @click="form.weeklyStart = i + 1"
+                  class="h-7 text-xs"
+                  :variant="form.reportType === 'daily' ? 'default' : 'outline'"
+                  @click="form.reportType = 'daily'"
                 >
-                  {{ name }}
+                  {{ t("reportSchedule.typeDaily") }}
                 </Button>
-              </div>
-              <div class="flex flex-wrap items-center gap-1.5">
-                <span class="text-xs text-muted-foreground">
-                  {{ t("reportSchedule.weeklyEnd") }}
-                </span>
                 <Button
-                  v-for="(name, i) in weekdayNames"
-                  :key="i"
                   size="sm"
-                  class="h-7 px-2 text-xs"
-                  :variant="form.weeklyEnd === i + 1 ? 'default' : 'outline'"
-                  @click="form.weeklyEnd = i + 1"
+                  class="h-7 text-xs"
+                  :variant="form.reportType === 'weekly' ? 'default' : 'outline'"
+                  @click="form.reportType = 'weekly'"
                 >
-                  {{ name }}
+                  {{ t("reportSchedule.typeWeekly") }}
                 </Button>
               </div>
               <p class="text-[11px] text-muted-foreground">
-                {{ t("reportSchedule.weeklyCustomHint") }}
+                {{
+                  form.reportType === "daily"
+                    ? t("reportSchedule.typeDailyHint")
+                    : t("reportSchedule.typeWeeklyHint")
+                }}
               </p>
-            </template>
-          </div>
+            </div>
 
-          <!-- author -->
-          <div class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium">{{ t("reportSchedule.authorLabel") }}</label>
-            <div class="flex gap-1.5">
-              <Button
-                size="sm"
-                class="h-7 text-xs"
-                :variant="form.authorMode === 'me' ? 'default' : 'outline'"
-                @click="form.authorMode = 'me'"
+            <!-- time -->
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">{{ t("reportSchedule.timeLabel") }}</label>
+              <TimeField v-model="form.time" class="w-24" />
+            </div>
+
+            <!-- 日报范围(daily):前一天(次日生成)或当天 -->
+            <div v-if="form.reportType === 'daily'" class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">{{ t("reportSchedule.dailyRangeLabel") }}</label>
+              <div class="flex gap-1.5">
+                <Button
+                  size="sm"
+                  class="h-7 text-xs"
+                  :variant="form.previousDay ? 'default' : 'outline'"
+                  @click="form.previousDay = true"
+                >
+                  {{ t("reportSchedule.dailyRangePrevious") }}
+                </Button>
+                <Button
+                  size="sm"
+                  class="h-7 text-xs"
+                  :variant="!form.previousDay ? 'default' : 'outline'"
+                  @click="form.previousDay = false"
+                >
+                  {{ t("reportSchedule.dailyRangeToday") }}
+                </Button>
+              </div>
+              <p v-if="!form.previousDay" class="text-[11px] text-muted-foreground">
+                {{ t("reportSchedule.dailyTodayHint") }}
+              </p>
+            </div>
+
+            <!-- weekday filter(daily) -->
+            <div v-if="form.reportType === 'daily'" class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">{{ t("reportSchedule.weekdayLabel") }}</label>
+              <div class="flex flex-wrap gap-1.5">
+                <Button
+                  size="sm"
+                  class="h-7 text-xs"
+                  :variant="form.weekdayMode === 'everyday' ? 'default' : 'outline'"
+                  @click="form.weekdayMode = 'everyday'"
+                >
+                  {{ t("reportSchedule.everyday") }}
+                </Button>
+                <Button
+                  size="sm"
+                  class="h-7 text-xs"
+                  :variant="form.weekdayMode === 'weekdays' ? 'default' : 'outline'"
+                  @click="form.weekdayMode = 'weekdays'"
+                >
+                  {{ t("reportSchedule.weekdaysOnly") }}
+                </Button>
+                <Button
+                  size="sm"
+                  class="h-7 text-xs"
+                  :variant="form.weekdayMode === 'chineseWorkday' ? 'default' : 'outline'"
+                  @click="form.weekdayMode = 'chineseWorkday'"
+                >
+                  {{ t("reportSchedule.chineseWorkdayOnly") }}
+                </Button>
+              </div>
+              <p
+                v-if="form.weekdayMode === 'chineseWorkday'"
+                class="text-[11px] text-muted-foreground"
               >
-                {{ t("reportSchedule.authorMe") }}
-              </Button>
-              <Button
-                size="sm"
-                class="h-7 text-xs"
-                :variant="form.authorMode === 'all' ? 'default' : 'outline'"
-                @click="form.authorMode = 'all'"
-              >
-                {{ t("reportSchedule.authorAll") }}
-              </Button>
+                {{ t("reportSchedule.chineseWorkdayHint") }}
+              </p>
+            </div>
+
+            <!-- weekly 周期模式:工作周(自动识别连续工作周期) 或 自定义周几~周几 -->
+            <div v-else class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">{{ t("reportSchedule.weeklyMode") }}</label>
+              <div class="flex gap-1.5">
+                <Button
+                  size="sm"
+                  class="h-7 text-xs"
+                  :variant="form.weeklyWorkweek ? 'default' : 'outline'"
+                  @click="form.weeklyWorkweek = true"
+                >
+                  {{ t("reportSchedule.weeklyModeWorkweek") }}
+                </Button>
+                <Button
+                  size="sm"
+                  class="h-7 text-xs"
+                  :variant="!form.weeklyWorkweek ? 'default' : 'outline'"
+                  @click="form.weeklyWorkweek = false"
+                >
+                  {{ t("reportSchedule.weeklyModeCustom") }}
+                </Button>
+              </div>
+              <p v-if="form.weeklyWorkweek" class="text-[11px] text-muted-foreground">
+                {{ t("reportSchedule.workweekHint") }}
+              </p>
+              <template v-else>
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span class="text-xs text-muted-foreground">
+                    {{ t("reportSchedule.weeklyStart") }}
+                  </span>
+                  <Button
+                    v-for="(name, i) in weekdayNames"
+                    :key="i"
+                    size="sm"
+                    class="h-7 px-2 text-xs"
+                    :variant="form.weeklyStart === i + 1 ? 'default' : 'outline'"
+                    @click="form.weeklyStart = i + 1"
+                  >
+                    {{ name }}
+                  </Button>
+                </div>
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span class="text-xs text-muted-foreground">
+                    {{ t("reportSchedule.weeklyEnd") }}
+                  </span>
+                  <Button
+                    v-for="(name, i) in weekdayNames"
+                    :key="i"
+                    size="sm"
+                    class="h-7 px-2 text-xs"
+                    :variant="form.weeklyEnd === i + 1 ? 'default' : 'outline'"
+                    @click="form.weeklyEnd = i + 1"
+                  >
+                    {{ name }}
+                  </Button>
+                </div>
+                <p class="text-[11px] text-muted-foreground">
+                  {{ t("reportSchedule.weeklyCustomHint") }}
+                </p>
+              </template>
+            </div>
+
+            <!-- author -->
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">{{ t("reportSchedule.authorLabel") }}</label>
+              <div class="flex gap-1.5">
+                <Button
+                  size="sm"
+                  class="h-7 text-xs"
+                  :variant="form.authorMode === 'me' ? 'default' : 'outline'"
+                  @click="form.authorMode = 'me'"
+                >
+                  {{ t("reportSchedule.authorMe") }}
+                </Button>
+                <Button
+                  size="sm"
+                  class="h-7 text-xs"
+                  :variant="form.authorMode === 'all' ? 'default' : 'outline'"
+                  @click="form.authorMode = 'all'"
+                >
+                  {{ t("reportSchedule.authorAll") }}
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
+        </ScrollArea>
 
         <!-- 右列:选择项目(筛选关键词/筛选标签由 ReportProjectSelector 内部管理) -->
         <ReportProjectSelector
@@ -344,7 +351,7 @@ function submit() {
         </ReportProjectSelector>
       </div>
 
-      <DialogFooter>
+      <DialogFooter class="shrink-0">
         <Button variant="outline" size="sm" @click="open = false">
           {{ t("common.cancel") }}
         </Button>

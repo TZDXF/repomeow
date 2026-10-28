@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { CalendarClock, Plus } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
+import ScrollArea from "@/components/common/ScrollArea.vue";
 import { useReportSchedules } from "@/composables/report-schedule/useReportSchedules";
 import ScheduleEditDialog from "./report-schedule/ScheduleEditDialog.vue";
 import ScheduleList from "./report-schedule/ScheduleList.vue";
@@ -73,8 +74,8 @@ async function submitSystemSchedule(intervalMinutes: number) {
 </script>
 
 <template>
-  <div class="flex flex-col gap-4">
-    <div class="flex items-center justify-between">
+  <section class="flex h-full flex-col gap-4">
+    <div class="flex shrink-0 items-center justify-between">
       <div>
         <h2 class="text-base font-semibold">{{ t("reportSchedule.title") }}</h2>
         <p class="text-sm text-muted-foreground">{{ t("reportSchedule.description") }}</p>
@@ -88,6 +89,7 @@ async function submitSystemSchedule(intervalMinutes: number) {
     <!-- 应用内置任务：固定存在，只允许启停和修改执行间隔 -->
     <SystemScheduleList
       v-if="systemSchedules.length"
+      class="shrink-0"
       :schedules="systemSchedules"
       @toggle="toggleSystemSchedule"
       @edit="openSystemEdit"
@@ -102,16 +104,17 @@ async function submitSystemSchedule(intervalMinutes: number) {
       {{ t("reportSchedule.empty") }}
     </div>
 
-    <!-- list -->
-    <ScheduleList
-      v-if="schedules.length"
-      :schedules="schedules"
-      :running-ids="runningIds"
-      @toggle="toggleSchedule"
-      @edit="openEdit"
-      @remove="deleteSchedule"
-      @run-now="runNow"
-    />
+    <!-- 用户任务列表跟随设置页剩余高度滚动，避免大量任务撑长设置页 -->
+    <ScrollArea v-if="schedules.length" class="min-h-0 flex-1">
+      <ScheduleList
+        :schedules="schedules"
+        :running-ids="runningIds"
+        @toggle="toggleSchedule"
+        @edit="openEdit"
+        @remove="deleteSchedule"
+        @run-now="runNow"
+      />
+    </ScrollArea>
 
     <!-- 内置任务间隔编辑：不可更名、不可删除 -->
     <SystemScheduleDialog
@@ -122,5 +125,5 @@ async function submitSystemSchedule(intervalMinutes: number) {
 
     <!-- create / edit dialog -->
     <ScheduleEditDialog v-model:open="dialogOpen" :editing="editing" @submit="submitSchedule" />
-  </div>
+  </section>
 </template>
