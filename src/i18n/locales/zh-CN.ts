@@ -2246,6 +2246,8 @@ export default {
       pixelDesc: "PICO-8 配色、硬边阴影的复古像素游戏风",
       glassPro: "玻璃拟态 Pro",
       glassProDesc: "流动极光、虹彩高光与多层磨砂玻璃，呈现更丰富的通透空间",
+      glassProEnabledNotice:
+        "已开启完整玻璃拟态效果，可能增加 GPU 与电量消耗；如感觉卡顿，可切换其他主题。",
       glassmorphism: "玻璃拟态",
       glassmorphismDesc: "柔和光斑、通透磨砂玻璃与香槟金点缀，暗色下呈现夜航质感",
     },

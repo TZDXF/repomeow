@@ -2345,6 +2345,8 @@ export default {
       glassPro: "Glassmorphism Pro",
       glassProDesc:
         "Flowing auroras, iridescent highlights and layered frosted glass with luminous depth",
+      glassProEnabledNotice:
+        "Full glass effects are on and may use more GPU power and battery. Switch themes if the interface feels slow.",
       glassmorphism: "Glassmorphism",
       glassmorphismDesc:
         "Soft light, frosted glass and champagne accents, with a nocturne dark mode",

@@ -40,18 +40,13 @@ async function sync() {
   if (disposed || document.hidden || motion.matches || !canvas.value) return;
   const current = generation;
   try {
-    const [
-      { createShader, getWebGPUSupport },
-      { default: mesh },
-      { default: flow },
-      { default: glass },
-    ] = await Promise.all([
-      import("shaders/js"),
-      import("shaders/core/MeshGradient"),
-      import("shaders/core/ChromaFlow"),
-      import("shaders/core/FlutedGlass"),
-    ]);
-    if (disposed || current !== generation || !(await getWebGPUSupport()).supported) return;
+    const [{ createShader }, { default: mesh }, { default: flow }, { default: glass }] =
+      await Promise.all([
+        import("shaders/js"),
+        import("shaders/core/MeshGradient"),
+        import("shaders/core/ChromaFlow"),
+        import("shaders/core/FlutedGlass"),
+      ]);
     if (disposed || current !== generation || !canvas.value) return;
     const instance = await createShader(
       canvas.value,

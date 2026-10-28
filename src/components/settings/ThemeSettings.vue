@@ -2,6 +2,7 @@
 import { useI18n } from "vue-i18n";
 import { computed, onMounted, onUnmounted, ref, type Component } from "vue";
 import { Monitor, Moon, Sun } from "@lucide/vue";
+import { toast } from "vue-sonner";
 import { useSettingsStore, type ThemeMode, type ThemeSkin } from "@/stores/settings";
 
 import ThemeChoicePreview from "./ThemeChoicePreview.vue";
@@ -23,6 +24,14 @@ function syncSystemDark(event: MediaQueryListEvent) {
 
 onMounted(() => systemDark.addEventListener("change", syncSystemDark));
 onUnmounted(() => systemDark.removeEventListener("change", syncSystemDark));
+
+async function selectSkin(value: ThemeSkin) {
+  if (value === store.themeSkin) return;
+  await store.setThemeSkin(value);
+  if (value === "glass-pro") {
+    toast.warning(t("settings.skin.glassProEnabledNotice"));
+  }
+}
 
 const OPTIONS: { value: ThemeMode; labelKey: string; descriptionKey: string; icon: Component }[] = [
   {
@@ -110,7 +119,7 @@ const SKINS: { value: ThemeSkin; labelKey: string; descriptionKey: string }[] = 
         :selected="store.themeSkin === skin.value"
         :label="t(skin.labelKey)"
         :description="t(skin.descriptionKey)"
-        @select="store.setThemeSkin(skin.value)"
+        @select="selectSkin(skin.value)"
       />
     </div>
   </section>
