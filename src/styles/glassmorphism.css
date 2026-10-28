@@ -77,6 +77,13 @@
   background-image: var(--glass-scene);
 }
 
+/* 终端文字画布保持透明,在整个面板(含工具栏)下统一做磨砂,避免只模糊输出区。 */
+:is([data-theme="glassmorphism"], [data-theme="glass-pro"]) [data-terminal-panel] {
+  background-color: var(--card);
+  -webkit-backdrop-filter: blur(24px) saturate(145%);
+  backdrop-filter: blur(24px) saturate(145%);
+}
+
 /* 不覆盖 body:托盘窗口外围必须保持透明。噪点作为背景层而非遮挡交互的覆盖层。 */
 :is([data-theme="glassmorphism"], [data-theme="glass-pro"])
   .app-surface
@@ -157,14 +164,14 @@
 /* 系统关闭透明效果/浏览器不支持模糊时提供不透明后备。 */
 @supports not (backdrop-filter: blur(40px)) {
   :is([data-theme="glassmorphism"], [data-theme="glass-pro"])
-    :is([data-slot="card"], .project-card, .theme-choice) {
+    :is([data-slot="card"], .project-card, .theme-choice, [data-terminal-panel]) {
     background: var(--popover);
   }
 }
 
 @media (prefers-reduced-transparency: reduce) {
   :is([data-theme="glassmorphism"], [data-theme="glass-pro"])
-    :is([data-slot="card"], .project-card, .theme-choice) {
+    :is([data-slot="card"], .project-card, .theme-choice, [data-terminal-panel]) {
     background: var(--popover);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;

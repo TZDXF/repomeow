@@ -179,7 +179,7 @@ async function clearFinished() {
 </script>
 
 <template>
-  <div class="shrink-0">
+  <div class="shrink-0" data-terminal-panel>
     <!-- 收起态:底部细条,显示运行中数量 -->
     <button
       v-if="!store.open"

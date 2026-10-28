@@ -53,11 +53,14 @@ function withAlpha(rgb: string, alpha: number): string {
 
 function currentTheme() {
   const isDark = document.documentElement.classList.contains("dark");
+  const skin = document.documentElement.dataset.theme;
+  const isGlass = skin === "glassmorphism" || skin === "glass-pro";
   const background = resolveThemeColor("--background") ?? (isDark ? "#0d1117" : "#ffffff");
   const foreground = resolveThemeColor("--foreground") ?? (isDark ? "#e6edf3" : "#1f2328");
   const mutedForeground = resolveThemeColor("--muted-foreground") ?? "#8b949e";
   return {
-    background,
+    // 玻璃皮肤由外层终端面板统一提供半透明底色与磨砂,避免 xterm 再画一层不透明背景。
+    background: isGlass ? "#00000000" : background,
     foreground,
     cursor: foreground,
     cursorAccent: background,
@@ -103,6 +106,8 @@ onMounted(() => {
     cursorBlink: false,
     scrollback: 5000,
     minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
+    // 初始化时开启,确保运行中切换到玻璃皮肤也能立即使用透明背景。
+    allowTransparency: true,
     theme: syncTheme(),
   });
   fit = new FitAddon();
