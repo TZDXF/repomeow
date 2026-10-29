@@ -19,8 +19,6 @@ const props = defineProps<{ sessionId: number }>();
 const store = useTerminalStore();
 
 const container = ref<HTMLDivElement | null>(null);
-// 容器留白区域(内边距)需与终端自绘背景同色,沿用面板背景会在边缘露出色差
-const termBg = ref<string>("transparent");
 let term: Terminal | null = null;
 let fit: FitAddon | null = null;
 let detachOutput: (() => void) | null = null;
@@ -53,27 +51,18 @@ function withAlpha(rgb: string, alpha: number): string {
 
 function currentTheme() {
   const isDark = document.documentElement.classList.contains("dark");
-  const skin = document.documentElement.dataset.theme;
-  const isGlass = skin === "glassmorphism" || skin === "glass-pro";
   const background = resolveThemeColor("--background") ?? (isDark ? "#0d1117" : "#ffffff");
   const foreground = resolveThemeColor("--foreground") ?? (isDark ? "#e6edf3" : "#1f2328");
   const mutedForeground = resolveThemeColor("--muted-foreground") ?? "#8b949e";
   return {
-    // 玻璃皮肤由外层终端面板统一提供半透明底色与磨砂,避免 xterm 再画一层不透明背景。
-    background: isGlass ? "#00000000" : background,
+    // 所有皮肤均透出外层面板背景,避免终端额外覆盖一层实色底。
+    background: "#00000000",
     foreground,
     cursor: foreground,
     cursorAccent: background,
     selectionBackground: withAlpha(foreground, 0.25),
     ...terminalAnsiColors(isDark, mutedForeground),
   };
-}
-
-/** 解析当前主题配色,并把背景色同步给容器留白区域 */
-function syncTheme() {
-  const theme = currentTheme();
-  termBg.value = theme.background;
-  return theme;
 }
 
 function sessionOf(id: number) {
@@ -106,9 +95,9 @@ onMounted(() => {
     cursorBlink: false,
     scrollback: 5000,
     minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
-    // 初始化时开启,确保运行中切换到玻璃皮肤也能立即使用透明背景。
+    // 初始化时开启透明支持,让终端背景透出外层面板。
     allowTransparency: true,
-    theme: syncTheme(),
+    theme: currentTheme(),
   });
   fit = new FitAddon();
   term.loadAddon(fit);
@@ -169,7 +158,7 @@ onMounted(() => {
   resizeObserver.observe(container.value);
 
   themeObserver = new MutationObserver(() => {
-    if (term) term.options.theme = syncTheme();
+    if (term) term.options.theme = currentTheme();
   });
   themeObserver.observe(document.documentElement, {
     attributes: true,
@@ -200,9 +189,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div
-    ref="container"
-    class="h-full w-full overflow-hidden p-2"
-    :style="{ backgroundColor: termBg }"
-  />
+  <div ref="container" class="h-full w-full overflow-hidden bg-transparent p-2" />
 </template>
+
+<style scoped>
+/* xterm 6 的原生滚动视口仍带默认黑底,独立于 theme.background 的透明设置。 */
+:deep(.xterm-viewport) {
+  background-color: transparent;
+}
+</style>
