@@ -23,10 +23,10 @@ jobs:
           # Apple 工具链可在 arm64 机器上原生编译 x86_64 目标,无需独立 Intel runner。
           - platform: macos-latest
             target: aarch64-apple-darwin
-            args: "--target aarch64-apple-darwin --bundles dmg"
+            args: "--target aarch64-apple-darwin --bundles dmg app"
           - platform: macos-latest
             target: x86_64-apple-darwin
-            args: "--target x86_64-apple-darwin --bundles dmg"
+            args: "--target x86_64-apple-darwin --bundles dmg app"
           # Linux:选 22.04 而非 24.04——WebKitGTK 4.1 依赖齐全,AppImage 工具链(libfuse2)开箱可用
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
