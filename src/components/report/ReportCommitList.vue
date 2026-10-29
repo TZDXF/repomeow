@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { ChevronRight, Loader2 } from "@lucide/vue";
+import { ChevronRight } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import ScrollArea from "@/components/common/ScrollArea.vue";
 import { formatCommitTime } from "@/lib/format";
 import type { ProjectCommits } from "@/lib/ai";
 
-const props = defineProps<{ commitData: ProjectCommits[]; loading: boolean }>();
+const props = defineProps<{ commitData: ProjectCommits[] }>();
 const { t } = useI18n();
 const openByProject = ref<Record<string, boolean>>({});
 const totalCommits = computed(() =>
@@ -21,7 +21,6 @@ const totalCommits = computed(() =>
     <div class="flex items-center justify-between">
       <div class="flex items-center gap-1.5">
         <label class="text-sm font-medium">{{ t("report.commits") }}</label>
-        <Loader2 v-if="loading" class="h-3.5 w-3.5 animate-spin text-muted-foreground" />
       </div>
       <Badge v-if="commitData.length" variant="secondary" class="text-xs">
         {{ t("report.commitCount", { count: totalCommits }) }}

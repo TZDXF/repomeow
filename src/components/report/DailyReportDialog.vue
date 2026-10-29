@@ -431,11 +431,7 @@ async function startBatch() {
               </div>
             </div>
 
-            <ReportCommitList
-              v-if="!isBatch && (commitData.length || loadingCommits)"
-              :commit-data="commitData"
-              :loading="loadingCommits"
-            />
+            <ReportCommitList v-if="!isBatch && commitData.length" :commit-data="commitData" />
 
             <!-- pb-0.5 预留按钮 active 态 translate-y-px 的下移空间,
                  否则内容刚好撑满时按下按钮会瞬间撑出滚动条、布局位移导致 click 丢失 -->
