@@ -1,5 +1,7 @@
 use super::*;
 use crate::error::AppResult;
+#[cfg(all(not(windows), not(target_os = "macos")))]
+use crate::error::{AppError, ErrorCode};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::process::Command;

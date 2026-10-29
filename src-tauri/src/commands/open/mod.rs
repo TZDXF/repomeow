@@ -17,6 +17,7 @@ pub use editor::*;
 pub use path::*;
 pub use shell::*;
 pub(crate) use shell::{resolve_shell, resolve_shell_choice, ShellKind};
+#[cfg(windows)]
 pub(crate) use terminal::find_wt;
 pub use terminal::*;
 

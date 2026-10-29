@@ -312,19 +312,24 @@ async fn get_shell_config(
 ) -> Result<ShellConfig, ExecutionError> {
     if shell_kind == ShellKind::PowerShell {
         // 对齐 coding-agent:powershell 仅 Windows 可用;shellPath 设置只作用于 bash。
-        if !cfg!(windows) {
+        // find_powershell_on_path 定义为 #[cfg(windows)],非 Windows 平台直接返回不可用
+        #[cfg(windows)]
+        {
+            if let Some(powershell) = find_powershell_on_path().await {
+                return ok(get_powershell_shell_config(&powershell));
+            }
+            return err(ExecutionError::new(
+                ExecutionErrorCode::ShellUnavailable,
+                "No PowerShell executable found. Install PowerShell or add powershell.exe/pwsh.exe to PATH.",
+            ));
+        }
+        #[cfg(not(windows))]
+        {
             return err(ExecutionError::new(
                 ExecutionErrorCode::ShellUnavailable,
                 "The powershell tool is only available on Windows.",
             ));
         }
-        if let Some(powershell) = find_powershell_on_path().await {
-            return ok(get_powershell_shell_config(&powershell));
-        }
-        return err(ExecutionError::new(
-            ExecutionErrorCode::ShellUnavailable,
-            "No PowerShell executable found. Install PowerShell or add powershell.exe/pwsh.exe to PATH.",
-        ));
     }
     if let Some(custom_shell_path) = custom_shell_path {
         if path_exists(Path::new(custom_shell_path)).await {

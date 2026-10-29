@@ -264,8 +264,12 @@ fn show_popup(app: &AppHandle, anchor: IconRect) {
             .decorations(false)
             .skip_taskbar(true)
             .always_on_top(true)
-            .visible(false)
-            .transparent(true);
+            .visible(false);
+            // transparent 仅 Windows/Linux 的 WebviewWindowBuilder 提供,macOS 上无此方法
+            #[cfg(not(target_os = "macos"))]
+            {
+                builder = builder.transparent(true);
+            }
             #[cfg(target_os = "windows")]
             {
                 builder = builder.effects(EffectsBuilder::new().effect(Effect::Acrylic).build());
