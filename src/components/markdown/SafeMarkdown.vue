@@ -41,7 +41,11 @@ interface Props {
   extensions?: ExtensionOverrides;
 }
 
-const props = defineProps<Props>();
+// Vue 会将未传入的布尔联合类型 prop 转为 false;显式保持渲染库的启用默认值。
+const props = withDefaults(defineProps<Props>(), {
+  controls: true,
+  previewers: true,
+});
 
 const mergedPreviewers = computed<PreviewerConfig>(() => mergeSafePreviewers(props.previewers));
 

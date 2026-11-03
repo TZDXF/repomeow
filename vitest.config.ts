@@ -1,9 +1,11 @@
 import path from "node:path";
+import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "vitest/config";
 
 // 独立的 vitest 配置:复用 vite 的 @ alias,避免在生产构建中加载测试相关配置
 // https://vitest.dev/config/
 export default defineConfig({
+  plugins: [vue()],
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "./src"),
