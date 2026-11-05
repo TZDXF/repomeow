@@ -36,7 +36,7 @@
 
 - **报告生成**：按项目与日期生成日报/周报（AI 汇总提交与变更），报告历史归档
 - **定时任务**：内置调度引擎，定时报告计划，结合中国工作日历跳过节假日
-- **内置 CLI**：主程序首参数传入子命令(git/wiki/sem/project/report)即进入 CLI 模式,JSON 输出;配套 4 个内置技能(Skill)可一键导入资源库并部署到各 agent,详见 [CLI.md](CLI.md)
+- **内置 CLI**：主程序首参数传入子命令（wiki/sem/project/report 等）即进入 CLI 模式，命令结果以 JSON 输出；配套 1 个内置 `repomeow` 技能（含 5 个 references）可一键导入资源库并部署到各 agent，详见 [CLI.md](CLI.md)
 
 ### 桌面体验
 
@@ -77,7 +77,7 @@ pnpm lint:fix       # 自动修复可修 lint 问题
 pnpm format         # oxfmt 格式化 src/
 pnpm format:check   # 仅检查格式(CI 用)
 pnpm test:unit      # Vitest 单元测试(src/**/*.test.ts)
-pnpm cli:dev -- git status -d .   # 以 CLI 模式运行主程序(不开窗口)
+pnpm cli:dev -- project list     # 以 CLI 模式运行主程序(不开窗口)
 pnpm sem:prepare    # 下载/校验 sem sidecar 二进制(首次运行或 cargo 构建前需要)
 pnpm release:local  # 本地发布流程调试(另有 check/build/sign/latest/all 子命令)
 ```

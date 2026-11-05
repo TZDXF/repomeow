@@ -40,15 +40,18 @@ repomeow report history-delete --id <报告id>
 # 列出全部定时报告调度
 repomeow report schedules
 
-# 全量覆盖:先 schedules 导出编辑,再写回(JSON 数组)
+# 全量覆盖:先 schedules 导出编辑,再写回(JSON 数组);仅在明确要求覆盖时执行
 repomeow report schedules-save --file <调度.json>
+```
 
-# 系统级调度(当前仅 git_update 后台检查)
+## 系统调度(Git 后台检查,非报告调度)
+
+```powershell
 repomeow report system-schedules
 repomeow report system-schedule-save --enabled true --interval-minutes 10
 ```
 
-`--interval-minutes` 范围 1-1440。调度变更写入数据库后,**运行中的桌面应用需重启才被调度器感知**(CLI 进程退出时无法通知其调度循环)。
+这两个命令管理 `git_update` 后台检查,不影响报告生成。`--interval-minutes` 范围 1-1440。调度变更写入数据库后,**运行中的桌面应用需重启才被调度器感知**(CLI 进程退出时无法通知其调度循环)。
 
 ## 注意
 

@@ -148,21 +148,17 @@ pub(super) fn read_wiki_page_impl(
 
 // ── Wiki 生成与更新(对齐项目问答助手) ───────────────────────────────
 
-fn wiki_project_name(db: &crate::db::Db, project_directory: &str) -> String {
-    use rusqlite::OptionalExtension;
-
+pub(super) fn wiki_project_name(
+    db: &crate::db::Db,
+    project_directory: &str,
+) -> Result<String, ToolFailure> {
     let registered = {
         let conn = db.0.lock().unwrap();
-        conn.query_row(
-            "SELECT name FROM projects WHERE directory = ?1 AND archived = 0",
-            [project_directory],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()
-        .ok()
-        .flatten()
+        crate::commands::project::get_by_path(&conn, project_directory)
+            .map_err(|error| ToolFailure::from_app("查询项目失败", error))?
+            .map(|project| project.name)
     };
-    registered
+    Ok(registered
         .filter(|name| !name.trim().is_empty())
         .unwrap_or_else(|| {
             project_directory
@@ -171,7 +167,7 @@ fn wiki_project_name(db: &crate::db::Db, project_directory: &str) -> String {
                 .filter(|name| !name.is_empty())
                 .unwrap_or("项目")
                 .to_string()
-        })
+        }))
 }
 
 pub(super) fn wiki_language(language: Option<String>) -> Result<String, ToolFailure> {
@@ -206,7 +202,7 @@ pub(super) async fn generate_wiki_impl(
     let language = wiki_language(language)?;
     let data_root = data_root_or_default(data_root)?;
     let db = open_db(&data_root)?;
-    let project_name = wiki_project_name(&db, &project_directory);
+    let project_name = wiki_project_name(&db, &project_directory)?;
     let request = GenerateWikiRequest {
         run_id: format!("cli-{}", crate::time_util::now_ts_nanos()),
         project_path: project_directory.clone(),

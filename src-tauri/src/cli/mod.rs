@@ -1,8 +1,8 @@
 //! RepoMeow CLI:主程序内置的命令行模式,面向 AI agent 与脚本提供
 //! 项目管理、Wiki、语义分析、报告、标签与 AI 配置等应用管理能力(git/docker 等本机工具不包装)。
 //!
-//! - 首参数命中子命令(git/wiki/sem/project/report)即进入 CLI 模式,执行后退出,不启动桌面窗口;
-//! - 成功结果以 JSON 写 stdout,失败以 {"code","message","detail"} JSON 写 stderr 且退出码非 0;
+//! - 首参数命中内置子命令即进入 CLI 模式,执行后退出,不启动桌面窗口;
+//! - 成功结果以 JSON 写 stdout(help/version 为纯文本),失败以 {"code","message","detail"} JSON 写 stderr 且退出码非 0;
 //! - 数据目录默认 `~/.repomeow`,可用环境变量 REPOMEOW_DATA_DIR 覆盖。
 
 use std::env;
@@ -45,7 +45,7 @@ use wiki_tool::*;
 #[command(
     name = "repomeow",
     version,
-    about = "RepoMeow CLI:项目管理 / Wiki / 语义分析 / 报告 / 标签 / 命令 / AI 配置(输出均为 JSON)",
+    about = "RepoMeow CLI:项目管理 / Wiki / 语义分析 / 报告 / 标签 / 命令 / AI 配置(命令结果输出 JSON)",
     disable_help_subcommand = true
 )]
 struct Cli {
@@ -800,8 +800,7 @@ enum FileCommands {
 fn is_cli_head(arg: &str) -> bool {
     matches!(
         arg,
-        "git"
-            | "wiki"
+        "wiki"
             | "sem"
             | "project"
             | "report"
@@ -814,8 +813,6 @@ fn is_cli_head(arg: &str) -> bool {
             | "account"
             | "file"
             | "terminal"
-            | "docker"
-            | "help"
             | "-h"
             | "--help"
             | "-V"
@@ -1224,7 +1221,7 @@ async fn dispatch(command: Commands) -> Result<Value, ToolFailure> {
             token,
         }) => update_account_impl(id, &label, base_url.as_deref(), token.as_deref(), None).await,
         Commands::Account(AccountCommands::Remove { id }) => remove_account_impl(id, None),
-        // ── 项目文件 / Docker ─────────────────────────────────────────
+        // ── 项目文件 / 桌面终端 ───────────────────────────────────────
         Commands::Terminal(command) => terminal_tool::execute(command).await,
         Commands::File(FileCommands::List {
             project_directory,

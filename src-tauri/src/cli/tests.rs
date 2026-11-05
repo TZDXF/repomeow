@@ -38,7 +38,16 @@ fn cli_head_detection_only_accepts_known_subcommands() {
     ] {
         assert!(is_cli_head(head), "should enter CLI mode: {head}");
     }
-    for other in ["status", "commit_code", "--mcp", "--autostart", "repomeow"] {
+    for other in [
+        "status",
+        "commit_code",
+        "git",
+        "docker",
+        "help",
+        "--mcp",
+        "--autostart",
+        "repomeow",
+    ] {
         assert!(!is_cli_head(other), "should not enter CLI mode: {other}");
     }
 }
@@ -175,6 +184,32 @@ fn wiki_generate_language_is_validated() {
     assert_eq!(wiki_language(Some("en-US".into())).unwrap(), "en-US");
     let error = wiki_language(Some("fr-FR".into())).unwrap_err();
     assert_eq!(error.code, "invalid_language");
+}
+
+#[test]
+fn wiki_project_name_uses_registered_custom_name() {
+    let data_root = temp_dir("wiki-project-name");
+    seed_db(&data_root);
+    let db = open_db(&data_root).unwrap();
+    {
+        let conn = db.0.lock().unwrap();
+        conn.execute(
+            "UPDATE projects SET name = '自定义项目名' WHERE path = ?1",
+            [clean_str("D:/projects/demo")],
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        wiki_project_name(&db, "D:/projects/demo").unwrap(),
+        "自定义项目名"
+    );
+    assert_eq!(
+        wiki_project_name(&db, "D:/projects/unregistered").unwrap(),
+        "unregistered"
+    );
+
+    drop(db);
+    let _ = fs::remove_dir_all(data_root);
 }
 
 #[tokio::test]
@@ -486,6 +521,36 @@ async fn generate_report_validates_before_touching_disk() {
     .await
     .unwrap_err();
     assert_eq!(no_projects.code, "project_directories_required");
+
+    let bad_author = generate_report_impl(
+        GenerateReportInput {
+            project_directories: vec!["D:/projects/demo".into()],
+            period_type: "daily".into(),
+            date_from: None,
+            date_to: None,
+            author_mode: Some("everyone".into()),
+            language: None,
+        },
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(bad_author.code, "invalid_author_mode");
+
+    let bad_language = generate_report_impl(
+        GenerateReportInput {
+            project_directories: vec!["D:/projects/demo".into()],
+            period_type: "daily".into(),
+            date_from: None,
+            date_to: None,
+            author_mode: None,
+            language: Some("fr-FR".into()),
+        },
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(bad_language.code, "invalid_language");
 }
 
 #[test]
@@ -938,6 +1003,14 @@ fn save_file_rejects_traversal_and_dual_source() {
     assert!(traversal.is_err());
     assert_eq!(traversal.unwrap_err().code, "invalid_file_path");
 
+    let windows_absolute = save_file_impl(
+        &project.to_string_lossy(),
+        "C:/repomeow-cli-escape.txt",
+        Some("x"),
+        None,
+    );
+    assert_eq!(windows_absolute.unwrap_err().code, "invalid_file_path");
+
     let dual = save_file_impl(
         &project.to_string_lossy(),
         "a.txt",
@@ -951,4 +1024,50 @@ fn save_file_rejects_traversal_and_dual_source() {
     assert_eq!(fs::read_to_string(project.join("a.txt")).unwrap(), "内容");
 
     let _ = fs::remove_dir_all(project);
+}
+
+#[test]
+#[cfg(any(unix, windows))]
+fn save_file_rejects_link_escape_and_symlink_targets() {
+    let project = temp_dir("file-save-links");
+    let outside = temp_dir("file-save-outside");
+    #[cfg(unix)]
+    use std::os::unix::fs::{symlink as symlink_file, symlink as symlink_dir};
+    #[cfg(windows)]
+    use std::os::windows::fs::{symlink_dir, symlink_file};
+
+    // Windows 未启用开发者模式时,创建符号链接可能需要管理员权限。
+    if let Err(error) = symlink_dir(&outside, project.join("outside-link")) {
+        #[cfg(windows)]
+        if error.raw_os_error() == Some(1314) {
+            eprintln!("跳过符号链接测试:系统未授予创建符号链接权限");
+            let _ = fs::remove_dir_all(project);
+            let _ = fs::remove_dir_all(outside);
+            return;
+        }
+        panic!("创建目录符号链接失败: {error}");
+    }
+    let escaped = save_file_impl(
+        &project.to_string_lossy(),
+        "outside-link/escaped.txt",
+        Some("x"),
+        None,
+    );
+    assert_eq!(escaped.unwrap_err().code, "invalid_file_path");
+    assert!(!outside.join("escaped.txt").exists());
+
+    let outside_file = outside.join("outside.txt");
+    fs::write(&outside_file, "keep").unwrap();
+    symlink_file(&outside_file, project.join("file-link")).unwrap();
+    let linked_target = save_file_impl(
+        &project.to_string_lossy(),
+        "file-link",
+        Some("overwrite"),
+        None,
+    );
+    assert_eq!(linked_target.unwrap_err().code, "invalid_file_path");
+    assert_eq!(fs::read_to_string(outside_file).unwrap(), "keep");
+
+    let _ = fs::remove_dir_all(project);
+    let _ = fs::remove_dir_all(outside);
 }

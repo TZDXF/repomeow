@@ -4,7 +4,7 @@ RepoMeow CLI 内置于主程序,不单独发布。首参数传入子命令即进
 
 ## 输出约定
 
-- 成功结果以 **JSON 写 stdout**,退出码 0;
+- 命令成功结果以 **JSON 写 stdout**,退出码 0;`--help` / `--version` 例外,输出纯文本;
 - 失败以 `{"code","message","detail"}` **JSON 写 stderr**,退出码非 0;
 - `REPOMEOW_DATA_DIR` 环境变量可覆盖数据目录(默认 `~/.repomeow`);
 - CLI 与运行中的桌面应用共享同一 SQLite 与配置文件,数据立即可见;调度类变更(报告调度、系统调度)需应用重启后才被调度器感知。
@@ -13,15 +13,17 @@ RepoMeow CLI 内置于主程序,不单独发布。首参数传入子命令即进
 
 打开「设置 → CLI」:
 
-1. 复制 CLI 可执行文件路径(与桌面应用同一可执行文件);
+1. Windows 点击「添加到用户 PATH」并重启终端和 AI 工具;macOS / Linux 手动将包含 `repomeow` 可执行文件的目录加入 PATH;
 2. 点击「导入到资源库」将内置技能 `repomeow` 导入资源库(SKILL.md 为入口,references/ 下按 project / sem / report / manage / settings 细分);
 3. 在「项目 → AI 资源」将技能部署到各 agent 的 skills 目录(如 `.claude/skills`、`.agents/skills`)。
 
-技能入口 SKILL.md 含输出约定与分组路由,细分用法在 references/ 下,agent 按需加载。重复导入会重建技能内容(同步最新可执行文件路径)。
+技能入口 SKILL.md 含输出约定与分组路由,细分用法在 references/ 下,agent 按需加载。技能通过 PATH 调用,不保存本机可执行文件路径;重复导入只刷新资源库中的技能文本,已部署副本需在「项目 → AI 资源」重新应用后同步。
 
 ## 命令
 
-`<项目目录>` 指 RepoMeow 登记项目时使用的目录;未登记或已归档返回 `project_not_found`(项目自身的 add/get/archive/unarchive/delete 除外)。`sem` 的 `-d` 可传仓库内任意路径,操作以仓库根目录为准。
+`<项目目录>` 指项目目录;需要登记状态的命令在项目未登记或已归档时返回 `project_not_found`(`project get/archive/unarchive/delete` 可操作已归档项目)。`project read-file`、Wiki 与 `file` 命令直接按文件系统路径操作,不要求项目已登记;`terminal create` 及终端的 `-p` 过滤要求项目已登记且未归档。`sem` 的 `-d` 可传仓库内任意路径,操作以仓库根目录为准。
+
+删除、清空、全量覆盖配置/调度、整本 Wiki 重生成、文件覆盖与终端输入/启停只应在用户明确要求的范围内执行;报告生成前确认日期与作者口径,避免错误消耗 AI 额度。AI 配置和账号 token 属于敏感信息,不要写入日志或提交到仓库。
 
 ### `wiki`
 
@@ -70,7 +72,7 @@ repomeow project reports [-p <项目目录>] [--limit 10]
 repomeow project commands -p <项目目录>
 ```
 
-`add` 的 `--name` 缺省取目录 basename;`update` 缺省项保持原值;`delete` 仅移除登记与关联数据,不动磁盘目录。`read-file` 返回带 1-based 行号前缀的内容,`hasMore=true` 时用 `--offset-line <endLine+1>` 续读;拒绝越界与符号链接逃逸,二进制文件返回 `binary_file`。
+`add` 的 `--name` 缺省取目录 basename;`update` 缺省项保持原值;`delete` 仅移除登记与关联数据,不动磁盘目录。`read-file` 返回带 1-based 行号前缀的内容,`hasMore=true` 时用 `--offset-line <endLine+1>` 续读;拒绝越界与符号链接逃逸,二进制文件返回 `binary_file`。读取基于前 512KB 预览,`previewTruncated=true` 时不能继续读取预览范围之外的行,`totalLines` 也仅统计预览内容。`project commands` 是 `script list` 的兼容速查入口,新脚本优先使用后者。
 
 ### `report`
 
@@ -84,6 +86,8 @@ repomeow report system-schedules
 repomeow report system-schedule-save --enabled true|false --interval-minutes 10
 ```
 
+其中 `system-schedules` / `system-schedule-save` 管理的是 Git 后台检查,不是报告调度。
+
 `generate` 同步等待(通常十几秒到一分钟),调用 AI 生成正文并写入报告历史,消耗用户在 RepoMeow 配置的 AI 额度;范围内无提交时不生成(`generated=false`)。`schedules-save` 全量覆盖(结构同 `schedules` 输出数组);调度变更需应用重启后生效。
 
 ### `tag`
@@ -94,6 +98,7 @@ repomeow tag create --name 后端 [--color "#ff0000"]
 repomeow tag update --id 1 --name 前端 [--color "#00ff00"]
 repomeow tag delete --id 1
 repomeow tag set-project -p <项目目录> --tag-ids 1,2
+repomeow tag set-project -p <项目目录> # 省略 --tag-ids 即清空绑定
 ```
 
 ### `script`
@@ -129,7 +134,7 @@ repomeow ai usage-log [--offset 0] [--limit 50] [--task-type report]
 repomeow ai usage-clear
 ```
 
-`config-get` 输出含 apiKey 明文,注意保密;`config-save` 全量覆盖(原子写 + 引用归一化)。
+`config-get` 输出含 apiKey 明文,注意保密;`config-save` 全量覆盖(原子写 + 引用归一化)。如需导出配置编辑,不要将临时 JSON 提交到仓库或粘贴到日志,使用后安全删除。
 
 ### `prompt`
 
@@ -150,7 +155,7 @@ repomeow account update --id 1 --label 备注 [--token <新令牌>] [--base-url 
 repomeow account remove --id 1
 ```
 
-`add`/`update` 先调平台 API 验证 token,失败不落库;token 输出只回显预览。
+`add`/`update` 先调平台 API 验证 token,失败不落库;token 输出只回显预览。命令行 `--token` 可能进入 shell 历史或进程参数,执行时应注意终端与日志环境。
 
 ### `file`
 
@@ -161,7 +166,7 @@ repomeow file search-text -p <项目目录> -q "TODO" [--include "src/**"] [--ex
 repomeow file save -p <项目目录> --path docs/note.md (--content "内容" | --content-file ./draft.md)
 ```
 
-`save` 创建或覆盖项目内文本文件(上限 512KB,父目录必须已存在;拒绝绝对路径与 `..`)。
+`save` 创建或覆盖项目内文本文件(上限 512KB,父目录必须已存在;拒绝绝对路径、`..`、符号链接/junction 逃逸及已有符号链接目标)。
 
 ### `terminal`
 

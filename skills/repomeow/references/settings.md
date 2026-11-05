@@ -8,7 +8,7 @@
 # 读取完整配置(含 apiKey 明文,注意保密;文件缺失时自动播种)
 repomeow ai config-get
 
-# 全量覆盖配置:先 config-get 导出编辑,再写回
+# 全量覆盖配置:先 config-get 导出编辑,再写回(仅在明确要求覆盖时执行)
 repomeow ai config-save --file <配置.json>
 
 # 内置厂商目录(添加厂商的候选清单,含预置模型)
@@ -18,6 +18,8 @@ repomeow ai builtin-providers
 repomeow ai models
 repomeow ai test
 ```
+
+`config-get` 和导出的配置 JSON 含 apiKey 明文,不要写入日志或提交到仓库;临时配置文件使用后安全删除。
 
 ## AI 用量
 
@@ -54,7 +56,7 @@ repomeow account update --id 1 --label 新备注 [--token <新令牌>] [--base-u
 repomeow account remove --id 1
 ```
 
-`add`/`update` 会先调平台 API 验证 token,验证失败不落库。github/gitee 用固定地址,`--base-url` 仅 gitlab 需要(自建实例)。
+`add`/`update` 会先调平台 API 验证 token,验证失败不落库。github/gitee 用固定地址,`--base-url` 仅 gitlab 需要(自建实例)。`--token` 可能进入 shell 历史或进程参数,执行时应注意终端与日志环境,不要将 token 写入技能或仓库。
 
 ## 项目文件
 
@@ -68,7 +70,9 @@ repomeow file search -p <项目目录> -q "mod.rs" [--limit 20]
 # 全文搜索(glob 过滤与设置页一致)
 repomeow file search-text -p <项目目录> -q "TODO" [--include "src/**"] [--exclude "*.lock"] [--case-sensitive] [--whole-word] [--regex]
 
-# 写入项目内文本文件(创建或覆盖;上限 512KB,父目录必须已存在;拒绝绝对路径与 ..)
+# 写入项目内文本文件(创建或覆盖;上限 512KB,父目录必须已存在;拒绝绝对路径、..、链接逃逸及已有符号链接目标)
 repomeow file save -p <项目目录> --path docs/note.md --content "内容"
 repomeow file save -p <项目目录> --path docs/note.md --content-file ./draft.md
 ```
+
+普通文件搜索和读写优先使用 agent 原生工具;仅在需要 RepoMeow 的 glob 过滤、项目目录约束或统一 JSON 输出时使用本组。`file save` 会覆盖已有文件,仅在用户明确要求时执行。

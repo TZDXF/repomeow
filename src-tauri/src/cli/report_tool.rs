@@ -1,4 +1,3 @@
-
 use serde_json::{json, Value};
 
 use crate::commands::ai::{cli_generate_and_save_report, GenerateAndSaveReportRequest};
@@ -58,13 +57,35 @@ pub(super) async fn generate_report_impl(
     } else {
         date_from.clone()
     };
-    let author_mode = match input.author_mode.as_deref() {
+    let author_mode = match input
+        .author_mode
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        None | Some("all") => "all",
         Some("me") => "me",
-        _ => "all",
+        Some(_) => {
+            return Err(ToolFailure::new(
+                "invalid_author_mode",
+                "authorMode 必须是 all 或 me",
+            ));
+        }
     };
-    let language = match input.language.as_deref() {
+    let language = match input
+        .language
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        None | Some("zh-CN") => "zh-CN",
         Some("en-US") => "en-US",
-        _ => "zh-CN",
+        Some(_) => {
+            return Err(ToolFailure::new(
+                "invalid_language",
+                "language 必须是 zh-CN 或 en-US",
+            ));
+        }
     };
 
     let data_root = data_root_or_default(data_root)?;

@@ -1,6 +1,6 @@
 //! CLI `file` 分组:项目文件浏览/搜索/写入。
 
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 use serde_json::{json, Value};
 
@@ -74,7 +74,56 @@ pub(super) fn search_text_impl(
     Ok(json!(outcome))
 }
 
+fn invalid_save_path() -> ToolFailure {
+    ToolFailure::new(
+        "invalid_file_path",
+        "文件路径必须是项目内的相对路径,且不能通过符号链接或 junction 逃逸",
+    )
+}
+
+/// 将待写路径限制在项目根目录内。父目录必须存在;已有目标不允许是符号链接。
+fn resolve_save_target(root: &str, rel: &str) -> Result<PathBuf, ToolFailure> {
+    let rel_path = Path::new(rel);
+    let bytes = rel.as_bytes();
+    let has_windows_drive_prefix =
+        bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
+    if rel_path.is_absolute()
+        || has_windows_drive_prefix
+        || !rel_path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+    {
+        return Err(invalid_save_path());
+    }
+
+    let root = std::fs::canonicalize(root).map_err(|_| invalid_save_path())?;
+    let target = root.join(rel_path);
+    let parent = target.parent().ok_or_else(invalid_save_path)?;
+    let canonical_parent = std::fs::canonicalize(parent).map_err(|_| invalid_save_path())?;
+    if !canonical_parent.is_dir() || !canonical_parent.starts_with(&root) {
+        return Err(invalid_save_path());
+    }
+
+    match std::fs::symlink_metadata(&target) {
+        Ok(metadata) => {
+            // 已存在的符号链接即使当前指向项目内也拒绝,避免写入目标被替换。
+            if metadata.file_type().is_symlink() {
+                return Err(invalid_save_path());
+            }
+            let canonical_target =
+                std::fs::canonicalize(&target).map_err(|_| invalid_save_path())?;
+            if !canonical_target.is_file() || !canonical_target.starts_with(&root) {
+                return Err(invalid_save_path());
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Err(invalid_save_path()),
+    }
+    Ok(target)
+}
+
 /// 写入项目内文本文件(创建或覆盖;内容上限 512KB,父目录必须已存在)。
+/// 拒绝绝对路径、..、符号链接/junction 逃逸及已有符号链接目标。
 /// 内容来源:--content 内联文本,或 --content-file 从文件读入(两者取一)。
 pub(super) fn save_file_impl(
     project_directory: &str,
@@ -87,12 +136,7 @@ pub(super) fn save_file_impl(
     if rel.is_empty() {
         return Err(ToolFailure::new("invalid_file_path", "文件路径不能为空"));
     }
-    if rel.starts_with('/') || rel.split('/').any(|seg| seg == "..") {
-        return Err(ToolFailure::new(
-            "invalid_file_path",
-            "文件路径必须是项目内的相对路径(拒绝绝对路径与 ..)",
-        ));
-    }
+    let target = resolve_save_target(&root, &rel)?;
     let body = match (content, content_file) {
         (Some(_), Some(_)) => {
             return Err(ToolFailure::new(
@@ -112,8 +156,7 @@ pub(super) fn save_file_impl(
             ))
         }
     };
-    let target = Path::new(&root).join(&rel).to_string_lossy().to_string();
-    files::save_text_file(target.clone(), body)
+    files::save_text_file(target.to_string_lossy().into_owned(), body)
         .map_err(|error| ToolFailure::from_app("写入文件失败", error))?;
     Ok(json!({ "path": rel, "saved": true }))
 }

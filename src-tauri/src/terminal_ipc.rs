@@ -259,25 +259,20 @@ fn dispatch(app: &AppHandle, request: TerminalIpcRequest) -> AppResult<Value> {
     }
 }
 
-fn resolve_project(app: &AppHandle, directory: &str) -> AppResult<(i64, String, String)> {
-    use rusqlite::OptionalExtension;
-
+fn resolve_project_in(
+    conn: &rusqlite::Connection,
+    directory: &str,
+) -> AppResult<(i64, String, String)> {
     let directory = clean_str(directory);
+    let project = crate::commands::project::get_by_path(conn, &directory)?
+        .ok_or_else(|| AppError::coded(ErrorCode::ProjectNotFound, &directory))?;
+    Ok((project.id, project.name, project.path))
+}
+
+fn resolve_project(app: &AppHandle, directory: &str) -> AppResult<(i64, String, String)> {
     let db = app.state::<Db>();
     let conn = db.0.lock().unwrap();
-    conn.query_row(
-        "SELECT id, name, directory FROM projects WHERE directory = ?1 AND archived = 0",
-        [&directory],
-        |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        },
-    )
-    .optional()?
-    .ok_or_else(|| AppError::coded(ErrorCode::ProjectNotFound, directory))
+    resolve_project_in(&conn, directory)
 }
 
 fn require_session(
@@ -440,6 +435,39 @@ mod tests {
         for kind in ["shell", "ai", "docker", "java", "unknown"] {
             assert!(!terminal_kind_cli_controllable(kind));
         }
+    }
+
+    #[test]
+    fn project_resolution_uses_registered_active_project() {
+        let root = std::env::temp_dir().join(format!(
+            "repomeow-terminal-ipc-{}-{}",
+            std::process::id(),
+            crate::time_util::now_ts_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let db = Db::open(&root.join("projects.db")).unwrap();
+        let conn = db.0.lock().unwrap();
+        conn.execute(
+            "INSERT INTO projects (path, name, created_at, updated_at) VALUES (?1, ?2, 0, 0)",
+            [clean_str("D:/projects/demo"), "自定义项目名".to_string()],
+        )
+        .unwrap();
+
+        let resolved = resolve_project_in(&conn, r"D:\projects\demo").unwrap();
+        assert_eq!(resolved.1, "自定义项目名");
+        assert_eq!(resolved.2, clean_str("D:/projects/demo"));
+
+        conn.execute(
+            "UPDATE projects SET archived_at = 1 WHERE id = ?1",
+            [resolved.0],
+        )
+        .unwrap();
+        let archived = resolve_project_in(&conn, "D:/projects/demo").unwrap_err();
+        assert_eq!(archived.code(), "project_not_found");
+
+        drop(conn);
+        drop(db);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

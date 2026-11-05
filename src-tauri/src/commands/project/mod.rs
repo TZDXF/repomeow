@@ -12,12 +12,12 @@ pub use repository::normalize_stored_paths;
 #[cfg(test)]
 pub use move_dir::move_dir;
 pub(crate) use repository::{
-    add, archive, get, list, list_archived, remove, set_auto_pull, set_favorite,
+    add, archive, get, get_by_path, list, list_archived, remove, set_auto_pull, set_favorite,
     set_wiki_auto_update, unarchive, update,
 };
 
 #[cfg(test)]
-pub use repository::{get_by_path, load_tags, update_path};
+pub use repository::{load_tags, update_path};
 
 #[cfg(test)]
 mod tests;

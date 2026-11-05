@@ -60,7 +60,7 @@ repomeow wiki delete -p <项目目录>
 repomeow project read-file -p <项目目录> --path src/lib/ai.ts [--offset-line 1] [--max-lines 400]
 ```
 
-返回带 1-based 行号前缀的内容;`hasMore=true` 时用 `--offset-line <endLine+1>` 续读。`--path` 必须是项目内相对路径(`/` 分隔),拒绝越界与符号链接逃逸;二进制文件返回 `binary_file` 错误。
+返回带 1-based 行号前缀的内容;`hasMore=true` 时用 `--offset-line <endLine+1>` 续读。`--path` 必须是项目内相对路径(`/` 分隔),拒绝越界与符号链接逃逸;二进制文件返回 `binary_file` 错误。读取基于前 512KB 预览,`previewTruncated=true` 时不能继续读取预览范围之外的行,`totalLines` 也仅统计预览内容。普通文件读取优先使用 agent 原生工具,需要带行号预览或 RepoMeow 路径约束时再使用此命令。
 
 ## 报告历史与自定义命令(只读速查)
 
@@ -68,8 +68,8 @@ repomeow project read-file -p <项目目录> --path src/lib/ai.ts [--offset-line
 # 报告历史(-p 可省略,省略时列出全部项目)
 repomeow project reports [-p <项目目录>] [--limit 10]
 
-# 项目登记的自定义命令(了解构建/运行方式的捷径)
+# 项目登记的自定义命令(script list 的兼容速查入口,新脚本优先用 script list)
 repomeow project commands -p <项目目录>
 ```
 
-项目未在 RepoMeow 登记或已归档时返回 `project_not_found` 错误(`project get`/`archive`/`unarchive`/`delete` 对已归档项目仍可操作)。
+需要登记状态的项目命令在未登记或已归档时返回 `project_not_found` 错误(`project get`/`archive`/`unarchive`/`delete` 对已归档项目仍可操作)。`project read-file` 与 Wiki 命令直接按路径操作,不要求项目已登记。`project delete` 仅删除登记及关联数据;`wiki delete` 和整本 `wiki generate` 会删除或覆盖已有内容,仅在用户明确要求时执行。

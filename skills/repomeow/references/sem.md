@@ -22,4 +22,4 @@ repomeow sem diff -d <仓库目录>
 
 - 实体参数:含 `::` 的串视为 entityId(形如 `src/a.ts::function::run`)精确匹配,否则按实体名匹配;重名时用 `--file-path` 消歧。
 - 典型流程:`sem find` 定位实体 → `sem context` 理解实现 → `sem relations` 评估影响面。
-- `sem diff` 依赖 RepoMeow 的语义索引;未索引的仓库可能返回空或提示,必要时先在 RepoMeow 中打开过该项目。
+- `sem` 命令直接调用 RepoMeow 内置的 sem sidecar 分析 Git 工作区,不要求项目已登记或先在桌面应用中打开;二进制缺失或目录不是 Git 仓库时会返回错误。
