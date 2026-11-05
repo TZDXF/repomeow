@@ -54,6 +54,8 @@ function currentTheme() {
   const background = resolveThemeColor("--background") ?? (isDark ? "#0d1117" : "#ffffff");
   const foreground = resolveThemeColor("--foreground") ?? (isDark ? "#e6edf3" : "#1f2328");
   const mutedForeground = resolveThemeColor("--muted-foreground") ?? "#8b949e";
+  const scrollbar = resolveThemeColor("--scrollbar-thumb");
+  const scrollbarHover = resolveThemeColor("--scrollbar-thumb-hover");
   return {
     // 所有皮肤均透出外层面板背景,避免终端额外覆盖一层实色底。
     background: "#00000000",
@@ -61,6 +63,9 @@ function currentTheme() {
     cursor: foreground,
     cursorAccent: background,
     selectionBackground: withAlpha(foreground, 0.25),
+    scrollbarSliderBackground: scrollbar,
+    scrollbarSliderHoverBackground: scrollbarHover,
+    scrollbarSliderActiveBackground: scrollbarHover,
     ...terminalAnsiColors(isDark, mutedForeground),
   };
 }
@@ -97,6 +102,7 @@ onMounted(() => {
     minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
     // 初始化时开启透明支持,让终端背景透出外层面板。
     allowTransparency: true,
+    overviewRuler: { width: 10 },
     theme: currentTheme(),
   });
   fit = new FitAddon();
@@ -189,12 +195,25 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="container" class="h-full w-full overflow-hidden bg-transparent p-2" />
+  <div ref="container" class="h-full w-full overflow-hidden bg-transparent" />
 </template>
 
 <style scoped>
+/* FitAddon 只扣除 .xterm 自身的内边距,不能放在外层容器,否则末行会超出可视区域。 */
+:deep(.xterm) {
+  height: 100%;
+  padding: 0.5rem;
+}
+
 /* xterm 6 的原生滚动视口仍带默认黑底,独立于 theme.background 的透明设置。 */
 :deep(.xterm-viewport) {
   background-color: transparent;
+}
+
+/* xterm 6 使用自绘滚动条;透明边框保留点击区域,视觉滑块与应用滚动条一致。 */
+:deep(.xterm-scrollable-element > .scrollbar > .slider) {
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background-clip: content-box;
 }
 </style>
