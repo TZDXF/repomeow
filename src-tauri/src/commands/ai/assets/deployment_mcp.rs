@@ -274,7 +274,7 @@ impl McpDocument {
                 toml: Some(doc),
             })
         } else {
-            // VS Code `.vscode/mcp.json` 为 JSONC(允许注释/尾逗号),读侧容忍;
+            // VS Code 与 OpenCode 2 配置为 JSONC(允许注释/尾逗号),读侧容忍;
             // 写回(edit)仍输出纯 JSON,注释不保留。
             let value = text
                 .map(|text| {

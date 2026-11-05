@@ -53,7 +53,10 @@ fn reads_mcp_servers_and_tolerates_corrupt() {
     assert_eq!(assets.mcp.len(), 2);
     let root_mcp = assets.mcp.iter().find(|m| m.path == ".mcp.json").unwrap();
     assert_eq!(root_mcp.dialect, "claude");
-    assert_eq!(root_mcp.agents, vec!["claude".to_string()]);
+    assert_eq!(
+        root_mcp.agents,
+        vec!["claude".to_string(), "minimax".to_string()]
+    );
     let names: Vec<&str> = root_mcp.servers.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(names, ["a", "b"]);
     assert_eq!(root_mcp.servers[0].config["url"], "https://a");

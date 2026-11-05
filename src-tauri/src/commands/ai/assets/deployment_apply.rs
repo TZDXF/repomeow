@@ -385,7 +385,7 @@ pub(super) fn import_mcp(
         .iter()
         .find(|t| t.path == source)
         .ok_or_else(|| problem(source))?;
-    // 每个 MCP 配置文件固定归属一个 Agent。
+    // 共享配置(如 Claude / MiniMax 的 .mcp.json)以首个 Agent 作为导入来源。
     let agent = target.agents[0];
     let value = McpDocument::read(root, target)?
         .entry(target, name)?

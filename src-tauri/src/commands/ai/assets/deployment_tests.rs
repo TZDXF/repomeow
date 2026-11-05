@@ -273,6 +273,35 @@ fn all_agent_targets_roundtrip_and_preserve_unrelated_mcp_entries() {
 }
 
 #[test]
+fn minimax_shares_claude_mcp_config_and_reference_removal() {
+    let f = Fixture::new();
+    f.mcp();
+    assert_eq!(target("minimax").unwrap().mcp_path, ".mcp.json");
+    assert_eq!(
+        target("minimax").unwrap().mcp_path,
+        target("claude").unwrap().mcp_path
+    );
+
+    assert_eq!(f.apply("mcp", "claude", &["m1"]).applied, 1);
+    assert_eq!(f.apply("mcp", "minimax", &["m1"]).applied, 1);
+    let target = mcp_target("minimax").unwrap();
+    let doc = McpDocument::read(&f.root, target).unwrap();
+    let value = doc.entry(target, "context").unwrap().unwrap();
+    assert_eq!(value["type"], "stdio");
+    assert_eq!(value["command"], "node");
+    let assets = super::super::scan_assets(&f.root.to_string_lossy()).unwrap();
+    assert_eq!(assets.mcp[0].agents, ["claude", "minimax"]);
+
+    // 同一文件被两个 Agent 引用时,解除一个不能删除另一个仍在使用的配置。
+    assert_eq!(f.apply("mcp", "minimax", &[]).applied, 1);
+    let doc = McpDocument::read(&f.root, target).unwrap();
+    assert!(doc.entry(target, "context").unwrap().is_some());
+    assert_eq!(f.apply("mcp", "claude", &[]).applied, 1);
+    let doc = McpDocument::read(&f.root, target).unwrap();
+    assert!(doc.entry(target, "context").unwrap().is_none());
+}
+
+#[test]
 fn invalid_manifest_and_project_local_mcp_changes_fail_closed() {
     let f = Fixture::new();
     f.mcp();
@@ -983,6 +1012,66 @@ fn repair_reapply_adopts_local_origin_baseline() {
     assert_eq!(
         fs::read_to_string(f.root.join(".claude/skills/mine/SKILL.md")).unwrap(),
         "---\nname: mine\n---\nv2"
+    );
+}
+
+#[test]
+fn opencode_v2_mcp_uses_nested_servers_and_jsonc() {
+    let f = Fixture::new();
+    f.mcp();
+    fs::write(
+        f.root.join("opencode.jsonc"),
+        r#"{
+  "$schema": "https://opencode.ai/config.json",
+  // OpenCode 2 将服务器放在 mcp.servers 下。
+  "mcp": {
+    "timeout": { "startup": 45000 },
+    "servers": {
+      "existing": { "type": "local", "command": ["other"] },
+    },
+  },
+}
+"#,
+    )
+    .unwrap();
+
+    let target = mcp_target("opencode").unwrap();
+    assert_eq!(target.path, "opencode.jsonc");
+    assert_eq!(target.key, "mcp.servers");
+    assert_eq!(f.apply("mcp", "opencode", &["m1"]).applied, 1);
+    let doc: Value = serde_json::from_slice(&fs::read(f.root.join(target.path)).unwrap()).unwrap();
+    assert_eq!(doc["$schema"], "https://opencode.ai/config.json");
+    assert_eq!(doc["mcp"]["timeout"]["startup"], 45000);
+    assert_eq!(
+        doc["mcp"]["servers"]["existing"]["command"],
+        json!(["other"])
+    );
+    assert_eq!(
+        doc["mcp"]["servers"]["context"]["command"],
+        json!(["node", "server.js"])
+    );
+    let assets = super::super::scan_assets(&f.root.to_string_lossy()).unwrap();
+    assert!(assets
+        .files
+        .iter()
+        .any(|item| item.path == "opencode.jsonc"));
+    assert_eq!(
+        assets
+            .mcp
+            .iter()
+            .find(|item| item.path == target.path)
+            .unwrap()
+            .servers
+            .len(),
+        2
+    );
+
+    assert_eq!(f.apply("mcp", "opencode", &[]).applied, 1);
+    let doc: Value = serde_json::from_slice(&fs::read(f.root.join(target.path)).unwrap()).unwrap();
+    assert!(doc["mcp"]["servers"].get("context").is_none());
+    assert_eq!(
+        doc["mcp"]["servers"]["existing"]["command"],
+        json!(["other"])
     );
 }
 

@@ -105,7 +105,7 @@ const FILE_PROBES: &[(&str, &str, &[&str])] = &[
     ),
     (".claude/settings.json", "setting", &["claude"]),
     (".claude/settings.local.json", "setting", &["claude"]),
-    ("opencode.json", "setting", &["opencode"]),
+    ("opencode.jsonc", "setting", &["opencode"]),
 ];
 
 /// 一个 MCP 管理目标的静态定义。
@@ -121,27 +121,27 @@ pub(super) struct McpTarget {
 }
 
 impl McpTarget {
-    /// VS Code 的 `.vscode/mcp.json` 官方允许注释与尾逗号(JSONC),读取需容忍;
-    /// 其余目标为纯 JSON / TOML,不受影响。
+    /// VS Code 的 `.vscode/mcp.json` 与 OpenCode 2 的 `opencode.jsonc`
+    /// 允许注释与尾逗号,读取需容忍;其余目标为纯 JSON / TOML。
     pub(super) fn jsonc(&self) -> bool {
-        self.path == ".vscode/mcp.json"
+        self.path == ".vscode/mcp.json" || self.path.ends_with(".jsonc")
     }
 }
 
 /// 项目内 MCP 管理目标(各 agent 的项目级 MCP 配置,按各家官方文档:
-/// claude=`.mcp.json`、cursor=`.cursor/mcp.json`、copilot=`.vscode/mcp.json`、
+/// claude/minimax=`.mcp.json`、cursor=`.cursor/mcp.json`、copilot=`.vscode/mcp.json`、
 /// gemini=`.gemini/settings.json` 的 mcpServers、codex=`.codex/config.toml` 的
-/// mcp_servers 表、opencode=`opencode.json` 的 mcp 键、zcode=`.zcode/config.json`
+/// mcp_servers 表、OpenCode 2=`opencode.jsonc` 的 mcp.servers 键、zcode=`.zcode/config.json`
 /// 的嵌套 mcp.servers 键(服务器对象与 claude 同形,复用 claude 方言);
 /// Kimi Code 的 `.kimi-code/mcp.json` 复用 JSON 结构,transport 字段单独映射;
 /// Pi: packages/coding-agent/docs/mcp.md,仅支持 stdio / Streamable HTTP。
-/// DSH 需插件配置、MiniMax 尚未接入项目级 MCP,故不在列。
+/// DSH 需 Cordis 插件/Profile 配置,没有项目级固定 MCP 文件,故不在列。
 pub(super) const MCP_TARGETS: &[McpTarget] = &[
     McpTarget {
         path: ".mcp.json",
         dialect: "claude",
         key: "mcpServers",
-        agents: &["claude"],
+        agents: &["claude", "minimax"],
     },
     McpTarget {
         path: ".cursor/mcp.json",
@@ -168,9 +168,9 @@ pub(super) const MCP_TARGETS: &[McpTarget] = &[
         agents: &["codex"],
     },
     McpTarget {
-        path: "opencode.json",
+        path: "opencode.jsonc",
         dialect: "opencode",
-        key: "mcp",
+        key: "mcp.servers",
         agents: &["opencode"],
     },
     McpTarget {

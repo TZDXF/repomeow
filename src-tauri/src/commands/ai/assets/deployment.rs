@@ -79,7 +79,7 @@ const TARGETS: &[ProjectAiTarget] = &[
         id: "opencode",
         name: "OpenCode",
         skill_path: ".opencode/skills",
-        mcp_path: "opencode.json",
+        mcp_path: "opencode.jsonc",
     },
     ProjectAiTarget {
         id: "zcode",
@@ -103,7 +103,7 @@ const TARGETS: &[ProjectAiTarget] = &[
         id: "minimax",
         name: "MiniMax Code",
         skill_path: ".minimax/skills",
-        mcp_path: "",
+        mcp_path: ".mcp.json",
     },
     ProjectAiTarget {
         id: "pi",
