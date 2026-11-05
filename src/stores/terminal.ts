@@ -91,7 +91,7 @@ export const useTerminalStore = defineStore("terminal", () => {
     for (const l of outputListeners) l(id, chunk);
   }
 
-  /** 统一执行入口:所有命令在应用内终端执行,并展开面板选中新会话。 */
+  /** 统一执行入口:npm/docker/custom 重复执行复用并重启原会话,随后展开面板选中该会话。 */
   async function run(
     project: Project,
     command: string,

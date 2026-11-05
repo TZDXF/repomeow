@@ -70,4 +70,4 @@ repomeow terminal stop --id 1 [-p <项目目录>]
 repomeow terminal restart --id 1 [-p <项目目录>]
 ```
 
-`output` 可读取当前输出缓冲;`input` 写入运行中 Tab,已结束时返回 `written=false`。输入、停止和重启前确认目标 Tab ID 与项目,必要时用 `-p` 限定,避免操作用户正在使用的其他终端。这些命令会启动或唤醒桌面应用,任务显示在应用内终端中,方便用户手动接管,不会在 CLI 后台隐藏运行。`create` 不接受任意命令文本,也不提供 Docker 操作。`input/start/restart` 仅允许 npm/custom 类型 Tab,不能操作 Shell/Agent/Docker Tab 绕过限制。`start` 不会重复启动已运行 Tab;`restart` 总是按原命令和目录重启。终端会话仅存内存,桌面应用退出后清空。
+`output` 可读取当前输出缓冲;`input` 写入运行中 Tab,已结束时返回 `written=false`。输入、停止和重启前确认目标 Tab ID 与项目,必要时用 `-p` 限定,避免操作用户正在使用的其他终端。这些命令会启动或唤醒桌面应用,任务显示在应用内终端中,方便用户手动接管,不会在 CLI 后台隐藏运行。`create` 不接受任意命令文本,也不提供 Docker 操作;重复创建同一 npm/custom 命令会复用并重启原 Tab。`input/start/restart` 仅允许 npm/custom 类型 Tab,不能操作 Shell/Agent/Docker Tab 绕过限制。`start` 不会重复启动已运行 Tab;`restart` 总是按原命令和目录重启。终端会话仅存内存,桌面应用退出后清空。

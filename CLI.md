@@ -181,7 +181,7 @@ repomeow terminal stop --id 1 [-p <项目目录>]
 repomeow terminal restart --id 1 [-p <项目目录>]
 ```
 
-终端命令通过桌面应用内的真实 TerminalManager 执行;桌面未运行时会自动启动,已运行时会唤醒并显示主窗口。`output` 读取当前输出缓冲;`input` 向运行中 Tab 写入 PTY 输入,`--enter` 追加回车,已结束 Tab 返回 `written=false`;`create` 只能引用已发现的 npm script 或已登记自定义命令,由桌面端校验并生成命令,不接受任意命令文本;`start` 仅恢复已停止/退出的 Tab,运行中不会重复启动;`restart` 总是重启;`input/start/restart` 仅允许 npm/custom 类型 Tab,不能操作 Shell/Agent/Docker Tab 绕过限制;`stop` 停止整棵进程树。Tab ID、原命令和工作目录在启停后保留。会话仅保存在桌面进程内存中,应用退出后清空。
+终端命令通过桌面应用内的真实 TerminalManager 执行;桌面未运行时会自动启动,已运行时会唤醒并显示主窗口。`output` 读取当前输出缓冲;`input` 向运行中 Tab 写入 PTY 输入,`--enter` 追加回车,已结束 Tab 返回 `written=false`;`create` 只能引用已发现的 npm script 或已登记自定义命令,由桌面端校验并生成命令,不接受任意命令文本;重复创建同一 npm/custom 命令会复用并重启原 Tab(运行中也会先停止整棵进程树);`start` 仅恢复已停止/退出的 Tab,运行中不会重复启动;`restart` 总是重启;`input/start/restart` 仅允许 npm/custom 类型 Tab,不能操作 Shell/Agent/Docker Tab 绕过限制;`stop` 停止整棵进程树。Tab ID、原命令和工作目录在启停后保留。会话仅保存在桌面进程内存中,应用退出后清空。
 
 ## 开发
 

@@ -51,7 +51,7 @@ export interface RunCommandOptions {
   label?: string;
 }
 
-/** 在内嵌终端启动新会话,返回会话元数据(输出经事件流式推送) */
+/** 在内嵌终端执行命令;npm/docker/custom 的同项目同命令同目录会话会复用并重启 */
 export function runCommandSession(
   project: Project,
   command: string,

@@ -68,6 +68,8 @@ struct SessionEntry {
 #[derive(Default)]
 pub struct TerminalManager {
     sessions: Mutex<HashMap<u64, SessionEntry>>,
+    /// 串行化命令创建与复用,避免快速连点/并发 IPC 同时未找到会话而新建多个 Tab
+    run_lock: Mutex<()>,
     next_id: AtomicU64,
 }
 
@@ -626,7 +628,51 @@ pub fn run_command_session(
     )
 }
 
-/// 内嵌命令会话的创建入口:前端 IPC 与项目问答工具共用。
+/// 同一工作目录的路径写法归一后比较;Windows 路径额外忽略 ASCII 大小写。
+fn same_work_dir(a: &str, b: &str) -> bool {
+    let a = crate::path_util::clean_str(a);
+    let b = crate::path_util::clean_str(b);
+    if cfg!(windows) {
+        a.eq_ignore_ascii_case(&b)
+    } else {
+        a == b
+    }
+}
+
+/// npm/docker/自定义命令重复执行时复用原 Tab;若曾有多个,优先重启仍在运行的最新会话。
+/// AI 的 create_terminal_tab 与 Java 命令保留显式新建语义,不参与复用。
+fn reusable_command_session_id(
+    manager: &Arc<TerminalManager>,
+    project_id: i64,
+    command: &str,
+    cwd: &str,
+    kind: Option<&str>,
+) -> Option<u64> {
+    let kind = kind?;
+    if !matches!(kind, "npm" | "docker" | "custom") {
+        return None;
+    }
+    manager
+        .lock()
+        .values()
+        .filter(|entry| {
+            !entry.info.interactive
+                && entry.info.project_id == project_id
+                && entry.info.kind == kind
+                && entry.info.command == command
+                && same_work_dir(&entry.info.cwd, cwd)
+        })
+        .max_by_key(|entry| {
+            (
+                entry.info.status == TerminalSessionStatus::Running,
+                entry.info.started_at,
+                entry.info.id,
+            )
+        })
+        .map(|entry| entry.info.id)
+}
+
+/// 内嵌命令会话的创建入口:前端 IPC、CLI 与项目问答工具共用。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_command_session_impl(
     app: &AppHandle,
@@ -643,6 +689,10 @@ pub(crate) fn run_command_session_impl(
     let work_dir = cwd.unwrap_or(path);
     if !std::path::Path::new(&work_dir).is_dir() {
         return Err(AppError::coded(ErrorCode::ScriptDirNotFound, work_dir));
+    }
+    let _run_guard = manager.run_lock.lock().unwrap();
+    if let Some(id) = reusable_command_session_id(manager, project_id, command, work_dir, kind) {
+        return restart_command_session_impl(app, manager, id);
     }
     let mgr = manager.clone();
     let id = mgr.next_id.fetch_add(1, Ordering::Relaxed) + 1;
@@ -940,6 +990,129 @@ pub fn remove_command_session(manager: State<'_, Arc<TerminalManager>>, id: u64)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn command_entry(
+        id: u64,
+        kind: &str,
+        status: TerminalSessionStatus,
+        started_at: i64,
+    ) -> SessionEntry {
+        SessionEntry {
+            info: TerminalSessionInfo {
+                id,
+                project_id: 1,
+                project_name: "demo".into(),
+                label: kind.into(),
+                kind: kind.into(),
+                command: "run demo".into(),
+                interactive: false,
+                cwd: "D:/repo".into(),
+                status,
+                exit_code: None,
+                started_at,
+                finished_at: None,
+            },
+            generation: 0,
+            pid: 0,
+            writer: None,
+            master: None,
+            spec: SessionSpec {
+                command: "run demo".into(),
+                cwd: "D:/repo".into(),
+                java_home: None,
+                interactive: false,
+                shell: None,
+            },
+            stop_requested: false,
+            output: VecDeque::new(),
+            output_chars: 0,
+        }
+    }
+
+    #[test]
+    fn repeated_project_commands_reuse_matching_session() {
+        let manager = Arc::new(TerminalManager::default());
+        for (id, kind, status) in [
+            (1, "npm", TerminalSessionStatus::Running),
+            (2, "docker", TerminalSessionStatus::Exited),
+            (3, "custom", TerminalSessionStatus::Stopped),
+        ] {
+            manager
+                .lock()
+                .insert(id, command_entry(id, kind, status, id as i64));
+            assert_eq!(
+                reusable_command_session_id(&manager, 1, "run demo", "D:/repo/", Some(kind)),
+                Some(id),
+                "{kind} 运行中与已结束会话都应复用"
+            );
+        }
+
+        assert_eq!(
+            reusable_command_session_id(&manager, 2, "run demo", "D:/repo", Some("npm")),
+            None,
+            "其他项目不复用"
+        );
+        assert_eq!(
+            reusable_command_session_id(&manager, 1, "other", "D:/repo", Some("npm")),
+            None,
+            "其他命令不复用"
+        );
+        assert_eq!(
+            reusable_command_session_id(&manager, 1, "run demo", "D:/elsewhere", Some("npm")),
+            None,
+            "其他工作目录不复用"
+        );
+        assert_eq!(
+            reusable_command_session_id(&manager, 1, "run demo", "D:/repo", Some("java")),
+            None,
+            "Java 保留新建语义"
+        );
+        assert_eq!(
+            reusable_command_session_id(&manager, 1, "run demo", "D:/repo", Some("ai")),
+            None,
+            "AI 保留新建语义"
+        );
+    }
+
+    #[test]
+    fn reuse_prefers_latest_running_session() {
+        let manager = Arc::new(TerminalManager::default());
+        manager.lock().insert(
+            1,
+            command_entry(1, "npm", TerminalSessionStatus::Running, 10),
+        );
+        manager.lock().insert(
+            2,
+            command_entry(2, "npm", TerminalSessionStatus::Exited, 20),
+        );
+        // 运行中优先于启动时间
+        assert_eq!(
+            reusable_command_session_id(&manager, 1, "run demo", "D:/repo", Some("npm")),
+            Some(1)
+        );
+        manager.lock().insert(
+            3,
+            command_entry(3, "npm", TerminalSessionStatus::Running, 30),
+        );
+        assert_eq!(
+            reusable_command_session_id(&manager, 1, "run demo", "D:/repo", Some("npm")),
+            Some(3)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn reuse_normalizes_windows_work_dir() {
+        let manager = Arc::new(TerminalManager::default());
+        manager.lock().insert(
+            1,
+            command_entry(1, "npm", TerminalSessionStatus::Running, 1),
+        );
+        assert_eq!(
+            reusable_command_session_id(&manager, 1, "run demo", "d:\\repo\\", Some("npm")),
+            Some(1)
+        );
+    }
 
     #[test]
     fn pty_input_normalizes_enter_and_paste_without_duplicate_lines() {
