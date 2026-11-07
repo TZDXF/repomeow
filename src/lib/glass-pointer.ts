@@ -1,8 +1,6 @@
 /** Theme-scoped pointer lighting; only the hovered material is measured per frame. */
 export function attachGlassPointer(surface: HTMLElement): () => void {
-  const preference = window.matchMedia(
-    "(prefers-reduced-motion: reduce), (prefers-reduced-transparency: reduce), (pointer: coarse)",
-  );
+  const preference = window.matchMedia("(pointer: coarse)");
   let frame = 0;
   let latest: PointerEvent | undefined;
   let active: HTMLElement | null = null;

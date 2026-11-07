@@ -266,13 +266,7 @@ function updateSplit(event: PointerEvent) {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .theme-preview-choice[data-theme="glass-pro"] .theme-preview-surface {
-    animation: none;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .theme-preview-choice {
+  .theme-preview-choice:not([data-theme="glass-pro"]) {
     transition: none;
   }
 }

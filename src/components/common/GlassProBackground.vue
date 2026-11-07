@@ -2,21 +2,15 @@
 import { onMounted, onUnmounted, ref } from "vue";
 import type { ShaderInstance } from "shaders/js";
 import { attachGlassPointer } from "@/lib/glass-pointer";
-import { glassProInteractiveLayers } from "@/lib/glass-pro-scene";
-
-const IDLE_PAUSE_MS = 1800;
 
 let detachPointer: (() => void) | undefined;
 let surface: HTMLElement | null = null;
-let idleTimer: number | undefined;
-let idle = false;
 
 const canvas = ref<HTMLCanvasElement>();
 const ready = ref(false);
 let shader: ShaderInstance | undefined;
 let observer: MutationObserver | undefined;
 let resizeObserver: ResizeObserver | undefined;
-let motion: MediaQueryList;
 let disposed = false;
 let generation = 0;
 
@@ -36,54 +30,24 @@ function setReady(value: boolean) {
   else surface?.removeAttribute("data-glass-shader-ready");
 }
 
-function clearIdleTimer() {
-  if (idleTimer !== undefined) window.clearTimeout(idleTimer);
-  idleTimer = undefined;
-}
-
-function scheduleIdlePause() {
-  clearIdleTimer();
-  if (!shader || disposed || document.hidden || motion.matches) return;
-  idleTimer = window.setTimeout(() => {
-    idleTimer = undefined;
-    shader?.pause();
-    idle = true;
-  }, IDLE_PAUSE_MS);
-}
-
-function handleActivity() {
-  if (disposed || document.hidden || motion.matches) return;
-  if (idle) {
-    shader?.resume();
-    idle = false;
-  }
-  scheduleIdlePause();
-}
-
 function destroy() {
   generation++;
-  clearIdleTimer();
   setReady(false);
   shader?.destroy();
   shader = undefined;
-  idle = false;
 }
 
 async function sync() {
-  // 隐藏窗口与减少动态效果偏好不分配 GPU 资源;注意不能用
-  // prefers-reduced-transparency 做门槛——Windows 关闭"透明效果"时它会命中,
-  // 但流动背景本身不是透明效果,不应被禁用。
+  // Pro 始终展示完整动态效果,仅在窗口隐藏时释放 GPU 资源。
   destroy();
-  if (disposed || document.hidden || motion.matches || !canvas.value) return;
+  if (disposed || document.hidden || !canvas.value) return;
   const current = generation;
   try {
-    const [{ createShader }, { default: mesh }, { default: flow }, { default: glass }] =
-      await Promise.all([
-        import("shaders/js"),
-        import("shaders/core/MeshGradient"),
-        import("shaders/core/ChromaFlow"),
-        import("shaders/core/FlutedGlass"),
-      ]);
+    const [{ createShader }, { default: mesh }, { default: glass }] = await Promise.all([
+      import("shaders/js"),
+      import("shaders/core/MeshGradient"),
+      import("shaders/core/FlutedGlass"),
+    ]);
     if (disposed || current !== generation || !canvas.value) return;
     const instance = await createShader(
       canvas.value,
@@ -104,11 +68,22 @@ async function sync() {
               seed: 8,
             },
           },
-          ...glassProInteractiveLayers,
+          {
+            id: "flow-glass",
+            type: "FlutedGlass",
+            props: {
+              aberration: 0.25,
+              angle: 30,
+              frequency: 8,
+              highlightColor: "#ffffff",
+              refraction: 1.5,
+              softness: 0.5,
+            },
+          },
         ],
       },
       {
-        components: [mesh, flow, glass],
+        components: [mesh, glass],
         disableTelemetry: true,
         observeElement: false,
         onReady: () => {
@@ -126,7 +101,6 @@ async function sync() {
     shader = instance;
     resize();
     setReady(!instance.getFailureReason());
-    scheduleIdlePause();
   } catch {
     // The CSS aurora remains visible if initialization or GPU allocation fails.
     if (current === generation) destroy();
@@ -135,10 +109,9 @@ async function sync() {
 
 function resize() {
   if (!canvas.value) return;
-  // Soft gradients need no retina-resolution buffer; cap GPU fill cost.
+  // 按实际显示尺寸渲染,像素比由渲染器处理,不再限制为最长边 1280px。
   const { width, height } = canvas.value.getBoundingClientRect();
-  const scale = Math.min(1, 1280 / Math.max(width, height));
-  shader?.resize(Math.max(1, Math.round(width * scale)), Math.max(1, Math.round(height * scale)));
+  shader?.resize(Math.max(1, Math.round(width)), Math.max(1, Math.round(height)));
   // The library also sets CSS dimensions in resize(); keep the scene stretched
   // to its container rather than shrinking the layout (and retriggering ResizeObserver).
   canvas.value.style.width = "100%";
@@ -147,13 +120,7 @@ function resize() {
 
 onMounted(() => {
   surface = canvas.value?.closest<HTMLElement>(".app-surface") ?? null;
-  if (surface) {
-    detachPointer = attachGlassPointer(surface);
-    surface.addEventListener("pointermove", handleActivity, { passive: true });
-    surface.addEventListener("pointerdown", handleActivity, { passive: true });
-  }
-  motion = window.matchMedia("(prefers-reduced-motion: reduce)");
-  motion.addEventListener("change", sync);
+  if (surface) detachPointer = attachGlassPointer(surface);
   document.addEventListener("visibilitychange", sync);
   observer = new MutationObserver(() => shader?.update("aurora", { stops: palette() }));
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
@@ -163,14 +130,11 @@ onMounted(() => {
 });
 onUnmounted(() => {
   detachPointer?.();
-  surface?.removeEventListener("pointermove", handleActivity);
-  surface?.removeEventListener("pointerdown", handleActivity);
 
   disposed = true;
   destroy();
   observer?.disconnect();
   resizeObserver?.disconnect();
-  motion?.removeEventListener("change", sync);
   document.removeEventListener("visibilitychange", sync);
   surface = null;
 });

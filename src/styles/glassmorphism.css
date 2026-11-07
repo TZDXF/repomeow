@@ -170,7 +170,7 @@
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  :is([data-theme="glassmorphism"], [data-theme="glass-pro"])
+  [data-theme="glassmorphism"]
     :is([data-slot="card"], .project-card, .theme-choice, [data-terminal-panel]) {
     background: var(--popover);
     -webkit-backdrop-filter: none;
@@ -179,7 +179,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :is([data-theme="glassmorphism"], [data-theme="glass-pro"])
+  [data-theme="glassmorphism"]
     :is(
       :is([data-slot="button"], [class~="group/button"]),
       [data-slot="input"],
