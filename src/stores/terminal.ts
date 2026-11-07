@@ -91,6 +91,16 @@ export const useTerminalStore = defineStore("terminal", () => {
     for (const l of outputListeners) l(id, chunk);
   }
 
+  /** 用命令结果补齐状态;请求期间已收到事件时保留事件状态,避免快速退出被旧的 running 响应覆盖。 */
+  async function syncSessionCommand(command: () => Promise<TerminalSessionInfo>) {
+    const previous = new Map(sessions.value.map((s) => [s.id, s]));
+    const info = await command();
+    if (sessions.value.find((s) => s.id === info.id) === previous.get(info.id)) {
+      onSessionChanged(info);
+    }
+    return info;
+  }
+
   /** 统一执行入口:npm/docker/custom 重复执行复用并重启原会话,随后展开面板选中该会话。 */
   async function run(
     project: Project,
@@ -98,7 +108,7 @@ export const useTerminalStore = defineStore("terminal", () => {
     opts: RunCommandOptions = {},
   ): Promise<void> {
     await init();
-    const info = await runCommandSession(project, command, opts);
+    const info = await syncSessionCommand(() => runCommandSession(project, command, opts));
     activeId.value = info.id;
     open.value = true;
   }
@@ -106,8 +116,7 @@ export const useTerminalStore = defineStore("terminal", () => {
   /** 主动创建应用内交互式 Shell;shell 显式指定类型,缺省使用设置中的默认 Shell */
   async function create(project: Project, shell?: TerminalKind) {
     await init();
-    const info = await createShellSession(project, shell);
-    onSessionChanged(info);
+    const info = await syncSessionCommand(() => createShellSession(project, shell));
     activeId.value = info.id;
     open.value = true;
   }
@@ -119,7 +128,7 @@ export const useTerminalStore = defineStore("terminal", () => {
 
   /** 重启会话:后端会再广播 session-changed,这里同步一次让 UI 立即翻转 */
   async function restart(id: number) {
-    onSessionChanged(await restartCommandSession(id));
+    await syncSessionCommand(() => restartCommandSession(id));
   }
 
   /** 移除会话(运行中的后端先停止);选中态顺延到剩余首个 */

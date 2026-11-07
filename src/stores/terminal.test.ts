@@ -107,6 +107,46 @@ describe("内置终端统一执行", () => {
     expect(mocks.onListen).toHaveBeenCalledTimes(2);
   });
 
+  it("再次运行已有 npm 命令时复用 Tab 并立即同步运行状态", async () => {
+    const stopped = { ...session, status: "stopped" as const, finished_at: 2 };
+    mocks.listCommandSessions.mockResolvedValueOnce([stopped]);
+    const store = useTerminalStore();
+
+    await store.run(project, session.command, { kind: "npm" });
+
+    expect(store.sessions).toEqual([session]);
+    expect(store.activeId).toBe(session.id);
+    expect(store.open).toBe(true);
+  });
+
+  it.each(["run", "restart", "create"] as const)(
+    "%s 响应返回前已收到退出事件时保留退出状态",
+    async (action) => {
+      mocks.listCommandSessions.mockResolvedValueOnce([{ ...session, status: "stopped" }]);
+      const store = useTerminalStore();
+      await store.init();
+      const onChanged = mocks.onListen.mock.calls[0]![1];
+      const finished = { ...session, status: "exited" as const, exit_code: 0, finished_at: 2 };
+      const respondAfterExit = async () => {
+        onChanged(session);
+        onChanged(finished);
+        return session;
+      };
+      const commandMock = {
+        run: mocks.runCommandSession,
+        restart: mocks.restartCommandSession,
+        create: mocks.createShellSession,
+      }[action];
+      commandMock.mockImplementationOnce(respondAfterExit);
+
+      if (action === "run") await store.run(project, session.command);
+      else if (action === "restart") await store.restart(session.id);
+      else await store.create(project);
+
+      expect(store.sessions).toEqual([finished]);
+    },
+  );
+
   it("内置会话启动失败时传播错误，不回退系统终端或打开空面板", async () => {
     const store = useTerminalStore();
     const error = new Error("启动终端失败");

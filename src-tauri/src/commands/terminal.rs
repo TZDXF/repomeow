@@ -68,7 +68,7 @@ struct SessionEntry {
 #[derive(Default)]
 pub struct TerminalManager {
     sessions: Mutex<HashMap<u64, SessionEntry>>,
-    /// 串行化命令创建与复用,避免快速连点/并发 IPC 同时未找到会话而新建多个 Tab
+    /// 串行化命令创建、复用与重启,避免并发 IPC 新建重复 Tab 或交错替换同一进程
     run_lock: Mutex<()>,
     next_id: AtomicU64,
 }
@@ -533,27 +533,37 @@ fn spawn_waiter(
                 status.exit_code() as i32
             }
         });
-        let info = {
-            let mut sessions = mgr.lock();
-            let Some(entry) = sessions.get_mut(&id) else {
-                return; // 会话已被移除
-            };
-            if entry.generation != generation {
-                return; // 旧进程退出(restart 后),状态已由新代数接管
-            }
-            entry.writer = None;
-            entry.master = None; // 关闭 PTY 主端,释放 ConPTY 句柄
-            entry.info.finished_at = Some(now_ts());
-            if entry.stop_requested {
-                entry.info.status = TerminalSessionStatus::Stopped;
-            } else {
-                entry.info.exit_code = exit_code;
-                entry.info.status = TerminalSessionStatus::Exited;
-            }
-            entry.info.clone()
-        };
-        let _ = app.emit(SESSION_CHANGED_EVENT, &info);
+        finish_session(&mgr, id, generation, exit_code, |info| {
+            let _ = app.emit(SESSION_CHANGED_EVENT, info);
+        });
     });
+}
+
+/// 退出状态与事件在同一把锁内提交,避免旧退出事件在新一轮启动之后才广播。
+fn finish_session(
+    mgr: &TerminalManager,
+    id: u64,
+    generation: u64,
+    exit_code: Option<i32>,
+    emit: impl FnOnce(&TerminalSessionInfo),
+) {
+    let mut sessions = mgr.lock();
+    let Some(entry) = sessions.get_mut(&id) else {
+        return;
+    };
+    if entry.generation != generation {
+        return; // 旧进程退出(restart 后),状态已由新代数接管
+    }
+    entry.writer = None;
+    entry.master = None; // 关闭 PTY 主端,释放 ConPTY 句柄
+    entry.info.finished_at = Some(now_ts());
+    if entry.stop_requested {
+        entry.info.status = TerminalSessionStatus::Stopped;
+    } else {
+        entry.info.exit_code = exit_code;
+        entry.info.status = TerminalSessionStatus::Exited;
+    }
+    emit(&entry.info);
 }
 
 /// 登记新会话并接管子进程句柄(reader/waiter 线程 + 事件广播)
@@ -589,12 +599,13 @@ fn register_launch(
                 output_chars: 0,
             },
         );
+        // 先广播启动,再启动 waiter,避免短命令的退出事件先于 running 到达。
+        let _ = app.emit(SESSION_CHANGED_EVENT, &info);
     }
     for reader in readers {
         spawn_reader(app.clone(), mgr.clone(), id, generation, reader);
     }
     spawn_waiter(app.clone(), mgr.clone(), id, generation, child);
-    let _ = app.emit(SESSION_CHANGED_EVENT, &info);
     info
 }
 
@@ -692,7 +703,7 @@ pub(crate) fn run_command_session_impl(
     }
     let _run_guard = manager.run_lock.lock().unwrap();
     if let Some(id) = reusable_command_session_id(manager, project_id, command, work_dir, kind) {
-        return restart_command_session_impl(app, manager, id);
+        return restart_command_session_locked(app, manager, id);
     }
     let mgr = manager.clone();
     let id = mgr.next_id.fetch_add(1, Ordering::Relaxed) + 1;
@@ -851,14 +862,28 @@ pub(crate) fn restart_command_session_impl(
     manager: &Arc<TerminalManager>,
     id: u64,
 ) -> AppResult<TerminalSessionInfo> {
+    let _run_guard = manager.run_lock.lock().unwrap();
+    restart_command_session_locked(app, manager, id)
+}
+
+/// 调用方持有 run_lock,整个停止与重新拉起过程不会与其他重启交错。
+fn restart_command_session_locked(
+    app: &AppHandle,
+    manager: &Arc<TerminalManager>,
+    id: u64,
+) -> AppResult<TerminalSessionInfo> {
     let mgr = manager.clone();
     let spec = {
         let mut sessions = mgr.lock();
         let entry = sessions.get_mut(&id).ok_or_else(|| session_not_found(id))?;
+        // 必须在停止旧进程之前失效旧 reader/waiter;新 PTY 拉起期间也不能发布旧停止状态。
+        entry.generation += 1;
         if entry.info.status == TerminalSessionStatus::Running {
             entry.stop_requested = true;
             kill_tree(entry.pid);
         }
+        entry.writer = None;
+        entry.master = None;
         SessionSpec {
             command: entry.spec.command.clone(),
             cwd: entry.spec.cwd.clone(),
@@ -871,14 +896,13 @@ pub(crate) fn restart_command_session_impl(
         Ok(l) => l,
         Err(e) => {
             // 重启拉起失败:会话标记为启动失败,保留在列表里供用户查看/重试
-            let info = {
+            {
                 let mut sessions = mgr.lock();
                 let entry = sessions.get_mut(&id).ok_or_else(|| session_not_found(id))?;
                 entry.info.status = TerminalSessionStatus::SpawnFailed;
                 entry.info.finished_at = Some(now_ts());
-                entry.info.clone()
-            };
-            let _ = app.emit(SESSION_CHANGED_EVENT, &info);
+                let _ = app.emit(SESSION_CHANGED_EVENT, &entry.info);
+            }
             return Err(e);
         }
     };
@@ -891,7 +915,6 @@ pub(crate) fn restart_command_session_impl(
     let (info, generation) = {
         let mut sessions = mgr.lock();
         let entry = sessions.get_mut(&id).ok_or_else(|| session_not_found(id))?;
-        entry.generation += 1;
         entry.pid = child.process_id().unwrap_or(0);
         entry.writer = writer;
         entry.master = master;
@@ -902,13 +925,13 @@ pub(crate) fn restart_command_session_impl(
         entry.info.exit_code = None;
         entry.info.started_at = now_ts();
         entry.info.finished_at = None;
+        let _ = app.emit(SESSION_CHANGED_EVENT, &entry.info);
         (entry.info.clone(), entry.generation)
     };
     for reader in readers {
         spawn_reader(app.clone(), mgr.clone(), id, generation, reader);
     }
     spawn_waiter(app.clone(), mgr.clone(), id, generation, child);
-    let _ = app.emit(SESSION_CHANGED_EVENT, &info);
     Ok(info)
 }
 
@@ -1072,6 +1095,55 @@ mod tests {
             None,
             "AI 保留新建语义"
         );
+    }
+
+    #[test]
+    fn old_waiter_cannot_publish_stopped_during_restart_or_after_spawn_failure() {
+        let manager = TerminalManager::default();
+        let mut entry = command_entry(1, "npm", TerminalSessionStatus::Running, 1);
+        // 旧进程已请求停止,新一代正在拉起,尚未重置 stop_requested。
+        entry.stop_requested = true;
+        entry.generation = 1;
+        manager.lock().insert(1, entry);
+
+        for status in [
+            TerminalSessionStatus::Running,
+            TerminalSessionStatus::SpawnFailed,
+        ] {
+            manager.lock().get_mut(&1).unwrap().info.status = status;
+            finish_session(&manager, 1, 0, Some(1), |_| {
+                panic!("旧进程不得广播停止事件");
+            });
+            let sessions = manager.lock();
+            assert_eq!(sessions[&1].info.status, status);
+            assert_eq!(sessions[&1].info.finished_at, None);
+        }
+    }
+
+    #[test]
+    fn current_waiter_commits_status_and_event_before_unlocking() {
+        let manager = TerminalManager::default();
+        manager.lock().insert(
+            1,
+            command_entry(1, "npm", TerminalSessionStatus::Running, 1),
+        );
+        let mut emitted = false;
+        finish_session(&manager, 1, 0, Some(7), |info| {
+            assert!(
+                manager.sessions.try_lock().is_err(),
+                "广播必须与状态更新保持原子顺序"
+            );
+            assert_eq!(info.status, TerminalSessionStatus::Exited);
+            assert_eq!(info.exit_code, Some(7));
+            assert!(info.finished_at.is_some());
+            emitted = true;
+        });
+        assert!(emitted);
+
+        manager.lock().get_mut(&1).unwrap().stop_requested = true;
+        finish_session(&manager, 1, 0, Some(1), |info| {
+            assert_eq!(info.status, TerminalSessionStatus::Stopped);
+        });
     }
 
     #[test]
