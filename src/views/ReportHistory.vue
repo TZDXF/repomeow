@@ -652,7 +652,7 @@ watch(
       </div>
     </div>
 
-    <DailyReportDialog v-model:open="reportOpen" />
+    <DailyReportDialog v-model:open="reportOpen" tag-filter-mode="any" />
     <ConfirmDialog
       v-model:open="deleteConfirmOpen"
       :title="t('common.delete')"

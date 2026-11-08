@@ -16,6 +16,7 @@ import ReportCommitList from "@/components/report/ReportCommitList.vue";
 import ReportPeriodControls from "@/components/report/ReportPeriodControls.vue";
 import ReportProjectSelector from "@/components/report/ReportProjectSelector.vue";
 import ReportResultPanel from "@/components/report/ReportResultPanel.vue";
+import type { TagFilterMode } from "@/components/report/project-selector";
 import { createDefaultReportPeriod, toLocalDate } from "@/components/report/report-period";
 import { generateAndSaveReport, type ProjectCommits } from "@/lib/ai";
 import { planBatchItems, type BatchItem } from "@/lib/batch-report";
@@ -36,7 +37,7 @@ const AUTHOR_OPTIONS: { value: AuthorMode; labelKey: string }[] = [
     { value: "all", labelKey: "report.authorAll" },
   ],
   { t } = useI18n(),
-  props = defineProps<{ presetProjectId?: number }>(),
+  props = defineProps<{ presetProjectId?: number; tagFilterMode?: TagFilterMode }>(),
   open = defineModel<boolean>("open", { required: true }),
   store = useProjectsStore(),
   settings = useSettingsStore(),
@@ -409,6 +410,7 @@ async function startBatch() {
               v-model="selectedIds"
               :projects="activeProjects"
               :tags="tagsStore.tags"
+              :tag-filter-mode="tagFilterMode"
             />
 
             <ReportPeriodControls
