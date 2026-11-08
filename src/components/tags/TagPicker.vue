@@ -16,11 +16,10 @@ import { useProjectsStore } from "@/stores/projects";
 import { useTagsStore } from "@/stores/tags";
 import type { Project } from "@/types";
 
-const { t } = useI18n();
-const props = defineProps<{ project: Project }>();
-
-const tagsStore = useTagsStore();
-const projectsStore = useProjectsStore();
+const { t } = useI18n(),
+  props = defineProps<{ project: Project }>(),
+  tagsStore = useTagsStore(),
+  projectsStore = useProjectsStore();
 
 function hasTag(tagId: number) {
   return props.project.tags.some((t) => t.id === tagId);

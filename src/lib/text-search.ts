@@ -20,9 +20,13 @@ export interface TextRange {
 
 /** 构造查找正则;空查询或非法正则返回 null(调用方各自决定呈现) */
 export function buildFindRegExp(q: FindQuery): RegExp | null {
-  if (!q.text.trim()) return null;
+  if (!q.text.trim()) {
+    return null;
+  }
   let source = q.useRegex ? q.text : q.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  if (q.wholeWord) source = `\\b(?:${source})\\b`;
+  if (q.wholeWord) {
+    source = `\\b(?:${source})\\b`;
+  }
   try {
     return new RegExp(source, q.caseSensitive ? "g" : "gi");
   } catch {
@@ -36,7 +40,9 @@ export function collectMatches(text: string, re: RegExp): TextRange[] {
   re.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
-    if (m[0].length > 0) ranges.push({ from: m.index, to: m.index + m[0].length, line: 0 });
+    if (m[0].length > 0) {
+      ranges.push({ from: m.index, to: m.index + m[0].length, line: 0 });
+    }
     re.lastIndex = m.index + Math.max(m[0].length, 1);
   }
   fillLines(text, ranges);
@@ -45,16 +51,23 @@ export function collectMatches(text: string, re: RegExp): TextRange[] {
 
 /** 为偏移范围回填 1-based 行号(行首偏移数组上二分) */
 function fillLines(text: string, ranges: TextRange[]): void {
-  if (!ranges.length) return;
+  if (!ranges.length) {
+    return;
+  }
   const starts: number[] = [0];
-  for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1)) starts.push(i + 1);
+  for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1)) {
+    starts.push(i + 1);
+  }
   for (const r of ranges) {
-    let lo = 0;
-    let hi = starts.length - 1;
+    let lo = 0,
+      hi = starts.length - 1;
     while (lo < hi) {
       const mid = (lo + hi + 1) >> 1;
-      if (starts[mid] <= r.from) lo = mid;
-      else hi = mid - 1;
+      if (starts[mid] <= r.from) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
     }
     r.line = lo + 1;
   }

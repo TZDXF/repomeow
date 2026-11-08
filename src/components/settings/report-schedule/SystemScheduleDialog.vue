@@ -15,12 +15,11 @@ import { clampIntervalMinutes } from "@/composables/report-schedule/schedule-uti
 import type { SystemSchedule } from "@/types";
 
 /** 内置任务间隔编辑:不可更名、不可删除,仅调整执行间隔(分钟) */
-const props = defineProps<{ schedule: SystemSchedule | null }>();
-const open = defineModel<boolean>("open", { required: true });
-const emit = defineEmits<{ save: [intervalMinutes: number] }>();
-
-const { t } = useI18n();
-const formInterval = ref(10);
+const props = defineProps<{ schedule: SystemSchedule | null }>(),
+  open = defineModel<boolean>("open", { required: true }),
+  emit = defineEmits<{ save: [intervalMinutes: number] }>(),
+  { t } = useI18n(),
+  formInterval = ref(10);
 
 watch(open, (isOpen) => {
   if (isOpen && props.schedule) {

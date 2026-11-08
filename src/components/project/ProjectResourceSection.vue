@@ -32,71 +32,69 @@ import RepairDialog from "./resource-section/RepairDialog.vue";
 import ProjectResourceAddDialog from "./ProjectResourceAddDialog.vue";
 
 const props = defineProps<{
-  projectPath: string;
-  kind: ProjectResourceKind;
-  targets: ProjectAiTarget[];
-  assets: ProjectAiAssets | null;
-  revision: number;
-  /** 技能预览页的返回路径(项目详情页路由) */
-  from: string;
-}>();
-const emit = defineEmits<{ preview: [path: string]; changed: [] }>();
-const { t } = useI18n();
-const router = useRouter();
-const settings = useSettingsStore();
-
-// ── 数据层 / 动作层 / 修复层(实现见 composables/project-resources/*) ──
-const {
-  data,
-  loading,
-  error,
-  activeFilter,
-  listed,
-  unmanaged,
-  filters,
-  filtered,
-  filteredUnmanaged,
-  groupCount,
-  records,
-} = useProjectResourceData({
-  projectPath: () => props.projectPath,
-  kind: () => props.kind,
-  revision: () => props.revision,
-  targets: () => props.targets,
-  assets: () => props.assets,
-});
-const {
-  removeTargets,
-  removing,
-  unmanagedRemoveTarget,
-  removingUnmanaged,
-  importing,
-  toggling,
-  toggleAgent,
-  configureUnmanaged,
-  importLocal,
-  importUnmanaged,
-  confirmRemove,
-  confirmRemoveUnmanaged,
-} = useResourceActions({
-  projectPath: () => props.projectPath,
-  kind: () => props.kind,
-  targets: () => props.targets,
-  data,
-  records,
-  changed,
-});
-const { repairResource, repairing, repairRecords, repairAgentName, applyUpdate, repairRecord } =
-  useResourceRepair({
+    projectPath: string;
+    kind: ProjectResourceKind;
+    targets: ProjectAiTarget[];
+    assets: ProjectAiAssets | null;
+    revision: number;
+    /** 技能预览页的返回路径(项目详情页路由) */
+    from: string;
+  }>(),
+  emit = defineEmits<{ preview: [path: string]; changed: [] }>(),
+  { t } = useI18n(),
+  router = useRouter(),
+  settings = useSettingsStore(),
+  // ── 数据层 / 动作层 / 修复层(实现见 composables/project-resources/*) ──
+  {
+    data,
+    loading,
+    error,
+    activeFilter,
+    listed,
+    unmanaged,
+    filters,
+    filtered,
+    filteredUnmanaged,
+    groupCount,
+    records,
+  } = useProjectResourceData({
+    projectPath: () => props.projectPath,
+    kind: () => props.kind,
+    revision: () => props.revision,
+    targets: () => props.targets,
+    assets: () => props.assets,
+  }),
+  {
+    removeTargets,
+    removing,
+    unmanagedRemoveTarget,
+    removingUnmanaged,
+    importing,
+    toggling,
+    toggleAgent,
+    configureUnmanaged,
+    importLocal,
+    importUnmanaged,
+    confirmRemove,
+    confirmRemoveUnmanaged,
+  } = useResourceActions({
     projectPath: () => props.projectPath,
     kind: () => props.kind,
     targets: () => props.targets,
     data,
     records,
     changed,
-  });
-
-const addOpen = ref(false);
+  }),
+  { repairResource, repairing, repairRecords, repairAgentName, applyUpdate, repairRecord } =
+    useResourceRepair({
+      projectPath: () => props.projectPath,
+      kind: () => props.kind,
+      targets: () => props.targets,
+      data,
+      records,
+      changed,
+    }),
+  addOpen = ref(false);
 watch(
   () => [props.projectPath, props.kind],
   () => {
@@ -112,7 +110,7 @@ function changed() {
 /** 技能预览页需要绝对目录:部署记录与资产扫描给出的都是项目相对路径,这里拼上项目根 */
 function absoluteSkillDir(dir: string): string {
   // 已是绝对路径(盘符/UNC/POSIX 根)时原样返回,防御未来来源变化
-  if (/^([A-Za-z]:[\\/]|\\\\|\/)/.test(dir)) {
+  if (/^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(dir)) {
     return dir;
   }
   return joinPath(props.projectPath, dir);

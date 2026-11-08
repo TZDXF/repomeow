@@ -33,6 +33,7 @@ describe("activateTerminalLink", () => {
     expect(openUrl).not.toHaveBeenCalled();
   });
 
+  // oxlint-disable-next-line no-script-url -- 安全回归用例必须覆盖危险协议。
   it.each(["javascript:alert(1)", "file:///C:/test.txt", "mailto:a@example.com", "invalid"])(
     "拒绝非网页或无效地址 %s",
     (url) => {

@@ -4,8 +4,8 @@ import { HoverCardTrigger } from "@/components/ui/hover-card";
 import { useContextValue } from "./context";
 import ContextIcon from "./ContextIcon.vue";
 
-const { t } = useI18n();
-const { usedTokens } = useContextValue();
+const { t } = useI18n(),
+  { usedTokens } = useContextValue();
 </script>
 
 <template>

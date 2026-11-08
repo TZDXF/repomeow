@@ -10,16 +10,15 @@ defineProps<{
   aiReady: boolean;
 }>();
 const emit = defineEmits<{
-  send: [text: string];
-}>();
-const { t } = useI18n();
-const router = useRouter();
-
-const suggestions = computed(() => [
-  t("chat.suggestion1"),
-  t("chat.suggestion2"),
-  t("chat.suggestion3"),
-]);
+    send: [text: string];
+  }>(),
+  { t } = useI18n(),
+  router = useRouter(),
+  suggestions = computed(() => [
+    t("chat.suggestion1"),
+    t("chat.suggestion2"),
+    t("chat.suggestion3"),
+  ]);
 </script>
 
 <template>

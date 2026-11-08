@@ -28,26 +28,25 @@ import type { GitWorktree } from "@/types";
  * linkHorizontal)算出,卡片仍为绝对定位的 Vue DOM,宽度自适应容器。
  * 合并/变基/删除操作经事件交给 WorktreePanel 处理。
  */
-const { t } = useI18n();
-const props = defineProps<{
-  worktrees: GitWorktree[];
-  /** 详情页当前选中的工作区路径,null = 主工作区 */
-  activePath: string | null;
-  rebasingPath: string | null;
-  rebaseInterruptedPath: string | null;
-  aborting: boolean;
-}>();
-const emit = defineEmits<{
-  merge: [w: GitWorktree];
-  rebase: [w: GitWorktree];
-  abortRebase: [w: GitWorktree];
-  remove: [w: GitWorktree];
-  create: [];
-}>();
-
-const tree = computed(() => buildWorktreeTree(props.worktrees));
-const layout = computed(() => (tree.value ? layoutWorktreeTree(tree.value) : null));
-const hasChildren = computed(() => (tree.value?.children.length ?? 0) > 0);
+const { t } = useI18n(),
+  props = defineProps<{
+    worktrees: GitWorktree[];
+    /** 详情页当前选中的工作区路径,null = 主工作区 */
+    activePath: string | null;
+    rebasingPath: string | null;
+    rebaseInterruptedPath: string | null;
+    aborting: boolean;
+  }>(),
+  emit = defineEmits<{
+    merge: [w: GitWorktree];
+    rebase: [w: GitWorktree];
+    abortRebase: [w: GitWorktree];
+    remove: [w: GitWorktree];
+    create: [];
+  }>(),
+  tree = computed(() => buildWorktreeTree(props.worktrees)),
+  layout = computed(() => (tree.value ? layoutWorktreeTree(tree.value) : null)),
+  hasChildren = computed(() => (tree.value?.children.length ?? 0) > 0);
 
 /** 固定朝向箭头:尾部与连线末端相接,尖端贴齐子节点左缘 */
 function arrowhead([x, y]: [number, number]) {
@@ -61,13 +60,13 @@ function nodeStyle(n: WorktreeLayoutNode) {
 }
 
 // 空态(无 linked worktree):主卡下方一格,导轨短横线接虚线占位按钮,点击展开新建表单
-const emptyTop = MAIN_H + ROW_GAP;
-const emptyCenter = emptyTop + ROW_H / 2;
-const emptyStub = stepLink(RAIL_X, MAIN_H, RAIL_W, emptyCenter);
-const emptyDash = `M ${RAIL_W} ${emptyCenter} H ${RAIL_W + LABEL_W - 8}`;
-const containerH = computed(() =>
-  hasChildren.value ? (layout.value?.height ?? MAIN_H) : emptyTop + ROW_H,
-);
+const emptyTop = MAIN_H + ROW_GAP,
+  emptyCenter = emptyTop + ROW_H / 2,
+  emptyStub = stepLink(RAIL_X, MAIN_H, RAIL_W, emptyCenter),
+  emptyDash = `M ${RAIL_W} ${emptyCenter} H ${RAIL_W + LABEL_W - 8}`,
+  containerH = computed(() =>
+    hasChildren.value ? (layout.value?.height ?? MAIN_H) : emptyTop + ROW_H,
+  );
 </script>
 
 <template>

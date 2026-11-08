@@ -51,7 +51,10 @@ export interface ResourceSkillInput {
 }
 
 type BackendSkillGroup = Omit<ResourceSkillGroup, "sortOrder"> & { sort: number };
-type BackendSkillList = { groups: BackendSkillGroup[]; skills: ResourceSkill[] };
+interface BackendSkillList {
+  groups: BackendSkillGroup[];
+  skills: ResourceSkill[];
+}
 
 function mapGroup(group: BackendSkillGroup): ResourceSkillGroup {
   return { ...group, sortOrder: group.sort };
@@ -323,9 +326,15 @@ export function filterSkills(
 ): ResourceSkill[] {
   const q = query.trim().toLowerCase();
   return skills.filter((skill) => {
-    if (groupId !== null && !skill.groupIds.includes(groupId)) return false;
-    if (sourceId !== null && skill.marketplace?.source !== sourceId) return false;
-    if (!q) return true;
+    if (groupId !== null && !skill.groupIds.includes(groupId)) {
+      return false;
+    }
+    if (sourceId !== null && skill.marketplace?.source !== sourceId) {
+      return false;
+    }
+    if (!q) {
+      return true;
+    }
     return skill.name.toLowerCase().includes(q) || skill.description.toLowerCase().includes(q);
   });
 }
@@ -376,15 +385,15 @@ export interface ResourceMarketplaceListOptions {
 export async function listResourceMarketplaceSkills(
   options: ResourceMarketplaceListOptions,
 ): Promise<ResourceMarketplaceList> {
-  const query = options.query?.trim();
-  const source = options.source?.trim();
-  const data = await cmd<BackendMarketplaceList>("rl_marketplace_list", {
-    mode: options.mode,
-    refresh: options.refresh ?? false,
-    ...(query ? { query } : {}),
-    ...(source ? { source } : {}),
-  });
-  const skills = data.skills ?? [];
+  const query = options.query?.trim(),
+    source = options.source?.trim(),
+    data = await cmd<BackendMarketplaceList>("rl_marketplace_list", {
+      mode: options.mode,
+      refresh: options.refresh ?? false,
+      ...(query ? { query } : {}),
+      ...(source ? { source } : {}),
+    }),
+    skills = data.skills ?? [];
   return {
     sources: mergeMarketplaceSources(
       [],
@@ -660,24 +669,24 @@ function collectJsonServerDef(name: string, value: unknown, out: ParsedResourceM
     out.skipped.push({ name: entryName, reason: "invalid" });
     return;
   }
-  const hasCommand = typeof value.command === "string" && value.command.trim() !== "";
-  const declared = value.type ?? value.transport;
-  const normalized = normalizeJsonTransport(declared);
+  const hasCommand = typeof value.command === "string" && value.command.trim() !== "",
+    declared = value.type ?? value.transport,
+    normalized = normalizeJsonTransport(declared);
   if (typeof declared === "string" && declared.trim() !== "" && normalized === null) {
     out.skipped.push({ name: entryName, reason: "unsupported" });
     return;
   }
-  const description = jsonStringField(value, "description");
-  // 未声明类型时按形状推断:有 command 走 stdio,否则 url 走 http
-  const transport = normalized ?? (hasCommand ? "stdio" : "http");
+  const description = jsonStringField(value, "description"),
+    // 未声明类型时按形状推断:有 command 走 stdio,否则 url 走 http
+    transport = normalized ?? (hasCommand ? "stdio" : "http");
   if (transport === "stdio") {
     const command = hasCommand ? (value.command as string).trim() : "";
     if (!command) {
       out.skipped.push({ name: entryName, reason: "invalid" });
       return;
     }
-    const args = jsonArgs(value.args);
-    const env = jsonMap(value.env);
+    const args = jsonArgs(value.args),
+      env = jsonMap(value.env);
     out.entries.push({
       name: entryName,
       ...(description ? { description } : {}),
@@ -750,11 +759,17 @@ export function parseEnvLines(text: string): Record<string, string> {
   const env: Record<string, string> = {};
   for (const raw of text.split("\n")) {
     const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
+    if (!line || line.startsWith("#")) {
+      continue;
+    }
     const index = line.indexOf("=");
-    if (index <= 0) continue;
+    if (index <= 0) {
+      continue;
+    }
     const key = line.slice(0, index).trim();
-    if (key) env[key] = line.slice(index + 1).trim();
+    if (key) {
+      env[key] = line.slice(index + 1).trim();
+    }
   }
   return env;
 }
@@ -769,11 +784,17 @@ export function parseHeaderLines(text: string): Record<string, string> {
   const headers: Record<string, string> = {};
   for (const raw of text.split("\n")) {
     const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
+    if (!line || line.startsWith("#")) {
+      continue;
+    }
     const index = line.indexOf(":");
-    if (index <= 0) continue;
+    if (index <= 0) {
+      continue;
+    }
     const key = line.slice(0, index).trim();
-    if (key) headers[key] = line.slice(index + 1).trim();
+    if (key) {
+      headers[key] = line.slice(index + 1).trim();
+    }
   }
   return headers;
 }
@@ -808,52 +829,67 @@ export interface ResourceBackupStatus {
   error?: string;
 }
 
-type BackendSyncRecord = {
+interface BackendSyncRecord {
   at: number;
   ok: boolean;
   errorMessage?: string;
   ahead: number;
   behind: number;
   diverged: boolean;
-};
+}
 
-type BackendLibraryInfo = {
+interface BackendLibraryInfo {
   remoteUrl?: string;
   branch?: string;
   lastSync?: BackendSyncRecord;
-};
+}
 
-type BackendSyncStatus = {
+interface BackendSyncStatus {
   remote?: string;
   branch?: string;
   ahead: number;
   behind: number;
   diverged: boolean;
   lastSync?: BackendSyncRecord;
-};
+}
 
-type BackendSyncOutcome = {
+interface BackendSyncOutcome {
   ok: boolean;
   ahead: number;
   behind: number;
   diverged: boolean;
   errorMessage?: string;
-};
+}
 
 function mapBackupStatus(
   info: BackendLibraryInfo,
   sync?: BackendSyncStatus,
   outcome?: BackendSyncOutcome,
 ): ResourceBackupStatus {
-  const record = sync?.lastSync ?? info.lastSync;
-  const diverged = outcome?.diverged ?? sync?.diverged ?? record?.diverged ?? false;
-  const failed = outcome ? !outcome.ok : record ? !record.ok : false;
-  const remoteUrl = sync?.remote ?? info.remoteUrl ?? "";
+  const record = sync?.lastSync ?? info.lastSync,
+    diverged = outcome?.diverged ?? sync?.diverged ?? record?.diverged ?? false,
+    remoteUrl = sync?.remote ?? info.remoteUrl ?? "";
+  let failed = false;
+  if (outcome) {
+    failed = !outcome.ok;
+  } else if (record) {
+    failed = !record.ok;
+  }
+  let state: ResourceBackupStatus["state"] = "never";
+  if (record) {
+    state = "idle";
+  }
+  if (failed) {
+    state = "error";
+  }
+  if (diverged) {
+    state = "diverged";
+  }
   return {
     configured: remoteUrl.length > 0,
     remoteUrl,
     branch: sync?.branch ?? info.branch ?? "main",
-    state: diverged ? "diverged" : failed ? "error" : record ? "idle" : "never",
+    state,
     lastSyncAt: record?.at,
     ahead: outcome?.ahead ?? sync?.ahead ?? record?.ahead,
     behind: outcome?.behind ?? sync?.behind ?? record?.behind,
@@ -871,7 +907,9 @@ export function openResourceLibraryDir(): Promise<void> {
 
 export async function getResourceBackupStatus(): Promise<ResourceBackupStatus> {
   const info = await getLibraryInfo();
-  if (!info.remoteUrl) return mapBackupStatus(info);
+  if (!info.remoteUrl) {
+    return mapBackupStatus(info);
+  }
   try {
     return mapBackupStatus(info, await cmd<BackendSyncStatus>("rl_sync_status"));
   } catch (error) {
@@ -915,8 +953,12 @@ export function onResourceBackupStatusChanged(
 /** 仓库来源模式以仓库内路径作为稳定标识，避免同名目录串装。 */
 export function marketplaceAuditId(skill: ResourceSkill): string | null {
   const marketplace = skill.marketplace;
-  if (!marketplace) return null;
-  if (!marketplace.id.startsWith("github:")) return marketplace.id;
+  if (!marketplace) {
+    return null;
+  }
+  if (!marketplace.id.startsWith("github:")) {
+    return marketplace.id;
+  }
   return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(skill.name)
     ? `${marketplace.source}/${skill.name}`
     : null;

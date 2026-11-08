@@ -15,18 +15,21 @@ export function useProjectPageCache(
   watch(
     [() => currentRoute().fullPath, () => [...openProjectIds()]],
     () => {
-      const route = currentRoute();
-      const openIds = new Set(openProjectIds());
-      const next = pages.value.filter((page) => openIds.has(page.projectId));
-      const match = /^\/projects\/(\d+)(?:\/.*)?$/.exec(route.path);
-      const projectId = match ? Number(match[1]) : undefined;
+      const route = currentRoute(),
+        openIds = new Set(openProjectIds()),
+        next = pages.value.filter((page) => openIds.has(page.projectId)),
+        match = /^\/projects\/(?<projectId>\d+)(?:\/.*)?$/.exec(route.path),
+        projectId = match ? Number(match.groups!.projectId) : undefined;
       if (projectId !== undefined && openIds.has(projectId)) {
         // 不能保存全局 useRoute() 的响应式代理,否则后台页面仍会跟着当前项目变化。
-        const snapshot = { ...route, params: { ...route.params }, query: { ...route.query } };
-        const index = next.findIndex((page) => page.route.path === route.path);
-        const page = { projectId, route: snapshot };
-        if (index < 0) next.push(page);
-        else next[index] = page;
+        const snapshot = { ...route, params: { ...route.params }, query: { ...route.query } },
+          index = next.findIndex((page) => page.route.path === route.path),
+          page = { projectId, route: snapshot };
+        if (index < 0) {
+          next.push(page);
+        } else {
+          next[index] = page;
+        }
       }
       pages.value = next;
     },

@@ -14,11 +14,11 @@ export function formatCompactNumber(value: number): string {
   }
 
   let unitIndex = Math.min(
-    Math.floor(Math.log10(absolute) / 3) - 1,
-    COMPACT_NUMBER_UNITS.length - 1,
-  );
-  let unit = COMPACT_NUMBER_UNITS[unitIndex];
-  let rounded = Math.round((value / unit.divisor) * 10) / 10;
+      Math.floor(Math.log10(absolute) / 3) - 1,
+      COMPACT_NUMBER_UNITS.length - 1,
+    ),
+    unit = COMPACT_NUMBER_UNITS[unitIndex],
+    rounded = Math.round((value / unit.divisor) * 10) / 10;
 
   // 999.95K 等边界值应提升为 1M,避免显示 1000K
   if (Math.abs(rounded) >= 1_000 && unitIndex < COMPACT_NUMBER_UNITS.length - 1) {
@@ -31,13 +31,19 @@ export function formatCompactNumber(value: number): string {
 
 /** 字节数 → 可读大小(B/KB/MB/GB/TB,1000 进制,保留 1 位小数) */
 export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return "0 B";
-  if (bytes < 1000) return `${Math.round(bytes)} B`;
+  if (!Number.isFinite(bytes) || bytes < 0) {
+    return "0 B";
+  }
+  if (bytes < 1000) {
+    return `${Math.round(bytes)} B`;
+  }
   const units = ["KB", "MB", "GB", "TB"] as const;
-  let value = bytes;
-  let unit = "B";
+  let value = bytes,
+    unit = "B";
   for (const u of units) {
-    if (value < 1000) break;
+    if (value < 1000) {
+      break;
+    }
     value /= 1000;
     unit = u;
   }
@@ -50,18 +56,26 @@ export function formatRelativeTime(
   tsSeconds: number | null,
   nowSeconds = Date.now() / 1000,
 ): string {
-  if (!tsSeconds) return i18n.global.t("common.never");
+  if (!tsSeconds) {
+    return i18n.global.t("common.never");
+  }
   const diff = nowSeconds - tsSeconds;
-  if (diff < 60) return i18n.global.t("common.justNow");
-  if (diff < 3600) return i18n.global.t("common.minutesAgo", { count: Math.floor(diff / 60) });
-  if (diff < 86400) return i18n.global.t("common.hoursAgo", { count: Math.floor(diff / 3600) });
+  if (diff < 60) {
+    return i18n.global.t("common.justNow");
+  }
+  if (diff < 3600) {
+    return i18n.global.t("common.minutesAgo", { count: Math.floor(diff / 60) });
+  }
+  if (diff < 86400) {
+    return i18n.global.t("common.hoursAgo", { count: Math.floor(diff / 3600) });
+  }
   return i18n.global.t("common.daysAgo", { count: Math.floor(diff / 86400) });
 }
 
 /** Date → 本地 "YYYY-MM-DD"(与后端报告日期、git log 日期串一致) */
 export function formatDate(d: Date): string {
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
+  const m = String(d.getMonth() + 1).padStart(2, "0"),
+    day = String(d.getDate()).padStart(2, "0");
   return `${d.getFullYear()}-${m}-${day}`;
 }
 
@@ -84,7 +98,9 @@ export function formatLocalDateTime(tsSeconds: number): string {
 
 /** ISO 时间串 → 当前语言的本地日期(仅日期部分);空串/解析失败回退空串 */
 export function formatIsoDate(iso: string): string {
-  if (!iso) return "";
+  if (!iso) {
+    return "";
+  }
   const ts = new Date(iso).getTime();
   return Number.isNaN(ts) ? "" : new Date(ts).toLocaleDateString(i18n.global.locale.value);
 }
@@ -93,8 +109,12 @@ export function formatIsoDate(iso: string): string {
 export function formatCommitTime(dateStr: string): string {
   // 补 T 使其按 ISO 本地时间解析("YYYY-MM-DD HH:MM" 在部分引擎会按 UTC 或解析失败)
   const ts = new Date(dateStr.replace(" ", "T")).getTime();
-  if (Number.isNaN(ts)) return dateStr;
-  if (Date.now() - ts >= 30 * 86400_000) return dateStr;
+  if (Number.isNaN(ts)) {
+    return dateStr;
+  }
+  if (Date.now() - ts >= 30 * 86400_000) {
+    return dateStr;
+  }
   return formatRelativeTime(Math.floor(ts / 1000));
 }
 
@@ -115,14 +135,20 @@ const EN_MONTH_PREFIXES = [
 
 /** skills.sh 审计日期("Mar 15, 2026")→ 当前语言的本地日期(zh-CN: 2026年3月15日);解析失败回退原串 */
 export function formatAuditDate(text: string): string {
-  const match = /^([A-Za-z]{3,9})\s+(\d{1,2}),\s*(\d{4})$/.exec(text.trim());
-  if (!match) return text;
-  const monthIndex = EN_MONTH_PREFIXES.indexOf(match[1].slice(0, 3).toLowerCase());
-  if (monthIndex < 0) return text;
-  const year = Number(match[3]);
-  const date = new Date(year, monthIndex, Number(match[2]));
+  const match = /^(?<month>[A-Za-z]{3,9})\s+(?<day>\d{1,2}),\s*(?<year>\d{4})$/.exec(text.trim());
+  if (!match) {
+    return text;
+  }
+  const monthIndex = EN_MONTH_PREFIXES.indexOf(match.groups!.month.slice(0, 3).toLowerCase());
+  if (monthIndex < 0) {
+    return text;
+  }
+  const year = Number(match.groups!.year),
+    date = new Date(year, monthIndex, Number(match.groups!.day));
   // 回绕(如 2 月 31 日)说明日期无效,回退原串
-  if (date.getFullYear() !== year || date.getMonth() !== monthIndex) return text;
+  if (date.getFullYear() !== year || date.getMonth() !== monthIndex) {
+    return text;
+  }
   return date.toLocaleDateString(i18n.global.locale.value, {
     year: "numeric",
     month: "long",

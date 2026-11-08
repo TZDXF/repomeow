@@ -6,26 +6,26 @@ import { cn } from "@/lib/utils";
 import { estimateCost, formatUsd, useContextValue } from "./context";
 
 const props = defineProps<{
-  class?: HTMLAttributes["class"];
-}>();
-
-const { t } = useI18n();
-const { usage, cost } = useContextValue();
-
-// 各分项成本与用量行口径一致(思考按输出计费);无费率或无用量时不渲染,避免误导性的 $0.00
-const totalCost = computed(() => {
-  const rates = cost.value;
-  const current = usage.value;
-  if (!rates || !current) return null;
-  const parts = [
-    estimateCost(current.inputTokens ?? 0, rates.input),
-    estimateCost(current.outputTokens ?? 0, rates.output),
-    estimateCost(current.reasoningTokens ?? 0, rates.output),
-    estimateCost(current.cachedInputTokens ?? 0, rates.cacheRead),
-  ];
-  const usd = parts.reduce<number>((sum, part) => sum + (part ?? 0), 0);
-  return usd > 0 ? formatUsd(usd) : null;
-});
+    class?: HTMLAttributes["class"];
+  }>(),
+  { t } = useI18n(),
+  { usage, cost } = useContextValue(),
+  // 各分项成本与用量行口径一致(思考按输出计费);无费率或无用量时不渲染,避免误导性的 $0.00
+  totalCost = computed(() => {
+    const rates = cost.value,
+      current = usage.value;
+    if (!rates || !current) {
+      return null;
+    }
+    const parts = [
+        estimateCost(current.inputTokens ?? 0, rates.input),
+        estimateCost(current.outputTokens ?? 0, rates.output),
+        estimateCost(current.reasoningTokens ?? 0, rates.output),
+        estimateCost(current.cachedInputTokens ?? 0, rates.cacheRead),
+      ],
+      usd = parts.reduce<number>((sum, part) => sum + (part ?? 0), 0);
+    return usd > 0 ? formatUsd(usd) : null;
+  });
 </script>
 
 <template>

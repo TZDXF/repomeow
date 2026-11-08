@@ -17,20 +17,20 @@ import type { TerminalSessionInfo } from "@/types";
  * 主动创建的交互式 Shell 不在此展示,只在项目终端面板可见;
  * 点击会话跳转到对应项目详情页并展开终端面板定位到该会话。
  */
-const { t } = useI18n();
-const router = useRouter();
-const store = useTerminalStore();
-const open = ref(false);
+const { t } = useI18n(),
+  router = useRouter(),
+  store = useTerminalStore(),
+  open = ref(false);
 
 onMounted(() => {
   void store.init();
 });
 
 /** 交互式 Shell 由用户在面板手动创建,全局概览只关心命令会话 */
-const sessions = computed(() => store.sessions.filter((s) => !s.interactive));
-const runningCount = computed(() => sessions.value.filter((s) => s.status === "running").length);
-const hasFinished = computed(() => sessions.value.some((s) => s.status !== "running"));
-const visible = computed(() => sessions.value.length > 0);
+const sessions = computed(() => store.sessions.filter((s) => !s.interactive)),
+  runningCount = computed(() => sessions.value.filter((s) => s.status === "running").length),
+  hasFinished = computed(() => sessions.value.some((s) => s.status !== "running")),
+  visible = computed(() => sessions.value.length > 0);
 
 interface ProjectGroup {
   projectId: number;
@@ -49,7 +49,9 @@ const groups = computed<ProjectGroup[]>(() => {
       map.set(s.project_id, g);
     }
     g.sessions.push(s);
-    if (s.status === "running") g.running++;
+    if (s.status === "running") {
+      g.running++;
+    }
   }
   return [...map.values()].sort(
     (a, b) => b.running - a.running || b.sessions[0].started_at - a.sessions[0].started_at,
@@ -93,7 +95,11 @@ async function clearFinished() {
         @mousedown.stop
         @dblclick.stop
       >
-        <TitleBarTaskIcon :icon="SquareTerminal" :running="runningCount > 0" :count="runningCount" />
+        <TitleBarTaskIcon
+          :icon="SquareTerminal"
+          :running="runningCount > 0"
+          :count="runningCount"
+        />
       </button>
     </PopoverTrigger>
 

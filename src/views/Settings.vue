@@ -51,125 +51,123 @@ interface Category {
 }
 
 const categories: Category[] = [
-  {
-    id: "general",
-    labelKey: "settings.categories.general",
-    icon: SlidersHorizontal,
-    component: GeneralSettings,
-  },
-  { id: "tags", labelKey: "settings.categories.tags", icon: Tags, component: TagSettings },
-  {
-    id: "tracking",
-    labelKey: "settings.categories.tracking",
-    icon: Radar,
-    component: TrackingSettings,
-  },
-  {
-    id: "devEnv",
-    labelKey: "settings.categories.devEnv",
-    icon: Coffee,
-    component: ToolchainPanel,
-  },
-  {
-    id: "archive",
-    labelKey: "settings.categories.archive",
-    icon: Archive,
-    component: ArchiveSettings,
-  },
-  { id: "cli", labelKey: "settings.categories.cli", icon: Cable, component: CliSettings },
-  { id: "ai", labelKey: "settings.categories.ai", icon: Sparkles, component: AiSettings },
-  {
-    id: "aiUsage",
-    labelKey: "settings.categories.aiUsage",
-    icon: Gauge,
-    component: AiUsageSettings,
-  },
-  {
-    id: "accounts",
-    labelKey: "settings.categories.accounts",
-    icon: KeyRound,
-    component: AccountSettings,
-  },
-  {
-    id: "prompts",
-    labelKey: "settings.categories.prompts",
-    icon: MessageSquareText,
-    component: PromptSettings,
-  },
-  {
-    id: "resources",
-    labelKey: "settings.categories.resources",
-    icon: Boxes,
-    component: ResourceLibrarySettings,
-  },
-  {
-    id: "schedule",
-    labelKey: "settings.categories.schedule",
-    icon: CalendarClock,
-    component: ReportScheduleSettings,
-  },
-  { id: "about", labelKey: "settings.categories.about", icon: Info, component: AboutSettings },
-];
-
-const route = useRoute();
-// 支持从子页(如技能预览页)带 ?category=resources 回跳,直接落在原分类
-const initialCategory = String(route.query.category ?? "");
-const activeId = ref(
-  categories.some((c) => c.id === initialCategory) ? initialCategory : categories[0].id,
-);
-const active = computed(() => categories.find((c) => c.id === activeId.value) ?? categories[0]);
-
-// 仅索引页面上可直接访问的设置；不挂载隐藏面板，避免触发额外请求。
-const settingEntries = [
-  { category: "general", labelKey: "settings.general.theme" },
-  { category: "general", labelKey: "settings.skin.title" },
-  { category: "general", labelKey: "settings.mdTheme.title" },
-  { category: "general", labelKey: "settings.general.openWith" },
-  { category: "general", labelKey: "settings.general.worktreeDir" },
-  { category: "general", labelKey: "settings.tray.title" },
-  { category: "general", labelKey: "settings.general.language" },
-  { category: "general", labelKey: "settings.developer.title" },
-  { category: "general", labelKey: "settings.autostart.launchAtLogin" },
-  { category: "ai", labelKey: "settings.ai.title" },
-  { category: "ai", labelKey: "settings.ai.defaultModel" },
-  { category: "ai", labelKey: "settings.ai.providers" },
-  { category: "ai", labelKey: "settings.ai.concurrency" },
-  { category: "aiUsage", labelKey: "settings.usage.title" },
-  { category: "aiUsage", labelKey: "settings.usage.trend" },
-  { category: "aiUsage", labelKey: "settings.usage.distribution" },
-  { category: "aiUsage", labelKey: "settings.usage.details" },
-];
-const categorySearchKeys: Record<string, string[]> = {
-  general: [
-    "settings.general",
-    "settings.theme",
-    "settings.skin",
-    "settings.mdTheme",
-    "settings.terminal",
-    "settings.tray",
-    "settings.language",
-    "settings.autostart",
-    "settings.developer",
+    {
+      id: "general",
+      labelKey: "settings.categories.general",
+      icon: SlidersHorizontal,
+      component: GeneralSettings,
+    },
+    { id: "tags", labelKey: "settings.categories.tags", icon: Tags, component: TagSettings },
+    {
+      id: "tracking",
+      labelKey: "settings.categories.tracking",
+      icon: Radar,
+      component: TrackingSettings,
+    },
+    {
+      id: "devEnv",
+      labelKey: "settings.categories.devEnv",
+      icon: Coffee,
+      component: ToolchainPanel,
+    },
+    {
+      id: "archive",
+      labelKey: "settings.categories.archive",
+      icon: Archive,
+      component: ArchiveSettings,
+    },
+    { id: "cli", labelKey: "settings.categories.cli", icon: Cable, component: CliSettings },
+    { id: "ai", labelKey: "settings.categories.ai", icon: Sparkles, component: AiSettings },
+    {
+      id: "aiUsage",
+      labelKey: "settings.categories.aiUsage",
+      icon: Gauge,
+      component: AiUsageSettings,
+    },
+    {
+      id: "accounts",
+      labelKey: "settings.categories.accounts",
+      icon: KeyRound,
+      component: AccountSettings,
+    },
+    {
+      id: "prompts",
+      labelKey: "settings.categories.prompts",
+      icon: MessageSquareText,
+      component: PromptSettings,
+    },
+    {
+      id: "resources",
+      labelKey: "settings.categories.resources",
+      icon: Boxes,
+      component: ResourceLibrarySettings,
+    },
+    {
+      id: "schedule",
+      labelKey: "settings.categories.schedule",
+      icon: CalendarClock,
+      component: ReportScheduleSettings,
+    },
+    { id: "about", labelKey: "settings.categories.about", icon: Info, component: AboutSettings },
   ],
-  tags: ["settings.tags"],
-  tracking: ["settings.tracking"],
-  devEnv: ["settings.devEnv"],
-  archive: ["settings.archive"],
-  cli: ["settings.cli"],
-  ai: ["settings.ai"],
-  aiUsage: ["settings.usage"],
-  accounts: ["settings.accounts"],
-  prompts: ["settings.prompts"],
-  resources: ["settings.resources"],
-  schedule: ["reportSchedule"],
-  about: ["settings.about", "settings.update", "update"],
-};
-const query = ref("");
-const searchOpen = ref(false);
-const selectedIndex = ref(0);
-const searchRoot = ref<HTMLElement>();
-const content = ref<HTMLElement>();
-const resourceLibrary = ref<InstanceType<typeof ResourceLibrarySettings>>();
+  route = useRoute(),
+  // 支持从子页(如技能预览页)带 ?category=resources 回跳,直接落在原分类
+  initialCategory = String(route.query.category ?? ""),
+  activeId = ref(
+    categories.some((c) => c.id === initialCategory) ? initialCategory : categories[0].id,
+  ),
+  active = computed(() => categories.find((c) => c.id === activeId.value) ?? categories[0]),
+  // 仅索引页面上可直接访问的设置；不挂载隐藏面板，避免触发额外请求。
+  settingEntries = [
+    { category: "general", labelKey: "settings.general.theme" },
+    { category: "general", labelKey: "settings.skin.title" },
+    { category: "general", labelKey: "settings.mdTheme.title" },
+    { category: "general", labelKey: "settings.general.openWith" },
+    { category: "general", labelKey: "settings.general.worktreeDir" },
+    { category: "general", labelKey: "settings.tray.title" },
+    { category: "general", labelKey: "settings.general.language" },
+    { category: "general", labelKey: "settings.developer.title" },
+    { category: "general", labelKey: "settings.autostart.launchAtLogin" },
+    { category: "ai", labelKey: "settings.ai.title" },
+    { category: "ai", labelKey: "settings.ai.defaultModel" },
+    { category: "ai", labelKey: "settings.ai.providers" },
+    { category: "ai", labelKey: "settings.ai.concurrency" },
+    { category: "aiUsage", labelKey: "settings.usage.title" },
+    { category: "aiUsage", labelKey: "settings.usage.trend" },
+    { category: "aiUsage", labelKey: "settings.usage.distribution" },
+    { category: "aiUsage", labelKey: "settings.usage.details" },
+  ],
+  categorySearchKeys: Record<string, string[]> = {
+    general: [
+      "settings.general",
+      "settings.theme",
+      "settings.skin",
+      "settings.mdTheme",
+      "settings.terminal",
+      "settings.tray",
+      "settings.language",
+      "settings.autostart",
+      "settings.developer",
+    ],
+    tags: ["settings.tags"],
+    tracking: ["settings.tracking"],
+    devEnv: ["settings.devEnv"],
+    archive: ["settings.archive"],
+    cli: ["settings.cli"],
+    ai: ["settings.ai"],
+    aiUsage: ["settings.usage"],
+    accounts: ["settings.accounts"],
+    prompts: ["settings.prompts"],
+    resources: ["settings.resources"],
+    schedule: ["reportSchedule"],
+    about: ["settings.about", "settings.update", "update"],
+  },
+  query = ref(""),
+  searchOpen = ref(false),
+  selectedIndex = ref(0),
+  searchRoot = ref<HTMLElement>(),
+  content = ref<HTMLElement>(),
+  resourceLibrary = ref<InstanceType<typeof ResourceLibrarySettings>>();
 onClickOutside(searchRoot, () => {
   searchOpen.value = false;
 });
@@ -182,7 +180,9 @@ interface SearchResult {
   order: number;
 }
 const searchResults = computed<SearchResult[]>(() => {
-  if (!query.value.trim()) return [];
+  if (!query.value.trim()) {
+    return [];
+  }
   const entries = [
     ...settingEntries,
     ...resourceSettingsSearchEntries,
@@ -191,18 +191,18 @@ const searchResults = computed<SearchResult[]>(() => {
   // 标题命中权重最高，分类全文案命中权重最低，同分时保持页面原有顺序。
   return entries
     .map((entry, order): SearchResult | null => {
-      const category = categories.find((c) => c.id === entry.category)!;
-      const resourceEntry = resourceSettingsSearchEntries.find(
-        (item) => item.labelKey === entry.labelKey,
-      );
-      const details =
-        entry.labelKey === category.labelKey
-          ? (categorySearchKeys[entry.category] ?? [])
-              .map((key) => settingsSearchText(tm(key)))
-              .join(" ")
-          : resourceEntry
-            ? settingsSearchText(tm(resourceEntry.searchKey))
-            : "";
+      const category = categories.find((c) => c.id === entry.category)!,
+        resourceEntry = resourceSettingsSearchEntries.find(
+          (item) => item.labelKey === entry.labelKey,
+        );
+      let details = "";
+      if (entry.labelKey === category.labelKey) {
+        details = (categorySearchKeys[entry.category] ?? [])
+          .map((key) => settingsSearchText(tm(key)))
+          .join(" ");
+      } else if (resourceEntry) {
+        details = settingsSearchText(tm(resourceEntry.searchKey));
+      }
       const hit = scoreSettingsSearch(query.value, {
         title: t(entry.labelKey),
         category: t(category.labelKey),
@@ -219,7 +219,9 @@ watch(query, () => {
   searchOpen.value = true;
 });
 function moveSelection(delta: number) {
-  if (!searchResults.value.length) return;
+  if (!searchResults.value.length) {
+    return;
+  }
   searchOpen.value = true;
   selectedIndex.value =
     (selectedIndex.value + delta + searchResults.value.length) % searchResults.value.length;
@@ -228,7 +230,9 @@ function moveSelection(delta: number) {
   );
 }
 async function locateSetting(entry = searchResults.value[selectedIndex.value]) {
-  if (!entry) return;
+  if (!entry) {
+    return;
+  }
   activeId.value = entry.category;
   searchOpen.value = false;
   await nextTick();
@@ -240,7 +244,9 @@ async function locateSetting(entry = searchResults.value[selectedIndex.value]) {
   const target = content.value?.querySelector<HTMLElement>(`[data-setting="${entry.labelKey}"]`);
   if (target) {
     target.scrollIntoView({ block: "center", behavior: "smooth" });
-    if (!target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+    if (!target.hasAttribute("tabindex")) {
+      target.setAttribute("tabindex", "-1");
+    }
     target.focus({ preventScroll: true });
   } else {
     content.value?.closest('[data-slot="scroll-area-viewport"]')?.scrollTo({ top: 0 });

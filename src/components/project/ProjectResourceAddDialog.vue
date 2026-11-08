@@ -28,26 +28,26 @@ import {
 
 /** 从资源库挑选资源加入项目列表;加入后回到列表逐项配置 Agent。 */
 const props = defineProps<{
-  projectPath: string;
-  kind: ProjectResourceKind;
-}>();
-const open = defineModel<boolean>("open", { required: true });
-const emit = defineEmits<{ changed: [] }>();
-const { t } = useI18n();
-const router = useRouter();
-const data = ref<ProjectResourceSnapshot | null>(null);
-const selected = ref(new Set<string>());
-const query = ref("");
-const loading = ref(false);
-const saving = ref(false);
-const loadError = ref("");
-const failures = ref<ResourceApplyResult["failures"]>([]);
+    projectPath: string;
+    kind: ProjectResourceKind;
+  }>(),
+  open = defineModel<boolean>("open", { required: true }),
+  emit = defineEmits<{ changed: [] }>(),
+  { t } = useI18n(),
+  router = useRouter(),
+  data = ref<ProjectResourceSnapshot | null>(null),
+  selected = ref(new Set<string>()),
+  query = ref(""),
+  loading = ref(false),
+  saving = ref(false),
+  loadError = ref(""),
+  failures = ref<ResourceApplyResult["failures"]>([]);
 let sequence = 0;
 onBeforeUnmount(() => sequence++);
 
 async function load() {
-  const seq = ++sequence;
-  const path = props.projectPath;
+  const seq = ++sequence,
+    path = props.projectPath;
   loading.value = true;
   loadError.value = "";
   try {
@@ -81,34 +81,34 @@ watch(
 );
 /** 已在项目列表(shortlist)或已部署的资源不再重复添加。 */
 const listedIds = computed(() => {
-  const ids = new Set<string>(data.value?.shortlist ?? []);
-  for (const d of data.value?.deployments ?? []) {
-    ids.add(d.resourceId);
-  }
-  return ids;
-});
-const candidates = computed(
-  () => data.value?.resources.filter((r) => !listedIds.value.has(r.id)) ?? [],
-);
-const filtered = computed(() => {
-  const q = query.value.trim().toLocaleLowerCase();
-  const matchingGroups = new Set(
-    data.value?.groups.filter((g) => g.name.toLocaleLowerCase().includes(q)).map((g) => g.id),
+    const ids = new Set<string>(data.value?.shortlist ?? []);
+    for (const d of data.value?.deployments ?? []) {
+      ids.add(d.resourceId);
+    }
+    return ids;
+  }),
+  candidates = computed(
+    () => data.value?.resources.filter((r) => !listedIds.value.has(r.id)) ?? [],
+  ),
+  filtered = computed(() => {
+    const q = query.value.trim().toLocaleLowerCase(),
+      matchingGroups = new Set(
+        data.value?.groups.filter((g) => g.name.toLocaleLowerCase().includes(q)).map((g) => g.id),
+      );
+    return candidates.value.filter(
+      (r) =>
+        !q ||
+        `${r.name} ${r.description} ${r.source ?? ""}`.toLocaleLowerCase().includes(q) ||
+        r.groupIds.some((id) => matchingGroups.has(id)),
+    );
+  }),
+  tree = computed(() =>
+    resourceTree(
+      props.kind === "skills" ? (data.value?.groups ?? []) : [],
+      filtered.value,
+      props.kind === "skills" ? t("projectAi.ungrouped") : "MCP",
+    ).filter((g) => g.resources.length),
   );
-  return candidates.value.filter(
-    (r) =>
-      !q ||
-      `${r.name} ${r.description} ${r.source ?? ""}`.toLocaleLowerCase().includes(q) ||
-      r.groupIds.some((id) => matchingGroups.has(id)),
-  );
-});
-const tree = computed(() =>
-  resourceTree(
-    props.kind === "skills" ? (data.value?.groups ?? []) : [],
-    filtered.value,
-    props.kind === "skills" ? t("projectAi.ungrouped") : "MCP",
-  ).filter((g) => g.resources.length),
-);
 function ids(resources: { id: string }[]) {
   return resources.map((r) => r.id);
 }
@@ -119,8 +119,8 @@ async function add() {
   if (saving.value || !data.value || !selected.value.size) {
     return;
   }
-  const path = props.projectPath;
-  const kind = props.kind;
+  const path = props.projectPath,
+    kind = props.kind;
   saving.value = true;
   failures.value = [];
   try {

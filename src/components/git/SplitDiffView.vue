@@ -7,59 +7,54 @@ import { emphasisTextHtml, wordClsOf } from "@/lib/diff-highlight";
 import type { GitCommitFileDiff } from "@/types";
 
 const props = defineProps<{
-  rows: DiffSideRow[];
-  landedDiff: GitCommitFileDiff | null;
-  lineHtml: Map<DiffLine, string>;
-  wordRanges: Map<DiffLine, [number, number]>;
-  /** 短暂高亮的新文件行号(语义变更定位;仅右侧窗格,1.6s 后由父组件清除) */
-  revealLine?: number | null;
-}>();
-
-const emit = defineEmits<{
-  expandFold: [key: string];
-}>();
-
-const splitRatio = defineModel<number>("splitRatio", { required: true });
-const currentRowPos = defineModel<number>("currentRowPos", { required: true });
-const { t } = useI18n();
-
-const sideRows = computed(() => props.rows);
-const splitActive = computed(() => true);
-const landedDiff = computed(() => props.landedDiff);
-
-const splitWrapEl = ref<HTMLElement | null>(null);
-const leftPaneEl = ref<HTMLElement | null>(null);
-const rightPaneEl = ref<HTMLElement | null>(null);
-const leftGutterEl = ref<HTMLElement | null>(null);
-const rightGutterEl = ref<HTMLElement | null>(null);
-const dividerEl = ref<HTMLElement | null>(null);
-
-const {
-  leftRows,
-  rightRows,
-  leftMarkers,
-  rightMarkers,
-  dividerShapes,
-  hbarPad,
-  scrollTopAt,
-  syncPaneScroll,
-  startSplitResize,
-} = useSplitDiffLayout({
-  sideRows,
-  layoutRows: sideRows,
-  splitActive,
-  landedDiff,
-  splitRatio,
-  currentRowPos,
-  elements: {
-    splitWrapEl,
-    leftPaneEl,
-    rightPaneEl,
-    leftGutterEl,
-    rightGutterEl,
-    dividerEl,
-  },
-});
+    rows: DiffSideRow[];
+    landedDiff: GitCommitFileDiff | null;
+    lineHtml: Map<DiffLine, string>;
+    wordRanges: Map<DiffLine, [number, number]>;
+    /** 短暂高亮的新文件行号(语义变更定位;仅右侧窗格,1.6s 后由父组件清除) */
+    revealLine?: number | null;
+  }>(),
+  emit = defineEmits<{
+    expandFold: [key: string];
+  }>(),
+  splitRatio = defineModel<number>("splitRatio", { required: true }),
+  currentRowPos = defineModel<number>("currentRowPos", { required: true }),
+  { t } = useI18n(),
+  sideRows = computed(() => props.rows),
+  splitActive = computed(() => true),
+  landedDiff = computed(() => props.landedDiff),
+  splitWrapEl = ref<HTMLElement | null>(null),
+  leftPaneEl = ref<HTMLElement | null>(null),
+  rightPaneEl = ref<HTMLElement | null>(null),
+  leftGutterEl = ref<HTMLElement | null>(null),
+  rightGutterEl = ref<HTMLElement | null>(null),
+  dividerEl = ref<HTMLElement | null>(null),
+  {
+    leftRows,
+    rightRows,
+    leftMarkers,
+    rightMarkers,
+    dividerShapes,
+    hbarPad,
+    scrollTopAt,
+    syncPaneScroll,
+    startSplitResize,
+  } = useSplitDiffLayout({
+    sideRows,
+    layoutRows: sideRows,
+    splitActive,
+    landedDiff,
+    splitRatio,
+    currentRowPos,
+    elements: {
+      splitWrapEl,
+      leftPaneEl,
+      rightPaneEl,
+      leftGutterEl,
+      rightGutterEl,
+      dividerEl,
+    },
+  });
 
 function sideText(line: DiffLine | null) {
   return line ? line.text.slice(1) : "";
@@ -78,8 +73,8 @@ function hlOf(line: DiffLine | null | undefined) {
 }
 
 function scrollToRow(rowPosition: number) {
-  const left = scrollTopAt("left", rowPosition);
-  const right = scrollTopAt("right", rowPosition);
+  const left = scrollTopAt("left", rowPosition),
+    right = scrollTopAt("right", rowPosition);
   if (leftPaneEl.value) {
     leftPaneEl.value.scrollTop = left;
   }

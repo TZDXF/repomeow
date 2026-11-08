@@ -13,26 +13,26 @@ import { useAiConfigStore } from "@/stores/ai-config";
 // 偏好写入 ai-config.json 后 Rust 侧每次 chat_send 前热读;回答回合进行中
 // 一律禁用切换,避免在途 LLM 调用与界面状态不一致。
 const props = defineProps<{
-  busy: boolean;
-  aiReady: boolean;
-}>();
-const { t } = useI18n();
-const aiConfig = useAiConfigStore();
-
-const modelGroups = computed<ModelSelectorGroup[]>(() => {
-  const config = aiConfig.config;
-  if (!config) return [];
-  return Object.entries(config.providers).map(([providerId, provider]) => ({
-    providerId,
-    providerName: provider.name || providerId,
-    models: provider.models,
-  }));
-});
-
-const thinkingDisabled = computed(() => !aiConfig.chatModel?.model.reasoning);
-const thinkingTitle = computed(() =>
-  thinkingDisabled.value ? t("chat.thinkingUnsupported") : t("chat.thinking"),
-);
+    busy: boolean;
+    aiReady: boolean;
+  }>(),
+  { t } = useI18n(),
+  aiConfig = useAiConfigStore(),
+  modelGroups = computed<ModelSelectorGroup[]>(() => {
+    const config = aiConfig.config;
+    if (!config) {
+      return [];
+    }
+    return Object.entries(config.providers).map(([providerId, provider]) => ({
+      providerId,
+      providerName: provider.name || providerId,
+      models: provider.models,
+    }));
+  }),
+  thinkingDisabled = computed(() => !aiConfig.chatModel?.model.reasoning),
+  thinkingTitle = computed(() =>
+    thinkingDisabled.value ? t("chat.thinkingUnsupported") : t("chat.thinking"),
+  );
 
 /** 偏好写入失败统一 toast(落盘失败时 store 已回读后端真实状态) */
 function applyPref(action: () => Promise<void>) {
@@ -46,7 +46,9 @@ function onModelChange(value: string) {
 }
 
 function onThinkingChange(level: unknown) {
-  if (typeof level !== "string") return;
+  if (typeof level !== "string") {
+    return;
+  }
   void applyPref(() => aiConfig.setChatThinking(level as ChatThinkingLevel));
 }
 </script>

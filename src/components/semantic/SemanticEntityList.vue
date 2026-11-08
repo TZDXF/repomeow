@@ -15,10 +15,9 @@ withDefaults(
 );
 
 const emit = defineEmits<{
-  open: [entity: SemanticEntityRef];
-}>();
-
-const { t } = useI18n();
+    open: [entity: SemanticEntityRef];
+  }>(),
+  { t } = useI18n();
 
 function key(entity: SemanticEntityRef): string {
   return entity.entityId ?? `${entity.filePath}:${entity.name}:${entity.startLine}`;

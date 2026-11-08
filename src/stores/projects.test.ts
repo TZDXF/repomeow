@@ -1,27 +1,26 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { useProjectsStore } from "@/stores/projects";
+import { cmd } from "@/lib/tauri";
 import type { GitProjectChangedPayload, GitStatus, Project } from "@/types";
 
 // node 环境无 Tauri IPC,mock 掉前后端桥
 vi.mock("@/lib/tauri", () => ({ cmd: vi.fn() }));
 
-import { cmd } from "@/lib/tauri";
-const cmdMock = cmd as unknown as Mock;
-
-const status: GitStatus = {
-  is_repo: true,
-  branch: "main",
-  ahead: 0,
-  behind: 0,
-  staged: 0,
-  modified: 1,
-  untracked: 0,
-  conflicted: 0,
-  remote_ahead: 0,
-  last_fetch_at: null,
-  last_commit_at: 1,
-};
+const cmdMock = cmd as unknown as Mock,
+  status: GitStatus = {
+    is_repo: true,
+    branch: "main",
+    ahead: 0,
+    behind: 0,
+    staged: 0,
+    modified: 1,
+    untracked: 0,
+    conflicted: 0,
+    remote_ahead: 0,
+    last_fetch_at: null,
+    last_commit_at: 1,
+  };
 
 function project(): Project {
   return {
@@ -145,9 +144,9 @@ describe("projects store 全量索引", () => {
     { label: "匹配搜索条件", query: "repo", tagIds: [], visible: true },
     { label: "无筛选", query: "", tagIds: [], visible: true },
   ])("$label 时新增项目可按 id 查询,列表仍遵循筛选结果", async ({ query, tagIds, visible }) => {
-    const store = useProjectsStore();
-    const existing = makeProject(1, "repo-a");
-    const added = makeProject(40, "repo-b");
+    const store = useProjectsStore(),
+      existing = makeProject(1, "repo-a"),
+      added = makeProject(40, "repo-b");
     cmdMock.mockImplementation(async (command: string) => {
       switch (command) {
         case "add_project":

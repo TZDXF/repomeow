@@ -8,31 +8,26 @@ import { cn } from "@/lib/utils";
 import { provideCommandContext } from ".";
 
 const props = withDefaults(defineProps<ListboxRootProps & { class?: HTMLAttributes["class"] }>(), {
-  modelValue: "",
-  highlightOnHover: true,
-});
-
-const emits = defineEmits<ListboxRootEmits>();
-
-const delegatedProps = reactiveOmit(props, "class");
-
-const forwarded = useForwardPropsEmits(delegatedProps, emits);
-
-const allItems = ref<Map<string, string>>(new Map());
-const allGroups = ref<Map<string, Set<string>>>(new Map());
-
-const { contains } = useFilter({ sensitivity: "base" });
-const filterState = reactive({
-  search: "",
-  filtered: {
-    /** The count of all visible items. */
-    count: 0,
-    /** Map from visible item id to its search score. */
-    items: new Map() as Map<string, number>,
-    /** Set of groups with at least one visible item. */
-    groups: new Set() as Set<string>,
-  },
-});
+    modelValue: "",
+    highlightOnHover: true,
+  }),
+  emits = defineEmits<ListboxRootEmits>(),
+  delegatedProps = reactiveOmit(props, "class"),
+  forwarded = useForwardPropsEmits(delegatedProps, emits),
+  allItems = ref<Map<string, string>>(new Map()),
+  allGroups = ref<Map<string, Set<string>>>(new Map()),
+  { contains } = useFilter({ sensitivity: "base" }),
+  filterState = reactive({
+    search: "",
+    filtered: {
+      /** The count of all visible items. */
+      count: 0,
+      /** Map from visible item id to its search score. */
+      items: new Map() as Map<string, number>,
+      /** Set of groups with at least one visible item. */
+      groups: new Set() as Set<string>,
+    },
+  });
 
 function filterItems() {
   if (!filterState.search) {
@@ -49,7 +44,9 @@ function filterItems() {
   for (const [id, value] of allItems.value) {
     const score = contains(value, filterState.search);
     filterState.filtered.items.set(id, score ? 1 : 0);
-    if (score) itemCount++;
+    if (score) {
+      itemCount++;
+    }
   }
 
   // Check which groups have at least 1 item shown

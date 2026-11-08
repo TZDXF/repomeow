@@ -27,11 +27,11 @@ export interface ParsedWikiSources {
 }
 
 /** 已闭合的 sources 注释块(取最后一个,防止正文里出现多个时误剥前文) */
-const SOURCES_BLOCK_RE = /<!--\s*sources\s*\n([\s\S]*?)-->/g;
-/** 流式生成中途的未闭合尾巴:sources 起始注释一直到文末(后面还有 --> 说明已闭合,不算尾巴) */
-const SOURCES_TAIL_RE = /\s*<!--\s*sources(?![\s\S]*-->)[\s\S]*$/;
-/** 单行条目:路径 + 可选 `:start` / `:start-end`(路径本身不含冒号,惰性匹配兜底) */
-const SOURCE_LINE_RE = /^(.+?)(?::(\d+)(?:\s*-\s*(\d+))?)?$/;
+const SOURCES_BLOCK_RE = /<!--\s*sources\s*\n(?<body>[\s\S]*?)-->/g,
+  /** 流式生成中途的未闭合尾巴:sources 起始注释一直到文末(后面还有 --> 说明已闭合,不算尾巴) */
+  SOURCES_TAIL_RE = /\s*<!--\s*sources(?![\s\S]*-->)[\s\S]*$/,
+  /** 单行条目:路径 + 可选 `:start` / `:start-end`(路径本身不含冒号,惰性匹配兜底) */
+  SOURCE_LINE_RE = /^(?<path>.+?)(?::(?<start>\d+)(?:\s*-\s*(?<end>\d+))?)?$/;
 
 /**
  * 解析页面正文末尾的来源注释块:返回剥离后的正文与各文件的行区间。
@@ -43,25 +43,35 @@ export function parseWikiSources(content: string, knownFiles?: string[]): Parsed
   const ranges = new Map<string, WikiSourceRange>();
   let body = content.replace(SOURCES_TAIL_RE, "");
 
-  const matches = [...body.matchAll(SOURCES_BLOCK_RE)];
-  // tsconfig lib 为 ES2020,无 Array.prototype.at
-  const last = matches[matches.length - 1];
+  const matches = [...body.matchAll(SOURCES_BLOCK_RE)],
+    // tsconfig lib 为 ES2020,无 Array.prototype.at
+    last = matches[matches.length - 1];
   if (last) {
     // bare filename → 全路径的 basename 查表(同名取先出现者)
     const byBasename = new Map<string, string>();
     for (const f of knownFiles ?? []) {
       const base = f.slice(f.lastIndexOf("/") + 1);
-      if (!byBasename.has(base)) byBasename.set(base, f);
+      if (!byBasename.has(base)) {
+        byBasename.set(base, f);
+      }
     }
-    for (const rawLine of last[1].split("\n")) {
+    for (const rawLine of last.groups!.body.split("\n")) {
       const m = rawLine.trim().match(SOURCE_LINE_RE);
-      if (!m) continue;
-      let path = normalizeFilePath(m[1].trim());
-      if (!path) continue;
-      if (!path.includes("/")) path = byBasename.get(path) ?? path;
-      const start = m[2] ? Number.parseInt(m[2], 10) : null;
-      const end = m[3] ? Number.parseInt(m[3], 10) : start;
-      if (start == null || end == null || start < 1) continue;
+      if (!m) {
+        continue;
+      }
+      let path = normalizeFilePath(m.groups!.path.trim());
+      if (!path) {
+        continue;
+      }
+      if (!path.includes("/")) {
+        path = byBasename.get(path) ?? path;
+      }
+      const start = m.groups!.start ? Number.parseInt(m.groups!.start, 10) : null,
+        end = m.groups!.end ? Number.parseInt(m.groups!.end, 10) : start;
+      if (start == null || end == null || start < 1) {
+        continue;
+      }
       ranges.set(path, { start, end: Math.max(start, end) });
     }
     // 只剥离最后一个块(正文里如有同名注释视为内容保留)

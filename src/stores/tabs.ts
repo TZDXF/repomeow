@@ -14,9 +14,9 @@ export function resolveTabFromPath(path: string): ResolvedTab {
   if (path === "/") {
     return { kind: "home" };
   }
-  const projectMatch = /^\/projects\/(\d+)(?:\/.*)?$/.exec(path);
+  const projectMatch = /^\/projects\/(?<projectId>\d+)(?:\/.*)?$/.exec(path);
   if (projectMatch) {
-    return { kind: "project", projectId: Number(projectMatch[1]) };
+    return { kind: "project", projectId: Number(projectMatch.groups!.projectId) };
   }
   if (path === "/report-history" || path.startsWith("/report-history/")) {
     return { kind: "history" };
@@ -32,9 +32,13 @@ const STORAGE_KEY = "repomeow.tabs.v1";
 function loadStoredProjectIds(): number[] {
   try {
     const raw = globalThis.localStorage?.getItem(STORAGE_KEY);
-    if (!raw) return [];
+    if (!raw) {
+      return [];
+    }
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
     return parsed.filter((id): id is number => typeof id === "number" && Number.isFinite(id));
   } catch {
     return [];
@@ -46,10 +50,9 @@ function loadStoredProjectIds(): number[] {
  * 路由进入项目页时自动建档 —— 卡片点击、托盘跳转、后台任务、终端会话菜单等入口无需单独接线。
  */
 export const useTabsStore = defineStore("title-tabs", () => {
-  const openProjectIds = ref<number[]>(loadStoredProjectIds());
-
-  // 页面和草稿仅在当前打开周期保留,不把临时编辑内容写入持久化存储。
-  const lastProjectPaths = ref<Record<number, string>>({});
+  const openProjectIds = ref<number[]>(loadStoredProjectIds()),
+    // 页面和草稿仅在当前打开周期保留,不把临时编辑内容写入持久化存储。
+    lastProjectPaths = ref<Record<number, string>>({});
 
   function getProjectPath(id: number): string {
     return lastProjectPaths.value[id] ?? `/projects/${id}`;
@@ -64,19 +67,25 @@ export const useTabsStore = defineStore("title-tabs", () => {
   }
 
   function openProject(id: number) {
-    if (!Number.isFinite(id) || openProjectIds.value.includes(id)) return;
+    if (!Number.isFinite(id) || openProjectIds.value.includes(id)) {
+      return;
+    }
     openProjectIds.value.push(id);
     persist();
   }
 
   /** 批量移除 tab,仅持久化和导航一次,避免中间路由重新打开已关闭的 tab。 */
   function closeTabs(ids: number[]): ResolvedTab | null {
-    const closingIds = new Set(ids);
-    const previousIds = openProjectIds.value;
-    const remainingIds = previousIds.filter((id) => !closingIds.has(id));
-    if (remainingIds.length === previousIds.length) return null;
+    const closingIds = new Set(ids),
+      previousIds = openProjectIds.value,
+      remainingIds = previousIds.filter((id) => !closingIds.has(id));
+    if (remainingIds.length === previousIds.length) {
+      return null;
+    }
     openProjectIds.value = remainingIds;
-    for (const id of closingIds) delete lastProjectPaths.value[id];
+    for (const id of closingIds) {
+      delete lastProjectPaths.value[id];
+    }
     persist();
 
     const active = resolveTabFromPath(router.currentRoute.value.path);
@@ -87,14 +96,14 @@ export const useTabsStore = defineStore("title-tabs", () => {
     ) {
       return null;
     }
-    const index = previousIds.indexOf(active.projectId);
-    // 从原激活位置向右寻找保留的 tab,没有则向左寻找。
-    const nextId =
-      previousIds.slice(index + 1).find((id) => !closingIds.has(id)) ??
-      previousIds
-        .slice(0, index)
-        .reverse()
-        .find((id) => !closingIds.has(id));
+    const index = previousIds.indexOf(active.projectId),
+      // 从原激活位置向右寻找保留的 tab,没有则向左寻找。
+      nextId =
+        previousIds.slice(index + 1).find((id) => !closingIds.has(id)) ??
+        previousIds
+          .slice(0, index)
+          .reverse()
+          .find((id) => !closingIds.has(id));
     if (nextId === undefined) {
       void router.push("/");
       return { kind: "home" };
@@ -109,7 +118,9 @@ export const useTabsStore = defineStore("title-tabs", () => {
   }
 
   function closeOtherTabs(id: number): ResolvedTab | null {
-    if (!openProjectIds.value.includes(id)) return null;
+    if (!openProjectIds.value.includes(id)) {
+      return null;
+    }
     return closeTabs(openProjectIds.value.filter((projectId) => projectId !== id));
   }
 
@@ -120,7 +131,9 @@ export const useTabsStore = defineStore("title-tabs", () => {
   /** 以当前显示顺序为准,首页不在可关闭列表内。 */
   function closeTabsToRight(id: number): ResolvedTab | null {
     const index = openProjectIds.value.indexOf(id);
-    if (index === -1) return null;
+    if (index === -1) {
+      return null;
+    }
     return closeTabs(openProjectIds.value.slice(index + 1));
   }
 

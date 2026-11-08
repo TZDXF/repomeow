@@ -42,43 +42,38 @@ import type { FilePreview } from "@/types";
  * token 数仅 md 文件展示。
  */
 const props = defineProps<{
-  /** 项目根目录(read_file_preview 的 root,越界访问由后端拒绝) */
-  root: string;
-  /** 仓库内相对路径;null 表示关闭 */
-  relPath: string | null;
-  /** 当前路径为已扫描的 SKILL.md 时，其 frontmatter description 的 token 数。 */
-  descriptionTokenCount?: number | null;
-  readOnly?: boolean;
-}>();
-const emit = defineEmits<{
-  (e: "close"): void;
-  (e: "saved"): void;
-  /** 点击正文 @ 引用请求跳转;跳转失败时也会回发原路径让父组件恢复 */
-  (e: "navigate", relPath: string): void;
-}>();
-
-const { t } = useI18n();
-const settingsStore = useSettingsStore();
-
-// 传游离元素,避免 Markdown 库将 island/pixel 的十六进制主题变量写成无效的 hsl(#…)。
-const detachedThemeEl = document.createElement("div");
-const themeElement = () => detachedThemeEl;
-
-const preview = ref<FilePreview | null>(null);
-const loading = ref(false);
-const editing = ref(false);
-const saving = ref(false);
-/** 取消编辑时 +1,强制 CodeViewer 重挂载以丢弃未保存改动 */
-const resetSeq = ref(0);
-const viewer = ref<InstanceType<typeof CodeViewer> | null>(null);
+    /** 项目根目录(read_file_preview 的 root,越界访问由后端拒绝) */
+    root: string;
+    /** 仓库内相对路径;null 表示关闭 */
+    relPath: string | null;
+    /** 当前路径为已扫描的 SKILL.md 时，其 frontmatter description 的 token 数。 */
+    descriptionTokenCount?: number | null;
+    readOnly?: boolean;
+  }>(),
+  emit = defineEmits<{
+    (e: "close" | "saved"): void;
+    /** 点击正文 @ 引用请求跳转;跳转失败时也会回发原路径让父组件恢复 */
+    (e: "navigate", relPath: string): void;
+  }>(),
+  { t } = useI18n(),
+  settingsStore = useSettingsStore(),
+  // 传游离元素,避免 Markdown 库将 island/pixel 的十六进制主题变量写成无效的 hsl(#…)。
+  detachedThemeEl = document.createElement("div"),
+  themeElement = () => detachedThemeEl,
+  preview = ref<FilePreview | null>(null),
+  loading = ref(false),
+  editing = ref(false),
+  saving = ref(false),
+  /** 取消编辑时 +1,强制 CodeViewer 重挂载以丢弃未保存改动 */
+  resetSeq = ref(0),
+  viewer = ref<InstanceType<typeof CodeViewer> | null>(null);
 let loadSeq = 0;
 
-const open = computed(() => props.relPath !== null);
-const isMarkdown = computed(() => /\.(md|mdc|markdown)$/i.test(props.relPath ?? ""));
-
-const drawerWidth = useLocalStorage("repomeow:ai-file-drawer-w", 680);
-const DRAWER_MIN_W = 400;
-const DRAWER_MAX_VIEWPORT_RATIO = 0.92;
+const open = computed(() => props.relPath !== null),
+  isMarkdown = computed(() => /\.(?:md|mdc|markdown)$/i.test(props.relPath ?? "")),
+  drawerWidth = useLocalStorage("repomeow:ai-file-drawer-w", 680),
+  DRAWER_MIN_W = 400,
+  DRAWER_MAX_VIEWPORT_RATIO = 0.92;
 let drawerResizeCleanups: (() => void)[] = [];
 
 function drawerWidthCap() {
@@ -87,27 +82,29 @@ function drawerWidthCap() {
 
 function startDrawerResize(e: PointerEvent) {
   e.preventDefault();
-  const startX = e.clientX;
-  const startW = drawerWidth.value;
-  const onMove = (ev: PointerEvent) => {
-    drawerWidth.value = Math.min(
-      drawerWidthCap(),
-      Math.max(DRAWER_MIN_W, Math.round(startW + startX - ev.clientX)),
-    );
-  };
-  const onUp = () => {
-    window.removeEventListener("pointermove", onMove);
-    window.removeEventListener("pointerup", onUp);
-    drawerResizeCleanups = drawerResizeCleanups.filter((fn) => fn !== cleanup);
-  };
-  const cleanup = onUp;
+  const startX = e.clientX,
+    startW = drawerWidth.value,
+    onMove = (ev: PointerEvent) => {
+      drawerWidth.value = Math.min(
+        drawerWidthCap(),
+        Math.max(DRAWER_MIN_W, Math.round(startW + startX - ev.clientX)),
+      );
+    },
+    onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      drawerResizeCleanups = drawerResizeCleanups.filter((fn) => fn !== cleanup);
+    },
+    cleanup = onUp;
   window.addEventListener("pointermove", onMove);
   window.addEventListener("pointerup", onUp);
   drawerResizeCleanups.push(cleanup);
 }
 /** 编辑中且内容有改动(用于 Esc 守卫与取消按钮) */
 function isDirty(): boolean {
-  if (!editing.value || !preview.value) return false;
+  if (!editing.value || !preview.value) {
+    return false;
+  }
   return viewer.value?.getText() !== (preview.value.text ?? "");
 }
 
@@ -127,9 +124,13 @@ watch(
         root: props.root,
         relPath: rel,
       });
-      if (seq === loadSeq) preview.value = result;
+      if (seq === loadSeq) {
+        preview.value = result;
+      }
     } catch (e) {
-      if (seq !== loadSeq) return;
+      if (seq !== loadSeq) {
+        return;
+      }
       toast.error(String(e));
       // @ 引用跳转失败(文件不存在等):回到之前的文件,不直接关抽屉;
       // 初次打开就失败(此时还没有任何已加载内容)才关闭
@@ -140,40 +141,56 @@ watch(
         emit("close");
       }
     } finally {
-      if (seq === loadSeq) loading.value = false;
+      if (seq === loadSeq) {
+        loading.value = false;
+      }
     }
   },
 );
 
 function requestClose() {
-  if (saving.value) return;
+  if (saving.value) {
+    return;
+  }
   // 有未保存改动时 Esc/遮罩不静默丢弃,由用户点「取消编辑」显式放弃
-  if (isDirty()) return;
+  if (isDirty()) {
+    return;
+  }
   editing.value = false;
   emit("close");
 }
 
 /** Dialog open 受控于 relPath;关闭请求(Esc/外点/右上角)统一走 requestClose,不直接改 open */
 function onDialogOpenUpdate(value: boolean) {
-  if (!value) requestClose();
+  if (!value) {
+    requestClose();
+  }
 }
 
 /** Esc / 外点守卫:有未保存改动或保存中时阻止 Dialog 默认关闭 */
 function onEscapeKeyDown(e: KeyboardEvent) {
-  if (saving.value || isDirty()) e.preventDefault();
+  if (saving.value || isDirty()) {
+    e.preventDefault();
+  }
 }
 function onOutsideInteract(e: Event) {
-  if (saving.value || isDirty()) e.preventDefault();
+  if (saving.value || isDirty()) {
+    e.preventDefault();
+  }
 }
 
 onBeforeUnmount(() => {
-  for (const cleanup of drawerResizeCleanups) cleanup();
+  for (const cleanup of drawerResizeCleanups) {
+    cleanup();
+  }
   drawerResizeCleanups = [];
   resetTranslation();
 });
 
 function startEdit() {
-  if (props.readOnly) return;
+  if (props.readOnly) {
+    return;
+  }
   editing.value = true;
 }
 
@@ -184,7 +201,9 @@ function cancelEdit() {
 
 async function save() {
   const rel = props.relPath;
-  if (props.readOnly || !rel || !preview.value || saving.value) return;
+  if (props.readOnly || !rel || !preview.value || saving.value) {
+    return;
+  }
   const text = viewer.value?.getText() ?? preview.value.text ?? "";
   if (text === (preview.value.text ?? "")) {
     editing.value = false;
@@ -210,7 +229,9 @@ async function save() {
 }
 
 async function openExternal() {
-  if (!props.relPath) return;
+  if (!props.relPath) {
+    return;
+  }
   try {
     await openLocalPath(joinPath(props.root, props.relPath));
   } catch (e) {
@@ -221,24 +242,22 @@ async function openExternal() {
 // ── Markdown 翻译(渲染态专属;后端 ai_translate_markdown 优先用翻译专用配置、
 //  未配置回退设置页默认模型;与技能预览/远程审计共用 useMarkdownTranslation)──
 const translation = useMarkdownTranslation({
-  getIdentity: () => props.relPath,
-  getText: () => preview.value?.text ?? null,
-  getLanguage: () => settingsStore.language,
-});
-const {
-  translating,
-  translatedText,
-  showTranslated,
-  toggle: toggleTranslate,
-  retranslate,
-  reset: resetTranslation,
-} = translation;
-
-/** 渲染态正文:译文激活时展示译文,否则原文 */
-const displayContent = computed(() => translation.displayContent(preview.value?.text ?? ""));
-
-// ── 正文 @ 文件引用 linkify(渲染态 Markdown 专属) ──────────────────────────
-const mdBody = ref<HTMLElement | null>(null);
+    getIdentity: () => props.relPath,
+    getText: () => preview.value?.text ?? null,
+    getLanguage: () => settingsStore.language,
+  }),
+  {
+    translating,
+    translatedText,
+    showTranslated,
+    toggle: toggleTranslate,
+    retranslate,
+    reset: resetTranslation,
+  } = translation,
+  /** 渲染态正文:译文激活时展示译文,否则原文 */
+  displayContent = computed(() => translation.displayContent(preview.value?.text ?? "")),
+  // ── 正文 @ 文件引用 linkify(渲染态 Markdown 专属) ──────────────────────────
+  mdBody = ref<HTMLElement | null>(null);
 
 // Markdown 组件渲染完成后(link 语法已由库处理)再扫纯文本节点插入引用按钮;
 // 编辑态切换/保存后内容重渲染、原文/译文切换,同样需要重扫
@@ -246,15 +265,21 @@ watch(
   () => [displayContent.value, editing.value] as const,
   async () => {
     await nextTick();
-    if (mdBody.value) linkifyFileRefs(mdBody.value);
+    if (mdBody.value) {
+      linkifyFileRefs(mdBody.value);
+    }
   },
 );
 
 function onMarkdownClick(e: MouseEvent) {
   const btn = (e.target as HTMLElement).closest(`button.${FILE_REF_CLASS}`);
-  if (!btn || !props.relPath) return;
+  if (!btn || !props.relPath) {
+    return;
+  }
   const ref = (btn as HTMLElement).dataset.ref;
-  if (!ref) return;
+  if (!ref) {
+    return;
+  }
   emit("navigate", resolveRefPath(props.relPath, ref));
 }
 </script>

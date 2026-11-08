@@ -14,22 +14,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 const props = withDefaults(
-  defineProps<{
-    rows: McpRow[];
-    addLabel: string;
-    keyPlaceholder?: string;
-    valuePlaceholder?: string;
-    /** 单值模式(如命令参数):隐藏键输入列 */
-    single?: boolean;
+    defineProps<{
+      rows: McpRow[];
+      addLabel: string;
+      keyPlaceholder?: string;
+      valuePlaceholder?: string;
+      /** 单值模式(如命令参数):隐藏键输入列 */
+      single?: boolean;
+    }>(),
+    { single: false, keyPlaceholder: "", valuePlaceholder: "" },
+  ),
+  emit = defineEmits<{
+    "update:rows": [rows: McpRow[]];
   }>(),
-  { single: false, keyPlaceholder: "", valuePlaceholder: "" },
-);
-
-const emit = defineEmits<{
-  "update:rows": [rows: McpRow[]];
-}>();
-
-const { t } = useI18n();
+  { t } = useI18n();
 
 let seq = 0;
 

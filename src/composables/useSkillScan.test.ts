@@ -14,14 +14,13 @@ vi.mock("@/lib/scan-cache", () => ({
   putCachedScanReport: vi.fn(() => Promise.resolve()),
 }));
 
-const cmdMock = vi.mocked(cmd);
-const getCachedMock = vi.mocked(getCachedScanReport);
-const putCachedMock = vi.mocked(putCachedScanReport);
-const toastError = vi.mocked(toast.error);
+const cmdMock = vi.mocked(cmd),
+  getCachedMock = vi.mocked(getCachedScanReport),
+  putCachedMock = vi.mocked(putCachedScanReport),
+  toastError = vi.mocked(toast.error);
 
 function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
+  let resolve!: (value: T) => void, reject!: (reason?: unknown) => void;
   const promise = new Promise<T>((res, rej) => {
     resolve = res;
     reject = rej;
@@ -61,9 +60,9 @@ beforeEach(() => {
 
 describe("useSkillScan", () => {
   it("扫描成功:回填报告并写缓存,计时复位", async () => {
-    const report = makeReport();
-    const scan = vi.fn(() => Promise.resolve(report));
-    const skillScan = setup(scan);
+    const report = makeReport(),
+      scan = vi.fn(() => Promise.resolve(report)),
+      skillScan = setup(scan);
 
     await skillScan.runScan(null);
     expect(skillScan.scanReport.value).toBe(report);
@@ -76,11 +75,10 @@ describe("useSkillScan", () => {
   });
 
   it("扫描失败:toast 格式化错误; dispose 后的在途失败不 toast", async () => {
-    const failing = deferred<ResourceSkillScanReport>();
-    const scan = vi.fn(() => failing.promise);
-    const skillScan = setup(scan);
-
-    const p1 = skillScan.runScan({ providerId: "p", modelId: "m" });
+    const failing = deferred<ResourceSkillScanReport>(),
+      scan = vi.fn(() => failing.promise),
+      skillScan = setup(scan),
+      p1 = skillScan.runScan({ providerId: "p", modelId: "m" });
     expect(scan).toHaveBeenCalledWith(expect.objectContaining({ providerId: "p", modelId: "m" }));
     failing.reject(new Error("boom"));
     await p1;
@@ -104,11 +102,10 @@ describe("useSkillScan", () => {
   });
 
   it("dispose 后晚到的成功报告不回填、不写缓存", async () => {
-    const pending = deferred<ResourceSkillScanReport>();
-    const scan = vi.fn(() => pending.promise);
-    const skillScan = setup(scan);
-
-    const p = skillScan.runScan(null);
+    const pending = deferred<ResourceSkillScanReport>(),
+      scan = vi.fn(() => pending.promise),
+      skillScan = setup(scan),
+      p = skillScan.runScan(null);
     skillScan.dispose();
     pending.resolve(makeReport());
     await p;
@@ -117,11 +114,10 @@ describe("useSkillScan", () => {
   });
 
   it("用户取消只发 ai_cancel_run:返回的静态报告(llmStatus=canceled)仍展示", async () => {
-    const pending = deferred<ResourceSkillScanReport>();
-    const scan = vi.fn(() => pending.promise);
-    const skillScan = setup(scan);
-
-    const p = skillScan.runScan(null);
+    const pending = deferred<ResourceSkillScanReport>(),
+      scan = vi.fn(() => pending.promise),
+      skillScan = setup(scan),
+      p = skillScan.runScan(null);
     expect(skillScan.scanning.value).toBe(true);
     skillScan.cancelScan();
     expect(cmdMock).toHaveBeenCalledWith("ai_cancel_run", {
@@ -136,8 +132,8 @@ describe("useSkillScan", () => {
   });
 
   it("hydrateCache 命中回填;dispose 后晚到的缓存回填作废", async () => {
-    const cached = makeReport();
-    const cacheQuery = deferred<ResourceSkillScanReport | null>();
+    const cached = makeReport(),
+      cacheQuery = deferred<ResourceSkillScanReport | null>();
     getCachedMock.mockReturnValue(cacheQuery.promise);
     const skillScan = setup(vi.fn());
 

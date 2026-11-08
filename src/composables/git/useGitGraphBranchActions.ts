@@ -10,15 +10,15 @@ export function useGitGraphBranchActions(
   selectedBranch: Ref<string>,
   reload: () => void,
 ) {
-  const { t } = useI18n();
-  const store = useProjectsStore();
-  const branchOp = ref<{ branch: string; op: "pull" | "push" } | null>(null);
-  const conflictOpen = ref(false);
-  const conflictFiles = ref<string[]>([]);
-  const deleteOpen = ref(false);
-  const deleteTarget = ref("");
-  const deleteNeedsForce = ref(false);
-  const deleting = ref(false);
+  const { t } = useI18n(),
+    store = useProjectsStore(),
+    branchOp = ref<{ branch: string; op: "pull" | "push" } | null>(null),
+    conflictOpen = ref(false),
+    conflictFiles = ref<string[]>([]),
+    deleteOpen = ref(false),
+    deleteTarget = ref(""),
+    deleteNeedsForce = ref(false),
+    deleting = ref(false);
 
   async function pullBranch(name: string): Promise<boolean> {
     const currentProject = project.value;
@@ -83,8 +83,8 @@ export function useGitGraphBranchActions(
   }
 
   async function confirmDeleteBranch() {
-    const currentProject = project.value;
-    const name = deleteTarget.value;
+    const currentProject = project.value,
+      name = deleteTarget.value;
     if (!currentProject || !name || deleting.value) {
       return;
     }

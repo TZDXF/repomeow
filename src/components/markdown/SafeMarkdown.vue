@@ -43,19 +43,23 @@ interface Props {
 
 // Vue 会将未传入的布尔联合类型 prop 转为 false;显式保持渲染库的启用默认值。
 const props = withDefaults(defineProps<Props>(), {
-  controls: true,
-  previewers: true,
-});
-
-const mergedPreviewers = computed<PreviewerConfig>(() => mergeSafePreviewers(props.previewers));
-
-const mergedComponents = computed<MarkdownComponents>(() => ({
-  ...props.components,
-  img: MdImage,
-  a: MdLink,
-}));
-
-const mergedExtensions = computed<ExtensionOverrides>(() => props.extensions ?? markdownExtensions);
+    controls: true,
+    previewers: true,
+    content: undefined,
+    mode: undefined,
+    themeElement: undefined,
+    locale: undefined,
+    beforeDownload: undefined,
+    components: undefined,
+    extensions: undefined,
+  }),
+  mergedPreviewers = computed<PreviewerConfig>(() => mergeSafePreviewers(props.previewers)),
+  mergedComponents = computed<MarkdownComponents>(() => ({
+    ...props.components,
+    img: MdImage,
+    a: MdLink,
+  })),
+  mergedExtensions = computed<ExtensionOverrides>(() => props.extensions ?? markdownExtensions);
 </script>
 
 <template>

@@ -15,20 +15,20 @@ defineProps<{
   language: SupportedLocale;
 }>();
 
-const emit = defineEmits<{ copy: [] }>();
-const { t } = useI18n();
-const controls: ControlsConfig = {
-  table: {
-    copy: true,
-    download: true,
-    fullscreen: true,
-    customize: createTableCustomize(t),
+const emit = defineEmits<{ copy: [] }>(),
+  { t } = useI18n(),
+  controls: ControlsConfig = {
+    table: {
+      copy: true,
+      download: true,
+      fullscreen: true,
+      customize: createTableCustomize(t),
+    },
+    code: { copy: true, collapse: true },
   },
-  code: { copy: true, collapse: true },
-};
-const detachedThemeEl = document.createElement("div");
-const themeElement = () => detachedThemeEl;
-const beforeDownload = createBeforeDownload(t);
+  detachedThemeEl = document.createElement("div"),
+  themeElement = () => detachedThemeEl,
+  beforeDownload = createBeforeDownload(t);
 </script>
 
 <template>

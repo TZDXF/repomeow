@@ -47,12 +47,8 @@ interface SpeechRecognitionErrorEvent extends Event {
 
 declare global {
   interface Window {
-    SpeechRecognition: {
-      new (): SpeechRecognition;
-    };
-    webkitSpeechRecognition: {
-      new (): SpeechRecognition;
-    };
+    SpeechRecognition: new () => SpeechRecognition;
+    webkitSpeechRecognition: new () => SpeechRecognition;
   }
 }
 
@@ -62,15 +58,14 @@ interface Props extends /* @vue-ignore */ PromptInputSpeechButtonProps {
   class?: HTMLAttributes["class"];
 }
 
-const props = defineProps<Props>();
-
-const { textInput, setTextInput } = usePromptInput();
-const isListening = ref(false);
-const recognition = ref<SpeechRecognition | null>(null);
+const props = defineProps<Props>(),
+  { textInput, setTextInput } = usePromptInput(),
+  isListening = ref(false),
+  recognition = ref<SpeechRecognition | null>(null);
 
 onMounted(() => {
-  const Win = window as any;
-  const SpeechRecognition = Win.SpeechRecognition || Win.webkitSpeechRecognition;
+  const Win = window as any,
+    SpeechRecognition = Win.SpeechRecognition || Win.webkitSpeechRecognition;
 
   if (SpeechRecognition) {
     const sr = new SpeechRecognition();
@@ -110,7 +105,9 @@ onUnmounted(() => {
 });
 
 function toggleListening() {
-  if (!recognition.value) return;
+  if (!recognition.value) {
+    return;
+  }
   if (isListening.value) {
     recognition.value.stop();
   } else {

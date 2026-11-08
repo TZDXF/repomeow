@@ -16,15 +16,14 @@ const { t } = useI18n();
 
 type PromptId = "commit" | "report" | "weeklyReport";
 
-const activePrompt = ref<PromptId>("commit");
-
-// 本地副本,显式保存后才写入 ~/.repomeow/prompts/*.md;空串 = 使用内置默认模板
-const commitPrompt = ref("");
-const reportPrompt = ref("");
-const weeklyReportPrompt = ref("");
-const defaultCommitPrompt = ref("");
-const defaultReportPrompt = ref("");
-const defaultWeeklyReportPrompt = ref("");
+const activePrompt = ref<PromptId>("commit"),
+  // 本地副本,显式保存后才写入 ~/.repomeow/prompts/*.md;空串 = 使用内置默认模板
+  commitPrompt = ref(""),
+  reportPrompt = ref(""),
+  weeklyReportPrompt = ref(""),
+  defaultCommitPrompt = ref(""),
+  defaultReportPrompt = ref(""),
+  defaultWeeklyReportPrompt = ref("");
 
 onMounted(async () => {
   try {

@@ -12,40 +12,40 @@ import type { SemanticEntityRef, SemanticRelationResult } from "@/types";
 // 实体的「调用者 / 引用」关系面板:选中实体后懒加载,切实体/切页签才发请求。
 
 const props = defineProps<{
-  root: string;
-  entity: SemanticEntityRef | null;
-}>();
-
-const emit = defineEmits<{
-  open: [filePath: string, startLine: number, endLine: number];
-}>();
-
-const { t } = useI18n();
-
-const tab = ref<"callers" | "refs">("callers");
-
-const request = useSemanticRequest((requestId: string, kind: "callers" | "refs") => {
-  const entity = props.entity;
-  if (!entity) return Promise.reject(new Error("no entity"));
-  return cmd<SemanticRelationResult>(`semantic_entity_${kind}`, {
-    path: props.root,
-    // entityId 优先;无可靠 id 时回退 名称+文件 消歧
-    entityId: entity.entityId ?? undefined,
-    entityName: entity.entityId ? undefined : entity.name,
-    filePath: entity.filePath || undefined,
-    requestId,
-  });
-});
-
-const related = computed(() =>
-  request.result.value ? flattenRelationGroups(request.result.value.groups) : [],
-);
+    root: string;
+    entity: SemanticEntityRef | null;
+  }>(),
+  emit = defineEmits<{
+    open: [filePath: string, startLine: number, endLine: number];
+  }>(),
+  { t } = useI18n(),
+  tab = ref<"callers" | "refs">("callers"),
+  request = useSemanticRequest((requestId: string, kind: "callers" | "refs") => {
+    const entity = props.entity;
+    if (!entity) {
+      return Promise.reject(new Error("no entity"));
+    }
+    return cmd<SemanticRelationResult>(`semantic_entity_${kind}`, {
+      path: props.root,
+      // entityId 优先;无可靠 id 时回退 名称+文件 消歧
+      entityId: entity.entityId ?? undefined,
+      entityName: entity.entityId ? undefined : entity.name,
+      filePath: entity.filePath || undefined,
+      requestId,
+    });
+  }),
+  related = computed(() =>
+    request.result.value ? flattenRelationGroups(request.result.value.groups) : [],
+  );
 
 watch(
   [() => props.entity, tab],
   () => {
-    if (props.entity) void request.run(tab.value);
-    else request.reset();
+    if (props.entity) {
+      void request.run(tab.value);
+    } else {
+      request.reset();
+    }
   },
   { immediate: true },
 );

@@ -19,14 +19,13 @@ import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
 import type { Project } from "@/types";
 
-const { t } = useI18n();
-const store = useProjectsStore();
-const pinsStore = usePinsStore();
-const settingsStore = useSettingsStore();
-const searchInput = ref("");
-
-// 常用命令展开状态:与详情页同一套 localStorage 持久化(scope trayPins),默认折叠
-const { isOpen: isPinsOpen, setOpen: setPinsOpen } = useCollapsibleOpen("trayPins");
+const { t } = useI18n(),
+  store = useProjectsStore(),
+  pinsStore = usePinsStore(),
+  settingsStore = useSettingsStore(),
+  searchInput = ref(""),
+  // 常用命令展开状态:与详情页同一套 localStorage 持久化(scope trayPins),默认折叠
+  { isOpen: isPinsOpen, setOpen: setPinsOpen } = useCollapsibleOpen("trayPins");
 
 function pinsOf(project: Project) {
   return pinsStore.pinsOf(project.id);
@@ -39,16 +38,16 @@ function togglePins(project: Project) {
 
 // 客户端过滤 + 按最近更新倒序;弹窗有独立 Pinia 实例,与主窗口的查询状态互不影响
 const filtered = computed(() => {
-  const q = searchInput.value.trim().toLowerCase();
-  const list = q
-    ? store.projects.filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          p.path.toLowerCase().includes(q) ||
-          p.description.toLowerCase().includes(q) ||
-          p.tags.some((tag) => tag.name.toLowerCase().includes(q)),
-      )
-    : store.projects;
+  const q = searchInput.value.trim().toLowerCase(),
+    list = q
+      ? store.projects.filter(
+          (p) =>
+            p.name.toLowerCase().includes(q) ||
+            p.path.toLowerCase().includes(q) ||
+            p.description.toLowerCase().includes(q) ||
+            p.tags.some((tag) => tag.name.toLowerCase().includes(q)),
+        )
+      : store.projects;
   // 收藏项目置顶(组内按收藏时间倒序),其余按最近更新倒序
   return [...list].sort((a, b) => compareFavorited(a, b) || b.updated_at - a.updated_at);
 });

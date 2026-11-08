@@ -10,14 +10,13 @@ import type { ReportSchedule, SystemSchedule } from "@/types";
  * 项目数量变化时自动重载(项目归档/删除会影响任务展示)。
  */
 export function useReportSchedules() {
-  const { t } = useI18n();
-  const projectStore = useProjectsStore();
-
-  const schedules = ref<ReportSchedule[]>([]);
-  const systemSchedules = ref<SystemSchedule[]>([]);
-  const loading = ref(false);
-  /** 手动执行中的任务 id 集合(按钮 loading 态) */
-  const runningIds = ref<string[]>([]);
+  const { t } = useI18n(),
+    projectStore = useProjectsStore(),
+    schedules = ref<ReportSchedule[]>([]),
+    systemSchedules = ref<SystemSchedule[]>([]),
+    loading = ref(false),
+    /** 手动执行中的任务 id 集合(按钮 loading 态) */
+    runningIds = ref<string[]>([]);
 
   async function load() {
     loading.value = true;
@@ -41,11 +40,11 @@ export function useReportSchedules() {
     intervalMinutes: number,
   ) {
     const saved = await cmd<SystemSchedule>("save_system_schedule", {
-      id: schedule.id,
-      enabled,
-      intervalMinutes,
-    });
-    const index = systemSchedules.value.findIndex((item) => item.id === saved.id);
+        id: schedule.id,
+        enabled,
+        intervalMinutes,
+      }),
+      index = systemSchedules.value.findIndex((item) => item.id === saved.id);
     if (index !== -1) {
       systemSchedules.value[index] = saved;
     }
@@ -92,7 +91,9 @@ export function useReportSchedules() {
 
   /** 手动执行:忽略星期/去重检查,立即按任务配置生成报告 */
   async function runNow(s: ReportSchedule) {
-    if (runningIds.value.includes(s.id)) return;
+    if (runningIds.value.includes(s.id)) {
+      return;
+    }
     runningIds.value = [...runningIds.value, s.id];
     try {
       await cmd<number>("run_report_schedule_now", { id: s.id });
@@ -100,7 +101,14 @@ export function useReportSchedules() {
       // 刷新 lastRunAt 展示
       await load();
     } catch (e) {
-      const message = typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
+      let message: string;
+      if (typeof e === "string") {
+        message = e;
+      } else if (e instanceof Error) {
+        message = e.message;
+      } else {
+        message = String(e);
+      }
       toast.error(t("reportSchedule.runFailed", { error: message }));
     } finally {
       runningIds.value = runningIds.value.filter((id) => id !== s.id);

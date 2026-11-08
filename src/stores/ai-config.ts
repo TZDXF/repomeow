@@ -25,12 +25,14 @@ export interface ResolvedAiModel {
  * 这里持有内存副本;setter 改副本后全量落盘,失败时回读并抛出。
  */
 export const useAiConfigStore = defineStore("ai-config", () => {
-  const config = ref<AiConfigFile | null>(null);
-  const loaded = ref(false);
+  const config = ref<AiConfigFile | null>(null),
+    loaded = ref(false);
 
   /** 读取配置(已加载时复用内存副本;force 重新拉取) */
   async function ensureLoaded(force = false): Promise<AiConfigFile> {
-    if (config.value && !force) return config.value;
+    if (config.value && !force) {
+      return config.value;
+    }
     return reload();
   }
 
@@ -54,77 +56,81 @@ export const useAiConfigStore = defineStore("ai-config", () => {
   // ── 引用解析(对齐 Rust resolve_chat_prefs 的回退语义) ──────────────
 
   function resolveRef(c: AiConfigFile, reference: AiModelRef | null): ResolvedAiModel | null {
-    if (!reference) return null;
-    const provider = c.providers[reference.providerId];
-    const model = provider?.models.find((m) => m.id === reference.modelId);
-    if (!provider || !model) return null;
+    if (!reference) {
+      return null;
+    }
+    const provider = c.providers[reference.providerId],
+      model = provider?.models.find((m) => m.id === reference.modelId);
+    if (!provider || !model) {
+      return null;
+    }
     return { reference, provider, model };
   }
 
   /** 问答当前生效的模型(chat 引用失效时回退 defaultModel) */
   const chatModel = computed<ResolvedAiModel | null>(() => {
-    const c = config.value;
-    if (!c) return null;
-    const chatRefValid =
-      c.chat.providerId != null &&
-      c.chat.modelId != null &&
-      Boolean(c.providers[c.chat.providerId]?.models.some((m) => m.id === c.chat.modelId));
-    const reference: AiModelRef | null = chatRefValid
-      ? { providerId: c.chat.providerId as string, modelId: c.chat.modelId as string }
-      : c.defaultModel;
-    return resolveRef(c, reference);
-  });
-
-  /** 默认模型(commit/报告/Wiki/测试连接使用) */
-  const defaultModel = computed<ResolvedAiModel | null>(() => {
-    const c = config.value;
-    return c ? resolveRef(c, c.defaultModel) : null;
-  });
-
-  /** 问答面板可用性:模型有效且厂商 baseUrl/apiKey 齐备 */
-  const chatReady = computed(() =>
-    Boolean(chatModel.value?.provider.baseUrl && chatModel.value?.provider.apiKey),
-  );
-
-  /** 默认模型可用性(报告等场景的前置校验) */
-  const defaultReady = computed(() =>
-    Boolean(defaultModel.value?.provider.baseUrl && defaultModel.value?.provider.apiKey),
-  );
-
-  const reportReady = computed(() => {
-    const c = config.value;
-    if (!c) return false;
-    const resolved = resolveRef(c, c.taskModels?.report ?? null) ?? resolveRef(c, c.defaultModel);
-    return Boolean(resolved?.provider.baseUrl && resolved?.provider.apiKey);
-  });
-
-  /** chat 模型的选择器复合值 "providerId/modelId" */
-  const chatModelValue = computed(() =>
-    chatModel.value
-      ? `${chatModel.value.reference.providerId}/${chatModel.value.reference.modelId}`
-      : "",
-  );
-
-  /** 当前问答思考强度(chat 偏好;非法值回退 medium) */
-  const chatThinking = computed<ChatThinkingLevel>(() => {
-    const value = config.value?.chat.thinking;
-    return isChatThinkingLevel(value) ? value : "medium";
-  });
+      const c = config.value;
+      if (!c) {
+        return null;
+      }
+      const chatRefValid =
+          c.chat.providerId != null &&
+          c.chat.modelId != null &&
+          Boolean(c.providers[c.chat.providerId]?.models.some((m) => m.id === c.chat.modelId)),
+        reference: AiModelRef | null = chatRefValid
+          ? { providerId: c.chat.providerId as string, modelId: c.chat.modelId as string }
+          : c.defaultModel;
+      return resolveRef(c, reference);
+    }),
+    /** 默认模型(commit/报告/Wiki/测试连接使用) */
+    defaultModel = computed<ResolvedAiModel | null>(() => {
+      const c = config.value;
+      return c ? resolveRef(c, c.defaultModel) : null;
+    }),
+    /** 问答面板可用性:模型有效且厂商 baseUrl/apiKey 齐备 */
+    chatReady = computed(() =>
+      Boolean(chatModel.value?.provider.baseUrl && chatModel.value?.provider.apiKey),
+    ),
+    /** 默认模型可用性(报告等场景的前置校验) */
+    defaultReady = computed(() =>
+      Boolean(defaultModel.value?.provider.baseUrl && defaultModel.value?.provider.apiKey),
+    ),
+    reportReady = computed(() => {
+      const c = config.value;
+      if (!c) {
+        return false;
+      }
+      const resolved = resolveRef(c, c.taskModels?.report ?? null) ?? resolveRef(c, c.defaultModel);
+      return Boolean(resolved?.provider.baseUrl && resolved?.provider.apiKey);
+    }),
+    /** chat 模型的选择器复合值 "providerId/modelId" */
+    chatModelValue = computed(() =>
+      chatModel.value
+        ? `${chatModel.value.reference.providerId}/${chatModel.value.reference.modelId}`
+        : "",
+    ),
+    /** 当前问答思考强度(chat 偏好;非法值回退 medium) */
+    chatThinking = computed<ChatThinkingLevel>(() => {
+      const value = config.value?.chat.thinking;
+      return isChatThinkingLevel(value) ? value : "medium";
+    });
 
   async function updateChat(patch: {
     providerId?: string | null;
     modelId?: string | null;
     thinking?: ChatThinkingLevel;
   }): Promise<void> {
-    const current = await ensureLoaded();
-    const chat = { ...emptyChatPrefs(), ...current.chat, ...patch };
+    const current = await ensureLoaded(),
+      chat = { ...emptyChatPrefs(), ...current.chat, ...patch };
     await save({ ...current, chat });
   }
 
   /** 切换问答模型(选择器复合值 "providerId/modelId" → 拆分引用) */
   async function setChatModelValue(value: string): Promise<void> {
     const separator = value.indexOf("/");
-    if (separator <= 0 || separator === value.length - 1) return;
+    if (separator <= 0 || separator === value.length - 1) {
+      return;
+    }
     await updateChat({
       providerId: value.slice(0, separator),
       modelId: value.slice(separator + 1),
@@ -132,7 +138,9 @@ export const useAiConfigStore = defineStore("ai-config", () => {
   }
 
   async function setChatThinking(level: ChatThinkingLevel): Promise<void> {
-    if (!isChatThinkingLevel(level)) return;
+    if (!isChatThinkingLevel(level)) {
+      return;
+    }
     await updateChat({ thinking: level });
   }
 

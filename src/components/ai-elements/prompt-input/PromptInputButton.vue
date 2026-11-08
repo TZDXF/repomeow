@@ -13,30 +13,36 @@ interface Props extends /* @vue-ignore */ InputGroupButtonProps {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  variant: "ghost",
-});
+    variant: "ghost",
+    class: undefined,
+    size: undefined,
+  }),
+  slots = useSlots(),
+  computedSize = computed(() => {
+    if (props.size) {
+      return props.size;
+    }
 
-const slots = useSlots();
+    const slotNodes = slots.default?.();
 
-const computedSize = computed(() => {
-  if (props.size) return props.size;
+    if (!slotNodes) {
+      return "icon-sm";
+    }
 
-  const slotNodes = slots.default?.();
+    const validChildren = slotNodes.filter((node) => {
+      if (node.type === Comment) {
+        return false;
+      }
+      if (node.type === Text && !node.children?.toString().trim()) {
+        return false;
+      }
+      return true;
+    });
 
-  if (!slotNodes) return "icon-sm";
-
-  const validChildren = slotNodes.filter((node) => {
-    if (node.type === Comment) return false;
-    if (node.type === Text && !node.children?.toString().trim()) return false;
-    return true;
-  });
-
-  return validChildren.length > 1 ? "sm" : "icon-sm";
-});
-
-const variant = toRef(props, "variant");
-
-const { size, variant: _, class: __, ...restProps } = props;
+    return validChildren.length > 1 ? "sm" : "icon-sm";
+  }),
+  variant = toRef(props, "variant"),
+  { size, variant: _, class: __, ...restProps } = props;
 </script>
 
 <template>

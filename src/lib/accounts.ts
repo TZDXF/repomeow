@@ -94,17 +94,21 @@ export function listProjectRemoteUrls(): Promise<string[]> {
  */
 export function normalizeRemoteUrl(raw: string): string {
   let s = raw.trim();
-  if (!s) return "";
+  if (!s) {
+    return "";
+  }
   // ssh://git@host[:port]/owner/repo
   s = s.replace(/^ssh:\/\/git@/, "https://");
   // git@host:owner/repo.git (scp-like)
-  const scp = s.match(/^git@([^:/]+):(.+)$/);
-  if (scp) s = `https://${scp[1]}/${scp[2]}`;
+  const scp = s.match(/^git@(?<host>[^:/]+):(?<path>.+)$/);
+  if (scp) {
+    s = `https://${scp.groups!.host}/${scp.groups!.path}`;
+  }
   // 去掉协议与可能的 userinfo
   s = s.replace(/^https?:\/\//, "");
   s = s.replace(/^[^@/]+@/, "");
   // 去掉端口、末尾 .git 与多余斜杠
-  s = s.replace(/^([^/:]+):\d+\//, "$1/");
+  s = s.replace(/^(?<host>[^/:]+):\d+\//, "$<host>/");
   s = s.replace(/[\\/]+$/, "").replace(/\.git$/i, "");
   return s.toLowerCase();
 }

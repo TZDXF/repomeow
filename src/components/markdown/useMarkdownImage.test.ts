@@ -10,8 +10,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 function deferred() {
-  let resolve!: (value: string) => void;
-  let reject!: (reason: Error) => void;
+  let resolve!: (value: string) => void, reject!: (reason: Error) => void;
   const promise = new Promise<string>((ok, fail) => {
     resolve = ok;
     reject = fail;
@@ -35,15 +34,15 @@ describe("useMarkdownImage", () => {
       .mockReturnValueOnce(third.promise);
     const url = ref("a.png"),
       base = ref("C:/one/docs"),
-      root = ref("C:/one");
-    const scope = effectScope();
-    const src = scope.run(() =>
-      useMarkdownImage(
-        () => url.value,
-        () => base.value,
-        () => root.value,
-      ),
-    )!;
+      root = ref("C:/one"),
+      scope = effectScope(),
+      src = scope.run(() =>
+        useMarkdownImage(
+          () => url.value,
+          () => base.value,
+          () => root.value,
+        ),
+      )!;
     expect(cmd).toHaveBeenCalledWith("resolve_markdown_image", {
       root: "C:/one",
       imagePath: "C:/one/docs/a.png",
@@ -67,15 +66,15 @@ describe("useMarkdownImage", () => {
   it("越界、后端拒绝、组件卸载和远程图片的处理", async () => {
     const pending = deferred();
     vi.mocked(cmd).mockReturnValueOnce(pending.promise).mockRejectedValueOnce(new Error("invalid"));
-    const url = ref("a.png");
-    const scope = effectScope();
-    const src = scope.run(() =>
-      useMarkdownImage(
-        () => url.value,
-        () => "C:/root",
-        () => "C:/root",
-      ),
-    )!;
+    const url = ref("a.png"),
+      scope = effectScope(),
+      src = scope.run(() =>
+        useMarkdownImage(
+          () => url.value,
+          () => "C:/root",
+          () => "C:/root",
+        ),
+      )!;
     url.value = "../outside.png";
     pending.resolve("C:/root/a.png");
     await settle();

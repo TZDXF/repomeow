@@ -93,7 +93,9 @@ function chatRunId(): string {
 
 /** token 数紧凑格式:999 → "999"、1234 → "1.2k"、1048576 → "1M"(上下文占用展示用) */
 export function formatTokenCount(tokens: number): string {
-  if (!Number.isFinite(tokens) || tokens <= 0) return "0";
+  if (!Number.isFinite(tokens) || tokens <= 0) {
+    return "0";
+  }
   if (tokens >= 1_000_000) {
     return `${(tokens / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
   }
@@ -105,10 +107,15 @@ export function formatTokenCount(tokens: number): string {
 
 /** AbortSignal → chat_abort 的取消绑定,参照 lib/ai.ts 的 bindCancellation 模式 */
 function bindCancellation(id: string, signal?: AbortSignal): () => void {
-  if (!signal) return () => {};
+  if (!signal) {
+    return () => {};
+  }
   const cancel = () => void cmd<void>("chat_abort", { runId: id }).catch(() => {});
-  if (signal.aborted) cancel();
-  else signal.addEventListener("abort", cancel, { once: true });
+  if (signal.aborted) {
+    cancel();
+  } else {
+    signal.addEventListener("abort", cancel, { once: true });
+  }
   return () => signal.removeEventListener("abort", cancel);
 }
 
@@ -124,9 +131,9 @@ export async function sendChatMessage(
     signal?: AbortSignal;
   },
 ): Promise<ChatUsageSummary | null> {
-  const runId = chatRunId();
-  const unbind = bindCancellation(runId, params.signal);
-  const channel = new Channel<ChatEvent>();
+  const runId = chatRunId(),
+    unbind = bindCancellation(runId, params.signal),
+    channel = new Channel<ChatEvent>();
   channel.onmessage = params.onEvent;
   try {
     return await cmd<ChatUsageSummary | null>("chat_send", {

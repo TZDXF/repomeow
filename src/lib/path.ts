@@ -10,8 +10,8 @@
 
 /** 去首尾空白与尾随分隔符(保留盘符根 `C:\` 与 `/` 本身) */
 export function cleanPath(p: string): string {
-  const trimmed = p.trim();
-  const stripped = trimmed.replace(/[\\/]+$/, "");
+  const trimmed = p.trim(),
+    stripped = trimmed.replace(/[\\/]+$/, "");
   if (stripped === "") {
     return trimmed.startsWith("/") ? "/" : trimmed;
   }
@@ -35,9 +35,9 @@ export function baseName(p: string): string {
 
 /** 切出父目录与目录名,父目录保留原路径的分隔符风格(Windows 盘符下用 \) */
 export function splitDirName(p: string): { parent: string; name: string } {
-  const segments = p.split(/[\\/]/).filter(Boolean);
-  const name = segments.pop() ?? "";
-  const sep = p.includes("\\") ? "\\" : "/";
+  const segments = p.split(/[\\/]/).filter(Boolean),
+    name = segments.pop() ?? "",
+    sep = p.includes("\\") ? "\\" : "/";
   return { parent: segments.join(sep) || sep, name };
 }
 
@@ -53,8 +53,8 @@ export function joinPath(parent: string, name: string): string {
 
 /** 展示用路径:p 位于 root 内时显示相对路径,否则原样返回(分隔符归一后比较) */
 export function displayRelativeTo(root: string, p: string): string {
-  const r = toForwardSlash(root);
-  const c = toForwardSlash(p);
+  const r = toForwardSlash(root),
+    c = toForwardSlash(p);
   if (r && c.startsWith(`${r}/`)) {
     return c.slice(r.length + 1);
   }
@@ -63,7 +63,7 @@ export function displayRelativeTo(root: string, p: string): string {
 
 /** p 是否位于 root 内(分隔符归一后前缀比较,大小写不敏感以覆盖 Windows 盘符路径) */
 export function isInsidePath(root: string, p: string): boolean {
-  const r = toForwardSlash(root).replace(/\/+$/, "").toLowerCase();
-  const c = toForwardSlash(p).toLowerCase();
+  const r = toForwardSlash(root).replace(/\/+$/, "").toLowerCase(),
+    c = toForwardSlash(p).toLowerCase();
   return c === r || c.startsWith(`${r}/`);
 }

@@ -19,34 +19,31 @@ import ScrollArea from "@/components/common/ScrollArea.vue";
 import type { BatchItem } from "@/lib/batch-report";
 import { useBatchReportStore } from "@/stores/batch-report";
 
-const { t } = useI18n();
-const router = useRouter();
-const store = useBatchReportStore();
-
-/** 明细列表的状态图标与颜色 */
-const STATUS_META: Record<BatchItem["status"], { icon: Component; class: string }> = {
-  pending: { icon: Clock3, class: "text-muted-foreground" },
-  running: { icon: Loader2, class: "animate-spin text-primary" },
-  done: { icon: CheckCircle2, class: "text-green-600 dark:text-green-400" },
-  "skipped-existing": { icon: MinusCircle, class: "text-muted-foreground" },
-  "skipped-no-commits": { icon: MinusCircle, class: "text-muted-foreground" },
-  failed: { icon: XCircle, class: "text-red-600 dark:text-red-400" },
-  cancelled: { icon: Ban, class: "text-muted-foreground" },
-};
-
-const STATUS_LABEL: Record<BatchItem["status"], string> = {
-  pending: "report.batchStatusPending",
-  running: "report.batchStatusRunning",
-  done: "report.batchStatusDone",
-  "skipped-existing": "report.batchStatusSkippedExisting",
-  "skipped-no-commits": "report.batchStatusSkippedNoCommits",
-  failed: "report.batchStatusFailed",
-  cancelled: "report.batchStatusCancelled",
-};
-
-/** 环形进度几何(viewBox 36,半径 15.5) */
-const RING_R = 15.5;
-const RING_C = 2 * Math.PI * RING_R;
+const { t } = useI18n(),
+  router = useRouter(),
+  store = useBatchReportStore(),
+  /** 明细列表的状态图标与颜色 */
+  STATUS_META: Record<BatchItem["status"], { icon: Component; class: string }> = {
+    pending: { icon: Clock3, class: "text-muted-foreground" },
+    running: { icon: Loader2, class: "animate-spin text-primary" },
+    done: { icon: CheckCircle2, class: "text-green-600 dark:text-green-400" },
+    "skipped-existing": { icon: MinusCircle, class: "text-muted-foreground" },
+    "skipped-no-commits": { icon: MinusCircle, class: "text-muted-foreground" },
+    failed: { icon: XCircle, class: "text-red-600 dark:text-red-400" },
+    cancelled: { icon: Ban, class: "text-muted-foreground" },
+  },
+  STATUS_LABEL: Record<BatchItem["status"], string> = {
+    pending: "report.batchStatusPending",
+    running: "report.batchStatusRunning",
+    done: "report.batchStatusDone",
+    "skipped-existing": "report.batchStatusSkippedExisting",
+    "skipped-no-commits": "report.batchStatusSkippedNoCommits",
+    failed: "report.batchStatusFailed",
+    cancelled: "report.batchStatusCancelled",
+  },
+  /** 环形进度几何(viewBox 36,半径 15.5) */
+  RING_R = 15.5,
+  RING_C = 2 * Math.PI * RING_R;
 
 function goHistory() {
   router.push("/report-history");

@@ -33,22 +33,26 @@ export interface JdkInstallProgress {
  * 重新打开对话框可回看。同一时刻只允许一个安装任务(重复 start 直接忽略)。
  */
 export const useJdkInstallStore = defineStore("jdk-install", () => {
-  const installing = ref(false);
-  const vendor = ref<JdkVendor>("adoptium");
-  const major = ref(0);
-  const progress = ref<JdkInstallProgress | null>(null);
+  const installing = ref(false),
+    vendor = ref<JdkVendor>("adoptium"),
+    major = ref(0),
+    progress = ref<JdkInstallProgress | null>(null);
   let unlisten: UnlistenFn | undefined;
 
   /** 下载进度百分比;解压阶段/未知总量返回 null(转不确定态样式) */
   const downloadPct = computed(() => {
     const p = progress.value;
-    if (!p || p.stage !== "download" || !p.total) return null;
+    if (!p || p.stage !== "download" || !p.total) {
+      return null;
+    }
     return Math.min(100, Math.round((p.received / p.total) * 100));
   });
 
   /** 启动一次在线安装(进行中时忽略重复调用);结果经 toast 通知,不向上抛错 */
   async function start(nextVendor: JdkVendor, nextMajor: number) {
-    if (installing.value) return;
+    if (installing.value) {
+      return;
+    }
     installing.value = true;
     vendor.value = nextVendor;
     major.value = nextMajor;
@@ -57,8 +61,8 @@ export const useJdkInstallStore = defineStore("jdk-install", () => {
     unlisten = await onListen<JdkInstallProgress>("jdk://install-progress", (p) => {
       progress.value = p;
     });
-    const t = i18n.global.t;
-    const settings = useSettingsStore();
+    const t = i18n.global.t,
+      settings = useSettingsStore();
     try {
       const installed = await cmd<JdkCandidate>("install_jdk", {
         vendor: nextVendor,

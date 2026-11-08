@@ -18,46 +18,41 @@ import type { ToolState } from "./types";
 // 状态表达从文字徽标(StatusBadge)瘦身为小号状态图标 + 无障碍文本,
 // 单行紧凑排列,连续调用时不占视觉空间。
 const props = defineProps<{
-  title?: string;
-  /** 标题后的行内摘要(主参数值),截断展示 */
-  subtitle?: string;
-  state: ToolState;
-  class?: HTMLAttributes["class"];
-}>();
-
-const { t } = useI18n();
-
-const label = computed(() => props.title ?? "");
-
-const statusIcon = computed<Component>(() => {
-  const icons: Record<ToolState, Component> = {
-    "input-streaming": Loader2Icon,
-    "input-available": Loader2Icon,
-    "output-available": CheckCircleIcon,
-    "output-error": XCircleIcon,
-  };
-  return icons[props.state];
-});
-
-const statusClass = computed(() => {
-  const classes: Record<ToolState, string> = {
-    "input-streaming": "animate-spin text-muted-foreground",
-    "input-available": "animate-spin text-muted-foreground",
-    "output-available": "text-green-600",
-    "output-error": "text-red-600",
-  };
-  return classes[props.state];
-});
-
-const statusText = computed(() => {
-  const labels: Record<ToolState, string> = {
-    "input-streaming": t("chat.toolRunning"),
-    "input-available": t("chat.toolRunning"),
-    "output-available": t("chat.toolDone"),
-    "output-error": t("chat.toolFailed"),
-  };
-  return labels[props.state];
-});
+    title?: string;
+    /** 标题后的行内摘要(主参数值),截断展示 */
+    subtitle?: string;
+    state: ToolState;
+    class?: HTMLAttributes["class"];
+  }>(),
+  { t } = useI18n(),
+  label = computed(() => props.title ?? ""),
+  statusIcon = computed<Component>(() => {
+    const icons: Record<ToolState, Component> = {
+      "input-streaming": Loader2Icon,
+      "input-available": Loader2Icon,
+      "output-available": CheckCircleIcon,
+      "output-error": XCircleIcon,
+    };
+    return icons[props.state];
+  }),
+  statusClass = computed(() => {
+    const classes: Record<ToolState, string> = {
+      "input-streaming": "animate-spin text-muted-foreground",
+      "input-available": "animate-spin text-muted-foreground",
+      "output-available": "text-green-600",
+      "output-error": "text-red-600",
+    };
+    return classes[props.state];
+  }),
+  statusText = computed(() => {
+    const labels: Record<ToolState, string> = {
+      "input-streaming": t("chat.toolRunning"),
+      "input-available": t("chat.toolRunning"),
+      "output-available": t("chat.toolDone"),
+      "output-error": t("chat.toolFailed"),
+    };
+    return labels[props.state];
+  });
 </script>
 
 <template>

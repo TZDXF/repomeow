@@ -5,16 +5,15 @@ import type { ThemeMode, ThemeSkin } from "@/stores/settings";
 import { themePreviewSplit } from "./theme-preview";
 
 const props = defineProps<{
-  skin: ThemeSkin;
-  mode: ThemeMode;
-  selected: boolean;
-  label: string;
-  description: string;
-  icon?: Component;
-}>();
-
-const emit = defineEmits<{ select: [] }>();
-const split = ref(50);
+    skin: ThemeSkin;
+    mode: ThemeMode;
+    selected: boolean;
+    label: string;
+    description: string;
+    icon?: Component;
+  }>(),
+  emit = defineEmits<{ select: [] }>(),
+  split = ref(50);
 
 function updateSplit(event: PointerEvent) {
   if (props.mode !== "system" || event.pointerType === "touch") {

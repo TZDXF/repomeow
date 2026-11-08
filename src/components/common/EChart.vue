@@ -5,7 +5,7 @@
  * 语言包跟随应用语言(locale 只能在 init 时指定,切换语言后销毁重建实例)。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import * as echarts from "echarts/core";
+import { init, registerLocale, use } from "echarts/core";
 import { CandlestickChart, HeatmapChart, LineChart } from "echarts/charts";
 import {
   DataZoomInsideComponent,
@@ -19,7 +19,7 @@ import langZH from "echarts/i18n/langZH-obj.js";
 import type { EChartsCoreOption } from "echarts/core";
 import { i18n } from "@/i18n";
 
-echarts.use([
+use([
   CandlestickChart,
   HeatmapChart,
   LineChart,
@@ -31,23 +31,23 @@ echarts.use([
   CanvasRenderer,
 ]);
 // echarts 内置默认语言为英文;中文语言包按需注册(时间轴月份名等)
-echarts.registerLocale("ZH", langZH);
+registerLocale("ZH", langZH);
 
 const props = defineProps<{
-  option: EChartsCoreOption;
-}>();
-
-const el = ref<HTMLElement>();
-let chart: ReturnType<typeof echarts.init> | undefined;
-let resizeObserver: ResizeObserver | undefined;
+    option: EChartsCoreOption;
+  }>(),
+  el = ref<HTMLElement>();
+let chart: ReturnType<typeof init> | undefined, resizeObserver: ResizeObserver | undefined;
 
 /** 应用语言 → echarts 语言包名("EN" 为内置默认,无需注册) */
 const chartLocale = computed(() => (i18n.global.locale.value === "zh-CN" ? "ZH" : "EN"));
 
 function createChart() {
-  if (!el.value) return;
+  if (!el.value) {
+    return;
+  }
   chart?.dispose();
-  chart = echarts.init(el.value, undefined, {
+  chart = init(el.value, undefined, {
     renderer: "canvas",
     locale: chartLocale.value,
   });
@@ -56,7 +56,9 @@ function createChart() {
 
 onMounted(() => {
   createChart();
-  if (!el.value) return;
+  if (!el.value) {
+    return;
+  }
   resizeObserver = new ResizeObserver(() => chart?.resize());
   resizeObserver.observe(el.value);
 });

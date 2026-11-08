@@ -37,13 +37,13 @@ export interface ResourceActionsOptions {
  * revision(上一步写入会使其失效);toggling/importing/removing 为防重入锁。
  */
 export function useResourceActions(options: ResourceActionsOptions) {
-  const { t } = useI18n();
-  const removeTargets = ref<ResourceChoice[]>([]);
-  const removing = ref(false);
-  const unmanagedRemoveTarget = ref<UnmanagedItem | null>(null);
-  const removingUnmanaged = ref(false);
-  const importing = ref<string | null>(null);
-  const toggling = ref("");
+  const { t } = useI18n(),
+    removeTargets = ref<ResourceChoice[]>([]),
+    removing = ref(false),
+    unmanagedRemoveTarget = ref<UnmanagedItem | null>(null),
+    removingUnmanaged = ref(false),
+    importing = ref<string | null>(null),
+    toggling = ref("");
   // 项目/类别切换:重置动作层瞬态(数据层自行重置快照与筛选)
   watch(
     () => [options.projectPath(), options.kind()],
@@ -103,18 +103,18 @@ export function useResourceActions(options: ResourceActionsOptions) {
     toggling.value = `${item.key}:${agent.id}`;
     try {
       const outcome = await claimLocalProjectResource({
-        path: options.projectPath(),
-        kind: options.kind(),
-        source: item.source,
-        name: options.kind() === "mcp" ? item.name : undefined,
-        expectedRevision: options.data.value.revision,
-      });
-      const snapshot = await loadProjectResources(options.projectPath(), options.kind());
-      const current = new Set(
-        snapshot.deployments
-          .filter((d) => d.resourceId === outcome.resourceId)
-          .map((d) => d.agentId),
-      );
+          path: options.projectPath(),
+          kind: options.kind(),
+          source: item.source,
+          name: options.kind() === "mcp" ? item.name : undefined,
+          expectedRevision: options.data.value.revision,
+        }),
+        snapshot = await loadProjectResources(options.projectPath(), options.kind()),
+        current = new Set(
+          snapshot.deployments
+            .filter((d) => d.resourceId === outcome.resourceId)
+            .map((d) => d.agentId),
+        );
       for (const owner of unmanagedOwners(item, options.targets(), options.kind())) {
         current.add(owner);
       }
@@ -228,18 +228,18 @@ export function useResourceActions(options: ResourceActionsOptions) {
       return;
     }
     removing.value = true;
-    let removed = 0;
-    let failed = 0;
+    let removed = 0,
+      failed = 0;
     try {
       for (const target of targets) {
         try {
-          const snapshot = await loadProjectResources(options.projectPath(), options.kind());
-          const result = await removeProjectResource({
-            path: options.projectPath(),
-            kind: options.kind(),
-            resourceId: target.id,
-            expectedRevision: snapshot.revision,
-          });
+          const snapshot = await loadProjectResources(options.projectPath(), options.kind()),
+            result = await removeProjectResource({
+              path: options.projectPath(),
+              kind: options.kind(),
+              resourceId: target.id,
+              expectedRevision: snapshot.revision,
+            });
           if (result.failures.length) {
             failed += result.failures.length;
           } else {

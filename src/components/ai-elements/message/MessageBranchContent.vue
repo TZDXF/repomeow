@@ -8,30 +8,27 @@ interface Props {
   class?: HTMLAttributes["class"];
 }
 
-const props = defineProps<Props>();
-const slots = useSlots();
+const props = defineProps<Props>(),
+  slots = useSlots(),
+  { currentBranch, setBranches } = useMessageBranchContext(),
+  branchVNodes = computed(() => {
+    const nodes = slots.default?.() ?? [],
+      extractChildren = (node: any): any[] => {
+        if (isVNode(node) && node.type === Fragment) {
+          return Array.isArray(node.children) ? node.children : [];
+        }
+        return [node];
+      },
+      allNodes = nodes.flatMap(extractChildren);
 
-const { currentBranch, setBranches } = useMessageBranchContext();
-
-const branchVNodes = computed(() => {
-  const nodes = slots.default?.() ?? [];
-
-  const extractChildren = (node: any): any[] => {
-    if (isVNode(node) && node.type === Fragment) {
-      return Array.isArray(node.children) ? node.children : [];
-    }
-    return [node];
-  };
-
-  const allNodes = nodes.flatMap(extractChildren);
-
-  return allNodes.filter((node) => {
-    if (!isVNode(node)) return false;
-    return node.type && typeof node.type === "object";
-  });
-});
-
-const sync = () => setBranches(branchVNodes.value.length);
+    return allNodes.filter((node) => {
+      if (!isVNode(node)) {
+        return false;
+      }
+      return node.type && typeof node.type === "object";
+    });
+  }),
+  sync = () => setBranches(branchVNodes.value.length);
 onMounted(sync);
 watch(branchVNodes, sync);
 

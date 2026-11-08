@@ -35,35 +35,34 @@ vi.mock("@/lib/terminal", () => ({
 }));
 
 const project: Project = {
-  id: 1,
-  name: "demo",
-  path: "D:/projects/demo",
-  description: "",
-  tags: [],
-  git: null,
-  path_exists: true,
-  archived_at: null,
-  favorited_at: null,
-  auto_pull: false,
-  wiki_auto_update: false,
-  created_at: 0,
-  updated_at: 0,
-};
-
-const session: TerminalSessionInfo = {
-  id: 42,
-  project_id: project.id,
-  project_name: project.name,
-  label: "dev",
-  kind: "npm",
-  command: "npm run dev",
-  interactive: false,
-  cwd: project.path,
-  status: "running",
-  exit_code: null,
-  started_at: 1,
-  finished_at: null,
-};
+    id: 1,
+    name: "demo",
+    path: "D:/projects/demo",
+    description: "",
+    tags: [],
+    git: null,
+    path_exists: true,
+    archived_at: null,
+    favorited_at: null,
+    auto_pull: false,
+    wiki_auto_update: false,
+    created_at: 0,
+    updated_at: 0,
+  },
+  session: TerminalSessionInfo = {
+    id: 42,
+    project_id: project.id,
+    project_name: project.name,
+    label: "dev",
+    kind: "npm",
+    command: "npm run dev",
+    interactive: false,
+    cwd: project.path,
+    status: "running",
+    exit_code: null,
+    started_at: 1,
+    finished_at: null,
+  };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -125,31 +124,35 @@ describe("内置终端统一执行", () => {
       mocks.listCommandSessions.mockResolvedValueOnce([{ ...session, status: "stopped" }]);
       const store = useTerminalStore();
       await store.init();
-      const onChanged = mocks.onListen.mock.calls[0]![1];
-      const finished = { ...session, status: "exited" as const, exit_code: 0, finished_at: 2 };
-      const respondAfterExit = async () => {
-        onChanged(session);
-        onChanged(finished);
-        return session;
-      };
-      const commandMock = {
-        run: mocks.runCommandSession,
-        restart: mocks.restartCommandSession,
-        create: mocks.createShellSession,
-      }[action];
+      const onChanged = mocks.onListen.mock.calls[0]![1],
+        finished = { ...session, status: "exited" as const, exit_code: 0, finished_at: 2 },
+        respondAfterExit = async () => {
+          onChanged(session);
+          onChanged(finished);
+          return session;
+        },
+        commandMock = {
+          run: mocks.runCommandSession,
+          restart: mocks.restartCommandSession,
+          create: mocks.createShellSession,
+        }[action];
       commandMock.mockImplementationOnce(respondAfterExit);
 
-      if (action === "run") await store.run(project, session.command);
-      else if (action === "restart") await store.restart(session.id);
-      else await store.create(project);
+      if (action === "run") {
+        await store.run(project, session.command);
+      } else if (action === "restart") {
+        await store.restart(session.id);
+      } else {
+        await store.create(project);
+      }
 
       expect(store.sessions).toEqual([finished]);
     },
   );
 
   it("内置会话启动失败时传播错误，不回退系统终端或打开空面板", async () => {
-    const store = useTerminalStore();
-    const error = new Error("启动终端失败");
+    const store = useTerminalStore(),
+      error = new Error("启动终端失败");
     mocks.runCommandSession.mockRejectedValueOnce(error);
 
     await expect(store.run(project, "npm run dev")).rejects.toBe(error);
@@ -172,9 +175,9 @@ describe("内置终端统一执行", () => {
 
 describe("终端会话顺序", () => {
   it("重启和后续状态事件不会改变已有会话顺序", async () => {
-    const first = { ...session, id: 1, started_at: 3 };
-    const second = { ...session, id: 2, status: "exited" as const, started_at: 2 };
-    const third = { ...session, id: 3, status: "exited" as const, started_at: 1 };
+    const first = { ...session, id: 1, started_at: 3 },
+      second = { ...session, id: 2, status: "exited" as const, started_at: 2 },
+      third = { ...session, id: 3, status: "exited" as const, started_at: 1 };
     mocks.listCommandSessions.mockResolvedValueOnce([first, second, third]);
     const restarted = { ...second, status: "running" as const, started_at: 4 };
     mocks.restartCommandSession.mockResolvedValueOnce(restarted);

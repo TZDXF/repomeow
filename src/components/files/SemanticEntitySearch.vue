@@ -12,28 +12,23 @@ import type { SemanticEntityRef, SemanticFindResult } from "@/types";
 // 全项目实体搜索:至少 2 字符、250ms 防抖;结果点击由父组件打开文件并定位。
 // 仅在用户显式进入本面板时工作,不与全文搜索混用。
 
-const props = defineProps<{ root: string }>();
-
-const emit = defineEmits<{
-  open: [filePath: string, startLine: number, endLine: number];
-}>();
-
-const { t } = useI18n();
-
-const query = ref("");
-
-const request = useSemanticRequest((requestId: string, q: string) =>
-  cmd<SemanticFindResult>("semantic_find_entities", { path: props.root, query: q, requestId }),
-);
-
-const debouncedSearch = debounce(() => {
-  const q = query.value.trim();
-  if (q.length < 2) {
-    request.reset();
-    return;
-  }
-  void request.run(q);
-}, 250);
+const props = defineProps<{ root: string }>(),
+  emit = defineEmits<{
+    open: [filePath: string, startLine: number, endLine: number];
+  }>(),
+  { t } = useI18n(),
+  query = ref(""),
+  request = useSemanticRequest((requestId: string, q: string) =>
+    cmd<SemanticFindResult>("semantic_find_entities", { path: props.root, query: q, requestId }),
+  ),
+  debouncedSearch = debounce(() => {
+    const q = query.value.trim();
+    if (q.length < 2) {
+      request.reset();
+      return;
+    }
+    void request.run(q);
+  }, 250);
 
 watch(query, () => debouncedSearch());
 watch(

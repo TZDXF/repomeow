@@ -5,29 +5,27 @@ import { formatCompactNumber, formatRelativeTime } from "@/lib/format";
 import type { GitProjectStats } from "@/types";
 
 const props = defineProps<{
-  stats: GitProjectStats;
-}>();
-
-const { t } = useI18n();
-
-const fmt = (n: number) => formatCompactNumber(n);
-
-/** 日均提交按有提交的天数平均(更能反映开发强度) */
-const avgPerActiveDay = computed(() => {
-  if (!props.stats.activeDays) return "0";
-  return (props.stats.totalCommits / props.stats.activeDays).toFixed(1);
-});
-
-const cells = computed(() => [
-  { label: t("git.graph.analysis.totalCommits"), value: fmt(props.stats.totalCommits) },
-  { label: t("git.graph.analysis.authors"), value: fmt(props.stats.authors.length) },
-  { label: t("git.graph.analysis.activeDays"), value: fmt(props.stats.activeDays) },
-  {
-    label: t("git.graph.analysis.avgPerDay"),
-    value: avgPerActiveDay.value,
-    title: t("git.graph.analysis.avgPerDayHint"),
-  },
-]);
+    stats: GitProjectStats;
+  }>(),
+  { t } = useI18n(),
+  fmt = (n: number) => formatCompactNumber(n),
+  /** 日均提交按有提交的天数平均(更能反映开发强度) */
+  avgPerActiveDay = computed(() => {
+    if (!props.stats.activeDays) {
+      return "0";
+    }
+    return (props.stats.totalCommits / props.stats.activeDays).toFixed(1);
+  }),
+  cells = computed(() => [
+    { label: t("git.graph.analysis.totalCommits"), value: fmt(props.stats.totalCommits) },
+    { label: t("git.graph.analysis.authors"), value: fmt(props.stats.authors.length) },
+    { label: t("git.graph.analysis.activeDays"), value: fmt(props.stats.activeDays) },
+    {
+      label: t("git.graph.analysis.avgPerDay"),
+      value: avgPerActiveDay.value,
+      title: t("git.graph.analysis.avgPerDayHint"),
+    },
+  ]);
 </script>
 
 <template>

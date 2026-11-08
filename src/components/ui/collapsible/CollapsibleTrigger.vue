@@ -4,9 +4,8 @@ import type { HTMLAttributes } from "vue";
 import { reactiveOmit } from "@vueuse/core";
 import { CollapsibleTrigger } from "reka-ui";
 
-const props = defineProps<CollapsibleTriggerProps & { class?: HTMLAttributes["class"] }>();
-
-const delegatedProps = reactiveOmit(props, "class");
+const props = defineProps<CollapsibleTriggerProps & { class?: HTMLAttributes["class"] }>(),
+  delegatedProps = reactiveOmit(props, "class");
 </script>
 
 <template>

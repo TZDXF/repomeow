@@ -13,30 +13,31 @@ import { Button } from "@/components/ui/button";
 // ── 用户提问气泡:悬停操作钮(复制/编辑),编辑态换成内联 textarea,
 // Enter 确认重发 / Esc 取消(Esc 拦截冒泡,避免触发面板级 Esc 收起) ---
 const props = defineProps<{
-  content: string;
-  /** 仅最后一条提问可编辑(父层在忙时也会关掉) */
-  editable: boolean;
-  /** 当前处于编辑态(父层 editingKey 命中本条) */
-  editing: boolean;
-  aiReady: boolean;
-}>();
-const editText = defineModel<string>("editText", { required: true });
-const emit = defineEmits<{
-  startEdit: [];
-  confirm: [];
-  cancel: [];
-  copy: [];
-}>();
-const { t } = useI18n();
-
-const editTextareaRef = ref<HTMLTextAreaElement | null>(null);
-const editRows = computed(() => Math.min(10, Math.max(2, editText.value.split("\n").length)));
+    content: string;
+    /** 仅最后一条提问可编辑(父层在忙时也会关掉) */
+    editable: boolean;
+    /** 当前处于编辑态(父层 editingKey 命中本条) */
+    editing: boolean;
+    aiReady: boolean;
+  }>(),
+  editText = defineModel<string>("editText", { required: true }),
+  emit = defineEmits<{
+    startEdit: [];
+    confirm: [];
+    cancel: [];
+    copy: [];
+  }>(),
+  { t } = useI18n(),
+  editTextareaRef = ref<HTMLTextAreaElement | null>(null),
+  editRows = computed(() => Math.min(10, Math.max(2, editText.value.split("\n").length)));
 
 // 进入编辑态后聚焦并把光标移到文末
 watch(
   () => props.editing,
   (on) => {
-    if (!on) return;
+    if (!on) {
+      return;
+    }
     void nextTick(() => {
       const el = editTextareaRef.value;
       if (el) {

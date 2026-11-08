@@ -17,14 +17,16 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  ariaLabel: "Conversation",
-  initial: true,
-  damping: 0.7,
-  stiffness: 0.05,
-  mass: 1.25,
-  anchor: "none",
-});
-const delegatedProps = reactiveOmit(props, "class");
+    ariaLabel: "Conversation",
+    initial: true,
+    damping: 0.7,
+    stiffness: 0.05,
+    mass: 1.25,
+    anchor: "none",
+    class: undefined,
+    resize: undefined,
+  }),
+  delegatedProps = reactiveOmit(props, "class");
 </script>
 
 <template>

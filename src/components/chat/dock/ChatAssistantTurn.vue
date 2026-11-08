@@ -17,24 +17,26 @@ import type { TurnView } from "@/composables/chat-dock/use-chat-timeline";
 
 // ── assistant 回合:思考与工具的统一折叠块 + 各段正文 + 流式/重试/压缩状态 ──
 const props = defineProps<{
-  turn: TurnView;
-  /** 重试倒计时剩余秒数(父层 250ms tick 驱动) */
-  retrySeconds: number;
-}>();
-const emit = defineEmits<{
-  copy: [];
-}>();
-const { t } = useI18n();
-const clock = useNow({ interval: 30_000 });
-const answerTime = computed(() => {
-  const timestamp = props.turn.completedAt;
-  if (timestamp == null) return null;
-  return {
-    label: formatRelativeTime(timestamp / 1000, clock.value.getTime() / 1000),
-    title: formatLocalDateTime(timestamp / 1000),
-    datetime: new Date(timestamp).toISOString(),
-  };
-});
+    turn: TurnView;
+    /** 重试倒计时剩余秒数(父层 250ms tick 驱动) */
+    retrySeconds: number;
+  }>(),
+  emit = defineEmits<{
+    copy: [];
+  }>(),
+  { t } = useI18n(),
+  clock = useNow({ interval: 30_000 }),
+  answerTime = computed(() => {
+    const timestamp = props.turn.completedAt;
+    if (timestamp == null) {
+      return null;
+    }
+    return {
+      label: formatRelativeTime(timestamp / 1000, clock.value.getTime() / 1000),
+      title: formatLocalDateTime(timestamp / 1000),
+      datetime: new Date(timestamp).toISOString(),
+    };
+  });
 </script>
 
 <template>

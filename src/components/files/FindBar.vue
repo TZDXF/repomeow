@@ -24,14 +24,11 @@ defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: "toggle", key: "caseSensitive" | "wholeWord" | "useRegex"): void;
-  (e: "next"): void;
-  (e: "prev"): void;
-  (e: "close"): void;
-}>();
-
-const { t } = useI18n();
-const host = ref<HTMLElement | null>(null);
+    (e: "toggle", key: "caseSensitive" | "wholeWord" | "useRegex"): void;
+    (e: "next" | "prev" | "close"): void;
+  }>(),
+  { t } = useI18n(),
+  host = ref<HTMLElement | null>(null);
 
 onMounted(() => focusInput());
 

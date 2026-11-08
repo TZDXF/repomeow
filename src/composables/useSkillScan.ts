@@ -56,16 +56,16 @@ export interface SkillScan {
 }
 
 export function useSkillScan(options: UseSkillScanOptions): SkillScan {
-  const scanning = ref(false);
-  const scanReport = shallowRef<ResourceSkillScanReport | null>(null);
-  const scanElapsed = ref(0);
-  let scanRunId = "";
-  let scanSeq = 0;
-  let elapsedTimer: ReturnType<typeof setInterval> | null = null;
+  const scanning = ref(false),
+    scanReport = shallowRef<ResourceSkillScanReport | null>(null),
+    scanElapsed = ref(0);
+  let scanRunId = "",
+    scanSeq = 0,
+    elapsedTimer: ReturnType<typeof setInterval> | null = null;
 
   const scanElapsedLabel = computed(() => {
-    const minutes = Math.floor(scanElapsed.value / 60);
-    const seconds = scanElapsed.value % 60;
+    const minutes = Math.floor(scanElapsed.value / 60),
+      seconds = scanElapsed.value % 60;
     return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   });
 
@@ -92,12 +92,16 @@ export function useSkillScan(options: UseSkillScanOptions): SkillScan {
 
   function hydrateCache() {
     const fingerprint = options.getFingerprint();
-    if (!fingerprint || scanReport.value || scanning.value) return;
-    const cacheId = options.getCacheId();
-    const seq = scanSeq;
+    if (!fingerprint || scanReport.value || scanning.value) {
+      return;
+    }
+    const cacheId = options.getCacheId(),
+      seq = scanSeq;
     void getCachedScanReport(cacheId, fingerprint).then((cached) => {
       // 离页/新一轮扫描开始后,晚到的缓存回填作废
-      if (seq !== scanSeq) return;
+      if (seq !== scanSeq) {
+        return;
+      }
       if (cached && !scanReport.value && !scanning.value) {
         scanReport.value = cached;
       }
@@ -105,7 +109,9 @@ export function useSkillScan(options: UseSkillScanOptions): SkillScan {
   }
 
   async function runScan(model: SkillScanModelRef | null) {
-    if (scanning.value) return;
+    if (scanning.value) {
+      return;
+    }
     const seq = ++scanSeq;
     scanning.value = true;
     scanReport.value = null;
@@ -120,14 +126,20 @@ export function useSkillScan(options: UseSkillScanOptions): SkillScan {
         modelId: model?.modelId,
       });
       // dispose 后晚到的报告不回填、不写缓存
-      if (seq !== scanSeq) return;
+      if (seq !== scanSeq) {
+        return;
+      }
       scanReport.value = report;
       // 成功后写入缓存;技能内容变化会改变指纹,旧缓存自动失效
       const fingerprint = options.getFingerprint();
-      if (fingerprint) void putCachedScanReport(options.getCacheId(), fingerprint, report);
+      if (fingerprint) {
+        void putCachedScanReport(options.getCacheId(), fingerprint, report);
+      }
     } catch (e) {
       // dispose 后的在途失败不 toast
-      if (seq !== scanSeq) return;
+      if (seq !== scanSeq) {
+        return;
+      }
       toast.error(options.formatError(e));
     } finally {
       if (seq === scanSeq) {

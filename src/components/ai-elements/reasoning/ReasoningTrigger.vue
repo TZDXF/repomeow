@@ -14,16 +14,18 @@ interface Props {
   class?: HTMLAttributes["class"];
 }
 
-const props = defineProps<Props>();
-
-const { t } = useI18n();
-const { isStreaming, isOpen, duration } = useReasoningContext();
-
-const thinkingMessage = computed(() => {
-  if (isStreaming.value || duration.value === 0) return "thinking";
-  if (duration.value === undefined) return "default_done";
-  return "duration_done";
-});
+const props = defineProps<Props>(),
+  { t } = useI18n(),
+  { isStreaming, isOpen, duration } = useReasoningContext(),
+  thinkingMessage = computed(() => {
+    if (isStreaming.value || duration.value === 0) {
+      return "thinking";
+    }
+    if (duration.value === undefined) {
+      return "default_done";
+    }
+    return "duration_done";
+  });
 </script>
 
 <template>

@@ -33,38 +33,34 @@ import { useSettingsStore } from "@/stores/settings";
 import type { GitCommitFile, GitGraphCommit } from "@/types";
 
 const props = defineProps<{
-  commit: GitGraphCommit;
-  /** 项目根目录绝对路径(拼接文件相对路径后用于 IDE 打开) */
-  projectPath: string;
-}>();
-
-const emit = defineEmits<{
-  /** 折叠为右侧窄条(窄条由父组件渲染,点击重新展开) */
-  collapse: [];
-}>();
-
-const { t } = useI18n();
-const settings = useSettingsStore();
-
-// --- 文件列表 ---
-const filesRequest = useLatestRequest();
-const imageRequest = useLatestRequest();
-const files = ref<GitCommitFile[]>([]);
-const filesLoading = ref(false);
-const filesError = ref("");
-/** 平铺 / 树形切换(持久化) */
-const treeMode = useLocalStorage("repomeow:commit-files-tree", false);
-const collapsedFolders = ref(new Set<string>());
-
-// --- 单文件 diff:本组件只负责取数,解析/着色/折叠/并排渲染全部在 DiffViewer ---
-const selectedPath = ref<string | null>(null);
-const {
-  diff,
-  loading: diffLoading,
-  error: diffError,
-  load: loadDiff,
-  reset: resetDiff,
-} = useGitDiffLoader({ keepPrevious: true });
+    commit: GitGraphCommit;
+    /** 项目根目录绝对路径(拼接文件相对路径后用于 IDE 打开) */
+    projectPath: string;
+  }>(),
+  emit = defineEmits<{
+    /** 折叠为右侧窄条(窄条由父组件渲染,点击重新展开) */
+    collapse: [];
+  }>(),
+  { t } = useI18n(),
+  settings = useSettingsStore(),
+  // --- 文件列表 ---
+  filesRequest = useLatestRequest(),
+  imageRequest = useLatestRequest(),
+  files = ref<GitCommitFile[]>([]),
+  filesLoading = ref(false),
+  filesError = ref(""),
+  /** 平铺 / 树形切换(持久化) */
+  treeMode = useLocalStorage("repomeow:commit-files-tree", false),
+  collapsedFolders = ref(new Set<string>()),
+  // --- 单文件 diff:本组件只负责取数,解析/着色/折叠/并排渲染全部在 DiffViewer ---
+  selectedPath = ref<string | null>(null),
+  {
+    diff,
+    loading: diffLoading,
+    error: diffError,
+    load: loadDiff,
+    reset: resetDiff,
+  } = useGitDiffLoader({ keepPrevious: true });
 
 // --- 图片 diff:二进制图片无文本 diff 可渲染,新旧版本 blob 转 data URL 由
 //     ImageDiffPreview 直接预览(与 ProjectFiles 的图片查看同款交互) ---
@@ -75,23 +71,18 @@ interface DiffImagePane {
   src: string;
   svg: boolean;
 }
-const imagePanes = ref<DiffImagePane[]>([]);
-const imageLoading = ref(false);
-const imageError = ref("");
-
-const selectedIsImage = computed(() =>
-  selectedPath.value ? isImagePath(selectedPath.value) : false,
-);
-
-/** 忽略空白差异模式(持久化):none 不忽略 / eol 行尾 / change 空白数量变化 / all 全部空白;
- *  与 DiffViewer 的 v-model 同源,模式变化时按新模式重取当前文件 diff(行集会变) */
-const ignoreWs = useLocalStorage<"none" | "eol" | "change" | "all">(
-  "repomeow:commit-diff-ignore-ws",
-  "none",
-);
-
-/** 合并提交(多父)diff-tree 无输出,展示提示而非空列表 */
-const isMerge = computed(() => props.commit.parents.length > 1);
+const imagePanes = ref<DiffImagePane[]>([]),
+  imageLoading = ref(false),
+  imageError = ref(""),
+  selectedIsImage = computed(() => (selectedPath.value ? isImagePath(selectedPath.value) : false)),
+  /** 忽略空白差异模式(持久化):none 不忽略 / eol 行尾 / change 空白数量变化 / all 全部空白;
+   *  与 DiffViewer 的 v-model 同源,模式变化时按新模式重取当前文件 diff(行集会变) */
+  ignoreWs = useLocalStorage<"none" | "eol" | "change" | "all">(
+    "repomeow:commit-diff-ignore-ws",
+    "none",
+  ),
+  /** 合并提交(多父)diff-tree 无输出,展示提示而非空列表 */
+  isMerge = computed(() => props.commit.parents.length > 1);
 
 async function loadFiles() {
   const isCurrent = filesRequest.begin();
@@ -109,16 +100,22 @@ async function loadFiles() {
       path: props.projectPath,
       hash: props.commit.hash,
     });
-    if (!isCurrent()) return;
+    if (!isCurrent()) {
+      return;
+    }
     files.value = result;
     // 默认选中第一个文件,直接展示 diff
     if (files.value.length) {
       void selectFile(files.value[0]);
     }
   } catch (e) {
-    if (isCurrent()) filesError.value = String(e);
+    if (isCurrent()) {
+      filesError.value = String(e);
+    }
   } finally {
-    if (isCurrent()) filesLoading.value = false;
+    if (isCurrent()) {
+      filesLoading.value = false;
+    }
   }
 }
 
@@ -156,9 +153,9 @@ async function selectFile(file: GitCommitFile, force = false) {
 // 图片 diff 取数:新增文件无旧版本、删除文件无新版本,其余(含重命名/类型变更)两侧都取;
 // blob 在某一版本不存在时该侧直接不渲染。旧版本从父提交的树读,重命名走 old_path
 async function loadImageDiff(file: GitCommitFile) {
-  const isCurrent = imageRequest.begin();
-  const wantOld = file.status !== "A";
-  const wantNew = file.status !== "D";
+  const isCurrent = imageRequest.begin(),
+    wantOld = file.status !== "A",
+    wantNew = file.status !== "D";
   imageLoading.value = true;
   imageError.value = "";
   try {
@@ -180,7 +177,9 @@ async function loadImageDiff(file: GitCommitFile) {
           })
         : Promise.resolve(null),
     ]);
-    if (!isCurrent()) return;
+    if (!isCurrent()) {
+      return;
+    }
     const panes: DiffImagePane[] = [];
     if (oldB64 !== null) {
       const p = file.old_path ?? file.path;
@@ -203,52 +202,58 @@ async function loadImageDiff(file: GitCommitFile) {
     }
     imagePanes.value = panes;
   } catch (e) {
-    if (!isCurrent()) return;
+    if (!isCurrent()) {
+      return;
+    }
     imagePanes.value = [];
     imageError.value = String(e);
   } finally {
-    if (isCurrent()) imageLoading.value = false;
+    if (isCurrent()) {
+      imageLoading.value = false;
+    }
   }
 }
 
 // 忽略空白模式变化:按新模式重取当前文件 diff(图片是二进制,不受空白模式影响,跳过)
 watch(ignoreWs, () => {
   const file = selectedFile.value;
-  if (file && !isImagePath(file.path)) void selectFile(file, true);
+  if (file && !isImagePath(file.path)) {
+    void selectFile(file, true);
+  }
 });
 
 // --- 树形展示:按目录层级聚合,折叠状态记忆;行化(树形/平铺)走 file-tree 统一辅助 ---
-const fileTree = computed(() => buildFileTree(files.value));
-
-const treeRows = computed(() => flattenVisibleTree(fileTree.value, collapsedFolders.value));
-
-/** 平铺行:只显示文件名,完整路径放 title;baseName 走 @/lib/path */
-const flatRows = computed(() =>
-  flatFileRows(files.value, {
-    name: (f) => (f.old_path ? `${baseName(f.old_path)} → ${baseName(f.path)}` : baseName(f.path)),
-    title: (f) => (f.old_path ? `${f.old_path} → ${f.path}` : f.path),
-  }),
-);
+const fileTree = computed(() => buildFileTree(files.value)),
+  treeRows = computed(() => flattenVisibleTree(fileTree.value, collapsedFolders.value)),
+  /** 平铺行:只显示文件名,完整路径放 title;baseName 走 @/lib/path */
+  flatRows = computed(() =>
+    flatFileRows(files.value, {
+      name: (f) =>
+        f.old_path ? `${baseName(f.old_path)} → ${baseName(f.path)}` : baseName(f.path),
+      title: (f) => (f.old_path ? `${f.old_path} → ${f.path}` : f.path),
+    }),
+  );
 
 function toggleFolder(fullPath: string) {
   collapsedFolders.value = toggleInSet(collapsedFolders.value, fullPath);
 }
 
 /** 当前选中文件(已删除的文件不提供 IDE 打开:工作区已不存在) */
-const selectedFile = computed(() => files.value.find((f) => f.path === selectedPath.value) ?? null);
-const canOpenInIde = computed(() => !!selectedFile.value && selectedFile.value.status !== "D");
-
-/** 并排是否适用:新增/删除文件一侧必然全空,强制逐行视图并隐藏切换按钮 */
-const splitApplicable = computed(
-  () => selectedFile.value?.status !== "A" && selectedFile.value?.status !== "D",
-);
+const selectedFile = computed(() => files.value.find((f) => f.path === selectedPath.value) ?? null),
+  canOpenInIde = computed(() => !!selectedFile.value && selectedFile.value.status !== "D"),
+  /** 并排是否适用:新增/删除文件一侧必然全空,强制逐行视图并隐藏切换按钮 */
+  splitApplicable = computed(
+    () => selectedFile.value?.status !== "A" && selectedFile.value?.status !== "D",
+  );
 
 // --- 在 IDE 打开(默认编辑器) ---
 async function openFile(file: GitCommitFile) {
   const option = sortOpenWithOptions(settings.openWithOrder, settings.customOpenWith).find(
     (candidate) => candidate.id === settings.defaultOpenWith,
   );
-  if (!option) return;
+  if (!option) {
+    return;
+  }
   try {
     await openPathWith(option, `${props.projectPath}/${file.path}`);
   } catch (e) {
@@ -273,25 +278,26 @@ async function copyHash(hash: string) {
 // --- 布局:vertical = 列表在上 diff 在下;horizontal = 列表与 diff 左右分列(diff 单独一列) ---
 /** 布局切换(持久化) */
 const layout = useLocalStorage<"vertical" | "horizontal">(
-  "repomeow:commit-detail-layout",
-  "vertical",
-);
-
-// --- 文件列表 / diff 区分隔拖拽:上下布局调列表高度,左右布局调列表宽度 ---
-const listHeight = useLocalStorage("repomeow:commit-detail-list-h", 240);
-const listWidth = useLocalStorage("repomeow:commit-detail-list-w", 280);
-const LIST_MIN_H = 120;
-const LIST_MAX_H = 600;
-const LIST_MIN_W = 180;
-/** 左右布局下 diff 列的最小宽度:listWidth 持久化值可能超过当前面板宽度(面板被拖窄过),
- * 列表宽度按容器实测宽度自适应 clamp,避免把 diff 挤成负宽、列表溢出容器 */
-const DIFF_MIN_W = 120;
-const rootEl = ref<HTMLElement | null>(null);
-const { width: panelWidth } = useElementSize(rootEl);
+    "repomeow:commit-detail-layout",
+    "vertical",
+  ),
+  // --- 文件列表 / diff 区分隔拖拽:上下布局调列表高度,左右布局调列表宽度 ---
+  listHeight = useLocalStorage("repomeow:commit-detail-list-h", 240),
+  listWidth = useLocalStorage("repomeow:commit-detail-list-w", 280),
+  LIST_MIN_H = 120,
+  LIST_MAX_H = 600,
+  LIST_MIN_W = 180,
+  /** 左右布局下 diff 列的最小宽度:listWidth 持久化值可能超过当前面板宽度(面板被拖窄过),
+   * 列表宽度按容器实测宽度自适应 clamp,避免把 diff 挤成负宽、列表溢出容器 */
+  DIFF_MIN_W = 120,
+  rootEl = ref<HTMLElement | null>(null),
+  { width: panelWidth } = useElementSize(rootEl);
 
 /** 列表宽度实际上限:面板宽减去 diff 列最小宽度,随面板宽度动态伸缩(不设固定上限) */
 function listWidthCap() {
-  if (layout.value !== "horizontal" || !panelWidth.value) return LIST_MIN_W;
+  if (layout.value !== "horizontal" || !panelWidth.value) {
+    return LIST_MIN_W;
+  }
   return Math.max(LIST_MIN_W, Math.floor(panelWidth.value) - DIFF_MIN_W);
 }
 
@@ -303,23 +309,23 @@ let listResizeCleanups: (() => void)[] = [];
 
 function startListResize(e: PointerEvent) {
   e.preventDefault();
-  const horizontal = layout.value === "horizontal";
-  const startPos = horizontal ? e.clientX : e.clientY;
-  const startSize = horizontal ? listWidth.value : listHeight.value;
-  const onMove = (ev: PointerEvent) => {
-    const size = Math.round(startSize + (horizontal ? ev.clientX : ev.clientY) - startPos);
-    if (horizontal) {
-      listWidth.value = Math.min(listWidthCap(), Math.max(LIST_MIN_W, size));
-    } else {
-      listHeight.value = Math.min(LIST_MAX_H, Math.max(LIST_MIN_H, size));
-    }
-  };
-  const onUp = () => {
-    window.removeEventListener("pointermove", onMove);
-    window.removeEventListener("pointerup", onUp);
-    listResizeCleanups = listResizeCleanups.filter((fn) => fn !== cleanup);
-  };
-  const cleanup = onUp;
+  const horizontal = layout.value === "horizontal",
+    startPos = horizontal ? e.clientX : e.clientY,
+    startSize = horizontal ? listWidth.value : listHeight.value,
+    onMove = (ev: PointerEvent) => {
+      const size = Math.round(startSize + (horizontal ? ev.clientX : ev.clientY) - startPos);
+      if (horizontal) {
+        listWidth.value = Math.min(listWidthCap(), Math.max(LIST_MIN_W, size));
+      } else {
+        listHeight.value = Math.min(LIST_MAX_H, Math.max(LIST_MIN_H, size));
+      }
+    },
+    onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      listResizeCleanups = listResizeCleanups.filter((fn) => fn !== cleanup);
+    },
+    cleanup = onUp;
   window.addEventListener("pointermove", onMove);
   window.addEventListener("pointerup", onUp);
   listResizeCleanups.push(cleanup);
@@ -330,7 +336,9 @@ onBeforeUnmount(() => {
   imageRequest.invalidate();
   resetDiff();
   // 拖拽中组件被卸载:残留 pointermove/pointerup 监听器仍会引用已卸载组件的状态,显式移除避免泄漏
-  for (const fn of listResizeCleanups) fn();
+  for (const fn of listResizeCleanups) {
+    fn();
+  }
   listResizeCleanups = [];
 });
 </script>

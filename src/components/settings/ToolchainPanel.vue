@@ -37,50 +37,61 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cmd } from "@/lib/tauri";
-import type { ToolchainKind, ToolchainOp, ToolchainRemoteVersion, ToolchainStatus, ToolchainUpdateInfo } from "@/types";
+import type {
+  ToolchainKind,
+  ToolchainOp,
+  ToolchainRemoteVersion,
+  ToolchainStatus,
+  ToolchainUpdateInfo,
+} from "@/types";
 import JavaSection from "@/components/settings/JavaSection.vue";
 
-const { t } = useI18n();
-
-const items = ref<ToolchainStatus[]>([]);
-const scanning = ref(false);
-/** 首扫是否已结束(区分「检测中」与「检测失败」两种空列表) */
-const scanned = ref(false);
-
-/** 分组展示顺序与图标;工具行顺序由后端 TOOLS 注册表决定 */
-const KIND_ORDER: ToolchainKind[] = ["rust", "python", "node", "dotnet", "go", "git", "powershell"];
-const GROUP_ICONS: Record<ToolchainKind, Component> = {
-  rust: markRaw(Hammer),
-  python: markRaw(FileTerminal),
-  node: markRaw(Hexagon),
-  dotnet: markRaw(Box),
-  go: markRaw(Squirrel),
-  git: markRaw(GitBranch),
-  powershell: markRaw(FileTerminal),
-};
-
-const groups = computed(() =>
-  KIND_ORDER.map((kind) => ({
-    kind,
-    icon: GROUP_ICONS[kind],
-    tools: items.value.filter((tool) => tool.kind === kind),
-  })).filter((group) => group.tools.length > 0),
-);
+const { t } = useI18n(),
+  items = ref<ToolchainStatus[]>([]),
+  scanning = ref(false),
+  /** 首扫是否已结束(区分「检测中」与「检测失败」两种空列表) */
+  scanned = ref(false),
+  /** 分组展示顺序与图标;工具行顺序由后端 TOOLS 注册表决定 */
+  KIND_ORDER: ToolchainKind[] = ["rust", "python", "node", "dotnet", "go", "git", "powershell"],
+  GROUP_ICONS: Record<ToolchainKind, Component> = {
+    rust: markRaw(Hammer),
+    python: markRaw(FileTerminal),
+    node: markRaw(Hexagon),
+    dotnet: markRaw(Box),
+    go: markRaw(Squirrel),
+    git: markRaw(GitBranch),
+    powershell: markRaw(FileTerminal),
+  },
+  groups = computed(() =>
+    KIND_ORDER.map((kind) => ({
+      kind,
+      icon: GROUP_ICONS[kind],
+      tools: items.value.filter((tool) => tool.kind === kind),
+    })).filter((group) => group.tools.length > 0),
+  );
 
 /** 版本管理器各自管理的东西不同,版本区标签随之区分(uv 行管的是 python) */
 function versionLabel(tool: ToolchainStatus): string {
-  if (tool.id === "dotnet") return t("settings.devEnv.tools.sdksLabel");
-  if (tool.id === "uv") return t("settings.devEnv.tools.pythonVersionsLabel");
+  if (tool.id === "dotnet") {
+    return t("settings.devEnv.tools.sdksLabel");
+  }
+  if (tool.id === "uv") {
+    return t("settings.devEnv.tools.pythonVersionsLabel");
+  }
   return t("settings.devEnv.tools.nodeVersionsLabel");
 }
 
 function displayName(tool: ToolchainStatus): string {
-  if (tool.id === "pwsh") return "PowerShell 7";
+  if (tool.id === "pwsh") {
+    return "PowerShell 7";
+  }
   return tool.id === "vp" ? "vp (Vite+)" : tool.id;
 }
 
 async function scan() {
-  if (scanning.value) return;
+  if (scanning.value) {
+    return;
+  }
   scanning.value = true;
   try {
     items.value = await cmd<ToolchainStatus[]>("detect_toolchains");
@@ -122,7 +133,9 @@ async function checkUpdate(tool: ToolchainStatus): Promise<ToolchainUpdateInfo |
 
 function checkAllUpdates() {
   for (const tool of items.value) {
-    if (tool.caps.can_update) void checkUpdate(tool);
+    if (tool.caps.can_update) {
+      void checkUpdate(tool);
+    }
   }
 }
 
@@ -157,13 +170,15 @@ function install(tool: ToolchainStatus) {
 }
 
 /** 待确认的工具链操作(卸载/卸载指定版本),ConfirmDialog 确认后执行 */
-const pendingOp = ref<{ description: string; action: () => void } | null>(null);
-const opConfirmOpen = computed({
-  get: () => pendingOp.value !== null,
-  set: (v) => {
-    if (!v) pendingOp.value = null;
-  },
-});
+const pendingOp = ref<{ description: string; action: () => void } | null>(null),
+  opConfirmOpen = computed({
+    get: () => pendingOp.value !== null,
+    set: (v) => {
+      if (!v) {
+        pendingOp.value = null;
+      }
+    },
+  });
 
 function uninstall(tool: ToolchainStatus) {
   let message = t("settings.devEnv.tools.uninstallConfirm", { name: displayName(tool) });
@@ -181,12 +196,16 @@ function uninstall(tool: ToolchainStatus) {
 const versionInputs = ref<Record<string, string>>({});
 
 function useVersion(tool: ToolchainStatus, name: string) {
-  if (!tool.caps.can_switch) return;
+  if (!tool.caps.can_switch) {
+    return;
+  }
   void run(tool.id, "use", name);
 }
 
 function removeVersion(tool: ToolchainStatus, name: string) {
-  if (!tool.caps.can_switch) return;
+  if (!tool.caps.can_switch) {
+    return;
+  }
   pendingOp.value = {
     description: t("settings.devEnv.tools.uninstallVersionConfirm", { name }),
     action: () => void run(tool.id, "uninstall_version", name),
@@ -199,7 +218,9 @@ function confirmOp() {
 
 function addVersion(tool: ToolchainStatus) {
   const version = (versionInputs.value[tool.id] ?? "").trim();
-  if (!version) return;
+  if (!version) {
+    return;
+  }
   versionInputs.value[tool.id] = "";
   void run(tool.id, "install_version", version);
 }
@@ -207,16 +228,18 @@ function addVersion(tool: ToolchainStatus) {
 // ---- 添加版本:远端可装列表选择器 ──────────────────────────────────────────
 
 /** 各版本管理器的「添加版本」展开态 / 加载态 / 已拉取的远端列表 / 过滤词 */
-const remoteOpen = ref<Record<string, boolean>>({});
-const remoteLoading = ref<Record<string, boolean>>({});
-const remoteVersions = ref<Record<string, ToolchainRemoteVersion[]>>({});
-const remoteFilter = ref<Record<string, string>>({});
+const remoteOpen = ref<Record<string, boolean>>({}),
+  remoteLoading = ref<Record<string, boolean>>({}),
+  remoteVersions = ref<Record<string, ToolchainRemoteVersion[]>>({}),
+  remoteFilter = ref<Record<string, string>>({});
 
 /** 展开/收起远端列表;首次展开时拉取(list_toolchain_versions 走网络,按需加载) */
 async function toggleRemote(tool: ToolchainStatus) {
   const open = !remoteOpen.value[tool.id];
   remoteOpen.value[tool.id] = open;
-  if (!open || remoteVersions.value[tool.id]) return;
+  if (!open || remoteVersions.value[tool.id]) {
+    return;
+  }
   remoteLoading.value[tool.id] = true;
   try {
     remoteVersions.value[tool.id] = await cmd<ToolchainRemoteVersion[]>("list_toolchain_versions", {
@@ -232,8 +255,8 @@ async function toggleRemote(tool: ToolchainStatus) {
 
 /** 远端列表过滤:排除已装版本,再按过滤词包含匹配 */
 function filteredRemote(tool: ToolchainStatus): ToolchainRemoteVersion[] {
-  const installed = new Set(tool.versions.map((v) => v.name));
-  const query = (remoteFilter.value[tool.id] ?? "").trim().toLowerCase();
+  const installed = new Set(tool.versions.map((v) => v.name)),
+    query = (remoteFilter.value[tool.id] ?? "").trim().toLowerCase();
   return (remoteVersions.value[tool.id] ?? []).filter(
     (v) => !installed.has(v.name) && (!query || v.name.toLowerCase().includes(query)),
   );
@@ -241,12 +264,14 @@ function filteredRemote(tool: ToolchainStatus): ToolchainRemoteVersion[] {
 
 // ---- dotnet 安装大版本选择 ────────────────────────────────────────────────
 
-const dotnetOpen = ref(false);
-const dotnetMajor = ref("10");
-const DOTNET_MAJORS = ["8", "9", "10"];
+const dotnetOpen = ref(false),
+  dotnetMajor = ref("10"),
+  DOTNET_MAJORS = ["8", "9", "10"];
 
 function onDotnetMajorChange(value: AcceptableValue) {
-  if (typeof value === "string") dotnetMajor.value = value;
+  if (typeof value === "string") {
+    dotnetMajor.value = value;
+  }
 }
 
 function confirmDotnetInstall() {
@@ -364,7 +389,9 @@ onMounted(() => {
                 <Button
                   v-else-if="updateInfo[tool.id]"
                   size="sm"
-                  :variant="updateInfo[tool.id]?.state === 'update_available' ? 'default' : 'outline'"
+                  :variant="
+                    updateInfo[tool.id]?.state === 'update_available' ? 'default' : 'outline'
+                  "
                   @click="update(tool)"
                 >
                   {{ updateLabel(tool) }}
@@ -456,10 +483,7 @@ onMounted(() => {
                 {{ t("settings.devEnv.versionLoading") }}
               </p>
               <template v-else>
-                <Input
-                  v-model="remoteFilter[tool.id]"
-                  class="h-6 px-2 text-xs"
-                />
+                <Input v-model="remoteFilter[tool.id]" class="h-6 px-2 text-xs" />
                 <p v-if="!filteredRemote(tool).length" class="text-xs text-muted-foreground">
                   {{ t("settings.devEnv.versionEmpty") }}
                 </p>

@@ -15,19 +15,34 @@ export function hasScheme(url: string): boolean {
 
 /** 统一分隔符并归一化 ./ ../ 段(Tauri asset 协议拒绝含 .. 的请求路径) */
 function normalizeSegments(path: string): string {
-  const isUnc = path.startsWith("\\\\") || path.startsWith("//");
-  const out: string[] = [];
+  const isUnc = path.startsWith("\\\\") || path.startsWith("//"),
+    out: string[] = [];
   // 根部长度:盘符("D:")为 1,UNC 头(server/share)为 2;.. 不得弹出根之外
-  const rootLen = isUnc ? 2 : path.startsWith("/") ? 0 : 1;
+  let rootLen = 1;
+  if (isUnc) {
+    rootLen = 2;
+  } else if (path.startsWith("/")) {
+    rootLen = 0;
+  }
   for (const part of path.split(/[\\/]+/)) {
-    if (!part || part === ".") continue;
+    if (!part || part === ".") {
+      continue;
+    }
     if (part === "..") {
-      if (out.length > rootLen) out.pop();
+      if (out.length > rootLen) {
+        out.pop();
+      }
       continue;
     }
     out.push(part);
   }
-  return (isUnc ? "//" : path.startsWith("/") ? "/" : "") + out.join("/");
+  let prefix = "";
+  if (isUnc) {
+    prefix = "//";
+  } else if (path.startsWith("/")) {
+    prefix = "/";
+  }
+  return prefix + out.join("/");
 }
 
 /**
@@ -45,10 +60,12 @@ export function resolvePath(base: string, rel: string): string {
   }
   clean = clean.split("#")[0].split("?")[0];
   // 已是绝对路径(Windows 盘符 / UNC)原样返回
-  if (WINDOWS_ABS.test(clean) || clean.startsWith("\\\\")) return clean;
+  if (WINDOWS_ABS.test(clean) || clean.startsWith("\\\\")) {
+    return clean;
+  }
   // root-relative(/xxx)与普通相对路径统一拼到项目根上;base 为根(C:\、/)时不再补分隔符
-  const root = cleanPath(base);
-  const joined = `${root}${/[\\/]$/.test(root) ? "" : "/"}${clean.replace(/^[\\/]+/, "")}`;
+  const root = cleanPath(base),
+    joined = `${root}${/[\\/]$/.test(root) ? "" : "/"}${clean.replace(/^[\\/]+/, "")}`;
   return normalizeSegments(joined);
 }
 
@@ -62,13 +79,22 @@ const SAFE_LINK_SCHEMES = new Set(["http:", "https:", "mailto:"]);
  * 判定前剔除 ASCII 空白/控制符,防 "java\tscript:" 之类绕过(浏览器解析 URL 时会忽略这些字符)
  */
 export function safeLinkHref(url: string | null | undefined): string | null {
-  if (!url) return null;
+  if (!url) {
+    return null;
+  }
   const trimmed = url.trim();
-  if (!trimmed) return null;
-  if (trimmed.startsWith("#")) return trimmed;
-  // eslint-disable-next-line no-control-regex -- 故意匹配控制符:浏览器解析 URL 会忽略它们,需在判定前剔除
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed.startsWith("#")) {
+    return trimmed;
+  }
+  // 剔除控制符用于阻止协议混淆，属于安全校验而非误匹配。
+  // oxlint-disable-next-line no-control-regex
   const compact = trimmed.replace(/[\u0000-\u0020]/g, "");
-  if (!hasScheme(compact)) return trimmed;
+  if (!hasScheme(compact)) {
+    return trimmed;
+  }
   const scheme = compact.slice(0, compact.indexOf(":") + 1).toLowerCase();
   return SAFE_LINK_SCHEMES.has(scheme) ? trimmed : null;
 }
@@ -76,8 +102,10 @@ export function safeLinkHref(url: string | null | undefined): string | null {
 /** 仅允许 http(s) 图片和可信根目录内的本地图片;没有根目录时禁用本地图片。 */
 export function safeMarkdownImage(url: string, base: string, root: string): string | null {
   const value = url.trim();
-  // eslint-disable-next-line no-control-regex -- 拒绝路径内控制字符
-  if (!value || /[\u0000-\u001f\u007f]/.test(value)) return null;
+  // oxlint-disable-next-line no-control-regex -- 图片 URL 明确拒绝控制符。
+  if (!value || /[\u0000-\u001f\u007f]/.test(value)) {
+    return null;
+  }
   if (/^https?:\/\//i.test(value)) {
     try {
       const parsed = new URL(value);
@@ -96,26 +124,34 @@ export function safeMarkdownImage(url: string, base: string, root: string): stri
   if (
     !root ||
     !base ||
-    // eslint-disable-next-line no-control-regex -- 同时检查 URL 解码后的控制字符
+    // oxlint-disable-next-line no-control-regex -- 解码后再次拒绝控制符。
     /[\u0000-\u001f\u007f]/.test(decoded) ||
     /^[\\/]{2}/.test(decoded) ||
     hasScheme(decoded)
-  )
+  ) {
     return null;
+  }
   const normalize = (path: string): string => {
-    const forward = toForwardSlash(path);
-    const prefix = forward.startsWith("/") ? "/" : "";
-    const parts: string[] = [];
-    for (const part of forward.split("/")) {
-      if (!part || part === ".") continue;
-      if (part === "..") parts.pop();
-      else parts.push(part);
-    }
-    return prefix + parts.join("/");
-  };
-  const cleanRoot = normalize(root);
-  const cleanBase = normalize(base);
-  if (!cleanRoot || !isInsidePath(cleanRoot, cleanBase)) return null;
+      const forward = toForwardSlash(path),
+        prefix = forward.startsWith("/") ? "/" : "",
+        parts: string[] = [];
+      for (const part of forward.split("/")) {
+        if (!part || part === ".") {
+          continue;
+        }
+        if (part === "..") {
+          parts.pop();
+        } else {
+          parts.push(part);
+        }
+      }
+      return prefix + parts.join("/");
+    },
+    cleanRoot = normalize(root),
+    cleanBase = normalize(base);
+  if (!cleanRoot || !isInsidePath(cleanRoot, cleanBase)) {
+    return null;
+  }
   const path = WINDOWS_ABS.test(decoded)
     ? normalize(decoded)
     : normalize(`${cleanBase}/${decoded.replace(/^[\\/]+/, "")}`);

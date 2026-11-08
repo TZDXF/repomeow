@@ -6,10 +6,10 @@ import type { HolidayData, HolidayName } from "@/types";
 
 // 模块级缓存:节假日/调休为全集数据(get_holiday_data 一次返回 2004–2026),
 // 一次拉取供多个日历组件共享;数据到达前为空集合,日历先按常规周末着色
-const holidayDates = ref<string[]>([]);
-const workdayDates = ref<string[]>([]);
-const holidayNameMap = ref<Record<string, HolidayName>>({});
-const workdayNameMap = ref<Record<string, HolidayName>>({});
+const holidayDates = ref<string[]>([]),
+  workdayDates = ref<string[]>([]),
+  holidayNameMap = ref<Record<string, HolidayName>>({}),
+  workdayNameMap = ref<Record<string, HolidayName>>({});
 let loadPromise: Promise<void> | null = null;
 
 /** 法定节假日/调休补班数据(响应式;首次调用时从后端拉取,失败回退空集合) */
@@ -72,7 +72,9 @@ export function localizedHolidayName(
   name: HolidayName | undefined,
   lang: string,
 ): string | undefined {
-  if (!name) return undefined;
+  if (!name) {
+    return undefined;
+  }
   return lang.startsWith("zh") ? name.zh : name.en;
 }
 
@@ -88,10 +90,12 @@ export function getHolidayDayTitle(
     return localizedHolidayName(ctx.holidayNames?.[ds], lang) ?? t("reportHistory.holiday");
   }
   if (ctx.workdaySet.has(ds)) {
-    const base = t("reportHistory.makeupWorkday");
-    const name = localizedHolidayName(ctx.workdayNames?.[ds], lang);
+    const base = t("reportHistory.makeupWorkday"),
+      name = localizedHolidayName(ctx.workdayNames?.[ds], lang);
     return name ? `${base} · ${name}` : base;
   }
-  if (weekend) return t("reportHistory.weekend");
+  if (weekend) {
+    return t("reportHistory.weekend");
+  }
   return undefined;
 }

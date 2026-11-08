@@ -7,23 +7,22 @@ import { Button } from "@/components/ui/button";
 import type { WorktreeTreeNode } from "@/components/git/worktree-graph";
 
 /** worktree 卡片:分支名/徽标/路径 + 合并/变基/删除操作,操作经事件交 WorktreePanel */
-const { t } = useI18n();
-const props = defineProps<{
-  node: WorktreeTreeNode;
-  /** 详情页当前选中的工作区路径,null = 主工作区 */
-  activePath: string | null;
-  rebasingPath: string | null;
-  rebaseInterruptedPath: string | null;
-  aborting: boolean;
-}>();
-const emit = defineEmits<{
-  merge: [w: NonNullable<WorktreeTreeNode["worktree"]>];
-  rebase: [w: NonNullable<WorktreeTreeNode["worktree"]>];
-  abortRebase: [w: NonNullable<WorktreeTreeNode["worktree"]>];
-  remove: [w: NonNullable<WorktreeTreeNode["worktree"]>];
-}>();
-
-const w = computed(() => props.node.worktree);
+const { t } = useI18n(),
+  props = defineProps<{
+    node: WorktreeTreeNode;
+    /** 详情页当前选中的工作区路径,null = 主工作区 */
+    activePath: string | null;
+    rebasingPath: string | null;
+    rebaseInterruptedPath: string | null;
+    aborting: boolean;
+  }>(),
+  emit = defineEmits<{
+    merge: [w: NonNullable<WorktreeTreeNode["worktree"]>];
+    rebase: [w: NonNullable<WorktreeTreeNode["worktree"]>];
+    abortRebase: [w: NonNullable<WorktreeTreeNode["worktree"]>];
+    remove: [w: NonNullable<WorktreeTreeNode["worktree"]>];
+  }>(),
+  w = computed(() => props.node.worktree);
 
 function emitFor(action: "merge" | "rebase" | "abortRebase" | "remove") {
   if (!w.value) {
@@ -41,13 +40,12 @@ function emitFor(action: "merge" | "rebase" | "abortRebase" | "remove") {
 }
 
 /** 来源分支有该 worktree 未包含的新提交:变基可带入更新 */
-const hasRebaseUpdates = computed(() => (w.value?.base_behind ?? 0) > 0);
-
-const rebaseTitle = computed(() =>
-  hasRebaseUpdates.value
-    ? t("git.worktree.rebaseUpdates", { count: w.value?.base_behind })
-    : t("git.worktree.rebase"),
-);
+const hasRebaseUpdates = computed(() => (w.value?.base_behind ?? 0) > 0),
+  rebaseTitle = computed(() =>
+    hasRebaseUpdates.value
+      ? t("git.worktree.rebaseUpdates", { count: w.value?.base_behind })
+      : t("git.worktree.rebase"),
+  );
 </script>
 
 <template>

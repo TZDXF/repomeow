@@ -6,30 +6,33 @@ import { computed } from "vue";
 import { cn } from "@/lib/utils";
 
 const props = withDefaults(
-  defineProps<{
-    /** "HH:MM" 字符串(24 小时制) */
-    modelValue: string;
-    class?: HTMLAttributes["class"];
-    disabled?: boolean;
-  }>(),
-  { disabled: false },
-);
-const emit = defineEmits<{ "update:modelValue": [value: string] }>();
-
-const timeValue = computed<Time | undefined>({
-  get: () => {
-    const [h, m] = props.modelValue.split(":").map((x) => Number.parseInt(x, 10));
-    if (Number.isNaN(h) || Number.isNaN(m)) return undefined;
-    return new Time(h, m);
-  },
-  set: (v) => {
-    if (!v) return;
-    emit(
-      "update:modelValue",
-      `${String(v.hour).padStart(2, "0")}:${String(v.minute).padStart(2, "0")}`,
-    );
-  },
-});
+    defineProps<{
+      /** "HH:MM" 字符串(24 小时制) */
+      modelValue: string;
+      class?: HTMLAttributes["class"];
+      disabled?: boolean;
+    }>(),
+    { disabled: false },
+  ),
+  emit = defineEmits<{ "update:modelValue": [value: string] }>(),
+  timeValue = computed<Time | undefined>({
+    get: () => {
+      const [h, m] = props.modelValue.split(":").map((x) => Number.parseInt(x, 10));
+      if (Number.isNaN(h) || Number.isNaN(m)) {
+        return undefined;
+      }
+      return new Time(h, m);
+    },
+    set: (v) => {
+      if (!v) {
+        return;
+      }
+      emit(
+        "update:modelValue",
+        `${String(v.hour).padStart(2, "0")}:${String(v.minute).padStart(2, "0")}`,
+      );
+    },
+  });
 </script>
 
 <template>

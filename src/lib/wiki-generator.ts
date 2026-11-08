@@ -102,10 +102,10 @@ export async function generateWiki(
   signal: AbortSignal,
   callbacks: WikiGenCallbacks,
 ): Promise<void> {
-  const { onPhase, onPage, onPageProgress, onContext, onActivities, onRetry } = callbacks;
-  const id = `wiki-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const pages = new Map<string, WikiOutlinePage>();
-  const channel = new Channel<WikiGenerationEvent>();
+  const { onPhase, onPage, onPageProgress, onContext, onActivities, onRetry } = callbacks,
+    id = `wiki-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    pages = new Map<string, WikiOutlinePage>(),
+    channel = new Channel<WikiGenerationEvent>();
   channel.onmessage = (event) => {
     if (event.kind === "phase") {
       onPhase(event.phase);
@@ -128,8 +128,11 @@ export async function generateWiki(
     }
   };
   const cancel = () => void cmd<void>("ai_cancel_run", { runId: id }).catch(() => {});
-  if (signal.aborted) cancel();
-  else signal.addEventListener("abort", cancel, { once: true });
+  if (signal.aborted) {
+    cancel();
+  } else {
+    signal.addEventListener("abort", cancel, { once: true });
+  }
   try {
     await cmd<void>("ai_generate_wiki", {
       request: {
@@ -168,12 +171,15 @@ export async function regenerateWikiPage(
   signal: AbortSignal,
   hints?: WikiPageHints,
 ): Promise<WikiPageGenerationResult> {
-  const id = `wiki-page-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const channel = new Channel<string>();
+  const id = `wiki-page-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    channel = new Channel<string>();
   channel.onmessage = () => {};
   const cancel = () => void cmd<void>("ai_cancel_run", { runId: id }).catch(() => {});
-  if (signal.aborted) cancel();
-  else signal.addEventListener("abort", cancel, { once: true });
+  if (signal.aborted) {
+    cancel();
+  } else {
+    signal.addEventListener("abort", cancel, { once: true });
+  }
   try {
     return await cmd<WikiPageGenerationResult>("ai_regenerate_wiki_page", {
       request: {
@@ -197,8 +203,8 @@ export async function updateWiki(
   automatic: boolean,
   onProgress: (progress: WikiUpdateProgress) => void,
 ): Promise<WikiUpdateResult> {
-  const id = `wiki-update-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const channel = new Channel<WikiUpdateProgress>();
+  const id = `wiki-update-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    channel = new Channel<WikiUpdateProgress>();
   channel.onmessage = onProgress;
   return cmd<WikiUpdateResult>("ai_update_wiki", {
     request: {

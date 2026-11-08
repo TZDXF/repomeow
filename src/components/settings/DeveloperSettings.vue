@@ -4,8 +4,8 @@ import { Switch } from "@/components/ui/switch";
 import { enableDeveloperMode, disableDeveloperMode } from "@/lib/developer-mode";
 import { useSettingsStore } from "@/stores/settings";
 
-const { t } = useI18n();
-const settings = useSettingsStore();
+const { t } = useI18n(),
+  settings = useSettingsStore();
 
 // dev 构建恒启用,开关仅保存偏好;打包版本中运行时切换即时生效。
 async function onToggle(value: boolean) {

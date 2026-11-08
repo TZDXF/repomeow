@@ -17,18 +17,18 @@ import { Input } from "@/components/ui/input";
 import { useProjectsStore } from "@/stores/projects";
 import type { Project } from "@/types";
 
-const { t } = useI18n();
-const props = defineProps<{ project: Project }>();
-const open = defineModel<boolean>("open", { required: true });
-
-const store = useProjectsStore();
-
-const path = ref("");
-const saving = ref(false);
+const { t } = useI18n(),
+  props = defineProps<{ project: Project }>(),
+  open = defineModel<boolean>("open", { required: true }),
+  store = useProjectsStore(),
+  path = ref(""),
+  saving = ref(false);
 
 // 每次打开重置选择,避免残留上次的目录
 watch(open, (v) => {
-  if (v) path.value = "";
+  if (v) {
+    path.value = "";
+  }
 });
 
 async function pickFolder() {
@@ -46,7 +46,9 @@ async function pickFolder() {
 
 async function confirm() {
   const target = path.value.trim();
-  if (!target || saving.value) return;
+  if (!target || saving.value) {
+    return;
+  }
   saving.value = true;
   try {
     await store.updateProjectPath(props.project.id, target);

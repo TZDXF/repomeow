@@ -10,6 +10,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   size: 16,
+  class: undefined,
 });
 </script>
 

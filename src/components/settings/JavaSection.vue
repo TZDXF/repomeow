@@ -30,20 +30,19 @@ import { JDK_VENDORS, useJdkInstallStore } from "@/stores/jdk-install";
 import { useSettingsStore } from "@/stores/settings";
 import type { JdkCandidate, JdkConfig, JdkVendor, RemoteJdkRelease } from "@/types";
 
-const { t } = useI18n();
-const store = useSettingsStore();
-/** 行徽标与路径展示跟随默认 JDK(项目未单独选择时生效的那个) */
-const defaultJdk = computed(() => store.jdkList.find((j) => j.id === store.defaultJdkId));
-
-const detecting = ref(false);
-const dialogOpen = ref(false);
-const formPath = ref("");
-const formName = ref("");
-const formVersion = ref("");
-const formError = ref("");
-const nameTouched = ref(false);
-const checking = ref(false);
-const submitting = ref(false);
+const { t } = useI18n(),
+  store = useSettingsStore(),
+  /** 行徽标与路径展示跟随默认 JDK(项目未单独选择时生效的那个) */
+  defaultJdk = computed(() => store.jdkList.find((j) => j.id === store.defaultJdkId)),
+  detecting = ref(false),
+  dialogOpen = ref(false),
+  formPath = ref(""),
+  formName = ref(""),
+  formVersion = ref(""),
+  formError = ref(""),
+  nameTouched = ref(false),
+  checking = ref(false),
+  submitting = ref(false);
 
 /** 路径去重 key:Windows 路径大小写不敏感 */
 function pathKey(path: string): string {
@@ -51,15 +50,19 @@ function pathKey(path: string): string {
 }
 
 async function detect() {
-  if (detecting.value) return;
+  if (detecting.value) {
+    return;
+  }
   detecting.value = true;
   try {
-    const candidates = await cmd<JdkCandidate[]>("detect_jdks");
-    // 探测结果先按路径去重,入库去重(addJdks 内按大小写不敏感路径再过滤一次)
-    const seen = new Set<string>();
-    const jdks: JdkConfig[] = [];
+    const candidates = await cmd<JdkCandidate[]>("detect_jdks"),
+      // 探测结果先按路径去重,入库去重(addJdks 内按大小写不敏感路径再过滤一次)
+      seen = new Set<string>(),
+      jdks: JdkConfig[] = [];
     for (const c of candidates) {
-      if (seen.has(pathKey(c.path))) continue;
+      if (seen.has(pathKey(c.path))) {
+        continue;
+      }
       seen.add(pathKey(c.path));
       jdks.push({
         id: crypto.randomUUID(),
@@ -102,12 +105,16 @@ async function validatePath() {
   formVersion.value = "";
   formError.value = "";
   const path = formPath.value.trim();
-  if (!path) return;
+  if (!path) {
+    return;
+  }
   checking.value = true;
   try {
     const version = await cmd<string>("check_jdk", { path });
     formVersion.value = version;
-    if (!nameTouched.value) formName.value = `Java ${javaMajorVersion(version)}`;
+    if (!nameTouched.value) {
+      formName.value = `Java ${javaMajorVersion(version)}`;
+    }
   } catch (e) {
     formError.value = String(e);
   } finally {
@@ -116,9 +123,11 @@ async function validatePath() {
 }
 
 async function submit() {
-  const path = formPath.value.trim();
-  const name = formName.value.trim();
-  if (!path || !name || !formVersion.value || submitting.value) return;
+  const path = formPath.value.trim(),
+    name = formName.value.trim();
+  if (!path || !name || !formVersion.value || submitting.value) {
+    return;
+  }
   if (store.jdkList.some((j) => pathKey(j.path) === pathKey(path))) {
     formError.value = t("settings.devEnv.duplicatePath");
     return;
@@ -136,13 +145,15 @@ async function submit() {
 }
 
 /** 待确认删除的 JDK,ConfirmDialog 确认后执行 */
-const pendingRemove = ref<JdkConfig | null>(null);
-const removeConfirmOpen = computed({
-  get: () => pendingRemove.value !== null,
-  set: (v) => {
-    if (!v) pendingRemove.value = null;
-  },
-});
+const pendingRemove = ref<JdkConfig | null>(null),
+  removeConfirmOpen = computed({
+    get: () => pendingRemove.value !== null,
+    set: (v) => {
+      if (!v) {
+        pendingRemove.value = null;
+      }
+    },
+  });
 
 function remove(jdk: JdkConfig) {
   pendingRemove.value = jdk;
@@ -150,25 +161,29 @@ function remove(jdk: JdkConfig) {
 
 async function confirmRemove() {
   const jdk = pendingRemove.value;
-  if (!jdk) return;
+  if (!jdk) {
+    return;
+  }
   await store.removeJdk(jdk.id);
 }
 
 // ---- 在线安装(任务状态在 jdk-install store,支持后台继续) ──────────────────
 
-const installStore = useJdkInstallStore();
-const installOpen = ref(false);
-const installVendor = ref<JdkVendor>("adoptium");
-/** Select 的 v-model 用字符串,安装时转回数字 */
-const installMajor = ref("");
-const releases = ref<RemoteJdkRelease[]>([]);
-const loadingReleases = ref(false);
+const installStore = useJdkInstallStore(),
+  installOpen = ref(false),
+  installVendor = ref<JdkVendor>("adoptium"),
+  /** Select 的 v-model 用字符串,安装时转回数字 */
+  installMajor = ref(""),
+  releases = ref<RemoteJdkRelease[]>([]),
+  loadingReleases = ref(false);
 
 /** 安装结束(成功或失败)自动收起对话框;期间可随时关闭,任务在后台继续 */
 watch(
   () => installStore.installing,
   (now, was) => {
-    if (was && !now && installOpen.value) installOpen.value = false;
+    if (was && !now && installOpen.value) {
+      installOpen.value = false;
+    }
   },
 );
 
@@ -179,7 +194,9 @@ function fmtMB(bytes: number): string {
 async function openInstall() {
   installOpen.value = true;
   // 后台任务进行中时只回看进度,不重置表单
-  if (installStore.installing) return;
+  if (installStore.installing) {
+    return;
+  }
   installVendor.value = "adoptium";
   installMajor.value = "";
   releases.value = [];
@@ -203,7 +220,9 @@ async function loadReleases() {
 }
 
 async function onVendorChange(value: AcceptableValue) {
-  if (typeof value !== "string" || value === installVendor.value) return;
+  if (typeof value !== "string" || value === installVendor.value) {
+    return;
+  }
   installVendor.value = value as JdkVendor;
   installMajor.value = "";
   releases.value = [];
@@ -213,7 +232,9 @@ async function onVendorChange(value: AcceptableValue) {
 /** 启动安装:任务交给全局 store,完成/失败经全局 toast 通知,不阻塞对话框关闭 */
 function startInstall() {
   const major = Number(installMajor.value);
-  if (!major) return;
+  if (!major) {
+    return;
+  }
   void installStore.start(installVendor.value, major);
 }
 </script>

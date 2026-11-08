@@ -10,16 +10,15 @@ interface Props {
   class?: HTMLAttributes["class"];
 }
 const props = withDefaults(defineProps<Props>(), {
-  defaultBranch: 0,
-});
-
-const emits = defineEmits<{
-  (e: "branchChange", branchIndex: number): void;
-}>();
-
-const currentBranch = ref<number>(props.defaultBranch);
-const branches = ref<VNode[]>([]);
-const totalBranches = ref<number>(0);
+    defaultBranch: 0,
+    class: undefined,
+  }),
+  emits = defineEmits<{
+    (e: "branchChange", branchIndex: number): void;
+  }>(),
+  currentBranch = ref<number>(props.defaultBranch),
+  branches = ref<VNode[]>([]),
+  totalBranches = ref<number>(0);
 
 function handleBranchChange(index: number) {
   currentBranch.value = index;
@@ -27,13 +26,17 @@ function handleBranchChange(index: number) {
 }
 
 function goToPrevious() {
-  if (totalBranches.value === 0) return;
+  if (totalBranches.value === 0) {
+    return;
+  }
   const next = currentBranch.value > 0 ? currentBranch.value - 1 : totalBranches.value - 1;
   handleBranchChange(next);
 }
 
 function goToNext() {
-  if (totalBranches.value === 0) return;
+  if (totalBranches.value === 0) {
+    return;
+  }
   const next = currentBranch.value < totalBranches.value - 1 ? currentBranch.value + 1 : 0;
   handleBranchChange(next);
 }

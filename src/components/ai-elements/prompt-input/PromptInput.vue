@@ -8,21 +8,19 @@ import { usePromptInputProvider } from "./context";
 import { PROMPT_INPUT_KEY } from "./types";
 
 const props = defineProps<{
-  class?: HTMLAttributes["class"];
-  accept?: string;
-  multiple?: boolean;
-  globalDrop?: boolean;
-  maxFiles?: number;
-  maxFileSize?: number;
-  initialInput?: string;
-}>();
-
-const emit = defineEmits<{
-  (e: "submit", payload: PromptInputMessage): void;
-  (e: "error", payload: { code: string; message: string }): void;
-}>();
-
-const instance = getCurrentInstance();
+    class?: HTMLAttributes["class"];
+    accept?: string;
+    multiple?: boolean;
+    globalDrop?: boolean;
+    maxFiles?: number;
+    maxFileSize?: number;
+    initialInput?: string;
+  }>(),
+  emit = defineEmits<{
+    (e: "submit", payload: PromptInputMessage): void;
+    (e: "error", payload: { code: string; message: string }): void;
+  }>(),
+  instance = getCurrentInstance();
 
 function getListener(name: "onSubmit" | "onError") {
   return instance?.vnode.props?.[name];
@@ -39,34 +37,35 @@ function callListener<T>(listener: unknown, payload: T) {
 }
 
 // --- Dual-mode context handling ---
-const inheritedContext = inject(PROMPT_INPUT_KEY, null);
-const localContext = inheritedContext
-  ? null
-  : usePromptInputProvider({
-      initialInput: props.initialInput,
-      maxFiles: props.maxFiles,
-      maxFileSize: props.maxFileSize,
-      accept: props.accept,
-      onSubmit: (msg) => {
-        const listener = getListener("onSubmit");
-        if (listener) return callListener(listener, msg);
+const inheritedContext = inject(PROMPT_INPUT_KEY, null),
+  localContext = inheritedContext
+    ? null
+    : usePromptInputProvider({
+        initialInput: props.initialInput,
+        maxFiles: props.maxFiles,
+        maxFileSize: props.maxFileSize,
+        accept: props.accept,
+        onSubmit: (msg) => {
+          const listener = getListener("onSubmit");
+          if (listener) {
+            return callListener(listener, msg);
+          }
 
-        emit("submit", msg);
-      },
-      onError: (err) => {
-        const listener = getListener("onError");
-        if (listener) {
-          void Promise.resolve(callListener(listener, err)).catch((error) => {
-            console.error("PromptInput onError listener failed:", error);
-          });
-          return;
-        }
+          emit("submit", msg);
+        },
+        onError: (err) => {
+          const listener = getListener("onError");
+          if (listener) {
+            void Promise.resolve(callListener(listener, err)).catch((error) => {
+              console.error("PromptInput onError listener failed:", error);
+            });
+            return;
+          }
 
-        emit("error", err);
-      },
-    });
-
-const context = inheritedContext || localContext;
+          emit("error", err);
+        },
+      }),
+  context = inheritedContext || localContext;
 
 if (!context) {
   throw new Error("PromptInput context is missing.");

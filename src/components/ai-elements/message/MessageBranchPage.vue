@@ -8,9 +8,8 @@ interface Props {
   class?: HTMLAttributes["class"];
 }
 
-const props = defineProps<Props>();
-
-const { currentBranch, totalBranches } = useMessageBranchContext();
+const props = defineProps<Props>(),
+  { currentBranch, totalBranches } = useMessageBranchContext();
 </script>
 
 <template>

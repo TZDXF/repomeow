@@ -14,18 +14,16 @@ defineOptions({
 });
 
 const props = withDefaults(
-  defineProps<
-    DialogContentProps & { class?: HTMLAttributes["class"]; showCloseButton?: boolean }
-  >(),
-  {
-    showCloseButton: true,
-  },
-);
-const emits = defineEmits<DialogContentEmits>();
-
-const delegatedProps = reactiveOmit(props, "class");
-
-const forwarded = useForwardPropsEmits(delegatedProps, emits);
+    defineProps<
+      DialogContentProps & { class?: HTMLAttributes["class"]; showCloseButton?: boolean }
+    >(),
+    {
+      showCloseButton: true,
+    },
+  ),
+  emits = defineEmits<DialogContentEmits>(),
+  delegatedProps = reactiveOmit(props, "class"),
+  forwarded = useForwardPropsEmits(delegatedProps, emits);
 </script>
 
 <template>

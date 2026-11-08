@@ -16,41 +16,50 @@ export interface TableData {
 }
 
 export function extractTableData(tableEl: HTMLTableElement): TableData {
-  const headers: string[] = [];
-  const headerCells = tableEl.querySelectorAll("thead th");
-  for (const cell of Array.from(headerCells)) headers.push(cell.textContent?.trim() ?? "");
+  const headers: string[] = [],
+    headerCells = tableEl.querySelectorAll("thead th");
+  for (const cell of Array.from(headerCells)) {
+    headers.push(cell.textContent?.trim() ?? "");
+  }
 
-  const rows: string[][] = [];
-  const bodyRows = tableEl.querySelectorAll("tbody tr");
+  const rows: string[][] = [],
+    bodyRows = tableEl.querySelectorAll("tbody tr");
   for (const row of Array.from(bodyRows)) {
-    const rowData: string[] = [];
-    const cells = row.querySelectorAll("td");
-    for (const cell of Array.from(cells)) rowData.push(cell.textContent?.trim() ?? "");
+    const rowData: string[] = [],
+      cells = row.querySelectorAll("td");
+    for (const cell of Array.from(cells)) {
+      rowData.push(cell.textContent?.trim() ?? "");
+    }
     rows.push(rowData);
   }
   return { headers, rows };
 }
 
 export function tableDataToCSV(data: TableData): string {
-  const { headers, rows } = data;
-  const escapeCSV = (value: string): string => {
-    let needsEscaping = false;
-    let hasQuote = false;
-    for (let i = 0; i < value.length; i += 1) {
-      const ch = value[i];
-      if (ch === '"') {
-        needsEscaping = true;
-        hasQuote = true;
-        break;
+  const { headers, rows } = data,
+    escapeCSV = (value: string): string => {
+      let needsEscaping = false,
+        hasQuote = false;
+      for (const ch of value) {
+        if (ch === '"') {
+          needsEscaping = true;
+          hasQuote = true;
+          break;
+        }
+        if (ch === "," || ch === "\n") {
+          needsEscaping = true;
+        }
       }
-      if (ch === "," || ch === "\n") needsEscaping = true;
-    }
-    if (!needsEscaping) return value;
-    if (hasQuote) return `"${value.replace(/"/g, '""')}"`;
-    return `"${value}"`;
-  };
-  const totalRows = headers.length > 0 ? rows.length + 1 : rows.length;
-  const csvRows: string[] = new Array(totalRows);
+      if (!needsEscaping) {
+        return value;
+      }
+      if (hasQuote) {
+        return `"${value.replace(/"/g, '""')}"`;
+      }
+      return `"${value}"`;
+    },
+    totalRows = headers.length > 0 ? rows.length + 1 : rows.length,
+    csvRows: string[] = new Array(totalRows);
   let rowIndex = 0;
   if (headers.length > 0) {
     csvRows[rowIndex] = headers.map(escapeCSV).join(",");
@@ -59,8 +68,9 @@ export function tableDataToCSV(data: TableData): string {
   for (const row of rows) {
     if (row.length < headers.length) {
       const paddedRow: string[] = new Array(headers.length);
-      for (let i = 0; i < headers.length; i += 1)
+      for (let i = 0; i < headers.length; i += 1) {
         paddedRow[i] = i < row.length ? escapeCSV(row[i]) : "";
+      }
       csvRows[rowIndex] = paddedRow.join(",");
     } else {
       csvRows[rowIndex] = row.map(escapeCSV).join(",");
@@ -71,9 +81,9 @@ export function tableDataToCSV(data: TableData): string {
 }
 
 export function tableDataToTSV(data: TableData): string {
-  const { headers, rows } = data;
-  const totalRows = headers.length > 0 ? rows.length + 1 : rows.length;
-  const tsvRows: string[] = new Array(totalRows);
+  const { headers, rows } = data,
+    totalRows = headers.length > 0 ? rows.length + 1 : rows.length,
+    tsvRows: string[] = new Array(totalRows);
   let rowIndex = 0;
   if (headers.length > 0) {
     tsvRows[rowIndex] = headers.join("\t");
@@ -82,7 +92,9 @@ export function tableDataToTSV(data: TableData): string {
   for (const row of rows) {
     if (row.length < headers.length) {
       const paddedRow: string[] = new Array(headers.length);
-      for (let i = 0; i < headers.length; i += 1) paddedRow[i] = i < row.length ? row[i] : "";
+      for (let i = 0; i < headers.length; i += 1) {
+        paddedRow[i] = i < row.length ? row[i] : "";
+      }
       tsvRows[rowIndex] = paddedRow.join("\t");
     } else {
       tsvRows[rowIndex] = row.join("\t");
@@ -94,20 +106,25 @@ export function tableDataToTSV(data: TableData): string {
 
 export function tableDataToMarkdown(data: TableData): string {
   const { headers, rows } = data;
-  if (headers.length === 0) return "";
+  if (headers.length === 0) {
+    return "";
+  }
   const markdownRows: string[] = new Array(rows.length + 2);
   let rowIndex = 0;
   markdownRows[rowIndex] = `| ${headers.map((h) => escapeMarkdownTableCell(h)).join(" | ")} |`;
   rowIndex += 1;
   const separatorParts: string[] = new Array(headers.length);
-  for (let i = 0; i < headers.length; i += 1) separatorParts[i] = "---";
+  for (let i = 0; i < headers.length; i += 1) {
+    separatorParts[i] = "---";
+  }
   markdownRows[rowIndex] = `| ${separatorParts.join(" | ")} |`;
   rowIndex += 1;
   for (const row of rows) {
     if (row.length < headers.length) {
       const paddedRow: string[] = new Array(headers.length);
-      for (let i = 0; i < headers.length; i += 1)
+      for (let i = 0; i < headers.length; i += 1) {
         paddedRow[i] = i < row.length ? escapeMarkdownTableCell(row[i]) : "";
+      }
       markdownRows[rowIndex] = `| ${paddedRow.join(" | ")} |`;
     } else {
       markdownRows[rowIndex] =

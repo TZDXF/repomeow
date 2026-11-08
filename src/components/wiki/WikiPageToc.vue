@@ -13,38 +13,34 @@ interface TocEntry {
 }
 
 /** 视口顶部再往下这段距离内的最后一个标题视为「当前」(标题自带 mt-6 上边距) */
-const ACTIVE_OFFSET_PX = 72;
-/** 跳转后标题距视口顶部的留白 */
-const SCROLL_MARGIN_PX = 12;
-/** 只有标题的页面不值得展示目录 */
-const MIN_ENTRIES = 2;
-/**
- * 容器宽于该值时目录常驻展开,否则折叠为按钮、hover 浮出。
- * 取值依据:正文列 max-w-3xl(768px)居中,需再容纳面板 w-52(208px)+ 两侧间距,
- * 即 768 + 2 * (208 + 16 + 16) ≈ 1248px 时面板与正文列之间仍有空隙。
- */
-const EXPAND_MIN_WIDTH = 1248;
-/** 折叠态移出后延迟收起,容忍指针在按钮与浮层间隙间的短暂离开 */
-const HOVER_CLOSE_DELAY_MS = 150;
-
-const props = defineProps<{
-  /** 渲染了 Markdown 正文的容器,标题直接从它的 DOM 中提取 */
-  root: HTMLElement | null;
-  /** 正文内容;变更后重新扫描标题 */
-  content: string;
-  /** 页面标识;切页后重置目录与高亮 */
-  pageId: string;
-}>();
-
-const { t } = useI18n();
-
-const host = ref<HTMLElement | null>(null);
-const { width: containerWidth } = useElementSize(host);
-const expanded = computed(() => containerWidth.value >= EXPAND_MIN_WIDTH);
-
-const entries = ref<TocEntry[]>([]);
-const activeEl = ref<HTMLElement | null>(null);
-const hovering = ref(false);
+const ACTIVE_OFFSET_PX = 72,
+  /** 跳转后标题距视口顶部的留白 */
+  SCROLL_MARGIN_PX = 12,
+  /** 只有标题的页面不值得展示目录 */
+  MIN_ENTRIES = 2,
+  /**
+   * 容器宽于该值时目录常驻展开,否则折叠为按钮、hover 浮出。
+   * 取值依据:正文列 max-w-3xl(768px)居中,需再容纳面板 w-52(208px)+ 两侧间距,
+   * 即 768 + 2 * (208 + 16 + 16) ≈ 1248px 时面板与正文列之间仍有空隙。
+   */
+  EXPAND_MIN_WIDTH = 1248,
+  /** 折叠态移出后延迟收起,容忍指针在按钮与浮层间隙间的短暂离开 */
+  HOVER_CLOSE_DELAY_MS = 150,
+  props = defineProps<{
+    /** 渲染了 Markdown 正文的容器,标题直接从它的 DOM 中提取 */
+    root: HTMLElement | null;
+    /** 正文内容;变更后重新扫描标题 */
+    content: string;
+    /** 页面标识;切页后重置目录与高亮 */
+    pageId: string;
+  }>(),
+  { t } = useI18n(),
+  host = ref<HTMLElement | null>(null),
+  { width: containerWidth } = useElementSize(host),
+  expanded = computed(() => containerWidth.value >= EXPAND_MIN_WIDTH),
+  entries = ref<TocEntry[]>([]),
+  activeEl = ref<HTMLElement | null>(null),
+  hovering = ref(false);
 let hoverTimer: ReturnType<typeof setTimeout> | null = null;
 
 const minLevel = computed(() =>
@@ -101,9 +97,9 @@ function jumpTo(entry: TocEntry) {
   if (!viewport) {
     return;
   }
-  const viewportTop = viewport.getBoundingClientRect().top;
-  const top =
-    viewport.scrollTop + entry.el.getBoundingClientRect().top - viewportTop - SCROLL_MARGIN_PX;
+  const viewportTop = viewport.getBoundingClientRect().top,
+    top =
+      viewport.scrollTop + entry.el.getBoundingClientRect().top - viewportTop - SCROLL_MARGIN_PX;
   viewport.scrollTo({ top: Math.max(top, 0), behavior: "smooth" });
   activeEl.value = entry.el;
 }

@@ -15,11 +15,11 @@ defineProps<{
   disabled: boolean;
 }>();
 const emit = defineEmits<{
-  newSession: [];
-  selectHistory: [id: string];
-}>();
-const { t } = useI18n();
-const historyOpen = ref(false);
+    newSession: [];
+    selectHistory: [id: string];
+  }>(),
+  { t } = useI18n(),
+  historyOpen = ref(false);
 
 function selectHistory(id: string) {
   historyOpen.value = false;

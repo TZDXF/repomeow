@@ -30,36 +30,31 @@ import type {
 // 选中实体的调用者/引用关系。sem 不可用时仅本面板降级,不影响文件树与预览。
 
 const props = defineProps<{
-  root: string;
-  /** 当前选中文件(仓库内 "/" 分隔相对路径);null 表示无文件 */
-  filePath: string | null;
-  /** 缓存世代:外部(head 变更等)递增以强制重新加载 */
-  cacheEpoch: number;
-}>();
-
-const emit = defineEmits<{
-  locate: [startLine: number, endLine: number];
-  open: [filePath: string, startLine: number, endLine: number];
-  impact: [entity: SemanticFileEntity];
-  history: [entity: SemanticFileEntity];
-}>();
-
-const { t } = useI18n();
-
-// ── 模式:结构大纲 / 全项目实体搜索 ──────────────────────────────────────────
-const mode = ref<"outline" | "search">("outline");
-const filter = ref("");
-const selectedEntity = ref<SemanticFileEntity | null>(null);
-
-const request = useSemanticRequest((requestId: string, file: string) =>
-  cmd<SemanticFileEntitiesResult>("semantic_file_entities", {
-    path: props.root,
-    filePath: file,
-    requestId,
-  }),
-);
-
-const fromCache = ref(false);
+    root: string;
+    /** 当前选中文件(仓库内 "/" 分隔相对路径);null 表示无文件 */
+    filePath: string | null;
+    /** 缓存世代:外部(head 变更等)递增以强制重新加载 */
+    cacheEpoch: number;
+  }>(),
+  emit = defineEmits<{
+    locate: [startLine: number, endLine: number];
+    open: [filePath: string, startLine: number, endLine: number];
+    impact: [entity: SemanticFileEntity];
+    history: [entity: SemanticFileEntity];
+  }>(),
+  { t } = useI18n(),
+  // ── 模式:结构大纲 / 全项目实体搜索 ──────────────────────────────────────────
+  mode = ref<"outline" | "search">("outline"),
+  filter = ref(""),
+  selectedEntity = ref<SemanticFileEntity | null>(null),
+  request = useSemanticRequest((requestId: string, file: string) =>
+    cmd<SemanticFileEntitiesResult>("semantic_file_entities", {
+      path: props.root,
+      filePath: file,
+      requestId,
+    }),
+  ),
+  fromCache = ref(false);
 
 async function load(file: string, force = false) {
   selectedEntity.value = null;
@@ -73,15 +68,20 @@ async function load(file: string, force = false) {
   }
   fromCache.value = false;
   const result = await request.run(file);
-  if (result) cacheFileEntities(props.root, file, result);
+  if (result) {
+    cacheFileEntities(props.root, file, result);
+  }
 }
 
 watch(
   [() => props.filePath, () => props.cacheEpoch],
   ([file]) => {
     filter.value = "";
-    if (file) void load(file, false);
-    else request.reset();
+    if (file) {
+      void load(file, false);
+    } else {
+      request.reset();
+    }
   },
   { immediate: true },
 );
@@ -95,17 +95,16 @@ function refresh() {
 }
 
 // ── 负责人标注(sem blame):可选列,首次打开时懒加载整文件 blame ──────────────
-const blameOn = ref(false);
-const blameMap = ref<Map<string, SemanticBlameEntry>>(new Map());
-const blameLoading = ref(false);
-
-const blameRequest = useSemanticRequest((requestId: string, file: string) =>
-  cmd<SemanticFileBlameResult>("semantic_file_blame", {
-    path: props.root,
-    filePath: file,
-    requestId,
-  }),
-);
+const blameOn = ref(false),
+  blameMap = ref<Map<string, SemanticBlameEntry>>(new Map()),
+  blameLoading = ref(false),
+  blameRequest = useSemanticRequest((requestId: string, file: string) =>
+    cmd<SemanticFileBlameResult>("semantic_file_blame", {
+      path: props.root,
+      filePath: file,
+      requestId,
+    }),
+  );
 
 async function toggleBlame() {
   blameOn.value = !blameOn.value;
@@ -132,19 +131,19 @@ watch(
 
 // ── 大纲树 / 过滤 ────────────────────────────────────────────────────────────
 const tree = computed<SemanticOutlineNode[]>(() =>
-  buildOutlineTree(request.result.value?.entities ?? []),
-);
-
-/** 过滤时拍平为列表(名称大小写不敏感),按展示序排序 */
-const filtered = computed<SemanticFileEntity[]>(() => {
-  const q = filter.value.trim().toLowerCase();
-  if (!q) return [];
-  return (request.result.value?.entities ?? [])
-    .filter((entity) => entity.name.toLowerCase().includes(q))
-    .sort(compareEntitiesForDisplay);
-});
-
-const filtering = computed(() => filter.value.trim().length > 0);
+    buildOutlineTree(request.result.value?.entities ?? []),
+  ),
+  /** 过滤时拍平为列表(名称大小写不敏感),按展示序排序 */
+  filtered = computed<SemanticFileEntity[]>(() => {
+    const q = filter.value.trim().toLowerCase();
+    if (!q) {
+      return [];
+    }
+    return (request.result.value?.entities ?? [])
+      .filter((entity) => entity.name.toLowerCase().includes(q))
+      .sort(compareEntitiesForDisplay);
+  }),
+  filtering = computed(() => filter.value.trim().length > 0);
 
 function selectEntity(entity: SemanticFileEntity) {
   selectedEntity.value = entity;

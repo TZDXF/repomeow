@@ -13,23 +13,21 @@ import {
 } from "@/lib/resource-library";
 import ResourceMcpEditDialog from "./ResourceMcpEditDialog.vue";
 
-const { t } = useI18n();
-
-const loading = ref(true);
-const servers = ref<ResourceMcpServer[]>([]);
-const editDialogOpen = ref(false);
-/** null = 新建;非 null = 编辑该服务器 */
-const editingServer = ref<ResourceMcpServer | null>(null);
-const pendingDelete = ref<ResourceMcpServer | null>(null);
-
-const deleteConfirmOpen = computed({
-  get: () => pendingDelete.value !== null,
-  set: (v) => {
-    if (!v) {
-      pendingDelete.value = null;
-    }
-  },
-});
+const { t } = useI18n(),
+  loading = ref(true),
+  servers = ref<ResourceMcpServer[]>([]),
+  editDialogOpen = ref(false),
+  /** null = 新建;非 null = 编辑该服务器 */
+  editingServer = ref<ResourceMcpServer | null>(null),
+  pendingDelete = ref<ResourceMcpServer | null>(null),
+  deleteConfirmOpen = computed({
+    get: () => pendingDelete.value !== null,
+    set: (v) => {
+      if (!v) {
+        pendingDelete.value = null;
+      }
+    },
+  });
 
 function endpointSummary(server: ResourceMcpServer): string {
   if (server.transport === "stdio") {

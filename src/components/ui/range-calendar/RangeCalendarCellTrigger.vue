@@ -7,15 +7,13 @@ import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button";
 
 const props = withDefaults(
-  defineProps<RangeCalendarCellTriggerProps & { class?: HTMLAttributes["class"] }>(),
-  {
-    as: "button",
-  },
-);
-
-const delegatedProps = reactiveOmit(props, "class");
-
-const forwardedProps = useForwardProps(delegatedProps);
+    defineProps<RangeCalendarCellTriggerProps & { class?: HTMLAttributes["class"] }>(),
+    {
+      as: "button",
+    },
+  ),
+  delegatedProps = reactiveOmit(props, "class"),
+  forwardedProps = useForwardProps(delegatedProps);
 </script>
 
 <template>

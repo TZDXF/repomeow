@@ -91,17 +91,17 @@ describe("buildOutlineTree", () => {
 
   it("breaks parent cycles caused by duplicated ids instead of recursing forever", () => {
     const tree = buildOutlineTree([
-      entity({ name: "a", entityId: "f::function::x", parentId: "f::function::y", startLine: 1 }),
-      entity({ name: "b", entityId: "f::function::y", parentId: "f::function::x", startLine: 2 }),
-    ]);
-    // 环被断开:两个实体都仍可达,且没有节点互为祖先
-    const names: string[] = [];
-    const walk = (nodes: ReturnType<typeof buildOutlineTree>) => {
-      for (const n of nodes) {
-        names.push(n.entity.name);
-        walk(n.children);
-      }
-    };
+        entity({ name: "a", entityId: "f::function::x", parentId: "f::function::y", startLine: 1 }),
+        entity({ name: "b", entityId: "f::function::y", parentId: "f::function::x", startLine: 2 }),
+      ]),
+      // 环被断开:两个实体都仍可达,且没有节点互为祖先
+      names: string[] = [],
+      walk = (nodes: ReturnType<typeof buildOutlineTree>) => {
+        for (const n of nodes) {
+          names.push(n.entity.name);
+          walk(n.children);
+        }
+      };
     walk(tree);
     expect(names.sort()).toEqual(["a", "b"]);
   });
@@ -109,11 +109,11 @@ describe("buildOutlineTree", () => {
 
 describe("compareEntitiesForDisplay", () => {
   it("orders structural types before high-density types", () => {
-    const fn = ref({ name: "z", entityType: "function", startLine: 100 });
-    const prop = ref({ name: "a", entityType: "property", startLine: 1 });
+    const fn = ref({ name: "z", entityType: "function", startLine: 100 }),
+      prop = ref({ name: "a", entityType: "property", startLine: 1 });
     expect(compareEntitiesForDisplay(fn, prop)).toBeLessThan(0);
-    const earlier = ref({ name: "b", startLine: 1 });
-    const later = ref({ name: "a", startLine: 50 });
+    const earlier = ref({ name: "b", startLine: 1 }),
+      later = ref({ name: "a", startLine: 50 });
     expect(compareEntitiesForDisplay(earlier, later)).toBeLessThan(0);
     expect(
       compareEntitiesForDisplay(
@@ -126,11 +126,11 @@ describe("compareEntitiesForDisplay", () => {
 
 describe("dedupeEntityRefs", () => {
   it("dedupes by entityId, falling back to file+name+line", () => {
-    const a = ref({ name: "x", entityId: "f::function::x" });
-    const b = ref({ name: "x", entityId: "f::function::x", startLine: 9 });
-    const c = ref({ name: "x", filePath: "g.ts", startLine: 1 });
-    const d = ref({ name: "x", filePath: "g.ts", startLine: 1 });
-    const e = ref({ name: "x", filePath: "g.ts", startLine: 2 });
+    const a = ref({ name: "x", entityId: "f::function::x" }),
+      b = ref({ name: "x", entityId: "f::function::x", startLine: 9 }),
+      c = ref({ name: "x", filePath: "g.ts", startLine: 1 }),
+      d = ref({ name: "x", filePath: "g.ts", startLine: 1 }),
+      e = ref({ name: "x", filePath: "g.ts", startLine: 2 });
     expect(dedupeEntityRefs([a, b, c, d, e])).toHaveLength(3);
   });
 });
@@ -157,8 +157,8 @@ describe("entityDisplayName", () => {
 
 describe("sliceGraphSide", () => {
   it("caps shown nodes and reports the folded remainder", () => {
-    const many = Array.from({ length: 10 }, (_, i) => ref({ name: `n${i}`, startLine: i }));
-    const { shown, extra } = sliceGraphSide(many, 8);
+    const many = Array.from({ length: 10 }, (_, i) => ref({ name: `n${i}`, startLine: i })),
+      { shown, extra } = sliceGraphSide(many, 8);
     expect(shown).toHaveLength(8);
     expect(extra).toBe(2);
   });
@@ -172,8 +172,8 @@ describe("sliceGraphSide", () => {
 describe("truncateGraphLabel", () => {
   it("truncates overlong labels with ellipsis", () => {
     expect(truncateGraphLabel("short")).toBe("short");
-    const long = "a".repeat(30);
-    const out = truncateGraphLabel(long);
+    const long = "a".repeat(30),
+      out = truncateGraphLabel(long);
     expect(out).toHaveLength(22);
     expect(out.endsWith("…")).toBe(true);
   });

@@ -14,12 +14,12 @@
 import { toForwardSlash } from "@/lib/path";
 
 /** 匹配 `@docs/guide.md` / `@.claude/skills/foo/SKILL.md` / `@foo.tar.gz` 形态的提及 */
-const FILE_REF_RE = /(?<![\w/])@((?:\.?[\w-][\w.-]*\/)*\.?[\w-][\w.-]*\.[\w-]+)/g;
+const FILE_REF_RE = /(?<![\w/])@(?<path>(?:\.?[\w-][\w.-]*\/)*\.?[\w-][\w.-]*\.[\w-]+)/g;
 
 /** 从文本中提取全部 @ 文件引用(供测试与纯文本场景复用) */
 export function extractFileRefs(text: string): string[] {
   FILE_REF_RE.lastIndex = 0;
-  return [...text.matchAll(FILE_REF_RE)].map((m) => m[1]);
+  return [...text.matchAll(FILE_REF_RE)].map((m) => m.groups!.path);
 }
 
 /**
@@ -29,9 +29,14 @@ export function extractFileRefs(text: string): string[] {
 export function resolveRefPath(currentRel: string, ref: string): string {
   const segments = toForwardSlash(currentRel).split("/").slice(0, -1);
   for (const seg of toForwardSlash(ref).split("/")) {
-    if (!seg || seg === ".") continue;
-    if (seg === "..") segments.pop();
-    else segments.push(seg);
+    if (!seg || seg === ".") {
+      continue;
+    }
+    if (seg === "..") {
+      segments.pop();
+    } else {
+      segments.push(seg);
+    }
   }
   return segments.join("/");
 }
@@ -46,22 +51,23 @@ export const FILE_REF_CLASS = "ai-file-ref";
  */
 export function linkifyFileRefs(container: HTMLElement): void {
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
-    acceptNode(node) {
-      const text = node.textContent;
-      FILE_REF_RE.lastIndex = 0;
-      if (!text || !FILE_REF_RE.test(text)) {
-        return NodeFilter.FILTER_REJECT;
-      }
-      const parent = node.parentElement;
-      if (!parent || parent.closest("a, code, pre, button")) {
-        return NodeFilter.FILTER_REJECT;
-      }
-      return NodeFilter.FILTER_ACCEPT;
-    },
-  });
-
-  const targets: Text[] = [];
-  while (walker.nextNode()) targets.push(walker.currentNode as Text);
+      acceptNode(node) {
+        const text = node.textContent;
+        FILE_REF_RE.lastIndex = 0;
+        if (!text || !FILE_REF_RE.test(text)) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        const parent = node.parentElement;
+        if (!parent || parent.closest("a, code, pre, button")) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    }),
+    targets: Text[] = [];
+  while (walker.nextNode()) {
+    targets.push(walker.currentNode as Text);
+  }
 
   for (const node of targets) {
     const text = node.textContent ?? "";
@@ -70,7 +76,9 @@ export function linkifyFileRefs(container: HTMLElement): void {
     let last = 0;
     for (const match of text.matchAll(FILE_REF_RE)) {
       const index = match.index;
-      if (index > last) fragment.append(document.createTextNode(text.slice(last, index)));
+      if (index > last) {
+        fragment.append(document.createTextNode(text.slice(last, index)));
+      }
       const button = document.createElement("button");
       button.type = "button";
       button.className = `${FILE_REF_CLASS} cursor-pointer font-medium text-primary underline decoration-dotted underline-offset-2 hover:decoration-solid`;
@@ -80,7 +88,9 @@ export function linkifyFileRefs(container: HTMLElement): void {
       fragment.append(button);
       last = index + match[0].length;
     }
-    if (last < text.length) fragment.append(document.createTextNode(text.slice(last)));
+    if (last < text.length) {
+      fragment.append(document.createTextNode(text.slice(last)));
+    }
     node.parentNode?.replaceChild(fragment, node);
   }
 }

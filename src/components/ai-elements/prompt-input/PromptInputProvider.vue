@@ -4,18 +4,16 @@ import { getCurrentInstance } from "vue";
 import { usePromptInputProvider } from "./context";
 
 const props = defineProps<{
-  initialInput?: string;
-  maxFiles?: number;
-  maxFileSize?: number;
-  accept?: string;
-}>();
-
-const emit = defineEmits<{
-  (e: "submit", payload: PromptInputMessage): void;
-  (e: "error", payload: { code: string; message: string }): void;
-}>();
-
-const instance = getCurrentInstance();
+    initialInput?: string;
+    maxFiles?: number;
+    maxFileSize?: number;
+    accept?: string;
+  }>(),
+  emit = defineEmits<{
+    (e: "submit", payload: PromptInputMessage): void;
+    (e: "error", payload: { code: string; message: string }): void;
+  }>(),
+  instance = getCurrentInstance();
 
 function getListener(name: "onSubmit" | "onError") {
   return instance?.vnode.props?.[name];
@@ -38,7 +36,9 @@ usePromptInputProvider({
   accept: props.accept,
   onSubmit: (msg) => {
     const listener = getListener("onSubmit");
-    if (listener) return callListener(listener, msg);
+    if (listener) {
+      return callListener(listener, msg);
+    }
 
     emit("submit", msg);
   },

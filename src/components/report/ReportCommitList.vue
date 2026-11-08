@@ -8,12 +8,12 @@ import ScrollArea from "@/components/common/ScrollArea.vue";
 import { formatCommitTime } from "@/lib/format";
 import type { ProjectCommits } from "@/lib/ai";
 
-const props = defineProps<{ commitData: ProjectCommits[] }>();
-const { t } = useI18n();
-const openByProject = ref<Record<string, boolean>>({});
-const totalCommits = computed(() =>
-  props.commitData.reduce((sum, data) => sum + data.commits.length, 0),
-);
+const props = defineProps<{ commitData: ProjectCommits[] }>(),
+  { t } = useI18n(),
+  openByProject = ref<Record<string, boolean>>({}),
+  totalCommits = computed(() =>
+    props.commitData.reduce((sum, data) => sum + data.commits.length, 0),
+  );
 </script>
 
 <template>

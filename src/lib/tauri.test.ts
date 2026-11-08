@@ -40,8 +40,8 @@ describe("translateCommandError / cmd 本地化路径(新契约)", () => {
     });
 
     it("Error.message 为空时:回退到 String(error),仍非空字符串", () => {
-      const e = new Error("");
-      const out = translateCommandErrorForTest(e);
+      const e = new Error(""),
+        out = translateCommandErrorForTest(e);
       // 空 message 时实现走 `error.message || String(error)`,此处不应抛,
       // 也不应返回字面量 "undefined"
       expect(typeof out).toBe("string");
@@ -113,9 +113,9 @@ describe("translateCommandError / cmd 本地化路径(新契约)", () => {
     });
 
     it("嵌套对象:不递归处理,只读顶层 code/message", () => {
-      const nested = { code: "project_not_found", message: { detail: "x" } };
-      // message 不是 string → 走兜底或无 message 路径,但绝不抛
-      const out = translateCommandErrorForTest(nested);
+      const nested = { code: "project_not_found", message: { detail: "x" } },
+        // message 不是 string → 走兜底或无 message 路径,但绝不抛
+        out = translateCommandErrorForTest(nested);
       expect(typeof out).toBe("string");
       expect(out.length).toBeGreaterThan(0);
     });

@@ -22,8 +22,8 @@ export interface AgentsMdGenerationState {
  */
 export const useAgentsMdStore = defineStore("agentsMd", () => {
   /** 按项目路径(归一化)记录最近一次生成;同项目同时只允许一个任务 */
-  const generations = reactive<Record<string, AgentsMdGenerationState>>({});
-  const controllers = new Map<string, AbortController>();
+  const generations = reactive<Record<string, AgentsMdGenerationState>>({}),
+    controllers = new Map<string, AbortController>();
 
   /** 获取指定项目的生成状态;返回值由 Vue reactive 托管,可直接用于 computed/watch */
   function generationFor(projectPath: string): AgentsMdGenerationState | undefined {

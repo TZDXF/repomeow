@@ -35,8 +35,8 @@ function makeSchedule(overrides: Partial<ReportSchedule> = {}): ReportSchedule {
 
 describe("scheduleToForm", () => {
   it("把持久化任务映射为表单,并拷贝数组", () => {
-    const s = makeSchedule();
-    const form = scheduleToForm(s);
+    const s = makeSchedule(),
+      form = scheduleToForm(s);
     expect(form).toMatchObject({
       name: "日报",
       time: "18:30",
@@ -79,8 +79,8 @@ describe("isScheduleFormValid", () => {
 
 describe("buildScheduleFromForm", () => {
   it("新建:生成 id、默认启用、lastRunAt 为 null,名称去空白", () => {
-    const form = { ...createEmptyScheduleForm(), name: "  晨会日报  ", projectIds: [7] };
-    const s = buildScheduleFromForm(form, null);
+    const form = { ...createEmptyScheduleForm(), name: "  晨会日报  ", projectIds: [7] },
+      s = buildScheduleFromForm(form, null);
     expect(s.id).toBeTruthy();
     expect(s.id).not.toBe("s1");
     expect(s.enabled).toBe(true);
@@ -89,9 +89,9 @@ describe("buildScheduleFromForm", () => {
   });
 
   it("编辑:保留 id / enabled / lastRunAt", () => {
-    const editing = makeSchedule();
-    const form = { ...scheduleToForm(editing), name: "改名" };
-    const s = buildScheduleFromForm(form, editing);
+    const editing = makeSchedule(),
+      form = { ...scheduleToForm(editing), name: "改名" },
+      s = buildScheduleFromForm(form, editing);
     expect(s.id).toBe("s1");
     expect(s.enabled).toBe(false);
     expect(s.lastRunAt).toBe(123456);

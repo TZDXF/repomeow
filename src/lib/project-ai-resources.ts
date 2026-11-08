@@ -152,15 +152,13 @@ export function resourceTree(
   resources: ResourceChoice[],
   ungrouped: string,
 ): ResourceTreeGroup[] {
-  const groupIds = new Set(groups.map((g) => g.id));
-  const tree = groups.map((g) => ({
-    id: g.id,
-    name: g.name,
-    resources: resources.filter((r) => r.groupIds.includes(g.id)),
-  }));
-  const sources = [
-    ...new Set(resources.map((r) => r.source).filter((s): s is string => !!s)),
-  ].sort();
+  const groupIds = new Set(groups.map((g) => g.id)),
+    tree = groups.map((g) => ({
+      id: g.id,
+      name: g.name,
+      resources: resources.filter((r) => r.groupIds.includes(g.id)),
+    })),
+    sources = [...new Set(resources.map((r) => r.source).filter((s): s is string => !!s))].sort();
   for (const source of sources) {
     tree.push({
       id: `source:${source}`,
@@ -178,8 +176,8 @@ export function selectionState(
   ids: string[],
   selected: ReadonlySet<string>,
 ): "none" | "some" | "all" {
-  const unique = [...new Set(ids)];
-  const count = unique.filter((id) => selected.has(id)).length;
+  const unique = [...new Set(ids)],
+    count = unique.filter((id) => selected.has(id)).length;
   if (count === 0) {
     return "none";
   }
@@ -206,8 +204,8 @@ export function assignChanges(
   resourceId: string,
   selectedAgents: ReadonlySet<string>,
 ) {
-  const existing = deployments.filter((d) => d.resourceId === resourceId);
-  const agents = new Set(existing.map((d) => d.agentId));
+  const existing = deployments.filter((d) => d.resourceId === resourceId),
+    agents = new Set(existing.map((d) => d.agentId));
   return {
     add: [...selectedAgents].filter((a) => !agents.has(a)).length,
     remove: existing.filter((d) => !selectedAgents.has(d.agentId)).length,
@@ -233,10 +231,10 @@ export interface MergedSkill {
  */
 export function mergeSkillsByName(skills: ProjectSkill[], skillPaths: string[]): MergedSkill[] {
   const rank = (dir: string) => {
-    const index = skillPaths.findIndex((root) => dir.startsWith(`${root}/`));
-    return index === -1 ? skillPaths.length : index;
-  };
-  const byName = new Map<string, ProjectSkill[]>();
+      const index = skillPaths.findIndex((root) => dir.startsWith(`${root}/`));
+      return index === -1 ? skillPaths.length : index;
+    },
+    byName = new Map<string, ProjectSkill[]>();
   for (const skill of skills) {
     const group = byName.get(skill.name);
     if (group) {

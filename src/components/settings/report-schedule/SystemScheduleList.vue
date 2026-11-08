@@ -9,14 +9,15 @@ import type { SystemSchedule } from "@/types";
 /** 应用内置任务列表:固定存在,只允许启停和修改执行间隔(不可删除/更名) */
 defineProps<{ schedules: SystemSchedule[] }>();
 const emit = defineEmits<{
-  toggle: [schedule: SystemSchedule];
-  edit: [schedule: SystemSchedule];
-}>();
-
-const { t } = useI18n();
+    toggle: [schedule: SystemSchedule];
+    edit: [schedule: SystemSchedule];
+  }>(),
+  { t } = useI18n();
 
 function lastRun(ts: number | null) {
-  if (!ts) return t("reportSchedule.never");
+  if (!ts) {
+    return t("reportSchedule.never");
+  }
   return formatLocalDateTime(ts);
 }
 </script>

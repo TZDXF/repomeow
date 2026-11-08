@@ -14,13 +14,12 @@ vi.mock("@/lib/translation-cache", () => ({
   putCachedTranslation: vi.fn(() => Promise.resolve()),
 }));
 
-const cmdMock = vi.mocked(cmd);
-const getCachedMock = vi.mocked(getCachedTranslation);
-const toastError = vi.mocked(toast.error);
+const cmdMock = vi.mocked(cmd),
+  getCachedMock = vi.mocked(getCachedTranslation),
+  toastError = vi.mocked(toast.error);
 
 function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
+  let resolve!: (value: T) => void, reject!: (reason?: unknown) => void;
   const promise = new Promise<T>((res, rej) => {
     resolve = res;
     reject = rej;
@@ -30,13 +29,13 @@ function deferred<T>() {
 
 /** 可切换身份/正文的翻译实例(模拟文件切换) */
 function setup(identity = "a.md", text = "hello") {
-  const currentIdentity = ref<string | null>(identity);
-  const currentText = ref<string | null>(text);
-  const translation = useMarkdownTranslation({
-    getIdentity: () => currentIdentity.value,
-    getText: () => currentText.value,
-    getLanguage: () => "zh-CN",
-  });
+  const currentIdentity = ref<string | null>(identity),
+    currentText = ref<string | null>(text),
+    translation = useMarkdownTranslation({
+      getIdentity: () => currentIdentity.value,
+      getText: () => currentText.value,
+      getLanguage: () => "zh-CN",
+    });
   return { translation, currentIdentity, currentText };
 }
 
@@ -68,9 +67,8 @@ describe("useMarkdownTranslation", () => {
   it("缓存 await 期间置忙防重复触发;再点取消后晚到的缓存命中作废", async () => {
     const cacheQuery = deferred<string | null>();
     getCachedMock.mockReturnValue(cacheQuery.promise);
-    const { translation } = setup();
-
-    const pending = translation.toggle();
+    const { translation } = setup(),
+      pending = translation.toggle();
     // 缓存查询期间已是 busy:再点 = 取消本轮
     expect(translation.translating.value).toBe(true);
     await translation.toggle();
@@ -96,9 +94,9 @@ describe("useMarkdownTranslation", () => {
   });
 
   it("AI 翻译成功:展示译文并回填缓存", async () => {
-    const calls = mockAiCalls();
-    const { translation } = setup();
-    const pending = translation.toggle();
+    const calls = mockAiCalls(),
+      { translation } = setup(),
+      pending = translation.toggle();
     await waitAiCall(calls, 1);
     calls[0].resolve("译文");
     await pending;
@@ -109,10 +107,9 @@ describe("useMarkdownTranslation", () => {
   });
 
   it("切换文件(reset)后:发 ai_cancel_run,旧请求成功返回被丢弃", async () => {
-    const calls = mockAiCalls();
-    const { translation, currentIdentity } = setup();
-
-    const pending = translation.toggle();
+    const calls = mockAiCalls(),
+      { translation, currentIdentity } = setup(),
+      pending = translation.toggle();
     await waitAiCall(calls, 1);
     expect(translation.translating.value).toBe(true);
 
@@ -133,10 +130,9 @@ describe("useMarkdownTranslation", () => {
   });
 
   it("新请求开始后:旧请求晚到的成功不覆盖新状态,旧 finally 不复位新 busy", async () => {
-    const calls = mockAiCalls();
-    const { translation } = setup();
-
-    const p1 = translation.toggle();
+    const calls = mockAiCalls(),
+      { translation } = setup(),
+      p1 = translation.toggle();
     await waitAiCall(calls, 1);
     // 取消第一轮并立即开始第二轮
     translation.reset();
@@ -158,10 +154,9 @@ describe("useMarkdownTranslation", () => {
   });
 
   it("旧请求在取消后失败不 toast;当前请求失败才 toast", async () => {
-    const calls = mockAiCalls();
-    const { translation } = setup();
-
-    const p1 = translation.toggle();
+    const calls = mockAiCalls(),
+      { translation } = setup(),
+      p1 = translation.toggle();
     await waitAiCall(calls, 1);
     translation.reset();
     calls[0].reject(new Error("canceled by user"));
@@ -177,9 +172,9 @@ describe("useMarkdownTranslation", () => {
   });
 
   it("请求期间身份被外部改变(未经 reset):结果同样作废", async () => {
-    const calls = mockAiCalls();
-    const { translation, currentIdentity } = setup();
-    const pending = translation.toggle();
+    const calls = mockAiCalls(),
+      { translation, currentIdentity } = setup(),
+      pending = translation.toggle();
     await waitAiCall(calls, 1);
     currentIdentity.value = "other.md";
     calls[0].resolve("译文");
@@ -189,9 +184,9 @@ describe("useMarkdownTranslation", () => {
   });
 
   it("原文/译文切换不发起请求;retranslate 跳过缓存覆盖旧译文", async () => {
-    const calls = mockAiCalls();
-    const { translation } = setup();
-    const pending = translation.toggle();
+    const calls = mockAiCalls(),
+      { translation } = setup(),
+      pending = translation.toggle();
     await waitAiCall(calls, 1);
     calls[0].resolve("译文-v1");
     await pending;

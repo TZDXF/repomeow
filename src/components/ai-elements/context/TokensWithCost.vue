@@ -2,14 +2,15 @@
 import { computed } from "vue";
 
 const props = defineProps<{
-  tokens?: number;
-  costText?: string;
-}>();
-
-const formattedTokens = computed(() => {
-  if (props.tokens === undefined) return "—";
-  return new Intl.NumberFormat("en-US", { notation: "compact" }).format(props.tokens);
-});
+    tokens?: number;
+    costText?: string;
+  }>(),
+  formattedTokens = computed(() => {
+    if (props.tokens === undefined) {
+      return "—";
+    }
+    return new Intl.NumberFormat("en-US", { notation: "compact" }).format(props.tokens);
+  });
 </script>
 
 <template>

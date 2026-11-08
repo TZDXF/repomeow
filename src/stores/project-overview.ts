@@ -17,15 +17,15 @@ import type { HiddenKind, ProjectOverview } from "@/types";
  */
 export const useProjectOverviewStore = defineStore("project-overview", () => {
   /** 进行中的请求,key 为项目 id:三个卡片同时挂载只发一次 IPC */
-  const inflight = new Map<number, Promise<ProjectOverview>>();
-  /**
-   * 最近一次聚合结果,按项目 id 存放,作为下次进入时的 stale 数据。
-   * shallowRef:读取路径只挪 LRU 顺序不触发订阅者(与 project-assets store 同因——
-   * 读时改响应式 Map 会造成渲染递归更新),写入新数据才 triggerRef。
-   */
-  const byId = shallowRef(new Map<number, ProjectOverview>());
-  /** 缓存条目上限,避免多项目堆积(单条仅隐藏项 + 自定义命令,体积很小) */
-  const MAX_ENTRIES = 32;
+  const inflight = new Map<number, Promise<ProjectOverview>>(),
+    /**
+     * 最近一次聚合结果,按项目 id 存放,作为下次进入时的 stale 数据。
+     * shallowRef:读取路径只挪 LRU 顺序不触发订阅者(与 project-assets store 同因——
+     * 读时改响应式 Map 会造成渲染递归更新),写入新数据才 triggerRef。
+     */
+    byId = shallowRef(new Map<number, ProjectOverview>()),
+    /** 缓存条目上限,避免多项目堆积(单条仅隐藏项 + 自定义命令,体积很小) */
+    MAX_ENTRIES = 32;
 
   /** 写入并维持 LRU 上限(同 key 先删后插刷新热度);数据变化经 triggerRef 通知订阅者 */
   function setCapped(projectId: number, data: ProjectOverview) {
@@ -33,14 +33,16 @@ export const useProjectOverviewStore = defineStore("project-overview", () => {
     map.delete(projectId);
     map.set(projectId, data);
     const oldest = map.keys().next().value;
-    if (map.size > MAX_ENTRIES && oldest !== undefined) map.delete(oldest);
+    if (map.size > MAX_ENTRIES && oldest !== undefined) {
+      map.delete(oldest);
+    }
     triggerRef(byId);
   }
 
   /** 同步读取缓存的聚合结果(stale 首屏用;无缓存返回 undefined),只刷 LRU 热度不触发订阅者 */
   function cached(projectId: number): ProjectOverview | undefined {
-    const map = byId.value;
-    const hit = map.get(projectId);
+    const map = byId.value,
+      hit = map.get(projectId);
     if (hit !== undefined && map.keys().next().value !== projectId) {
       map.delete(projectId);
       map.set(projectId, hit);
@@ -51,7 +53,9 @@ export const useProjectOverviewStore = defineStore("project-overview", () => {
   /** 拉取(或复用进行中的)聚合数据;失败回退缓存(没有则空数据),不向上抛错 */
   function refresh(projectId: number): Promise<ProjectOverview> {
     const pending = inflight.get(projectId);
-    if (pending) return pending;
+    if (pending) {
+      return pending;
+    }
     const p = cmd<ProjectOverview>("get_project_overview", { projectId })
       .then((data) => {
         setCapped(projectId, data);
@@ -72,9 +76,13 @@ export const useProjectOverviewStore = defineStore("project-overview", () => {
   /** 卡片内隐藏/恢复隐藏成功后同步缓存,让下次进入的 stale 首屏与本次操作一致 */
   function setHiddenLocal(projectId: number, kind: HiddenKind, targetKey: string, hidden: boolean) {
     const cur = byId.value.get(projectId);
-    if (!cur) return;
+    if (!cur) {
+      return;
+    }
     const exists = cur.hidden_items.some((i) => i.kind === kind && i.targetKey === targetKey);
-    if (hidden === exists) return;
+    if (hidden === exists) {
+      return;
+    }
     const items = hidden
       ? [...cur.hidden_items, { kind, targetKey }]
       : cur.hidden_items.filter((i) => !(i.kind === kind && i.targetKey === targetKey));

@@ -9,14 +9,14 @@ import { useSettingsStore } from "@/stores/settings";
 import { listProjectAiTargets, type ProjectAiTarget } from "@/lib/project-ai-resources";
 import { agentBrandIcon } from "@/lib/agent-icons";
 
-const { t } = useI18n();
-const settings = useSettingsStore();
-const targets = ref<ProjectAiTarget[]>([]);
-const saving = ref(false);
-/** 预先解析品牌图标,无对应品牌的回退 lucide Bot。 */
-const rows = computed(() =>
-  targets.value.map((agent) => ({ ...agent, icon: agentBrandIcon(agent.id) })),
-);
+const { t } = useI18n(),
+  settings = useSettingsStore(),
+  targets = ref<ProjectAiTarget[]>([]),
+  saving = ref(false),
+  /** 预先解析品牌图标,无对应品牌的回退 lucide Bot。 */
+  rows = computed(() =>
+    targets.value.map((agent) => ({ ...agent, icon: agentBrandIcon(agent.id) })),
+  );
 onMounted(async () => {
   try {
     targets.value = await listProjectAiTargets();

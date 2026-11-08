@@ -24,8 +24,8 @@ export interface ReportPeriodSelection {
 }
 
 function defaultBatchRange(): RangeModel {
-  const end = calendarToday(getLocalTimeZone());
-  const start = end.subtract({ days: 6 });
+  const end = calendarToday(getLocalTimeZone()),
+    start = end.subtract({ days: 6 });
   return {
     start: start as unknown as RangeDateValue,
     end: end as unknown as RangeDateValue,

@@ -9,10 +9,10 @@ import { codeToHtml } from "shiki";
 const model = defineModel<string>({ required: true });
 defineProps<{ placeholder?: string }>();
 
-const textareaEl = ref<HTMLTextAreaElement | null>(null);
-const layerEl = ref<HTMLDivElement | null>(null);
-const highlighted = ref("");
-const composing = ref(false);
+const textareaEl = ref<HTMLTextAreaElement | null>(null),
+  layerEl = ref<HTMLDivElement | null>(null),
+  highlighted = ref(""),
+  composing = ref(false);
 let seq = 0;
 
 watch(
@@ -29,7 +29,9 @@ watch(
         themes: { light: "github-light", dark: "github-dark" },
         defaultColor: false,
       });
-      if (mySeq === seq) highlighted.value = html;
+      if (mySeq === seq) {
+        highlighted.value = html;
+      }
     } catch (error) {
       // 高亮失败时保留空 highlighted,模板会回退纯文本层,避免透明文字完全隐形
       if (mySeq === seq) {
@@ -43,7 +45,9 @@ watch(
 
 /** 高亮层与 textarea 同盒滚动,保证着色/行号与光标行严格对齐 */
 function syncScroll() {
-  if (!layerEl.value || !textareaEl.value) return;
+  if (!layerEl.value || !textareaEl.value) {
+    return;
+  }
   layerEl.value.scrollTop = textareaEl.value.scrollTop;
   layerEl.value.scrollLeft = textareaEl.value.scrollLeft;
 }
@@ -66,13 +70,17 @@ function onBlur() {
 
 /** Tab 插入两空格(缩进续行命令),不跳出输入框 */
 async function onKeydown(e: KeyboardEvent) {
-  if (e.key !== "Tab" || e.shiftKey) return;
+  if (e.key !== "Tab" || e.shiftKey) {
+    return;
+  }
   e.preventDefault();
   const ta = textareaEl.value;
-  if (!ta) return;
-  const start = ta.selectionStart;
-  const end = ta.selectionEnd;
-  model.value = ta.value.slice(0, start) + "  " + ta.value.slice(end);
+  if (!ta) {
+    return;
+  }
+  const start = ta.selectionStart,
+    end = ta.selectionEnd;
+  model.value = `${ta.value.slice(0, start)}  ${ta.value.slice(end)}`;
   await nextTick();
   ta.focus();
   ta.setSelectionRange(start + 2, start + 2);

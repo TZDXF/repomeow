@@ -12,24 +12,21 @@ import { cmd } from "@/lib/tauri";
 import { debounce } from "@/lib/utils";
 import type { ProjectFileEntry } from "@/types";
 
-const FILE_SEARCH_LIMIT = 50;
-
-const props = defineProps<{
-  root: string;
-}>();
-
-const emit = defineEmits<{
-  open: [path: string];
-}>();
-
-const { t } = useI18n();
-const open = ref(false);
-const text = ref("");
-const activeIndex = ref(0);
-const results = ref<ProjectFileEntry[]>([]);
-const limited = ref(false);
-const box = ref<HTMLElement | null>(null);
-const trigger = ref<InstanceType<typeof Button> | null>(null);
+const FILE_SEARCH_LIMIT = 50,
+  props = defineProps<{
+    root: string;
+  }>(),
+  emit = defineEmits<{
+    open: [path: string];
+  }>(),
+  { t } = useI18n(),
+  open = ref(false),
+  text = ref(""),
+  activeIndex = ref(0),
+  results = ref<ProjectFileEntry[]>([]),
+  limited = ref(false),
+  box = ref<HTMLElement | null>(null),
+  trigger = ref<InstanceType<typeof Button> | null>(null);
 let searchSeq = 0;
 
 const debouncedSearch = debounce((query: string) => void runSearch(query), 200);

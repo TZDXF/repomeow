@@ -25,17 +25,16 @@ defineProps<{
 }>();
 
 const emit = defineEmits<{
-  back: [];
-  locate: [commit: GitGraphCommit];
-  refresh: [];
-}>();
-
-const searchQuery = defineModel<string>("searchQuery", { required: true });
-const filterValue = defineModel<string>("filterValue", { required: true });
-/** 视图切换:graph = 提交图谱;analysis = 数据分析 */
-const view = defineModel<string>("view", { required: true });
-const isGraph = computed(() => view.value === "graph");
-const { t } = useI18n();
+    back: [];
+    locate: [commit: GitGraphCommit];
+    refresh: [];
+  }>(),
+  searchQuery = defineModel<string>("searchQuery", { required: true }),
+  filterValue = defineModel<string>("filterValue", { required: true }),
+  /** 视图切换:graph = 提交图谱;analysis = 数据分析 */
+  view = defineModel<string>("view", { required: true }),
+  isGraph = computed(() => view.value === "graph"),
+  { t } = useI18n();
 
 function shortHash(hash: string) {
   return hash.slice(0, 7);

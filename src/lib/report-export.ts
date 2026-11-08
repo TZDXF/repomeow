@@ -39,20 +39,19 @@ function reportSection(
   options: ReportExportOptions,
   headingLevel: 1 | 2,
 ): string {
-  const { labels, formatCreatedAt } = options;
-  const heading = "#".repeat(headingLevel);
-  const lines = [
-    `${heading} ${reportHeading(report, labels)}`,
-    "",
-    `- **${labels.dateRange}**: ${reportDateLabel(report)}`,
-    `- **${labels.projects}**: ${report.projectNames.map(oneLine).join(", ")}`,
-    `- **${labels.generatedAt}**: ${formatCreatedAt(report.createdAt)}`,
-    `- **${labels.commits}**: ${report.totalCommits}`,
-    "",
-    report.result.trim(),
-  ];
-
-  const commits = report.commits.filter((item) => item.commits.length > 0);
+  const { labels, formatCreatedAt } = options,
+    heading = "#".repeat(headingLevel),
+    lines = [
+      `${heading} ${reportHeading(report, labels)}`,
+      "",
+      `- **${labels.dateRange}**: ${reportDateLabel(report)}`,
+      `- **${labels.projects}**: ${report.projectNames.map(oneLine).join(", ")}`,
+      `- **${labels.generatedAt}**: ${formatCreatedAt(report.createdAt)}`,
+      `- **${labels.commits}**: ${report.totalCommits}`,
+      "",
+      report.result.trim(),
+    ],
+    commits = report.commits.filter((item) => item.commits.length > 0);
   if (commits.length > 0) {
     lines.push("", `${heading}# ${labels.commitDetails}`);
     for (const item of commits) {
@@ -82,14 +81,14 @@ export function buildReportExportMarkdown(
   }
 
   const from = reports.reduce(
-    (minimum, report) => (report.dateFrom < minimum ? report.dateFrom : minimum),
-    reports[0].dateFrom,
-  );
-  const to = reports.reduce(
-    (maximum, report) => (report.dateTo > maximum ? report.dateTo : maximum),
-    reports[0].dateTo,
-  );
-  const sections = reports.map((report) => reportSection(report, options, 2));
+      (minimum, report) => (report.dateFrom < minimum ? report.dateFrom : minimum),
+      reports[0].dateFrom,
+    ),
+    to = reports.reduce(
+      (maximum, report) => (report.dateTo > maximum ? report.dateTo : maximum),
+      reports[0].dateTo,
+    ),
+    sections = reports.map((report) => reportSection(report, options, 2));
   return `# ${options.labels.collection} · ${from} – ${to}\n\n${sections.join("\n\n---\n\n")}\n`;
 }
 
@@ -114,14 +113,14 @@ export function createReportExportFilename(
   }
 
   const from = reports.reduce(
-    (minimum, report) => (report.dateFrom < minimum ? report.dateFrom : minimum),
-    reports[0].dateFrom,
-  );
-  const to = reports.reduce(
-    (maximum, report) => (report.dateTo > maximum ? report.dateTo : maximum),
-    reports[0].dateTo,
-  );
-  const types = new Set(reports.map((report) => report.periodType));
+      (minimum, report) => (report.dateFrom < minimum ? report.dateFrom : minimum),
+      reports[0].dateFrom,
+    ),
+    to = reports.reduce(
+      (maximum, report) => (report.dateTo > maximum ? report.dateTo : maximum),
+      reports[0].dateTo,
+    ),
+    types = new Set(reports.map((report) => report.periodType));
   let name = labels.collection;
   if (types.size === 1) {
     name = reports[0].periodType === "weekly" ? labels.weekly : labels.daily;

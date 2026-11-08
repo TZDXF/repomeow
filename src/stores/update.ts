@@ -20,52 +20,54 @@ export type UpdateStatus =
  * 适合 toast / 对话框展示的简短文案,避免 UI 溢出。
  */
 function toFriendlyError(e: unknown): string {
-  const raw = e instanceof Error ? e.message : String(e);
-  const lower = raw.toLowerCase();
-  const networkHints = [
-    "error sending request",
-    "network",
-    "dns",
-    "timed out",
-    "timeout",
-    "connect",
-    "tcp",
-    "eof",
-  ];
+  const raw = e instanceof Error ? e.message : String(e),
+    lower = raw.toLowerCase(),
+    networkHints = [
+      "error sending request",
+      "network",
+      "dns",
+      "timed out",
+      "timeout",
+      "connect",
+      "tcp",
+      "eof",
+    ];
   if (networkHints.some((hint) => lower.includes(hint))) {
     return i18n.global.t("update.errorNetwork");
   }
   // 去掉 URL(最易导致溢出),并截断过长的原始信息
   const cleaned = raw
-    .replace(/https?:\/\/\S+/g, "")
-    .replace(/\(\s*\)/g, "")
-    .trim();
-  const maxLen = 120;
+      .replace(/https?:\/\/\S+/g, "")
+      .replace(/\(\s*\)/g, "")
+      .trim(),
+    maxLen = 120;
   return cleaned.length > maxLen ? `${cleaned.slice(0, maxLen)}...` : cleaned;
 }
 
 export const useUpdateStore = defineStore("update", () => {
-  const status = ref<UpdateStatus>("idle");
-  /** 检查到的可用更新(由插件返回,含版本号/更新说明/下载安装方法;类实例含私有字段,必须 shallowRef 避免被响应式代理) */
-  const update = shallowRef<Update | null>(null);
-  /** 当前应用版本号 */
-  const currentVersion = ref("");
-  /** 下载进度(字节) */
-  const downloaded = ref(0);
-  const total = ref(0);
-  const error = ref("");
-  /** 更新详情对话框开关(toast action / 标题栏按钮 / 设置页均可打开) */
-  const dialogOpen = ref(false);
-
-  const hasUpdate = computed(() => status.value === "available" && update.value !== null);
-
-  const progress = computed(() => {
-    if (!total.value) return 0;
-    return Math.min(100, Math.round((downloaded.value / total.value) * 100));
-  });
+  const status = ref<UpdateStatus>("idle"),
+    /** 检查到的可用更新(由插件返回,含版本号/更新说明/下载安装方法;类实例含私有字段,必须 shallowRef 避免被响应式代理) */
+    update = shallowRef<Update | null>(null),
+    /** 当前应用版本号 */
+    currentVersion = ref(""),
+    /** 下载进度(字节) */
+    downloaded = ref(0),
+    total = ref(0),
+    error = ref(""),
+    /** 更新详情对话框开关(toast action / 标题栏按钮 / 设置页均可打开) */
+    dialogOpen = ref(false),
+    hasUpdate = computed(() => status.value === "available" && update.value !== null),
+    progress = computed(() => {
+      if (!total.value) {
+        return 0;
+      }
+      return Math.min(100, Math.round((downloaded.value / total.value) * 100));
+    });
 
   async function init() {
-    if (currentVersion.value) return;
+    if (currentVersion.value) {
+      return;
+    }
     try {
       currentVersion.value = await getVersion();
     } catch {
@@ -82,8 +84,9 @@ export const useUpdateStore = defineStore("update", () => {
       status.value === "checking" ||
       status.value === "downloading" ||
       status.value === "installed"
-    )
+    ) {
       return;
+    }
     const t = i18n.global.t;
     status.value = "checking";
     error.value = "";
@@ -103,18 +106,24 @@ export const useUpdateStore = defineStore("update", () => {
       } else {
         update.value = null;
         status.value = "idle";
-        if (manual) toast.success(t("update.upToDate"));
+        if (manual) {
+          toast.success(t("update.upToDate"));
+        }
       }
     } catch (e) {
       status.value = "error";
       error.value = toFriendlyError(e);
-      if (manual) toast.error(t("update.checkFailed", { error: error.value }));
+      if (manual) {
+        toast.error(t("update.checkFailed", { error: error.value }));
+      }
     }
   }
 
   async function downloadAndInstall() {
     const target = update.value;
-    if (!target || status.value === "downloading") return;
+    if (!target || status.value === "downloading") {
+      return;
+    }
     const t = i18n.global.t;
     status.value = "downloading";
     downloaded.value = 0;

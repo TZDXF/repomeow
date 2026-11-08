@@ -8,9 +8,9 @@ import {
 } from "@/components/ui/context-menu";
 import { useTabsStore } from "@/stores/tabs";
 
-const props = defineProps<{ projectId: number }>();
-const { t } = useI18n();
-const tabsStore = useTabsStore();
+const props = defineProps<{ projectId: number }>(),
+  { t } = useI18n(),
+  tabsStore = useTabsStore();
 </script>
 
 <template>

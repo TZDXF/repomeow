@@ -28,43 +28,37 @@ import type { GitBranches, GitWorktree, Project } from "@/types";
  * rebasingPath / rebaseInterruptedPath 以 v-model 暴露,供调用方展示进行中/
  * 中断状态(如树形图上的 spinner 与中止按钮);操作落地后 emit changed 通知刷新。
  */
-const { t } = useI18n();
-const props = defineProps<{ project: Project }>();
-const emit = defineEmits<{ changed: [] }>();
-
-/** 正在变基的 worktree 路径(同一时间只跑一个) */
-const rebasingPath = defineModel<string | null>("rebasingPath", { default: null });
-/** 变基中断(冲突待外部解决)的 worktree 路径 */
-const rebaseInterruptedPath = defineModel<string | null>("rebaseInterruptedPath", {
-  default: null,
-});
-
-const store = useProjectsStore();
-
-const worktrees = ref<GitWorktree[]>([]);
-const branches = ref<GitBranches>({ local: [], remote: [], tracking: [] });
+const { t } = useI18n(),
+  props = defineProps<{ project: Project }>(),
+  emit = defineEmits<{ changed: [] }>(),
+  /** 正在变基的 worktree 路径(同一时间只跑一个) */
+  rebasingPath = defineModel<string | null>("rebasingPath", { default: null }),
+  /** 变基中断(冲突待外部解决)的 worktree 路径 */
+  rebaseInterruptedPath = defineModel<string | null>("rebaseInterruptedPath", {
+    default: null,
+  }),
+  store = useProjectsStore(),
+  worktrees = ref<GitWorktree[]>([]),
+  branches = ref<GitBranches>({ local: [], remote: [], tracking: [] });
 /** 是否已加载过;操作落地后重置,下次打开重拉(分支/领先数已变化) */
 let loaded = false;
 
 // --- 合回确认(目标分支可选,默认创建来源分支) ---
-const mergeTarget = ref<GitWorktree | null>(null);
-const mergeInto = ref("");
-const mergeSquash = ref(false);
-const merging = ref(false);
-
-// --- 变基确认(执行前的流程图解;onto 默认创建来源分支) ---
-const rebaseTarget = ref<GitWorktree | null>(null);
-const rebaseOnto = ref("");
-
-// --- 冲突引导(复用 ConflictDialog;worktree 内冲突传 worktree 路径) ---
-const conflictOpen = ref(false);
-const conflictFiles = ref<string[]>([]);
-const conflictPath = ref<string | undefined>(undefined);
-
-/** 主工作区当前分支:合并/变基默认目标的兜底(调用方 project 可能是 worktree 副本) */
-const mainBranch = computed(
-  () => worktrees.value.find((w) => w.is_main)?.branch ?? props.project.git?.branch ?? null,
-);
+const mergeTarget = ref<GitWorktree | null>(null),
+  mergeInto = ref(""),
+  mergeSquash = ref(false),
+  merging = ref(false),
+  // --- 变基确认(执行前的流程图解;onto 默认创建来源分支) ---
+  rebaseTarget = ref<GitWorktree | null>(null),
+  rebaseOnto = ref(""),
+  // --- 冲突引导(复用 ConflictDialog;worktree 内冲突传 worktree 路径) ---
+  conflictOpen = ref(false),
+  conflictFiles = ref<string[]>([]),
+  conflictPath = ref<string | undefined>(undefined),
+  /** 主工作区当前分支:合并/变基默认目标的兜底(调用方 project 可能是 worktree 副本) */
+  mainBranch = computed(
+    () => worktrees.value.find((w) => w.is_main)?.branch ?? props.project.git?.branch ?? null,
+  );
 
 /** 远程分支去掉远端名前缀: "origin/team/x" -> "team/x" */
 function remoteShortName(remote: string) {
@@ -73,25 +67,27 @@ function remoteShortName(remote: string) {
 
 // 已被某个 worktree 检出的分支名(判断 squash 可用性)
 const checkedOutBranches = computed(() => {
-  return new Set(worktrees.value.map((w) => w.branch).filter((b): b is string => !!b));
-});
-
-/** 合并目标候选:除源分支外的全部本地分支 */
-const mergeTargetCandidates = computed(() =>
-  branches.value.local.filter((b) => b !== mergeTarget.value?.branch),
-);
-/** 选中的合并目标是否检出在某个 worktree(未检出时后端仅允许快进,不可 squash) */
-const mergeIntoCheckedOut = computed(() => checkedOutBranches.value.has(mergeInto.value));
-
-/** 变基 onto 候选:除自身分支外的本地 + 远程分支 */
-const rebaseOntoLocal = computed(() =>
-  branches.value.local.filter((b) => b !== rebaseTarget.value?.branch),
-);
+    return new Set(worktrees.value.map((w) => w.branch).filter((b): b is string => !!b));
+  }),
+  /** 合并目标候选:除源分支外的全部本地分支 */
+  mergeTargetCandidates = computed(() =>
+    branches.value.local.filter((b) => b !== mergeTarget.value?.branch),
+  ),
+  /** 选中的合并目标是否检出在某个 worktree(未检出时后端仅允许快进,不可 squash) */
+  mergeIntoCheckedOut = computed(() => checkedOutBranches.value.has(mergeInto.value)),
+  /** 变基 onto 候选:除自身分支外的本地 + 远程分支 */
+  rebaseOntoLocal = computed(() =>
+    branches.value.local.filter((b) => b !== rebaseTarget.value?.branch),
+  );
 
 /** 来源分支解析为本地分支名(base 可能是 origin/x 远程引用,本地同名时映射过去) */
 function resolveLocalBase(base: string | null, self: string | null): string | null {
-  if (!base || base === self) return null;
-  if (branches.value.local.includes(base)) return base;
+  if (!base || base === self) {
+    return null;
+  }
+  if (branches.value.local.includes(base)) {
+    return base;
+  }
   const short = remoteShortName(base);
   return branches.value.local.includes(short) ? short : null;
 }
@@ -115,7 +111,9 @@ function defaultRebaseOnto(w: GitWorktree) {
 }
 
 async function ensureLoaded() {
-  if (loaded) return;
+  if (loaded) {
+    return;
+  }
   const [wts, brs] = await Promise.all([
     store.listWorktrees(props.project),
     store.listBranches(props.project),
@@ -152,7 +150,9 @@ defineExpose({ openMerge, openRebase });
 
 // 目标分支未被检出时 squash 不可用(后端无工作区可暂存)
 watch(mergeInto, () => {
-  if (!mergeIntoCheckedOut.value) mergeSquash.value = false;
+  if (!mergeIntoCheckedOut.value) {
+    mergeSquash.value = false;
+  }
 });
 
 function showConflicts(files: string[], path?: string) {
@@ -162,9 +162,11 @@ function showConflicts(files: string[], path?: string) {
 }
 
 async function mergeBack() {
-  const w = mergeTarget.value;
-  const target = mergeInto.value;
-  if (!w?.branch || !target || merging.value) return;
+  const w = mergeTarget.value,
+    target = mergeInto.value;
+  if (!w?.branch || !target || merging.value) {
+    return;
+  }
   merging.value = true;
   try {
     const { conflicts, mergedIn } = await store.mergeBranch(props.project, w.branch, {
@@ -195,13 +197,17 @@ async function mergeBack() {
 function confirmRebase() {
   const w = rebaseTarget.value;
   rebaseTarget.value = null;
-  if (w) rebase(w);
+  if (w) {
+    rebase(w);
+  }
 }
 
 /** 在 worktree 内执行:将该 worktree 的分支变基到选定基点(默认创建来源分支)之上 */
 async function rebase(w: GitWorktree) {
   const onto = rebaseOnto.value || mainBranch.value;
-  if (!onto || rebasingPath.value) return;
+  if (!onto || rebasingPath.value) {
+    return;
+  }
   rebasingPath.value = w.path;
   try {
     const result = await store.rebaseBranch(props.project, onto, w.path);

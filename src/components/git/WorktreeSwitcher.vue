@@ -23,28 +23,26 @@ import type { GitWorktree, Project } from "@/types";
  * 下拉时刷新,当前选中的 worktree 已不存在(被管理面板或外部删除)时自动回退
  * 主工作区。管理操作(新建/删除/合回/变基)经 manage 事件交给 WorktreePanel。
  */
-const { t } = useI18n();
-const props = defineProps<{ project: Project }>();
-const path = defineModel<string | null>("path", { required: true });
-const emit = defineEmits<{ manage: [] }>();
-
-const store = useProjectsStore();
-
-const worktrees = ref<GitWorktree[]>([]);
-const loading = ref(false);
-const open = ref(false);
-
-const mainWorktree = computed(() => worktrees.value.find((w) => w.is_main));
-/** 主工作区之外的 linked worktree */
-const linkedWorktrees = computed(() => worktrees.value.filter((w) => !w.is_main));
-
-/** 触发按钮显示名:仅选中 linked worktree 时展示其分支名/短 hash,主工作区只显示图标 */
-const currentLabel = computed(() => {
-  const w = worktrees.value.find((x) => x.path === path.value);
-  // 列表尚未加载到时先用通用文案兜底(加载完成会校验并可能回退主工作区)
-  if (!w) return t("git.worktree.workspace");
-  return w.branch ?? w.head.slice(0, 7);
-});
+const { t } = useI18n(),
+  props = defineProps<{ project: Project }>(),
+  path = defineModel<string | null>("path", { required: true }),
+  emit = defineEmits<{ manage: [] }>(),
+  store = useProjectsStore(),
+  worktrees = ref<GitWorktree[]>([]),
+  loading = ref(false),
+  open = ref(false),
+  mainWorktree = computed(() => worktrees.value.find((w) => w.is_main)),
+  /** 主工作区之外的 linked worktree */
+  linkedWorktrees = computed(() => worktrees.value.filter((w) => !w.is_main)),
+  /** 触发按钮显示名:仅选中 linked worktree 时展示其分支名/短 hash,主工作区只显示图标 */
+  currentLabel = computed(() => {
+    const w = worktrees.value.find((x) => x.path === path.value);
+    // 列表尚未加载到时先用通用文案兜底(加载完成会校验并可能回退主工作区)
+    if (!w) {
+      return t("git.worktree.workspace");
+    }
+    return w.branch ?? w.head.slice(0, 7);
+  });
 
 /** 相对主工作区根的路径展示,与 WorktreePanel 的 displayPath 一致 */
 function displayPath(w: GitWorktree) {
@@ -69,11 +67,15 @@ async function load() {
 watch(() => props.project.id, load, { immediate: true });
 // 每次打开下拉刷新列表,保证面板外(如命令行)的增删也能看到
 watch(open, (v) => {
-  if (v) load();
+  if (v) {
+    load();
+  }
 });
 
 function select(target: string | null) {
-  if (target !== path.value) path.value = target;
+  if (target !== path.value) {
+    path.value = target;
+  }
 }
 
 /** 管理面板创建/删除 worktree 后由父组件调用,刷新列表并校验当前选中 */

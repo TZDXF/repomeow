@@ -21,28 +21,28 @@ import {
   type ResourceMarketplaceSkill,
 } from "@/lib/resource-library";
 
-const props = defineProps<{ initialSource?: string }>();
-const { t } = useI18n();
-const sourceInput = ref(props.initialSource || "");
-const loadedSource = ref("");
-const query = ref("");
-const skills = ref<ResourceMarketplaceSkill[]>([]);
-const loading = ref(false);
-const error = ref("");
-const installing = ref(new Set<string>());
-const batchRunning = ref(false);
-const confirmOpen = ref(false);
-const progress = ref({ completed: 0, total: 0, success: 0, failed: 0 });
-const failures = ref<Record<string, string>>({});
-const cancelRequested = ref(false);
-let sequence = 0;
-let disposed = false;
+const props = defineProps<{ initialSource?: string }>(),
+  { t } = useI18n(),
+  sourceInput = ref(props.initialSource || ""),
+  loadedSource = ref(""),
+  query = ref(""),
+  skills = ref<ResourceMarketplaceSkill[]>([]),
+  loading = ref(false),
+  error = ref(""),
+  installing = ref(new Set<string>()),
+  batchRunning = ref(false),
+  confirmOpen = ref(false),
+  progress = ref({ completed: 0, total: 0, success: 0, failed: 0 }),
+  failures = ref<Record<string, string>>({}),
+  cancelRequested = ref(false);
+let sequence = 0,
+  disposed = false;
 const filtered = computed(() =>
-  skills.value.filter((skill) =>
-    `${skill.name} ${skill.id}`.toLowerCase().includes(query.value.trim().toLowerCase()),
+    skills.value.filter((skill) =>
+      `${skill.name} ${skill.id}`.toLowerCase().includes(query.value.trim().toLowerCase()),
+    ),
   ),
-);
-const pending = computed(() => skills.value.filter((skill) => !skill.installedSkillId));
+  pending = computed(() => skills.value.filter((skill) => !skill.installedSkillId));
 async function load() {
   if (batchRunning.value || installing.value.size) {
     return;

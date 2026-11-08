@@ -8,13 +8,12 @@ import { cn } from "@/lib/utils";
 import { badgeVariants } from ".";
 
 const props = defineProps<
-  PrimitiveProps & {
-    variant?: BadgeVariants["variant"];
-    class?: HTMLAttributes["class"];
-  }
->();
-
-const delegatedProps = reactiveOmit(props, "class");
+    PrimitiveProps & {
+      variant?: BadgeVariants["variant"];
+      class?: HTMLAttributes["class"];
+    }
+  >(),
+  delegatedProps = reactiveOmit(props, "class");
 </script>
 
 <template>

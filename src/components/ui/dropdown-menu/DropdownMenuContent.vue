@@ -11,18 +11,16 @@ defineOptions({
 });
 
 const props = withDefaults(
-  defineProps<DropdownMenuContentProps & { class?: HTMLAttributes["class"] }>(),
-  {
-    align: "start",
-    sideOffset: 4,
-    collisionPadding: () => POPPER_COLLISION_PADDING,
-  },
-);
-const emits = defineEmits<DropdownMenuContentEmits>();
-
-const delegatedProps = reactiveOmit(props, "class");
-
-const forwarded = useForwardPropsEmits(delegatedProps, emits);
+    defineProps<DropdownMenuContentProps & { class?: HTMLAttributes["class"] }>(),
+    {
+      align: "start",
+      sideOffset: 4,
+      collisionPadding: () => POPPER_COLLISION_PADDING,
+    },
+  ),
+  emits = defineEmits<DropdownMenuContentEmits>(),
+  delegatedProps = reactiveOmit(props, "class"),
+  forwarded = useForwardPropsEmits(delegatedProps, emits);
 </script>
 
 <template>

@@ -7,12 +7,11 @@ import type { WikiData } from "@/types";
 import { toFriendlyWikiGenerationError, useWikiStore } from "@/stores/wiki";
 
 const generationHarness = vi.hoisted(() => {
-  const finishes = new Map<string, () => void>();
-  const errors = new Map<string, Error>();
-  return { errors, finishes };
-});
-
-const localStorageData = new Map<string, string>();
+    const finishes = new Map<string, () => void>(),
+      errors = new Map<string, Error>();
+    return { errors, finishes };
+  }),
+  localStorageData = new Map<string, string>();
 
 beforeEach(() => {
   localStorageData.clear();
@@ -75,9 +74,9 @@ describe("wiki store generation concurrency", () => {
   });
 
   it("allows different projects to generate independently", async () => {
-    const store = useWikiStore();
-    const first = store.generate({ id: 1, path: "D:\\repos\\first", name: "first" }, "zh-CN");
-    const second = store.generate({ id: 2, path: "D:\\repos\\second", name: "second" }, "zh-CN");
+    const store = useWikiStore(),
+      first = store.generate({ id: 1, path: "D:\\repos\\first", name: "first" }, "zh-CN"),
+      second = store.generate({ id: 2, path: "D:\\repos\\second", name: "second" }, "zh-CN");
 
     expect(store.isGenerating("D:\\repos\\first")).toBe(true);
     expect(store.isGenerating("D:\\repos\\second")).toBe(true);
@@ -103,8 +102,8 @@ describe("wiki store generation concurrency", () => {
   });
 
   it("将大纲解析错误转换为友好的用户提示", async () => {
-    const store = useWikiStore();
-    const path = "D:\\repos\\invalid-outline";
+    const store = useWikiStore(),
+      path = "D:\\repos\\invalid-outline";
     generationHarness.errors.set(path, new Error("wiki outline JSON validation failed"));
 
     const run = store.generate({ path, name: "invalid-outline" }, "zh-CN");
@@ -146,9 +145,8 @@ describe("wiki store automatic update", () => {
 
   it("HEAD 变化后把自动增量任务整体交给后端读取项目配置", async () => {
     vi.mocked(updateWiki).mockResolvedValue({ updatedPageIds: ["overview"] });
-    const project = { path: "D:\\repos\\wiki-auto-update", name: "wiki-auto-update" };
-
-    const count = await useWikiStore().autoUpdate(project, "zh-CN");
+    const project = { path: "D:\\repos\\wiki-auto-update", name: "wiki-auto-update" },
+      count = await useWikiStore().autoUpdate(project, "zh-CN");
 
     expect(count).toBe(1);
     expect(updateWiki).toHaveBeenCalledWith(
@@ -162,9 +160,8 @@ describe("wiki store automatic update", () => {
 
   it("后端判定没有受影响页面时返回 0", async () => {
     vi.mocked(updateWiki).mockResolvedValue({ updatedPageIds: [] });
-    const project = { path: "D:\\repos\\wiki-auto-update", name: "wiki-auto-update" };
-
-    const count = await useWikiStore().autoUpdate(project, "zh-CN");
+    const project = { path: "D:\\repos\\wiki-auto-update", name: "wiki-auto-update" },
+      count = await useWikiStore().autoUpdate(project, "zh-CN");
 
     expect(count).toBe(0);
     expect(regenerateWikiPage).not.toHaveBeenCalled();
@@ -226,8 +223,8 @@ function deferred<T>() {
 }
 
 describe("缓存 Wiki 页面的项目隔离", () => {
-  const first = { path: "C:/repos/first", name: "first" };
-  const second = { path: "C:/repos/second", name: "second" };
+  const first = { path: "C:/repos/first", name: "first" },
+    second = { path: "C:/repos/second", name: "second" };
   beforeEach(() => {
     vi.clearAllMocks();
     setActivePinia(createPinia());
@@ -239,8 +236,8 @@ describe("缓存 Wiki 页面的项目隔离", () => {
   });
 
   it("A → B → A 始终保留各自文档,归一化路径复用同一阅读状态", async () => {
-    const store = useWikiStore();
-    const a = store.documentFor(first.path);
+    const store = useWikiStore(),
+      a = store.documentFor(first.path);
     await store.load(first.path);
     await store.load(second.path);
     expect(a.data?.meta.projectPath).toBe(first.path);
@@ -252,12 +249,12 @@ describe("缓存 Wiki 页面的项目隔离", () => {
   });
 
   it("不同项目并发加载和乱序完成不会共享 loading 或覆盖内容", async () => {
-    const pendingA = deferred<WikiData>();
-    const pendingB = deferred<WikiData>();
+    const pendingA = deferred<WikiData>(),
+      pendingB = deferred<WikiData>();
     vi.mocked(loadWiki).mockReturnValueOnce(pendingA.promise).mockReturnValueOnce(pendingB.promise);
-    const store = useWikiStore();
-    const a = store.load(first.path);
-    const b = store.load(second.path);
+    const store = useWikiStore(),
+      a = store.load(first.path),
+      b = store.load(second.path);
     expect(store.documentFor(first.path).loading).toBe(true);
     expect(store.documentFor(second.path).loading).toBe(true);
     pendingB.resolve(document(second.path));
@@ -271,12 +268,12 @@ describe("缓存 Wiki 页面的项目隔离", () => {
   });
 
   it("同一项目迟到的旧响应不能覆盖新内容或提前结束 loading", async () => {
-    const older = deferred<WikiData>();
-    const newer = deferred<WikiData>();
+    const older = deferred<WikiData>(),
+      newer = deferred<WikiData>();
     vi.mocked(loadWiki).mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
-    const store = useWikiStore();
-    const oldRun = store.load(first.path);
-    const newRun = store.load(first.path);
+    const store = useWikiStore(),
+      oldRun = store.load(first.path),
+      newRun = store.load(first.path);
     older.resolve(document(first.path, "old"));
     await oldRun;
     expect(store.documentFor(first.path).loading).toBe(true);

@@ -35,16 +35,15 @@ import GitGraphTable from "@/components/git/GitGraphTable.vue";
 import GitAnalysisPanel from "@/components/git/analysis/GitAnalysisPanel.vue";
 import type { GitBranches, GitGraphCommit, GitProjectChangedPayload } from "@/types";
 
-const { t } = useI18n();
-const route = useRoute();
-const router = useRouter();
-const store = useProjectsStore();
-const active = useProjectPageActive();
-
-const project = computed(() => {
-  const id = Number(route.params.id);
-  return Number.isFinite(id) ? store.getProjectById(id) : undefined;
-});
+const { t } = useI18n(),
+  route = useRoute(),
+  router = useRouter(),
+  store = useProjectsStore(),
+  active = useProjectPageActive(),
+  project = computed(() => {
+    const id = Number(route.params.id);
+    return Number.isFinite(id) ? store.getProjectById(id) : undefined;
+  });
 
 /** git_graph_log 流式批次(done = true 表示提交序列结束) */
 interface GitGraphBatch {
@@ -52,23 +51,21 @@ interface GitGraphBatch {
   done: boolean;
 }
 
-const branches = ref<GitBranches>({ local: [], remote: [], tracking: [] });
-const loading = ref(false);
-const loadError = ref("");
-const streamDone = ref(false);
-const selected = ref<GitGraphCommit | null>(null);
-
-// 分支筛选:"all" 显示所有分支;"current" 仅显示左侧列表中选中的分支(未选择时回退到当前检出的分支)
-const filterValue = ref("all");
-const selectedBranch = ref("");
-// 搜索:匹配提交信息 / hash / 作者
-const searchQuery = ref("");
-
-// 视图切换:graph = 提交图谱;analysis = 数据分析(全量历史统计面板),每次进入默认图谱,不持久化
-const viewMode = ref<"graph" | "analysis">("graph");
-// 分析面板懒激活:首次切入才挂载,之后保持存活,避免来回切换反复全量统计
-const analysisActivated = ref(false);
-const analysisPanel = ref<InstanceType<typeof GitAnalysisPanel> | null>(null);
+const branches = ref<GitBranches>({ local: [], remote: [], tracking: [] }),
+  loading = ref(false),
+  loadError = ref(""),
+  streamDone = ref(false),
+  selected = ref<GitGraphCommit | null>(null),
+  // 分支筛选:"all" 显示所有分支;"current" 仅显示左侧列表中选中的分支(未选择时回退到当前检出的分支)
+  filterValue = ref("all"),
+  selectedBranch = ref(""),
+  // 搜索:匹配提交信息 / hash / 作者
+  searchQuery = ref(""),
+  // 视图切换:graph = 提交图谱;analysis = 数据分析(全量历史统计面板),每次进入默认图谱,不持久化
+  viewMode = ref<"graph" | "analysis">("graph"),
+  // 分析面板懒激活:首次切入才挂载,之后保持存活,避免来回切换反复全量统计
+  analysisActivated = ref(false),
+  analysisPanel = ref<InstanceType<typeof GitAnalysisPanel> | null>(null);
 
 watch(viewMode, (v) => {
   if (v === "analysis") {
@@ -85,115 +82,103 @@ function onRefresh() {
   }
 }
 
-const currentBranch = computed(() => project.value?.git?.branch ?? "");
-
-const ROW_H = 32;
-const LANE_W = 16;
-const GRAPH_PAD = 4;
-// 流式批次大小(后端钳制 50..2000)
-const BATCH_SIZE = 500;
+const currentBranch = computed(() => project.value?.git?.branch ?? ""),
+  ROW_H = 32,
+  LANE_W = 16,
+  GRAPH_PAD = 4,
+  // 流式批次大小(后端钳制 50..2000)
+  BATCH_SIZE = 500;
 
 // --- 增量泳道布局:push 就地追加,批次到达后 triggerRef 触发视图更新 ---
 let layouter = createGraphLayouter();
-const nodes = shallowRef<GraphNodeLayout[]>(layouter.nodes);
-const edges = shallowRef<GraphEdgeLayout[]>([]);
-const laneCount = ref(1);
-const totalCount = computed(() => nodes.value.length);
-
-/** 图形区自然宽度:泳道间距固定,空间不足时表格横向滚动或裁剪图谱列,而不是压缩泳道 */
-const graphWidth = computed(() => laneCount.value * LANE_W + GRAPH_PAD * 2);
-
-// --- 虚拟列表:只渲染可视窗口内的行与连线 ---
-// 不用 vueuse 的 wrapperProps(它按"流式行 + marginTop 偏移"设计);
-// 本页行与 SVG 均按 row * ROW_H 绝对定位,容器用全高占位
-const {
-  list: visibleNodes,
-  containerProps,
-  scrollTo,
-} = useVirtualList(nodes, {
-  itemHeight: ROW_H,
-  overscan: 10,
-});
-
-const startIndex = computed(() => visibleNodes.value[0]?.index ?? 0);
-const endIndex = computed(() => visibleNodes.value[visibleNodes.value.length - 1]?.index ?? 0);
-
-const { width: containerWidth } = useElementSize(containerProps.ref);
-const { colWidths, graphColWidth, graphClipPath, descColWidth, totalWidth, startColResize } =
-  useGitGraphColumnSizing(containerWidth, graphWidth);
-
-// --- 分支筛选 ---
-/** 筛选目标分支:左侧选中的分支,未选择时回退到当前检出的分支 */
-const resolvedFilterBranch = computed(() => selectedBranch.value || currentBranch.value);
-
-/** 后端修订范围参数:"current" 且有目标分支时按分支取日志,否则 --all 含远程 */
-const graphParams = computed(() => {
-  if (filterValue.value === "current" && resolvedFilterBranch.value) {
-    return { branches: [resolvedFilterBranch.value] as string[] | null };
-  }
-  return { branches: null as string[] | null };
-});
-
-const filterLabel = computed(() => {
-  if (filterValue.value === "current") {
-    return resolvedFilterBranch.value || t("git.graph.filterCurrent");
-  }
-  return t("git.graph.filterAll");
-});
-
-// --- 标签(从已加载提交的引用装饰中收集) ---
-const tags = computed(() => {
-  const seen: string[] = [];
-  for (const n of nodes.value) {
-    for (const r of n.commit.refs) {
-      if (isTag(r)) {
-        const name = tagName(r);
-        if (!seen.includes(name)) {
-          seen.push(name);
+const nodes = shallowRef<GraphNodeLayout[]>(layouter.nodes),
+  edges = shallowRef<GraphEdgeLayout[]>([]),
+  laneCount = ref(1),
+  totalCount = computed(() => nodes.value.length),
+  /** 图形区自然宽度:泳道间距固定,空间不足时表格横向滚动或裁剪图谱列,而不是压缩泳道 */
+  graphWidth = computed(() => laneCount.value * LANE_W + GRAPH_PAD * 2),
+  // --- 虚拟列表:只渲染可视窗口内的行与连线 ---
+  // 不用 vueuse 的 wrapperProps(它按"流式行 + marginTop 偏移"设计);
+  // 本页行与 SVG 均按 row * ROW_H 绝对定位,容器用全高占位
+  {
+    list: visibleNodes,
+    containerProps,
+    scrollTo,
+  } = useVirtualList(nodes, {
+    itemHeight: ROW_H,
+    overscan: 10,
+  }),
+  startIndex = computed(() => visibleNodes.value[0]?.index ?? 0),
+  endIndex = computed(() => visibleNodes.value[visibleNodes.value.length - 1]?.index ?? 0),
+  { width: containerWidth } = useElementSize(containerProps.ref),
+  { colWidths, graphColWidth, graphClipPath, descColWidth, totalWidth, startColResize } =
+    useGitGraphColumnSizing(containerWidth, graphWidth),
+  // --- 分支筛选 ---
+  /** 筛选目标分支:左侧选中的分支,未选择时回退到当前检出的分支 */
+  resolvedFilterBranch = computed(() => selectedBranch.value || currentBranch.value),
+  /** 后端修订范围参数:"current" 且有目标分支时按分支取日志,否则 --all 含远程 */
+  graphParams = computed(() => {
+    if (filterValue.value === "current" && resolvedFilterBranch.value) {
+      return { branches: [resolvedFilterBranch.value] as string[] | null };
+    }
+    return { branches: null as string[] | null };
+  }),
+  filterLabel = computed(() => {
+    if (filterValue.value === "current") {
+      return resolvedFilterBranch.value || t("git.graph.filterCurrent");
+    }
+    return t("git.graph.filterAll");
+  }),
+  // --- 标签(从已加载提交的引用装饰中收集) ---
+  tags = computed(() => {
+    const seen: string[] = [];
+    for (const n of nodes.value) {
+      for (const r of n.commit.refs) {
+        if (isTag(r)) {
+          const name = tagName(r);
+          if (!seen.includes(name)) {
+            seen.push(name);
+          }
         }
       }
     }
-  }
-  return seen;
-});
-
-const hasSidebar = computed(
-  () =>
-    branches.value.local.length > 0 || branches.value.remote.length > 0 || tags.value.length > 0,
-);
-
-/** 左侧分支/标签列表整体折叠(持久化) */
-const sidebarOpen = useLocalStorage("repomeow:graph-sidebar-open", true);
-const mainRowEl = ref<HTMLElement | null>(null);
-const { detailOpen, effectiveDetailWidth, startDetailResize } = useGitGraphDetailSizing(
-  hasSidebar,
-  sidebarOpen,
-  mainRowEl,
-);
-
-// --- 搜索 ---
-const searchResults = computed<GitGraphCommit[]>(() => {
-  const q = searchQuery.value.trim().toLowerCase();
-  if (!q) {
-    return [];
-  }
-  const out: GitGraphCommit[] = [];
-  for (const n of nodes.value) {
-    const c = n.commit;
-    if (
-      c.subject.toLowerCase().includes(q) ||
-      c.hash.toLowerCase().includes(q) ||
-      c.author.toLowerCase().includes(q)
-    ) {
-      out.push(c);
-      if (out.length >= 20) {
-        break;
+    return seen;
+  }),
+  hasSidebar = computed(
+    () =>
+      branches.value.local.length > 0 || branches.value.remote.length > 0 || tags.value.length > 0,
+  ),
+  /** 左侧分支/标签列表整体折叠(持久化) */
+  sidebarOpen = useLocalStorage("repomeow:graph-sidebar-open", true),
+  mainRowEl = ref<HTMLElement | null>(null),
+  { detailOpen, effectiveDetailWidth, startDetailResize } = useGitGraphDetailSizing(
+    hasSidebar,
+    sidebarOpen,
+    mainRowEl,
+  ),
+  // --- 搜索 ---
+  searchResults = computed<GitGraphCommit[]>(() => {
+    const q = searchQuery.value.trim().toLowerCase();
+    if (!q) {
+      return [];
+    }
+    const out: GitGraphCommit[] = [];
+    for (const n of nodes.value) {
+      const c = n.commit;
+      if (
+        c.subject.toLowerCase().includes(q) ||
+        c.hash.toLowerCase().includes(q) ||
+        c.author.toLowerCase().includes(q)
+      ) {
+        out.push(c);
+        if (out.length >= 20) {
+          break;
+        }
       }
     }
-  }
-  return out;
-});
-const matchHashes = computed(() => new Set(searchResults.value.map((c) => c.hash)));
+    return out;
+  }),
+  matchHashes = computed(() => new Set(searchResults.value.map((c) => c.hash)));
 
 // --- 流式加载 ---
 // 递增序号使过期流的批次被丢弃(切换筛选/项目时旧流不污染新数据)
@@ -208,10 +193,12 @@ function publishLayout() {
 
 async function load(preserveView = false) {
   const currentProject = project.value;
-  if (!currentProject) return;
-  preserveView = preserveView && streamDone.value;
-  const seq = ++loadSeq;
-  const nextLayout = createGraphLayouter();
+  if (!currentProject) {
+    return;
+  }
+  preserveView &&= streamDone.value;
+  const seq = ++loadSeq,
+    nextLayout = createGraphLayouter();
   loading.value = true;
   loadError.value = "";
   if (!preserveView) {
@@ -224,13 +211,17 @@ async function load(preserveView = false) {
   try {
     const channel = new Channel<GitGraphBatch>();
     channel.onmessage = (batch) => {
-      if (seq !== loadSeq) return;
+      if (seq !== loadSeq) {
+        return;
+      }
       nextLayout.push(batch.commits);
-      if (!preserveView) publishLayout();
+      if (!preserveView) {
+        publishLayout();
+      }
       // 重新激活时后台构建新图,完成后原子替换,不因清空列表丢失滚动和详情选择。
       if (batch.done && preserveView) {
-        const scrollTop = containerProps.ref.value?.scrollTop ?? 0;
-        const hash = selected.value?.hash;
+        const scrollTop = containerProps.ref.value?.scrollTop ?? 0,
+          hash = selected.value?.hash;
         layouter = nextLayout;
         publishLayout();
         selected.value = nextLayout.nodes.find((node) => node.commit.hash === hash)?.commit ?? null;
@@ -267,11 +258,16 @@ async function load(preserveView = false) {
         onBatch: channel,
       }),
     ]);
-    if (seq === loadSeq) branches.value = branchData;
+    if (seq === loadSeq) {
+      branches.value = branchData;
+    }
   } catch (e) {
     if (seq === loadSeq) {
-      if (preserveView) toast.error(`${t("git.graph.loadFailed")}: ${String(e)}`);
-      else loadError.value = String(e);
+      if (preserveView) {
+        toast.error(`${t("git.graph.loadFailed")}: ${String(e)}`);
+      } else {
+        loadError.value = String(e);
+      }
       loading.value = false;
     }
   }
@@ -279,12 +275,14 @@ async function load(preserveView = false) {
 
 async function refreshCachedData() {
   await load(true);
-  if (analysisActivated.value) await analysisPanel.value?.reload();
+  if (analysisActivated.value) {
+    await analysisPanel.value?.reload();
+  }
 }
 onProjectPageReactivated(refreshCachedData);
 
-let unlistenGit: (() => void) | undefined;
-let disposed = false;
+let unlistenGit: (() => void) | undefined,
+  disposed = false;
 onMounted(async () => {
   const unlisten = await onListen<GitProjectChangedPayload>("git://project-changed", (payload) => {
     if (
@@ -296,8 +294,11 @@ onMounted(async () => {
       void refreshCachedData();
     }
   });
-  if (disposed) unlisten();
-  else unlistenGit = unlisten;
+  if (disposed) {
+    unlisten();
+  } else {
+    unlistenGit = unlisten;
+  }
 });
 onBeforeUnmount(() => {
   disposed = true;
@@ -327,8 +328,8 @@ watch(selectedBranch, () => {
 // --- 定位 ---
 function locateNode(node: GraphNodeLayout) {
   selected.value = node.commit;
-  const el = containerProps.ref.value;
-  const viewRows = el ? Math.max(Math.floor(el.clientHeight / ROW_H), 1) : 10;
+  const el = containerProps.ref.value,
+    viewRows = el ? Math.max(Math.floor(el.clientHeight / ROW_H), 1) : 10;
   scrollTo(Math.max(0, node.row - Math.floor(viewRows / 2)));
 }
 

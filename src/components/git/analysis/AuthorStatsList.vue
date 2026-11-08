@@ -6,12 +6,10 @@ import { topWithOther } from "@/lib/git-stats";
 import type { GitAuthorStat } from "@/types";
 
 const props = defineProps<{
-  authors: GitAuthorStat[];
-}>();
-
-const { t } = useI18n();
-
-const TOP_AUTHORS = 10;
+    authors: GitAuthorStat[];
+  }>(),
+  { t } = useI18n(),
+  TOP_AUTHORS = 10;
 
 interface AuthorRow {
   key: string;
@@ -26,39 +24,37 @@ interface AuthorRow {
 }
 
 const rows = computed<AuthorRow[]>(() => {
-  const toRow = (a: GitAuthorStat): AuthorRow => ({
-    key: a.email || `name:${a.name}`,
-    name: a.name || a.email,
-    email: a.email,
-    commits: a.commits,
-    additions: a.additions,
-    deletions: a.deletions,
-    lastCommitAt: a.lastCommitAt,
-    other: false,
-  });
-  return topWithOther(props.authors.map(toRow), TOP_AUTHORS, (rest) => ({
-    key: "__other__",
-    name: t("git.graph.analysis.otherAuthors", { count: rest.length }),
-    email: "",
-    commits: rest.reduce((s, a) => s + a.commits, 0),
-    additions: rest.reduce((s, a) => s + a.additions, 0),
-    deletions: rest.reduce((s, a) => s + a.deletions, 0),
-    lastCommitAt: null,
-    other: true,
-  }));
-});
-
-const maxCommits = computed(() => Math.max(...rows.value.map((r) => r.commits), 1));
-
-/** 头像底色按行序轮换(确定性的柔和色板,亮暗主题均可读) */
-const AVATAR_COLORS = [
-  "bg-blue-500/15 text-blue-600 dark:text-blue-400",
-  "bg-violet-500/15 text-violet-600 dark:text-violet-400",
-  "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-  "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-  "bg-rose-500/15 text-rose-600 dark:text-rose-400",
-  "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400",
-] as const;
+    const toRow = (a: GitAuthorStat): AuthorRow => ({
+      key: a.email || `name:${a.name}`,
+      name: a.name || a.email,
+      email: a.email,
+      commits: a.commits,
+      additions: a.additions,
+      deletions: a.deletions,
+      lastCommitAt: a.lastCommitAt,
+      other: false,
+    });
+    return topWithOther(props.authors.map(toRow), TOP_AUTHORS, (rest) => ({
+      key: "__other__",
+      name: t("git.graph.analysis.otherAuthors", { count: rest.length }),
+      email: "",
+      commits: rest.reduce((s, a) => s + a.commits, 0),
+      additions: rest.reduce((s, a) => s + a.additions, 0),
+      deletions: rest.reduce((s, a) => s + a.deletions, 0),
+      lastCommitAt: null,
+      other: true,
+    }));
+  }),
+  maxCommits = computed(() => Math.max(...rows.value.map((r) => r.commits), 1)),
+  /** 头像底色按行序轮换(确定性的柔和色板,亮暗主题均可读) */
+  AVATAR_COLORS = [
+    "bg-blue-500/15 text-blue-600 dark:text-blue-400",
+    "bg-violet-500/15 text-violet-600 dark:text-violet-400",
+    "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+    "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+    "bg-rose-500/15 text-rose-600 dark:text-rose-400",
+    "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400",
+  ] as const;
 
 function avatarClass(index: number): string {
   return AVATAR_COLORS[index % AVATAR_COLORS.length];

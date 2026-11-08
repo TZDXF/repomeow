@@ -3,23 +3,22 @@ import { Check, PanelBottomClose, Power } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { useSettingsStore, type CloseAction } from "@/stores/settings";
 
-const { t } = useI18n();
-const store = useSettingsStore();
-
-const OPTIONS: { value: CloseAction; icon: typeof Power; labelKey: string; descKey: string }[] = [
-  {
-    value: "tray",
-    icon: PanelBottomClose,
-    labelKey: "settings.tray.closeToTray",
-    descKey: "settings.tray.closeToTrayHint",
-  },
-  {
-    value: "exit",
-    icon: Power,
-    labelKey: "settings.tray.closeToExit",
-    descKey: "settings.tray.closeToExitHint",
-  },
-];
+const { t } = useI18n(),
+  store = useSettingsStore(),
+  OPTIONS: { value: CloseAction; icon: typeof Power; labelKey: string; descKey: string }[] = [
+    {
+      value: "tray",
+      icon: PanelBottomClose,
+      labelKey: "settings.tray.closeToTray",
+      descKey: "settings.tray.closeToTrayHint",
+    },
+    {
+      value: "exit",
+      icon: Power,
+      labelKey: "settings.tray.closeToExit",
+      descKey: "settings.tray.closeToExitHint",
+    },
+  ];
 </script>
 
 <template>

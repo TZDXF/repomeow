@@ -3,21 +3,20 @@ import { Check } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { useSettingsStore, type Language } from "@/stores/settings";
 
-const { t } = useI18n();
-const store = useSettingsStore();
-
-const OPTIONS: { value: Language; labelKey: string; nativeLabelKey: string }[] = [
-  {
-    value: "zh-CN",
-    labelKey: "settings.language.zhCN",
-    nativeLabelKey: "settings.language.zhCNNative",
-  },
-  {
-    value: "en-US",
-    labelKey: "settings.language.enUS",
-    nativeLabelKey: "settings.language.enUSNative",
-  },
-];
+const { t } = useI18n(),
+  store = useSettingsStore(),
+  OPTIONS: { value: Language; labelKey: string; nativeLabelKey: string }[] = [
+    {
+      value: "zh-CN",
+      labelKey: "settings.language.zhCN",
+      nativeLabelKey: "settings.language.zhCNNative",
+    },
+    {
+      value: "en-US",
+      labelKey: "settings.language.enUS",
+      nativeLabelKey: "settings.language.enUSNative",
+    },
+  ];
 </script>
 
 <template>

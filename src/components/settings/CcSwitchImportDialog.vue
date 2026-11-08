@@ -17,21 +17,18 @@ import {
 import { listCcSwitchProviders, type CcSwitchProvider, type CcSwitchScan } from "@/lib/ai-config";
 
 const props = defineProps<{
-  open: boolean;
-}>();
-
-const emit = defineEmits<{
-  "update:open": [value: boolean];
-  /** 确认导入:勾选的供应商原文交给父组件并入草稿 */
-  import: [providers: CcSwitchProvider[]];
-}>();
-
-const { t } = useI18n();
-
-const ccSwitchLoading = ref(false);
-const ccSwitchScan = ref<CcSwitchScan | null>(null);
-/** 勾选项的 key:`${app}/${id}`(不同应用间 id 可能重复) */
-const ccSwitchChecked = ref<Set<string>>(new Set());
+    open: boolean;
+  }>(),
+  emit = defineEmits<{
+    "update:open": [value: boolean];
+    /** 确认导入:勾选的供应商原文交给父组件并入草稿 */
+    import: [providers: CcSwitchProvider[]];
+  }>(),
+  { t } = useI18n(),
+  ccSwitchLoading = ref(false),
+  ccSwitchScan = ref<CcSwitchScan | null>(null),
+  /** 勾选项的 key:`${app}/${id}`(不同应用间 id 可能重复) */
+  ccSwitchChecked = ref<Set<string>>(new Set());
 
 function ccSwitchKey(provider: CcSwitchProvider): string {
   return `${provider.app}/${provider.id}`;
@@ -40,7 +37,9 @@ function ccSwitchKey(provider: CcSwitchProvider): string {
 watch(
   () => props.open,
   async (open) => {
-    if (!open) return;
+    if (!open) {
+      return;
+    }
     ccSwitchLoading.value = true;
     ccSwitchScan.value = null;
     try {
@@ -83,7 +82,9 @@ function confirmCcSwitchImport() {
   const providers = (ccSwitchScan.value?.providers ?? []).filter((provider) =>
     ccSwitchChecked.value.has(ccSwitchKey(provider)),
   );
-  if (!providers.length) return;
+  if (!providers.length) {
+    return;
+  }
   emit("import", providers);
   emit("update:open", false);
 }

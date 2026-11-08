@@ -9,14 +9,12 @@ import { buildCumulativeCommits } from "@/lib/git-stats";
 import type { GitDayStat } from "@/types";
 
 const props = defineProps<{
-  byDay: GitDayStat[];
-}>();
-
-const { t } = useI18n();
-const { themeStamp } = useChartTheme();
-
-/** 全历史累计提交曲线:横轴时间,纵轴截至当日的累计提交数 */
-const points = computed(() => buildCumulativeCommits(props.byDay));
+    byDay: GitDayStat[];
+  }>(),
+  { t } = useI18n(),
+  { themeStamp } = useChartTheme(),
+  /** 全历史累计提交曲线:横轴时间,纵轴截至当日的累计提交数 */
+  points = computed(() => buildCumulativeCommits(props.byDay));
 
 /**
  * 读根节点主题 CSS 变量并归一化为 rgb/#hex。
@@ -24,9 +22,13 @@ const points = computed(() => buildCumulativeCommits(props.byDay));
  */
 function resolveCssColor(name: string, fallback: string): string {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  if (!raw) return fallback;
+  if (!raw) {
+    return fallback;
+  }
   const ctx = document.createElement("canvas").getContext("2d");
-  if (!ctx) return fallback;
+  if (!ctx) {
+    return fallback;
+  }
   ctx.fillStyle = raw;
   return ctx.fillStyle;
 }
@@ -34,10 +36,10 @@ function resolveCssColor(name: string, fallback: string): string {
 const option = computed<EChartsCoreOption>(() => {
   // 主题(亮暗/皮肤)变化时重建配色
   void themeStamp.value;
-  const axisColor = resolveCssColor("--muted-foreground", "#888888");
-  const borderColor = resolveCssColor("--border", "#e5e5e5");
-  const primary = resolveCssColor("--primary", "#0ea5e9");
-  const list = points.value;
+  const axisColor = resolveCssColor("--muted-foreground", "#888888"),
+    borderColor = resolveCssColor("--border", "#e5e5e5"),
+    primary = resolveCssColor("--primary", "#0ea5e9"),
+    list = points.value;
   return {
     animationDuration: 300,
     // 底部留出 dataZoom 滑条的位置
@@ -50,10 +52,12 @@ const option = computed<EChartsCoreOption>(() => {
       textStyle: { color: resolveCssColor("--popover-foreground", "#111111"), fontSize: 12 },
       formatter: (params: unknown) => {
         const first = (Array.isArray(params) ? params[0] : params) as
-          | { dataIndex?: number }
-          | undefined;
-        const p = typeof first?.dataIndex === "number" ? list[first.dataIndex] : undefined;
-        if (!p) return "";
+            | { dataIndex?: number }
+            | undefined,
+          p = typeof first?.dataIndex === "number" ? list[first.dataIndex] : undefined;
+        if (!p) {
+          return "";
+        }
         return t("git.graph.analysis.cumulativeCell", { day: p.day, count: p.total });
       },
     },

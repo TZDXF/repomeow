@@ -3,16 +3,16 @@ import { onMounted, onUnmounted, ref } from "vue";
 import type { ShaderInstance } from "shaders/js";
 import { attachGlassPointer } from "@/lib/glass-pointer";
 
-let detachPointer: (() => void) | undefined;
-let surface: HTMLElement | null = null;
+let detachPointer: (() => void) | undefined,
+  surface: HTMLElement | null = null;
 
-const canvas = ref<HTMLCanvasElement>();
-const ready = ref(false);
-let shader: ShaderInstance | undefined;
-let observer: MutationObserver | undefined;
-let resizeObserver: ResizeObserver | undefined;
-let disposed = false;
-let generation = 0;
+const canvas = ref<HTMLCanvasElement>(),
+  ready = ref(false);
+let shader: ShaderInstance | undefined,
+  observer: MutationObserver | undefined,
+  resizeObserver: ResizeObserver | undefined,
+  disposed = false,
+  generation = 0;
 
 function palette() {
   const dark = document.documentElement.classList.contains("dark");
@@ -26,8 +26,11 @@ function palette() {
 
 function setReady(value: boolean) {
   ready.value = value;
-  if (value) surface?.setAttribute("data-glass-shader-ready", "");
-  else surface?.removeAttribute("data-glass-shader-ready");
+  if (value) {
+    surface?.setAttribute("data-glass-shader-ready", "");
+  } else {
+    surface?.removeAttribute("data-glass-shader-ready");
+  }
 }
 
 function destroy() {
@@ -40,7 +43,9 @@ function destroy() {
 async function sync() {
   // Pro 始终展示完整动态效果,仅在窗口隐藏时释放 GPU 资源。
   destroy();
-  if (disposed || document.hidden || !canvas.value) return;
+  if (disposed || document.hidden || !canvas.value) {
+    return;
+  }
   const current = generation;
   try {
     const [{ createShader }, { default: mesh }, { default: glass }] = await Promise.all([
@@ -48,7 +53,9 @@ async function sync() {
       import("shaders/core/MeshGradient"),
       import("shaders/core/FlutedGlass"),
     ]);
-    if (disposed || current !== generation || !canvas.value) return;
+    if (disposed || current !== generation || !canvas.value) {
+      return;
+    }
     const instance = await createShader(
       canvas.value,
       {
@@ -87,10 +94,14 @@ async function sync() {
         disableTelemetry: true,
         observeElement: false,
         onReady: () => {
-          if (current === generation) setReady(true);
+          if (current === generation) {
+            setReady(true);
+          }
         },
         onError: () => {
-          if (current === generation) setReady(false);
+          if (current === generation) {
+            setReady(false);
+          }
         },
       },
     );
@@ -103,12 +114,16 @@ async function sync() {
     setReady(!instance.getFailureReason());
   } catch {
     // The CSS aurora remains visible if initialization or GPU allocation fails.
-    if (current === generation) destroy();
+    if (current === generation) {
+      destroy();
+    }
   }
 }
 
 function resize() {
-  if (!canvas.value) return;
+  if (!canvas.value) {
+    return;
+  }
   // 按实际显示尺寸渲染,像素比由渲染器处理,不再限制为最长边 1280px。
   const { width, height } = canvas.value.getBoundingClientRect();
   shader?.resize(Math.max(1, Math.round(width)), Math.max(1, Math.round(height)));
@@ -120,12 +135,16 @@ function resize() {
 
 onMounted(() => {
   surface = canvas.value?.closest<HTMLElement>(".app-surface") ?? null;
-  if (surface) detachPointer = attachGlassPointer(surface);
+  if (surface) {
+    detachPointer = attachGlassPointer(surface);
+  }
   document.addEventListener("visibilitychange", sync);
   observer = new MutationObserver(() => shader?.update("aurora", { stops: palette() }));
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
   resizeObserver = new ResizeObserver(resize);
-  if (canvas.value) resizeObserver.observe(canvas.value);
+  if (canvas.value) {
+    resizeObserver.observe(canvas.value);
+  }
   void sync();
 });
 onUnmounted(() => {

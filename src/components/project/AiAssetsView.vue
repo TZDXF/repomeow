@@ -16,17 +16,17 @@ import { cmd } from "@/lib/tauri";
 import type { Project, ProjectAiAssets } from "@/types";
 
 /** 资源内容仅在全局资源库维护;项目页负责从资源库添加、按 Agent 配置及安全移除。 */
-const props = defineProps<{ project: Project }>();
-const { t } = useI18n();
-const settings = useSettingsStore();
-const agentsMdStore = useAgentsMdStore();
-const router = useRouter();
-const assets = ref<ProjectAiAssets | null>(null);
-const targets = ref<ProjectAiTarget[]>([]);
-const loading = ref(false);
-const revision = ref(0);
-const drawerPath = ref<string | null>(null);
-const drawerReadOnly = ref(false);
+const props = defineProps<{ project: Project }>(),
+  { t } = useI18n(),
+  settings = useSettingsStore(),
+  agentsMdStore = useAgentsMdStore(),
+  router = useRouter(),
+  assets = ref<ProjectAiAssets | null>(null),
+  targets = ref<ProjectAiTarget[]>([]),
+  loading = ref(false),
+  revision = ref(0),
+  drawerPath = ref<string | null>(null),
+  drawerReadOnly = ref(false);
 let sequence = 0;
 onBeforeUnmount(() => sequence++);
 async function load() {
@@ -63,13 +63,13 @@ watch(
 );
 onProjectPageReactivated(resourcesChanged);
 const files = computed(
-  () => assets.value?.files.filter((f) => !targets.value.some((a) => a.mcpPath === f.path)) ?? [],
-);
-/** 已存在 AGENTS.md 时按钮切换为「重新生成」语义(assets 未加载时按存在处理,避免文案闪烁) */
-const hasAgentsMd = computed(() => assets.value?.files.some((f) => f.path === "AGENTS.md") ?? true);
-const agentsMdDialogOpen = ref(false);
-/** 生成状态托管在 agents-md store:离开页面任务继续,回来即恢复进行态 */
-const generatingAgentsMd = computed(() => agentsMdStore.isGenerating(props.project.path));
+    () => assets.value?.files.filter((f) => !targets.value.some((a) => a.mcpPath === f.path)) ?? [],
+  ),
+  /** 已存在 AGENTS.md 时按钮切换为「重新生成」语义(assets 未加载时按存在处理,避免文案闪烁) */
+  hasAgentsMd = computed(() => assets.value?.files.some((f) => f.path === "AGENTS.md") ?? true),
+  agentsMdDialogOpen = ref(false),
+  /** 生成状态托管在 agents-md store:离开页面任务继续,回来即恢复进行态 */
+  generatingAgentsMd = computed(() => agentsMdStore.isGenerating(props.project.path));
 function generateAgents(options: { model?: string; thinking?: string }) {
   agentsMdDialogOpen.value = false;
   // 结果 toast 由 store 负责(页面可能已离开);这里只触发,完成经下方 watch 联动

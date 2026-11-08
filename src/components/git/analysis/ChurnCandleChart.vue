@@ -8,20 +8,17 @@ import { formatLocalDateTime } from "@/lib/format";
 import type { GitCommitChurn } from "@/types";
 
 const props = defineProps<{
-  /** 逐提交增删行(仅非合并提交),按 committer 时间升序 */
-  commits: GitCommitChurn[];
-}>();
-
-const { t } = useI18n();
-const { themeStamp } = useChartTheme();
-
-/** 阳线(净新增)/阴线(净减少)配色,沿用旧版 emerald/rose 语义;累计线用 indigo 与红绿区分 */
-const UP_COLOR = "#10b981";
-const DOWN_COLOR = "#f43f5e";
-const LINE_COLOR = "#6366f1";
-
-/** 数据量大时 dataZoom 默认窗口只展示最近的蜡烛数(滚轮缩放/拖动平移查看更早) */
-const DEFAULT_VISIBLE_CANDLES = 200;
+    /** 逐提交增删行(仅非合并提交),按 committer 时间升序 */
+    commits: GitCommitChurn[];
+  }>(),
+  { t } = useI18n(),
+  { themeStamp } = useChartTheme(),
+  /** 阳线(净新增)/阴线(净减少)配色,沿用旧版 emerald/rose 语义;累计线用 indigo 与红绿区分 */
+  UP_COLOR = "#10b981",
+  DOWN_COLOR = "#f43f5e",
+  LINE_COLOR = "#6366f1",
+  /** 数据量大时 dataZoom 默认窗口只展示最近的蜡烛数(滚轮缩放/拖动平移查看更早) */
+  DEFAULT_VISIBLE_CANDLES = 200;
 
 /**
  * 读根节点主题 CSS 变量并归一化为 rgb/#hex。
@@ -29,9 +26,13 @@ const DEFAULT_VISIBLE_CANDLES = 200;
  */
 function resolveCssColor(name: string, fallback: string): string {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  if (!raw) return fallback;
+  if (!raw) {
+    return fallback;
+  }
   const ctx = document.createElement("canvas").getContext("2d");
-  if (!ctx) return fallback;
+  if (!ctx) {
+    return fallback;
+  }
   ctx.fillStyle = raw;
   return ctx.fillStyle;
 }
@@ -47,33 +48,42 @@ function escapeHtml(s: string): string {
 
 /** 带符号行数:+120 / −80(负号与 churnCell 一致用 U+2212) */
 function signed(n: number): string {
-  return n > 0 ? `+${n}` : n < 0 ? `−${Math.abs(n)}` : "0";
+  if (n > 0) {
+    return `+${n}`;
+  }
+  if (n < 0) {
+    return `−${Math.abs(n)}`;
+  }
+  return "0";
 }
 
 /** Y 轴大数值缩写:12000 → 12k */
 function abbrev(v: number): string {
   const abs = Math.abs(v);
-  if (abs >= 10000) return `${Math.round(v / 1000)}k`;
-  if (abs >= 1000) return `${(v / 1000).toFixed(1)}k`;
+  if (abs >= 10000) {
+    return `${Math.round(v / 1000)}k`;
+  }
+  if (abs >= 1000) {
+    return `${(v / 1000).toFixed(1)}k`;
+  }
   return String(v);
 }
 
 const option = computed<EChartsCoreOption>(() => {
   // 主题(亮暗/皮肤)变化时重建配色
   void themeStamp.value;
-  const axisColor = resolveCssColor("--muted-foreground", "#888888");
-  const borderColor = resolveCssColor("--border", "#e5e5e5");
-  const list = props.commits;
-  const len = list.length;
-  const startPercent =
-    len > DEFAULT_VISIBLE_CANDLES ? (1 - DEFAULT_VISIBLE_CANDLES / len) * 100 : 0;
+  const axisColor = resolveCssColor("--muted-foreground", "#888888"),
+    borderColor = resolveCssColor("--border", "#e5e5e5"),
+    list = props.commits,
+    len = list.length,
+    startPercent = len > DEFAULT_VISIBLE_CANDLES ? (1 - DEFAULT_VISIBLE_CANDLES / len) * 100 : 0;
   // 金融 K 线形态:open 接上一根 close(累计净变更),蜡烛沿代码量走势起伏;
   // 影线 = 本次新增推高(+additions)/删除下探(−deletions)的位置
   let prev = 0;
   const candles = list.map((c) => {
-    const open = prev;
-    const close = prev + c.additions - c.deletions;
-    const k = { t: c.t * 1000, open, close, low: prev - c.deletions, high: prev + c.additions };
+    const open = prev,
+      close = prev + c.additions - c.deletions,
+      k = { t: c.t * 1000, open, close, low: prev - c.deletions, high: prev + c.additions };
     prev = close;
     return k;
   });
@@ -89,12 +99,14 @@ const option = computed<EChartsCoreOption>(() => {
       textStyle: { color: resolveCssColor("--popover-foreground", "#111111"), fontSize: 12 },
       formatter: (params: unknown) => {
         const first = (Array.isArray(params) ? params[0] : params) as
-          | { dataIndex?: number }
-          | undefined;
-        const idx = typeof first?.dataIndex === "number" ? first.dataIndex : -1;
-        const c = list[idx];
-        const k = candles[idx];
-        if (!c || !k) return "";
+            | { dataIndex?: number }
+            | undefined,
+          idx = typeof first?.dataIndex === "number" ? first.dataIndex : -1,
+          c = list[idx],
+          k = candles[idx];
+        if (!c || !k) {
+          return "";
+        }
         const net = c.additions - c.deletions;
         return [
           `<div style="font-weight:600;max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(c.subject)} <span style="opacity:.55;font-weight:400">#${c.shortId}</span></div>`,

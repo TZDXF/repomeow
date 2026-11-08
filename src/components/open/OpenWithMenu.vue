@@ -17,29 +17,27 @@ import type { EditorAvailability, OpenWithOption } from "@/lib/open-with";
 import { useSettingsStore } from "@/stores/settings";
 import type { Project } from "@/types";
 
-const { t } = useI18n();
-const props = withDefaults(defineProps<{ project: Project; compact?: boolean }>(), {
-  compact: false,
-});
-
-const settings = useSettingsStore();
-const availability = ref<EditorAvailability | null>(null);
+const { t } = useI18n(),
+  props = withDefaults(defineProps<{ project: Project; compact?: boolean }>(), {
+    compact: false,
+  }),
+  settings = useSettingsStore(),
+  availability = ref<EditorAvailability | null>(null);
 
 onMounted(async () => {
   availability.value = await getEditorAvailability();
 });
 
 const visibleOptions = computed(() =>
-  sortOpenWithOptions(settings.openWithOrder, settings.customOpenWith).filter(
-    (option) => !isEditorUnavailable(option, availability.value),
+    sortOpenWithOptions(settings.openWithOrder, settings.customOpenWith).filter(
+      (option) => !isEditorUnavailable(option, availability.value),
+    ),
   ),
-);
-
-const current = computed(
-  () =>
-    visibleOptions.value.find((option) => option.id === settings.defaultOpenWith) ??
-    visibleOptions.value[0],
-);
+  current = computed(
+    () =>
+      visibleOptions.value.find((option) => option.id === settings.defaultOpenWith) ??
+      visibleOptions.value[0],
+  );
 
 function optionLabel(option: OpenWithOption): string {
   return option.custom ? option.name : t(option.labelKey);

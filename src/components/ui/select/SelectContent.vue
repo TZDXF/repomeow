@@ -12,20 +12,18 @@ defineOptions({
 });
 
 const props = withDefaults(
-  defineProps<SelectContentProps & { class?: HTMLAttributes["class"] }>(),
-  {
-    // popper:item-aligned 模式按视口边缘定位且不读 collisionPadding,
-    // 长列表会钻进自绘标题栏下方;popper 模式经 POPPER_COLLISION_PADDING 让出标题栏高度
-    position: "popper",
-    align: "center",
-    collisionPadding: () => POPPER_COLLISION_PADDING,
-  },
-);
-const emits = defineEmits<SelectContentEmits>();
-
-const delegatedProps = reactiveOmit(props, "class");
-
-const forwarded = useForwardPropsEmits(delegatedProps, emits);
+    defineProps<SelectContentProps & { class?: HTMLAttributes["class"] }>(),
+    {
+      // popper:item-aligned 模式按视口边缘定位且不读 collisionPadding,
+      // 长列表会钻进自绘标题栏下方;popper 模式经 POPPER_COLLISION_PADDING 让出标题栏高度
+      position: "popper",
+      align: "center",
+      collisionPadding: () => POPPER_COLLISION_PADDING,
+    },
+  ),
+  emits = defineEmits<SelectContentEmits>(),
+  delegatedProps = reactiveOmit(props, "class"),
+  forwarded = useForwardPropsEmits(delegatedProps, emits);
 </script>
 
 <template>

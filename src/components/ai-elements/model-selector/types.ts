@@ -15,7 +15,9 @@ export function modelOptionValue(providerId: string, modelId: string): string {
 /** 复合值 → 模型引用;格式非法返回 null */
 export function parseModelOptionValue(value: string): AiModelRef | null {
   const separator = value.indexOf("/");
-  if (separator <= 0 || separator === value.length - 1) return null;
+  if (separator <= 0 || separator === value.length - 1) {
+    return null;
+  }
   return { providerId: value.slice(0, separator), modelId: value.slice(separator + 1) };
 }
 

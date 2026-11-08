@@ -13,13 +13,19 @@ const { scrollRef, contentRef, isAtBottom, escapedFromLock } = useStickToBottomC
 let observer: ResizeObserver | undefined;
 
 watchEffect((onCleanup) => {
-  const scroll = scrollRef.value;
-  const content = contentRef.value;
-  if (!scroll || !content) return;
+  const scroll = scrollRef.value,
+    content = contentRef.value;
+  if (!scroll || !content) {
+    return;
+  }
   observer = new ResizeObserver(() => {
-    if (!isAtBottom.value || escapedFromLock.value) return;
+    if (!isAtBottom.value || escapedFromLock.value) {
+      return;
+    }
     const max = scroll.scrollHeight - scroll.clientHeight;
-    if (max <= 0 || scroll.scrollTop >= max) return;
+    if (max <= 0 || scroll.scrollTop >= max) {
+      return;
+    }
     scroll.scrollTop = max;
   });
   observer.observe(content);

@@ -16,7 +16,9 @@ export function watchProjectPageDeactivation(active: Readonly<Ref<boolean>>, clo
   return watch(
     active,
     (value) => {
-      if (!value) close();
+      if (!value) {
+        close();
+      }
     },
     { immediate: true },
   );
@@ -28,7 +30,9 @@ export function watchProjectPageReactivation(
   refresh: () => void | Promise<unknown>,
 ) {
   return watch(active, (value, previous) => {
-    if (value && !previous) return refresh();
+    if (value && !previous) {
+      return refresh();
+    }
   });
 }
 

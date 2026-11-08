@@ -19,53 +19,53 @@ import { useMarkdownTranslation } from "@/composables/useMarkdownTranslation";
 import { useSettingsStore } from "@/stores/settings";
 
 const props = withDefaults(
-  defineProps<{
-    marketplaceId: string | null;
-    /** 本地安全扫描报告(父级扫描页传入);null 表示尚未扫描 */
-    localScan?: ResourceSkillScanReport | null;
-    scanning?: boolean;
-  }>(),
-  { localScan: null, scanning: false },
-);
-const { t, te, locale } = useI18n();
-const language = computed(() => locale.value as SupportedLocale);
-// 传游离元素,避免 Markdown 库把 island/pixel 主题变量写成无效 hsl(#…)(与技能预览一致)
-const detachedThemeEl = document.createElement("div");
-const themeElement = () => detachedThemeEl;
-const settings = useSettingsStore();
-const audits = ref<ResourcePublicAudit[]>([]);
-const loading = ref(false);
-const error = ref("");
-/** 选中的审计来源:"local"=本地扫描(默认);其余为远程 provider */
-const selection = ref<"local" | string>("local");
-const selected = computed(
-  () => audits.value.find((audit) => audit.provider === selection.value) ?? null,
-);
-const detailLoading = ref(false);
-const detailError = ref("");
-/** 远程审计详情缓存(provider 维度):切换来源不重复请求;刷新/切换技能时随 resetDetail 清空 */
-const detailCache = new Map<string, { markdown: string; auditedAt: string }>();
-const original = ref("");
-const auditedAt = ref("");
-let listSeq = 0;
-let detailSeq = 0;
+    defineProps<{
+      marketplaceId: string | null;
+      /** 本地安全扫描报告(父级扫描页传入);null 表示尚未扫描 */
+      localScan?: ResourceSkillScanReport | null;
+      scanning?: boolean;
+    }>(),
+    { localScan: null, scanning: false },
+  ),
+  { t, te, locale } = useI18n(),
+  language = computed(() => locale.value as SupportedLocale),
+  // 传游离元素,避免 Markdown 库把 island/pixel 主题变量写成无效 hsl(#…)(与技能预览一致)
+  detachedThemeEl = document.createElement("div"),
+  themeElement = () => detachedThemeEl,
+  settings = useSettingsStore(),
+  audits = ref<ResourcePublicAudit[]>([]),
+  loading = ref(false),
+  error = ref(""),
+  /** 选中的审计来源:"local"=本地扫描(默认);其余为远程 provider */
+  selection = ref<"local" | string>("local"),
+  selected = computed(
+    () => audits.value.find((audit) => audit.provider === selection.value) ?? null,
+  ),
+  detailLoading = ref(false),
+  detailError = ref(""),
+  /** 远程审计详情缓存(provider 维度):切换来源不重复请求;刷新/切换技能时随 resetDetail 清空 */
+  detailCache = new Map<string, { markdown: string; auditedAt: string }>(),
+  original = ref(""),
+  auditedAt = ref("");
+let listSeq = 0,
+  detailSeq = 0;
 // 翻译状态机与技能预览页/AI 文件抽屉共用(取消/切换/卸载废弃旧结果)
 const translation = useMarkdownTranslation({
-  getIdentity: () =>
-    props.marketplaceId && selection.value !== "local"
-      ? `${props.marketplaceId}:${selection.value}`
-      : null,
-  getText: () => original.value || null,
-  getLanguage: () => settings.language,
-  runIdPrefix: "audit-translation",
-});
-const {
-  translating,
-  translatedText: translated,
-  showTranslated: showTranslation,
-  toggle: translate,
-  reset: resetTranslation,
-} = translation;
+    getIdentity: () =>
+      props.marketplaceId && selection.value !== "local"
+        ? `${props.marketplaceId}:${selection.value}`
+        : null,
+    getText: () => original.value || null,
+    getLanguage: () => settings.language,
+    runIdPrefix: "audit-translation",
+  }),
+  {
+    translating,
+    translatedText: translated,
+    showTranslated: showTranslation,
+    toggle: translate,
+    reset: resetTranslation,
+  } = translation;
 function resetDetail() {
   detailSeq++;
   resetTranslation();
@@ -182,34 +182,34 @@ function statusClass(status: string) {
 }
 /** 本地扫描来源的状态摘要:扫描中 / 等级+评分 / 未扫描 */
 const localStatus = computed(() => {
-  if (props.scanning) {
-    return t("settings.resources.skills.previewPage.scan.running");
-  }
-  const report = props.localScan;
-  if (!report) {
-    return t("settings.resources.skills.previewPage.scan.idle");
-  }
-  const key = `settings.resources.skills.previewPage.scan.level.${report.level}`;
-  const label = te(key) ? t(key) : report.level;
-  return `${label} ${report.score}`;
-});
-const localStatusClass = computed(() => {
-  if (props.scanning) {
-    return "text-primary";
-  }
-  switch (props.localScan?.level) {
-    case "low":
-      return "text-emerald-600 dark:text-emerald-400";
-    case "medium":
-      return "text-amber-600 dark:text-amber-400";
-    case "high":
-      return "text-orange-600 dark:text-orange-400";
-    case "critical":
-      return "text-red-600 dark:text-red-400";
-    default:
-      return "text-muted-foreground";
-  }
-});
+    if (props.scanning) {
+      return t("settings.resources.skills.previewPage.scan.running");
+    }
+    const report = props.localScan;
+    if (!report) {
+      return t("settings.resources.skills.previewPage.scan.idle");
+    }
+    const key = `settings.resources.skills.previewPage.scan.level.${report.level}`,
+      label = te(key) ? t(key) : report.level;
+    return `${label} ${report.score}`;
+  }),
+  localStatusClass = computed(() => {
+    if (props.scanning) {
+      return "text-primary";
+    }
+    switch (props.localScan?.level) {
+      case "low":
+        return "text-emerald-600 dark:text-emerald-400";
+      case "medium":
+        return "text-amber-600 dark:text-amber-400";
+      case "high":
+        return "text-orange-600 dark:text-orange-400";
+      case "critical":
+        return "text-red-600 dark:text-red-400";
+      default:
+        return "text-muted-foreground";
+    }
+  });
 watch(() => props.marketplaceId, load, { immediate: true });
 // 界面语言切换:旧语言译文作废,再点翻译按新语言重译
 watch(

@@ -16,7 +16,9 @@ describe("isKnownAiApiType", () => {
       "anthropic-messages",
       "google-generative-ai",
     ]);
-    for (const api of AI_API_TYPES) expect(isKnownAiApiType(api)).toBe(true);
+    for (const api of AI_API_TYPES) {
+      expect(isKnownAiApiType(api)).toBe(true);
+    }
   });
 
   it("keeps unknown external values typed but unclassified", () => {

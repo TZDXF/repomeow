@@ -34,25 +34,21 @@ import ChatContextMeter from "@/components/chat/dock/ChatContextMeter.vue";
 import ChatVirtualMessage from "@/components/chat/ChatVirtualMessage.vue";
 
 // 时间线末尾固定保持真实挂载的条数,保证吸底定位与流式内容始终可见
-const PINNED_TAIL = 4;
-
-const props = defineProps<{ project: Project }>();
-const open = defineModel<boolean>("open", { default: false });
-
-const { t } = useI18n();
-const chat = useChatStore();
-const aiConfig = useAiConfigStore();
+const PINNED_TAIL = 4,
+  props = defineProps<{ project: Project }>(),
+  open = defineModel<boolean>("open", { default: false }),
+  { t } = useI18n(),
+  chat = useChatStore(),
+  aiConfig = useAiConfigStore();
 
 // --- AI 配置就绪(多厂商配置 ai-config.json;chat 模型有效且厂商 baseUrl/apiKey 齐) ---
 onMounted(() => {
   void aiConfig.ensureLoaded();
 });
-const aiReady = computed(() => aiConfig.chatReady);
-
-// --- 会话状态(按项目路径隔离,离开页面不清空) ---
-const session = computed(() => chat.ensureSession(props.project.path));
-
-const history = computed(() => chat.ensureHistory(props.project.path));
+const aiReady = computed(() => aiConfig.chatReady),
+  // --- 会话状态(按项目路径隔离,离开页面不清空) ---
+  session = computed(() => chat.ensureSession(props.project.path)),
+  history = computed(() => chat.ensureHistory(props.project.path));
 watch(
   () => props.project.path,
   (path) => void chat.loadHistory(path),
@@ -65,25 +61,24 @@ function selectHistory(id: string) {
   void chat.selectHistory(props.project.path, id);
 }
 
-const isEmpty = computed(() => session.value.messages.length === 0 && !session.value.busy);
-
-// ── 面板布局 / 时间线视图 / 消息动作(实现见 composables/chat-dock/*) ──
-const { panelStyle, resizing, startResize } = useChatDockLayout(open);
-const { timeline, retrySeconds } = useChatTimeline(session);
-const {
-  onSubmit,
-  sendText,
-  abort,
-  startNewSession,
-  editingKey,
-  editText,
-  startEdit,
-  cancelEdit,
-  confirmEdit,
-  copyText,
-  copyTurn,
-  submitStatus,
-} = useChatMessageActions({ project: () => props.project, session, aiReady });
+const isEmpty = computed(() => session.value.messages.length === 0 && !session.value.busy),
+  // ── 面板布局 / 时间线视图 / 消息动作(实现见 composables/chat-dock/*) ──
+  { panelStyle, resizing, startResize } = useChatDockLayout(open),
+  { timeline, retrySeconds } = useChatTimeline(session),
+  {
+    onSubmit,
+    sendText,
+    abort,
+    startNewSession,
+    editingKey,
+    editText,
+    startEdit,
+    cancelEdit,
+    confirmEdit,
+    copyText,
+    copyTurn,
+    submitStatus,
+  } = useChatMessageActions({ project: () => props.project, session, aiReady });
 </script>
 
 <template>

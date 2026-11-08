@@ -15,43 +15,44 @@ import type { SemanticEntityLogResult, SemanticEntityRef } from "@/types";
 // 点击历史提交跳转 GitGraph(?commit=<fullOid>)定位。
 
 const props = defineProps<{
-  /** 项目 ID(GitGraph 路由跳转用) */
-  projectId: number;
-  root: string;
-  entity: SemanticEntityRef | null;
-}>();
-
-const open = defineModel<boolean>("open", { required: true });
-
-const { t, te } = useI18n();
-const router = useRouter();
-
-const request = useSemanticRequest((requestId: string) => {
-  const entity = props.entity;
-  if (!entity) return Promise.reject(new Error("no entity"));
-  return cmd<SemanticEntityLogResult>("semantic_entity_log", {
-    path: props.root,
-    entityName: entity.name,
-    filePath: entity.filePath || undefined,
-    limit: 50,
-    requestId,
+    /** 项目 ID(GitGraph 路由跳转用) */
+    projectId: number;
+    root: string;
+    entity: SemanticEntityRef | null;
+  }>(),
+  open = defineModel<boolean>("open", { required: true }),
+  { t, te } = useI18n(),
+  router = useRouter(),
+  request = useSemanticRequest((requestId: string) => {
+    const entity = props.entity;
+    if (!entity) {
+      return Promise.reject(new Error("no entity"));
+    }
+    return cmd<SemanticEntityLogResult>("semantic_entity_log", {
+      path: props.root,
+      entityName: entity.name,
+      filePath: entity.filePath || undefined,
+      limit: 50,
+      requestId,
+    });
   });
-});
 
 watch([open, () => props.entity], ([isOpen]) => {
-  if (isOpen && props.entity) void request.run();
-  else request.cancel();
+  if (isOpen && props.entity) {
+    void request.run();
+  } else {
+    request.cancel();
+  }
 });
 
-const entityMissing = computed(() => request.errorCode.value === "semantic_entity_not_found");
-
-const CHANGE_MARKS: Record<string, string> = {
-  added: "+",
-  modified: "M",
-  deleted: "−",
-  renamed: "R",
-  moved: "↗",
-};
+const entityMissing = computed(() => request.errorCode.value === "semantic_entity_not_found"),
+  CHANGE_MARKS: Record<string, string> = {
+    added: "+",
+    modified: "M",
+    deleted: "−",
+    renamed: "R",
+    moved: "↗",
+  };
 
 function changeMark(changeType: string): string {
   return CHANGE_MARKS[changeType] ?? "•";

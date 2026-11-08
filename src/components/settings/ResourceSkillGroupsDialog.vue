@@ -26,64 +26,56 @@ import {
 } from "@/lib/resource-library";
 
 const props = defineProps<{
-  open: boolean;
-  groups: ResourceSkillGroup[];
-  /** 全量技能列表:分组行展示成员数,「添加技能」选择器从中勾选 */
-  skills: ResourceSkill[];
-}>();
-
-const emit = defineEmits<{
-  "update:open": [value: boolean];
-  /** 分组增删改/排序/成员调整后触发(父组件刷新列表) */
-  changed: [];
-}>();
-
-const { t } = useI18n();
-
-const PRESET_COLORS = [
-  "#3b82f6",
-  "#22c55e",
-  "#eab308",
-  "#ef4444",
-  "#a855f7",
-  "#ec4899",
-  "#14b8a6",
-  "#f97316",
-];
-
-const newName = ref("");
-const newDescription = ref("");
-const newColor = ref("#3b82f6");
-const creating = ref(false);
-
-const editingId = ref<string | null>(null);
-const editName = ref("");
-const editDescription = ref("");
-const editColor = ref("#3b82f6");
-const savingEdit = ref(false);
-
-const reordering = ref(false);
-
-const pendingDelete = ref<ResourceSkillGroup | null>(null);
-const deleteConfirmOpen = computed({
-  get: () => pendingDelete.value !== null,
-  set: (v) => {
-    if (!v) {
-      pendingDelete.value = null;
+    open: boolean;
+    groups: ResourceSkillGroup[];
+    /** 全量技能列表:分组行展示成员数,「添加技能」选择器从中勾选 */
+    skills: ResourceSkill[];
+  }>(),
+  emit = defineEmits<{
+    "update:open": [value: boolean];
+    /** 分组增删改/排序/成员调整后触发(父组件刷新列表) */
+    changed: [];
+  }>(),
+  { t } = useI18n(),
+  PRESET_COLORS = [
+    "#3b82f6",
+    "#22c55e",
+    "#eab308",
+    "#ef4444",
+    "#a855f7",
+    "#ec4899",
+    "#14b8a6",
+    "#f97316",
+  ],
+  newName = ref(""),
+  newDescription = ref(""),
+  newColor = ref("#3b82f6"),
+  creating = ref(false),
+  editingId = ref<string | null>(null),
+  editName = ref(""),
+  editDescription = ref(""),
+  editColor = ref("#3b82f6"),
+  savingEdit = ref(false),
+  reordering = ref(false),
+  pendingDelete = ref<ResourceSkillGroup | null>(null),
+  deleteConfirmOpen = computed({
+    get: () => pendingDelete.value !== null,
+    set: (v) => {
+      if (!v) {
+        pendingDelete.value = null;
+      }
+    },
+  }),
+  /** 每个分组的技能成员数(groupId → count) */
+  memberCount = computed(() => {
+    const counts = new Map<string, number>();
+    for (const skill of props.skills) {
+      for (const groupId of skill.groupIds) {
+        counts.set(groupId, (counts.get(groupId) ?? 0) + 1);
+      }
     }
-  },
-});
-
-/** 每个分组的技能成员数(groupId → count) */
-const memberCount = computed(() => {
-  const counts = new Map<string, number>();
-  for (const skill of props.skills) {
-    for (const groupId of skill.groupIds) {
-      counts.set(groupId, (counts.get(groupId) ?? 0) + 1);
-    }
-  }
-  return counts;
-});
+    return counts;
+  });
 
 async function create() {
   const name = newName.value.trim();
@@ -112,8 +104,8 @@ function startEdit(group: ResourceSkillGroup) {
 }
 
 async function saveEdit() {
-  const id = editingId.value;
-  const name = editName.value.trim();
+  const id = editingId.value,
+    name = editName.value.trim();
   if (!id || !name || savingEdit.value) {
     return;
   }
@@ -166,29 +158,28 @@ async function move(index: number, dir: -1 | 1) {
 
 // ── 「添加技能」选择器:勾选集合整体保存,后端按差量增删成员 ──────────────
 
-const pickerGroup = ref<ResourceSkillGroup | null>(null);
-const pickerSelected = ref(new Set<string>());
-const pickerQuery = ref("");
-const savingPicker = ref(false);
-
-const pickerOpen = computed({
-  get: () => pickerGroup.value !== null,
-  set: (v) => {
-    if (!v) {
-      pickerGroup.value = null;
+const pickerGroup = ref<ResourceSkillGroup | null>(null),
+  pickerSelected = ref(new Set<string>()),
+  pickerQuery = ref(""),
+  savingPicker = ref(false),
+  pickerOpen = computed({
+    get: () => pickerGroup.value !== null,
+    set: (v) => {
+      if (!v) {
+        pickerGroup.value = null;
+      }
+    },
+  }),
+  pickerFiltered = computed(() => {
+    const q = pickerQuery.value.trim().toLowerCase();
+    if (!q) {
+      return props.skills;
     }
-  },
-});
-
-const pickerFiltered = computed(() => {
-  const q = pickerQuery.value.trim().toLowerCase();
-  if (!q) {
-    return props.skills;
-  }
-  return props.skills.filter(
-    (skill) => skill.name.toLowerCase().includes(q) || skill.description.toLowerCase().includes(q),
-  );
-});
+    return props.skills.filter(
+      (skill) =>
+        skill.name.toLowerCase().includes(q) || skill.description.toLowerCase().includes(q),
+    );
+  });
 
 function openPicker(group: ResourceSkillGroup) {
   pickerGroup.value = group;

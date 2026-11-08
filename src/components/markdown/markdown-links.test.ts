@@ -35,6 +35,7 @@ describe("Markdown 链接统一拦截", () => {
   });
   it("危险协议及中键、右键、修饰键均无法触发导航", () => {
     for (const e of [
+      // oxlint-disable-next-line no-script-url -- 安全回归用例必须覆盖危险协议。
       click("javascript:alert(1)"),
       click("https://example.com", { type: "auxclick", button: 1 }),
       click("https://example.com", { type: "contextmenu", button: 2 }),

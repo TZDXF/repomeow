@@ -21,42 +21,42 @@ import {
 import GitBranchTrackBadges from "@/components/git/GitBranchTrackBadges.vue";
 import type { BranchTreeNode } from "@/lib/branch-tree";
 
-const { t } = useI18n();
-// 树结构渲染分支:目录节点内联展开/收起(chevron 切换),分支节点点击展开嵌套操作子菜单。
-// 既是分支又是目录的节点(如 feature 与 feature/x 并存):行内 chevron 控制子级内联展开,
-// 行本身点击展开自身操作子菜单
-const props = withDefaults(
-  defineProps<{
-    nodes: BranchTreeNode[];
-    /** 远程分组:操作项为 签出/删除远程分支,目录顶层用 Globe 图标 */
-    remote?: boolean;
-    depth?: number;
-    currentBranch?: string;
-    /** 分支名 → upstream 跟踪差值(仅本地分支有) */
-    trackByName?: Map<string, { ahead: number; behind: number }>;
-    /** 进行中的分支操作(拉取/推送),用于禁用与展示 spinner */
-    branchOp?: { branch: string; op: "pull" | "push" } | null;
-    /** 任一 git 操作进行中(签出/拉取/推送等),锁定全部操作项 */
-    locked?: boolean;
-    /** 已折叠目录键集合(键见 folderKey) */
-    collapsed: Set<string>;
-  }>(),
-  {
-    remote: false,
-    depth: 0,
-    currentBranch: "",
-    trackByName: undefined,
-    branchOp: null,
-    locked: false,
-  },
-);
-const emit = defineEmits<{
-  toggleFolder: [key: string];
-  checkout: [branch: string, remote: boolean];
-  pull: [branch: string];
-  push: [branch: string];
-  remove: [branch: string, remote: boolean];
-}>();
+const { t } = useI18n(),
+  // 树结构渲染分支:目录节点内联展开/收起(chevron 切换),分支节点点击展开嵌套操作子菜单。
+  // 既是分支又是目录的节点(如 feature 与 feature/x 并存):行内 chevron 控制子级内联展开,
+  // 行本身点击展开自身操作子菜单
+  props = withDefaults(
+    defineProps<{
+      nodes: BranchTreeNode[];
+      /** 远程分组:操作项为 签出/删除远程分支,目录顶层用 Globe 图标 */
+      remote?: boolean;
+      depth?: number;
+      currentBranch?: string;
+      /** 分支名 → upstream 跟踪差值(仅本地分支有) */
+      trackByName?: Map<string, { ahead: number; behind: number }>;
+      /** 进行中的分支操作(拉取/推送),用于禁用与展示 spinner */
+      branchOp?: { branch: string; op: "pull" | "push" } | null;
+      /** 任一 git 操作进行中(签出/拉取/推送等),锁定全部操作项 */
+      locked?: boolean;
+      /** 已折叠目录键集合(键见 folderKey) */
+      collapsed: Set<string>;
+    }>(),
+    {
+      remote: false,
+      depth: 0,
+      currentBranch: "",
+      trackByName: undefined,
+      branchOp: null,
+      locked: false,
+    },
+  ),
+  emit = defineEmits<{
+    toggleFolder: [key: string];
+    checkout: [branch: string, remote: boolean];
+    pull: [branch: string];
+    push: [branch: string];
+    remove: [branch: string, remote: boolean];
+  }>();
 
 /** 折叠键带分组前缀:本地目录与远程目录可能同名(如本地 feature 与 origin/feature) */
 function folderKey(node: BranchTreeNode) {

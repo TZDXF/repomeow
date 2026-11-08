@@ -11,14 +11,13 @@ import { resolveTabFromPath, useTabsStore } from "@/stores/tabs";
 
 import TitleTabContextMenu from "./TitleTabContextMenu.vue";
 
-const { t } = useI18n();
-const route = useRoute();
-const router = useRouter();
-const tabsStore = useTabsStore();
-const projectsStore = useProjectsStore();
-const backgroundTasksStore = useBackgroundTasksStore();
-
-const resolved = computed(() => resolveTabFromPath(route.path));
+const { t } = useI18n(),
+  route = useRoute(),
+  router = useRouter(),
+  tabsStore = useTabsStore(),
+  projectsStore = useProjectsStore(),
+  backgroundTasksStore = useBackgroundTasksStore(),
+  resolved = computed(() => resolveTabFromPath(route.path));
 
 function projectName(id: number): string {
   // 走全量索引,首页搜索/标签筛选裁剪列表时不回退 #id
@@ -33,7 +32,9 @@ function isProjectActive(id: number): boolean {
 const runningCountByProject = computed(() => {
   const counts = new Map<number, number>();
   for (const task of backgroundTasksStore.tasks) {
-    if (!task.target) continue;
+    if (!task.target) {
+      continue;
+    }
     counts.set(task.target.projectId, (counts.get(task.target.projectId) ?? 0) + 1);
   }
   return counts;
@@ -44,8 +45,8 @@ function runningCount(id: number): number {
 }
 
 function tabTitle(id: number): string {
-  const name = projectName(id);
-  const count = runningCount(id);
+  const name = projectName(id),
+    count = runningCount(id);
   return count > 0 ? `${name} · ${t("titleBar.tasksRunning", { count })}` : name;
 }
 
@@ -65,9 +66,13 @@ function onCloseTab(event: MouseEvent, id: number) {
 /** 悬停文本 tab 时,若名称溢出则实测溢出距离并驱动横向滚动展示全名 */
 function onTabHoverEnter(event: MouseEvent) {
   const label = (event.currentTarget as HTMLElement).querySelector<HTMLElement>("[data-tab-label]");
-  if (!label) return;
+  if (!label) {
+    return;
+  }
   const distance = label.scrollWidth - label.clientWidth;
-  if (distance <= 0) return;
+  if (distance <= 0) {
+    return;
+  }
   // 匀速滚动约 40px/s,由 keyframes 前后各留停顿
   label.style.setProperty("--tab-scroll-x", `-${distance}px`);
   label.style.setProperty("--tab-scroll-duration", `${Math.max(3, distance / 40)}s`);
@@ -82,21 +87,27 @@ function onTabHoverLeave(event: MouseEvent) {
 }
 
 // ── 溢出检测:tab 总宽超出显示范围时,尾部出现「更多」按钮(点击弹出完整列表) ──
-const stripRef = ref<HTMLElement | null>(null);
-const trackRef = ref<HTMLElement | null>(null);
-const overflow = ref(false);
+const stripRef = ref<HTMLElement | null>(null),
+  trackRef = ref<HTMLElement | null>(null),
+  overflow = ref(false);
 let resizeObserver: ResizeObserver | undefined;
 
 function measureOverflow() {
   const strip = stripRef.value;
-  if (!strip) return;
+  if (!strip) {
+    return;
+  }
   overflow.value = strip.scrollWidth > strip.clientWidth + 1;
 }
 
 onMounted(() => {
   resizeObserver = new ResizeObserver(measureOverflow);
-  if (stripRef.value) resizeObserver.observe(stripRef.value);
-  if (trackRef.value) resizeObserver.observe(trackRef.value);
+  if (stripRef.value) {
+    resizeObserver.observe(stripRef.value);
+  }
+  if (trackRef.value) {
+    resizeObserver.observe(trackRef.value);
+  }
   measureOverflow();
 });
 

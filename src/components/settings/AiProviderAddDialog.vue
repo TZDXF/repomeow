@@ -23,46 +23,44 @@ import {
 import { AI_API_TYPES, type AiApiType, type AiModelDef, type AiProvider } from "@/lib/ai-config";
 
 const props = defineProps<{
-  open: boolean;
-  /** 内置厂商目录(设置页 onMounted 拉取,失败时仅剩自定义) */
-  catalog: Record<string, AiProvider>;
-  /** 已存在的厂商 id(去重;内置选项过滤与提交前校验共用) */
-  existingIds: string[];
-}>();
-
-const emit = defineEmits<{
-  "update:open": [value: boolean];
-  /** 确认添加:models 为内置厂商带入的预置模型(自定义为空数组) */
-  add: [
-    payload: {
-      id: string;
-      name: string;
-      baseUrl: string;
-      apiKey: string;
-      api: AiApiType;
-      models: AiModelDef[];
-    },
-  ];
-}>();
-
-const { t } = useI18n();
-
-/** 厂商选择中「自定义」选项的固定值 */
-const CUSTOM_CHOICE = "custom";
-
-const addChoice = ref(CUSTOM_CHOICE);
-const addForm = reactive({
-  id: "",
-  name: "",
-  baseUrl: "",
-  apiKey: "",
-  api: "openai-completions" as AiApiType,
-});
+    open: boolean;
+    /** 内置厂商目录(设置页 onMounted 拉取,失败时仅剩自定义) */
+    catalog: Record<string, AiProvider>;
+    /** 已存在的厂商 id(去重;内置选项过滤与提交前校验共用) */
+    existingIds: string[];
+  }>(),
+  emit = defineEmits<{
+    "update:open": [value: boolean];
+    /** 确认添加:models 为内置厂商带入的预置模型(自定义为空数组) */
+    add: [
+      payload: {
+        id: string;
+        name: string;
+        baseUrl: string;
+        apiKey: string;
+        api: AiApiType;
+        models: AiModelDef[];
+      },
+    ];
+  }>(),
+  { t } = useI18n(),
+  /** 厂商选择中「自定义」选项的固定值 */
+  CUSTOM_CHOICE = "custom",
+  addChoice = ref(CUSTOM_CHOICE),
+  addForm = reactive({
+    id: "",
+    name: "",
+    baseUrl: "",
+    apiKey: "",
+    api: "openai-completions" as AiApiType,
+  });
 
 watch(
   () => props.open,
   (open) => {
-    if (!open) return;
+    if (!open) {
+      return;
+    }
     addChoice.value = CUSTOM_CHOICE;
     addForm.id = "";
     addForm.name = "";
@@ -74,16 +72,15 @@ watch(
 
 /** 内置目录中尚未添加的厂商(已存在的 id 不再提供,避免重复) */
 const addOptions = computed(() => {
-  const used = new Set(props.existingIds);
-  return Object.entries(props.catalog)
-    .filter(([id]) => !used.has(id))
-    .map(([id, provider]) => ({ id, name: provider.name.trim() || id }));
-});
-
-/** 选中内置厂商时带入的预置模型数(对话框提示用) */
-const seededModelCount = computed(() =>
-  addChoice.value === CUSTOM_CHOICE ? 0 : (props.catalog[addChoice.value]?.models.length ?? 0),
-);
+    const used = new Set(props.existingIds);
+    return Object.entries(props.catalog)
+      .filter(([id]) => !used.has(id))
+      .map(([id, provider]) => ({ id, name: provider.name.trim() || id }));
+  }),
+  /** 选中内置厂商时带入的预置模型数(对话框提示用) */
+  seededModelCount = computed(() =>
+    addChoice.value === CUSTOM_CHOICE ? 0 : (props.catalog[addChoice.value]?.models.length ?? 0),
+  );
 
 function onAddChoiceChange(value: unknown) {
   const choice = String(value);
@@ -96,7 +93,9 @@ function onAddChoiceChange(value: unknown) {
     return;
   }
   const provider = props.catalog[choice];
-  if (!provider) return;
+  if (!provider) {
+    return;
+  }
   addForm.id = choice;
   addForm.name = provider.name;
   addForm.baseUrl = provider.baseUrl;

@@ -14,22 +14,22 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  duration: 2,
-  spread: 2,
-});
-
-const slots = useSlots();
-
-const textContent = computed(() => {
-  const nodes = slots.default?.();
-  if (!Array.isArray(nodes)) return "";
-  return nodes.map((node) => (typeof node.children === "string" ? node.children : "")).join("");
-});
-
-const style = computed((): CSSProperties => ({
-  "--shimmer-spread": `${textContent.value.length * props.spread}px`,
-  animationDuration: `${props.duration}s`,
-}));
+    duration: 2,
+    spread: 2,
+    class: undefined,
+  }),
+  slots = useSlots(),
+  textContent = computed(() => {
+    const nodes = slots.default?.();
+    if (!Array.isArray(nodes)) {
+      return "";
+    }
+    return nodes.map((node) => (typeof node.children === "string" ? node.children : "")).join("");
+  }),
+  style = computed((): CSSProperties => ({
+    "--shimmer-spread": `${textContent.value.length * props.spread}px`,
+    animationDuration: `${props.duration}s`,
+  }));
 </script>
 
 <template>

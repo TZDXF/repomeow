@@ -7,10 +7,9 @@ import FavoriteToggle from "@/components/project/FavoriteToggle.vue";
 import ProjectActionsMenu from "@/components/project/ProjectActionsMenu.vue";
 import type { Project } from "@/types";
 
-const { t } = useI18n();
-const props = defineProps<{ project: Project }>();
-
-const router = useRouter();
+const { t } = useI18n(),
+  props = defineProps<{ project: Project }>(),
+  router = useRouter();
 
 function open() {
   router.push(`/projects/${props.project.id}`);

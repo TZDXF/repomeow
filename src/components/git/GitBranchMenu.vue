@@ -48,63 +48,57 @@ import type { GitStatus, GitBranches, GitWorktree, Project } from "@/types";
 
 type Op = "pull" | "push" | "unshallow" | "";
 
-const { t } = useI18n();
-const props = defineProps<{ project: Project }>();
-const emit = defineEmits<{ openStash: [] }>();
-const store = useProjectsStore();
-
-const git = computed(() => props.project.git);
-
-const open = ref(false);
-const branches = ref<GitBranches>({ local: [], remote: [], tracking: [] });
-const worktrees = ref<GitWorktree[]>([]);
-const loading = ref(false);
-const switching = ref(false);
-
-/** 当前目录若是仓库的 linked worktree 则进入 worktree 模式:切换分支会与其他
- * 工作区冲突,菜单改为提供合回/变基,不展示新建分支与本地/远程分支列表 */
-const currentWorktree = computed(() => {
-  const p = toForwardSlash(props.project.path);
-  return worktrees.value.find((w) => !w.is_main && toForwardSlash(w.path) === p) ?? null;
-});
-/** 来源分支领先当前 worktree 的提交数(>0 时变基项带计数) */
-const baseBehind = computed(() => currentWorktree.value?.base_behind ?? 0);
-
-// --- 当前分支操作(提交/拉取/推送,从原 GitActions 并入) ---
-const busy = ref<Op>("");
-const commitOpen = ref(false);
-const conflictOpen = ref(false);
-const conflicts = ref<string[]>([]);
-
-const staged = computed(() => git.value?.staged ?? 0);
-const modified = computed(() => git.value?.modified ?? 0);
-const untracked = computed(() => git.value?.untracked ?? 0);
-const ahead = computed(() => git.value?.ahead ?? 0);
-const behind = computed(() => git.value?.behind ?? 0);
-const hasChanges = computed(
-  () => !!git.value && staged.value + modified.value + untracked.value > 0,
-);
-
-/** 提交项悬浮提示:三类变更明细 */
-const commitTitle = computed(
-  () =>
-    `${t("git.staged")} ${staged.value} · ${t("git.modified")} ${modified.value} · ${t("git.untracked")} ${untracked.value}`,
-);
-
-/** 任一 git 操作进行中时锁定菜单内全部操作项 */
-const opsLocked = computed(() => busy.value !== "" || switching.value || !!branchOp.value);
-
-/** 暴露给触发按钮的同步状态:点击菜单项后菜单即关闭,loading 需展示在外部按钮上 */
-const triggerOp = computed<Op>(() => busy.value || branchOp.value?.op || "");
+const { t } = useI18n(),
+  props = defineProps<{ project: Project }>(),
+  emit = defineEmits<{ openStash: [] }>(),
+  store = useProjectsStore(),
+  git = computed(() => props.project.git),
+  open = ref(false),
+  branches = ref<GitBranches>({ local: [], remote: [], tracking: [] }),
+  worktrees = ref<GitWorktree[]>([]),
+  loading = ref(false),
+  switching = ref(false),
+  /** 当前目录若是仓库的 linked worktree 则进入 worktree 模式:切换分支会与其他
+   * 工作区冲突,菜单改为提供合回/变基,不展示新建分支与本地/远程分支列表 */
+  currentWorktree = computed(() => {
+    const p = toForwardSlash(props.project.path);
+    return worktrees.value.find((w) => !w.is_main && toForwardSlash(w.path) === p) ?? null;
+  }),
+  /** 来源分支领先当前 worktree 的提交数(>0 时变基项带计数) */
+  baseBehind = computed(() => currentWorktree.value?.base_behind ?? 0),
+  // --- 当前分支操作(提交/拉取/推送,从原 GitActions 并入) ---
+  busy = ref<Op>(""),
+  commitOpen = ref(false),
+  conflictOpen = ref(false),
+  conflicts = ref<string[]>([]),
+  staged = computed(() => git.value?.staged ?? 0),
+  modified = computed(() => git.value?.modified ?? 0),
+  untracked = computed(() => git.value?.untracked ?? 0),
+  ahead = computed(() => git.value?.ahead ?? 0),
+  behind = computed(() => git.value?.behind ?? 0),
+  hasChanges = computed(() => !!git.value && staged.value + modified.value + untracked.value > 0),
+  /** 提交项悬浮提示:三类变更明细 */
+  commitTitle = computed(
+    () =>
+      `${t("git.staged")} ${staged.value} · ${t("git.modified")} ${modified.value} · ${t("git.untracked")} ${untracked.value}`,
+  ),
+  /** 任一 git 操作进行中时锁定菜单内全部操作项 */
+  opsLocked = computed(() => busy.value !== "" || switching.value || !!branchOp.value),
+  /** 暴露给触发按钮的同步状态:点击菜单项后菜单即关闭,loading 需展示在外部按钮上 */
+  triggerOp = computed<Op>(() => busy.value || branchOp.value?.op || "");
 
 async function unshallow() {
-  if (opsLocked.value) return;
+  if (opsLocked.value) {
+    return;
+  }
   const project = props.project;
   busy.value = "unshallow";
   try {
     project.git = await cmd<GitStatus>("git_unshallow", { path: project.path });
     toast.success(t("git.unshallow.success"));
-    if (props.project.path === project.path) await loadBranches();
+    if (props.project.path === project.path) {
+      await loadBranches();
+    }
   } catch (e) {
     toast.error(String(e));
   } finally {
@@ -113,37 +107,36 @@ async function unshallow() {
 }
 
 // --- 新建分支对话框 ---
-const createOpen = ref(false);
-const newBranch = ref("");
-const baseBranch = ref("");
-const creating = ref(false);
-
-/** 分支名 → upstream 跟踪差值 */
-const trackByName = computed(() => {
-  const m = new Map<string, { ahead: number; behind: number }>();
-  for (const tr of branches.value.tracking) {
-    m.set(tr.name, { ahead: tr.ahead, behind: tr.behind });
-  }
-  return m;
-});
-
-/** 本地/远程分支按 "/" 聚合为树:目录内联展开/收起,分支点击展开操作子菜单 */
-const localTree = computed(() => buildBranchTree(branches.value.local));
-const remoteTree = computed(() => buildBranchTree(branches.value.remote));
-
-/** 树内已折叠的目录键("local:feature" / "remote:origin/feature") */
-const collapsedFolders = ref<Set<string>>(new Set());
+const createOpen = ref(false),
+  newBranch = ref(""),
+  baseBranch = ref(""),
+  creating = ref(false),
+  /** 分支名 → upstream 跟踪差值 */
+  trackByName = computed(() => {
+    const m = new Map<string, { ahead: number; behind: number }>();
+    for (const tr of branches.value.tracking) {
+      m.set(tr.name, { ahead: tr.ahead, behind: tr.behind });
+    }
+    return m;
+  }),
+  /** 本地/远程分支按 "/" 聚合为树:目录内联展开/收起,分支点击展开操作子菜单 */
+  localTree = computed(() => buildBranchTree(branches.value.local)),
+  remoteTree = computed(() => buildBranchTree(branches.value.remote)),
+  /** 树内已折叠的目录键("local:feature" / "remote:origin/feature") */
+  collapsedFolders = ref<Set<string>>(new Set());
 
 /** 默认折叠全部目录;本地树展开当前分支的祖先目录,保证当前分支节点可见 */
 function defaultCollapsed(): Set<string> {
-  const keys = new Set<string>();
-  const collect = (nodes: BranchTreeNode[], group: string) => {
-    for (const n of nodes) {
-      if (!n.children.length) continue;
-      keys.add(`${group}:${n.fullPath}`);
-      collect(n.children, group);
-    }
-  };
+  const keys = new Set<string>(),
+    collect = (nodes: BranchTreeNode[], group: string) => {
+      for (const n of nodes) {
+        if (!n.children.length) {
+          continue;
+        }
+        keys.add(`${group}:${n.fullPath}`);
+        collect(n.children, group);
+      }
+    };
   collect(localTree.value, "local");
   collect(remoteTree.value, "remote");
   const current = git.value?.branch;
@@ -217,7 +210,9 @@ watch(createOpen, (v) => {
 });
 
 async function switchTo(branch: string, remote = false): Promise<boolean> {
-  if (switching.value || (!remote && branch === props.project.git?.branch)) return false;
+  if (switching.value || (!remote && branch === props.project.git?.branch)) {
+    return false;
+  }
   switching.value = true;
   try {
     await store.checkoutBranch(props.project, branch, { remote });
@@ -241,13 +236,14 @@ async function checkoutBranch(branch: string, remote: boolean) {
 
 async function createBranch() {
   const name = newBranch.value.trim();
-  if (!name || creating.value) return;
+  if (!name || creating.value) {
+    return;
+  }
   creating.value = true;
   try {
     // 基点为当前分支时无需显式传递(等价于基于 HEAD 创建)
-    const current = props.project.git?.branch;
-    const startPoint =
-      baseBranch.value && baseBranch.value !== current ? baseBranch.value : undefined;
+    const current = props.project.git?.branch,
+      startPoint = baseBranch.value && baseBranch.value !== current ? baseBranch.value : undefined;
     await store.checkoutBranch(props.project, name, { create: true, startPoint });
     toast.success(t("git.branch.switched", { name }));
     createOpen.value = false;
@@ -261,7 +257,9 @@ async function createBranch() {
 
 // --- 当前分支:拉取 / 推送(推送被拒时给出拉取并推送的快捷修复) ---
 async function pull(): Promise<boolean> {
-  if (busy.value) return false;
+  if (busy.value) {
+    return false;
+  }
   busy.value = "pull";
   try {
     const list = await store.pullRepository(props.project);
@@ -282,7 +280,9 @@ async function pull(): Promise<boolean> {
 }
 
 async function push() {
-  if (busy.value) return;
+  if (busy.value) {
+    return;
+  }
   busy.value = "push";
   try {
     await store.pushRepository(props.project);
@@ -304,16 +304,20 @@ async function push() {
 
 /** 先拉取;无冲突则自动重试推送(有冲突则交给冲突引导流程) */
 async function pullThenPush() {
-  if (await pull()) await push();
+  if (await pull()) {
+    await push();
+  }
 }
 
 // --- 跟踪更新:开启后后台定时检查远端更新并自动快进拉取(无法快进即取消,不提醒) ---
 /** 主工作区下 props.project 即 store 中的对象,切换后就地更新、此处响应式跟随 */
-const tracked = computed(() => props.project.auto_pull);
-const trackingBusy = ref(false);
+const tracked = computed(() => props.project.auto_pull),
+  trackingBusy = ref(false);
 
 async function toggleTracking() {
-  if (trackingBusy.value) return;
+  if (trackingBusy.value) {
+    return;
+  }
   trackingBusy.value = true;
   const next = !tracked.value;
   try {
@@ -330,7 +334,9 @@ async function toggleTracking() {
 const branchOp = ref<{ branch: string; op: "pull" | "push" } | null>(null);
 
 async function pullBranch(name: string): Promise<boolean> {
-  if (branchOp.value) return false;
+  if (branchOp.value) {
+    return false;
+  }
   branchOp.value = { branch: name, op: "pull" };
   try {
     const list = await store.pullRepository(props.project, name);
@@ -352,7 +358,9 @@ async function pullBranch(name: string): Promise<boolean> {
 }
 
 async function pushBranch(name: string) {
-  if (branchOp.value) return;
+  if (branchOp.value) {
+    return;
+  }
   branchOp.value = { branch: name, op: "push" };
   try {
     await store.pushRepository(props.project, name);
@@ -381,11 +389,11 @@ async function pullThenPushBranch(name: string) {
 }
 
 // --- 删除分支:本地 -d 安全删除(未合并原地切换 -D 强删确认);远程 push --delete ---
-const deleteOpen = ref(false);
-const deleteTarget = ref("");
-const deleteIsRemote = ref(false);
-const deleteNeedsForce = ref(false);
-const deleting = ref(false);
+const deleteOpen = ref(false),
+  deleteTarget = ref(""),
+  deleteIsRemote = ref(false),
+  deleteNeedsForce = ref(false),
+  deleting = ref(false);
 
 function askDeleteBranch(name: string, remote: boolean) {
   deleteTarget.value = name;
@@ -396,7 +404,9 @@ function askDeleteBranch(name: string, remote: boolean) {
 
 async function confirmDeleteBranch() {
   const name = deleteTarget.value;
-  if (!name || deleting.value) return;
+  if (!name || deleting.value) {
+    return;
+  }
   deleting.value = true;
   try {
     if (deleteIsRemote.value) {
@@ -426,12 +436,16 @@ const opsRef = ref<InstanceType<typeof WorktreeOpsDialogs> | null>(null);
 
 function openMerge() {
   const w = currentWorktree.value;
-  if (w) opsRef.value?.openMerge(w);
+  if (w) {
+    opsRef.value?.openMerge(w);
+  }
 }
 
 function openRebase() {
   const w = currentWorktree.value;
-  if (w) opsRef.value?.openRebase(w);
+  if (w) {
+    opsRef.value?.openRebase(w);
+  }
 }
 
 /** 合回/变基落地后:当前工作区的 ahead/behind 与变更统计已变化,刷新状态与列表 */

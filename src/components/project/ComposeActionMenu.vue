@@ -12,36 +12,39 @@ import {
   type ComposeMenuAction,
 } from "./compose-menu";
 
-const props = defineProps<{ kind: "context" | "dropdown"; service: boolean }>();
-const emit = defineEmits<{
-  run: [command: ComposeCommand];
-  export: [kind: "container" | "image"];
-}>();
-const { t } = useI18n();
-const entries = computed(() => composeMenuEntries(props.kind, props.service));
-const icons = {
-  up: Play,
-  stop: Square,
-  down: Square,
-  buildUp: Hammer,
-  build: Hammer,
-  restart: RotateCw,
-  exportContainer: Download,
-  exportImage: ImageDown,
-};
-const colors: Partial<Record<ComposeMenuAction, string>> = {
-  up: "text-emerald-600",
-  stop: "text-red-600",
-  down: "text-red-600",
-  buildUp: "text-emerald-600",
-  build: "text-sky-600",
-  restart: "text-amber-600",
-};
+const props = defineProps<{ kind: "context" | "dropdown"; service: boolean }>(),
+  emit = defineEmits<{
+    run: [command: ComposeCommand];
+    export: [kind: "container" | "image"];
+  }>(),
+  { t } = useI18n(),
+  entries = computed(() => composeMenuEntries(props.kind, props.service)),
+  icons = {
+    up: Play,
+    stop: Square,
+    down: Square,
+    buildUp: Hammer,
+    build: Hammer,
+    restart: RotateCw,
+    exportContainer: Download,
+    exportImage: ImageDown,
+  },
+  colors: Partial<Record<ComposeMenuAction, string>> = {
+    up: "text-emerald-600",
+    stop: "text-red-600",
+    down: "text-red-600",
+    buildUp: "text-emerald-600",
+    build: "text-sky-600",
+    restart: "text-amber-600",
+  };
 
 function activate(action: ComposeMenuAction) {
   const resolved = resolveComposeMenuAction(action);
-  if (resolved.kind === "export") emit("export", resolved.target);
-  else emit("run", resolved.command);
+  if (resolved.kind === "export") {
+    emit("export", resolved.target);
+  } else {
+    emit("run", resolved.command);
+  }
 }
 </script>
 

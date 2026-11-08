@@ -5,30 +5,26 @@ import { Maximize, ZoomIn, ZoomOut } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 
 const props = defineProps<{
-  src: string;
-  alt?: string;
-  /** svg 文件:无固有尺寸时回退解析 viewBox 得到像素标注 */
-  svg?: boolean;
-}>();
-
-const { t } = useI18n();
-
-const MIN_SCALE = 0.05;
-const MAX_SCALE = 8;
-const ZOOM_STEP = 1.25;
-
-const viewport = ref<HTMLDivElement | null>(null);
-const dims = ref<{ w: number; h: number } | null>(null);
-const loadFailed = ref(false);
-/** null = 适应窗口;数字 = 相对原始像素的缩放比例(1 = 实际大小) */
-const scale = ref<number | null>(null);
-const tx = ref(0);
-const ty = ref(0);
-const dragging = ref(false);
-
-// 视口内容区尺寸(不含 p-4 内边距),随窗口缩放/左栏拖宽联动
-const vpW = ref(0);
-const vpH = ref(0);
+    src: string;
+    alt?: string;
+    /** svg 文件:无固有尺寸时回退解析 viewBox 得到像素标注 */
+    svg?: boolean;
+  }>(),
+  { t } = useI18n(),
+  MIN_SCALE = 0.05,
+  MAX_SCALE = 8,
+  ZOOM_STEP = 1.25,
+  viewport = ref<HTMLDivElement | null>(null),
+  dims = ref<{ w: number; h: number } | null>(null),
+  loadFailed = ref(false),
+  /** null = 适应窗口;数字 = 相对原始像素的缩放比例(1 = 实际大小) */
+  scale = ref<number | null>(null),
+  tx = ref(0),
+  ty = ref(0),
+  dragging = ref(false),
+  // 视口内容区尺寸(不含 p-4 内边距),随窗口缩放/左栏拖宽联动
+  vpW = ref(0),
+  vpH = ref(0);
 let resizeObserver: ResizeObserver | undefined;
 
 onMounted(() => {
@@ -38,7 +34,9 @@ onMounted(() => {
     vpH.value = rect?.height ?? 0;
     clampPan();
   });
-  if (viewport.value) resizeObserver.observe(viewport.value);
+  if (viewport.value) {
+    resizeObserver.observe(viewport.value);
+  }
 });
 
 onBeforeUnmount(() => resizeObserver?.disconnect());
@@ -46,7 +44,9 @@ onBeforeUnmount(() => resizeObserver?.disconnect());
 /** 适应窗口模式下的等比缩放比例(不放大超过原始像素) */
 const fitScale = computed(() => {
   const d = dims.value;
-  if (!d || d.w === 0 || d.h === 0 || vpW.value === 0 || vpH.value === 0) return 1;
+  if (!d || d.w === 0 || d.h === 0 || vpW.value === 0 || vpH.value === 0) {
+    return 1;
+  }
   return Math.min(1, vpW.value / d.w, vpH.value / d.h);
 });
 
@@ -58,35 +58,39 @@ const percentLabel = computed(() => `${Math.round(currentScale() * 100)}%`);
 
 /** 缩放后超出视口的图像部分保持可拖回:平移量钳制在溢出半宽内 */
 function clampPan() {
-  const d = dims.value;
-  const s = scale.value;
+  const d = dims.value,
+    s = scale.value;
   if (s === null || !d) {
     tx.value = 0;
     ty.value = 0;
     return;
   }
-  const maxX = Math.max(0, (d.w * s - vpW.value) / 2);
-  const maxY = Math.max(0, (d.h * s - vpH.value) / 2);
+  const maxX = Math.max(0, (d.w * s - vpW.value) / 2),
+    maxY = Math.max(0, (d.h * s - vpH.value) / 2);
   tx.value = Math.min(maxX, Math.max(-maxX, tx.value));
   ty.value = Math.min(maxY, Math.max(-maxY, ty.value));
 }
 
 const pannable = computed(() => {
-  const d = dims.value;
-  const s = scale.value;
-  if (s === null || !d) return false;
+  const d = dims.value,
+    s = scale.value;
+  if (s === null || !d) {
+    return false;
+  }
   return d.w * s > vpW.value + 1 || d.h * s > vpH.value + 1;
 });
 
 /** 以光标为焦点的缩放:缩放前后保持光标下的图像点位不动 */
 function zoomAt(clientX: number, clientY: number, factor: number) {
   const vp = viewport.value;
-  if (!vp || !dims.value || !factor) return;
-  const rect = vp.getBoundingClientRect();
-  const cx = clientX - rect.left - rect.width / 2;
-  const cy = clientY - rect.top - rect.height / 2;
-  const s0 = currentScale();
-  const s1 = Math.min(MAX_SCALE, Math.max(MIN_SCALE, s0 * factor));
+  if (!vp || !dims.value || !factor) {
+    return;
+  }
+  const rect = vp.getBoundingClientRect(),
+    cx = clientX - rect.left - rect.width / 2,
+    cy = clientY - rect.top - rect.height / 2,
+    s0 = currentScale(),
+    s1 = Math.min(MAX_SCALE, Math.max(MIN_SCALE, s0 * factor));
   tx.value = cx - (cx - tx.value) * (s1 / s0);
   ty.value = cy - (cy - ty.value) * (s1 / s0);
   scale.value = s1;
@@ -95,7 +99,9 @@ function zoomAt(clientX: number, clientY: number, factor: number) {
 
 function zoomStep(factor: number) {
   const rect = viewport.value?.getBoundingClientRect();
-  if (!rect) return;
+  if (!rect) {
+    return;
+  }
   zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, factor);
 }
 
@@ -113,34 +119,41 @@ function showActual() {
 
 /** 视口本身无可滚动内容,滚轮一律用于缩放(触控板双指捏合同样走 wheel) */
 function onWheel(e: WheelEvent) {
-  if (!dims.value || !e.deltaY) return;
+  if (!dims.value || !e.deltaY) {
+    return;
+  }
   e.preventDefault();
   zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP);
 }
 
 function onDblClick() {
-  if (scale.value === null) showActual();
-  else setFit();
+  if (scale.value === null) {
+    showActual();
+  } else {
+    setFit();
+  }
 }
 
 function onPointerDown(e: PointerEvent) {
-  if (e.button !== 0 || !pannable.value) return;
+  if (e.button !== 0 || !pannable.value) {
+    return;
+  }
   const target = e.currentTarget as HTMLElement;
   target.setPointerCapture(e.pointerId);
-  const startX = e.clientX - tx.value;
-  const startY = e.clientY - ty.value;
+  const startX = e.clientX - tx.value,
+    startY = e.clientY - ty.value;
   dragging.value = true;
   const onMove = (ev: PointerEvent) => {
-    tx.value = ev.clientX - startX;
-    ty.value = ev.clientY - startY;
-    clampPan();
-  };
-  const onUp = () => {
-    dragging.value = false;
-    target.removeEventListener("pointermove", onMove);
-    target.removeEventListener("pointerup", onUp);
-    target.removeEventListener("pointercancel", onUp);
-  };
+      tx.value = ev.clientX - startX;
+      ty.value = ev.clientY - startY;
+      clampPan();
+    },
+    onUp = () => {
+      dragging.value = false;
+      target.removeEventListener("pointermove", onMove);
+      target.removeEventListener("pointerup", onUp);
+      target.removeEventListener("pointercancel", onUp);
+    };
   target.addEventListener("pointermove", onMove);
   target.addEventListener("pointerup", onUp);
   target.addEventListener("pointercancel", onUp);
@@ -157,16 +170,20 @@ function onImgLoad(e: Event) {
   }
   // svg 未写 width/height 属性时浏览器报 0,回退解析 viewBox 标注像素
   dims.value = null;
-  if (props.svg) parseViewBox();
+  if (props.svg) {
+    parseViewBox();
+  }
 }
 
 async function parseViewBox() {
   const mySeq = ++viewBoxSeq;
   try {
-    const text = await (await fetch(props.src)).text();
-    const m = text.match(/viewBox\s*=\s*["']\s*[\d.+-]+[ ,]+[\d.+-]+[ ,]+([\d.]+)[ ,]+([\d.]+)/i);
-    const w = m ? Number(m[1]) : 0;
-    const h = m ? Number(m[2]) : 0;
+    const text = await (await fetch(props.src)).text(),
+      m = text.match(
+        /viewBox\s*=\s*["']\s*[\d.+-]+[ ,]+[\d.+-]+[ ,]+(?<width>[\d.]+)[ ,]+(?<height>[\d.]+)/i,
+      ),
+      w = m ? Number(m.groups!.width) : 0,
+      h = m ? Number(m.groups!.height) : 0;
     if (mySeq === viewBoxSeq && w > 0 && h > 0) {
       dims.value = { w: Math.round(w), h: Math.round(h) };
     }

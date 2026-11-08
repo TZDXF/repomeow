@@ -38,24 +38,21 @@ import { useProjectOverviewStore } from "@/stores/project-overview";
 import { useSettingsStore } from "@/stores/settings";
 import type { HiddenItem, HiddenKind, JavaBuildGroup, Project } from "@/types";
 
-const { t } = useI18n();
-const props = defineProps<{ project: Project }>();
-const assetsStore = useProjectAssetsStore();
-const overviewStore = useProjectOverviewStore();
-const settingsStore = useSettingsStore();
-const pinsStore = usePinsStore();
-const terminalStore = useTerminalStore();
-
-/** 扫描结果来自共享 store(与 npm/docker 卡片合并为一次后端扫描) */
-const groups = computed(() => assetsStore.assetsOf(props.project)?.java_builds ?? []);
-const loaded = ref(false);
-/** 已隐藏的分组("<dir>\n<tool>")与临时显示开关(灰显,可逐条恢复) */
-const hiddenGroups = ref<Set<string>>(new Set());
-const showHidden = ref(false);
-
-const groupKey = (g: JavaBuildGroup) => `${g.dir}\n${g.tool}`;
-
-const hiddenCount = computed(() => hiddenGroups.value.size);
+const { t } = useI18n(),
+  props = defineProps<{ project: Project }>(),
+  assetsStore = useProjectAssetsStore(),
+  overviewStore = useProjectOverviewStore(),
+  settingsStore = useSettingsStore(),
+  pinsStore = usePinsStore(),
+  terminalStore = useTerminalStore(),
+  /** 扫描结果来自共享 store(与 npm/docker 卡片合并为一次后端扫描) */
+  groups = computed(() => assetsStore.assetsOf(props.project)?.java_builds ?? []),
+  loaded = ref(false),
+  /** 已隐藏的分组("<dir>\n<tool>")与临时显示开关(灰显,可逐条恢复) */
+  hiddenGroups = ref<Set<string>>(new Set()),
+  showHidden = ref(false),
+  groupKey = (g: JavaBuildGroup) => `${g.dir}\n${g.tool}`,
+  hiddenCount = computed(() => hiddenGroups.value.size);
 
 interface DisplayGroup {
   group: JavaBuildGroup;
@@ -64,24 +61,27 @@ interface DisplayGroup {
 
 /** 当前应展示的分组:默认过滤隐藏;showHidden 时全部显示但标记 hidden 灰显 */
 const displayGroups = computed<DisplayGroup[]>(() =>
-  groups.value
-    .map((g) => ({ group: g, hidden: hiddenGroups.value.has(groupKey(g)) }))
-    .filter((x) => showHidden.value || !x.hidden),
-);
-
-// path 一并作为 watch 源:详情页切换工作区(worktree)时传入的是 id 相同、
-// path 不同的 project 副本,需要按新工作目录重新扫描;refresh 内部去重,
-// 与 PackageScripts / DockerCompose 同时挂载只触发一次扫描
-const loadRequest = useLatestRequest();
+    groups.value
+      .map((g) => ({ group: g, hidden: hiddenGroups.value.has(groupKey(g)) }))
+      .filter((x) => showHidden.value || !x.hidden),
+  ),
+  // path 一并作为 watch 源:详情页切换工作区(worktree)时传入的是 id 相同、
+  // path 不同的 project 副本,需要按新工作目录重新扫描;refresh 内部去重,
+  // 与 PackageScripts / DockerCompose 同时挂载只触发一次扫描
+  loadRequest = useLatestRequest();
 async function load(resetView = true) {
-  const isCurrent = loadRequest.begin();
-  const currentProject = props.project;
-  if (resetView) showHidden.value = false;
+  const isCurrent = loadRequest.begin(),
+    currentProject = props.project;
+  if (resetView) {
+    showHidden.value = false;
+  }
   pinsStore.ensureLoaded();
   // stale-while-revalidate:旧扫描结果与旧隐藏项都齐备时,立即按旧数据渲染
   // (隐藏项必须先就位,否则已隐藏分组会在首屏闪现再消失)
   const staleOverview = overviewStore.cached(currentProject.id);
-  if (staleOverview) applyHiddenItems(staleOverview.hidden_items);
+  if (staleOverview) {
+    applyHiddenItems(staleOverview.hidden_items);
+  }
   const hasStale = !!assetsStore.assetsOf(currentProject) && !!staleOverview;
   loaded.value = hasStale;
   // refresh 内部去重:与 PackageScripts / DockerCompose 同时挂载只触发一次
@@ -90,7 +90,9 @@ async function load(resetView = true) {
     assetsStore.refresh(currentProject),
     overviewStore.refresh(currentProject.id),
   ]);
-  if (!isCurrent()) return;
+  if (!isCurrent()) {
+    return;
+  }
   applyHiddenItems(overview.hidden_items);
   loaded.value = true;
 }
@@ -106,14 +108,15 @@ function applyHiddenItems(items: HiddenItem[]) {
 }
 
 const defaultJdk = computed(() =>
-  settingsStore.jdkList.find((j) => j.id === settingsStore.defaultJdkId),
-);
-
-/** 当前项目的 JDK 选择值(Select 的 v-model) */
-const jdkMode = computed(() => settingsStore.projectJdkMap[props.project.id] ?? JDK_FOLLOW_DEFAULT);
+    settingsStore.jdkList.find((j) => j.id === settingsStore.defaultJdkId),
+  ),
+  /** 当前项目的 JDK 选择值(Select 的 v-model) */
+  jdkMode = computed(() => settingsStore.projectJdkMap[props.project.id] ?? JDK_FOLLOW_DEFAULT);
 
 async function onJdkChange(value: AcceptableValue) {
-  if (typeof value !== "string") return;
+  if (typeof value !== "string") {
+    return;
+  }
   // 跟随默认不落库(删除默认项后自动回退语义),其余显式持久化
   await settingsStore.setProjectJdk(props.project.id, value === JDK_FOLLOW_DEFAULT ? "" : value);
 }
@@ -147,8 +150,11 @@ async function setHidden(kind: HiddenKind, key: string, hidden: boolean) {
     // 同步 overview 缓存,下次进入详情时 stale 首屏就是最新隐藏状态
     overviewStore.setHiddenLocal(props.project.id, kind, key, hidden);
     const next = new Set(hiddenGroups.value);
-    if (hidden) next.add(key);
-    else next.delete(key);
+    if (hidden) {
+      next.add(key);
+    } else {
+      next.delete(key);
+    }
     hiddenGroups.value = next;
   } catch (e) {
     toast.error(String(e));
@@ -157,8 +163,8 @@ async function setHidden(kind: HiddenKind, key: string, hidden: boolean) {
 
 /** 切换「常用命令」标记(托盘弹窗中可快速执行,JDK 选择对托盘同样生效) */
 async function togglePin(g: JavaBuildGroup) {
-  const key = groupKey(g);
-  const pinned = pinsStore.isPinned(props.project.id, "javaBuild", key);
+  const key = groupKey(g),
+    pinned = pinsStore.isPinned(props.project.id, "javaBuild", key);
   try {
     await pinsStore.setPinned(
       props.project.id,

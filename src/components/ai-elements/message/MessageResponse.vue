@@ -19,33 +19,34 @@ interface Props {
   class?: HTMLAttributes["class"];
 }
 
-const props = withDefaults(defineProps<Props>(), { mode: "static" });
-
-const { t, locale } = useI18n();
-
-// 主题变量读取隔离(与 wiki/report 的用法一致):传一个游离元素,库的
-// useTailwindV3Theme 从它读不到任何 shadcn 变量,就不会把变量快照内联写回
-// body 下共享的 overlay 容器——hex 格式的皮肤变量(island/pixel)会被库误包成
-// 非法的 hsl(#…),导致表格/代码块的全屏弹层背景全透明。
-const detachedThemeEl = document.createElement("div");
-const themeElement = () => detachedThemeEl;
-
-const beforeDownload = createBeforeDownload(t);
-
-const slots = useSlots();
-const slotContent = computed<string | undefined>(() => {
-  const nodes = slots.default?.();
-  if (!Array.isArray(nodes)) {
-    return undefined;
-  }
-  let text = "";
-  for (const node of nodes) {
-    if (typeof node.children === "string") text += node.children;
-  }
-  return text || undefined;
-});
-
-const md = computed(() => (slotContent.value ?? props.content ?? "") as string);
+const props = withDefaults(defineProps<Props>(), {
+    mode: "static",
+    content: undefined,
+    class: undefined,
+  }),
+  { t, locale } = useI18n(),
+  // 主题变量读取隔离(与 wiki/report 的用法一致):传一个游离元素,库的
+  // useTailwindV3Theme 从它读不到任何 shadcn 变量,就不会把变量快照内联写回
+  // body 下共享的 overlay 容器——hex 格式的皮肤变量(island/pixel)会被库误包成
+  // 非法的 hsl(#…),导致表格/代码块的全屏弹层背景全透明。
+  detachedThemeEl = document.createElement("div"),
+  themeElement = () => detachedThemeEl,
+  beforeDownload = createBeforeDownload(t),
+  slots = useSlots(),
+  slotContent = computed<string | undefined>(() => {
+    const nodes = slots.default?.();
+    if (!Array.isArray(nodes)) {
+      return undefined;
+    }
+    let text = "";
+    for (const node of nodes) {
+      if (typeof node.children === "string") {
+        text += node.children;
+      }
+    }
+    return text || undefined;
+  }),
+  md = computed(() => (slotContent.value ?? props.content ?? "") as string);
 </script>
 
 <template>

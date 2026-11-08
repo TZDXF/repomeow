@@ -22,25 +22,25 @@ import { useWikiStore } from "@/stores/wiki";
 import { onProjectPageReactivated, useProjectPageActive } from "@/composables/useProjectPageState";
 import type { Project, WikiPageData } from "@/types";
 
-const { t } = useI18n();
-const route = useRoute();
-const router = useRouter();
-const store = useProjectsStore();
-const settings = useSettingsStore();
-const wiki = useWikiStore();
-const active = useProjectPageActive();
-
-const project = computed<Project | undefined>(() => {
-  const id = Number(route.params.id);
-  return Number.isFinite(id) ? store.getProjectById(id) : undefined;
-});
-
-const wikiData = computed(() => (project.value ? wiki.documentFor(project.value.path).data : null));
-const wikiLoading = computed(() =>
-  project.value ? wiki.documentFor(project.value.path).loading : false,
-);
+const { t } = useI18n(),
+  route = useRoute(),
+  router = useRouter(),
+  store = useProjectsStore(),
+  settings = useSettingsStore(),
+  wiki = useWikiStore(),
+  active = useProjectPageActive(),
+  project = computed<Project | undefined>(() => {
+    const id = Number(route.params.id);
+    return Number.isFinite(id) ? store.getProjectById(id) : undefined;
+  }),
+  wikiData = computed(() => (project.value ? wiki.documentFor(project.value.path).data : null)),
+  wikiLoading = computed(() =>
+    project.value ? wiki.documentFor(project.value.path).loading : false,
+  );
 onProjectPageReactivated(() => {
-  if (project.value) return wiki.load(project.value.path);
+  if (project.value) {
+    return wiki.load(project.value.path);
+  }
 });
 
 // 首次渲染前启动加载，避免把尚未读取的数据误判为空；也响应项目切换。
@@ -48,25 +48,26 @@ onProjectPageReactivated(() => {
 watch(
   () => project.value?.path,
   async (path) => {
-    if (path) await wiki.load(path);
+    if (path) {
+      await wiki.load(path);
+    }
   },
   { immediate: true },
 );
 
 /** 当前项目的生成状态;不同项目的任务在全局 store 中按路径隔离 */
 const generation = computed(() => {
-  const p = project.value;
-  return p ? wiki.generationFor(p.path) : undefined;
-});
-const generatingHere = computed(() => {
-  const p = project.value;
-  return p ? wiki.isGenerating(p.path) : false;
-});
+    const p = project.value;
+    return p ? wiki.generationFor(p.path) : undefined;
+  }),
+  generatingHere = computed(() => {
+    const p = project.value;
+    return p ? wiki.isGenerating(p.path) : false;
+  }),
+  // ── 页面选择 ──────────────────────────────────────────────────────────────
 
-// ── 页面选择 ──────────────────────────────────────────────────────────────
-
-const pages = computed(() => wikiData.value?.pages ?? []);
-const selectedId = ref<string | null>(null);
+  pages = computed(() => wikiData.value?.pages ?? []),
+  selectedId = ref<string | null>(null);
 watch(
   [pages, generatingHere],
   ([list, generating]) => {
@@ -76,121 +77,123 @@ watch(
   },
   { immediate: true },
 );
-const current = computed(() => pages.value.find((p) => p.id === selectedId.value) ?? null);
+const current = computed(() => pages.value.find((p) => p.id === selectedId.value) ?? null),
+  // ── 生成进度 ───────────────────────────────────────────────────────────────
 
-// ── 生成进度 ───────────────────────────────────────────────────────────────
+  phaseText = computed(() => {
+    const map: Record<WikiGenPhase, string> = {
+        collecting: t("wiki.phase.collecting"),
+        outlining: t("wiki.phase.outlining"),
+        generating: t("wiki.phase.generating"),
+        done: "",
+        failed: "",
+        cancelled: "",
+      },
+      phase = generation.value?.phase ?? "idle";
+    return phase === "idle" ? "" : map[phase];
+  }),
+  totalPageCount = computed(() => generation.value?.pages.length ?? 0),
+  processedPageCount = computed(
+    () =>
+      generation.value?.pages.filter((item) =>
+        ["done", "failed", "cancelled"].includes(item.status),
+      ).length ?? 0,
+  ),
+  contextSummaryText = computed(() => {
+    if (!generation.value || !["collecting", "outlining"].includes(generation.value.phase)) {
+      return "";
+    }
+    const context = generation.value?.context;
+    if (!context) {
+      return "";
+    }
+    return t("wiki.progress.contextSummary", {
+      files: context.fileCount,
+      readme: t(context.hasReadme ? "wiki.progress.found" : "wiki.progress.notFound"),
+      manifests: context.manifestCount,
+      truncated: context.treeTruncated ? t("wiki.progress.treeTruncated") : "",
+    });
+  }),
+  /** agent 工具调用累计次数(大纲探索与页面补读),驱动「文档书写中」动画的粒子与徽标 */
+  writingToolCalls = computed(() => generation.value?.toolCalls ?? 0),
+  /** 每秒刷新展示用时;生成开始时间由全局 store 持有,路由返回后不会重新计时 */
+  now = useNow({ interval: 1000 }),
+  elapsedText = computed(() => {
+    const startedAt = generation.value?.startedAt;
+    if (!startedAt) {
+      return "00:00";
+    }
+    const totalSeconds = Math.max(0, Math.floor((now.value.getTime() - startedAt) / 1000)),
+      hours = Math.floor(totalSeconds / 3600),
+      minutes = Math.floor((totalSeconds % 3600) / 60),
+      seconds = totalSeconds % 60,
+      pair = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    return hours > 0 ? `${String(hours).padStart(2, "0")}:${pair}` : pair;
+  }),
+  /** 生成期间只阅读已完成页面，不展示中间正文或自动跟随生成页。 */
+  generationItem = computed(() =>
+    generation.value?.pages.find((item) => item.page.id === selectedId.value),
+  ),
+  completedPages = computed<WikiPageData[]>(() =>
+    (generation.value?.pages ?? [])
+      .filter((item) => item.status === "done")
+      .map((item) => ({
+        ...item.page,
+        content: generation.value?.streamContents[item.page.id] ?? "",
+      })),
+  ),
+  readingPage = computed(() =>
+    generatingHere.value
+      ? (completedPages.value.find((page) => page.id === selectedId.value) ?? null)
+      : current.value,
+  ),
+  retryStatus = computed(() => {
+    const retries = generation.value?.retries;
+    if (!retries) {
+      return undefined;
+    }
+    return generationItem.value ? retries[generationItem.value.page.id] : retries.outline;
+  }),
+  retryText = computed(() => {
+    const retry = retryStatus.value;
+    if (!retry) {
+      return "";
+    }
+    return t(`wiki.progress.retrying.${retry.reason}`, {
+      seconds: retry.delaySeconds,
+      attempt: retry.attempt,
+      max: retry.maxAttempts,
+    });
+  }),
+  // ── 左侧导航列表(生成中与最终查看复用同一列表样式) ───────────────────────
 
-const phaseText = computed(() => {
-  const map: Record<WikiGenPhase, string> = {
-    collecting: t("wiki.phase.collecting"),
-    outlining: t("wiki.phase.outlining"),
-    generating: t("wiki.phase.generating"),
-    done: "",
-    failed: "",
-    cancelled: "",
-  };
-  const phase = generation.value?.phase ?? "idle";
-  return phase === "idle" ? "" : map[phase];
-});
-
-const totalPageCount = computed(() => generation.value?.pages.length ?? 0);
-const processedPageCount = computed(
-  () =>
-    generation.value?.pages.filter((item) => ["done", "failed", "cancelled"].includes(item.status))
-      .length ?? 0,
-);
-const contextSummaryText = computed(() => {
-  if (!generation.value || !["collecting", "outlining"].includes(generation.value.phase)) {
-    return "";
-  }
-  const context = generation.value?.context;
-  if (!context) {
-    return "";
-  }
-  return t("wiki.progress.contextSummary", {
-    files: context.fileCount,
-    readme: t(context.hasReadme ? "wiki.progress.found" : "wiki.progress.notFound"),
-    manifests: context.manifestCount,
-    truncated: context.treeTruncated ? t("wiki.progress.treeTruncated") : "",
-  });
-});
-
-/** agent 工具调用累计次数(大纲探索与页面补读),驱动「文档书写中」动画的粒子与徽标 */
-const writingToolCalls = computed(() => generation.value?.toolCalls ?? 0);
-
-/** 每秒刷新展示用时;生成开始时间由全局 store 持有,路由返回后不会重新计时 */
-const now = useNow({ interval: 1000 });
-const elapsedText = computed(() => {
-  const startedAt = generation.value?.startedAt;
-  if (!startedAt) return "00:00";
-  const totalSeconds = Math.max(0, Math.floor((now.value.getTime() - startedAt) / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  const pair = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-  return hours > 0 ? `${String(hours).padStart(2, "0")}:${pair}` : pair;
-});
-
-/** 生成期间只阅读已完成页面，不展示中间正文或自动跟随生成页。 */
-const generationItem = computed(() =>
-  generation.value?.pages.find((item) => item.page.id === selectedId.value),
-);
-const completedPages = computed<WikiPageData[]>(() =>
-  (generation.value?.pages ?? [])
-    .filter((item) => item.status === "done")
-    .map((item) => ({
-      ...item.page,
-      content: generation.value?.streamContents[item.page.id] ?? "",
-    })),
-);
-const readingPage = computed(() =>
-  generatingHere.value
-    ? (completedPages.value.find((page) => page.id === selectedId.value) ?? null)
-    : current.value,
-);
-const retryStatus = computed(() => {
-  const retries = generation.value?.retries;
-  if (!retries) return undefined;
-  return generationItem.value ? retries[generationItem.value.page.id] : retries.outline;
-});
-const retryText = computed(() => {
-  const retry = retryStatus.value;
-  if (!retry) return "";
-  return t(`wiki.progress.retrying.${retry.reason}`, {
-    seconds: retry.delaySeconds,
-    attempt: retry.attempt,
-    max: retry.maxAttempts,
-  });
-});
-
-// ── 左侧导航列表(生成中与最终查看复用同一列表样式) ───────────────────────
-
-const navItems = computed<WikiNavItem[]>(() => {
-  if (generatingHere.value) {
-    return (generation.value?.pages ?? []).map((i) => ({
-      id: i.page.id,
-      title: i.page.title,
-      section: i.page.section ?? null,
-      importance: i.page.importance,
-      status: i.status,
-      error: i.error,
-      durationMs: i.durationMs,
+  navItems = computed<WikiNavItem[]>(() => {
+    if (generatingHere.value) {
+      return (generation.value?.pages ?? []).map((i) => ({
+        id: i.page.id,
+        title: i.page.title,
+        section: i.page.section ?? null,
+        importance: i.page.importance,
+        status: i.status,
+        error: i.error,
+        durationMs: i.durationMs,
+      }));
+    }
+    return pages.value.map((p) => ({
+      id: p.id,
+      title: p.title,
+      section: p.section ?? null,
+      importance: p.importance,
+      unread: project.value ? wiki.isPageUnread(project.value.path, p.id) : false,
     }));
-  }
-  return pages.value.map((p) => ({
-    id: p.id,
-    title: p.title,
-    section: p.section ?? null,
-    importance: p.importance,
-    unread: project.value ? wiki.isPageUnread(project.value.path, p.id) : false,
-  }));
-});
-
-const activeId = computed(() => selectedId.value);
+  }),
+  activeId = computed(() => selectedId.value);
 
 function selectPage(id: string) {
   selectedId.value = id;
-  if (!generatingHere.value && project.value) wiki.markPageRead(project.value.path, id);
+  if (!generatingHere.value && project.value) {
+    wiki.markPageRead(project.value.path, id);
+  }
 }
 
 /** 页面进入正文视口即视为已读；也覆盖首次打开和更新后仍停留在当前页的情况。 */
@@ -216,15 +219,17 @@ watch(
   async () => {
     await nextTick();
     const viewport = previewHost.value?.closest('[data-slot="scroll-area-viewport"]');
-    if (viewport) viewport.scrollTop = 0;
+    if (viewport) {
+      viewport.scrollTop = 0;
+    }
   },
 );
 
 // ── 生成 / 操作 ───────────────────────────────────────────────────────────
 
 /** 生成配置对话框:生成/重新生成前选择,或右上角入口修改当前项目的独立配置 */
-const genDialogOpen = ref(false);
-const genDialogMode = ref<"generate" | "edit">("generate");
+const genDialogOpen = ref(false),
+  genDialogMode = ref<"generate" | "edit">("generate");
 
 function requestGenerate() {
   genDialogMode.value = "generate";
@@ -247,7 +252,9 @@ function onGenConfirm() {
 /** 实际执行整本生成(对话框确认后,或增量更新退化时读取当前项目配置直接跑) */
 function generate() {
   const p = project.value;
-  if (!p) return;
+  if (!p) {
+    return;
+  }
   wiki
     .generate({ id: p.id, path: p.path, name: p.name }, settings.language)
     .then(() => {
@@ -261,7 +268,9 @@ function generate() {
 
 async function removeWiki() {
   const p = project.value;
-  if (!p) return;
+  if (!p) {
+    return;
+  }
   try {
     await wiki.remove(p.path);
     toast.success(t("wiki.deleted"));
@@ -272,7 +281,9 @@ async function removeWiki() {
 
 async function regeneratePage(page: WikiPageData) {
   const p = project.value;
-  if (!p) return;
+  if (!p) {
+    return;
+  }
   try {
     await wiki.regeneratePage({ id: p.id, path: p.path, name: p.name }, page, settings.language);
     toast.success(t("wiki.pageRegenerated"));
@@ -283,7 +294,9 @@ async function regeneratePage(page: WikiPageData) {
 
 function openDir() {
   const p = project.value;
-  if (!p) return;
+  if (!p) {
+    return;
+  }
   openWikiDir(p.path).catch((e) =>
     toast.error(t("settings.prompts.openDirFailed", { error: String(e) })),
   );
@@ -296,7 +309,9 @@ function openDir() {
  */
 async function updateWiki() {
   const p = project.value;
-  if (!p) return;
+  if (!p) {
+    return;
+  }
   try {
     const count = await wiki.update({ id: p.id, path: p.path, name: p.name }, settings.language);
     toast.success(count > 0 ? t("wiki.updatedPages", { count }) : t("wiki.updateNoop"));

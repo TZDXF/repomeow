@@ -51,13 +51,13 @@ describe("flattenVisibleTree", () => {
 
   it("dim/title 谓词仅作用于文件行", () => {
     const marked = buildFileTree<TestFile>([
-      { path: "src/a.ts", status: "M" },
-      { path: "src/b.ts", status: "D" },
-    ]);
-    const rows = flattenVisibleTree(marked, new Set(), {
-      dim: (f) => f.status === "D",
-      title: (f) => `title:${f.path}`,
-    });
+        { path: "src/a.ts", status: "M" },
+        { path: "src/b.ts", status: "D" },
+      ]),
+      rows = flattenVisibleTree(marked, new Set(), {
+        dim: (f) => f.status === "D",
+        title: (f) => `title:${f.path}`,
+      });
     expect(rows.find((r) => r.fullPath === "src/a.ts")).toMatchObject({
       dimmed: false,
       title: "title:src/a.ts",

@@ -11,21 +11,18 @@ defineOptions({
 });
 
 const props = defineProps<{
-  modelValue?: AcceptableValue | AcceptableValue[];
-  class?: HTMLAttributes["class"];
-  size?: "sm" | "default";
-}>();
-
-const emit = defineEmits<{
-  "update:modelValue": AcceptableValue;
-}>();
-
-const modelValue = useVModel(props, "modelValue", emit, {
-  passive: true,
-  defaultValue: "",
-});
-
-const delegatedProps = reactiveOmit(props, "class", "size");
+    modelValue?: AcceptableValue | AcceptableValue[];
+    class?: HTMLAttributes["class"];
+    size?: "sm" | "default";
+  }>(),
+  emit = defineEmits<{
+    "update:modelValue": AcceptableValue;
+  }>(),
+  modelValue = useVModel(props, "modelValue", emit, {
+    passive: true,
+    defaultValue: "",
+  }),
+  delegatedProps = reactiveOmit(props, "class", "size");
 </script>
 
 <template>

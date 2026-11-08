@@ -15,21 +15,18 @@ import ChatToolCard from "./ChatToolCard.vue";
  * (用户手动展开后不再干预);历史消息默认收起。
  */
 const props = withDefaults(
-  defineProps<{
-    groups: ChatProcessGroup[];
-    /** 过程仍在产出(本轮正文尚未开始):展开跟随流式;转 false 后自动收起 */
-    active?: boolean;
-    defaultOpen?: boolean;
-  }>(),
-  { active: false, defaultOpen: false },
-);
-
-const { t } = useI18n();
-
-const open = ref(props.defaultOpen);
-const hasAutoClosed = ref(false);
-
-const AUTO_CLOSE_DELAY = 800;
+    defineProps<{
+      groups: ChatProcessGroup[];
+      /** 过程仍在产出(本轮正文尚未开始):展开跟随流式;转 false 后自动收起 */
+      active?: boolean;
+      defaultOpen?: boolean;
+    }>(),
+    { active: false, defaultOpen: false },
+  ),
+  { t } = useI18n(),
+  open = ref(props.defaultOpen),
+  hasAutoClosed = ref(false),
+  AUTO_CLOSE_DELAY = 800;
 let closeTimer: ReturnType<typeof setTimeout> | undefined;
 
 watch(
@@ -53,7 +50,9 @@ watch(
 );
 
 onUnmounted(() => {
-  if (closeTimer !== undefined) clearTimeout(closeTimer);
+  if (closeTimer !== undefined) {
+    clearTimeout(closeTimer);
+  }
 });
 
 const toolCount = computed(() => props.groups.reduce((sum, group) => sum + group.runs.length, 0));

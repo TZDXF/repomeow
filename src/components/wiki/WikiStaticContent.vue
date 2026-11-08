@@ -18,50 +18,47 @@ interface SourceTarget {
 }
 
 const props = defineProps<{
-  page: WikiPageData;
-  pages: WikiPageData[];
-  projectRoot: string;
-  language: SupportedLocale;
-  regenerating: boolean;
-  generationActive?: boolean;
-}>();
-
-const emit = defineEmits<{
-  regenerate: [page: WikiPageData];
-  selectRelated: [id: string];
-}>();
-
-const { t } = useI18n();
-const sourceTarget = ref<SourceTarget | null>(null);
-const parsed = computed(() => parseWikiSources(props.page.content, props.page.relevantFiles));
-const relatedPages = computed<WikiPageData[]>(() => {
-  const seen = new Set<string>();
-  const related: WikiPageData[] = [];
-  for (const id of props.page.relatedPages) {
-    if (id === props.page.id || seen.has(id)) {
-      continue;
+    page: WikiPageData;
+    pages: WikiPageData[];
+    projectRoot: string;
+    language: SupportedLocale;
+    regenerating: boolean;
+    generationActive?: boolean;
+  }>(),
+  emit = defineEmits<{
+    regenerate: [page: WikiPageData];
+    selectRelated: [id: string];
+  }>(),
+  { t } = useI18n(),
+  sourceTarget = ref<SourceTarget | null>(null),
+  parsed = computed(() => parseWikiSources(props.page.content, props.page.relevantFiles)),
+  relatedPages = computed<WikiPageData[]>(() => {
+    const seen = new Set<string>(),
+      related: WikiPageData[] = [];
+    for (const id of props.page.relatedPages) {
+      if (id === props.page.id || seen.has(id)) {
+        continue;
+      }
+      const target = props.pages.find((item) => item.id === id);
+      if (target) {
+        seen.add(id);
+        related.push(target);
+      }
     }
-    const target = props.pages.find((item) => item.id === id);
-    if (target) {
-      seen.add(id);
-      related.push(target);
-    }
-  }
-  return related;
-});
-
-const controls: ControlsConfig = {
-  table: {
-    copy: true,
-    download: true,
-    fullscreen: true,
-    customize: createTableCustomize(t),
+    return related;
+  }),
+  controls: ControlsConfig = {
+    table: {
+      copy: true,
+      download: true,
+      fullscreen: true,
+      customize: createTableCustomize(t),
+    },
+    code: { copy: true, collapse: true },
   },
-  code: { copy: true, collapse: true },
-};
-const detachedThemeEl = document.createElement("div");
-const themeElement = () => detachedThemeEl;
-const beforeDownload = createBeforeDownload(t);
+  detachedThemeEl = document.createElement("div"),
+  themeElement = () => detachedThemeEl,
+  beforeDownload = createBeforeDownload(t);
 
 function openSource(path: string) {
   const range = parsed.value.ranges.get(path);

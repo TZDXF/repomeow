@@ -14,11 +14,11 @@ import { useChatStore } from "@/stores/chat";
 
 /** 捕获每次 sendChatMessage 的 onEvent 与 promise 控制柄,按项目路径索引 */
 const chatHarness = vi.hoisted(() => {
-  type Pending = {
+  interface Pending {
     resolve: (usage: ChatUsageSummary | null) => void;
     reject: (error: unknown) => void;
     onEvent: (event: ChatEvent) => void;
-  };
+  }
   const pending = new Map<string, Pending>();
   return { pending };
 });
@@ -67,8 +67,8 @@ function fail(path: string, error: unknown) {
   chatHarness.pending.get(path)?.reject(error);
 }
 
-const PATH = "D:\\repos\\demo";
-const PROJECT = { path: PATH, name: "demo" };
+const PATH = "D:\\repos\\demo",
+  PROJECT = { path: PATH, name: "demo" };
 
 describe("chat store", () => {
   beforeEach(() => {
@@ -78,13 +78,13 @@ describe("chat store", () => {
   });
 
   it("首次创建返回响应式会话,computed 能跟踪首轮 busy/消息/错误变化", async () => {
-    const store = useChatStore();
-    const session = store.ensureSession(PATH);
-    const status = computed(() => ({
-      busy: session.busy,
-      count: session.messages.length,
-      error: session.error,
-    }));
+    const store = useChatStore(),
+      session = store.ensureSession(PATH),
+      status = computed(() => ({
+        busy: session.busy,
+        count: session.messages.length,
+        error: session.error,
+      }));
     expect(isReactive(session)).toBe(true);
     expect(status.value).toEqual({ busy: false, count: 0, error: null });
     const run = store.send(PATH, PROJECT, "问题");
@@ -95,8 +95,8 @@ describe("chat store", () => {
   });
 
   it("在途请求拒绝重复发送时不新增消息,且向用户显示忙提示", async () => {
-    const store = useChatStore();
-    const run = store.send(PATH, PROJECT, "第一个问题");
+    const store = useChatStore(),
+      run = store.send(PATH, PROJECT, "第一个问题");
     await expect(store.send(PATH, PROJECT, "第二个问题")).resolves.toBe(false);
     expect(store.ensureSession(PATH).error).toBeTruthy();
     expect(store.ensureSession(PATH).messages).toHaveLength(1);
@@ -106,8 +106,8 @@ describe("chat store", () => {
   });
 
   it("textDelta 累积 streamingText,toolCall/toolResult 写入 toolRuns", async () => {
-    const store = useChatStore();
-    const run = store.send(PATH, PROJECT, "这个项目是做什么的");
+    const store = useChatStore(),
+      run = store.send(PATH, PROJECT, "这个项目是做什么的");
 
     emit(PATH, { kind: "textDelta", delta: "这是一" });
     emit(PATH, { kind: "toolCall", id: "t1", name: "read_file", args: { path: "a.rs" } });
@@ -134,8 +134,8 @@ describe("chat store", () => {
   });
 
   it("turnEnd 把 streamingText 固化为 assistant 消息并清空,done 结束整轮", async () => {
-    const store = useChatStore();
-    const run = store.send(PATH, PROJECT, "总结结构");
+    const store = useChatStore(),
+      run = store.send(PATH, PROJECT, "总结结构");
     emit(PATH, { kind: "textDelta", delta: "前端 Vue" });
     emit(PATH, { kind: "toolCall", id: "t1", name: "list_files", args: {} });
     emit(PATH, { kind: "toolResult", id: "t1", ok: true, summary: "ok" });
@@ -162,8 +162,8 @@ describe("chat store", () => {
   });
 
   it("retryScheduled 丢弃失败 attempt 残片并在下一 attempt 开始时清理状态", async () => {
-    const store = useChatStore();
-    const run = store.send(PATH, PROJECT, "重试一下");
+    const store = useChatStore(),
+      run = store.send(PATH, PROJECT, "重试一下");
     emit(PATH, { kind: "textDelta", delta: "失败前的部分内容" });
     emit(PATH, { kind: "toolCall", id: "failed-tool", name: "read_file", args: {} });
     emit(PATH, {
@@ -198,8 +198,8 @@ describe("chat store", () => {
   });
 
   it("compactionStart/End 置位 compacting,成功时落时间线标记并回落上下文占用", async () => {
-    const store = useChatStore();
-    const run = store.send(PATH, PROJECT, "继续");
+    const store = useChatStore(),
+      run = store.send(PATH, PROJECT, "继续");
     emit(PATH, { kind: "textDelta", delta: "回答" });
     emit(PATH, { kind: "turnEnd", contextTokens: 150_000 });
 
@@ -227,8 +227,8 @@ describe("chat store", () => {
   });
 
   it("compactionEnd tokensAfter 为 null(压缩失败)时不落标记、不打断对话", async () => {
-    const store = useChatStore();
-    const run = store.send(PATH, PROJECT, "继续");
+    const store = useChatStore(),
+      run = store.send(PATH, PROJECT, "继续");
     emit(PATH, { kind: "textDelta", delta: "回答" });
     emit(PATH, { kind: "turnEnd", contextTokens: 150_000 });
     emit(PATH, { kind: "compactionStart", reason: "overflow" });
@@ -250,8 +250,8 @@ describe("chat store", () => {
   });
 
   it("thinkingDelta 累积思考流,turnEnd 随消息固化并清空", async () => {
-    const store = useChatStore();
-    const run = store.send(PATH, PROJECT, "分析一下");
+    const store = useChatStore(),
+      run = store.send(PATH, PROJECT, "分析一下");
     emit(PATH, { kind: "thinkingDelta", delta: "先想" });
     emit(PATH, { kind: "thinkingDelta", delta: "一想" });
     emit(PATH, { kind: "textDelta", delta: "结论" });
@@ -272,8 +272,8 @@ describe("chat store", () => {
   });
 
   it("纯思考+工具轮(无正文)也固化消息保留思考内容", async () => {
-    const store = useChatStore();
-    const run = store.send(PATH, PROJECT, "查一下");
+    const store = useChatStore(),
+      run = store.send(PATH, PROJECT, "查一下");
     emit(PATH, { kind: "thinkingDelta", delta: "需要读文件" });
     emit(PATH, { kind: "toolCall", id: "t1", name: "read_file", args: {} });
     emit(PATH, { kind: "toolResult", id: "t1", ok: true, summary: "ok" });
@@ -293,8 +293,8 @@ describe("chat store", () => {
   });
 
   it("retryScheduled 一并丢弃失败 attempt 的思考残片", async () => {
-    const store = useChatStore();
-    const run = store.send(PATH, PROJECT, "重试一下");
+    const store = useChatStore(),
+      run = store.send(PATH, PROJECT, "重试一下");
     emit(PATH, { kind: "thinkingDelta", delta: "失败前的思考" });
     emit(PATH, { kind: "textDelta", delta: "失败前的部分内容" });
     emit(PATH, {
@@ -320,8 +320,8 @@ describe("chat store", () => {
   });
 
   it("最终 error 会清理 retry 状态", async () => {
-    const store = useChatStore();
-    const run = store.send(PATH, PROJECT, "持续失败");
+    const store = useChatStore(),
+      run = store.send(PATH, PROJECT, "持续失败");
     emit(PATH, {
       kind: "retryScheduled",
       attempt: 3,
@@ -340,9 +340,9 @@ describe("chat store", () => {
   });
 
   it("忙时拒绝再次发送,不重复调用后端", async () => {
-    const store = useChatStore();
-    const first = store.send(PATH, PROJECT, "第一条");
-    const accepted = await store.send(PATH, PROJECT, "第二条");
+    const store = useChatStore(),
+      first = store.send(PATH, PROJECT, "第一条"),
+      accepted = await store.send(PATH, PROJECT, "第二条");
 
     expect(accepted).toBe(false);
     expect(chatHarness.pending.size).toBe(1);
@@ -353,8 +353,8 @@ describe("chat store", () => {
   });
 
   it("上一轮结束后清理在途记录,后续发送不被永久拒绝", async () => {
-    const store = useChatStore();
-    const first = store.send(PATH, PROJECT, "第一条");
+    const store = useChatStore(),
+      first = store.send(PATH, PROJECT, "第一条");
     finish(PATH);
     await first;
 
@@ -372,8 +372,8 @@ describe("chat store", () => {
   });
 
   it("error 事件映射 chat_busy 前缀并进入 error 阶段", async () => {
-    const store = useChatStore();
-    const run = store.send(PATH, PROJECT, "问题");
+    const store = useChatStore(),
+      run = store.send(PATH, PROJECT, "问题");
     emit(PATH, { kind: "error", code: "ai_request_failed", message: "chat_busy: 上一条还在跑" });
     finish(PATH, null);
     await run;
@@ -385,8 +385,8 @@ describe("chat store", () => {
   });
 
   it("ai_not_configured 拒绝映射为配置引导文案", async () => {
-    const store = useChatStore();
-    const run = store.send(PATH, PROJECT, "问题");
+    const store = useChatStore(),
+      run = store.send(PATH, PROJECT, "问题");
     fail(
       PATH,
       Object.assign(new Error("请先在设置页配置 AI 的 API Key"), {
@@ -402,8 +402,8 @@ describe("chat store", () => {
   });
 
   it("中止后 send 的 finally 固化残余流式文本为 partial 消息", async () => {
-    const store = useChatStore();
-    const run = store.send(PATH, PROJECT, "写长一点");
+    const store = useChatStore(),
+      run = store.send(PATH, PROJECT, "写长一点");
     emit(PATH, { kind: "textDelta", delta: "写到一半" });
     store.abort(PATH);
     finish(PATH, null);
@@ -422,8 +422,8 @@ describe("chat store", () => {
   });
 
   it("newSession 清空前端会话并调用后端清理", async () => {
-    const store = useChatStore();
-    const run = store.send(PATH, PROJECT, "第一条");
+    const store = useChatStore(),
+      run = store.send(PATH, PROJECT, "第一条");
     emit(PATH, { kind: "textDelta", delta: "回答" });
     emit(PATH, { kind: "turnEnd", contextTokens: 120 });
     finish(PATH);
@@ -441,9 +441,9 @@ describe("chat store", () => {
   });
 
   it("editLastUserMessage 截掉最后回合并以新文本重发,清理其工具记录", async () => {
-    const store = useChatStore();
-    // 第一轮:带工具调用的完整回合
-    const first = store.send(PATH, PROJECT, "第一问");
+    const store = useChatStore(),
+      // 第一轮:带工具调用的完整回合
+      first = store.send(PATH, PROJECT, "第一问");
     emit(PATH, { kind: "toolCall", id: "t1", name: "read_file", args: {} });
     emit(PATH, { kind: "toolResult", id: "t1", ok: true, summary: "ok" });
     emit(PATH, { kind: "textDelta", delta: "第一答" });
@@ -481,8 +481,8 @@ describe("chat store", () => {
   });
 
   it("editLastUserMessage 清理被截回合遗留的孤立工具记录", async () => {
-    const store = useChatStore();
-    const run = store.send(PATH, PROJECT, "带工具的提问");
+    const store = useChatStore(),
+      run = store.send(PATH, PROJECT, "带工具的提问");
     emit(PATH, { kind: "toolCall", id: "t9", name: "read_file", args: {} });
     emit(PATH, { kind: "toolResult", id: "t9", ok: true, summary: "ok" });
     emit(PATH, { kind: "textDelta", delta: "回答" });
@@ -501,8 +501,8 @@ describe("chat store", () => {
   });
 
   it("editLastUserMessage 后端截断失败时恢复消息并进入 error 阶段", async () => {
-    const store = useChatStore();
-    const run = store.send(PATH, PROJECT, "原始提问");
+    const store = useChatStore(),
+      run = store.send(PATH, PROJECT, "原始提问");
     emit(PATH, { kind: "textDelta", delta: "原始回答" });
     emit(PATH, { kind: "turnEnd", contextTokens: 100 });
     finish(PATH, USAGE);
@@ -528,19 +528,19 @@ describe("chat store", () => {
   });
 
   it("editLastUserMessage 忙时拒绝,无历史时退化为普通发送", async () => {
-    const store = useChatStore();
-    const run = store.send(PATH, PROJECT, "进行中的提问");
+    const store = useChatStore(),
+      run = store.send(PATH, PROJECT, "进行中的提问");
     await expect(store.editLastUserMessage(PATH, PROJECT, "改动")).resolves.toBe(false);
     expect(vi.mocked(truncateChatLastTurn)).not.toHaveBeenCalled();
     finish(PATH, USAGE);
     await run;
 
-    const FRESH_PATH = "D:\\repos\\fresh";
-    const fresh = store.editLastUserMessage(
-      FRESH_PATH,
-      { path: FRESH_PATH, name: "fresh" },
-      "首条提问",
-    );
+    const FRESH_PATH = "D:\\repos\\fresh",
+      fresh = store.editLastUserMessage(
+        FRESH_PATH,
+        { path: FRESH_PATH, name: "fresh" },
+        "首条提问",
+      );
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(vi.mocked(truncateChatLastTurn)).not.toHaveBeenCalled();
     expect(chatHarness.pending.has(FRESH_PATH)).toBe(true);
@@ -579,8 +579,8 @@ describe("chat history", () => {
   }
 
   it("整轮结束自动保存稳定消息、思考、工具和统计,不保存运行中状态", async () => {
-    const store = useChatStore();
-    const run = store.send(PATH, PROJECT, "需要保留的问题");
+    const store = useChatStore(),
+      run = store.send(PATH, PROJECT, "需要保留的问题");
     emit(PATH, { kind: "thinkingDelta", delta: "思考" });
     emit(PATH, { kind: "textDelta", delta: "回答" });
     emit(PATH, { kind: "toolCall", id: "t1", name: "read_file", args: {} });
@@ -603,9 +603,9 @@ describe("chat history", () => {
   it("重启后恢复所选历史,同一项目的并发读取只请求一次", async () => {
     const saved = snapshot();
     vi.mocked(getChatHistory).mockResolvedValueOnce({ entries: [saved.entry], active: saved });
-    const store = useChatStore();
-    const first = store.loadHistory(PATH);
-    const second = store.loadHistory(PATH);
+    const store = useChatStore(),
+      first = store.loadHistory(PATH),
+      second = store.loadHistory(PATH);
     await Promise.all([first, second]);
     expect(getChatHistory).toHaveBeenCalledTimes(1);
     expect(store.ensureSession(PATH).messages).toEqual(saved.state.messages);
@@ -617,8 +617,8 @@ describe("chat history", () => {
   });
 
   it("新会话保留旧记录且后续消息使用不同的历史 ID", async () => {
-    const store = useChatStore();
-    const first = store.send(PATH, PROJECT, "第一段");
+    const store = useChatStore(),
+      first = store.send(PATH, PROJECT, "第一段");
     finish(PATH);
     await first;
     const firstId = store.ensureHistory(PATH).activeId;
@@ -645,8 +645,8 @@ describe("chat history", () => {
   });
 
   it("运行中切换历史先停止并保存残缺回复,切换期间拒绝新消息", async () => {
-    const store = useChatStore();
-    const saved = snapshot();
+    const store = useChatStore(),
+      saved = snapshot();
     vi.mocked(selectChatHistory).mockResolvedValueOnce(saved);
     const run = store.send(PATH, PROJECT, "当前问题");
     emit(PATH, { kind: "textDelta", delta: "尚未结束的回复" });

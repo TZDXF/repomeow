@@ -42,13 +42,17 @@ export const ContextKey: InjectionKey<ContextValue> = Symbol("ai-elements-contex
 
 export function useContextValue(): ContextValue {
   const ctx = inject(ContextKey);
-  if (!ctx) throw new Error("Context 子组件必须放在 <Context> 内使用");
+  if (!ctx) {
+    throw new Error("Context 子组件必须放在 <Context> 内使用");
+  }
   return ctx;
 }
 
 /** 占用比例 0~1;用量或窗口缺失时返回 null */
 export function contextPercent(used: number | null, max: number | null): number | null {
-  if (used == null || !max || max <= 0) return null;
+  if (used == null || !max || max <= 0) {
+    return null;
+  }
   return Math.min(1, used / max);
 }
 
@@ -74,6 +78,8 @@ export function estimateCost(
   tokens: number,
   ratePerMillion: number | undefined,
 ): number | undefined {
-  if (ratePerMillion == null || tokens <= 0) return undefined;
+  if (ratePerMillion == null || tokens <= 0) {
+    return undefined;
+  }
   return (tokens / 1_000_000) * ratePerMillion;
 }

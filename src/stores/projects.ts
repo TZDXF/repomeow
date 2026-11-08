@@ -15,20 +15,20 @@ import type {
 } from "@/types";
 
 export const useProjectsStore = defineStore("projects", () => {
-  const projects = ref<Project[]>([]);
-  /** 全量项目索引(id → Project):不受搜索/标签筛选裁剪。按 id 查项目(标题栏 tab 名、
-   * 详情页/文件/Wiki/提交图路由反查、报告任务名等)统一走 getProjectById,
-   * 避免首页搜索期间这些场景误判「项目不存在」而回退 #id 或误报 not-found */
-  const projectsById = ref(new Map<number, Project>());
-  const archivedProjects = ref<Project[]>([]);
-  const loading = ref(false);
-  const query = ref("");
-  const selectedTagIds = ref<number[]>([]);
+  const projects = ref<Project[]>([]),
+    /** 全量项目索引(id → Project):不受搜索/标签筛选裁剪。按 id 查项目(标题栏 tab 名、
+     * 详情页/文件/Wiki/提交图路由反查、报告任务名等)统一走 getProjectById,
+     * 避免首页搜索期间这些场景误判「项目不存在」而回退 #id 或误报 not-found */
+    projectsById = ref(new Map<number, Project>()),
+    archivedProjects = ref<Project[]>([]),
+    loading = ref(false),
+    query = ref(""),
+    selectedTagIds = ref<number[]>([]);
 
   /** 写入全量索引;替换时保留旧 git 状态(后端仅在列表拉取时附带) */
   function upsertProjects(list: Project[]) {
     for (const p of list) {
-      p.git = p.git ?? projectsById.value.get(p.id)?.git ?? null;
+      p.git ??= projectsById.value.get(p.id)?.git ?? null;
       projectsById.value.set(p.id, p);
     }
   }
@@ -48,10 +48,10 @@ export const useProjectsStore = defineStore("projects", () => {
     loading.value = true;
     try {
       const list = await cmd<Project[]>("list_projects", {
-        query: query.value.trim() ? query.value.trim() : null,
-        tagIds: selectedTagIds.value.length ? selectedTagIds.value : null,
-      });
-      const prevGit = new Map(projects.value.map((p) => [p.id, p.git] as const));
+          query: query.value.trim() ? query.value.trim() : null,
+          tagIds: selectedTagIds.value.length ? selectedTagIds.value : null,
+        }),
+        prevGit = new Map(projects.value.map((p) => [p.id, p.git] as const));
       list.forEach((p) => {
         p.git = prevGit.get(p.id) ?? p.git;
       });
@@ -79,15 +79,17 @@ export const useProjectsStore = defineStore("projects", () => {
   }
 
   function clearTagFilters() {
-    if (!selectedTagIds.value.length) return;
+    if (!selectedTagIds.value.length) {
+      return;
+    }
     selectedTagIds.value = [];
     fetchProjects({ withGit: false });
   }
 
   /** 重新拉取单个项目(保留已有的 git 状态,后端不返回);无论是否在当前筛选结果内都同步全量索引 */
   async function refreshProject(id: number) {
-    const fresh = await cmd<Project>("get_project", { id });
-    const idx = projects.value.findIndex((p) => p.id === id);
+    const fresh = await cmd<Project>("get_project", { id }),
+      idx = projects.value.findIndex((p) => p.id === id);
     if (idx >= 0) {
       fresh.git = projects.value[idx].git;
       projects.value[idx] = fresh;
@@ -109,7 +111,7 @@ export const useProjectsStore = defineStore("projects", () => {
     if (!filtered) {
       const idx = projects.value.findIndex((p) => p.id === id);
       if (idx >= 0) {
-        fresh.git = fresh.git ?? projects.value[idx].git;
+        fresh.git ??= projects.value[idx].git;
         projects.value[idx] = fresh;
       } else {
         projects.value.push(fresh);
@@ -126,23 +128,23 @@ export const useProjectsStore = defineStore("projects", () => {
    * force: true 用于路径变更(重定向/移动目录)后必须拿到最新状态的场景。
    */
   async function refreshGitStatus(project: Project, options: { force?: boolean } = {}) {
-    const force = options.force ?? false;
-    const registered = projects.value.some((p) => p.id === project.id && p.path === project.path);
-    const scope: GitCheckScope = registered
-      ? { kind: "project", projectId: project.id }
-      : { kind: "path", path: project.path };
-    const run = async () => {
-      const items = await cmd<GitStatusItem[]>("check_git_status", {
-        scope,
-        force,
-        fetchRemote: false,
-      });
-      const item = items.find((i) => i.path === project.path) ?? items[0];
-      if (!item) {
-        throw new Error("git status unavailable");
-      }
-      return item.status;
-    };
+    const force = options.force ?? false,
+      registered = projects.value.some((p) => p.id === project.id && p.path === project.path),
+      scope: GitCheckScope = registered
+        ? { kind: "project", projectId: project.id }
+        : { kind: "path", path: project.path },
+      run = async () => {
+        const items = await cmd<GitStatusItem[]>("check_git_status", {
+            scope,
+            force,
+            fetchRemote: false,
+          }),
+          item = items.find((i) => i.path === project.path) ?? items[0];
+        if (!item) {
+          throw new Error("git status unavailable");
+        }
+        return item.status;
+      };
     try {
       project.git = await run();
     } catch {
@@ -161,12 +163,12 @@ export const useProjectsStore = defineStore("projects", () => {
    */
   async function refreshAllGitStatus(force = false) {
     try {
-      const scope: GitCheckScope = { kind: "all" };
-      const items = await cmd<GitStatusItem[]>("check_git_status", {
-        scope,
-        force,
-        fetchRemote: false,
-      });
+      const scope: GitCheckScope = { kind: "all" },
+        items = await cmd<GitStatusItem[]>("check_git_status", {
+          scope,
+          force,
+          fetchRemote: false,
+        });
       applyGitStatusItems(items);
     } catch {
       // 失败静默:由后端事件推送/窗口聚焦兜底补充
@@ -175,11 +177,15 @@ export const useProjectsStore = defineStore("projects", () => {
 
   /** 按路径批量写入 git 状态(后端事件推送与批量命令共用) */
   function applyGitStatusItems(items: GitStatusItem[]) {
-    if (!items.length) return;
+    if (!items.length) {
+      return;
+    }
     const byPath = new Map(items.map((i) => [i.path, i.status]));
     projects.value.forEach((p) => {
       const st = byPath.get(p.path);
-      if (st) p.git = st;
+      if (st) {
+        p.git = st;
+      }
     });
   }
 
@@ -231,18 +237,22 @@ export const useProjectsStore = defineStore("projects", () => {
   }
 
   async function updateProject(id: number, name: string, description: string) {
-    const project = await cmd<Project>("update_project", { id, name, description });
-    const idx = projects.value.findIndex((p) => p.id === id);
-    if (idx >= 0) projects.value[idx] = project;
+    const project = await cmd<Project>("update_project", { id, name, description }),
+      idx = projects.value.findIndex((p) => p.id === id);
+    if (idx >= 0) {
+      projects.value[idx] = project;
+    }
     upsertProjects([project]);
     return project;
   }
 
   /** 重新指定项目目录(目录被移动后修复登记路径),成功后重新探测 git 状态 */
   async function updateProjectPath(id: number, path: string) {
-    const project = await cmd<Project>("update_project_path", { id, path });
-    const idx = projects.value.findIndex((p) => p.id === id);
-    if (idx >= 0) projects.value[idx] = project;
+    const project = await cmd<Project>("update_project_path", { id, path }),
+      idx = projects.value.findIndex((p) => p.id === id);
+    if (idx >= 0) {
+      projects.value[idx] = project;
+    }
     upsertProjects([project]);
     if (project.path_exists) {
       // 路径刚变更,绕过缓存强制重查新路径状态
@@ -253,9 +263,11 @@ export const useProjectsStore = defineStore("projects", () => {
 
   /** 应用内移动项目目录到新的父目录下(可改名),成功后重新探测 git 状态 */
   async function moveProjectDir(id: number, targetParent: string, dirName: string) {
-    const project = await cmd<Project>("move_project_dir", { id, targetParent, dirName });
-    const idx = projects.value.findIndex((p) => p.id === id);
-    if (idx >= 0) projects.value[idx] = project;
+    const project = await cmd<Project>("move_project_dir", { id, targetParent, dirName }),
+      idx = projects.value.findIndex((p) => p.id === id);
+    if (idx >= 0) {
+      projects.value[idx] = project;
+    }
     upsertProjects([project]);
     await refreshGitStatus(project, { force: true });
     return project;

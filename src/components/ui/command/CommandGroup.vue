@@ -8,22 +8,21 @@ import { cn } from "@/lib/utils";
 import { provideCommandGroupContext, useCommand } from ".";
 
 const props = defineProps<
-  ListboxGroupProps & {
-    class?: HTMLAttributes["class"];
-    heading?: string;
-  }
->();
-
-const delegatedProps = reactiveOmit(props, "class");
-
-const { allGroups, filterState } = useCommand();
-const id = useId();
-
-const isRender = computed(() => (!filterState.search ? true : filterState.filtered.groups.has(id)));
+    ListboxGroupProps & {
+      class?: HTMLAttributes["class"];
+      heading?: string;
+    }
+  >(),
+  delegatedProps = reactiveOmit(props, "class"),
+  { allGroups, filterState } = useCommand(),
+  id = useId(),
+  isRender = computed(() => (!filterState.search ? true : filterState.filtered.groups.has(id)));
 
 provideCommandGroupContext({ id });
 onMounted(() => {
-  if (!allGroups.value.has(id)) allGroups.value.set(id, new Set());
+  if (!allGroups.value.has(id)) {
+    allGroups.value.set(id, new Set());
+  }
 });
 onUnmounted(() => {
   allGroups.value.delete(id);

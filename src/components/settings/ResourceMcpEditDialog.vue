@@ -37,28 +37,24 @@ import {
 import ResourceMcpRowsEditor, { type McpRow } from "./ResourceMcpRowsEditor.vue";
 
 const props = defineProps<{
-  open: boolean;
-  /** null = 新建;非 null = 编辑该服务器 */
-  server: ResourceMcpServer | null;
-}>();
-
-const emit = defineEmits<{
-  "update:open": [value: boolean];
-  /** 创建或更新成功后触发(父组件刷新列表) */
-  saved: [];
-}>();
-
-const { t } = useI18n();
-
-// 示例 JSON 是代码而非文案,且 vue-i18n 会把字面 {} 当插值语法,故放组件常量
-const JSON_EXAMPLE_SINGLE = `{
+    open: boolean;
+    /** null = 新建;非 null = 编辑该服务器 */
+    server: ResourceMcpServer | null;
+  }>(),
+  emit = defineEmits<{
+    "update:open": [value: boolean];
+    /** 创建或更新成功后触发(父组件刷新列表) */
+    saved: [];
+  }>(),
+  { t } = useI18n(),
+  // 示例 JSON 是代码而非文案,且 vue-i18n 会把字面 {} 当插值语法,故放组件常量
+  JSON_EXAMPLE_SINGLE = `{
   "blender": {
     "command": "cmd",
     "args": ["/c", "uvx", "blender-mcp"]
   }
-}`;
-
-const JSON_EXAMPLE_MULTI = `{
+}`,
+  JSON_EXAMPLE_MULTI = `{
   "mcpServers": {
     "filesystem": {
       "command": "npx",
@@ -70,35 +66,33 @@ const JSON_EXAMPLE_MULTI = `{
       "headers": { "Authorization": "Bearer xxx" }
     }
   }
-}`;
-
-/** 新建时示例展示可批量导入的 mcpServers 包装;编辑现有服务器时仅单个定义 */
-const jsonExample = computed(() => (props.server ? JSON_EXAMPLE_SINGLE : JSON_EXAMPLE_MULTI));
+}`,
+  /** 新建时示例展示可批量导入的 mcpServers 包装;编辑现有服务器时仅单个定义 */
+  jsonExample = computed(() => (props.server ? JSON_EXAMPLE_SINGLE : JSON_EXAMPLE_MULTI));
 
 /** 连接定义的编辑方式:表单控件或直接编辑 JSON */
 type Mode = "form" | "json";
 
 const MODE_ITEMS: { value: Mode; labelKey: string }[] = [
-  { value: "form", labelKey: "settings.resources.mcp.editDialog.modeForm" },
-  { value: "json", labelKey: "settings.resources.mcp.editDialog.modeJson" },
-];
-
-const mode = ref<Mode>("form");
-const name = ref("");
-const description = ref("");
-const transport = ref<ResourceMcpTransport>("stdio");
-const command = ref("");
-const url = ref("");
-const jsonText = ref("");
-/** 进入 JSON 模式时由表单序列化的快照,用于识别「未编辑直接切回表单」 */
-const jsonSnapshot = ref("");
-const saving = ref(false);
+    { value: "form", labelKey: "settings.resources.mcp.editDialog.modeForm" },
+    { value: "json", labelKey: "settings.resources.mcp.editDialog.modeJson" },
+  ],
+  mode = ref<Mode>("form"),
+  name = ref(""),
+  description = ref(""),
+  transport = ref<ResourceMcpTransport>("stdio"),
+  command = ref(""),
+  url = ref(""),
+  jsonText = ref(""),
+  /** 进入 JSON 模式时由表单序列化的快照,用于识别「未编辑直接切回表单」 */
+  jsonSnapshot = ref(""),
+  saving = ref(false);
 
 // args/env/headers 行式编辑(替代整段文本框);id 仅作行追踪
 let rowSeq = 0;
-const argRows = ref<McpRow[]>([]);
-const envRows = ref<McpRow[]>([]);
-const headerRows = ref<McpRow[]>([]);
+const argRows = ref<McpRow[]>([]),
+  envRows = ref<McpRow[]>([]),
+  headerRows = ref<McpRow[]>([]);
 
 function nextRowId(): number {
   rowSeq += 1;
@@ -130,38 +124,37 @@ function mapFromRows(rows: McpRow[]): Record<string, string> {
 }
 
 const urlInvalid = computed(() => {
-  if (transport.value === "stdio") {
-    return false;
-  }
-  const text = url.value.trim();
-  if (!text) {
-    // 空值由保存按钮禁用兜底,不重复标红
-    return false;
-  }
-  try {
-    const parsed = new URL(text);
-    return parsed.protocol !== "http:" && parsed.protocol !== "https:";
-  } catch {
-    return true;
-  }
-});
-
-const saveDisabled = computed(() => {
-  if (saving.value) {
-    return true;
-  }
-  if (mode.value === "json") {
-    // 名称可能由 JSON 的 name 字段回填,保存时再校验
-    return !jsonText.value.trim();
-  }
-  if (!name.value.trim()) {
-    return true;
-  }
-  if (transport.value === "stdio") {
-    return !command.value.trim();
-  }
-  return !url.value.trim() || urlInvalid.value;
-});
+    if (transport.value === "stdio") {
+      return false;
+    }
+    const text = url.value.trim();
+    if (!text) {
+      // 空值由保存按钮禁用兜底,不重复标红
+      return false;
+    }
+    try {
+      const parsed = new URL(text);
+      return parsed.protocol !== "http:" && parsed.protocol !== "https:";
+    } catch {
+      return true;
+    }
+  }),
+  saveDisabled = computed(() => {
+    if (saving.value) {
+      return true;
+    }
+    if (mode.value === "json") {
+      // 名称可能由 JSON 的 name 字段回填,保存时再校验
+      return !jsonText.value.trim();
+    }
+    if (!name.value.trim()) {
+      return true;
+    }
+    if (transport.value === "stdio") {
+      return !command.value.trim();
+    }
+    return !url.value.trim() || urlInvalid.value;
+  });
 
 watch(
   () => [props.open, props.server] as const,
@@ -198,8 +191,8 @@ function serializeDefinition(): string {
   const def: Record<string, unknown> = { type: transport.value };
   if (transport.value === "stdio") {
     def.command = command.value.trim();
-    const args = argsFromRows(argRows.value);
-    const env = mapFromRows(envRows.value);
+    const args = argsFromRows(argRows.value),
+      env = mapFromRows(envRows.value);
     if (args.length) {
       def.args = args;
     }
@@ -235,8 +228,8 @@ function applyEntryToForm(entry: ParsedResourceMcpEntry): void {
 /** 解析 JSON 模式文本,失败弹 toast 并返回 null */
 function parseJsonEntry(): ParsedResourceMcpEntry | null {
   try {
-    const parsed = parseResourceMcpJson(jsonText.value);
-    const [first] = parsed.entries;
+    const parsed = parseResourceMcpJson(jsonText.value),
+      [first] = parsed.entries;
     if (!first) {
       toast.error(t("settings.resources.mcp.editDialog.jsonNoEntries"));
       return null;

@@ -14,22 +14,20 @@ import type { SemanticBlameEntry, SemanticFileEntity } from "@/types";
 // 其余实体按文档序展示,子级缩进。点击行由父级定位到源码。
 
 const props = defineProps<{
-  nodes: SemanticOutlineNode[];
-  depth: number;
-  selectedId: string | null;
-  /** 负责人/最后修改(blame)标注,key 为 `${name}:${startLine}` */
-  blame?: Map<string, SemanticBlameEntry>;
-  /** 强制全部可见:展开的聚合组内部使用,避免成员被再次聚合而永远无法展开 */
-  forceVisible?: boolean;
-}>();
-
-const emit = defineEmits<{
-  select: [entity: SemanticFileEntity];
-  impact: [entity: SemanticFileEntity];
-  history: [entity: SemanticFileEntity];
-}>();
-
-const { t } = useI18n();
+    nodes: SemanticOutlineNode[];
+    depth: number;
+    selectedId: string | null;
+    /** 负责人/最后修改(blame)标注,key 为 `${name}:${startLine}` */
+    blame?: Map<string, SemanticBlameEntry>;
+    /** 强制全部可见:展开的聚合组内部使用,避免成员被再次聚合而永远无法展开 */
+    forceVisible?: boolean;
+  }>(),
+  emit = defineEmits<{
+    select: [entity: SemanticFileEntity];
+    impact: [entity: SemanticFileEntity];
+    history: [entity: SemanticFileEntity];
+  }>(),
+  { t } = useI18n();
 
 /** blame 标注按 名称+起始行 匹配(实体行区间与 blame 行区间同源) */
 function blameOf(node: SemanticOutlineNode): SemanticBlameEntry | undefined {
@@ -37,27 +35,30 @@ function blameOf(node: SemanticOutlineNode): SemanticBlameEntry | undefined {
 }
 
 const visible = computed(() =>
-  props.forceVisible
-    ? props.nodes
-    : props.nodes.filter((node) => !COLLAPSED_ENTITY_TYPES.has(node.entity.entityType)),
-);
-
-/** 高密度实体按类型聚合(forceVisible 时不聚合) */
-const collapsedGroups = computed(() => {
-  const groups = new Map<string, SemanticOutlineNode[]>();
-  if (props.forceVisible) return [];
-  for (const node of props.nodes) {
-    if (COLLAPSED_ENTITY_TYPES.has(node.entity.entityType)) {
-      const list = groups.get(node.entity.entityType);
-      if (list) list.push(node);
-      else groups.set(node.entity.entityType, [node]);
+    props.forceVisible
+      ? props.nodes
+      : props.nodes.filter((node) => !COLLAPSED_ENTITY_TYPES.has(node.entity.entityType)),
+  ),
+  /** 高密度实体按类型聚合(forceVisible 时不聚合) */
+  collapsedGroups = computed(() => {
+    const groups = new Map<string, SemanticOutlineNode[]>();
+    if (props.forceVisible) {
+      return [];
     }
-  }
-  return [...groups.entries()];
-});
-
-const expandedGroups = ref(new Set<string>());
-const collapsedNodes = ref(new Set<string>());
+    for (const node of props.nodes) {
+      if (COLLAPSED_ENTITY_TYPES.has(node.entity.entityType)) {
+        const list = groups.get(node.entity.entityType);
+        if (list) {
+          list.push(node);
+        } else {
+          groups.set(node.entity.entityType, [node]);
+        }
+      }
+    }
+    return [...groups.entries()];
+  }),
+  expandedGroups = ref(new Set<string>()),
+  collapsedNodes = ref(new Set<string>());
 
 function toggleGroup(type: string) {
   expandedGroups.value = toggleInSet(expandedGroups.value, type);

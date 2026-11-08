@@ -9,9 +9,8 @@ interface Props extends /* @vue-ignore */ PromptInputActionAddAttachmentsProps {
   label?: string;
 }
 
-const props = defineProps<Props>();
-
-const { openFileDialog } = usePromptInput();
+const props = defineProps<Props>(),
+  { openFileDialog } = usePromptInput();
 </script>
 
 <template>

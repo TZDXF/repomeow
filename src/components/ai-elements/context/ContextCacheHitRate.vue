@@ -6,11 +6,10 @@ import { formatContextPercent, useContextValue } from "./context";
 
 /** 平均缓存命中率行(各轮 Σcached / Σinput);无样本时不渲染 */
 const props = defineProps<{
-  class?: HTMLAttributes["class"];
-}>();
-
-const { t } = useI18n();
-const { cacheHitRate } = useContextValue();
+    class?: HTMLAttributes["class"];
+  }>(),
+  { t } = useI18n(),
+  { cacheHitRate } = useContextValue();
 </script>
 
 <template>

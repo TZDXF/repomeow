@@ -4,45 +4,45 @@ import { useI18n } from "vue-i18n";
 import HeatmapGrid from "@/components/common/HeatmapGrid.vue";
 
 const props = withDefaults(
-  defineProps<{
-    weeks: T[][];
-    monthLabels: { col: number; month: number }[];
-    cellTitle: (cell: T) => string;
-    size?: "sm" | "md";
-    centered?: boolean;
-    fitWidth?: boolean;
-    showLegend?: boolean;
-  }>(),
-  { size: "sm", centered: false, fitWidth: false, showLegend: false },
-);
-const { t } = useI18n();
-const weekdayKeys = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
-const rowLabels = computed(() =>
-  weekdayKeys.map((key, row) => (row % 2 === 0 ? t(`settings.usage.weekdayShort.${key}`) : "")),
-);
-const columnLabels = computed(() => {
-  const months = new Map(props.monthLabels.map(({ col, month }) => [col, month]));
-  return props.weeks.map((_, col) =>
-    months.has(col) ? t(`settings.usage.monthShort.m${months.get(col)}`) : "",
-  );
-});
-const rows = computed(() =>
-  weekdayKeys.map((_, row) =>
-    props.weeks.flatMap((week) => {
-      const cell = week[row];
-      return cell
-        ? [
-            {
-              key: cell.day,
-              level: cell.level,
-              hidden: cell.future,
-              title: cell.future ? undefined : props.cellTitle(cell),
-            },
-          ]
-        : [];
-    }),
+    defineProps<{
+      weeks: T[][];
+      monthLabels: { col: number; month: number }[];
+      cellTitle: (cell: T) => string;
+      size?: "sm" | "md";
+      centered?: boolean;
+      fitWidth?: boolean;
+      showLegend?: boolean;
+    }>(),
+    { size: "sm", centered: false, fitWidth: false, showLegend: false },
   ),
-);
+  { t } = useI18n(),
+  weekdayKeys = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const,
+  rowLabels = computed(() =>
+    weekdayKeys.map((key, row) => (row % 2 === 0 ? t(`settings.usage.weekdayShort.${key}`) : "")),
+  ),
+  columnLabels = computed(() => {
+    const months = new Map(props.monthLabels.map(({ col, month }) => [col, month]));
+    return props.weeks.map((_, col) =>
+      months.has(col) ? t(`settings.usage.monthShort.m${months.get(col)}`) : "",
+    );
+  }),
+  rows = computed(() =>
+    weekdayKeys.map((_, row) =>
+      props.weeks.flatMap((week) => {
+        const cell = week[row];
+        return cell
+          ? [
+              {
+                key: cell.day,
+                level: cell.level,
+                hidden: cell.future,
+                title: cell.future ? undefined : props.cellTitle(cell),
+              },
+            ]
+          : [];
+      }),
+    ),
+  );
 </script>
 
 <template>

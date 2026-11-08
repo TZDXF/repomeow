@@ -36,8 +36,8 @@ describe("foldContextLines", () => {
   });
 
   it("非上下文行会切断折叠区间并参与后续键下标", () => {
-    const change: DiffLine = { kind: "add", text: "+new", oldLine: null, newLine: 7 };
-    const folded = foldContextLines([...contextLines(13), change, ...contextLines(13)], new Set());
+    const change: DiffLine = { kind: "add", text: "+new", oldLine: null, newLine: 7 },
+      folded = foldContextLines([...contextLines(13), change, ...contextLines(13)], new Set());
     expect(folded.filter((line) => line.kind === "fold")).toEqual([
       { kind: "fold", count: 7, key: "0:13" },
       { kind: "fold", count: 7, key: "14:13" },
@@ -60,10 +60,10 @@ describe("并排窗格行模型", () => {
   });
 
   it("左右像素位置可以经 sideRow 坐标稳定互换", () => {
-    const offsets = buildPaneRowOffsets(rows);
-    const rowHeight = 20;
-    const leftTop = paneScrollTopAt(offsets.left, 2.5, rowHeight);
-    const position = locatePaneRowPosition(offsets.left, leftTop, rowHeight);
+    const offsets = buildPaneRowOffsets(rows),
+      rowHeight = 20,
+      leftTop = paneScrollTopAt(offsets.left, 2.5, rowHeight),
+      position = locatePaneRowPosition(offsets.left, leftTop, rowHeight);
     expect(position).toBeCloseTo(2.5);
     expect(paneScrollTopAt(offsets.right, position, rowHeight)).toBe(44);
     expect(locatePaneRowPosition(offsets.left, 0, rowHeight)).toBeCloseTo(-0.2);
@@ -73,10 +73,10 @@ describe("并排窗格行模型", () => {
 describe("并排变化块与连接标记", () => {
   it("连续替换、纯删除分别形成变化块，并在空白侧生成删除标记", () => {
     const rows = toSideBySideRows(
-      parseDiff(["@@ -1,3 +1,2 @@", "-old", "+new", " same", "-removed"].join("\n")),
-    ).filter((row) => row.kind !== "hunk");
-    const offsets = buildPaneRowOffsets(rows);
-    const blocks = buildChangeBlocks(rows);
+        parseDiff(["@@ -1,3 +1,2 @@", "-old", "+new", " same", "-removed"].join("\n")),
+      ).filter((row) => row.kind !== "hunk"),
+      offsets = buildPaneRowOffsets(rows),
+      blocks = buildChangeBlocks(rows);
     expect(blocks).toEqual([
       { start: 0, end: 1, cls: "divider-mod", hasLeft: true, hasRight: true },
       { start: 2, end: 3, cls: "divider-del", hasLeft: true, hasRight: false },

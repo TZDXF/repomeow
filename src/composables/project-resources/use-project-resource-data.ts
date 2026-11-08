@@ -207,19 +207,19 @@ export interface ProjectResourceDataOptions {
  * use-resource-repair;变更后不自行刷新,由 changed 回调驱动父组件重扫资产。
  */
 export function useProjectResourceData(options: ProjectResourceDataOptions) {
-  const { t } = useI18n();
-  const data = ref<ProjectResourceSnapshot | null>(null);
-  const loading = ref(false);
-  const error = ref("");
-  const activeFilter = ref("");
-  /** 非托管检测用的 assets 快照:仅在 load() 提交 deployments 时同步更新,保证两侧数据成对一致,杜绝刷新期间的幽灵行。 */
-  const assetsSnapshot = ref<ProjectAiAssets | null>(null);
+  const { t } = useI18n(),
+    data = ref<ProjectResourceSnapshot | null>(null),
+    loading = ref(false),
+    error = ref(""),
+    activeFilter = ref(""),
+    /** 非托管检测用的 assets 快照:仅在 load() 提交 deployments 时同步更新,保证两侧数据成对一致,杜绝刷新期间的幽灵行。 */
+    assetsSnapshot = ref<ProjectAiAssets | null>(null);
   let sequence = 0;
   onBeforeUnmount(() => sequence++);
   /** 已有数据时的刷新走静默模式(不闪 loading),配合父组件协调好的时序,避免整列视觉闪动。 */
   async function load() {
-    const seq = ++sequence;
-    const silent = !!data.value;
+    const seq = ++sequence,
+      silent = !!data.value;
     if (!silent) {
       loading.value = true;
     }
@@ -256,40 +256,40 @@ export function useProjectResourceData(options: ProjectResourceDataOptions) {
       activeFilter.value = "";
     },
   );
-  const listed = computed(() => buildListedResources(data.value));
-  const unmanaged = computed<UnmanagedItem[]>(() =>
-    buildUnmanagedItems(
-      options.kind(),
-      assetsSnapshot.value,
-      data.value?.deployments ?? [],
-      options.targets(),
+  const listed = computed(() => buildListedResources(data.value)),
+    unmanaged = computed<UnmanagedItem[]>(() =>
+      buildUnmanagedItems(
+        options.kind(),
+        assetsSnapshot.value,
+        data.value?.deployments ?? [],
+        options.targets(),
+      ),
     ),
-  );
-  /** 分组只作为筛选维度(skills):用户分组与市场来源(owner/repo)并列。 */
-  const tree = computed(() =>
-    resourceTree(
-      options.kind() === "skills" ? (data.value?.groups ?? []) : [],
-      listed.value,
-      t("projectAi.ungrouped"),
-    ).filter((g) => g.resources.length),
-  );
-  /** 未入库条目不单独区分:无未分组桶时补一个,使其计入筛选。 */
-  const filters = computed(() => {
-    if (options.kind() !== "skills") {
-      return [];
-    }
-    const groups = tree.value;
-    if (unmanaged.value.length && !groups.some((g) => g.id === UNGROUPED_FILTER)) {
-      return [...groups, { id: UNGROUPED_FILTER, name: t("projectAi.ungrouped"), resources: [] }];
-    }
-    return groups;
-  });
-  const filtered = computed(() => {
-    if (!activeFilter.value) {
-      return listed.value;
-    }
-    return tree.value.find((g) => g.id === activeFilter.value)?.resources ?? [];
-  });
+    /** 分组只作为筛选维度(skills):用户分组与市场来源(owner/repo)并列。 */
+    tree = computed(() =>
+      resourceTree(
+        options.kind() === "skills" ? (data.value?.groups ?? []) : [],
+        listed.value,
+        t("projectAi.ungrouped"),
+      ).filter((g) => g.resources.length),
+    ),
+    /** 未入库条目不单独区分:无未分组桶时补一个,使其计入筛选。 */
+    filters = computed(() => {
+      if (options.kind() !== "skills") {
+        return [];
+      }
+      const groups = tree.value;
+      if (unmanaged.value.length && !groups.some((g) => g.id === UNGROUPED_FILTER)) {
+        return [...groups, { id: UNGROUPED_FILTER, name: t("projectAi.ungrouped"), resources: [] }];
+      }
+      return groups;
+    }),
+    filtered = computed(() => {
+      if (!activeFilter.value) {
+        return listed.value;
+      }
+      return tree.value.find((g) => g.id === activeFilter.value)?.resources ?? [];
+    });
   watch(filters, (next) => {
     if (activeFilter.value && !next.some((g) => g.id === activeFilter.value)) {
       activeFilter.value = "";

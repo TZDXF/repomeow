@@ -13,16 +13,15 @@ import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
 import type { Project } from "@/types";
 
-const { t } = useI18n();
-const store = useProjectsStore();
-const settings = useSettingsStore();
-
-/**
- * 本页独立维护全量项目列表,不走 store.projects:
- * 后者会被首页的搜索/标签筛选裁剪(筛选条件在 fetchProjects 时随 list_projects 下发),
- * 跟踪更新配置需要看到全部项目,与首页筛选互不影响。
- */
-const allProjects = ref<Project[]>([]);
+const { t } = useI18n(),
+  store = useProjectsStore(),
+  settings = useSettingsStore(),
+  /**
+   * 本页独立维护全量项目列表,不走 store.projects:
+   * 后者会被首页的搜索/标签筛选裁剪(筛选条件在 fetchProjects 时随 list_projects 下发),
+   * 跟踪更新配置需要看到全部项目,与首页筛选互不影响。
+   */
+  allProjects = ref<Project[]>([]);
 
 onMounted(async () => {
   try {
@@ -33,19 +32,20 @@ onMounted(async () => {
 });
 
 /** 搜索关键字,匹配名称/描述/路径/标签 */
-const searchInput = ref("");
-
-const filteredProjects = computed(() => {
-  return allProjects.value.filter((project) => matchesTrackingProject(project, searchInput.value));
-});
-
-const trackedCount = computed(() => allProjects.value.filter((p) => p.auto_pull).length);
-
-/** 逐项目切换中的开关置灰,避免连点造成命令乱序 */
-const pendingIds = ref<Set<number>>(new Set());
+const searchInput = ref(""),
+  filteredProjects = computed(() => {
+    return allProjects.value.filter((project) =>
+      matchesTrackingProject(project, searchInput.value),
+    );
+  }),
+  trackedCount = computed(() => allProjects.value.filter((p) => p.auto_pull).length),
+  /** 逐项目切换中的开关置灰,避免连点造成命令乱序 */
+  pendingIds = ref<Set<number>>(new Set());
 
 async function toggle(project: Project, enabled: boolean) {
-  if (pendingIds.value.has(project.id)) return;
+  if (pendingIds.value.has(project.id)) {
+    return;
+  }
   pendingIds.value.add(project.id);
   try {
     await store.setAutoPull(project.id, enabled);
@@ -61,7 +61,9 @@ async function toggle(project: Project, enabled: boolean) {
 const wikiPendingIds = ref<Set<number>>(new Set());
 
 async function toggleWiki(project: Project, enabled: boolean) {
-  if (wikiPendingIds.value.has(project.id)) return;
+  if (wikiPendingIds.value.has(project.id)) {
+    return;
+  }
   wikiPendingIds.value.add(project.id);
   try {
     await store.setWikiAutoUpdate(project.id, enabled);
@@ -75,7 +77,9 @@ async function toggleWiki(project: Project, enabled: boolean) {
 
 /** Wiki 开关提示:全局已开启时项目值被忽略,否则可独立配置。 */
 function wikiToggleTitle(): string {
-  if (settings.wikiAutoUpdate) return t("settings.tracking.wikiToggleGloballyOn");
+  if (settings.wikiAutoUpdate) {
+    return t("settings.tracking.wikiToggleGloballyOn");
+  }
   return t("settings.tracking.wikiToggleHint");
 }
 

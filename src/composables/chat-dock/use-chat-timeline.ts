@@ -54,7 +54,8 @@ function emptyTurn(key: string): TurnView {
 
 /** 旧历史未保存 createdAt,但消息 ID 中包含当时的毫秒时间戳。 */
 function messageTimestamp(message: { id: string; createdAt?: number }): number | null {
-  const timestamp = message.createdAt ?? Number(/^chat-msg-(\d+)-/.exec(message.id)?.[1]);
+  const timestamp =
+    message.createdAt ?? Number(/^chat-msg-(?<timestamp>\d+)-/.exec(message.id)?.groups?.timestamp);
   return Number.isFinite(timestamp) && timestamp > 0 && timestamp <= 8.64e15 ? timestamp : null;
 }
 
@@ -73,9 +74,13 @@ export type ViewCache = Map<string, ViewCacheEntry>;
 const VIEW_CACHE_LIMIT = 512;
 
 function depsEqual(a: unknown[], b: unknown[]): boolean {
-  if (a.length !== b.length) return false;
+  if (a.length !== b.length) {
+    return false;
+  }
   for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false;
+    if (a[i] !== b[i]) {
+      return false;
+    }
   }
   return true;
 }
@@ -86,12 +91,18 @@ function cachedView(
   deps: unknown[],
   build: () => TimelineView,
 ): TimelineView {
-  if (!cache) return build();
+  if (!cache) {
+    return build();
+  }
   const hit = cache.get(key);
-  if (hit && depsEqual(hit.deps, deps)) return hit.view;
+  if (hit && depsEqual(hit.deps, deps)) {
+    return hit.view;
+  }
   const view = build();
   // 会话切换/截断遗留的陈旧条目无害(消息 id 不复用),超限时整体清空防泄漏
-  if (cache.size >= VIEW_CACHE_LIMIT) cache.clear();
+  if (cache.size >= VIEW_CACHE_LIMIT) {
+    cache.clear();
+  }
   cache.set(key, { deps, view });
   return view;
 }
@@ -129,12 +140,14 @@ export function buildCommittedTimeline(s: ChatSessionState, cache?: ViewCache): 
     }
   }
   // 归并中的回合:连续 assistant 消息收集到同一回合,回合结束时一次性产出视图
-  let parts: TurnPart[] = [];
-  let turnKey = "";
+  let parts: TurnPart[] = [],
+    turnKey = "";
   const flushTurn = () => {
-    if (parts.length === 0) return;
-    const key = turnKey;
-    const captured = parts;
+    if (parts.length === 0) {
+      return;
+    }
+    const key = turnKey,
+      captured = parts;
     parts = [];
     views.push(
       cachedView(
@@ -151,12 +164,12 @@ export function buildCommittedTimeline(s: ChatSessionState, cache?: ViewCache): 
       flushTurn();
       const { tokensBefore, tokensAfter } = compaction;
       views.push(
-        cachedView(
-          cache,
-          message.id,
-          [message],
-          () => ({ kind: "compaction", key: message.id, tokensBefore, tokensAfter }),
-        ),
+        cachedView(cache, message.id, [message], () => ({
+          kind: "compaction",
+          key: message.id,
+          tokensBefore,
+          tokensAfter,
+        })),
       );
       continue;
     }
@@ -164,16 +177,18 @@ export function buildCommittedTimeline(s: ChatSessionState, cache?: ViewCache): 
       flushTurn();
       const editable = !s.busy && message.id === lastUserId;
       views.push(
-        cachedView(
-          cache,
-          message.id,
-          [message, editable],
-          () => ({ kind: "user", key: message.id, content: message.content, editable }),
-        ),
+        cachedView(cache, message.id, [message, editable], () => ({
+          kind: "user",
+          key: message.id,
+          content: message.content,
+          editable,
+        })),
       );
       continue;
     }
-    if (parts.length === 0) turnKey = message.id;
+    if (parts.length === 0) {
+      turnKey = message.id;
+    }
     parts.push({ message, runs: resolveRuns(message.toolRunIds, s.toolRuns) });
   }
   flushTurn();
@@ -182,7 +197,9 @@ export function buildCommittedTimeline(s: ChatSessionState, cache?: ViewCache): 
 
 /** 忙时的流式回合(独立于已提交回合);空闲返回 null。 */
 export function buildLiveTurn(s: ChatSessionState): TurnView | null {
-  if (!s.busy) return null;
+  if (!s.busy) {
+    return null;
+  }
   const turn = emptyTurn(LIVE_TURN_KEY);
   turn.live = true;
   turn.streamingText = s.streamingText;
@@ -202,8 +219,8 @@ export function buildLiveTurn(s: ChatSessionState): TurnView | null {
 
 /** 完整时间线(已提交视图 + 忙时 live 回合);无缓存的一次性版本。 */
 export function buildTimeline(s: ChatSessionState): TimelineView[] {
-  const live = buildLiveTurn(s);
-  const base = buildCommittedTimeline(s);
+  const live = buildLiveTurn(s),
+    base = buildCommittedTimeline(s);
   return live ? [...base, live] : base;
 }
 
@@ -213,20 +230,22 @@ export function buildTimeline(s: ChatSessionState): TimelineView[] {
  * liveTurn,base 依赖的 messages/toolRuns/busy 不变即不重算。
  */
 export function useChatTimeline(session: ComputedRef<ChatSessionState>) {
-  const cache: ViewCache = new Map();
-  const base = computed(() => buildCommittedTimeline(session.value, cache));
-  const liveTurn = computed(() => buildLiveTurn(session.value));
-  const timeline = computed(() => (liveTurn.value ? [...base.value, liveTurn.value] : base.value));
-  const retryClock = useNow({ interval: 250 });
-  const retrySeconds = computed(() =>
-    retryRemainingSeconds(session.value.retry, retryClock.value.getTime()),
-  );
+  const cache: ViewCache = new Map(),
+    base = computed(() => buildCommittedTimeline(session.value, cache)),
+    liveTurn = computed(() => buildLiveTurn(session.value)),
+    timeline = computed(() => (liveTurn.value ? [...base.value, liveTurn.value] : base.value)),
+    retryClock = useNow({ interval: 250 }),
+    retrySeconds = computed(() =>
+      retryRemainingSeconds(session.value.retry, retryClock.value.getTime()),
+    );
   return { timeline, retrySeconds };
 }
 
 /** 重试倒计时剩余秒数(0 下限)。 */
 export function retryRemainingSeconds(retry: ChatRetryState | null, now: number): number {
-  if (!retry) return 0;
+  if (!retry) {
+    return 0;
+  }
   const elapsed = now - retry.scheduledAt;
   return Math.max(0, Math.ceil((retry.delayMs - elapsed) / 1000));
 }

@@ -31,17 +31,17 @@ export interface DiffSideRow {
 /** 解析 unified diff:逐行旧/新行号;文件头(diff --git / index / --- / +++ 等)不展示 */
 export function parseDiff(text: string): DiffLine[] {
   const out: DiffLine[] = [];
-  let oldN = 0;
-  let newN = 0;
-  let seenHunk = false;
+  let oldN = 0,
+    newN = 0,
+    seenHunk = false;
   for (const raw of text.split("\n")) {
     if (!raw) {
       continue;
     }
-    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
+    const hunk = /^@@ -(?<oldStart>\d+)(?:,\d+)? \+(?<newStart>\d+)(?:,\d+)? @@/.exec(raw);
     if (hunk) {
-      oldN = Number(hunk[1]);
-      newN = Number(hunk[2]);
+      oldN = Number(hunk.groups!.oldStart);
+      newN = Number(hunk.groups!.newStart);
       seenHunk = true;
       out.push({ kind: "hunk", text: raw, oldLine: null, newLine: null });
       continue;
@@ -90,8 +90,8 @@ export function intralineRanges(lines: DiffLine[]): Map<DiffLine, [number, numbe
       i++;
       continue;
     }
-    const dels: DiffLine[] = [];
-    const adds: DiffLine[] = [];
+    const dels: DiffLine[] = [],
+      adds: DiffLine[] = [];
     while (i < lines.length && (lines[i].kind === "del" || lines[i].kind === "add")) {
       const change = lines[i];
       if (change.kind === "del") {
@@ -103,15 +103,23 @@ export function intralineRanges(lines: DiffLine[]): Map<DiffLine, [number, numbe
     }
     const n = Math.min(dels.length, adds.length);
     for (let j = 0; j < n; j++) {
-      const a = dels[j].text.slice(1);
-      const b = adds[j].text.slice(1);
-      const maxPre = Math.min(a.length, b.length);
+      const a = dels[j].text.slice(1),
+        b = adds[j].text.slice(1),
+        maxPre = Math.min(a.length, b.length);
       let pre = 0;
-      while (pre < maxPre && a[pre] === b[pre]) pre++;
+      while (pre < maxPre && a[pre] === b[pre]) {
+        pre++;
+      }
       let suf = 0;
-      while (suf < maxPre - pre && a[a.length - 1 - suf] === b[b.length - 1 - suf]) suf++;
-      if (pre < a.length - suf) out.set(dels[j], [pre, a.length - suf]);
-      if (pre < b.length - suf) out.set(adds[j], [pre, b.length - suf]);
+      while (suf < maxPre - pre && a[a.length - 1 - suf] === b[b.length - 1 - suf]) {
+        suf++;
+      }
+      if (pre < a.length - suf) {
+        out.set(dels[j], [pre, a.length - suf]);
+      }
+      if (pre < b.length - suf) {
+        out.set(adds[j], [pre, b.length - suf]);
+      }
     }
   }
   return out;
@@ -138,8 +146,8 @@ export function toSideBySideRows(lines: (DiffLine | DiffFold)[]): DiffSideRow[] 
       i++;
       continue;
     }
-    const dels: DiffLine[] = [];
-    const adds: DiffLine[] = [];
+    const dels: DiffLine[] = [],
+      adds: DiffLine[] = [];
     while (i < lines.length && (lines[i].kind === "del" || lines[i].kind === "add")) {
       const change = lines[i];
       if (change.kind === "del") {

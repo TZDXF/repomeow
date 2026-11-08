@@ -37,55 +37,57 @@ defineProps<{
   elapsedLabel: string;
 }>();
 const emit = defineEmits<{
-  /** 运行/重新扫描;model 为 null 时跟随默认模型 */
-  (e: "run", model: SkillScanModelRef | null): void;
-  (e: "cancel"): void;
-}>();
-
-const { t, te } = useI18n();
-const aiConfig = useAiConfigStore();
+    /** 运行/重新扫描;model 为 null 时跟随默认模型 */
+    (e: "run", model: SkillScanModelRef | null): void;
+    (e: "cancel"): void;
+  }>(),
+  { t, te } = useI18n(),
+  aiConfig = useAiConfigStore();
 
 // 模型选择器数据源(已加载时复用内存副本)
 onMounted(() => {
   aiConfig.ensureLoaded().catch(() => {});
 });
-const i18n = { t, te };
-
-// ── 扫描模型选择:复合值 "providerId/modelId",缺省跟随设置页默认模型 ──
-// 显式引用失效(厂商/模型被删)时后端会回退默认模型,前端在配置加载后
-// 把选项归位,保证触发器显示与实际生效模型一致。
-const SCAN_MODEL_STORAGE_KEY = "repomeow.rl-scan-model";
-/** 通用选项哨兵值:不含 "/",parseModelOptionValue 解析为 null = 跟随默认模型 */
-const SCAN_MODEL_DEFAULT = "default";
-const scanModelValue = ref(localStorage.getItem(SCAN_MODEL_STORAGE_KEY) ?? SCAN_MODEL_DEFAULT);
-
-const scanDefaultModelLabel = computed(() => {
-  const model = aiConfig.defaultModel?.model;
-  return model
-    ? t("settings.resources.skills.previewPage.scan.modelDefaultNamed", {
-        model: modelDisplayName(model),
-      })
-    : t("settings.resources.skills.previewPage.scan.modelDefault");
-});
-
-const scanModelGroups = computed<ModelSelectorGroup[]>(() => {
-  const config = aiConfig.config;
-  if (!config) return [];
-  return Object.entries(config.providers).map(([providerId, provider]) => ({
-    providerId,
-    providerName: provider.name || providerId,
-    models: provider.models,
-  }));
-});
+const i18n = { t, te },
+  // ── 扫描模型选择:复合值 "providerId/modelId",缺省跟随设置页默认模型 ──
+  // 显式引用失效(厂商/模型被删)时后端会回退默认模型,前端在配置加载后
+  // 把选项归位,保证触发器显示与实际生效模型一致。
+  SCAN_MODEL_STORAGE_KEY = "repomeow.rl-scan-model",
+  /** 通用选项哨兵值:不含 "/",parseModelOptionValue 解析为 null = 跟随默认模型 */
+  SCAN_MODEL_DEFAULT = "default",
+  scanModelValue = ref(localStorage.getItem(SCAN_MODEL_STORAGE_KEY) ?? SCAN_MODEL_DEFAULT),
+  scanDefaultModelLabel = computed(() => {
+    const model = aiConfig.defaultModel?.model;
+    return model
+      ? t("settings.resources.skills.previewPage.scan.modelDefaultNamed", {
+          model: modelDisplayName(model),
+        })
+      : t("settings.resources.skills.previewPage.scan.modelDefault");
+  }),
+  scanModelGroups = computed<ModelSelectorGroup[]>(() => {
+    const config = aiConfig.config;
+    if (!config) {
+      return [];
+    }
+    return Object.entries(config.providers).map(([providerId, provider]) => ({
+      providerId,
+      providerName: provider.name || providerId,
+      models: provider.models,
+    }));
+  });
 
 watch(
   () => aiConfig.loaded,
   (loaded) => {
-    if (!loaded || scanModelValue.value === SCAN_MODEL_DEFAULT) return;
+    if (!loaded || scanModelValue.value === SCAN_MODEL_DEFAULT) {
+      return;
+    }
     const valid = scanModelGroups.value.some((group) =>
       group.models.some((model) => `${group.providerId}/${model.id}` === scanModelValue.value),
     );
-    if (!valid) scanModelValue.value = SCAN_MODEL_DEFAULT;
+    if (!valid) {
+      scanModelValue.value = SCAN_MODEL_DEFAULT;
+    }
   },
   { immediate: true },
 );

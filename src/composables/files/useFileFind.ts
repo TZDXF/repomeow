@@ -17,34 +17,32 @@ export function useFileFind({
   findBarRef,
   previewText,
 }: UseFileFindOptions) {
-  const findOpen = ref(false);
-  const findText = ref("");
-  const findCase = ref(false);
-  const findWord = ref(false);
-  const findRegex = ref(false);
-  const findTotal = ref(0);
-  const findIndex = ref(-1);
-
-  const findQuery = computed<FindQuery>(() => ({
-    text: findText.value,
-    caseSensitive: findCase.value,
-    wholeWord: findWord.value,
-    useRegex: findRegex.value,
-  }));
-
-  const findInvalid = computed(() => {
-    if (!findRegex.value || !findText.value.trim()) {
-      return false;
-    }
-    return (
-      buildFindRegExp({
-        text: findText.value,
-        caseSensitive: true,
-        wholeWord: true,
-        useRegex: true,
-      }) === null
-    );
-  });
+  const findOpen = ref(false),
+    findText = ref(""),
+    findCase = ref(false),
+    findWord = ref(false),
+    findRegex = ref(false),
+    findTotal = ref(0),
+    findIndex = ref(-1),
+    findQuery = computed<FindQuery>(() => ({
+      text: findText.value,
+      caseSensitive: findCase.value,
+      wholeWord: findWord.value,
+      useRegex: findRegex.value,
+    })),
+    findInvalid = computed(() => {
+      if (!findRegex.value || !findText.value.trim()) {
+        return false;
+      }
+      return (
+        buildFindRegExp({
+          text: findText.value,
+          caseSensitive: true,
+          wholeWord: true,
+          useRegex: true,
+        }) === null
+      );
+    });
 
   function refreshFind(scrollToCurrent: boolean) {
     const viewer = codeViewer.value;

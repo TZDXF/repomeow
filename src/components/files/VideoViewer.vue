@@ -3,15 +3,13 @@ import { ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
 const props = defineProps<{
-  /** asset 协议 URL(convertFileSrc 产物) */
-  src: string;
-  name?: string;
-}>();
-
-const { t } = useI18n();
-
-/** 解码失败/容器不支持时置位,展示兜底文案 */
-const failed = ref(false);
+    /** asset 协议 URL(convertFileSrc 产物) */
+    src: string;
+    name?: string;
+  }>(),
+  { t } = useI18n(),
+  /** 解码失败/容器不支持时置位,展示兜底文案 */
+  failed = ref(false);
 
 watch(
   () => props.src,

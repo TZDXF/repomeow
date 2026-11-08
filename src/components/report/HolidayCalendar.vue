@@ -30,29 +30,25 @@ import {
 
 /** 单日选择日历(ui Calendar 的节假日版):高亮法定节假日/调休补班/周末,与报告历史日历一致 */
 const props = withDefaults(defineProps<CalendarRootProps & { class?: HTMLAttributes["class"] }>(), {
-  modelValue: undefined,
-});
-const emits = defineEmits<CalendarRootEmits>();
-
-const delegatedProps = reactiveOmit(props, "class", "placeholder");
-
-const placeholder = useVModel(props, "placeholder", emits, {
-  passive: true,
-  defaultValue: props.defaultPlaceholder ?? today(getLocalTimeZone()),
-}) as Ref<DateValue>;
-
-const forwarded = useForwardPropsEmits(delegatedProps, emits);
-
-const { t, locale } = useI18n();
-const { holidaySet, workdaySet, holidayNames, workdayNames } = useHolidayData();
-
-/** 节假日判定数据(日期集合 + 真实节日名称表) */
-const dayCtx = computed<HolidayDayContext>(() => ({
-  holidaySet: holidaySet.value,
-  workdaySet: workdaySet.value,
-  holidayNames: holidayNames.value,
-  workdayNames: workdayNames.value,
-}));
+    modelValue: undefined,
+    class: undefined,
+  }),
+  emits = defineEmits<CalendarRootEmits>(),
+  delegatedProps = reactiveOmit(props, "class", "placeholder"),
+  placeholder = useVModel(props, "placeholder", emits, {
+    passive: true,
+    defaultValue: props.defaultPlaceholder ?? today(getLocalTimeZone()),
+  }) as Ref<DateValue>,
+  forwarded = useForwardPropsEmits(delegatedProps, emits),
+  { t, locale } = useI18n(),
+  { holidaySet, workdaySet, holidayNames, workdayNames } = useHolidayData(),
+  /** 节假日判定数据(日期集合 + 真实节日名称表) */
+  dayCtx = computed<HolidayDayContext>(() => ({
+    holidaySet: holidaySet.value,
+    workdaySet: workdaySet.value,
+    holidayNames: holidayNames.value,
+    workdayNames: workdayNames.value,
+  }));
 
 function dayClass(dv: DateValue): string {
   return getHolidayDayClass(dv.toString(), isWeekendDate(dv), dayCtx.value);

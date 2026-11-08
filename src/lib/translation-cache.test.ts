@@ -16,12 +16,12 @@ import {
 
 /** 把库内译文等于 translatedText 的条目 createdAt 回拨 ageMs(模拟过期写入) */
 async function backdate(translatedText: string, ageMs: number) {
-  const db = await openDB(TRANSLATION_CACHE_DB, 1);
-  const tx = db.transaction(TRANSLATION_CACHE_STORE, "readwrite");
-  // getAllKeys 与 getAll 按同一键序返回,按下标对齐取每行的键(键为库外主键,值里没有)
-  const keys = await tx.store.getAllKeys();
-  const rows = (await tx.store.getAll()) as { translatedText: string }[];
-  const createdAt = Date.now() - ageMs;
+  const db = await openDB(TRANSLATION_CACHE_DB, 1),
+    tx = db.transaction(TRANSLATION_CACHE_STORE, "readwrite"),
+    // getAllKeys 与 getAll 按同一键序返回,按下标对齐取每行的键(键为库外主键,值里没有)
+    keys = await tx.store.getAllKeys(),
+    rows = (await tx.store.getAll()) as { translatedText: string }[],
+    createdAt = Date.now() - ageMs;
   rows.forEach((row, i) => {
     if (row.translatedText === translatedText) {
       void tx.store.put({ ...row, createdAt }, keys[i]);
@@ -32,8 +32,8 @@ async function backdate(translatedText: string, ageMs: number) {
 }
 
 async function storedTexts(): Promise<string[]> {
-  const db = await openDB(TRANSLATION_CACHE_DB, 1);
-  const rows = (await db.getAll(TRANSLATION_CACHE_STORE)) as { translatedText: string }[];
+  const db = await openDB(TRANSLATION_CACHE_DB, 1),
+    rows = (await db.getAll(TRANSLATION_CACHE_STORE)) as { translatedText: string }[];
   db.close();
   return rows.map((row) => row.translatedText);
 }

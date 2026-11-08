@@ -21,58 +21,53 @@ interface ColumnWidths {
 }
 
 const props = defineProps<{
-  visibleNodes: VisibleGraphNode[];
-  edges: GraphEdgeLayout[];
-  startIndex: number;
-  endIndex: number;
-  totalCount: number;
-  streamDone: boolean;
-  selectedHash?: string;
-  matchHashes: Set<string>;
-  graphWidth: number;
-  graphColWidth: number;
-  graphClipPath: string;
-  descColWidth: number;
-  totalWidth: number;
-  colWidths: ColumnWidths;
-}>();
-
-const emit = defineEmits<{
-  select: [commit: GitGraphCommit];
-  startColResize: [key: GitGraphColumnKey, event: PointerEvent];
-  resetDescWidth: [];
-}>();
-
-const { t } = useI18n();
-
-const ROW_HEIGHT = 32;
-const LANE_WIDTH = 16;
-const GRAPH_PADDING = 4;
-const NODE_RADIUS = 4;
-const HEADER_HEIGHT = 32;
-
-const visibleEdges = computed(() => {
-  const all = props.edges;
-  let lo = 0;
-  let hi = all.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (all[mid].fromRow <= props.endIndex) {
-      lo = mid + 1;
-    } else {
-      hi = mid;
+    visibleNodes: VisibleGraphNode[];
+    edges: GraphEdgeLayout[];
+    startIndex: number;
+    endIndex: number;
+    totalCount: number;
+    streamDone: boolean;
+    selectedHash?: string;
+    matchHashes: Set<string>;
+    graphWidth: number;
+    graphColWidth: number;
+    graphClipPath: string;
+    descColWidth: number;
+    totalWidth: number;
+    colWidths: ColumnWidths;
+  }>(),
+  emit = defineEmits<{
+    select: [commit: GitGraphCommit];
+    startColResize: [key: GitGraphColumnKey, event: PointerEvent];
+    resetDescWidth: [];
+  }>(),
+  { t } = useI18n(),
+  ROW_HEIGHT = 32,
+  LANE_WIDTH = 16,
+  GRAPH_PADDING = 4,
+  NODE_RADIUS = 4,
+  HEADER_HEIGHT = 32,
+  visibleEdges = computed(() => {
+    const all = props.edges;
+    let lo = 0,
+      hi = all.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (all[mid].fromRow <= props.endIndex) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
     }
-  }
-  const result: GraphEdgeLayout[] = [];
-  for (let i = 0; i < lo; i++) {
-    if (all[i].toRow >= props.startIndex) {
-      result.push(all[i]);
+    const result: GraphEdgeLayout[] = [];
+    for (let i = 0; i < lo; i++) {
+      if (all[i].toRow >= props.startIndex) {
+        result.push(all[i]);
+      }
     }
-  }
-  return result;
-});
-
-const svgOffsetY = computed(() => props.startIndex * ROW_HEIGHT);
+    return result;
+  }),
+  svgOffsetY = computed(() => props.startIndex * ROW_HEIGHT);
 
 function nodeX(lane: number) {
   return GRAPH_PADDING + lane * LANE_WIDTH + LANE_WIDTH / 2;
@@ -83,10 +78,10 @@ function nodeYRelative(row: number) {
 }
 
 function edgePath(edge: GraphEdgeLayout): string {
-  const x1 = nodeX(edge.fromLane);
-  const y1 = nodeYRelative(edge.fromRow);
-  const x2 = nodeX(edge.toLane);
-  const y2 = nodeYRelative(edge.toRow);
+  const x1 = nodeX(edge.fromLane),
+    y1 = nodeYRelative(edge.fromRow),
+    x2 = nodeX(edge.toLane),
+    y2 = nodeYRelative(edge.toRow);
   if (x1 === x2) {
     return `M ${x1} ${y1} L ${x2} ${y2}`;
   }

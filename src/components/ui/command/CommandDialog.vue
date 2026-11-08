@@ -13,23 +13,22 @@ import {
 import Command from "./Command.vue";
 
 const props = withDefaults(
-  defineProps<
-    DialogRootProps & {
-      title?: string;
-      description?: string;
-      class?: HTMLAttributes["class"];
-      showCloseButton?: boolean;
-    }
-  >(),
-  {
-    title: "Command Palette",
-    description: "Search for a command to run...",
-    showCloseButton: false,
-  },
-);
-const emits = defineEmits<DialogRootEmits>();
-
-const forwarded = useForwardPropsEmits(props, emits);
+    defineProps<
+      DialogRootProps & {
+        title?: string;
+        description?: string;
+        class?: HTMLAttributes["class"];
+        showCloseButton?: boolean;
+      }
+    >(),
+    {
+      title: "Command Palette",
+      description: "Search for a command to run...",
+      showCloseButton: false,
+    },
+  ),
+  emits = defineEmits<DialogRootEmits>(),
+  forwarded = useForwardPropsEmits(props, emits);
 </script>
 
 <template>

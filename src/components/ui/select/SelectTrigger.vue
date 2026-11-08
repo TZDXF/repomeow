@@ -8,12 +8,13 @@ import { SelectIcon, SelectTrigger, useForwardProps } from "reka-ui";
 import { cn } from "@/lib/utils";
 
 const props = withDefaults(
-  defineProps<SelectTriggerProps & { class?: HTMLAttributes["class"]; size?: "sm" | "default" }>(),
-  { size: "default" },
-);
-
-const delegatedProps = reactiveOmit(props, "class", "size");
-const forwardedProps = useForwardProps(delegatedProps);
+    defineProps<
+      SelectTriggerProps & { class?: HTMLAttributes["class"]; size?: "sm" | "default" }
+    >(),
+    { size: "default" },
+  ),
+  delegatedProps = reactiveOmit(props, "class", "size"),
+  forwardedProps = useForwardProps(delegatedProps);
 </script>
 
 <template>

@@ -10,83 +10,88 @@ import { baseName } from "@/lib/path";
  */
 
 /** 超过该字符数跳过着色(后端对 >10 万行的文件已截断,这里再兜一道避免 oniguruma 卡 UI) */
-const MAX_CHARS = 500_000;
-
-/** 扩展名 → shiki 语言 id(只收 canonical 名,未收录的落 text 不着色) */
-const EXT_TO_LANG: Record<string, string> = {
-  ts: "typescript",
-  mts: "typescript",
-  cts: "typescript",
-  tsx: "tsx",
-  js: "javascript",
-  mjs: "javascript",
-  cjs: "javascript",
-  jsx: "jsx",
-  vue: "vue",
-  svelte: "svelte",
-  html: "html",
-  htm: "html",
-  css: "css",
-  scss: "scss",
-  sass: "sass",
-  less: "less",
-  json: "json",
-  jsonc: "jsonc",
-  json5: "json5",
-  md: "markdown",
-  markdown: "markdown",
-  py: "python",
-  rs: "rust",
-  go: "go",
-  java: "java",
-  kt: "kotlin",
-  kts: "kotlin",
-  c: "c",
-  h: "c",
-  cpp: "cpp",
-  cc: "cpp",
-  cxx: "cpp",
-  hpp: "cpp",
-  cs: "csharp",
-  php: "php",
-  rb: "ruby",
-  swift: "swift",
-  dart: "dart",
-  lua: "lua",
-  scala: "scala",
-  groovy: "groovy",
-  pl: "perl",
-  r: "r",
-  sh: "shellscript",
-  bash: "shellscript",
-  zsh: "shellscript",
-  ps1: "powershell",
-  bat: "bat",
-  cmd: "bat",
-  yml: "yaml",
-  yaml: "yaml",
-  toml: "toml",
-  xml: "xml",
-  svg: "xml",
-  sql: "sql",
-  ini: "ini",
-  conf: "ini",
-  properties: "properties",
-  graphql: "graphql",
-  gql: "graphql",
-  prisma: "prisma",
-  diff: "diff",
-  mk: "makefile",
-};
+const MAX_CHARS = 500_000,
+  /** 扩展名 → shiki 语言 id(只收 canonical 名,未收录的落 text 不着色) */
+  EXT_TO_LANG: Record<string, string> = {
+    ts: "typescript",
+    mts: "typescript",
+    cts: "typescript",
+    tsx: "tsx",
+    js: "javascript",
+    mjs: "javascript",
+    cjs: "javascript",
+    jsx: "jsx",
+    vue: "vue",
+    svelte: "svelte",
+    html: "html",
+    htm: "html",
+    css: "css",
+    scss: "scss",
+    sass: "sass",
+    less: "less",
+    json: "json",
+    jsonc: "jsonc",
+    json5: "json5",
+    md: "markdown",
+    markdown: "markdown",
+    py: "python",
+    rs: "rust",
+    go: "go",
+    java: "java",
+    kt: "kotlin",
+    kts: "kotlin",
+    c: "c",
+    h: "c",
+    cpp: "cpp",
+    cc: "cpp",
+    cxx: "cpp",
+    hpp: "cpp",
+    cs: "csharp",
+    php: "php",
+    rb: "ruby",
+    swift: "swift",
+    dart: "dart",
+    lua: "lua",
+    scala: "scala",
+    groovy: "groovy",
+    pl: "perl",
+    r: "r",
+    sh: "shellscript",
+    bash: "shellscript",
+    zsh: "shellscript",
+    ps1: "powershell",
+    bat: "bat",
+    cmd: "bat",
+    yml: "yaml",
+    yaml: "yaml",
+    toml: "toml",
+    xml: "xml",
+    svg: "xml",
+    sql: "sql",
+    ini: "ini",
+    conf: "ini",
+    properties: "properties",
+    graphql: "graphql",
+    gql: "graphql",
+    prisma: "prisma",
+    diff: "diff",
+    mk: "makefile",
+  };
 
 /** 由文件路径推断 shiki 语言;无扩展名的 Dockerfile / Makefile 按文件名识别 */
 export function diffLangOf(filePath: string): string {
-  const name = baseName(filePath);
-  const lower = name.toLowerCase();
-  if (lower === "dockerfile" || lower.startsWith("dockerfile.")) return "dockerfile";
-  if (lower === "makefile") return "makefile";
+  const name = baseName(filePath),
+    lower = name.toLowerCase();
+  if (lower === "dockerfile" || lower.startsWith("dockerfile.")) {
+    return "dockerfile";
+  }
+  if (lower === "makefile") {
+    return "makefile";
+  }
   const dot = name.lastIndexOf(".");
-  if (dot <= 0) return "text";
+  if (dot <= 0) {
+    return "text";
+  }
   return EXT_TO_LANG[name.slice(dot + 1).toLowerCase()] ?? "text";
 }
 
@@ -116,14 +121,22 @@ function segmentHtml(
     !light && !dark
       ? escapeHtml(s)
       : `<span style="--shiki-light:${light ?? "inherit"};--shiki-dark:${dark ?? "inherit"}">${escapeHtml(s)}</span>`;
-  if (!emphasis) return colorOf(content);
-  const cs = Math.max(emphasis[0] - base, 0);
-  const ce = Math.min(emphasis[1] - base, content.length);
-  if (cs >= ce) return colorOf(content);
+  if (!emphasis) {
+    return colorOf(content);
+  }
+  const cs = Math.max(emphasis[0] - base, 0),
+    ce = Math.min(emphasis[1] - base, content.length);
+  if (cs >= ce) {
+    return colorOf(content);
+  }
   let html = "";
-  if (cs > 0) html += colorOf(content.slice(0, cs));
+  if (cs > 0) {
+    html += colorOf(content.slice(0, cs));
+  }
   html += `<span class="${emphasisCls}">${colorOf(content.slice(cs, ce))}</span>`;
-  if (ce < content.length) html += colorOf(content.slice(ce));
+  if (ce < content.length) {
+    html += colorOf(content.slice(ce));
+  }
   return html;
 }
 
@@ -137,11 +150,15 @@ export function tokensToLineHtml(
   emphasis?: [number, number],
   emphasisCls = "",
 ): string {
-  if (!tokens) return "";
-  let html = "";
-  let base = 0;
+  if (!tokens) {
+    return "";
+  }
+  let html = "",
+    base = 0;
   for (const token of tokens) {
-    if (!token.content) continue;
+    if (!token.content) {
+      continue;
+    }
     html += segmentHtml(
       token.content,
       token.htmlStyle?.["--shiki-light"],
@@ -181,13 +198,15 @@ export async function highlightDiffLines(
   filePath: string,
   emphasis?: Map<DiffLine, [number, number]>,
 ): Promise<Map<DiffLine, string> | null> {
-  const oldSrc: string[] = [];
-  const oldRefs: DiffLine[] = [];
-  const newSrc: string[] = [];
-  const newRefs: DiffLine[] = [];
+  const oldSrc: string[] = [],
+    oldRefs: DiffLine[] = [],
+    newSrc: string[] = [],
+    newRefs: DiffLine[] = [];
   let total = 0;
   for (const line of lines) {
-    if (line.kind !== "ctx" && line.kind !== "del" && line.kind !== "add") continue;
+    if (line.kind !== "ctx" && line.kind !== "del" && line.kind !== "add") {
+      continue;
+    }
     // 去掉行首 diff 标记才是源码;ctx 行同时属于新旧两侧
     const src = line.text.slice(1);
     total += src.length;
@@ -200,12 +219,14 @@ export async function highlightDiffLines(
       newRefs.push(line);
     }
   }
-  if (!newRefs.length || total > MAX_CHARS) return null;
+  if (!newRefs.length || total > MAX_CHARS) {
+    return null;
+  }
 
-  const lang = diffLangOf(filePath) as BundledLanguage;
-  const out = new Map<DiffLine, string>();
-  const htmlOf = (ref: DiffLine, tokens: LineToken[] | undefined) =>
-    tokensToLineHtml(tokens, emphasis?.get(ref), wordClsOf(ref));
+  const lang = diffLangOf(filePath) as BundledLanguage,
+    out = new Map<DiffLine, string>(),
+    htmlOf = (ref: DiffLine, tokens: LineToken[] | undefined) =>
+      tokensToLineHtml(tokens, emphasis?.get(ref), wordClsOf(ref));
   try {
     // 先旧后新:ctx 行两侧文本相同,新侧结果覆盖旧侧,视觉效果一致
     if (oldRefs.length) {

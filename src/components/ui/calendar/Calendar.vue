@@ -24,54 +24,48 @@ import {
 } from ".";
 
 const props = withDefaults(
-  defineProps<
-    CalendarRootProps & {
-      class?: HTMLAttributes["class"];
-      layout?: LayoutTypes;
-      yearRange?: DateValue[];
-    }
-  >(),
-  {
-    modelValue: undefined,
-    layout: undefined,
-  },
-);
-const emits = defineEmits<CalendarRootEmits>();
+    defineProps<
+      CalendarRootProps & {
+        class?: HTMLAttributes["class"];
+        layout?: LayoutTypes;
+        yearRange?: DateValue[];
+      }
+    >(),
+    {
+      modelValue: undefined,
+      layout: undefined,
+    },
+  ),
+  emits = defineEmits<CalendarRootEmits>(),
+  delegatedProps = reactiveOmit(props, "class", "layout", "placeholder"),
+  placeholder = useVModel(props, "placeholder", emits, {
+    passive: true,
+    defaultValue: props.defaultPlaceholder ?? today(getLocalTimeZone()),
+  }) as Ref<DateValue>,
+  formatter = useDateFormatter(props.locale ?? "en"),
+  yearRange = computed(() => {
+    return (
+      props.yearRange ??
+      createYearRange({
+        start:
+          props?.minValue ??
+          (toRaw(props.placeholder) ?? props.defaultPlaceholder ?? today(getLocalTimeZone())).cycle(
+            "year",
+            -100,
+          ),
 
-const delegatedProps = reactiveOmit(props, "class", "layout", "placeholder");
-
-const placeholder = useVModel(props, "placeholder", emits, {
-  passive: true,
-  defaultValue: props.defaultPlaceholder ?? today(getLocalTimeZone()),
-}) as Ref<DateValue>;
-
-const formatter = useDateFormatter(props.locale ?? "en");
-
-const yearRange = computed(() => {
-  return (
-    props.yearRange ??
-    createYearRange({
-      start:
-        props?.minValue ??
-        (toRaw(props.placeholder) ?? props.defaultPlaceholder ?? today(getLocalTimeZone())).cycle(
-          "year",
-          -100,
-        ),
-
-      end:
-        props?.maxValue ??
-        (toRaw(props.placeholder) ?? props.defaultPlaceholder ?? today(getLocalTimeZone())).cycle(
-          "year",
-          10,
-        ),
-    })
-  );
-});
-
-const [DefineMonthTemplate, ReuseMonthTemplate] = createReusableTemplate<{ date: DateValue }>();
-const [DefineYearTemplate, ReuseYearTemplate] = createReusableTemplate<{ date: DateValue }>();
-
-const forwarded = useForwardPropsEmits(delegatedProps, emits);
+        end:
+          props?.maxValue ??
+          (toRaw(props.placeholder) ?? props.defaultPlaceholder ?? today(getLocalTimeZone())).cycle(
+            "year",
+            10,
+          ),
+      })
+    );
+  }),
+  [DefineMonthTemplate, ReuseMonthTemplate] = createReusableTemplate<{ date: DateValue }>(),
+  [DefineYearTemplate, ReuseYearTemplate] = createReusableTemplate<{ date: DateValue }>(),
+  forwarded = useForwardPropsEmits(delegatedProps, emits);
 </script>
 
 <template>

@@ -13,29 +13,29 @@ function luminance(hex: string): number {
 }
 
 const lightBackgrounds = [
-  ["默认", "#ffffff"],
-  ["玻璃", "#e8eef4"],
-  ["岛屿", "#f8f8f0"],
-  ["像素", "#f4f4f4"],
-];
-const ansiKeys = [
-  "black",
-  "red",
-  "green",
-  "yellow",
-  "blue",
-  "magenta",
-  "cyan",
-  "white",
-  "brightBlack",
-  "brightRed",
-  "brightGreen",
-  "brightYellow",
-  "brightBlue",
-  "brightMagenta",
-  "brightCyan",
-  "brightWhite",
-];
+    ["默认", "#ffffff"],
+    ["玻璃", "#e8eef4"],
+    ["岛屿", "#f8f8f0"],
+    ["像素", "#f4f4f4"],
+  ],
+  ansiKeys = [
+    "black",
+    "red",
+    "green",
+    "yellow",
+    "blue",
+    "magenta",
+    "cyan",
+    "white",
+    "brightBlack",
+    "brightRed",
+    "brightGreen",
+    "brightYellow",
+    "brightBlue",
+    "brightMagenta",
+    "brightCyan",
+    "brightWhite",
+  ];
 
 describe("终端 ANSI 主题", () => {
   it("亮色模式覆盖完整 16 色,不沿用皮肤中可能过浅的弱化文字色", () => {
@@ -47,10 +47,10 @@ describe("终端 ANSI 主题", () => {
   it.each(lightBackgrounds)("%s亮色皮肤的每种 ANSI 文字色都有足够对比度", (_, background) => {
     const backgroundLuminance = luminance(background);
     for (const [name, color] of Object.entries(terminalAnsiColors(false, "#9f927d"))) {
-      const foregroundLuminance = luminance(color);
-      const contrast =
-        (Math.max(backgroundLuminance, foregroundLuminance) + 0.05) /
-        (Math.min(backgroundLuminance, foregroundLuminance) + 0.05);
+      const foregroundLuminance = luminance(color),
+        contrast =
+          (Math.max(backgroundLuminance, foregroundLuminance) + 0.05) /
+          (Math.min(backgroundLuminance, foregroundLuminance) + 0.05);
       expect(contrast, name).toBeGreaterThanOrEqual(TERMINAL_MINIMUM_CONTRAST_RATIO);
     }
   });

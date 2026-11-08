@@ -15,15 +15,13 @@ import FileTypeStats from "./FileTypeStats.vue";
 import WeekdayHourHeatmap from "./WeekdayHourHeatmap.vue";
 
 const props = defineProps<{
-  /** 项目路径(分析对象) */
-  path: string;
-}>();
-
-const { t } = useI18n();
-
-const stats = ref<GitProjectStats | null>(null);
-const loading = ref(false);
-const error = ref("");
+    /** 项目路径(分析对象) */
+    path: string;
+  }>(),
+  { t } = useI18n(),
+  stats = ref<GitProjectStats | null>(null),
+  loading = ref(false),
+  error = ref("");
 // 单调递增请求令牌:切换项目/连续刷新时丢弃过期响应(照抄 AiUsageSettings 的防竞态范式)
 let loadToken = 0;
 
@@ -33,7 +31,9 @@ async function reload() {
   error.value = "";
   try {
     const result = await cmd<GitProjectStats>("git_project_stats", { path: props.path });
-    if (token !== loadToken) return;
+    if (token !== loadToken) {
+      return;
+    }
     stats.value = result;
   } catch (e) {
     if (token === loadToken) {

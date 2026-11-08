@@ -24,21 +24,19 @@ import { useTerminalStore } from "@/stores/terminal";
 import { useProjectOverviewStore } from "@/stores/project-overview";
 import type { CustomCommand, Project } from "@/types";
 
-const { t } = useI18n();
-const props = defineProps<{ project: Project }>();
-const pinsStore = usePinsStore();
-const terminalStore = useTerminalStore();
-const overviewStore = useProjectOverviewStore();
-
-const commands = ref<CustomCommand[]>([]);
-
-const dialogOpen = ref(false);
-const editingId = ref<number | null>(null);
-const formName = ref("");
-const formCommand = ref("");
-const formDescription = ref("");
-const formIcon = ref("");
-const submitting = ref(false);
+const { t } = useI18n(),
+  props = defineProps<{ project: Project }>(),
+  pinsStore = usePinsStore(),
+  terminalStore = useTerminalStore(),
+  overviewStore = useProjectOverviewStore(),
+  commands = ref<CustomCommand[]>([]),
+  dialogOpen = ref(false),
+  editingId = ref<number | null>(null),
+  formName = ref(""),
+  formCommand = ref(""),
+  formDescription = ref(""),
+  formIcon = ref(""),
+  submitting = ref(false);
 
 async function load() {
   // 聚合 store 与 PackageScripts / DockerCompose 共享一次 get_project_overview IPC,
@@ -82,7 +80,9 @@ function openEdit(c: CustomCommand) {
 }
 
 async function submit() {
-  if (!formName.value.trim() || !formCommand.value.trim() || submitting.value) return;
+  if (!formName.value.trim() || !formCommand.value.trim() || submitting.value) {
+    return;
+  }
   submitting.value = true;
   try {
     const args = {
@@ -108,13 +108,15 @@ async function submit() {
 }
 
 /** 待确认删除的自定义命令,ConfirmDialog 确认后执行 */
-const pendingRemove = ref<CustomCommand | null>(null);
-const removeConfirmOpen = computed({
-  get: () => pendingRemove.value !== null,
-  set: (v) => {
-    if (!v) pendingRemove.value = null;
-  },
-});
+const pendingRemove = ref<CustomCommand | null>(null),
+  removeConfirmOpen = computed({
+    get: () => pendingRemove.value !== null,
+    set: (v) => {
+      if (!v) {
+        pendingRemove.value = null;
+      }
+    },
+  });
 
 function remove(c: CustomCommand) {
   pendingRemove.value = c;
@@ -122,7 +124,9 @@ function remove(c: CustomCommand) {
 
 async function confirmRemove() {
   const c = pendingRemove.value;
-  if (!c) return;
+  if (!c) {
+    return;
+  }
   try {
     await cmd("delete_custom_command", { id: c.id });
     await load();
@@ -143,8 +147,8 @@ async function run(c: CustomCommand) {
 
 /** 切换自定义命令的「常用命令」标记(target_key 为命令 id,后端会在编辑/删除时同步) */
 async function togglePin(c: CustomCommand) {
-  const key = String(c.id);
-  const pinned = pinsStore.isPinned(props.project.id, "customCommand", key);
+  const key = String(c.id),
+    pinned = pinsStore.isPinned(props.project.id, "customCommand", key);
   try {
     await pinsStore.setPinned(
       props.project.id,

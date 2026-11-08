@@ -92,8 +92,8 @@ describe("buildVisibleRows", () => {
   });
 
   it("已知空目录不 expandable,展开也不产生子行", () => {
-    const rows = buildVisibleRows(childrenMap, new Set(["empty"]));
-    const empty = rows.find((r) => r.fullPath === "empty")!;
+    const rows = buildVisibleRows(childrenMap, new Set(["empty"])),
+      empty = rows.find((r) => r.fullPath === "empty")!;
     expect(empty.expandable).toBe(false);
     expect(rows.filter((r) => r.depth > 0)).toHaveLength(0);
   });
@@ -112,9 +112,9 @@ describe("buildVisibleRows", () => {
 
   it("ignored 标记透传为 dimmed", () => {
     const map = new Map<string, ProjectFileEntry[]>([
-      ["", [entry("logs", true, true), entry("src", true)]],
-    ]);
-    const rows = buildVisibleRows(map, new Set());
+        ["", [entry("logs", true, true), entry("src", true)]],
+      ]),
+      rows = buildVisibleRows(map, new Set());
     expect(rows.find((r) => r.fullPath === "logs")?.dimmed).toBe(true);
     expect(rows.find((r) => r.fullPath === "src")?.dimmed).toBe(false);
   });

@@ -40,12 +40,12 @@ export interface FileTreeRow<T = unknown> {
 
 /** 把扁平文件列表按目录层级聚合成树(目录在前、文件在后,同层按名称排序) */
 export function buildFileTree<T extends { path: string }>(files: T[]): FileTreeNode<T>[] {
-  const roots: FileTreeNode<T>[] = [];
-  const byPath = new Map<string, FileTreeNode<T>>();
+  const roots: FileTreeNode<T>[] = [],
+    byPath = new Map<string, FileTreeNode<T>>();
   for (const file of files) {
     const segs = file.path.split("/");
-    let prefix = "";
-    let siblings = roots;
+    let prefix = "",
+      siblings = roots;
     for (let i = 0; i < segs.length; i++) {
       prefix = prefix ? `${prefix}/${segs[i]}` : segs[i];
       let node = byPath.get(prefix);
@@ -88,29 +88,29 @@ export function flattenVisibleTree<T extends { path: string }>(
   collapsed: ReadonlySet<string>,
   opts?: TreeRowOptions<T>,
 ): FileTreeRow<T>[] {
-  const out: FileTreeRow<T>[] = [];
-  const walk = (list: FileTreeNode<T>[], depth: number) => {
-    for (const node of list) {
-      // expanded 仅对目录行有意义(文件行恒 false)
-      const expanded = node.file === null && !collapsed.has(node.fullPath);
-      out.push({
-        key: node.fullPath,
-        name: node.name,
-        fullPath: node.fullPath,
-        isDir: node.file === null,
-        depth,
-        expanded,
-        expandable: node.children.length > 0,
-        dimmed: node.file ? (opts?.dim?.(node.file) ?? false) : false,
-        loading: false,
-        title: node.file ? opts?.title?.(node.file) : undefined,
-        data: node.file,
-      });
-      if (node.children.length && expanded) {
-        walk(node.children, depth + 1);
+  const out: FileTreeRow<T>[] = [],
+    walk = (list: FileTreeNode<T>[], depth: number) => {
+      for (const node of list) {
+        // expanded 仅对目录行有意义(文件行恒 false)
+        const expanded = node.file === null && !collapsed.has(node.fullPath);
+        out.push({
+          key: node.fullPath,
+          name: node.name,
+          fullPath: node.fullPath,
+          isDir: node.file === null,
+          depth,
+          expanded,
+          expandable: node.children.length > 0,
+          dimmed: node.file ? (opts?.dim?.(node.file) ?? false) : false,
+          loading: false,
+          title: node.file ? opts?.title?.(node.file) : undefined,
+          data: node.file,
+        });
+        if (node.children.length && expanded) {
+          walk(node.children, depth + 1);
+        }
       }
-    }
-  };
+    };
   walk(nodes, 0);
   return out;
 }

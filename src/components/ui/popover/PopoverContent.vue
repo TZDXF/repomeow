@@ -11,18 +11,16 @@ defineOptions({
 });
 
 const props = withDefaults(
-  defineProps<PopoverContentProps & { class?: HTMLAttributes["class"] }>(),
-  {
-    align: "center",
-    sideOffset: 4,
-    collisionPadding: () => POPPER_COLLISION_PADDING,
-  },
-);
-const emits = defineEmits<PopoverContentEmits>();
-
-const delegatedProps = reactiveOmit(props, "class");
-
-const forwarded = useForwardPropsEmits(delegatedProps, emits);
+    defineProps<PopoverContentProps & { class?: HTMLAttributes["class"] }>(),
+    {
+      align: "center",
+      sideOffset: 4,
+      collisionPadding: () => POPPER_COLLISION_PADDING,
+    },
+  ),
+  emits = defineEmits<PopoverContentEmits>(),
+  delegatedProps = reactiveOmit(props, "class"),
+  forwarded = useForwardPropsEmits(delegatedProps, emits);
 </script>
 
 <template>

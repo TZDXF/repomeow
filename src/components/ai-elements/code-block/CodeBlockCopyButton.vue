@@ -15,19 +15,16 @@ interface Props extends /* @vue-ignore */ CodeBlockCopyButtonProps {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  timeout: 2000,
-});
-
-const emit = defineEmits<{
-  (event: "copy"): void;
-  (event: "error", error: Error): void;
-}>();
-
-const delegatedProps = reactiveOmit(props, "timeout", "class");
-
-const { code } = useCodeBlockContext();
-
-const isCopied = ref(false);
+    timeout: 2000,
+    class: undefined,
+  }),
+  emit = defineEmits<{
+    (event: "copy"): void;
+    (event: "error", error: Error): void;
+  }>(),
+  delegatedProps = reactiveOmit(props, "timeout", "class"),
+  { code } = useCodeBlockContext(),
+  isCopied = ref(false);
 let resetTimer: ReturnType<typeof setTimeout> | undefined;
 
 const icon = computed(() => (isCopied.value ? CheckIcon : CopyIcon));

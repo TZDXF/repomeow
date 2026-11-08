@@ -7,16 +7,16 @@ export function useProjectDialogState(
   onUpdate: (open: boolean) => void,
   active?: Readonly<Ref<boolean>>,
 ) {
-  const uncontrolledOpen = ref(props.defaultOpen ?? false);
-  const requestedOpen = computed(() => props.open ?? uncontrolledOpen.value);
-  const visible = computed(() => requestedOpen.value && (active?.value ?? true));
-  // 切走时保留弹窗内部编辑器等组件;主动关闭时恢复原来的销毁行为。
-  const unmountOnHide = computed(() =>
-    active && requestedOpen.value ? false : props.unmountOnHide,
-  );
+  const uncontrolledOpen = ref(props.defaultOpen ?? false),
+    requestedOpen = computed(() => props.open ?? uncontrolledOpen.value),
+    visible = computed(() => requestedOpen.value && (active?.value ?? true)),
+    // 切走时保留弹窗内部编辑器等组件;主动关闭时恢复原来的销毁行为。
+    unmountOnHide = computed(() => (active && requestedOpen.value ? false : props.unmountOnHide));
 
   function updateOpen(value: boolean) {
-    if (active && !active.value) return;
+    if (active && !active.value) {
+      return;
+    }
     uncontrolledOpen.value = value;
     onUpdate(value);
   }

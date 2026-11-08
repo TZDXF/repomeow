@@ -10,25 +10,27 @@ import { formatContextPercent, useContextValue } from "./context";
  * breakdown 缺失或全零时不渲染。
  */
 const props = defineProps<{
-  class?: HTMLAttributes["class"];
-}>();
-
-const { t } = useI18n();
-const { breakdown, usedTokens } = useContextValue();
-
-const parts = computed(() => {
-  const current = breakdown.value;
-  if (!current) return [];
-  return [
-    { key: "systemPrompt", label: t("chat.context.systemPrompt"), tokens: current.systemPrompt },
-    { key: "tools", label: t("chat.context.tools"), tokens: current.tools },
-    { key: "messages", label: t("chat.context.messages"), tokens: current.messages },
-  ].filter((part) => part.tokens > 0);
-});
+    class?: HTMLAttributes["class"];
+  }>(),
+  { t } = useI18n(),
+  { breakdown, usedTokens } = useContextValue(),
+  parts = computed(() => {
+    const current = breakdown.value;
+    if (!current) {
+      return [];
+    }
+    return [
+      { key: "systemPrompt", label: t("chat.context.systemPrompt"), tokens: current.systemPrompt },
+      { key: "tools", label: t("chat.context.tools"), tokens: current.tools },
+      { key: "messages", label: t("chat.context.messages"), tokens: current.messages },
+    ].filter((part) => part.tokens > 0);
+  });
 
 function share(tokens: number): string | null {
   const used = usedTokens.value;
-  if (used == null || used <= 0) return null;
+  if (used == null || used <= 0) {
+    return null;
+  }
   return formatContextPercent(tokens / used);
 }
 </script>

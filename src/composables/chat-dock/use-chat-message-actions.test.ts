@@ -31,16 +31,16 @@ vi.mock("@/lib/chat", () => ({
 }));
 
 function harness() {
-  const chat = useChatStore();
-  const project = ref({ path: "D:/repos/one", name: "one" } as Project);
-  const session = computed(() => chat.ensureSession(project.value.path));
-  const aiReady = ref(true);
-  const actions = useChatMessageActions({
-    project: () => project.value,
-    session,
-    aiReady: computed(() => aiReady.value),
-  });
-  const send = vi.spyOn(chat, "send").mockResolvedValue(true);
+  const chat = useChatStore(),
+    project = ref({ path: "D:/repos/one", name: "one" } as Project),
+    session = computed(() => chat.ensureSession(project.value.path)),
+    aiReady = ref(true),
+    actions = useChatMessageActions({
+      project: () => project.value,
+      session,
+      aiReady: computed(() => aiReady.value),
+    }),
+    send = vi.spyOn(chat, "send").mockResolvedValue(true);
   return { chat, project, session, aiReady, actions, send };
 }
 
@@ -61,26 +61,25 @@ describe("useChatMessageActions", () => {
 
   it("仅切换不同项目 tab 的路由,每个项目独立保存提问和回答,切回后不串会话", async () => {
     const projects = new Map<number, Project>([
-      [1, { id: 1, path: "D:/repos/one", name: "one" } as Project],
-      [2, { id: 2, path: "D:/repos/two", name: "two" } as Project],
-      [3, { id: 3, path: "D:/repos/three", name: "three" } as Project],
-    ]);
-    // 与 TitleTabs.openProject 一致:同一路由记录只切换项目 id,不重建发送逻辑。
-    const router = createRouter({
-      history: createMemoryHistory(),
-      routes: [{ path: "/projects/:id", component: { render: () => null } }],
-    });
+        [1, { id: 1, path: "D:/repos/one", name: "one" } as Project],
+        [2, { id: 2, path: "D:/repos/two", name: "two" } as Project],
+        [3, { id: 3, path: "D:/repos/three", name: "three" } as Project],
+      ]),
+      // 与 TitleTabs.openProject 一致:同一路由记录只切换项目 id,不重建发送逻辑。
+      router = createRouter({
+        history: createMemoryHistory(),
+        routes: [{ path: "/projects/:id", component: { render: () => null } }],
+      });
     await router.push("/projects/1");
-    const chat = useChatStore();
-    const project = computed(() => projects.get(Number(router.currentRoute.value.params.id))!);
-    const session = computed(() => chat.ensureSession(project.value.path));
-    const actions = useChatMessageActions({
-      project: () => project.value,
-      session,
-      aiReady: computed(() => true),
-    });
-
-    const visits = [1, 2, 3, 1];
+    const chat = useChatStore(),
+      project = computed(() => projects.get(Number(router.currentRoute.value.params.id))!),
+      session = computed(() => chat.ensureSession(project.value.path)),
+      actions = useChatMessageActions({
+        project: () => project.value,
+        session,
+        aiReady: computed(() => true),
+      }),
+      visits = [1, 2, 3, 1];
     for (const [index, id] of visits.entries()) {
       await router.push(`/projects/${id}`);
       await expect(actions.onSubmit({ text: `问题${index + 1}`, files: [] })).resolves.toBe(true);
@@ -107,10 +106,10 @@ describe("useChatMessageActions", () => {
   });
 
   it("工作树路径变化后停止/新会话/编辑重发均使用当前路径", () => {
-    const { chat, project, actions } = harness();
-    const abort = vi.spyOn(chat, "abort").mockImplementation(() => {});
-    const newSession = vi.spyOn(chat, "newSession").mockResolvedValue();
-    const edit = vi.spyOn(chat, "editLastUserMessage").mockResolvedValue(true);
+    const { chat, project, actions } = harness(),
+      abort = vi.spyOn(chat, "abort").mockImplementation(() => {}),
+      newSession = vi.spyOn(chat, "newSession").mockResolvedValue(),
+      edit = vi.spyOn(chat, "editLastUserMessage").mockResolvedValue(true);
     project.value = { ...project.value, path: "D:/worktrees/feature" };
 
     actions.abort();

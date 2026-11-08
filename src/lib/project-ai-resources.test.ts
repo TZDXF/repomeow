@@ -42,33 +42,33 @@ describe("project resource selection", () => {
   });
   it("treats marketplace source as an additional group alongside user groups", () => {
     const market: ResourceChoice[] = [
-      {
-        id: "m1",
-        name: "M1",
-        description: "",
-        groupIds: ["a"],
-        supportedAgents: [],
-        source: "owner/repo",
-      },
-      {
-        id: "m2",
-        name: "M2",
-        description: "",
-        groupIds: [],
-        supportedAgents: [],
-        source: "owner/repo",
-      },
-      {
-        id: "m3",
-        name: "M3",
-        description: "",
-        groupIds: [],
-        supportedAgents: [],
-        source: "other/lib",
-      },
-      { id: "m4", name: "M4", description: "", groupIds: [], supportedAgents: [] },
-    ];
-    const tree = resourceTree([{ id: "a", name: "A", description: "" }], market, "Ungrouped");
+        {
+          id: "m1",
+          name: "M1",
+          description: "",
+          groupIds: ["a"],
+          supportedAgents: [],
+          source: "owner/repo",
+        },
+        {
+          id: "m2",
+          name: "M2",
+          description: "",
+          groupIds: [],
+          supportedAgents: [],
+          source: "owner/repo",
+        },
+        {
+          id: "m3",
+          name: "M3",
+          description: "",
+          groupIds: [],
+          supportedAgents: [],
+          source: "other/lib",
+        },
+        { id: "m4", name: "M4", description: "", groupIds: [], supportedAgents: [] },
+      ],
+      tree = resourceTree([{ id: "a", name: "A", description: "" }], market, "Ungrouped");
     expect(tree.map((g) => [g.name, g.resources.map((r) => r.id)])).toEqual([
       ["A", ["m1"]],
       ["other/lib", ["m3"]],
@@ -77,8 +77,8 @@ describe("project resource selection", () => {
     ]);
   });
   it("uses one set across groups and toggles only the passed IDs", () => {
-    const initial = new Set(["loose"]);
-    const selected = toggleResources(initial, ["shared", "solo", "shared"], true);
+    const initial = new Set(["loose"]),
+      selected = toggleResources(initial, ["shared", "solo", "shared"], true);
     expect(initial).toEqual(new Set(["loose"]));
     expect(selected.size).toBe(3);
     expect(selectionState(["shared"], selected)).toBe("all");
@@ -105,13 +105,9 @@ describe("project resource selection", () => {
 });
 
 it("sends the snapshot revision with add/assign/remove commands", async () => {
-  const { cmd } = await import("@/lib/tauri");
-  const {
-    addProjectResources,
-    assignProjectResource,
-    importProjectResource,
-    removeProjectResource,
-  } = await import("./project-ai-resources");
+  const { cmd } = await import("@/lib/tauri"),
+    { addProjectResources, assignProjectResource, importProjectResource, removeProjectResource } =
+      await import("./project-ai-resources");
   await addProjectResources({
     path: "D:/demo",
     kind: "skills",
@@ -168,13 +164,13 @@ it("sends the snapshot revision with add/assign/remove commands", async () => {
 
 describe("mergeSkillsByName", () => {
   const skill = (dir: string, name: string, description = ""): ProjectSkill => ({
-    dir,
-    name,
-    description,
-    descriptionTokenCount: 0,
-    tokenCount: 0,
-  });
-  const roots = [".claude/skills", ".agents/skills", ".zcode/skills"];
+      dir,
+      name,
+      description,
+      descriptionTokenCount: 0,
+      tokenCount: 0,
+    }),
+    roots = [".claude/skills", ".agents/skills", ".zcode/skills"];
 
   it("merges same-name skills across agent directories into one row", () => {
     const merged = mergeSkillsByName(

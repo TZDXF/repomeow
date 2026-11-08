@@ -46,32 +46,28 @@ import { useProjectOverviewStore } from "@/stores/project-overview";
 import { useProjectAssetsStore } from "@/stores/project-assets";
 import type { ComposeFile, ComposeServiceState, HiddenItem, Project } from "@/types";
 
-const { t } = useI18n();
-const props = defineProps<{ project: Project }>();
-const pinsStore = usePinsStore();
-const terminalStore = useTerminalStore();
-const assetsStore = useProjectAssetsStore();
-const overviewStore = useProjectOverviewStore();
-
-const { isOpen, setOpen } = useCollapsibleOpen("compose");
-
-/** 扫描结果来自共享 store(与 PackageScripts 卡片合并为一次后端扫描) */
-const files = computed(() => assetsStore.assetsOf(props.project)?.compose_files ?? []);
-const loaded = ref(false);
-/** 各 compose 文件展开状态,key 为文件路径 */
-const openStates = ref<Record<string, boolean>>({});
-/** 服务运行状态,key 为 `${file.path}\n${service}`;无记录表示未创建/docker 不可用 */
-const statuses = ref<Record<string, ComposeServiceState>>({});
-const refreshing = ref(false);
-/** 已隐藏的 compose 文件路径 */
-const hiddenFiles = ref<Set<string>>(new Set());
-/** 临时显示已隐藏文件(灰显,可逐个恢复) */
-const showHidden = ref(false);
-
-const stateKey = (f: ComposeFile, name: string) => `${f.path}\n${name}`;
-
-/** 服务行「更多」菜单打开中的行 key:关闭时延迟清除,保证关闭动画期间触发按钮仍显示,内容锚点不丢失 */
-const openMoreKey = ref<string | null>(null);
+const { t } = useI18n(),
+  props = defineProps<{ project: Project }>(),
+  pinsStore = usePinsStore(),
+  terminalStore = useTerminalStore(),
+  assetsStore = useProjectAssetsStore(),
+  overviewStore = useProjectOverviewStore(),
+  { isOpen, setOpen } = useCollapsibleOpen("compose"),
+  /** 扫描结果来自共享 store(与 PackageScripts 卡片合并为一次后端扫描) */
+  files = computed(() => assetsStore.assetsOf(props.project)?.compose_files ?? []),
+  loaded = ref(false),
+  /** 各 compose 文件展开状态,key 为文件路径 */
+  openStates = ref<Record<string, boolean>>({}),
+  /** 服务运行状态,key 为 `${file.path}\n${service}`;无记录表示未创建/docker 不可用 */
+  statuses = ref<Record<string, ComposeServiceState>>({}),
+  refreshing = ref(false),
+  /** 已隐藏的 compose 文件路径 */
+  hiddenFiles = ref<Set<string>>(new Set()),
+  /** 临时显示已隐藏文件(灰显,可逐个恢复) */
+  showHidden = ref(false),
+  stateKey = (f: ComposeFile, name: string) => `${f.path}\n${name}`,
+  /** 服务行「更多」菜单打开中的行 key:关闭时延迟清除,保证关闭动画期间触发按钮仍显示,内容锚点不丢失 */
+  openMoreKey = ref<string | null>(null);
 
 function onMoreOpenChange(key: string, open: boolean) {
   if (open) {
@@ -79,34 +75,38 @@ function onMoreOpenChange(key: string, open: boolean) {
   } else {
     // 菜单关闭动画 100ms,动画结束后再允许按钮随 group-hover 隐藏
     setTimeout(() => {
-      if (openMoreKey.value === key) openMoreKey.value = null;
+      if (openMoreKey.value === key) {
+        openMoreKey.value = null;
+      }
     }, 150);
   }
 }
 
-const hiddenCount = computed(() => hiddenFiles.value.size);
-
-/** 当前应展示的文件:过滤隐藏文件;showHidden 时全部显示但标记 hidden 灰显 */
-const displayFiles = computed(() =>
-  files.value
-    .map((f) => ({ file: f, hidden: hiddenFiles.value.has(f.path) }))
-    .filter((x) => showHidden.value || !x.hidden),
-);
-
-// path 一并作为 watch 源:详情页切换工作区(worktree)时传入的是 id 相同、
-// path 不同的 project 副本,需要按新工作目录重新扫描
-const loadRequest = useLatestRequest();
+const hiddenCount = computed(() => hiddenFiles.value.size),
+  /** 当前应展示的文件:过滤隐藏文件;showHidden 时全部显示但标记 hidden 灰显 */
+  displayFiles = computed(() =>
+    files.value
+      .map((f) => ({ file: f, hidden: hiddenFiles.value.has(f.path) }))
+      .filter((x) => showHidden.value || !x.hidden),
+  ),
+  // path 一并作为 watch 源:详情页切换工作区(worktree)时传入的是 id 相同、
+  // path 不同的 project 副本,需要按新工作目录重新扫描
+  loadRequest = useLatestRequest();
 async function load(resetView = true) {
-  const isCurrent = loadRequest.begin();
-  const currentProject = props.project;
-  if (resetView) showHidden.value = false;
+  const isCurrent = loadRequest.begin(),
+    currentProject = props.project;
+  if (resetView) {
+    showHidden.value = false;
+  }
   pinsStore.ensureLoaded();
   // stale-while-revalidate:旧扫描结果与旧隐藏项都齐备时,立即按旧数据渲染
   // (隐藏项必须先就位,否则已隐藏文件会在首屏闪现再消失),
   // 并先用旧文件列表查服务状态,后台刷新完成后再按新列表补一次;
   // 仅首次进入(无旧数据)才等首轮请求
   const staleOverview = overviewStore.cached(currentProject.id);
-  if (staleOverview) applyHiddenFiles(staleOverview.hidden_items);
+  if (staleOverview) {
+    applyHiddenFiles(staleOverview.hidden_items);
+  }
   const hasStale = !!assetsStore.assetsOf(currentProject) && !!staleOverview;
   loaded.value = hasStale;
   if (hasStale) {
@@ -119,7 +119,9 @@ async function load(resetView = true) {
     assetsStore.refresh(currentProject),
     overviewStore.refresh(currentProject.id),
   ]);
-  if (!isCurrent()) return;
+  if (!isCurrent()) {
+    return;
+  }
   applyHiddenFiles(overview.hidden_items);
   loaded.value = true;
   resetOpenStates();
@@ -163,11 +165,16 @@ async function toggleFileHidden(path: string, hidden: boolean) {
     // 同步 overview 缓存,下次进入详情时 stale 首屏就是最新隐藏状态
     overviewStore.setHiddenLocal(props.project.id, "composeFile", path, !hidden);
     const next = new Set(hiddenFiles.value);
-    if (hidden) next.delete(path);
-    else next.add(path);
+    if (hidden) {
+      next.delete(path);
+    } else {
+      next.add(path);
+    }
     hiddenFiles.value = next;
     // 恢复显示的文件需要补查服务状态;隐藏则无需操作(下次刷新自然跳过)
-    if (hidden) loadStatuses();
+    if (hidden) {
+      loadStatuses();
+    }
   } catch (e) {
     toast.error(String(e));
   }
@@ -185,12 +192,14 @@ async function loadStatuses() {
   try {
     // 单次 IPC 批量查询,后端并行执行各文件的 docker compose ps
     const results = await cmd<ComposeServiceState[][]>("compose_ps_batch", {
-      path: props.project.path,
-      files: targets.map((f) => f.path),
-    });
-    const map: Record<string, ComposeServiceState> = {};
+        path: props.project.path,
+        files: targets.map((f) => f.path),
+      }),
+      map: Record<string, ComposeServiceState> = {};
     targets.forEach((f, i) => {
-      for (const st of results[i] ?? []) map[stateKey(f, st.name)] = st;
+      for (const st of results[i] ?? []) {
+        map[stateKey(f, st.name)] = st;
+      }
     });
     statuses.value = map;
   } catch {
@@ -202,7 +211,9 @@ async function loadStatuses() {
 
 // 临时显示已隐藏文件时需要补查它们的服务状态
 watch(showHidden, (v) => {
-  if (v) loadStatuses();
+  if (v) {
+    loadStatuses();
+  }
 });
 
 function stateOf(f: ComposeFile, name: string): ComposeServiceState | undefined {
@@ -212,13 +223,17 @@ function stateOf(f: ComposeFile, name: string): ComposeServiceState | undefined 
 /** 状态点颜色:绿=运行中;黄=容器存在但未运行(exited 等);灰=未创建或 docker 不可用 */
 function dotClass(f: ComposeFile, name: string): string {
   const st = stateOf(f, name);
-  if (!st) return "bg-muted-foreground/40";
+  if (!st) {
+    return "bg-muted-foreground/40";
+  }
   return st.running ? "bg-emerald-500" : "bg-amber-500";
 }
 
 function stateTitle(f: ComposeFile, name: string): string {
   const st = stateOf(f, name);
-  if (!st) return t("docker.statusUnknown");
+  if (!st) {
+    return t("docker.statusUnknown");
+  }
   return st.status || t(st.running ? "docker.running" : "docker.stopped");
 }
 
@@ -257,8 +272,8 @@ async function toggleFilePin(file: ComposeFile) {
 
 /** 切换单个服务的「常用命令」标记 */
 async function toggleServicePin(file: ComposeFile, service: string) {
-  const key = `${file.path}\n${service}`;
-  const pinned = pinsStore.isPinned(props.project.id, "composeService", key);
+  const key = `${file.path}\n${service}`,
+    pinned = pinsStore.isPinned(props.project.id, "composeService", key);
   try {
     await pinsStore.setPinned(
       props.project.id,
@@ -297,13 +312,13 @@ async function run(
 
 /** 导出选项对话框的待处理目标;null 表示关闭 */
 const exportRequest = ref<{
-  file: ComposeFile;
-  /** 空字符串 = 导出该文件全部服务 */
-  service: string;
-  kind: "container" | "image";
-} | null>(null);
-const exportMerge = ref(false);
-const exportCompress = ref(false);
+    file: ComposeFile;
+    /** 空字符串 = 导出该文件全部服务 */
+    service: string;
+    kind: "container" | "image";
+  } | null>(null),
+  exportMerge = ref(false),
+  exportCompress = ref(false);
 
 /** 打开导出选项弹窗(每次打开重置选项) */
 function openExportOptions(file: ComposeFile, service: string, kind: "container" | "image") {
@@ -315,13 +330,15 @@ function openExportOptions(file: ComposeFile, service: string, kind: "container"
 /** 确认导出选项后:按合并与否选单文件/目录,压缩追加 .gz 后缀,然后调后端执行 */
 async function confirmExport() {
   const req = exportRequest.value;
-  if (!req) return;
+  if (!req) {
+    return;
+  }
   // 单服务导出没有「合并」语义,合并开关仅批量导出时展示,单服务恒为 false
-  const merge = !req.service && exportMerge.value;
-  const compress = exportCompress.value;
+  const merge = !req.service && exportMerge.value,
+    compress = exportCompress.value;
   exportRequest.value = null;
-  const ext = compress ? "tar.gz" : "tar";
-  const title = t(req.kind === "container" ? "docker.exportContainer" : "docker.exportImage");
+  const ext = compress ? "tar.gz" : "tar",
+    title = t(req.kind === "container" ? "docker.exportContainer" : "docker.exportImage");
   try {
     let dest: string | null;
     if (req.service) {
@@ -333,8 +350,8 @@ async function confirmExport() {
       });
     } else if (merge) {
       // 合并导出:选择合并后的单文件路径(如 docker-compose-images.tar.gz)
-      const stem = req.file.file_name.replace(/\.[^.]*$/, "");
-      const group = req.kind === "image" ? "images" : "containers";
+      const stem = req.file.file_name.replace(/\.[^.]*$/, ""),
+        group = req.kind === "image" ? "images" : "containers";
       dest = await save({
         title,
         defaultPath: `${stem}-${group}.${ext}`,
@@ -344,7 +361,9 @@ async function confirmExport() {
       // 不合并:选目录,后端逐服务生成 <service>-<kind>.tar(.gz)
       dest = await open({ directory: true, title });
     }
-    if (!dest) return;
+    if (!dest) {
+      return;
+    }
     await cmd("compose_export", {
       path: props.project.path,
       file: req.file.path,

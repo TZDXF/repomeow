@@ -5,12 +5,11 @@ import { toast } from "vue-sonner";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { Switch } from "@/components/ui/switch";
 
-const { t } = useI18n();
-
-// 开机自启的权威状态在系统侧(Windows 注册表 Run 项 / macOS LaunchAgent),
-// 不落 settings.json:加载时从插件读,切换失败时回滚开关并提示
-const enabled = ref(false);
-const busy = ref(false);
+const { t } = useI18n(),
+  // 开机自启的权威状态在系统侧(Windows 注册表 Run 项 / macOS LaunchAgent),
+  // 不落 settings.json:加载时从插件读,切换失败时回滚开关并提示
+  enabled = ref(false),
+  busy = ref(false);
 
 onMounted(async () => {
   try {
