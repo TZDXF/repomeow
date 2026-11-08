@@ -66,7 +66,7 @@ pub(super) fn read_wiki_tool(app: &AppHandle, ctx: &ChatToolContext) -> AgentToo
                         .map_err(tool_err)?;
                     let Some(data) = data else {
                         return text_result(
-                            "该项目尚未生成 Wiki。不要擅自生成;可告知用户,仅在用户明确要求时才用 regenerate_wiki 生成整本(后台执行,耗时较长;当前为「确认后执行」权限时,应用会在执行前弹出确认)。",
+                            "该项目尚未生成 Wiki。不要擅自生成;可告知用户,仅在用户明确要求时才用 regenerate_wiki 生成整本(后台执行,耗时较长)。",
                         );
                     };
                     match arg_str(&args, "page_id") {
@@ -89,7 +89,7 @@ pub(super) fn read_wiki_tool(app: &AppHandle, ctx: &ChatToolContext) -> AgentToo
                         },
                         None => {
                             let stale_note = if data.stale {
-                                "是(代码已更新,Wiki 可能过时。不要自行更新:先基于现有内容回答并告知用户可能过时;确有更新必要时再调用 update_wiki,当前为「确认后执行」权限时,应用会在执行前弹出确认)"
+                                "是(代码已更新,Wiki 可能过时。不要自行更新:先基于现有内容回答并告知用户可能过时;确有更新必要时再调用 update_wiki)"
                             } else {
                                 "否"
                             };
@@ -110,7 +110,7 @@ pub(super) fn update_wiki_tool(app: &AppHandle, ctx: &ChatToolContext) -> AgentT
     tool(
         "update_wiki",
         "增量更新 Wiki",
-        "对已有 Wiki 做增量更新:检测自上次生成以来的代码变更,仅重新生成受影响页面(同步等待完成,通常几秒到一两分钟)。仅在 Wiki 过时(read_wiki 返回「过时:是」)且确有更新必要时调用;当前为「确认后执行」权限时,应用会在执行前弹出确认,不必在正文中先征得同意,但不要自动触发。项目还没有 Wiki 或历史被改写时本工具会报错,此时改用 regenerate_wiki。若失败原因是「配置的模型不存在 / model not found」,先用 get_ai_config 查看可用模型、询问用户选用哪个,再用 set_wiki_model 写回 Wiki 配置后重试本工具。无参数。",
+        "对已有 Wiki 做增量更新:检测自上次生成以来的代码变更,仅重新生成受影响页面(同步等待完成,通常几秒到一两分钟)。仅在 Wiki 过时(read_wiki 返回「过时:是」)且确有更新必要时调用;按任务需要直接执行。项目还没有 Wiki 或历史被改写时本工具会报错,此时改用 regenerate_wiki。若失败原因是「配置的模型不存在 / model not found」,先用 get_ai_config 查看可用模型,优先选用用户指定的替代模型或已配置且可用的默认模型,再用 set_wiki_model 写回 Wiki 配置后重试本工具。无参数。",
         json!({
             "type": "object",
             "properties": {},
@@ -159,7 +159,7 @@ pub(super) fn regenerate_wiki_tool(app: &AppHandle, ctx: &ChatToolContext) -> Ag
     tool(
         "regenerate_wiki",
         "整本重生成 Wiki",
-        "在后台启动整本 Wiki 重新生成(立即返回,不等待完成;耗时几分钟到几十分钟)。**仅在用户明确要求整本重生成时使用**(首次生成或重写整本);当前为「确认后执行」权限时,应用会在执行前弹出确认,不必在正文中先征得同意。不要为了更新少数几页而使用它——那是 update_wiki 的职责。若报错「配置的模型不存在 / model not found」,先用 get_ai_config 查看可用模型、询问用户选用哪个,再用 set_wiki_model 写回 Wiki 配置后重试本工具。无参数。",
+        "在后台启动整本 Wiki 重新生成(立即返回,不等待完成;耗时几分钟到几十分钟)。**仅在用户明确要求整本重生成时使用**(首次生成或重写整本);按任务需要直接执行。不要为了更新少数几页而使用它——那是 update_wiki 的职责。若报错「配置的模型不存在 / model not found」,先用 get_ai_config 查看可用模型,优先选用用户指定的替代模型或已配置且可用的默认模型,再用 set_wiki_model 写回 Wiki 配置后重试本工具。无参数。",
         json!({
             "type": "object",
             "properties": {},
@@ -186,7 +186,7 @@ pub(super) fn regenerate_wiki_tool(app: &AppHandle, ctx: &ChatToolContext) -> Ag
                         return Err(tool_err(AppError::coded(
                             ErrorCode::AiNotConfigured,
                             format!(
-                                "{reason}。可用 get_ai_config 查看可用模型,与用户确认后用 set_wiki_model 切换再重试"
+                                "{reason}。可用 get_ai_config 查看可用模型,选用用户指定的替代模型或已配置且可用的默认模型,用 set_wiki_model 切换再重试"
                             ),
                         )));
                     }

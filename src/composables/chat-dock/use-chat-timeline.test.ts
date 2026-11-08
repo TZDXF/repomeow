@@ -133,7 +133,7 @@ describe("buildTimeline", () => {
           msg({ id: "a2", role: "assistant", content: "正文" }),
         ],
         toolRuns: {
-          r1: { id: "r1", name: "read", args: {}, ok: true, summary: "ok", permission: null },
+          r1: { id: "r1", name: "read", args: {}, ok: true, summary: "ok" },
         },
       }),
     );
@@ -151,7 +151,7 @@ describe("buildTimeline", () => {
         streamingText: "流式中",
         pendingToolRunIds: ["r1"],
         toolRuns: {
-          r1: { id: "r1", name: "bash", args: {}, ok: null, summary: "", permission: null },
+          r1: { id: "r1", name: "bash", args: {}, ok: null, summary: "" },
         },
         messages: [
           msg({ id: "u1", role: "user", content: "问" }),
@@ -213,7 +213,6 @@ describe("buildCommittedTimeline 记忆化", () => {
       args: {},
       ok: null,
       summary: "",
-      permission: "pending",
     };
     const state = session({
       messages: [
@@ -228,8 +227,8 @@ describe("buildCommittedTimeline 记忆化", () => {
     expect(buildCommittedTimeline(state, cache)).toEqual(first);
     expect(buildCommittedTimeline(state, cache)[1]).toBe(first[1]);
 
-    // run 对象被替换(权限状态流转):仅引用它的回合重建
-    const resolved = { ...run, permission: "allowed" as const };
+    // run 对象被替换(工具执行完成):仅引用它的回合重建
+    const resolved = { ...run, ok: true, summary: "done" };
     const updated = buildCommittedTimeline(
       session({ ...state, toolRuns: { r1: resolved } }),
       cache,

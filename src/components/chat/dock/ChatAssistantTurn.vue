@@ -2,7 +2,6 @@
 import { computed } from "vue";
 import { useNow } from "@vueuse/core";
 import { useI18n } from "vue-i18n";
-import { toast } from "vue-sonner";
 import { Copy } from "@lucide/vue";
 import { Loader } from "@/components/ai-elements/loader";
 import {
@@ -14,7 +13,6 @@ import {
 } from "@/components/ai-elements/message";
 import ChatTurnProcess from "@/components/chat/ChatTurnProcess.vue";
 import { formatLocalDateTime, formatRelativeTime } from "@/lib/format";
-import { useChatStore } from "@/stores/chat";
 import type { TurnView } from "@/composables/chat-dock/use-chat-timeline";
 
 // ── assistant 回合:思考与工具的统一折叠块 + 各段正文 + 流式/重试/压缩状态 ──
@@ -22,13 +20,11 @@ const props = defineProps<{
   turn: TurnView;
   /** 重试倒计时剩余秒数(父层 250ms tick 驱动) */
   retrySeconds: number;
-  projectPath: string;
 }>();
 const emit = defineEmits<{
   copy: [];
 }>();
 const { t } = useI18n();
-const chat = useChatStore();
 const clock = useNow({ interval: 30_000 });
 const answerTime = computed(() => {
   const timestamp = props.turn.completedAt;
@@ -39,13 +35,6 @@ const answerTime = computed(() => {
     datetime: new Date(timestamp).toISOString(),
   };
 });
-
-/** ChatToolCard 冒泡的工具权限请求:经 store 回应后端;失败 toast 提示可重试 */
-function onToolPermissionRespond(payload: { id: string; allow: boolean }) {
-  void chat.respondToolPermission(props.projectPath, payload.id, payload.allow).then((ok) => {
-    if (!ok) toast.error(t("chat.toolPermission.respondFailed"));
-  });
-}
 </script>
 
 <template>
@@ -56,7 +45,6 @@ function onToolPermissionRespond(payload: { id: string; allow: boolean }) {
           v-if="turn.groups.length > 0"
           :groups="turn.groups"
           :active="turn.active"
-          @respond="onToolPermissionRespond"
         />
         <MessageResponse v-for="(content, ci) in turn.contents" :key="ci" :content="content" />
         <template v-if="turn.live">

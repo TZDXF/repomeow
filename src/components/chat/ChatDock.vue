@@ -190,7 +190,6 @@ const {
                 v-else
                 :turn="view"
                 :retry-seconds="view.live ? retrySeconds : 0"
-                :project-path="project.path"
                 @copy="copyTurn(view)"
               />
             </ChatVirtualMessage>

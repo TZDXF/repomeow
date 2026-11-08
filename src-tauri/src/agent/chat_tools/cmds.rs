@@ -89,7 +89,7 @@ pub(super) fn add_custom_command_tool(app: &AppHandle, ctx: &ChatToolContext) ->
     tool(
         "add_custom_command",
         "新增自定义命令",
-        "为当前项目新增一条自定义命令(保存到 RepoMeow,用户可在界面一键在终端执行)。仅在用户明确要求「添加/保存命令」时使用;当前为「确认后执行」权限时,应用会在执行前弹出确认,不必在正文中先征得同意,但应说明将写入的内容。参数:name(必填)命令名称;command(必填)将在终端执行的命令文本;description(可选)用途说明。",
+        "为当前项目新增一条自定义命令(保存到 RepoMeow,用户可在界面一键在终端执行)。仅在用户明确要求「添加/保存命令」时使用;按任务需要直接执行,并说明将写入的内容。参数:name(必填)命令名称;command(必填)将在终端执行的命令文本;description(可选)用途说明。",
         json!({
             "type": "object",
             "properties": {
@@ -150,7 +150,7 @@ pub(super) fn update_custom_command_tool(app: &AppHandle, ctx: &ChatToolContext)
     tool(
         "update_custom_command",
         "编辑自定义命令",
-        "修改当前项目已登记的自定义命令,按 name 定位(名称见 list_custom_commands 输出)。仅在用户明确要求「修改/重命名」某条命令时使用;当前为「确认后执行」权限时,应用会在执行前弹出确认,不必在正文中先征得同意,但应说明将改成的内容。未提供的字段保持原值;description 传空字符串表示清空描述。参数:name(必填)要修改的命令名称;command(可选)新的命令文本;description(可选)新的用途说明;new_name(可选)重命名后的新名称。",
+        "修改当前项目已登记的自定义命令,按 name 定位(名称见 list_custom_commands 输出)。仅在用户明确要求「修改/重命名」某条命令时使用;按任务需要直接执行,并说明将改成的内容。未提供的字段保持原值;description 传空字符串表示清空描述。参数:name(必填)要修改的命令名称;command(可选)新的命令文本;description(可选)新的用途说明;new_name(可选)重命名后的新名称。",
         json!({
             "type": "object",
             "properties": {
@@ -247,7 +247,7 @@ pub(super) fn delete_custom_command_tool(app: &AppHandle, ctx: &ChatToolContext)
     tool(
         "delete_custom_command",
         "删除自定义命令",
-        "删除当前项目已登记的自定义命令,按 name 定位(名称见 list_custom_commands 输出)。仅在用户明确要求「删除」某条命令时使用;当前为「确认后执行」权限时,应用会在执行前弹出确认,不必在正文中先征得同意,但应说明将删除哪条命令。删除会连带移除该命令的「常用命令」标记。参数:name(必填)要删除的命令名称。",
+        "删除当前项目已登记的自定义命令,按 name 定位(名称见 list_custom_commands 输出)。仅在用户明确要求「删除」某条命令时使用;按任务需要直接执行,并说明将删除哪条命令。删除会连带移除该命令的「常用命令」标记。参数:name(必填)要删除的命令名称。",
         json!({
             "type": "object",
             "properties": {

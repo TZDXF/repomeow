@@ -8,7 +8,6 @@ import {
   selectChatHistory,
   type ChatHistoryEntry,
   type ChatStoredState,
-  respondToolPermission as respondToolPermissionCmd,
   sendChatMessage,
   truncateChatLastTurn,
   type ChatContextBreakdown,
@@ -166,7 +165,6 @@ export const useChatStore = defineStore("chat", () => {
 
   function restoreSession(state: ChatStoredState): ChatSessionState {
     const session = { ...defaultSession(), ...state };
-    resetApprovalStates(session);
     return session;
   }
 
@@ -254,7 +252,6 @@ export const useChatStore = defineStore("chat", () => {
             args: event.args,
             ok: existing?.ok ?? null,
             summary: existing?.summary ?? "",
-            permission: existing?.permission ?? null,
           },
         };
         if (!session.pendingToolRunIds.includes(event.id)) {
@@ -262,45 +259,12 @@ export const useChatStore = defineStore("chat", () => {
         }
         break;
       }
-      case "toolPermissionRequest": {
-        const existing = session.toolRuns[event.id];
-        if (existing) {
-          // ToolCall 已先到达:更新已有 run 并置为待确认,不重复登记 pendingToolRunIds
-          session.toolRuns = {
-            ...session.toolRuns,
-            [event.id]: {
-              ...existing,
-              name: event.name,
-              args: event.args,
-              permission: "pending",
-            },
-          };
-        } else {
-          session.toolRuns = {
-            ...session.toolRuns,
-            [event.id]: {
-              id: event.id,
-              name: event.name,
-              args: event.args,
-              ok: null,
-              summary: "",
-              permission: "pending",
-            },
-          };
-          session.pendingToolRunIds = [...session.pendingToolRunIds, event.id];
-        }
-        break;
-      }
       case "toolResult": {
         const run = session.toolRuns[event.id];
         if (run) {
-          const permission =
-            run.permission === "pending" || run.permission === "responding"
-              ? "denied"
-              : run.permission;
           session.toolRuns = {
             ...session.toolRuns,
-            [event.id]: { ...run, ok: event.ok, summary: event.summary, permission },
+            [event.id]: { ...run, ok: event.ok, summary: event.summary },
           };
         }
         break;
@@ -360,7 +324,6 @@ export const useChatStore = defineStore("chat", () => {
         session.streamingText = "";
         session.streamingThinking = "";
         session.pendingToolRunIds = [];
-        resetApprovalStates(session);
         session.retry = {
           attempt: event.attempt,
           maxAttempts: event.maxAttempts,
@@ -450,8 +413,6 @@ export const useChatStore = defineStore("chat", () => {
         session.streamingThinking = "";
         session.retry = null;
         session.compacting = false;
-        // 中止/异常退出后不可能再收到审批结果,清理未决审批状态
-        resetApprovalStates(session);
         session.busy = false;
         controllers.delete(path);
         if (session.phase === "streaming") {
@@ -516,67 +477,6 @@ export const useChatStore = defineStore("chat", () => {
     return send(path, project, trimmed);
   }
 
-  /** 清理未决的审批状态:把 pending/responding 的 run 还原为无需审批 */
-  function resetApprovalStates(session: ChatSessionState) {
-    let changed = false;
-    const next: Record<string, ChatToolRun> = {};
-    for (const [id, run] of Object.entries(session.toolRuns)) {
-      if (run.permission === "pending" || run.permission === "responding") {
-        next[id] = { ...run, permission: null };
-        changed = true;
-      } else {
-        next[id] = run;
-      }
-    }
-    if (changed) session.toolRuns = next;
-  }
-
-  /**
-   * 回应工具权限请求(ask 档下的待确认工具)。
-   * 先置 responding 禁用重复点击,命令成功后转 allowed/denied;
-   * 失败恢复 pending 允许重试。非 pending 的 run 直接拒绝(返回 false)。
-   */
-  async function respondToolPermission(
-    path: string,
-    toolCallId: string,
-    allow: boolean,
-  ): Promise<boolean> {
-    const session = sessions.value[path];
-    const run = session?.toolRuns[toolCallId];
-    if (!session || !run || run.permission !== "pending") return false;
-    session.toolRuns = {
-      ...session.toolRuns,
-      [toolCallId]: { ...run, permission: "responding" },
-    };
-    let accepted: boolean;
-    try {
-      accepted = await respondToolPermissionCmd(path, toolCallId, allow);
-    } catch {
-      // 传输失败时恢复 pending 供重试;期间会话被清空(新会话)则跳过
-      const live = sessions.value[path];
-      const current = live === session ? session.toolRuns[toolCallId] : undefined;
-      if (current && current.permission === "responding") {
-        session.toolRuns = {
-          ...session.toolRuns,
-          [toolCallId]: { ...current, permission: "pending" },
-        };
-      }
-      return false;
-    }
-    const live = sessions.value[path];
-    const current = live === session ? session.toolRuns[toolCallId] : undefined;
-    if (current && current.permission === "responding") {
-      session.toolRuns = {
-        ...session.toolRuns,
-        [toolCallId]: {
-          ...current,
-          permission: accepted && allow ? "allowed" : "denied",
-        },
-      };
-    }
-    return accepted;
-  }
-
   async function settleRun(path: string) {
     controllers.get(path)?.abort();
     await activeRuns.get(path)?.catch(() => {});
@@ -630,7 +530,6 @@ export const useChatStore = defineStore("chat", () => {
     send,
     abort,
     editLastUserMessage,
-    respondToolPermission,
     newSession,
   };
 });

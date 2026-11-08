@@ -3,7 +3,6 @@ import type { Component, HTMLAttributes } from "vue";
 import {
   CheckCircleIcon,
   ChevronDownIcon,
-  CircleHelpIcon,
   Loader2Icon,
   WrenchIcon,
   XCircleIcon,
@@ -34,7 +33,6 @@ const statusIcon = computed<Component>(() => {
   const icons: Record<ToolState, Component> = {
     "input-streaming": Loader2Icon,
     "input-available": Loader2Icon,
-    "awaiting-permission": CircleHelpIcon,
     "output-available": CheckCircleIcon,
     "output-error": XCircleIcon,
   };
@@ -45,7 +43,6 @@ const statusClass = computed(() => {
   const classes: Record<ToolState, string> = {
     "input-streaming": "animate-spin text-muted-foreground",
     "input-available": "animate-spin text-muted-foreground",
-    "awaiting-permission": "text-amber-500",
     "output-available": "text-green-600",
     "output-error": "text-red-600",
   };
@@ -56,7 +53,6 @@ const statusText = computed(() => {
   const labels: Record<ToolState, string> = {
     "input-streaming": t("chat.toolRunning"),
     "input-available": t("chat.toolRunning"),
-    "awaiting-permission": t("chat.toolAwaitingPermission"),
     "output-available": t("chat.toolDone"),
     "output-error": t("chat.toolFailed"),
   };

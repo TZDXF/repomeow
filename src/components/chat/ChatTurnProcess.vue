@@ -26,8 +26,6 @@ const props = withDefaults(
 
 const { t } = useI18n();
 
-const emit = defineEmits<{ respond: [payload: { id: string; allow: boolean }] }>();
-
 const open = ref(props.defaultOpen);
 const hasAutoClosed = ref(false);
 
@@ -101,7 +99,6 @@ const toolCount = computed(() => props.groups.reduce((sum, group) => sum + group
             :key="`${gi}-${ri}`"
             :run="run"
             class="border-0"
-            @respond="(payload) => emit('respond', payload)"
           />
         </template>
       </div>

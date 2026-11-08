@@ -930,14 +930,6 @@ export default {
       xhigh: "超高",
       max: "最大",
     },
-    permission: {
-      readOnly: "工具权限:只读(禁止写入类工具)",
-      readOnlyShort: "只读",
-      all: "工具权限:全部(允许写入类工具,不做确认)",
-      ask: "工具权限:每次询问(写操作前确认,默认)",
-      allShort: "完全访问",
-      askShort: "确认后执行",
-    },
     context: {
       title: "上下文占用",
       input: "输入",
@@ -965,17 +957,6 @@ export default {
     toolRunning: "运行中",
     toolDone: "完成",
     toolFailed: "失败",
-    toolAwaitingPermission: "等待确认",
-    toolPermission: {
-      explain: "该工具会写入数据或执行耗时任务,需要你确认后才会执行",
-      deny: "拒绝",
-      allowOnce: "允许本次",
-      deniedWait: "已拒绝,等待本次调用收尾…",
-      denied: "用户已拒绝执行此工具",
-      timedOut: "等待确认超时,已取消执行",
-      cancelled: "确认请求已取消",
-      respondFailed: "权限回应失败,该请求可能已失效",
-    },
     tools: {
       sem_find: "语义搜索",
       sem_context: "实体上下文",

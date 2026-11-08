@@ -401,7 +401,6 @@ pub fn run() {
             commands::chat::chat_history_get,
             commands::chat::chat_history_save,
             commands::chat::chat_history_select,
-            commands::chat::chat_tool_permission_respond,
             commands::chat::chat_truncate_last_turn,
         ])
         .build(tauri::generate_context!())

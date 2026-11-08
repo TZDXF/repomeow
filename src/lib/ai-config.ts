@@ -20,9 +20,6 @@ export function isKnownAiApiType(value: string): value is KnownAiApiType {
   return (AI_API_TYPES as readonly string[]).includes(value);
 }
 
-/** 问答工具权限档位:all = 全部工具;ask = 写操作前询问确认;readOnly = 仅只读工具 */
-export type ChatPermission = "all" | "ask" | "readOnly";
-
 /** 思考强度:off 关闭,其余对齐 pi 的 ThinkingLevel */
 export type ChatThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -131,7 +128,6 @@ export interface ChatPrefs {
   providerId: string | null;
   modelId: string | null;
   thinking: ChatThinkingLevel;
-  permission: ChatPermission;
 }
 
 export type AiModelPurpose = "commit" | "report" | "translation";
@@ -147,9 +143,9 @@ export interface AiConfigFile {
   taskModels?: AiTaskModels;
 }
 
-/** 创建一份带默认值的空 chat 偏好(配置损坏回退用);权限默认 ask(写操作前确认) */
+/** 创建一份带默认值的空 chat 偏好(配置损坏回退用) */
 export function emptyChatPrefs(): ChatPrefs {
-  return { providerId: null, modelId: null, thinking: "medium", permission: "ask" };
+  return { providerId: null, modelId: null, thinking: "medium" };
 }
 
 /** 读取配置;后端文件缺失时自动播种(含旧 settings.json 三键迁移) */

@@ -973,14 +973,6 @@ export default {
       xhigh: "Ultra high",
       max: "Max",
     },
-    permission: {
-      readOnly: "Tool permission: read-only (write tools disabled)",
-      readOnlyShort: "Read-only",
-      all: "Tool permission: full (write tools allowed, no confirmation)",
-      ask: "Tool permission: ask each time (confirm before write actions, default)",
-      allShort: "Full access",
-      askShort: "Confirm before executing",
-    },
     context: {
       title: "Context usage",
       input: "Input",
@@ -1008,17 +1000,6 @@ export default {
     toolRunning: "Running",
     toolDone: "Done",
     toolFailed: "Failed",
-    toolAwaitingPermission: "Awaiting permission",
-    toolPermission: {
-      explain: "This tool writes data or runs a lengthy task and needs your approval",
-      deny: "Deny",
-      allowOnce: "Allow this time",
-      deniedWait: "Denied; waiting for this call to finish…",
-      denied: "You denied this tool request",
-      timedOut: "Approval timed out; the tool was not run",
-      cancelled: "The approval request was cancelled",
-      respondFailed: "The approval request may have expired",
-    },
     tools: {
       sem_find: "Semantic search",
       sem_context: "Entity context",

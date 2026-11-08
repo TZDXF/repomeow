@@ -29,7 +29,6 @@ export type ChatEvent =
   | { kind: "textDelta"; delta: string }
   | { kind: "thinkingDelta"; delta: string }
   | { kind: "toolCall"; id: string; name: string; args: unknown }
-  | { kind: "toolPermissionRequest"; id: string; name: string; args: unknown }
   | { kind: "toolResult"; id: string; ok: boolean; summary: string }
   | {
       kind: "turnEnd";
@@ -70,9 +69,6 @@ export interface ChatMessage {
   compaction?: { tokensBefore: number; tokensAfter: number };
 }
 
-/** 工具权限审批状态:null = 无需审批(all 档直接执行) */
-export type ChatToolPermission = "pending" | "responding" | "allowed" | "denied";
-
 /** 一次工具调用的展示状态(与 ChatEvent 的 toolCall/toolResult 通过 id 关联) */
 export interface ChatToolRun {
   id: string;
@@ -81,8 +77,6 @@ export interface ChatToolRun {
   /** null = 仍在运行;true/false = 结果状态 */
   ok: boolean | null;
   summary: string;
-  /** 权限审批状态(ask 档下需要确认的工具;null = 无需审批或已收尾) */
-  permission: ChatToolPermission | null;
 }
 
 /** 回答过程折叠块里的单个轮次段:该轮思考原文与工具调用(按发生顺序) */
@@ -162,16 +156,7 @@ export function truncateChatLastTurn(projectPath: string, projectName: string): 
   return cmd<void>("chat_truncate_last_turn", { projectPath, projectName });
 }
 
-/** 回应工具权限请求:allow=true 允许本次执行,false 拒绝(后端仍会以 toolResult 收尾) */
-export function respondToolPermission(
-  projectPath: string,
-  toolCallId: string,
-  allow: boolean,
-): Promise<boolean> {
-  return cmd<boolean>("chat_tool_permission_respond", { projectPath, toolCallId, allow });
-}
-
-/** 持久化时只保留稳定内容,不保存运行中/审批中等瞬态标记。 */
+/** 持久化时只保留稳定内容,不保存运行中等瞬态标记。 */
 export interface ChatStoredState {
   messages: ChatMessage[];
   toolRuns: Record<string, ChatToolRun>;

@@ -134,8 +134,6 @@ pub struct ChatPrefs {
     pub model_id: Option<String>,
     #[serde(default = "default_thinking")]
     pub thinking: String,
-    #[serde(default)]
-    pub permission: ChatPermission,
 }
 
 impl Default for ChatPrefs {
@@ -144,27 +142,8 @@ impl Default for ChatPrefs {
             provider_id: None,
             model_id: None,
             thinking: default_thinking(),
-            permission: ChatPermission::default(),
         }
     }
-}
-
-/// 问答工具权限:
-/// - `all`:全部工具直接执行;
-/// - `ask`(默认):全部工具可用,但有副作用工具(`update_wiki` /
-///   `regenerate_wiki` / `add_custom_command` / `update_custom_command` /
-///   `delete_custom_command` / `generate_report` / `set_wiki_model` / `bash` /
-///   终端标签页管理)执行前由应用弹出硬确认(见 `commands/chat/permission.rs`
-///   的 before_tool_call 门禁);默认要求确认,把"完全访问"变成用户的显式选择。
-///
-/// - `readOnly`:仅允许无副作用工具,旧配置保留只读语义。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ChatPermission {
-    All,
-    #[default]
-    Ask,
-    ReadOnly,
 }
 
 // ── 读写(原子写;缺/坏 → 播种) ──────────────────────────────────────
@@ -280,7 +259,6 @@ fn seed_at(data_dir: &Path) -> AiConfigFile {
             provider_id: Some(LEGACY_PROVIDER_ID.to_string()),
             model_id: Some(model.to_string()),
             thinking: default_thinking(),
-            permission: ChatPermission::default(),
         };
     }
     normalize(&mut config);
@@ -669,7 +647,6 @@ mod tests {
         assert!(config.chat.provider_id.is_none());
         assert!(config.chat.model_id.is_none());
         assert_eq!(config.chat.thinking, "medium");
-        assert_eq!(config.chat.permission, ChatPermission::Ask);
         assert_eq!(config.providers["openai"].api, "openai-responses");
         assert_eq!(config.providers["deepseek"].api, API_OPENAI_COMPLETIONS);
     }
@@ -780,39 +757,26 @@ mod tests {
     }
 
     #[test]
-    fn chat_permission_preserves_readonly_and_round_trips() {
-        // 默认为 Ask:写操作前需确认,"完全访问"须用户显式选择。
-        assert_eq!(ChatPermission::default(), ChatPermission::Ask);
-        // 当前取值 all / ask / readOnly。
+    fn chat_prefs_ignore_legacy_permissions() {
+        for permission in ["readOnly", "ask", "all", "unknown"] {
+            let prefs: ChatPrefs = serde_json::from_value(serde_json::json!({
+                "permission": permission,
+                "thinking": "high",
+                "providerId": "provider",
+                "modelId": "model"
+            }))
+            .unwrap();
+            assert_eq!(prefs.thinking, "high");
+            assert_eq!(prefs.provider_id.as_deref(), Some("provider"));
+            assert_eq!(prefs.model_id.as_deref(), Some("model"));
+            assert!(serde_json::to_value(&prefs)
+                .unwrap()
+                .get("permission")
+                .is_none());
+        }
         assert_eq!(
-            serde_json::from_str::<ChatPermission>("\"all\"").unwrap(),
-            ChatPermission::All
-        );
-        assert_eq!(
-            serde_json::from_str::<ChatPermission>("\"ask\"").unwrap(),
-            ChatPermission::Ask
-        );
-        // 旧值 readOnly 保留只读语义。
-        assert_eq!(
-            serde_json::from_str::<ChatPermission>("\"readOnly\"").unwrap(),
-            ChatPermission::ReadOnly
-        );
-        // ChatPrefs 缺省 permission → Ask;旧 readOnly 保持只读。
-        let prefs: ChatPrefs = serde_json::from_str("{}").unwrap();
-        assert_eq!(prefs.permission, ChatPermission::Ask);
-        let prefs: ChatPrefs = serde_json::from_str(r#"{"permission":"readOnly"}"#).unwrap();
-        assert_eq!(prefs.permission, ChatPermission::ReadOnly);
-        assert_eq!(
-            serde_json::to_string(&ChatPermission::ReadOnly).unwrap(),
-            "\"readOnly\""
-        );
-        assert_eq!(
-            serde_json::to_string(&ChatPermission::Ask).unwrap(),
-            "\"ask\""
-        );
-        assert_eq!(
-            serde_json::to_string(&ChatPermission::All).unwrap(),
-            "\"all\""
+            serde_json::from_str::<ChatPrefs>("{}").unwrap(),
+            ChatPrefs::default()
         );
     }
 }

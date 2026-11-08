@@ -9,22 +9,20 @@ use crate::agent::types::{
     Message, PrepareNextTurnFn, ToolExecutionMode, TypedMessage,
 };
 use crate::agent::Agent;
-use crate::ai::catalog::{self, ChatPermission, ModelRef};
+use crate::ai::catalog::{self, ModelRef};
 use crate::db::Db;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::path_util::clean_str;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use tauri::AppHandle;
-use tokio::sync::oneshot;
 
 /// 已解析的 chat 偏好快照(会话内缓存,变化才热切换)。
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct ResolvedPrefs {
     pub(super) model_ref: ModelRef,
     pub(super) thinking: String,
-    pub(super) permission: ChatPermission,
 }
 
 /// 解析当前 chat 偏好 → (模型元数据, 快照, 厂商 api_key)。
@@ -49,14 +47,13 @@ pub(super) fn resolve_prefs(
         ResolvedPrefs {
             model_ref: reference,
             thinking: prefs.thinking.clone(),
-            permission: prefs.permission,
         },
         api_key,
     ))
 }
 
 /// 把最新 chat 偏好热应用到会话:思考变化就地换 AgentState(历史保留),
-/// 权限变化时重新筛选工具集,历史保持不变。
+/// 模型元数据同步更新,历史保持不变。
 pub(super) fn apply_prefs(app: &AppHandle, session: &ChatSession) -> AppResult<()> {
     let config_file = catalog::load_ai_config_file(app);
     let (model, resolved, _api_key) = resolve_prefs(&config_file)?;
@@ -72,10 +69,6 @@ pub(super) fn apply_prefs(app: &AppHandle, session: &ChatSession) -> AppResult<(
             .agent
             .set_thinking_level(catalog::parse_thinking_level(&resolved.thinking));
     }
-    session.agent.set_tools(super::permission::filter_tools(
-        &session.all_tools,
-        resolved.permission,
-    ));
     session.agent.set_model(model);
     *session.prefs.lock().unwrap() = Some(resolved);
     Ok(())
@@ -100,7 +93,7 @@ pub(super) fn build_session(
         system_prompt: build_system_prompt(project_name, project_path),
         model: model.clone(),
         thinking_level: catalog::parse_thinking_level(&resolved.thinking),
-        tools: super::permission::filter_tools(&all_tools, resolved.permission),
+        tools: all_tools,
         messages: Vec::new(),
         is_streaming: false,
         streaming_message: None,
@@ -108,8 +101,6 @@ pub(super) fn build_session(
         error_message: None,
     };
     let prefs_cell: Arc<Mutex<Option<ResolvedPrefs>>> = Arc::new(Mutex::new(Some(resolved)));
-    let pending_cell: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>> =
-        Arc::new(Mutex::new(HashMap::new()));
     let sink_cell: EventSink = Arc::new(Mutex::new(None));
     let cancel_cell = CancelCell::default();
     let breakdown_cell = Arc::new(Mutex::new(None));
@@ -189,12 +180,7 @@ pub(super) fn build_session(
         get_steering_messages: None,
         get_follow_up_messages: None,
         tool_execution: ToolExecutionMode::Parallel,
-        // ask 权限下拦截需要确认的副作用工具(通用 agent core 不动)。
-        before_tool_call: Some(build_permission_hook(
-            pending_cell.clone(),
-            prefs_cell.clone(),
-            sink_cell.clone(),
-        )),
+        before_tool_call: None,
         after_tool_call: None,
         prepare_request: None,
     };
@@ -205,7 +191,6 @@ pub(super) fn build_session(
     ));
     *agent_slot.lock().unwrap() = Some(Arc::downgrade(&agent));
     let session = ChatSession {
-        all_tools,
         agent,
         cancel_cell,
         sink: sink_cell,
@@ -215,7 +200,6 @@ pub(super) fn build_session(
         busy: Arc::new(AtomicBool::new(false)),
         run_id: Arc::new(Mutex::new(String::new())),
         prefs: prefs_cell,
-        pending: pending_cell,
         last_compaction_ts,
     };
     // 订阅一次,随会话存活;事件经 sink 槽转发给当前 chat_send 的 Channel。

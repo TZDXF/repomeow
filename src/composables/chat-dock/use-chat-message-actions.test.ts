@@ -27,7 +27,6 @@ vi.mock("@/lib/chat", () => ({
     updatedAt: 1,
   })),
   selectChatHistory: vi.fn(),
-  respondToolPermission: vi.fn(async () => true),
   truncateChatLastTurn: vi.fn(async () => {}),
 }));
 

@@ -9,7 +9,6 @@ import {
   type AiModelDef,
   type AiModelRef,
   type AiProvider,
-  type ChatPermission,
   type ChatThinkingLevel,
 } from "@/lib/ai-config";
 
@@ -112,14 +111,10 @@ export const useAiConfigStore = defineStore("ai-config", () => {
     return isChatThinkingLevel(value) ? value : "medium";
   });
 
-  /** 当前问答工具权限(缺省回退 ask:写操作前确认) */
-  const chatPermission = computed<ChatPermission>(() => config.value?.chat.permission ?? "ask");
-
   async function updateChat(patch: {
     providerId?: string | null;
     modelId?: string | null;
     thinking?: ChatThinkingLevel;
-    permission?: ChatPermission;
   }): Promise<void> {
     const current = await ensureLoaded();
     const chat = { ...emptyChatPrefs(), ...current.chat, ...patch };
@@ -141,10 +136,6 @@ export const useAiConfigStore = defineStore("ai-config", () => {
     await updateChat({ thinking: level });
   }
 
-  async function setChatPermission(permission: ChatPermission): Promise<void> {
-    await updateChat({ permission });
-  }
-
   return {
     config,
     loaded,
@@ -158,10 +149,8 @@ export const useAiConfigStore = defineStore("ai-config", () => {
     reportReady,
     chatModelValue,
     chatThinking,
-    chatPermission,
     updateChat,
     setChatModelValue,
     setChatThinking,
-    setChatPermission,
   };
 });

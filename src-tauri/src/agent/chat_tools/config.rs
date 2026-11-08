@@ -114,7 +114,7 @@ pub(super) fn set_wiki_model_tool(app: &AppHandle, ctx: &ChatToolContext) -> Age
     tool(
         "set_wiki_model",
         "切换 Wiki 模型",
-        "把本项目 Wiki 生成使用的模型切换为指定模型,写回项目 Wiki 配置。典型用途:Wiki 生成/更新因「配置的模型不存在」失败时,先用 get_ai_config 查看可用模型并与用户确认替代项,再调用本工具,然后重试 update_wiki / regenerate_wiki。当前为「确认后执行」权限时,应用会在执行前弹出确认。参数:provider_id(必填)与 model_id(必填),取值来自 get_ai_config 的模型清单。",
+        "把本项目 Wiki 生成使用的模型切换为指定模型,写回项目 Wiki 配置。典型用途:Wiki 生成/更新因「配置的模型不存在」失败时,先用 get_ai_config 查看可用模型,优先选用用户指定的替代模型或已配置且可用的默认模型,再调用本工具,然后重试 update_wiki / regenerate_wiki。按任务需要直接执行。参数:provider_id(必填)与 model_id(必填),取值来自 get_ai_config 的模型清单。",
         json!({
             "type": "object",
             "properties": {

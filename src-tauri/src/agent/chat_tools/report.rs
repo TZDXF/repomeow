@@ -14,7 +14,7 @@ pub(super) fn generate_report_tool(app: &AppHandle, ctx: &ChatToolContext) -> Ag
     tool(
         "generate_report",
         "生成日报/周报",
-        "生成项目日报或周报:汇总指定时间范围的 git 提交,调用 AI 生成正文并保存到报告历史(同步等待,通常十几秒)。仅在用户要求生成日报/周报时使用;当前为「确认后执行」权限时,应用会在执行前弹出确认,不必在正文中先征得同意。参数:period_type(必填)\"daily\" 或 \"weekly\";date_from/date_to(可选)\"YYYY-MM-DD\",缺省 daily=今天、weekly=最近 7 天;author_mode(可选)\"all\" 统计所有人、\"me\" 仅当前 git 用户,缺省 \"all\"。返回报告正文(超长截断)。",
+        "生成项目日报或周报:汇总指定时间范围的 git 提交,调用 AI 生成正文并保存到报告历史(同步等待,通常十几秒)。仅在用户要求生成日报/周报时使用;按任务需要直接执行。参数:period_type(必填)\"daily\" 或 \"weekly\";date_from/date_to(可选)\"YYYY-MM-DD\",缺省 daily=今天、weekly=最近 7 天;author_mode(可选)\"all\" 统计所有人、\"me\" 仅当前 git 用户,缺省 \"all\"。返回报告正文(超长截断)。",
         json!({
             "type": "object",
             "properties": {

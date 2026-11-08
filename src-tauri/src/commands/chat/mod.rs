@@ -7,18 +7,9 @@
 //! Agent 上下文一并保存,重启后可恢复续聊。每次 `chat_send` 结束后把聚合的
 //! token 用量写入 `ai_usage_log`(task_type = "chat")。
 //!
-//! 模型/思考强度/工具权限来自 `ai-config.json` 的 `chat` 段(缺省回退
-//! defaultModel),每次 `chat_send` 前重读:思考与权限变化经 `Agent` 的
-//! 状态热切换方法就地生效(会话历史保留),模型与密钥由 StreamFn 每次
-//! LLM 调用时重读。
-//!
-//! ask 权限(硬确认):工具集与 all 相同,但需要确认的副作用工具
-//! (`update_wiki` / `regenerate_wiki` / `add_custom_command` /
-//! `update_custom_command` / `delete_custom_command` / `generate_report` /
-//! `set_wiki_model` / `bash` / 终端 Tab 写操作)执行前经 `AgentLoopConfig.before_tool_call` 钩子拦截,
-//! 推 `ToolPermissionRequest` 事件并等待 `chat_tool_permission_respond`
-//! 决策(允许继续 / 拒绝或 2 分钟超时则 block);这些工具均带 sequential
-//! 标记,含它们的批次整体顺序执行,确认一次最多挂起一个。
+//! 模型与思考强度来自 `ai-config.json` 的 `chat` 段(缺省回退
+//! defaultModel),每次 `chat_send` 前重读并热应用,会话历史保留。
+//! 模型与密钥由 StreamFn 每次 LLM 调用时重读。全部问答工具直接执行。
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -29,7 +20,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
-use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::llm::Usage;
@@ -43,7 +33,6 @@ mod compaction;
 mod events;
 mod history;
 pub use history::*;
-mod permission;
 mod session;
 mod stream;
 #[cfg(test)]
@@ -52,7 +41,6 @@ mod turn;
 
 use compaction::*;
 use events::*;
-use permission::*;
 use session::*;
 use stream::*;
 use turn::*;
@@ -82,13 +70,6 @@ pub enum ChatEvent {
         id: String,
         ok: bool,
         summary: String,
-    },
-    /// ask 权限下,有副作用工具执行前等待用户确认(id 经
-    /// `chat_tool_permission_respond` 回传决策;args 为校验后的参数)。
-    ToolPermissionRequest {
-        id: String,
-        name: String,
-        args: Value,
     },
     /// 一个回合(一次 LLM 调用 + 工具执行)结束,携带当前上下文占用
     /// (最近一条 assistant 消息的 usage.total_tokens,无数据为 null)
@@ -194,7 +175,6 @@ fn sink_send(sink: &EventSink, event: ChatEvent) {
 /// 一个项目的问答会话(全部字段 Arc 化,可整体 Clone 快照)。
 #[derive(Clone)]
 struct ChatSession {
-    all_tools: Vec<crate::agent::types::AgentTool>,
     agent: Arc<Agent>,
     cancel_cell: CancelCell,
     sink: EventSink,
@@ -206,10 +186,8 @@ struct ChatSession {
     breakdown: Arc<Mutex<Option<ChatContextBreakdown>>>,
     busy: Arc<AtomicBool>,
     run_id: Arc<Mutex<String>>,
-    /// 已解析的 chat 偏好快照(思考/权限/模型引用变化时热切换)。
+    /// 已解析的 chat 偏好快照(思考/模型引用变化时热切换)。
     prefs: Arc<Mutex<Option<ResolvedPrefs>>>,
-    /// ask 权限下待确认工具调用的一次性决策通道(tool_call_id → 发送端)。
-    pending: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
     /// 最近一次自动压缩的 summary 消息时间戳(防重触发守卫,对齐 pi
     /// `_checkCompaction` 的「早于最新 compaction 条目则跳过」)。
     last_compaction_ts: Arc<Mutex<i64>>,
@@ -287,7 +265,7 @@ pub async fn chat_send(
         ));
     }
 
-    // 热应用最新 chat 偏好(思考/权限/模型元数据),配置被清空则本条拒绝。
+    // 热应用最新 chat 偏好(思考/模型元数据),配置被清空则本条拒绝。
     if let Err(error) = apply_prefs(&app, &session) {
         session.busy.store(false, Ordering::SeqCst);
         return Err(error);
@@ -322,8 +300,6 @@ pub async fn chat_send(
     drop(run);
     session.cancel_cell.clear();
     session.sink.lock().unwrap().take();
-    // 回合结束:清空未决确认(正常路径钩子已自清,这里是兜底,杜绝迟到响应)。
-    session.pending.lock().unwrap().clear();
     session.busy.store(false, Ordering::SeqCst);
 
     record_chat_usage(&db, &app, &usage_snapshot, duration_ms);
@@ -364,26 +340,9 @@ pub async fn chat_abort(run_id: String) -> AppResult<()> {
         let session = chat_sessions().lock().unwrap().get(&session_key).cloned();
         if let Some(session) = session {
             session.agent.abort();
-            // 清空未决确认:等待中的钩子经 receiver Err 立即按取消收尾,不死锁。
-            session.pending.lock().unwrap().clear();
         }
     }
     Ok(())
-}
-
-/// 回应 ask 权限下的工具执行确认(tool_call_id 来自 ToolPermissionRequest
-/// 事件;allow=true 放行、false 拒绝)。未知 / 重复 / 已解决的请求幂等忽略,
-/// 不会导致工具执行。
-#[tauri::command]
-pub async fn chat_tool_permission_respond(
-    project_path: String,
-    tool_call_id: String,
-    allow: bool,
-) -> AppResult<bool> {
-    let session_key = clean_str(&project_path);
-    let session = chat_sessions().lock().unwrap().get(&session_key).cloned();
-    Ok(session
-        .is_some_and(|session| deliver_permission_decision(&session.pending, &tool_call_id, allow)))
 }
 
 /// 丢弃某项目的会话上下文(下一条消息从零开始)。若该会话回合仍在跑,
@@ -404,8 +363,6 @@ pub async fn chat_new_session(db: State<'_, Db>, project_path: String) -> AppRes
             token.cancel();
         }
         session.agent.abort();
-        // 清空未决确认,避免钩子等待悬空。
-        session.pending.lock().unwrap().clear();
     }
     Ok(())
 }
