@@ -6,38 +6,37 @@ import { Loader2 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
-const { t } = useI18n();
-// remote=false: 删除本地分支(-d,未合并时由父组件把 needsForce 置 true 切换为 -D 强删确认)
-// remote=true: 删除远程分支(git push --delete),无 force 流程
-const props = withDefaults(
-  defineProps<{
-    branch: string;
-    needsForce?: boolean;
-    remote?: boolean;
-    deleting?: boolean;
-  }>(),
-  { needsForce: false, remote: false, deleting: false },
-);
-const open = defineModel<boolean>("open", { required: true });
-const emit = defineEmits<{ confirm: [] }>();
-
-const title = computed(() =>
-  props.remote ? t("git.branch.deleteRemoteTitle") : t("git.branch.deleteTitle"),
-);
-const hint = computed(() => {
-  if (props.remote) {
-    return t("git.branch.deleteRemoteConfirm", { name: props.branch });
-  }
-  return props.needsForce
-    ? t("git.branch.deleteForceHint", { name: props.branch })
-    : t("git.branch.deleteConfirm", { name: props.branch });
-});
-const confirmLabel = computed(() => {
-  if (props.deleting) {
-    return t("git.branch.deleting");
-  }
-  return props.needsForce && !props.remote ? t("git.branch.forceDelete") : t("common.delete");
-});
+const { t } = useI18n(),
+  // remote=false: 删除本地分支(-d,未合并时由父组件把 needsForce 置 true 切换为 -D 强删确认)
+  // remote=true: 删除远程分支(git push --delete),无 force 流程
+  props = withDefaults(
+    defineProps<{
+      branch: string;
+      needsForce?: boolean;
+      remote?: boolean;
+      deleting?: boolean;
+    }>(),
+    { needsForce: false, remote: false, deleting: false },
+  ),
+  open = defineModel<boolean>("open", { required: true }),
+  emit = defineEmits<{ confirm: [] }>(),
+  title = computed(() =>
+    props.remote ? t("git.branch.deleteRemoteTitle") : t("git.branch.deleteTitle"),
+  ),
+  hint = computed(() => {
+    if (props.remote) {
+      return t("git.branch.deleteRemoteConfirm", { name: props.branch });
+    }
+    return props.needsForce
+      ? t("git.branch.deleteForceHint", { name: props.branch })
+      : t("git.branch.deleteConfirm", { name: props.branch });
+  }),
+  confirmLabel = computed(() => {
+    if (props.deleting) {
+      return t("git.branch.deleting");
+    }
+    return props.needsForce && !props.remote ? t("git.branch.forceDelete") : t("common.delete");
+  });
 </script>
 
 <template>

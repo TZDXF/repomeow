@@ -40,55 +40,50 @@ import type { GitCommitFileDiff } from "@/types";
  * 完成后行模型 / 高亮 / 元数据(landedDiff)同帧替换,避免纯文本先闪现再上色。
  */
 const props = defineProps<{
-  /** 当前文件的 diff 结果;null = 尚未加载 */
-  diff: GitCommitFileDiff | null;
-  /** diff 对应的文件路径(标题与着色语言推断);切文件时先于 diff 变化 */
-  filePath: string | null;
-  loading: boolean;
-  error: string;
-  /** 并排是否适用:新增/删除文件一侧必然全空,强制逐行视图并隐藏切换按钮 */
-  splitApplicable: boolean;
-  /** 当前文件是否可在 IDE 打开(已删除文件工作区已不存在,不可打开) */
-  canOpenIde: boolean;
-  /** 定位请求:新文件 1-based 行号 + 序号(同一行重复点击靠 seq 变化再触发);
-   *  语义变更列表点击时由父组件下发,diff 尚未落地则落地后自动执行 */
-  reveal?: { line: number; seq: number } | null;
-}>();
-
-/** 忽略空白差异模式:none 不忽略 / eol 行尾 / change 空白数量变化 / all 全部空白。
- *  由父组件持有(持久化),模式变化需父组件按新模式重取 diff(行集会变) */
-const ignoreWs = defineModel<"none" | "eol" | "change" | "all">("ignoreWs", { required: true });
-
-const emit = defineEmits<{
-  /** 在 IDE 打开当前文件(路径拼接与编辑器选择由父组件负责) */
-  openIde: [];
-}>();
-
-const { t } = useI18n();
-
-/** 行内差异高亮(持久化):成对增删行中实际不同的片段加强底色 */
-const wordDiff = useLocalStorage("repomeow:commit-diff-word", true);
-/** 并排查看(持久化):旧版本在左、新版本在右 */
-const splitDiff = useLocalStorage("repomeow:commit-diff-split", false);
-/** 并排左右内容窗格的宽度比(持久化,拖拽中间连接条调整;0.5 = 各占一半) */
-const splitRatio = useLocalStorage("repomeow:commit-diff-split-ratio", 0.5);
-
-/** diff 行模型与着色结果:由下方 watch 在着色完成后同帧写入(键就是行对象引用,fold/sideRows 复用同一批) */
-const diffLines = shallowRef<DiffLine[]>([]);
-const lineHtml = shallowRef(new Map<DiffLine, string>());
-/** 行内差异区间(wordDiff 开启时按当前 diff 行集计算;shiki 未着色的行回退渲染也用它) */
-const wordRanges = shallowRef(new Map<DiffLine, [number, number]>());
-/** 与 diffLines 同帧落地的 diff 元数据:truncated 徽标 / hunk 头过滤 / 工具栏显隐以它为准,
- *  不用 props.diff——新 diff 到达与着色完成之间有一个异步间隙,元数据必须跟随行模型 */
-const landedDiff = shallowRef<GitCommitFileDiff | null>(null);
+    /** 当前文件的 diff 结果;null = 尚未加载 */
+    diff: GitCommitFileDiff | null;
+    /** diff 对应的文件路径(标题与着色语言推断);切文件时先于 diff 变化 */
+    filePath: string | null;
+    loading: boolean;
+    error: string;
+    /** 并排是否适用:新增/删除文件一侧必然全空,强制逐行视图并隐藏切换按钮 */
+    splitApplicable: boolean;
+    /** 当前文件是否可在 IDE 打开(已删除文件工作区已不存在,不可打开) */
+    canOpenIde: boolean;
+    /** 定位请求:新文件 1-based 行号 + 序号(同一行重复点击靠 seq 变化再触发);
+     *  语义变更列表点击时由父组件下发,diff 尚未落地则落地后自动执行 */
+    reveal?: { line: number; seq: number } | null;
+  }>(),
+  /** 忽略空白差异模式:none 不忽略 / eol 行尾 / change 空白数量变化 / all 全部空白。
+   *  由父组件持有(持久化),模式变化需父组件按新模式重取 diff(行集会变) */
+  ignoreWs = defineModel<"none" | "eol" | "change" | "all">("ignoreWs", { required: true }),
+  emit = defineEmits<{
+    /** 在 IDE 打开当前文件(路径拼接与编辑器选择由父组件负责) */
+    openIde: [];
+  }>(),
+  { t } = useI18n(),
+  /** 行内差异高亮(持久化):成对增删行中实际不同的片段加强底色 */
+  wordDiff = useLocalStorage("repomeow:commit-diff-word", true),
+  /** 并排查看(持久化):旧版本在左、新版本在右 */
+  splitDiff = useLocalStorage("repomeow:commit-diff-split", false),
+  /** 并排左右内容窗格的宽度比(持久化,拖拽中间连接条调整;0.5 = 各占一半) */
+  splitRatio = useLocalStorage("repomeow:commit-diff-split-ratio", 0.5),
+  /** diff 行模型与着色结果:由下方 watch 在着色完成后同帧写入(键就是行对象引用,fold/sideRows 复用同一批) */
+  diffLines = shallowRef<DiffLine[]>([]),
+  lineHtml = shallowRef(new Map<DiffLine, string>()),
+  /** 行内差异区间(wordDiff 开启时按当前 diff 行集计算;shiki 未着色的行回退渲染也用它) */
+  wordRanges = shallowRef(new Map<DiffLine, [number, number]>()),
+  /** 与 diffLines 同帧落地的 diff 元数据:truncated 徽标 / hunk 头过滤 / 工具栏显隐以它为准,
+   *  不用 props.diff——新 diff 到达与着色完成之间有一个异步间隙,元数据必须跟随行模型 */
+  landedDiff = shallowRef<GitCommitFileDiff | null>(null);
 /** 着色并发序号:连切文件/连按开关时,旧的着色结果不得覆盖新的 */
 let highlightSeq = 0;
 
 /** 已手动展开的折叠区(换文件时重置)。声明必须先于下方 immediate watch(同步执行,后置声明触发 TDZ) */
-const expandedFolds = ref(new Set<string>());
-const currentScrollTop = ref(0);
-/** 并排模式当前滚动位置(sideRow 空间的小数行,与 scrollTopAt/locateRowPos 同坐标系) */
-const currentRowPos = ref(0);
+const expandedFolds = ref(new Set<string>()),
+  currentScrollTop = ref(0),
+  /** 并排模式当前滚动位置(sideRow 空间的小数行,与 scrollTopAt/locateRowPos 同坐标系) */
+  currentRowPos = ref(0);
 
 // 新 diff 到达:先解析再着色,完成后行模型 / 高亮 / 元数据同帧落地;折叠与滚动位置属旧 diff,一并重置
 watch(
@@ -105,12 +100,13 @@ watch(
       currentRowPos.value = 0;
       return;
     }
-    const filePath = props.filePath;
-    const lines = parseDiff(result.diff);
-    const ranges = wordDiff.value ? intralineRanges(lines) : new Map<DiffLine, [number, number]>();
-    const htmlMap =
-      (await highlightDiffLines(lines, filePath, ranges)) ?? new Map<DiffLine, string>();
-    if (seq !== highlightSeq) return;
+    const filePath = props.filePath,
+      lines = parseDiff(result.diff),
+      ranges = wordDiff.value ? intralineRanges(lines) : new Map<DiffLine, [number, number]>(),
+      htmlMap = (await highlightDiffLines(lines, filePath, ranges)) ?? new Map<DiffLine, string>();
+    if (seq !== highlightSeq) {
+      return;
+    }
     wordRanges.value = ranges;
     lineHtml.value = htmlMap;
     diffLines.value = lines;
@@ -119,24 +115,30 @@ watch(
     currentScrollTop.value = 0;
     currentRowPos.value = 0;
     // 切文件前已有点击定位请求:行模型落地后再执行
-    if (props.reveal) void revealLine(props.reveal.line);
+    if (props.reveal) {
+      void revealLine(props.reveal.line);
+    }
   },
   { immediate: true },
 );
 
 /** 仅重算行内区间并重新着色(行内高亮开关用,不重新取 diff) */
 async function rehighlight(filePath: string, ranges: Map<DiffLine, [number, number]>) {
-  const seq = ++highlightSeq;
-  const htmlMap =
-    (await highlightDiffLines(diffLines.value, filePath, ranges)) ?? new Map<DiffLine, string>();
-  if (seq !== highlightSeq || props.filePath !== filePath) return;
+  const seq = ++highlightSeq,
+    htmlMap =
+      (await highlightDiffLines(diffLines.value, filePath, ranges)) ?? new Map<DiffLine, string>();
+  if (seq !== highlightSeq || props.filePath !== filePath) {
+    return;
+  }
   wordRanges.value = ranges;
   lineHtml.value = htmlMap;
 }
 
 watch(wordDiff, () => {
   const path = props.filePath;
-  if (!path || !diffLines.value.length) return;
+  if (!path || !diffLines.value.length) {
+    return;
+  }
   const ranges = wordDiff.value
     ? intralineRanges(diffLines.value)
     : new Map<DiffLine, [number, number]>();
@@ -149,7 +151,9 @@ watch(wordDiff, () => {
 // libgit2 在 @@ 上报畸形头如 2-)仍展示——此时它是定位"被截断的变更段"的唯一线索。
 
 function expandFold(key: string) {
-  if (!key) return;
+  if (!key) {
+    return;
+  }
   const next = new Set(expandedFolds.value);
   next.add(key);
   expandedFolds.value = next;
@@ -174,22 +178,25 @@ const displayLines = computed(() => {
 
 /** 模板取行内 HTML:优先 shiki 着色结果;未着色但有行内差异区间的行退化为转义纯文本 + 差异底色 */
 function hlOf(line: DiffLine | null | undefined) {
-  if (!line) return "";
+  if (!line) {
+    return "";
+  }
   const html = lineHtml.value.get(line);
-  if (html) return html;
+  if (html) {
+    return html;
+  }
   const range = wordRanges.value.get(line);
   return range ? emphasisTextHtml(line.text.slice(1), range, wordClsOf(line)) : "";
 }
 
-const splitActive = computed(() => splitDiff.value && props.splitApplicable);
-// hunk 头已在 displayLines 统一过滤(截断 diff 保留,作变更段定位线索),
-// sideRows / paneRowOffsets / changeBlocks 等下游全部随之保持一致
-const sideRows = computed(() => toSideBySideRows(displayLines.value));
-
-// --- 差异导航:上/下一个差异;逐行模式按 px(行索引 × 行高 + py-1 上内边距),
-// 并排模式按 sideRow 空间行位置(经 scrollTopAt 换算到两侧窗格) ---
-const unifiedEl = ref<HTMLElement | null>(null);
-const splitViewEl = ref<InstanceType<typeof SplitDiffView> | null>(null);
+const splitActive = computed(() => splitDiff.value && props.splitApplicable),
+  // hunk 头已在 displayLines 统一过滤(截断 diff 保留,作变更段定位线索),
+  // sideRows / paneRowOffsets / changeBlocks 等下游全部随之保持一致
+  sideRows = computed(() => toSideBySideRows(displayLines.value)),
+  // --- 差异导航:上/下一个差异;逐行模式按 px(行索引 × 行高 + py-1 上内边距),
+  // 并排模式按 sideRow 空间行位置(经 scrollTopAt 换算到两侧窗格) ---
+  unifiedEl = ref<HTMLElement | null>(null),
+  splitViewEl = ref<InstanceType<typeof SplitDiffView> | null>(null);
 
 function rowHeightPx() {
   return parseFloat(getComputedStyle(document.documentElement).fontSize) * 1.25 || 20;
@@ -209,41 +216,51 @@ const changeRowIdx = computed(() => {
 
 /** 差异块顶部位置:逐行为 scrollTop(px),并排为 sideRow 空间行位置 */
 function changeOffsets() {
-  if (splitActive.value) return changeRowIdx.value;
+  if (splitActive.value) {
+    return changeRowIdx.value;
+  }
   const h = rowHeightPx();
   return changeRowIdx.value.map((i) => h / 5 + i * h);
 }
 
 const hasPrevChange = computed(() =>
-  splitActive.value
-    ? changeOffsets().some((o) => o < currentRowPos.value - 0.1)
-    : changeOffsets().some((o) => o < currentScrollTop.value - 2),
-);
-const hasNextChange = computed(() =>
-  splitActive.value
-    ? changeOffsets().some((o) => o > currentRowPos.value + 0.1)
-    : changeOffsets().some((o) => o > currentScrollTop.value + 2),
-);
+    splitActive.value
+      ? changeOffsets().some((o) => o < currentRowPos.value - 0.1)
+      : changeOffsets().some((o) => o < currentScrollTop.value - 2),
+  ),
+  hasNextChange = computed(() =>
+    splitActive.value
+      ? changeOffsets().some((o) => o > currentRowPos.value + 0.1)
+      : changeOffsets().some((o) => o > currentScrollTop.value + 2),
+  );
 
 function scrollToChange(dir: 1 | -1) {
   const offsets = changeOffsets();
   if (splitActive.value) {
-    const cur = currentRowPos.value;
-    const target =
-      dir === 1
-        ? offsets.find((o) => o > cur + 0.1)
-        : [...offsets].reverse().find((o) => o < cur - 0.1);
-    if (target == null) return;
+    const cur = currentRowPos.value,
+      target =
+        dir === 1
+          ? offsets.find((o) => o > cur + 0.1)
+          : [...offsets].reverse().find((o) => o < cur - 0.1);
+    if (target == null) {
+      return;
+    }
     currentRowPos.value = target;
     splitViewEl.value?.scrollToRow(target);
     return;
   }
-  const cur = currentScrollTop.value;
-  const target =
-    dir === 1 ? offsets.find((o) => o > cur + 2) : [...offsets].reverse().find((o) => o < cur - 2);
-  if (target == null) return;
+  const cur = currentScrollTop.value,
+    target =
+      dir === 1
+        ? offsets.find((o) => o > cur + 2)
+        : [...offsets].reverse().find((o) => o < cur - 2);
+  if (target == null) {
+    return;
+  }
   currentScrollTop.value = target;
-  if (unifiedEl.value) unifiedEl.value.scrollTop = target;
+  if (unifiedEl.value) {
+    unifiedEl.value.scrollTop = target;
+  }
 }
 
 function onUnifiedScroll() {
@@ -263,15 +280,19 @@ const revealLineNo = ref<number | null>(null);
 let revealTimer: ReturnType<typeof setTimeout> | undefined;
 
 async function revealLine(target: number) {
-  if (!Number.isFinite(target) || target <= 0 || !diffLines.value.length) return;
+  if (!Number.isFinite(target) || target <= 0 || !diffLines.value.length) {
+    return;
+  }
   // 与 foldContextLines 同口径在未折叠行序列上定位,目标落在折叠隐藏段内则先展开
   const base = landedDiff.value?.truncated
-    ? diffLines.value
-    : diffLines.value.filter((line) => line.kind !== "hunk");
-  const targetIdx = base.findIndex((line) => line.newLine != null && line.newLine >= target);
-  if (targetIdx < 0) return;
-  const MIN_RUN = 12;
-  const EDGE = 3;
+      ? diffLines.value
+      : diffLines.value.filter((line) => line.kind !== "hunk"),
+    targetIdx = base.findIndex((line) => line.newLine != null && line.newLine >= target);
+  if (targetIdx < 0) {
+    return;
+  }
+  const MIN_RUN = 12,
+    EDGE = 3;
   let i = 0;
   while (i < base.length) {
     if (base[i].kind !== "ctx") {
@@ -279,7 +300,9 @@ async function revealLine(target: number) {
       continue;
     }
     let j = i;
-    while (j < base.length && base[j].kind === "ctx") j++;
+    while (j < base.length && base[j].kind === "ctx") {
+      j++;
+    }
     if (j - i > MIN_RUN && targetIdx >= i + EDGE && targetIdx < j - EDGE) {
       const key = `${i}:${j - i}`;
       if (!expandedFolds.value.has(key)) {
@@ -302,16 +325,20 @@ async function revealLine(target: number) {
     const idx = sideRows.value.findIndex(
       (row) => row.kind === "line" && row.right?.newLine != null && row.right.newLine >= target,
     );
-    if (idx < 0) return;
+    if (idx < 0) {
+      return;
+    }
     splitViewEl.value?.scrollToRow(Math.max(idx - 8, 0));
     return;
   }
   const idx = displayLines.value.findIndex(
     (line) => line.kind !== "fold" && line.newLine != null && line.newLine >= target,
   );
-  if (idx < 0 || !unifiedEl.value) return;
-  const h = rowHeightPx();
-  const top = Math.max(h / 5 + idx * h - unifiedEl.value.clientHeight / 3, 0);
+  if (idx < 0 || !unifiedEl.value) {
+    return;
+  }
+  const h = rowHeightPx(),
+    top = Math.max(h / 5 + idx * h - unifiedEl.value.clientHeight / 3, 0);
   unifiedEl.value.scrollTop = top;
   currentScrollTop.value = top;
 }
@@ -320,7 +347,9 @@ async function revealLine(target: number) {
 watch(
   () => props.reveal,
   (req) => {
-    if (req) void revealLine(req.line);
+    if (req) {
+      void revealLine(req.line);
+    }
   },
 );
 </script>

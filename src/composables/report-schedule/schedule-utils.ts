@@ -45,8 +45,12 @@ export function createEmptyScheduleForm(): ScheduleFormState {
 export function weekdayModeOf(
   s: Pick<ReportSchedule, "chineseWorkdayOnly" | "weekdaysOnly">,
 ): WeekdayMode {
-  if (s.chineseWorkdayOnly) return "chineseWorkday";
-  if (s.weekdaysOnly) return "weekdays";
+  if (s.chineseWorkdayOnly) {
+    return "chineseWorkday";
+  }
+  if (s.weekdaysOnly) {
+    return "weekdays";
+  }
   return "everyday";
 }
 
@@ -105,8 +109,8 @@ export function buildScheduleFromForm(
 
 /** 周一~周日的本地化短标签(Intl,避免 i18n 数组不可靠);2024-01-01 是周一 */
 export function weekdayShortNames(locale: string): string[] {
-  const fmt = new Intl.DateTimeFormat(locale, { weekday: "short" });
-  const mon = new Date(2024, 0, 1);
+  const fmt = new Intl.DateTimeFormat(locale, { weekday: "short" }),
+    mon = new Date(2024, 0, 1);
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date(mon);
     d.setDate(1 + i);
@@ -119,8 +123,8 @@ export function weeklyRangeLabel(
   s: Pick<ReportSchedule, "weeklyStartWeekday" | "weeklyEndWeekday">,
   names: string[],
 ): string {
-  const start = names[(s.weeklyStartWeekday - 1 + 7) % 7] ?? "";
-  const end = names[(s.weeklyEndWeekday - 1 + 7) % 7] ?? "";
+  const start = names[(s.weeklyStartWeekday - 1 + 7) % 7] ?? "",
+    end = names[(s.weeklyEndWeekday - 1 + 7) % 7] ?? "";
   return `${start} ~ ${end}`;
 }
 

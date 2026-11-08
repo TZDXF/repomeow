@@ -33,8 +33,8 @@ export interface SplitDiffLayoutElements {
   dividerEl: Ref<HTMLElement | null>;
 }
 
-const SPLIT_RATIO_MIN = 0.2;
-const SPLIT_RATIO_MAX = 0.8;
+const SPLIT_RATIO_MIN = 0.2,
+  SPLIT_RATIO_MAX = 0.8;
 
 /**
  * 并排 diff 的 DOM 布局控制器：维护左右内容/行号栏滚动同步、连接条图形、
@@ -42,23 +42,21 @@ const SPLIT_RATIO_MAX = 0.8;
  */
 export function useSplitDiffLayout(options: SplitDiffLayoutOptions) {
   const { sideRows, layoutRows, splitActive, landedDiff, splitRatio, currentRowPos, elements } =
-    options;
-  const { splitWrapEl, leftPaneEl, rightPaneEl, leftGutterEl, rightGutterEl, dividerEl } = elements;
-
-  const leftRows = computed(() => buildPaneRows(sideRows.value, "left"));
-  const rightRows = computed(() => buildPaneRows(sideRows.value, "right"));
-  const paneRowOffsets = computed(() => buildPaneRowOffsets(sideRows.value));
-  const changeBlocks = computed(() => buildChangeBlocks(sideRows.value));
-  const leftMarkers = computed(() =>
-    buildInsertMarkers(changeBlocks.value, paneRowOffsets.value, "left"),
-  );
-  const rightMarkers = computed(() =>
-    buildInsertMarkers(changeBlocks.value, paneRowOffsets.value, "right"),
-  );
-
-  const leftScrollPx = ref(0);
-  const rightScrollPx = ref(0);
-  const paneSyncing = ref(false);
+      options,
+    { splitWrapEl, leftPaneEl, rightPaneEl, leftGutterEl, rightGutterEl, dividerEl } = elements,
+    leftRows = computed(() => buildPaneRows(sideRows.value, "left")),
+    rightRows = computed(() => buildPaneRows(sideRows.value, "right")),
+    paneRowOffsets = computed(() => buildPaneRowOffsets(sideRows.value)),
+    changeBlocks = computed(() => buildChangeBlocks(sideRows.value)),
+    leftMarkers = computed(() =>
+      buildInsertMarkers(changeBlocks.value, paneRowOffsets.value, "left"),
+    ),
+    rightMarkers = computed(() =>
+      buildInsertMarkers(changeBlocks.value, paneRowOffsets.value, "right"),
+    ),
+    leftScrollPx = ref(0),
+    rightScrollPx = ref(0),
+    paneSyncing = ref(false);
   let paneSyncFrame = 0;
 
   function rowHeightPx() {
@@ -96,12 +94,12 @@ export function useSplitDiffLayout(options: SplitDiffLayoutOptions) {
       return;
     }
 
-    const side: DiffPaneSide = source === "left" || source === "leftGutter" ? "left" : "right";
-    const other: DiffPaneSide = side === "left" ? "right" : "left";
-    const panes = { left: leftPaneEl, right: rightPaneEl };
-    const gutters = { left: leftGutterEl, right: rightGutterEl };
-    const fromGutter = source === "leftGutter" || source === "rightGutter";
-    const from = (fromGutter ? gutters[side] : panes[side]).value;
+    const side: DiffPaneSide = source === "left" || source === "leftGutter" ? "left" : "right",
+      other: DiffPaneSide = side === "left" ? "right" : "left",
+      panes = { left: leftPaneEl, right: rightPaneEl },
+      gutters = { left: leftGutterEl, right: rightGutterEl },
+      fromGutter = source === "leftGutter" || source === "rightGutter",
+      from = (fromGutter ? gutters[side] : panes[side]).value;
     if (!from) {
       return;
     }
@@ -129,19 +127,19 @@ export function useSplitDiffLayout(options: SplitDiffLayoutOptions) {
     });
   }
 
-  const { width: dividerWidth, height: dividerHeight } = useElementSize(dividerEl);
-  const dividerShapes = computed(() =>
-    buildDividerShapes({
-      rows: sideRows.value,
-      blocks: changeBlocks.value,
-      offsets: paneRowOffsets.value,
-      width: dividerWidth.value || 20,
-      viewportHeight: dividerHeight.value,
-      leftScrollTop: leftScrollPx.value,
-      rightScrollTop: rightScrollPx.value,
-      rowHeight: rowHeightPx(),
-    }),
-  );
+  const { width: dividerWidth, height: dividerHeight } = useElementSize(dividerEl),
+    dividerShapes = computed(() =>
+      buildDividerShapes({
+        rows: sideRows.value,
+        blocks: changeBlocks.value,
+        offsets: paneRowOffsets.value,
+        width: dividerWidth.value || 20,
+        viewportHeight: dividerHeight.value,
+        leftScrollTop: leftScrollPx.value,
+        rightScrollTop: rightScrollPx.value,
+        rowHeight: rowHeightPx(),
+      }),
+    );
 
   // 新内容落地或刚切换为并排视图时，两侧都复位到可视行首。
   watch(
@@ -184,10 +182,10 @@ export function useSplitDiffLayout(options: SplitDiffLayoutOptions) {
 
   function startSplitResize(event: PointerEvent) {
     event.preventDefault();
-    const wrap = splitWrapEl.value;
-    const leftGutter = leftGutterEl.value;
-    const rightGutter = rightGutterEl.value;
-    const divider = dividerEl.value;
+    const wrap = splitWrapEl.value,
+      leftGutter = leftGutterEl.value,
+      rightGutter = rightGutterEl.value,
+      divider = dividerEl.value;
     if (!wrap || !leftGutter || !rightGutter || !divider) {
       return;
     }
@@ -197,18 +195,18 @@ export function useSplitDiffLayout(options: SplitDiffLayoutOptions) {
       return;
     }
     const baseX =
-      wrap.getBoundingClientRect().left + leftGutter.offsetWidth + divider.offsetWidth / 2;
-    const onMove = (moveEvent: PointerEvent) => {
-      splitRatio.value = Math.min(
-        SPLIT_RATIO_MAX,
-        Math.max(SPLIT_RATIO_MIN, (moveEvent.clientX - baseX) / paneArea),
-      );
-    };
-    const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      splitResizeCleanups = splitResizeCleanups.filter((cleanup) => cleanup !== onUp);
-    };
+        wrap.getBoundingClientRect().left + leftGutter.offsetWidth + divider.offsetWidth / 2,
+      onMove = (moveEvent: PointerEvent) => {
+        splitRatio.value = Math.min(
+          SPLIT_RATIO_MAX,
+          Math.max(SPLIT_RATIO_MIN, (moveEvent.clientX - baseX) / paneArea),
+        );
+      },
+      onUp = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        splitResizeCleanups = splitResizeCleanups.filter((cleanup) => cleanup !== onUp);
+      };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     splitResizeCleanups.push(onUp);

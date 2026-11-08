@@ -11,25 +11,23 @@ import type { FindQuery } from "@/lib/text-search";
 import type { ProjectFileEntry } from "@/types";
 
 const props = defineProps<{
-  empty: boolean;
-  error: boolean;
-  loading: boolean;
-  root: string;
-  rows: FileTreeRow<ProjectFileEntry>[];
-  selected: string | null;
-  /** 当前文件是可预览文本时启用「结构」视图 */
-  outlineEnabled: boolean;
-}>();
-
-const emit = defineEmits<{
-  open: [path: string, line: number, query: FindQuery];
-  select: [path: string];
-  toggle: [path: string];
-}>();
-
-const view = defineModel<"tree" | "search" | "outline">("view", { required: true });
-const { t } = useI18n();
-const searchPanel = ref<InstanceType<typeof TextSearchPanel> | null>(null);
+    empty: boolean;
+    error: boolean;
+    loading: boolean;
+    root: string;
+    rows: FileTreeRow<ProjectFileEntry>[];
+    selected: string | null;
+    /** 当前文件是可预览文本时启用「结构」视图 */
+    outlineEnabled: boolean;
+  }>(),
+  emit = defineEmits<{
+    open: [path: string, line: number, query: FindQuery];
+    select: [path: string];
+    toggle: [path: string];
+  }>(),
+  view = defineModel<"tree" | "search" | "outline">("view", { required: true }),
+  { t } = useI18n(),
+  searchPanel = ref<InstanceType<typeof TextSearchPanel> | null>(null);
 
 async function focusSearch() {
   await nextTick();
@@ -38,16 +36,21 @@ async function focusSearch() {
 
 defineExpose({ focusSearch });
 
-const title = () =>
-  view.value === "tree"
-    ? t("files.treeView")
-    : view.value === "search"
-      ? t("files.textSearchTitle")
-      : t("files.semantic.outlineTitle");
+function title(): string {
+  if (view.value === "tree") {
+    return t("files.treeView");
+  }
+  if (view.value === "search") {
+    return t("files.textSearchTitle");
+  }
+  return t("files.semantic.outlineTitle");
+}
 
 // 当前文件不可解析时切 outline 无意义,回退树视图
 function setView(next: "tree" | "search" | "outline") {
-  if (next === "outline" && !props.outlineEnabled) return;
+  if (next === "outline" && !props.outlineEnabled) {
+    return;
+  }
   view.value = next;
 }
 </script>

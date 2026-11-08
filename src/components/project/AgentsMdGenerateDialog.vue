@@ -12,29 +12,26 @@ import AgentModelThinkingSelect from "@/components/ai-elements/AgentModelThinkin
  * 是否触发生成由调用方决定;取消则丢弃改动。
  */
 const props = defineProps<{
-  /** false 表示关闭 */
-  open: boolean;
-  /** 已存在 AGENTS.md:标题/提示切换为重新生成语义 */
-  regenerate: boolean;
-}>();
-const emit = defineEmits<{
-  close: [];
-  confirm: [options: { model?: string; thinking?: string }];
-}>();
-
-const { t } = useI18n();
-
-const model = ref("");
-const thinking = ref("");
-
-const open = computed({
-  get: () => props.open,
-  set: (v: boolean) => {
-    if (!v) {
-      emit("close");
-    }
-  },
-});
+    /** false 表示关闭 */
+    open: boolean;
+    /** 已存在 AGENTS.md:标题/提示切换为重新生成语义 */
+    regenerate: boolean;
+  }>(),
+  emit = defineEmits<{
+    close: [];
+    confirm: [options: { model?: string; thinking?: string }];
+  }>(),
+  { t } = useI18n(),
+  model = ref(""),
+  thinking = ref(""),
+  open = computed({
+    get: () => props.open,
+    set: (v: boolean) => {
+      if (!v) {
+        emit("close");
+      }
+    },
+  });
 
 watch(
   () => props.open,

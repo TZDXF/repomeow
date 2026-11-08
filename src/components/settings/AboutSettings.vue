@@ -6,8 +6,8 @@ import { Separator } from "@/components/ui/separator";
 import UpdateSettings from "@/components/settings/UpdateSettings.vue";
 import { useUpdateStore } from "@/stores/update";
 
-const { t } = useI18n();
-const updateStore = useUpdateStore();
+const { t } = useI18n(),
+  updateStore = useUpdateStore();
 
 function onCheck() {
   if (updateStore.hasUpdate) {

@@ -5,17 +5,17 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("glass pointer lifecycle", () => {
   it("coalesces pointer events and cleans up styles and listeners", () => {
-    const preference = Object.assign(new EventTarget(), { matches: false });
-    const win = Object.assign(new EventTarget(), { matchMedia: () => preference });
-    const doc = Object.assign(new EventTarget(), { hidden: false });
-    const values = new Map<string, string>();
-    const surface = Object.assign(new EventTarget(), {
-      style: {
-        setProperty: (key: string, value: string) => values.set(key, value),
-        removeProperty: (key: string) => values.delete(key),
-      },
-      getBoundingClientRect: () => ({ left: 0, top: 0, width: 100, height: 100 }),
-    });
+    const preference = Object.assign(new EventTarget(), { matches: false }),
+      win = Object.assign(new EventTarget(), { matchMedia: () => preference }),
+      doc = Object.assign(new EventTarget(), { hidden: false }),
+      values = new Map<string, string>(),
+      surface = Object.assign(new EventTarget(), {
+        style: {
+          setProperty: (key: string, value: string) => values.set(key, value),
+          removeProperty: (key: string) => values.delete(key),
+        },
+        getBoundingClientRect: () => ({ left: 0, top: 0, width: 100, height: 100 }),
+      });
     let render: (() => void) | undefined;
     const raf = vi.fn((callback: () => void) => {
       render = callback;
@@ -31,15 +31,15 @@ describe("glass pointer lifecycle", () => {
     );
     vi.stubGlobal("requestAnimationFrame", raf);
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
-    const detach = attachGlassPointer(surface as unknown as HTMLElement);
-    const move = () =>
-      surface.dispatchEvent(
-        Object.assign(new Event("pointermove"), {
-          clientX: 75,
-          clientY: 25,
-          pointerType: "mouse",
-        }),
-      );
+    const detach = attachGlassPointer(surface as unknown as HTMLElement),
+      move = () =>
+        surface.dispatchEvent(
+          Object.assign(new Event("pointermove"), {
+            clientX: 75,
+            clientY: 25,
+            pointerType: "mouse",
+          }),
+        );
     move();
     move();
     expect(raf).toHaveBeenCalledTimes(1);

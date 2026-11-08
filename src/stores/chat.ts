@@ -135,16 +135,18 @@ export function friendlyChatError(code: string, message: string): string {
 
 export const useChatStore = defineStore("chat", () => {
   // key = clean 后的项目路径(与 ChatDock 传入的 project.path 一致)
-  const sessions = ref<Record<string, ChatSessionState>>({});
-  const histories = ref<Record<string, ChatHistoryState>>({});
-  // 非响应式运行簿:协调加载、取消、保存与会话切换。
-  const historyLoads = new Map<string, Promise<void>>();
-  const controllers = new Map<string, AbortController>();
-  const activeRuns = new Map<string, Promise<void>>();
+  const sessions = ref<Record<string, ChatSessionState>>({}),
+    histories = ref<Record<string, ChatHistoryState>>({}),
+    // 非响应式运行簿:协调加载、取消、保存与会话切换。
+    historyLoads = new Map<string, Promise<void>>(),
+    controllers = new Map<string, AbortController>(),
+    activeRuns = new Map<string, Promise<void>>();
 
   function ensureSession(path: string): ChatSessionState {
     const existing = sessions.value[path];
-    if (existing) return existing;
+    if (existing) {
+      return existing;
+    }
     const created = defaultSession();
     sessions.value[path] = created;
     // 必须返回 ref 容器里的代理,首次创建的原始对象无法追踪 busy/error 等更新。
@@ -179,9 +181,13 @@ export const useChatStore = defineStore("chat", () => {
 
   function loadHistory(path: string): Promise<void> {
     const history = ensureHistory(path);
-    if (history.loaded) return Promise.resolve();
+    if (history.loaded) {
+      return Promise.resolve();
+    }
     const pending = historyLoads.get(path);
-    if (pending) return pending;
+    if (pending) {
+      return pending;
+    }
     history.loading = true;
     history.error = null;
     const run = (async () => {
@@ -208,19 +214,21 @@ export const useChatStore = defineStore("chat", () => {
 
   async function persistSession(path: string): Promise<boolean> {
     const session = ensureSession(path);
-    if (!session.messages.length) return true;
+    if (!session.messages.length) {
+      return true;
+    }
     const history = ensureHistory(path);
     history.activeId ??= messageId();
-    const title = session.messages.find((message) => message.role === "user")?.content ?? "";
-    const state: ChatStoredState = {
-      messages: session.messages,
-      toolRuns: session.toolRuns,
-      lastUsage: session.lastUsage,
-      contextTokens: session.contextTokens,
-      contextBreakdown: session.contextBreakdown,
-      cacheHitInputTokens: session.cacheHitInputTokens,
-      cacheHitCachedTokens: session.cacheHitCachedTokens,
-    };
+    const title = session.messages.find((message) => message.role === "user")?.content ?? "",
+      state: ChatStoredState = {
+        messages: session.messages,
+        toolRuns: session.toolRuns,
+        lastUsage: session.lastUsage,
+        contextTokens: session.contextTokens,
+        contextBreakdown: session.contextBreakdown,
+        cacheHitInputTokens: session.cacheHitInputTokens,
+        cacheHitCachedTokens: session.cacheHitCachedTokens,
+      };
     try {
       const entry = await saveChatHistory(path, history.activeId, title.slice(0, 80), state);
       history.entries = [entry, ...history.entries.filter((item) => item.id !== entry.id)];
@@ -234,7 +242,9 @@ export const useChatStore = defineStore("chat", () => {
 
   function onChatEvent(path: string, event: ChatEvent) {
     const session = sessions.value[path];
-    if (!session) return;
+    if (!session) {
+      return;
+    }
     switch (event.kind) {
       case "textDelta":
         session.streamingText += event.delta;
@@ -270,9 +280,9 @@ export const useChatStore = defineStore("chat", () => {
         break;
       }
       case "turnEnd": {
-        const content = session.streamingText;
-        const thinking = session.streamingThinking;
-        const toolRunIds = [...session.pendingToolRunIds];
+        const content = session.streamingText,
+          thinking = session.streamingThinking,
+          toolRunIds = [...session.pendingToolRunIds];
         // 纯工具轮(模型只调工具没说话)也固化,保留时间线
         if (content || thinking || toolRunIds.length > 0) {
           const message: ChatMessage = {
@@ -352,7 +362,9 @@ export const useChatStore = defineStore("chat", () => {
    */
   function send(path: string, project: ChatProject, text: string): Promise<boolean> {
     const trimmed = text.trim();
-    if (!trimmed) return Promise.resolve(false);
+    if (!trimmed) {
+      return Promise.resolve(false);
+    }
     if (activeRuns.has(path) || ensureHistory(path).changing) {
       ensureSession(path).error = friendlyChatError("ai_request_failed", "chat_busy");
       return Promise.resolve(false);
@@ -427,7 +439,9 @@ export const useChatStore = defineStore("chat", () => {
     // 若用 run.finally() 的返回值入表,则永远不等于 run,条目无法删除,
     // 该项目的后续发送会被 busy 守卫永久拒绝。
     void run.finally(() => {
-      if (activeRuns.get(path) === run) activeRuns.delete(path);
+      if (activeRuns.get(path) === run) {
+        activeRuns.delete(path);
+      }
     });
     return run.then(() => true);
   }
@@ -448,14 +462,20 @@ export const useChatStore = defineStore("chat", () => {
     text: string,
   ): Promise<boolean> {
     const trimmed = text.trim();
-    if (!trimmed) return false;
-    if (activeRuns.has(path) || ensureHistory(path).changing) return false;
-    const session = ensureSession(path);
-    const index = session.messages.map((message) => message.role).lastIndexOf("user");
-    if (index < 0) return send(path, project, trimmed);
+    if (!trimmed) {
+      return false;
+    }
+    if (activeRuns.has(path) || ensureHistory(path).changing) {
+      return false;
+    }
+    const session = ensureSession(path),
+      index = session.messages.map((message) => message.role).lastIndexOf("user");
+    if (index < 0) {
+      return send(path, project, trimmed);
+    }
 
-    const previousMessages = session.messages;
-    const previousToolRuns = session.toolRuns;
+    const previousMessages = session.messages,
+      previousToolRuns = session.toolRuns;
     session.messages = session.messages.slice(0, index);
     // 清理被截回合遗留的工具调用记录(仅保留仍被消息引用的)
     const referenced = new Set(session.messages.flatMap((message) => message.toolRunIds));
@@ -485,11 +505,15 @@ export const useChatStore = defineStore("chat", () => {
   /** 新会话只重置当前上下文,旧对话先保存;保存失败时不丢弃当前内容。 */
   async function newSession(path: string) {
     const history = ensureHistory(path);
-    if (history.changing || history.loading) return;
+    if (history.changing || history.loading) {
+      return;
+    }
     history.changing = true;
     try {
       await settleRun(path);
-      if (!(await persistSession(path))) return;
+      if (!(await persistSession(path))) {
+        return;
+      }
       await newChatSession(path);
       sessions.value[path] = defaultSession();
       history.activeId = null;
@@ -504,11 +528,15 @@ export const useChatStore = defineStore("chat", () => {
   /** 切换历史前停止在途回合,保存当前对话,再同步切换前后端上下文。 */
   async function selectHistory(path: string, id: string) {
     const history = ensureHistory(path);
-    if (history.changing || history.loading || history.activeId === id) return;
+    if (history.changing || history.loading || history.activeId === id) {
+      return;
+    }
     history.changing = true;
     try {
       await settleRun(path);
-      if (!(await persistSession(path))) return;
+      if (!(await persistSession(path))) {
+        return;
+      }
       const snapshot = await selectChatHistory(path, id);
       sessions.value[path] = restoreSession(snapshot.state);
       history.activeId = snapshot.entry.id;

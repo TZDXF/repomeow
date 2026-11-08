@@ -25,8 +25,8 @@ describe("agents-md store", () => {
 
   it("生成挂在 store 上:进行态可查询并镜像为后台任务,成功后 toast 并收敛状态", async () => {
     generateAgentsMdMock.mockResolvedValue(true);
-    const store = useAgentsMdStore();
-    const run = store.generate(project, "zh-CN", { model: "deepseek/deepseek-v4-pro" });
+    const store = useAgentsMdStore(),
+      run = store.generate(project, "zh-CN", { model: "deepseek/deepseek-v4-pro" });
     // 状态同步进入 running(不等待 IPC 返回),后台任务中心立即可见
     expect(store.isGenerating(project.path)).toBe(true);
     expect(store.backgroundTasks).toEqual([

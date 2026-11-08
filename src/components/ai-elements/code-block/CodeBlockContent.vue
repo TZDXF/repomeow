@@ -6,19 +6,18 @@ import { computed, ref, watch } from "vue";
 import { createRawTokens, highlightCode, isBold, isItalic, isUnderline } from "./utils";
 
 const props = withDefaults(
-  defineProps<{
-    code: string;
-    language: BundledLanguage;
-    showLineNumbers?: boolean;
-  }>(),
-  {
-    showLineNumbers: false,
-  },
-);
-
-const rawTokens = computed(() => createRawTokens(props.code));
-// Try to get cached result synchronously, otherwise use raw tokens
-const tokenized = ref<TokenizedCode>(highlightCode(props.code, props.language) ?? rawTokens.value);
+    defineProps<{
+      code: string;
+      language: BundledLanguage;
+      showLineNumbers?: boolean;
+    }>(),
+    {
+      showLineNumbers: false,
+    },
+  ),
+  rawTokens = computed(() => createRawTokens(props.code)),
+  // Try to get cached result synchronously, otherwise use raw tokens
+  tokenized = ref<TokenizedCode>(highlightCode(props.code, props.language) ?? rawTokens.value);
 
 watch(
   () => [props.code, props.language],
@@ -48,27 +47,26 @@ interface KeyedLine {
 }
 
 const keyedLines = computed<KeyedLine[]>(() =>
-  tokenized.value.tokens.map((line, lineIdx) => ({
-    key: `line-${lineIdx}`,
-    tokens: line.map((token, tokenIdx) => ({
-      token,
-      key: `line-${lineIdx}-${tokenIdx}`,
+    tokenized.value.tokens.map((line, lineIdx) => ({
+      key: `line-${lineIdx}`,
+      tokens: line.map((token, tokenIdx) => ({
+        token,
+        key: `line-${lineIdx}-${tokenIdx}`,
+      })),
     })),
-  })),
-);
-
-const lineNumberClasses = cn(
-  "block",
-  "before:content-[counter(line)]",
-  "before:inline-block",
-  "before:[counter-increment:line]",
-  "before:w-8",
-  "before:mr-4",
-  "before:text-right",
-  "before:text-muted-foreground/50",
-  "before:font-mono",
-  "before:select-none",
-);
+  ),
+  lineNumberClasses = cn(
+    "block",
+    "before:content-[counter(line)]",
+    "before:inline-block",
+    "before:[counter-increment:line]",
+    "before:w-8",
+    "before:mr-4",
+    "before:text-right",
+    "before:text-muted-foreground/50",
+    "before:font-mono",
+    "before:select-none",
+  );
 </script>
 
 <template>

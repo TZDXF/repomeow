@@ -20,17 +20,16 @@ import type { EditorAvailability } from "@/lib/open-with";
 import { cmd } from "@/lib/tauri";
 import type { EditorKind, Project } from "@/types";
 
-const { t } = useI18n();
-// path 缺省为项目路径;worktree 内产生的冲突传 worktree 路径,确保「打开」落在正确目录
-const props = defineProps<{ project: Project; conflicts: string[]; path?: string }>();
-const open = defineModel<boolean>("open", { required: true });
-
-const availability = ref<EditorAvailability | null>(null);
-const aiConfig = useAiConfigStore();
-const model = ref("");
-const thinking = ref("");
-const agentsLoading = ref(true);
-const startingAgent = ref(false);
+const { t } = useI18n(),
+  // path 缺省为项目路径;worktree 内产生的冲突传 worktree 路径,确保「打开」落在正确目录
+  props = defineProps<{ project: Project; conflicts: string[]; path?: string }>(),
+  open = defineModel<boolean>("open", { required: true }),
+  availability = ref<EditorAvailability | null>(null),
+  aiConfig = useAiConfigStore(),
+  model = ref(""),
+  thinking = ref(""),
+  agentsLoading = ref(true),
+  startingAgent = ref(false);
 
 onMounted(async () => {
   void getEditorAvailability()

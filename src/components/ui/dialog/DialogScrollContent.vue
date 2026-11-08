@@ -17,12 +17,10 @@ defineOptions({
   inheritAttrs: false,
 });
 
-const props = defineProps<DialogContentProps & { class?: HTMLAttributes["class"] }>();
-const emits = defineEmits<DialogContentEmits>();
-
-const delegatedProps = reactiveOmit(props, "class");
-
-const forwarded = useForwardPropsEmits(delegatedProps, emits);
+const props = defineProps<DialogContentProps & { class?: HTMLAttributes["class"] }>(),
+  emits = defineEmits<DialogContentEmits>(),
+  delegatedProps = reactiveOmit(props, "class"),
+  forwarded = useForwardPropsEmits(delegatedProps, emits);
 </script>
 
 <template>

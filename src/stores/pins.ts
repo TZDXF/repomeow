@@ -14,8 +14,8 @@ export interface PinInput {
 }
 
 export const usePinsStore = defineStore("pins", () => {
-  const pins = ref<PinnedCommand[]>([]);
-  const loaded = ref(false);
+  const pins = ref<PinnedCommand[]>([]),
+    loaded = ref(false);
 
   async function fetchPins() {
     pins.value = await cmd<PinnedCommand[]>("list_pinned_commands", {});

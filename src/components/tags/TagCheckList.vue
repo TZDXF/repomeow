@@ -7,22 +7,24 @@ import { Input } from "@/components/ui/input";
 import ScrollArea from "@/components/common/ScrollArea.vue";
 import type { Tag } from "@/types";
 
-const { t } = useI18n();
-const props = defineProps<{ tags: Tag[]; checkedIds: number[] }>();
-const emit = defineEmits<{ toggle: [tagId: number] }>();
-
-const keyword = ref("");
-const searchInput = ref<InstanceType<typeof Input> | null>(null);
-
-const filtered = computed(() => {
-  const kw = keyword.value.trim().toLowerCase();
-  if (!kw) return props.tags;
-  return props.tags.filter((t) => t.name.toLowerCase().includes(kw));
-});
+const { t } = useI18n(),
+  props = defineProps<{ tags: Tag[]; checkedIds: number[] }>(),
+  emit = defineEmits<{ toggle: [tagId: number] }>(),
+  keyword = ref(""),
+  searchInput = ref<InstanceType<typeof Input> | null>(null),
+  filtered = computed(() => {
+    const kw = keyword.value.trim().toLowerCase();
+    if (!kw) {
+      return props.tags;
+    }
+    return props.tags.filter((t) => t.name.toLowerCase().includes(kw));
+  });
 
 // 阻止字符键冒泡触发菜单的 type-ahead,Escape 保留给菜单关闭
 function onSearchKeydown(e: KeyboardEvent) {
-  if (e.key !== "Escape") e.stopPropagation();
+  if (e.key !== "Escape") {
+    e.stopPropagation();
+  }
 }
 
 onMounted(() => {

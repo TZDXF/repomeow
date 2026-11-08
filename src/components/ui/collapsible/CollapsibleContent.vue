@@ -5,9 +5,8 @@ import { reactiveOmit } from "@vueuse/core";
 import { CollapsibleContent } from "reka-ui";
 import { cn } from "@/lib/utils";
 
-const props = defineProps<CollapsibleContentProps & { class?: HTMLAttributes["class"] }>();
-
-const delegatedProps = reactiveOmit(props, "class");
+const props = defineProps<CollapsibleContentProps & { class?: HTMLAttributes["class"] }>(),
+  delegatedProps = reactiveOmit(props, "class");
 </script>
 
 <template>

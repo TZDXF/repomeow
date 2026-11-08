@@ -35,94 +35,89 @@ import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
 import type { GitWorktreeFile, Project } from "@/types";
 
-const { t } = useI18n();
-const props = defineProps<{ project: Project }>();
-const open = defineModel<boolean>("open", { required: true });
-const store = useProjectsStore();
-const settings = useSettingsStore();
-
-const message = ref("");
-const submitting = ref(false);
-const submittingAndPushing = ref(false);
-const generating = ref(false);
+const { t } = useI18n(),
+  props = defineProps<{ project: Project }>(),
+  open = defineModel<boolean>("open", { required: true }),
+  store = useProjectsStore(),
+  settings = useSettingsStore(),
+  message = ref(""),
+  submitting = ref(false),
+  submittingAndPushing = ref(false),
+  generating = ref(false);
 let generateController: AbortController | null = null;
 // 未跟踪文件默认勾选纳入本次提交
-const includeUntracked = ref(true);
-
-const git = computed(() => props.project.git);
-const untrackedCount = computed(() => git.value?.untracked ?? 0);
-
-// --- 变更预览:默认折叠,点击展开后加载文件清单与单文件 diff(相对 HEAD,含未跟踪文件) ---
-const showChanges = ref(false);
-const files = ref<GitWorktreeFile[]>([]);
-const filesLoading = ref(false);
-const filesError = ref("");
-const selectedPath = ref<string | null>(null);
-const {
-  diff,
-  loading: diffLoading,
-  error: diffError,
-  load: loadDiff,
-  reset: resetDiff,
-} = useGitDiffLoader({ keepPrevious: true });
-
-/** 忽略空白差异模式(与提交详情面板同键同源):none 不忽略 / eol 行尾 / change 空白数量变化 / all 全部空白 */
-const ignoreWs = useLocalStorage<"none" | "eol" | "change" | "all">(
-  "repomeow:commit-diff-ignore-ws",
-  "none",
-);
-
-// --- 文件勾选:可提交子集;未跟踪文件仅在勾选"包含未跟踪文件"时可提交 ---
-const checkedPaths = ref(new Set<string>());
-/** 用户主动取消勾选的路径:收起再展开重新拉取清单时保留取消意图(新出现的文件默认勾选) */
-const deselectedPaths = ref(new Set<string>());
+const includeUntracked = ref(true),
+  git = computed(() => props.project.git),
+  untrackedCount = computed(() => git.value?.untracked ?? 0),
+  // --- 变更预览:默认折叠,点击展开后加载文件清单与单文件 diff(相对 HEAD,含未跟踪文件) ---
+  showChanges = ref(false),
+  files = ref<GitWorktreeFile[]>([]),
+  filesLoading = ref(false),
+  filesError = ref(""),
+  selectedPath = ref<string | null>(null),
+  {
+    diff,
+    loading: diffLoading,
+    error: diffError,
+    load: loadDiff,
+    reset: resetDiff,
+  } = useGitDiffLoader({ keepPrevious: true }),
+  /** 忽略空白差异模式(与提交详情面板同键同源):none 不忽略 / eol 行尾 / change 空白数量变化 / all 全部空白 */
+  ignoreWs = useLocalStorage<"none" | "eol" | "change" | "all">(
+    "repomeow:commit-diff-ignore-ws",
+    "none",
+  ),
+  // --- 文件勾选:可提交子集;未跟踪文件仅在勾选"包含未跟踪文件"时可提交 ---
+  checkedPaths = ref(new Set<string>()),
+  /** 用户主动取消勾选的路径:收起再展开重新拉取清单时保留取消意图(新出现的文件默认勾选) */
+  deselectedPaths = ref(new Set<string>());
 
 /** 未勾选"包含未跟踪文件"时未跟踪文件不可提交(勾选框禁用) */
 function fileCommittable(file: GitWorktreeFile) {
   return !file.untracked || includeUntracked.value;
 }
 
-const committableFiles = computed(() => files.value.filter(fileCommittable));
-const checkedFiles = computed(() =>
-  committableFiles.value.filter((f) => checkedPaths.value.has(f.path)),
-);
-const allChecked = computed(
-  () =>
-    committableFiles.value.length > 0 &&
-    checkedFiles.value.length === committableFiles.value.length,
-);
-const someChecked = computed(() => checkedFiles.value.length > 0);
-
-/** 本次实际会提交的变更数:展开过预览(清单已加载)时按勾选数计,否则按状态计数 */
-const committable = computed(() => {
-  if (files.value.length) {
-    return checkedFiles.value.length;
-  }
-  if (!git.value) {
-    return 0;
-  }
-  return git.value.staged + git.value.modified + (includeUntracked.value ? git.value.untracked : 0);
-});
-
-/** 勾选子集时提交的路径清单(重命名新旧路径一并传入);全选 / 未展开为 null,走后端全量语义 */
-const checkedPayload = computed<string[] | null>(() => {
-  if (!files.value.length || allChecked.value) {
-    return null;
-  }
-  const out: string[] = [];
-  for (const f of checkedFiles.value) {
-    if (f.old_path) {
-      out.push(f.old_path);
+const committableFiles = computed(() => files.value.filter(fileCommittable)),
+  checkedFiles = computed(() =>
+    committableFiles.value.filter((f) => checkedPaths.value.has(f.path)),
+  ),
+  allChecked = computed(
+    () =>
+      committableFiles.value.length > 0 &&
+      checkedFiles.value.length === committableFiles.value.length,
+  ),
+  someChecked = computed(() => checkedFiles.value.length > 0),
+  /** 本次实际会提交的变更数:展开过预览(清单已加载)时按勾选数计,否则按状态计数 */
+  committable = computed(() => {
+    if (files.value.length) {
+      return checkedFiles.value.length;
     }
-    out.push(f.path);
-  }
-  return out;
-});
+    if (!git.value) {
+      return 0;
+    }
+    return (
+      git.value.staged + git.value.modified + (includeUntracked.value ? git.value.untracked : 0)
+    );
+  }),
+  /** 勾选子集时提交的路径清单(重命名新旧路径一并传入);全选 / 未展开为 null,走后端全量语义 */
+  checkedPayload = computed<string[] | null>(() => {
+    if (!files.value.length || allChecked.value) {
+      return null;
+    }
+    const out: string[] = [];
+    for (const f of checkedFiles.value) {
+      if (f.old_path) {
+        out.push(f.old_path);
+      }
+      out.push(f.path);
+    }
+    return out;
+  });
 
 /** 勾选 / 取消一组路径,并同步记录取消意图(供重新加载清单时恢复) */
 function setChecked(paths: string[], checked: boolean) {
-  const nextChecked = new Set(checkedPaths.value);
-  const nextDeselected = new Set(deselectedPaths.value);
+  const nextChecked = new Set(checkedPaths.value),
+    nextDeselected = new Set(deselectedPaths.value);
   for (const p of paths) {
     if (checked) {
       nextChecked.add(p);
@@ -171,24 +166,22 @@ watch(includeUntracked, (v) => {
 
 // --- 树形展示:按目录层级聚合,折叠状态记忆;行化(树形/平铺)走 file-tree 统一辅助 ---
 // 平铺 / 树形切换与提交详情面板共用持久化键
-const treeMode = useLocalStorage("repomeow:commit-files-tree", false);
-const collapsedFolders = ref(new Set<string>());
-const fileTree = computed(() => buildFileTree(files.value));
-
-const treeRows = computed(() =>
-  flattenVisibleTree(fileTree.value, collapsedFolders.value, {
-    dim: fileDimmed,
-    title: fileTitle,
-  }),
-);
-
-const flatRows = computed(() =>
-  flatFileRows(files.value, {
-    name: flatName,
-    dim: fileDimmed,
-    title: fileTitle,
-  }),
-);
+const treeMode = useLocalStorage("repomeow:commit-files-tree", false),
+  collapsedFolders = ref(new Set<string>()),
+  fileTree = computed(() => buildFileTree(files.value)),
+  treeRows = computed(() =>
+    flattenVisibleTree(fileTree.value, collapsedFolders.value, {
+      dim: fileDimmed,
+      title: fileTitle,
+    }),
+  ),
+  flatRows = computed(() =>
+    flatFileRows(files.value, {
+      name: flatName,
+      dim: fileDimmed,
+      title: fileTitle,
+    }),
+  );
 
 function toggleFolder(fullPath: string) {
   collapsedFolders.value = toggleInSet(collapsedFolders.value, fullPath);
@@ -196,34 +189,34 @@ function toggleFolder(fullPath: string) {
 
 /** 目录节点勾选信息(仅统计可提交文件;total = 0 时勾选框禁用),paths 供整目录勾选 */
 const folderInfo = computed(() => {
-  const map = new Map<string, { all: boolean; some: boolean; total: number; paths: string[] }>();
-  const walk = (
-    node: FileTreeNode<GitWorktreeFile>,
-  ): { checked: number; total: number; paths: string[] } => {
-    let total = 0;
-    let checked = 0;
-    const paths: string[] = [];
-    if (node.file && fileCommittable(node.file)) {
-      total = 1;
-      checked = checkedPaths.value.has(node.file.path) ? 1 : 0;
-      paths.push(node.file.path);
-    }
-    for (const c of node.children) {
-      const r = walk(c);
-      total += r.total;
-      checked += r.checked;
-      paths.push(...r.paths);
-    }
-    if (!node.file && node.children.length) {
-      map.set(node.fullPath, {
-        all: total > 0 && checked === total,
-        some: checked > 0,
-        total,
-        paths,
-      });
-    }
-    return { checked, total, paths };
-  };
+  const map = new Map<string, { all: boolean; some: boolean; total: number; paths: string[] }>(),
+    walk = (
+      node: FileTreeNode<GitWorktreeFile>,
+    ): { checked: number; total: number; paths: string[] } => {
+      let total = 0,
+        checked = 0;
+      const paths: string[] = [];
+      if (node.file && fileCommittable(node.file)) {
+        total = 1;
+        checked = checkedPaths.value.has(node.file.path) ? 1 : 0;
+        paths.push(node.file.path);
+      }
+      for (const c of node.children) {
+        const r = walk(c);
+        total += r.total;
+        checked += r.checked;
+        paths.push(...r.paths);
+      }
+      if (!node.file && node.children.length) {
+        map.set(node.fullPath, {
+          all: total > 0 && checked === total,
+          some: checked > 0,
+          total,
+          paths,
+        });
+      }
+      return { checked, total, paths };
+    };
   for (const n of fileTree.value) {
     walk(n);
   }
@@ -256,14 +249,13 @@ function flatName(file: GitWorktreeFile) {
     : baseName(file.path);
 }
 
-const selectedFile = computed(() => files.value.find((f) => f.path === selectedPath.value) ?? null);
-const canOpenInIde = computed(() => !!selectedFile.value && selectedFile.value.status !== "D");
-/** 并排是否适用:新增/删除文件一侧必然全空,强制逐行视图(与提交详情面板一致) */
-const splitApplicable = computed(
-  () => selectedFile.value?.status !== "A" && selectedFile.value?.status !== "D",
-);
-
-const filesRequest = useLatestRequest();
+const selectedFile = computed(() => files.value.find((f) => f.path === selectedPath.value) ?? null),
+  canOpenInIde = computed(() => !!selectedFile.value && selectedFile.value.status !== "D"),
+  /** 并排是否适用:新增/删除文件一侧必然全空,强制逐行视图(与提交详情面板一致) */
+  splitApplicable = computed(
+    () => selectedFile.value?.status !== "A" && selectedFile.value?.status !== "D",
+  ),
+  filesRequest = useLatestRequest();
 
 async function loadChanges() {
   const isCurrent = filesRequest.begin();
@@ -276,7 +268,9 @@ async function loadChanges() {
     const result = await cmd<GitWorktreeFile[]>("git_worktree_files", {
       path: props.project.path,
     });
-    if (!isCurrent()) return;
+    if (!isCurrent()) {
+      return;
+    }
     files.value = result;
     // 可提交文件默认勾选;保留用户之前主动取消的选择(收起再展开不丢),新出现的文件默认勾选
     checkedPaths.value = new Set(
@@ -287,9 +281,13 @@ async function loadChanges() {
       void selectFile(files.value[0]);
     }
   } catch (e) {
-    if (isCurrent()) filesError.value = String(e);
+    if (isCurrent()) {
+      filesError.value = String(e);
+    }
   } finally {
-    if (isCurrent()) filesLoading.value = false;
+    if (isCurrent()) {
+      filesLoading.value = false;
+    }
   }
 }
 
@@ -310,7 +308,9 @@ async function selectFile(file: GitWorktreeFile, force = false) {
 
 // 忽略空白模式变化:按新模式重取当前文件 diff(行集会变)
 watch(ignoreWs, () => {
-  if (selectedFile.value) void selectFile(selectedFile.value, true);
+  if (selectedFile.value) {
+    void selectFile(selectedFile.value, true);
+  }
 });
 
 /** 在 IDE 打开(默认编辑器;未跟踪文件工作区已存在,同样可打开) */
@@ -318,7 +318,9 @@ async function openFile(file: GitWorktreeFile) {
   const option = sortOpenWithOptions(settings.openWithOrder, settings.customOpenWith).find(
     (candidate) => candidate.id === settings.defaultOpenWith,
   );
-  if (!option) return;
+  if (!option) {
+    return;
+  }
   try {
     await openPathWith(option, `${props.project.path}/${file.path}`);
   } catch (e) {
@@ -352,7 +354,9 @@ watch(open, (v) => {
 });
 
 async function submit() {
-  if (!message.value.trim() || committable.value === 0 || submitting.value) return;
+  if (!message.value.trim() || committable.value === 0 || submitting.value) {
+    return;
+  }
   submitting.value = true;
   try {
     await store.commitChanges(
@@ -397,8 +401,12 @@ const { pendingPush, run: commitAndPush } = useCommitAndPush(
 );
 
 async function submitAndPush() {
-  if (submitting.value) return;
-  if (!pendingPush.value && (!message.value.trim() || committable.value === 0)) return;
+  if (submitting.value) {
+    return;
+  }
+  if (!pendingPush.value && (!message.value.trim() || committable.value === 0)) {
+    return;
+  }
   submitting.value = true;
   submittingAndPushing.value = true;
   try {
@@ -420,7 +428,9 @@ async function submitAndPush() {
 
 /** AI 生成提交信息:严格跟随本次提交的未跟踪开关与文件勾选范围;生成中再次点击即取消 */
 async function generate() {
-  if (generating.value || committable.value === 0) return;
+  if (generating.value || committable.value === 0) {
+    return;
+  }
   generating.value = true;
   const controller = new AbortController();
   generateController = controller;
@@ -432,7 +442,9 @@ async function generate() {
       checkedPayload.value,
       controller.signal,
     );
-    if (result != null) message.value = result;
+    if (result != null) {
+      message.value = result;
+    }
   } catch (e) {
     if (!controller.signal.aborted) {
       toast.error(e instanceof Error ? e.message : String(e));

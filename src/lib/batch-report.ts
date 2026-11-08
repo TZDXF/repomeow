@@ -48,8 +48,8 @@ export async function planBatchItems(options: BatchPlanOptions): Promise<BatchIt
   });
 
   // 已有报告匹配集合:日报按 date_to,周报按 (date_from, date_to) 对
-  let existingDaily = new Set<string>();
-  let existingWeekly = new Set<string>();
+  let existingDaily = new Set<string>(),
+    existingWeekly = new Set<string>();
   if (options.skipExisting) {
     const existing = await cmd<ReportDateRange[]>("list_report_dates", {
       periodType: options.periodType,

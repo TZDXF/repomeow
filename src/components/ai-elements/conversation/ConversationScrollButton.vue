@@ -10,9 +10,9 @@ interface Props {
   class?: HTMLAttributes["class"];
 }
 
-const props = defineProps<Props>();
-const { isAtBottom, scrollToBottom } = useStickToBottomContext();
-const showScrollButton = computed(() => !isAtBottom.value);
+const props = defineProps<Props>(),
+  { isAtBottom, scrollToBottom } = useStickToBottomContext(),
+  showScrollButton = computed(() => !isAtBottom.value);
 
 function handleClick() {
   scrollToBottom();

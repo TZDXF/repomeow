@@ -6,8 +6,8 @@ import { router } from "@/router";
 
 // 用带响应式的假 router 替代真实 hash 路由,测试内直接改 currentRoute 驱动 store 的自动建档
 vi.mock("@/router", async () => {
-  const { ref } = await import("vue");
-  const currentRoute = ref<{ path: string }>({ path: "/" });
+  const { ref } = await import("vue"),
+    currentRoute = ref<{ path: string }>({ path: "/" });
   return {
     router: {
       currentRoute,
@@ -16,8 +16,8 @@ vi.mock("@/router", async () => {
   };
 });
 
-const pushMock = router.push as unknown as Mock;
-const routeRef = router.currentRoute as unknown as { value: { path: string } };
+const pushMock = router.push as unknown as Mock,
+  routeRef = router.currentRoute as unknown as { value: { path: string } };
 
 function setRoute(path: string) {
   routeRef.value = { path };

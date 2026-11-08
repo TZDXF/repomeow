@@ -22,19 +22,17 @@ import { cmd } from "@/lib/tauri";
 import { buildUsageHeatmap, type UsageHeatCell } from "@/lib/usage-heatmap";
 import type { AiUsageEntry, AiUsageSummary, AiUsageTaskStat } from "@/types";
 
-const { t } = useI18n();
+const { t } = useI18n(),
+  PAGE_SIZE = 50,
+  PREFETCH_DISTANCE = 160,
+  // ── 汇总与明细加载 ─────────────────────────────────────────────────────────
 
-const PAGE_SIZE = 50;
-const PREFETCH_DISTANCE = 160;
-
-// ── 汇总与明细加载 ─────────────────────────────────────────────────────────
-
-const summary = ref<AiUsageSummary | null>(null);
-const entries = ref<AiUsageEntry[]>([]);
-const hasMore = ref(false);
-const loading = ref(false);
-const taskFilter = ref<string>("all");
-const logContent = ref<HTMLDivElement | null>(null);
+  summary = ref<AiUsageSummary | null>(null),
+  entries = ref<AiUsageEntry[]>([]),
+  hasMore = ref(false),
+  loading = ref(false),
+  taskFilter = ref<string>("all"),
+  logContent = ref<HTMLDivElement | null>(null);
 
 function logViewport() {
   return logContent.value?.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
@@ -42,7 +40,9 @@ function logViewport() {
 
 function prefetchIfNearBottom() {
   const viewport = logViewport();
-  if (!viewport || viewport.clientHeight === 0) return;
+  if (!viewport || viewport.clientHeight === 0) {
+    return;
+  }
   if (viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= PREFETCH_DISTANCE) {
     void loadMore();
   }
@@ -69,39 +69,59 @@ async function reload() {
   hasMore.value = false;
   try {
     const [, page] = await Promise.all([loadSummary(), fetchPage(0)]);
-    if (token !== loadToken) return;
+    if (token !== loadToken) {
+      return;
+    }
     entries.value = page;
     hasMore.value = page.length >= PAGE_SIZE;
     await nextTick();
-    if (token !== loadToken) return;
+    if (token !== loadToken) {
+      return;
+    }
     const viewport = logViewport();
-    if (viewport) viewport.scrollTop = 0;
+    if (viewport) {
+      viewport.scrollTop = 0;
+    }
     loading.value = false;
     prefetchIfNearBottom();
   } catch (e) {
-    if (token === loadToken) toast.error(String(e));
+    if (token === loadToken) {
+      toast.error(String(e));
+    }
   } finally {
-    if (token === loadToken) loading.value = false;
+    if (token === loadToken) {
+      loading.value = false;
+    }
   }
 }
 
 async function loadMore() {
-  if (loading.value || !hasMore.value) return;
+  if (loading.value || !hasMore.value) {
+    return;
+  }
   const token = ++loadToken;
   loading.value = true;
   try {
     const page = await fetchPage(entries.value.length);
-    if (token !== loadToken) return;
+    if (token !== loadToken) {
+      return;
+    }
     entries.value.push(...page);
     hasMore.value = page.length >= PAGE_SIZE;
     await nextTick();
-    if (token !== loadToken) return;
+    if (token !== loadToken) {
+      return;
+    }
     loading.value = false;
     prefetchIfNearBottom();
   } catch (e) {
-    if (token === loadToken) toast.error(String(e));
+    if (token === loadToken) {
+      toast.error(String(e));
+    }
   } finally {
-    if (token === loadToken) loading.value = false;
+    if (token === loadToken) {
+      loading.value = false;
+    }
   }
 }
 
@@ -130,15 +150,14 @@ async function confirmClear() {
 // ── 展示辅助 ───────────────────────────────────────────────────────────────
 
 const cells = computed(() => [
-  exactCell(t("settings.usage.calls"), summary.value?.totalCalls ?? null),
-  tokenCell(t("settings.usage.inputTokens"), summary.value?.totalInputTokens ?? null),
-  tokenCell(t("settings.usage.outputTokens"), summary.value?.totalOutputTokens ?? null),
-  tokenCell(t("settings.usage.cachedTokens"), summary.value?.totalCachedTokens ?? null),
-  tokenCell(t("settings.usage.totalTokens"), summary.value?.totalTokens ?? null),
-]);
-
-/** 最近半年热力图(周列 × 周一~周日行;空窗口也照常渲染,保持布局稳定) */
-const heatmap = computed(() => buildUsageHeatmap(summary.value?.byDay ?? []));
+    exactCell(t("settings.usage.calls"), summary.value?.totalCalls ?? null),
+    tokenCell(t("settings.usage.inputTokens"), summary.value?.totalInputTokens ?? null),
+    tokenCell(t("settings.usage.outputTokens"), summary.value?.totalOutputTokens ?? null),
+    tokenCell(t("settings.usage.cachedTokens"), summary.value?.totalCachedTokens ?? null),
+    tokenCell(t("settings.usage.totalTokens"), summary.value?.totalTokens ?? null),
+  ]),
+  /** 最近半年热力图(周列 × 周一~周日行;空窗口也照常渲染,保持布局稳定) */
+  heatmap = computed(() => buildUsageHeatmap(summary.value?.byDay ?? []));
 
 function cellTitle(cell: UsageHeatCell): string {
   if (cell.calls === 0 && cell.totalTokens === 0) {
@@ -162,15 +181,19 @@ function taskStatTitle(stat: AiUsageTaskStat): string {
 
 /** 分布条占比基准:优先按合计 tokens 相对最大值,全为 0(均未上报)时退化为按次数 */
 const taskBarBase = computed(() => {
-  const stats = summary.value?.byTask ?? [];
-  const maxTokens = Math.max(0, ...stats.map((s) => s.totalTokens));
-  if (maxTokens > 0) return { key: "totalTokens" as const, max: maxTokens };
+  const stats = summary.value?.byTask ?? [],
+    maxTokens = Math.max(0, ...stats.map((s) => s.totalTokens));
+  if (maxTokens > 0) {
+    return { key: "totalTokens" as const, max: maxTokens };
+  }
   return { key: "calls" as const, max: Math.max(1, ...stats.map((s) => s.calls)) };
 });
 
 function taskBarWidth(stat: AiUsageTaskStat): string {
   const value = taskBarBase.value.key === "totalTokens" ? stat.totalTokens : stat.calls;
-  if (value <= 0) return "0%";
+  if (value <= 0) {
+    return "0%";
+  }
   // 最小 4% 保证小占比条目仍可见
   return `${Math.max(4, Math.round((value / taskBarBase.value.max) * 100))}%`;
 }

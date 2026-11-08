@@ -24,10 +24,10 @@ describe("缓存项目卡片的数据校验", () => {
 
   it("外部新增脚本后切回页面会重扫,同页多个卡片共享一次请求", async () => {
     vi.mocked(cmd).mockResolvedValueOnce(assets("old")).mockResolvedValueOnce(assets("added"));
-    const store = useProjectAssetsStore();
-    const active = ref(true);
-    const draft = ref("未提交的命令草稿");
-    const scope = effectScope();
+    const store = useProjectAssetsStore(),
+      active = ref(true),
+      draft = ref("未提交的命令草稿"),
+      scope = effectScope();
     scope.run(() => {
       // PackageScripts / DockerCompose / SpringBootCard 共用重新激活钩子。
       for (let i = 0; i < 3; i++) {

@@ -8,11 +8,9 @@ import { CalendarNext, useForwardProps } from "reka-ui";
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button";
 
-const props = defineProps<CalendarNextProps & { class?: HTMLAttributes["class"] }>();
-
-const delegatedProps = reactiveOmit(props, "class");
-
-const forwardedProps = useForwardProps(delegatedProps);
+const props = defineProps<CalendarNextProps & { class?: HTMLAttributes["class"] }>(),
+  delegatedProps = reactiveOmit(props, "class"),
+  forwardedProps = useForwardProps(delegatedProps);
 </script>
 
 <template>

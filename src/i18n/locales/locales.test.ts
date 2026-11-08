@@ -14,8 +14,8 @@ function keyPaths(obj: Record<string, unknown>, prefix = ""): string[] {
 
 describe("i18n 词条对齐", () => {
   it("zh-CN 与 en-US 键集合完全一致", () => {
-    const zh = keyPaths(zhCN as Record<string, unknown>);
-    const en = keyPaths(enUS as Record<string, unknown>);
+    const zh = keyPaths(zhCN as Record<string, unknown>),
+      en = keyPaths(enUS as Record<string, unknown>);
     expect(zh.filter((k) => !en.includes(k))).toEqual([]);
     expect(en.filter((k) => !zh.includes(k))).toEqual([]);
   });

@@ -20,42 +20,40 @@ import {
   type ResourceMarketplaceSource,
 } from "@/lib/resource-library";
 
-const { t } = useI18n();
-
-const showGithub = ref(false);
-const repositorySource = ref("");
-const loading = ref(true);
-/** 是否完成过至少一次加载:之后的后台刷新不清空列表,避免切回本页时闪烁 */
-const loaded = ref(false);
-const skills = ref<ResourceMarketplaceSkill[]>([]);
-const sources = ref<ResourceMarketplaceSource[]>([]);
-const query = ref("");
-const submittedQuery = ref("");
-const browseMode = ref<"all" | "trending" | "hot">("all");
-const activeSourceId = ref<string | null>(null);
-const sourcePickerOpen = ref(false);
-const sourcePickerQuery = ref("");
-const MAX_VISIBLE_SOURCES = 4;
-type MarketplaceSnapshot = {
+const { t } = useI18n(),
+  showGithub = ref(false),
+  repositorySource = ref(""),
+  loading = ref(true),
+  /** 是否完成过至少一次加载:之后的后台刷新不清空列表,避免切回本页时闪烁 */
+  loaded = ref(false),
+  skills = ref<ResourceMarketplaceSkill[]>([]),
+  sources = ref<ResourceMarketplaceSource[]>([]),
+  query = ref(""),
+  submittedQuery = ref(""),
+  browseMode = ref<"all" | "trending" | "hot">("all"),
+  activeSourceId = ref<string | null>(null),
+  sourcePickerOpen = ref(false),
+  sourcePickerQuery = ref(""),
+  MAX_VISIBLE_SOURCES = 4;
+interface MarketplaceSnapshot {
   skills: ResourceMarketplaceSkill[];
   sources: ResourceMarketplaceSource[];
-};
+}
 /** 无关键词的榜单按模式缓存；搜索结果仍每次向市场查询。 */
-const browseCache = new Map<"all" | "trending" | "hot", MarketplaceSnapshot>();
-/** 正在安装的市场条目 id 集合;后端经全局锁串行落盘,其他条目的安装按钮不互斥 */
-const installingIds = ref(new Set<string>());
-
-const filtered = computed(() => filterMarketplaceSkills(skills.value, "", activeSourceId.value));
-const sourceNameMap = computed(
-  () => new Map(sources.value.map((source) => [source.id, source.name])),
-);
-const visibleSources = computed(() => sources.value.slice(0, MAX_VISIBLE_SOURCES));
-const hiddenSources = computed(() => sources.value.slice(MAX_VISIBLE_SOURCES));
-const searchedSources = computed(() => {
-  const normalized = sourcePickerQuery.value.trim().toLowerCase();
-  if (!normalized) return sources.value;
-  return sources.value.filter((source) => source.name.toLowerCase().includes(normalized));
-});
+const browseCache = new Map<"all" | "trending" | "hot", MarketplaceSnapshot>(),
+  /** 正在安装的市场条目 id 集合;后端经全局锁串行落盘,其他条目的安装按钮不互斥 */
+  installingIds = ref(new Set<string>()),
+  filtered = computed(() => filterMarketplaceSkills(skills.value, "", activeSourceId.value)),
+  sourceNameMap = computed(() => new Map(sources.value.map((source) => [source.id, source.name]))),
+  visibleSources = computed(() => sources.value.slice(0, MAX_VISIBLE_SOURCES)),
+  hiddenSources = computed(() => sources.value.slice(MAX_VISIBLE_SOURCES)),
+  searchedSources = computed(() => {
+    const normalized = sourcePickerQuery.value.trim().toLowerCase();
+    if (!normalized) {
+      return sources.value;
+    }
+    return sources.value.filter((source) => source.name.toLowerCase().includes(normalized));
+  });
 
 function sourceName(sourceId?: string): string {
   if (!sourceId) {
@@ -78,10 +76,10 @@ let requestSeq = 0;
 
 /** 每次加载先清空旧结果；响应只在它仍是当前请求、模式与搜索词未变时生效。 */
 async function fetchList(force = false) {
-  const requestId = ++requestSeq;
-  const mode = browseMode.value;
-  const searchQuery = submittedQuery.value;
-  const cached = !searchQuery && !force ? browseCache.get(mode) : undefined;
+  const requestId = ++requestSeq,
+    mode = browseMode.value,
+    searchQuery = submittedQuery.value,
+    cached = !searchQuery && !force ? browseCache.get(mode) : undefined;
   activeSourceId.value = null;
   if (cached) {
     skills.value = cached.skills;

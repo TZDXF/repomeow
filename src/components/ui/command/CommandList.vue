@@ -5,11 +5,9 @@ import { reactiveOmit } from "@vueuse/core";
 import { ListboxContent, useForwardProps } from "reka-ui";
 import { cn } from "@/lib/utils";
 
-const props = defineProps<ListboxContentProps & { class?: HTMLAttributes["class"] }>();
-
-const delegatedProps = reactiveOmit(props, "class");
-
-const forwarded = useForwardProps(delegatedProps);
+const props = defineProps<ListboxContentProps & { class?: HTMLAttributes["class"] }>(),
+  delegatedProps = reactiveOmit(props, "class"),
+  forwarded = useForwardProps(delegatedProps);
 </script>
 
 <template>

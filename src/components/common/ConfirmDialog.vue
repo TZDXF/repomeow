@@ -23,8 +23,8 @@ withDefaults(
   { confirmText: undefined, destructive: false },
 );
 
-const open = defineModel<boolean>("open", { required: true });
-const emit = defineEmits<{ confirm: [] }>();
+const open = defineModel<boolean>("open", { required: true }),
+  emit = defineEmits<{ confirm: [] }>();
 
 function onConfirm() {
   emit("confirm");

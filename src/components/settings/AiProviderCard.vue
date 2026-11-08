@@ -24,38 +24,39 @@ import {
 } from "@/components/settings/ai-provider-draft";
 
 const props = defineProps<{
-  draft: ProviderDraft;
-  open: boolean;
-  /** 两段式删除:父组件确认窗口内为 true */
-  confirmDelete: boolean;
-  /** 当前默认模型属于本厂商 */
-  isDefault: boolean;
-  /** 正在拉取模型列表的厂商 key(全局锁,防并发拉取);null = 空闲 */
-  fetchingKey: string | null;
-  /** 本厂商最近一次「获取模型列表」拉到的模型 ID 候选 */
-  fetchedModelIds: string[];
-}>();
-
-const emit = defineEmits<{
-  "update:open": [open: boolean];
-  remove: [];
-  fetchModels: [];
-}>();
-
-const { t } = useI18n();
-
-const fetching = computed(() => props.fetchingKey === props.draft.key);
-const providerApiOptions = computed(() =>
-  isKnownAiApiType(props.draft.api) ? AI_API_TYPES : [props.draft.api, ...AI_API_TYPES],
-);
+    draft: ProviderDraft;
+    open: boolean;
+    /** 两段式删除:父组件确认窗口内为 true */
+    confirmDelete: boolean;
+    /** 当前默认模型属于本厂商 */
+    isDefault: boolean;
+    /** 正在拉取模型列表的厂商 key(全局锁,防并发拉取);null = 空闲 */
+    fetchingKey: string | null;
+    /** 本厂商最近一次「获取模型列表」拉到的模型 ID 候选 */
+    fetchedModelIds: string[];
+  }>(),
+  emit = defineEmits<{
+    "update:open": [open: boolean];
+    remove: [];
+    fetchModels: [];
+  }>(),
+  { t } = useI18n(),
+  fetching = computed(() => props.fetchingKey === props.draft.key),
+  providerApiOptions = computed(() =>
+    isKnownAiApiType(props.draft.api) ? AI_API_TYPES : [props.draft.api, ...AI_API_TYPES],
+  );
 
 function modelApiOptions(model: ModelDraft): (AiApiType | "")[] {
-  if (!model.api || isKnownAiApiType(model.api)) return ["", ...AI_API_TYPES];
+  if (!model.api || isKnownAiApiType(model.api)) {
+    return ["", ...AI_API_TYPES];
+  }
   return ["", model.api, ...AI_API_TYPES];
 }
 
 function apiLabel(api: AiApiType | ""): string {
-  if (!api) return t("settings.ai.inheritProviderApi");
+  if (!api) {
+    return t("settings.ai.inheritProviderApi");
+  }
   return isKnownAiApiType(api) ? t(`settings.ai.apiTypes.${api}`) : api;
 }
 
@@ -90,41 +91,46 @@ function removeModel(model: ModelDraft) {
 // ── 模型高级配置(compat 兼容开关) ────────────────────────────────────
 
 /** 各模型行高级配置区的展开开关 */
-const advancedOpen = reactive<Record<string, boolean>>({});
-
-/** 暴露给 UI 的兼容开关;maxTokensField 选项为字段名,其余为三态 */
-const COMPAT_FIELDS: readonly {
-  key: keyof ModelCompatDraft;
-  labelKey: string;
-  options: readonly string[];
-}[] = [
-  {
-    key: "supportsDeveloperRole",
-    labelKey: "settings.ai.compatDeveloperRole",
-    options: ["auto", "on", "off"],
-  },
-  {
-    key: "supportsReasoningEffort",
-    labelKey: "settings.ai.compatReasoningEffort",
-    options: ["auto", "on", "off"],
-  },
-  {
-    key: "supportsStore",
-    labelKey: "settings.ai.compatStore",
-    options: ["auto", "on", "off"],
-  },
-  {
-    key: "maxTokensField",
-    labelKey: "settings.ai.compatMaxTokensField",
-    options: ["auto", "max_completion_tokens", "max_tokens"],
-  },
-];
+const advancedOpen = reactive<Record<string, boolean>>({}),
+  /** 暴露给 UI 的兼容开关;maxTokensField 选项为字段名,其余为三态 */
+  COMPAT_FIELDS: readonly {
+    key: keyof ModelCompatDraft;
+    labelKey: string;
+    options: readonly string[];
+  }[] = [
+    {
+      key: "supportsDeveloperRole",
+      labelKey: "settings.ai.compatDeveloperRole",
+      options: ["auto", "on", "off"],
+    },
+    {
+      key: "supportsReasoningEffort",
+      labelKey: "settings.ai.compatReasoningEffort",
+      options: ["auto", "on", "off"],
+    },
+    {
+      key: "supportsStore",
+      labelKey: "settings.ai.compatStore",
+      options: ["auto", "on", "off"],
+    },
+    {
+      key: "maxTokensField",
+      labelKey: "settings.ai.compatMaxTokensField",
+      options: ["auto", "max_completion_tokens", "max_tokens"],
+    },
+  ];
 
 /** 选项文案:auto/支持/不支持走 i18n,字段名选项原样展示 */
 function compatOptionLabel(option: string): string {
-  if (option === "auto") return t("settings.ai.compatAuto");
-  if (option === "on") return t("settings.ai.compatOn");
-  if (option === "off") return t("settings.ai.compatOff");
+  if (option === "auto") {
+    return t("settings.ai.compatAuto");
+  }
+  if (option === "on") {
+    return t("settings.ai.compatOn");
+  }
+  if (option === "off") {
+    return t("settings.ai.compatOff");
+  }
   return option;
 }
 
@@ -135,23 +141,24 @@ function setCompatOption(model: ModelDraft, key: keyof ModelCompatDraft, value: 
 // ── 模型 ID 下拉候选(「获取模型列表」的结果,供填写时挑选,不直接落行) ──
 
 /** 各模型行 ID 输入框的候选弹层开关(仅由行内下拉按钮开合) */
-const suggestionOpen = reactive<Record<string, boolean>>({});
-/** 弹层顶部搜索框文本(弹层关闭时删除,打开时重置) */
-const suggestionQuery = reactive<Record<string, string>>({});
-const suggestionSearchRefs = new Map<string, HTMLInputElement>();
-const SUGGESTION_LIMIT = 50;
-
-/** 该厂商是否已有拉取到的模型候选(决定模型行是否展示下拉按钮) */
-const hasFetchedModels = computed(() => props.fetchedModelIds.length > 0);
+const suggestionOpen = reactive<Record<string, boolean>>({}),
+  /** 弹层顶部搜索框文本(弹层关闭时删除,打开时重置) */
+  suggestionQuery = reactive<Record<string, string>>({}),
+  suggestionSearchRefs = new Map<string, HTMLInputElement>(),
+  SUGGESTION_LIMIT = 50,
+  /** 该厂商是否已有拉取到的模型候选(决定模型行是否展示下拉按钮) */
+  hasFetchedModels = computed(() => props.fetchedModelIds.length > 0);
 
 /** 当前行的下拉候选:按弹层搜索词模糊过滤、排除其他行已占用的 ID */
 function modelSuggestions(model: ModelDraft): string[] {
   const list = props.fetchedModelIds;
-  if (!list.length) return [];
+  if (!list.length) {
+    return [];
+  }
   const used = new Set(
-    props.draft.models.filter((item) => item !== model).map((item) => item.id.trim()),
-  );
-  const keyword = (suggestionQuery[model.key] ?? "").trim().toLowerCase();
+      props.draft.models.filter((item) => item !== model).map((item) => item.id.trim()),
+    ),
+    keyword = (suggestionQuery[model.key] ?? "").trim().toLowerCase();
   return list
     .filter((id) => !used.has(id) && (!keyword || id.toLowerCase().includes(keyword)))
     .slice(0, SUGGESTION_LIMIT);
@@ -159,8 +166,11 @@ function modelSuggestions(model: ModelDraft): string[] {
 
 function setSuggestionSearchRef(key: string, el: unknown) {
   const input = (el as ComponentPublicInstance | null)?.$el;
-  if (input instanceof HTMLInputElement) suggestionSearchRefs.set(key, input);
-  else suggestionSearchRefs.delete(key);
+  if (input instanceof HTMLInputElement) {
+    suggestionSearchRefs.set(key, input);
+  } else {
+    suggestionSearchRefs.delete(key);
+  }
 }
 
 /** 弹层开合统一入口:展开时重置搜索词并聚焦搜索框,关闭时清理 */

@@ -14,9 +14,9 @@ import { useProjectsStore } from "@/stores/projects";
 import { useWikiStore } from "@/stores/wiki";
 import type { Project } from "@/types";
 
-const { t } = useI18n();
-const store = useProjectsStore();
-const wikiStore = useWikiStore();
+const { t } = useI18n(),
+  store = useProjectsStore(),
+  wikiStore = useWikiStore();
 
 onMounted(async () => {
   try {
@@ -29,43 +29,45 @@ onMounted(async () => {
 });
 
 /** 搜索关键字,匹配名称/描述/路径 */
-const searchInput = ref("");
-
-const filteredProjects = computed(() => {
-  // 空格切分为多个查询词,词间 AND:每个词至少命中名称/描述/路径之一
-  const terms = searchInput.value.toLowerCase().split(/\s+/).filter(Boolean);
-  if (terms.length === 0) return store.archivedProjects;
-  return store.archivedProjects.filter((p) => {
-    const fields = [p.name, p.description, p.path].map((s) => s.toLowerCase());
-    return terms.every((q) => fields.some((f) => f.includes(q)));
-  });
-});
-
-/** 待确认的二次操作:恢复归档或彻底删除 */
-const pending = ref<{ action: "restore" | "delete"; project: Project } | null>(null);
-
-const confirmTitle = computed(() =>
-  pending.value?.action === "delete"
-    ? t("settings.archive.permanentDelete")
-    : t("settings.archive.restore"),
-);
-const confirmDescription = computed(() => {
-  if (!pending.value) return "";
-  const key =
-    pending.value.action === "delete"
-      ? "settings.archive.deleteConfirm"
-      : "settings.archive.restoreConfirm";
-  return t(key, { name: pending.value.project.name });
-});
-
-/** 删除确认打开时异步检测:该项目是否有 wiki 数据,有则展示联动清理开关 */
-const wikiExists = ref(false);
-const cleanWiki = ref(true);
+const searchInput = ref(""),
+  filteredProjects = computed(() => {
+    // 空格切分为多个查询词,词间 AND:每个词至少命中名称/描述/路径之一
+    const terms = searchInput.value.toLowerCase().split(/\s+/).filter(Boolean);
+    if (terms.length === 0) {
+      return store.archivedProjects;
+    }
+    return store.archivedProjects.filter((p) => {
+      const fields = [p.name, p.description, p.path].map((s) => s.toLowerCase());
+      return terms.every((q) => fields.some((f) => f.includes(q)));
+    });
+  }),
+  /** 待确认的二次操作:恢复归档或彻底删除 */
+  pending = ref<{ action: "restore" | "delete"; project: Project } | null>(null),
+  confirmTitle = computed(() =>
+    pending.value?.action === "delete"
+      ? t("settings.archive.permanentDelete")
+      : t("settings.archive.restore"),
+  ),
+  confirmDescription = computed(() => {
+    if (!pending.value) {
+      return "";
+    }
+    const key =
+      pending.value.action === "delete"
+        ? "settings.archive.deleteConfirm"
+        : "settings.archive.restoreConfirm";
+    return t(key, { name: pending.value.project.name });
+  }),
+  /** 删除确认打开时异步检测:该项目是否有 wiki 数据,有则展示联动清理开关 */
+  wikiExists = ref(false),
+  cleanWiki = ref(true);
 
 watch(pending, async (p) => {
   wikiExists.value = false;
   cleanWiki.value = true;
-  if (p?.action !== "delete") return;
+  if (p?.action !== "delete") {
+    return;
+  }
   try {
     const exists = await hasWiki(p.project.path);
     // 异步期间对话框可能已关闭或切到其他项目,仅回写仍匹配的结果
@@ -78,7 +80,9 @@ watch(pending, async (p) => {
 });
 
 async function confirmAction() {
-  if (!pending.value) return;
+  if (!pending.value) {
+    return;
+  }
   const { action, project } = pending.value;
   try {
     if (action === "delete") {

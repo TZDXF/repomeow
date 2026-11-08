@@ -6,8 +6,7 @@ vi.mock("@/lib/tauri", () => ({
 }));
 
 function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
+  let resolve!: (value: T) => void, reject!: (reason?: unknown) => void;
   const promise = new Promise<T>((res, rej) => {
     resolve = res;
     reject = rej;
@@ -17,8 +16,8 @@ function deferred<T>() {
 
 describe("useSemanticRequest", () => {
   it("stores result and clears loading", async () => {
-    const req = useSemanticRequest(async (_id: string, value: number) => value * 2);
-    const done = req.run(21);
+    const req = useSemanticRequest(async (_id: string, value: number) => value * 2),
+      done = req.run(21);
     expect(req.loading.value).toBe(true);
     expect(await done).toBe(42);
     expect(req.result.value).toBe(42);
@@ -27,15 +26,15 @@ describe("useSemanticRequest", () => {
   });
 
   it("ignores stale responses from superseded runs", async () => {
-    const first = deferred<string>();
-    const second = deferred<string>();
+    const first = deferred<string>(),
+      second = deferred<string>();
     let call = 0;
     const req = useSemanticRequest(async (_id: string) => {
-      call += 1;
-      return call === 1 ? first.promise : second.promise;
-    });
-    const run1 = req.run();
-    const run2 = req.run();
+        call += 1;
+        return call === 1 ? first.promise : second.promise;
+      }),
+      run1 = req.run(),
+      run2 = req.run();
     second.resolve("new");
     await run2;
     first.resolve("old");
@@ -46,7 +45,9 @@ describe("useSemanticRequest", () => {
 
   it("keeps error from latest run and swallows canceled errors", async () => {
     const req = useSemanticRequest(async (_id: string, fail: string) => {
-      if (fail === "plain") throw new Error("boom");
+      if (fail === "plain") {
+        throw new Error("boom");
+      }
       const error = new Error("canceled") as Error & { code?: string };
       error.code = "semantic_canceled";
       throw error;
@@ -58,9 +59,9 @@ describe("useSemanticRequest", () => {
   });
 
   it("reset clears state and invalidates in-flight run", async () => {
-    const pending = deferred<string>();
-    const req = useSemanticRequest((_id: string) => pending.promise);
-    const run = req.run();
+    const pending = deferred<string>(),
+      req = useSemanticRequest((_id: string) => pending.promise),
+      run = req.run();
     req.reset();
     pending.resolve("late");
     expect(await run).toBeNull();

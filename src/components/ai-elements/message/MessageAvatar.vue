@@ -9,9 +9,8 @@ interface Props {
   class?: HTMLAttributes["class"];
 }
 
-const props = defineProps<Props>();
-
-const fallbackText = computed(() => props.name?.slice(0, 2) ?? "ME");
+const props = defineProps<Props>(),
+  fallbackText = computed(() => props.name?.slice(0, 2) ?? "ME");
 </script>
 
 <template>

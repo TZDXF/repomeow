@@ -9,44 +9,52 @@ import { useStickToBottomContext } from "vue-stick-to-bottom";
  * 上下文(本组件必须渲染在 Conversation 内部)。
  */
 const props = withDefaults(
-  defineProps<{
-    /** 强制渲染:时间线末尾固定几条保持真实挂载,保证吸底定位与流式可见 */
-    pinned?: boolean;
-    /** 流式回合:始终渲染 */
-    live?: boolean;
-  }>(),
-  { pinned: false, live: false },
-);
+    defineProps<{
+      /** 强制渲染:时间线末尾固定几条保持真实挂载,保证吸底定位与流式可见 */
+      pinned?: boolean;
+      /** 流式回合:始终渲染 */
+      live?: boolean;
+    }>(),
+    { pinned: false, live: false },
+  ),
+  { scrollRef } = useStickToBottomContext(),
+  shell = ref<HTMLElement>(),
+  body = ref<HTMLElement>(),
+  nearby = ref(false),
+  revealed = ref(false),
+  focused = ref(false),
+  // 占位高度:取最后实测值,初始给一个常见气泡的估计值
+  height = ref(160),
+  rendered = computed(
+    () => props.pinned || props.live || nearby.value || revealed.value || focused.value,
+  );
 
-const { scrollRef } = useStickToBottomContext();
-const shell = ref<HTMLElement>();
-const body = ref<HTMLElement>();
-const nearby = ref(false);
-const revealed = ref(false);
-const focused = ref(false);
-// 占位高度:取最后实测值,初始给一个常见气泡的估计值
-const height = ref(160);
-const rendered = computed(
-  () => props.pinned || props.live || nearby.value || revealed.value || focused.value,
-);
-
-let intersection: IntersectionObserver | undefined;
-let resize: ResizeObserver | undefined;
-let disposed = false;
+let intersection: IntersectionObserver | undefined,
+  resize: ResizeObserver | undefined,
+  disposed = false;
 
 function measure() {
   const el = body.value;
-  if (!el) return;
+  if (!el) {
+    return;
+  }
   const next = el.getBoundingClientRect().height;
-  if (!next) return;
+  if (!next) {
+    return;
+  }
   const previous = height.value;
   height.value = next;
   const viewport = scrollRef.value;
-  if (!viewport || !shell.value) return;
+  if (!viewport || !shell.value) {
+    return;
+  }
   // 视口上方的占位高度变化时补偿 scrollTop,保持阅读位置;吸底跟随交给 Conversation
-  const above = shell.value.getBoundingClientRect().top + previous <= viewport.getBoundingClientRect().top;
-  const atBottom = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop < 32;
-  if (above && !atBottom) viewport.scrollTop += next - previous;
+  const above =
+      shell.value.getBoundingClientRect().top + previous <= viewport.getBoundingClientRect().top,
+    atBottom = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop < 32;
+  if (above && !atBottom) {
+    viewport.scrollTop += next - previous;
+  }
 }
 
 async function onFocusOut() {
@@ -58,10 +66,16 @@ watch(
   rendered,
   async (visible) => {
     resize?.disconnect();
-    if (!visible) return;
+    if (!visible) {
+      return;
+    }
     await nextTick();
-    if (disposed) return;
-    if (body.value) resize?.observe(body.value);
+    if (disposed) {
+      return;
+    }
+    if (body.value) {
+      resize?.observe(body.value);
+    }
     measure();
   },
   { flush: "post" },
@@ -77,20 +91,26 @@ onMounted(() => {
     () => scrollRef.value,
     (viewport) => {
       intersection?.disconnect();
-      if (!viewport || !shell.value) return;
+      if (!viewport || !shell.value) {
+        return;
+      }
       intersection = new IntersectionObserver(
         (entries) => {
           for (const entry of entries) {
             // 正被用户选中(划词复制)的内容不因滚出视口而卸载
-            const selection = window.getSelection();
-            const selecting =
-              selection &&
-              !selection.isCollapsed &&
-              (shell.value?.contains(selection.anchorNode) ||
-                shell.value?.contains(selection.focusNode));
-            if (!entry.isIntersecting && selecting) continue;
+            const selection = window.getSelection(),
+              selecting =
+                selection &&
+                !selection.isCollapsed &&
+                (shell.value?.contains(selection.anchorNode) ||
+                  shell.value?.contains(selection.focusNode));
+            if (!entry.isIntersecting && selecting) {
+              continue;
+            }
             nearby.value = entry.isIntersecting;
-            if (entry.isIntersecting) revealed.value = false;
+            if (entry.isIntersecting) {
+              revealed.value = false;
+            }
           }
         },
         { root: viewport, rootMargin: "800px 0px" },

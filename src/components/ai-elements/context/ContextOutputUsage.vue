@@ -7,18 +7,15 @@ import { estimateCost, formatUsd, useContextValue } from "./context";
 import TokensWithCost from "./TokensWithCost.vue";
 
 const props = defineProps<{
-  class?: HTMLAttributes["class"];
-}>();
-
-const { t } = useI18n();
-const { usage, cost } = useContextValue();
-
-const outputTokens = computed(() => usage.value?.outputTokens ?? 0);
-
-const outputCostText = computed(() => {
-  const usd = estimateCost(outputTokens.value, cost.value?.output);
-  return usd == null ? undefined : formatUsd(usd);
-});
+    class?: HTMLAttributes["class"];
+  }>(),
+  { t } = useI18n(),
+  { usage, cost } = useContextValue(),
+  outputTokens = computed(() => usage.value?.outputTokens ?? 0),
+  outputCostText = computed(() => {
+    const usd = estimateCost(outputTokens.value, cost.value?.output);
+    return usd == null ? undefined : formatUsd(usd);
+  });
 </script>
 
 <template>

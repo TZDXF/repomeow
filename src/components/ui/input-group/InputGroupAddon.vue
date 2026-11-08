@@ -15,8 +15,8 @@ const props = withDefaults(
 );
 
 function handleInputGroupAddonClick(e: MouseEvent) {
-  const currentTarget = e.currentTarget as HTMLElement | null;
-  const target = e.target as HTMLElement | null;
+  const currentTarget = e.currentTarget as HTMLElement | null,
+    target = e.target as HTMLElement | null;
   if (target && target.closest("button")) {
     return;
   }

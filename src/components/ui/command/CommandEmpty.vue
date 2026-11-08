@@ -7,12 +7,10 @@ import { computed } from "vue";
 import { cn } from "@/lib/utils";
 import { useCommand } from ".";
 
-const props = defineProps<PrimitiveProps & { class?: HTMLAttributes["class"] }>();
-
-const delegatedProps = reactiveOmit(props, "class");
-
-const { filterState } = useCommand();
-const isRender = computed(() => !!filterState.search && filterState.filtered.count === 0);
+const props = defineProps<PrimitiveProps & { class?: HTMLAttributes["class"] }>(),
+  delegatedProps = reactiveOmit(props, "class"),
+  { filterState } = useCommand(),
+  isRender = computed(() => !!filterState.search && filterState.filtered.count === 0);
 </script>
 
 <template>

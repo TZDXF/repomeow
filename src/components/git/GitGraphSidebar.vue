@@ -27,26 +27,23 @@ interface BranchTreeRow {
 }
 
 const props = defineProps<{
-  branches: GitBranches;
-  tags: string[];
-  currentBranch: string;
-  selectedBranch: string;
-  branchOp: { branch: string; op: "pull" | "push" } | null;
-}>();
-
-const open = defineModel<boolean>("open", { required: true });
-
-const emit = defineEmits<{
-  selectBranch: [name: string];
-  locateTag: [tag: string];
-  pullBranch: [name: string];
-  pushBranch: [name: string];
-  deleteBranch: [name: string];
-}>();
-
-const { t } = useI18n();
-const collapsedSections = ref<Set<string>>(new Set());
-const collapsedFolders = ref<Set<string>>(new Set());
+    branches: GitBranches;
+    tags: string[];
+    currentBranch: string;
+    selectedBranch: string;
+    branchOp: { branch: string; op: "pull" | "push" } | null;
+  }>(),
+  open = defineModel<boolean>("open", { required: true }),
+  emit = defineEmits<{
+    selectBranch: [name: string];
+    locateTag: [tag: string];
+    pullBranch: [name: string];
+    pushBranch: [name: string];
+    deleteBranch: [name: string];
+  }>(),
+  { t } = useI18n(),
+  collapsedSections = ref<Set<string>>(new Set()),
+  collapsedFolders = ref<Set<string>>(new Set());
 
 function toggleInSet(target: Ref<Set<string>>, key: string) {
   const next = new Set(target.value);
@@ -67,28 +64,28 @@ function toggleFolder(key: string) {
 }
 
 function branchRows(names: string[], prefix: string): BranchTreeRow[] {
-  const out: BranchTreeRow[] = [];
-  const walk = (nodes: BranchTreeNode[], depth: number) => {
-    for (const node of nodes) {
-      out.push({ node, depth });
-      if (node.children.length && !collapsedFolders.value.has(`${prefix}:${node.fullPath}`)) {
-        walk(node.children, depth + 1);
+  const out: BranchTreeRow[] = [],
+    walk = (nodes: BranchTreeNode[], depth: number) => {
+      for (const node of nodes) {
+        out.push({ node, depth });
+        if (node.children.length && !collapsedFolders.value.has(`${prefix}:${node.fullPath}`)) {
+          walk(node.children, depth + 1);
+        }
       }
-    }
-  };
+    };
   walk(buildBranchTree(names), 0);
   return out;
 }
 
-const localRows = computed(() => branchRows(props.branches.local, "local"));
-const remoteRows = computed(() => branchRows(props.branches.remote, "remote"));
-const trackByName = computed(() => {
-  const result = new Map<string, GitBranchTrack>();
-  for (const track of props.branches.tracking) {
-    result.set(track.name, track);
-  }
-  return result;
-});
+const localRows = computed(() => branchRows(props.branches.local, "local")),
+  remoteRows = computed(() => branchRows(props.branches.remote, "remote")),
+  trackByName = computed(() => {
+    const result = new Map<string, GitBranchTrack>();
+    for (const track of props.branches.tracking) {
+      result.set(track.name, track);
+    }
+    return result;
+  });
 
 function trackOf(branch: string | null) {
   return branch ? trackByName.value.get(branch) : undefined;

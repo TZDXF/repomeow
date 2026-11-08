@@ -18,15 +18,14 @@ interface UseLazyProjectFilesOptions {
  * 在后台预取。根路径变化时，旧请求通过序号失效，不会回填到新工作区。
  */
 export function useLazyProjectFiles({ rootPath, selected }: UseLazyProjectFilesOptions) {
-  const childrenMap = ref(new Map<string, ProjectFileEntry[]>());
-  const expandedFolders = ref(new Set<string>());
-  const listLoading = ref(false);
-  const listError = ref(false);
+  const childrenMap = ref(new Map<string, ProjectFileEntry[]>()),
+    expandedFolders = ref(new Set<string>()),
+    listLoading = ref(false),
+    listError = ref(false);
   let listSeq = 0;
-  const inflight = new Map<string, Promise<void>>();
-
-  const prefetchQueue: string[] = [];
-  const prefetchQueued = new Set<string>();
+  const inflight = new Map<string, Promise<void>>(),
+    prefetchQueue: string[] = [],
+    prefetchQueued = new Set<string>();
   let prefetchActive = 0;
 
   function prefetchNext(children: ProjectFileEntry[]) {
@@ -64,35 +63,35 @@ export function useLazyProjectFiles({ rootPath, selected }: UseLazyProjectFilesO
     if (!path) {
       return;
     }
-    const seq = listSeq;
-    const request = (async () => {
-      try {
-        const entries = await cmd<ProjectFileEntry[]>("list_project_files", {
-          path,
-          dir: dir || null,
-        });
-        if (seq !== listSeq) {
-          return;
-        }
-        const next = new Map(childrenMap.value);
-        next.set(dir, sortDirEntries(entries));
-        childrenMap.value = next;
-        if (dir === "" || expandedFolders.value.has(dir)) {
-          prefetchNext(entries);
-        }
-      } catch {
-        if (seq !== listSeq) {
-          return;
-        }
-        if (dir === "") {
-          listError.value = true;
-        } else {
+    const seq = listSeq,
+      request = (async () => {
+        try {
+          const entries = await cmd<ProjectFileEntry[]>("list_project_files", {
+            path,
+            dir: dir || null,
+          });
+          if (seq !== listSeq) {
+            return;
+          }
           const next = new Map(childrenMap.value);
-          next.set(dir, []);
+          next.set(dir, sortDirEntries(entries));
           childrenMap.value = next;
+          if (dir === "" || expandedFolders.value.has(dir)) {
+            prefetchNext(entries);
+          }
+        } catch {
+          if (seq !== listSeq) {
+            return;
+          }
+          if (dir === "") {
+            listError.value = true;
+          } else {
+            const next = new Map(childrenMap.value);
+            next.set(dir, []);
+            childrenMap.value = next;
+          }
         }
-      }
-    })();
+      })();
     inflight.set(dir, request);
     void request.finally(() => {
       if (inflight.get(dir) === request) {
@@ -123,8 +122,8 @@ export function useLazyProjectFiles({ rootPath, selected }: UseLazyProjectFilesO
 
   /** 加载并展开文件的全部祖先目录，使外部搜索选中的文件在树中可见。 */
   async function revealPath(path: string) {
-    const segments = path.split("/");
-    const prefixes: string[] = [];
+    const segments = path.split("/"),
+      prefixes: string[] = [];
     let prefix = "";
     for (let i = 0; i < segments.length - 1; i++) {
       prefix = prefix ? `${prefix}/${segments[i]}` : segments[i];
@@ -158,9 +157,9 @@ export function useLazyProjectFiles({ rootPath, selected }: UseLazyProjectFilesO
       }
       return;
     }
-    const affected = [...dirs];
-    const stale: string[] = [];
-    const next = new Map(childrenMap.value);
+    const affected = [...dirs],
+      stale: string[] = [],
+      next = new Map(childrenMap.value);
     for (const key of next.keys()) {
       const hit = affected.some((d) => key === d || (d !== "" && key.startsWith(`${d}/`)));
       if (hit) {
@@ -176,10 +175,10 @@ export function useLazyProjectFiles({ rootPath, selected }: UseLazyProjectFilesO
       void ensureChildren(dir);
     }
   }
-  const visibleRows = computed(() => buildVisibleRows(childrenMap.value, expandedFolders.value));
-  const rootEmpty = computed(
-    () => childrenMap.value.has("") && childrenMap.value.get("")!.length === 0,
-  );
+  const visibleRows = computed(() => buildVisibleRows(childrenMap.value, expandedFolders.value)),
+    rootEmpty = computed(
+      () => childrenMap.value.has("") && childrenMap.value.get("")!.length === 0,
+    );
 
   async function loadFiles() {
     if (!rootPath.value) {

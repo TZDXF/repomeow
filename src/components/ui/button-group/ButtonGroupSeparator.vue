@@ -6,9 +6,9 @@ import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 
 const props = withDefaults(defineProps<SeparatorProps & { class?: HTMLAttributes["class"] }>(), {
-  orientation: "vertical",
-});
-const delegatedProps = reactiveOmit(props, "class");
+    orientation: "vertical",
+  }),
+  delegatedProps = reactiveOmit(props, "class");
 </script>
 
 <template>

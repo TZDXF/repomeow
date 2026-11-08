@@ -16,7 +16,9 @@ export function resolveJavaHome(
   projectId: number | string,
 ): string | undefined {
   const mode = store.projectJdkMap[String(projectId)] ?? JDK_FOLLOW_DEFAULT;
-  if (mode === JDK_SYSTEM_PATH) return undefined;
+  if (mode === JDK_SYSTEM_PATH) {
+    return undefined;
+  }
   const id = mode === JDK_FOLLOW_DEFAULT ? store.defaultJdkId : mode;
   return store.jdkList.find((j) => j.id === id)?.path;
 }
@@ -24,6 +26,8 @@ export function resolveJavaHome(
 /** 从 `java -version` 版本串提取展示用主版本:"17.0.2" -> "17","1.8.0_392" -> "8" */
 export function javaMajorVersion(version: string): string {
   const parts = version.split(/[._]/);
-  if (parts[0] === "1" && parts.length > 1) return parts[1];
+  if (parts[0] === "1" && parts.length > 1) {
+    return parts[1];
+  }
   return parts[0] || version;
 }

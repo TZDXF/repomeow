@@ -12,6 +12,8 @@ export const ReasoningKey: InjectionKey<ReasoningContextValue> = Symbol("Reasoni
 
 export function useReasoningContext() {
   const ctx = inject<ReasoningContextValue>(ReasoningKey);
-  if (!ctx) throw new Error("Reasoning components must be used within <Reasoning>");
+  if (!ctx) {
+    throw new Error("Reasoning components must be used within <Reasoning>");
+  }
   return ctx;
 }

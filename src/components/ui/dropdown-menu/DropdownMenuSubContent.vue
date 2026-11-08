@@ -7,16 +7,14 @@ import { POPPER_COLLISION_PADDING } from "@/lib/popper";
 import { cn } from "@/lib/utils";
 
 const props = withDefaults(
-  defineProps<DropdownMenuSubContentProps & { class?: HTMLAttributes["class"] }>(),
-  {
-    collisionPadding: () => POPPER_COLLISION_PADDING,
-  },
-);
-const emits = defineEmits<DropdownMenuSubContentEmits>();
-
-const delegatedProps = reactiveOmit(props, "class");
-
-const forwarded = useForwardPropsEmits(delegatedProps, emits);
+    defineProps<DropdownMenuSubContentProps & { class?: HTMLAttributes["class"] }>(),
+    {
+      collisionPadding: () => POPPER_COLLISION_PADDING,
+    },
+  ),
+  emits = defineEmits<DropdownMenuSubContentEmits>(),
+  delegatedProps = reactiveOmit(props, "class"),
+  forwarded = useForwardPropsEmits(delegatedProps, emits);
 </script>
 
 <template>

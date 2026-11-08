@@ -28,13 +28,13 @@ import { useAgentsMdStore } from "@/stores/agents-md";
 import { useBatchReportStore } from "@/stores/batch-report";
 import { useWikiStore } from "@/stores/wiki";
 
-const { t } = useI18n();
-const router = useRouter();
-const store = useBackgroundTasksStore();
-const agentsMdStore = useAgentsMdStore();
-const batchReportStore = useBatchReportStore();
-const wikiStore = useWikiStore();
-const open = ref(false);
+const { t } = useI18n(),
+  router = useRouter(),
+  store = useBackgroundTasksStore(),
+  agentsMdStore = useAgentsMdStore(),
+  batchReportStore = useBatchReportStore(),
+  wikiStore = useWikiStore(),
+  open = ref(false);
 
 interface TaskGroup {
   key: BackgroundTaskKind;
@@ -118,27 +118,26 @@ watch(open, (isOpen) => {
 });
 
 const taskGroups = computed<TaskGroup[]>(() => {
-  const kinds: BackgroundTaskKind[] = ["report", "wiki", "conflict", "agents-md"];
-  return kinds.flatMap((kind) => {
-    const tasks = store.tasks.filter((task) => task.kind === kind);
-    if (!tasks.length) {
-      return [];
-    }
-    const determinate = tasks.filter((task) => task.total > 0);
-    const completed = determinate.reduce((sum, task) => sum + task.completed, 0);
-    const total = determinate.reduce((sum, task) => sum + task.total, 0);
-    let progress = t("titleBar.running");
-    if (determinate.length === tasks.length) {
-      progress = `${completed}/${total}`;
-    } else if (total > 0) {
-      progress = `${completed}/${total}+`;
-    }
-    return [{ key: kind, label: kindLabel(kind), count: tasks.length, progress }];
-  });
-});
-
-const taskCount = computed(() => store.tasks.length);
-const visible = computed(() => taskCount.value > 0 || store.history.length > 0);
+    const kinds: BackgroundTaskKind[] = ["report", "wiki", "conflict", "agents-md"];
+    return kinds.flatMap((kind) => {
+      const tasks = store.tasks.filter((task) => task.kind === kind);
+      if (!tasks.length) {
+        return [];
+      }
+      const determinate = tasks.filter((task) => task.total > 0),
+        completed = determinate.reduce((sum, task) => sum + task.completed, 0),
+        total = determinate.reduce((sum, task) => sum + task.total, 0);
+      let progress = t("titleBar.running");
+      if (determinate.length === tasks.length) {
+        progress = `${completed}/${total}`;
+      } else if (total > 0) {
+        progress = `${completed}/${total}+`;
+      }
+      return [{ key: kind, label: kindLabel(kind), count: tasks.length, progress }];
+    });
+  }),
+  taskCount = computed(() => store.tasks.length),
+  visible = computed(() => taskCount.value > 0 || store.history.length > 0);
 
 function progressPercent(task: BackgroundTaskItem): number {
   if (task.total <= 0) {

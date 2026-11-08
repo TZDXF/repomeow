@@ -21,16 +21,15 @@ function formatValue(value: unknown): string {
 }
 
 const entries = computed<[string, string][]>(() => {
-  if (props.input !== null && typeof props.input === "object" && !Array.isArray(props.input)) {
-    return Object.entries(props.input as Record<string, unknown>).map(([key, value]) => [
-      key,
-      formatValue(value),
-    ]);
-  }
-  return [];
-});
-
-const fallback = computed(() => formatValue(props.input));
+    if (props.input !== null && typeof props.input === "object" && !Array.isArray(props.input)) {
+      return Object.entries(props.input as Record<string, unknown>).map(([key, value]) => [
+        key,
+        formatValue(value),
+      ]);
+    }
+    return [];
+  }),
+  fallback = computed(() => formatValue(props.input));
 </script>
 
 <template>

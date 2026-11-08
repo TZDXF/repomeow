@@ -27,21 +27,20 @@ type OutputListener = (id: number, chunk: string) => void;
  */
 export const useTerminalStore = defineStore("terminal", () => {
   /** 全部会话(初始使用后端排序,已有会话更新时保持位置) */
-  const sessions = ref<TerminalSessionInfo[]>([]);
-  /** 终端面板是否展开 */
-  const open = ref(false);
-  /** 当前选中的会话 id */
-  const activeId = ref<number | null>(null);
-  /** 展开态面板高度(px,顶部边缘拖拽调整;窗口级 UI 状态,不持久化) */
-  const panelHeight = ref(288);
-  /** 每个项目的页签手工排序(会话 id 列表);未列入的会话按默认排序附后 */
-  const tabOrders = ref(new Map<number, number[]>());
-
-  /** 每会话输出缓存:事件流自订阅起完整;订阅前已存在的会话在 init 时回填 */
-  const buffers = new Map<number, string>();
-  /** 各会话最近一次 started_at:restart 后该值变化,据此清空前端缓存 */
-  const startedAts = new Map<number, number>();
-  const outputListeners = new Set<OutputListener>();
+  const sessions = ref<TerminalSessionInfo[]>([]),
+    /** 终端面板是否展开 */
+    open = ref(false),
+    /** 当前选中的会话 id */
+    activeId = ref<number | null>(null),
+    /** 展开态面板高度(px,顶部边缘拖拽调整;窗口级 UI 状态,不持久化) */
+    panelHeight = ref(288),
+    /** 每个项目的页签手工排序(会话 id 列表);未列入的会话按默认排序附后 */
+    tabOrders = ref(new Map<number, number[]>()),
+    /** 每会话输出缓存:事件流自订阅起完整;订阅前已存在的会话在 init 时回填 */
+    buffers = new Map<number, string>(),
+    /** 各会话最近一次 started_at:restart 后该值变化,据此清空前端缓存 */
+    startedAts = new Map<number, number>(),
+    outputListeners = new Set<OutputListener>();
 
   let initPromise: Promise<void> | null = null;
 
@@ -86,15 +85,19 @@ export const useTerminalStore = defineStore("terminal", () => {
   }
 
   function appendOutput(id: number, chunk: string) {
-    if (!chunk) return;
+    if (!chunk) {
+      return;
+    }
     buffers.set(id, appendCapped(buffers.get(id) ?? "", chunk));
-    for (const l of outputListeners) l(id, chunk);
+    for (const l of outputListeners) {
+      l(id, chunk);
+    }
   }
 
   /** 用命令结果补齐状态;请求期间已收到事件时保留事件状态,避免快速退出被旧的 running 响应覆盖。 */
   async function syncSessionCommand(command: () => Promise<TerminalSessionInfo>) {
-    const previous = new Map(sessions.value.map((s) => [s.id, s]));
-    const info = await command();
+    const previous = new Map(sessions.value.map((s) => [s.id, s])),
+      info = await command();
     if (sessions.value.find((s) => s.id === info.id) === previous.get(info.id)) {
       onSessionChanged(info);
     }

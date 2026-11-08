@@ -6,12 +6,10 @@ import { filterLanguageFileTypes, topWithOther } from "@/lib/git-stats";
 import type { GitFileTypeStat } from "@/types";
 
 const props = defineProps<{
-  fileTypes: GitFileTypeStat[];
-}>();
-
-const { t } = useI18n();
-
-const TOP_TYPES = 8;
+    fileTypes: GitFileTypeStat[];
+  }>(),
+  { t } = useI18n(),
+  TOP_TYPES = 8;
 
 interface TypeRow {
   ext: string;
@@ -23,47 +21,48 @@ interface TypeRow {
 }
 
 const rows = computed<TypeRow[]>(() => {
-  // 对标 GitHub 语言条:只统计语言类文件,占比相对语言类字节合计(不含图片/配置等)
-  const langs = filterLanguageFileTypes(props.fileTypes);
-  const total = Math.max(
-    langs.reduce((s, f) => s + f.bytes, 0),
-    1,
-  );
-  const toRow = (f: GitFileTypeStat): TypeRow => ({
-    ext: f.ext,
-    files: f.files,
-    bytes: f.bytes,
-    share: f.bytes / total,
-    other: false,
-  });
-  return topWithOther(langs.map(toRow), TOP_TYPES, (rest) => ({
-    ext: "__other__",
-    files: rest.reduce((s, f) => s + f.files, 0),
-    bytes: rest.reduce((s, f) => s + f.bytes, 0),
-    share: rest.reduce((s, f) => s + f.share, 0),
-    other: true,
-  }));
-});
-
-/** 类型配色:按行序轮换的确定性色板(语言条与图例共用) */
-const TYPE_COLORS = [
-  "bg-blue-500",
-  "bg-violet-500",
-  "bg-amber-500",
-  "bg-emerald-500",
-  "bg-rose-500",
-  "bg-cyan-500",
-  "bg-orange-500",
-  "bg-lime-600",
-  "bg-slate-400",
-] as const;
+    // 对标 GitHub 语言条:只统计语言类文件,占比相对语言类字节合计(不含图片/配置等)
+    const langs = filterLanguageFileTypes(props.fileTypes),
+      total = Math.max(
+        langs.reduce((s, f) => s + f.bytes, 0),
+        1,
+      ),
+      toRow = (f: GitFileTypeStat): TypeRow => ({
+        ext: f.ext,
+        files: f.files,
+        bytes: f.bytes,
+        share: f.bytes / total,
+        other: false,
+      });
+    return topWithOther(langs.map(toRow), TOP_TYPES, (rest) => ({
+      ext: "__other__",
+      files: rest.reduce((s, f) => s + f.files, 0),
+      bytes: rest.reduce((s, f) => s + f.bytes, 0),
+      share: rest.reduce((s, f) => s + f.share, 0),
+      other: true,
+    }));
+  }),
+  /** 类型配色:按行序轮换的确定性色板(语言条与图例共用) */
+  TYPE_COLORS = [
+    "bg-blue-500",
+    "bg-violet-500",
+    "bg-amber-500",
+    "bg-emerald-500",
+    "bg-rose-500",
+    "bg-cyan-500",
+    "bg-orange-500",
+    "bg-lime-600",
+    "bg-slate-400",
+  ] as const;
 
 function colorClass(index: number): string {
   return TYPE_COLORS[index % TYPE_COLORS.length];
 }
 
 function extLabel(row: TypeRow): string {
-  if (row.other) return t("git.graph.analysis.typeOther");
+  if (row.other) {
+    return t("git.graph.analysis.typeOther");
+  }
   return `.${row.ext}`;
 }
 

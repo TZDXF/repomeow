@@ -34,12 +34,11 @@ withDefaults(
 );
 
 /** 模型复合值("providerId/modelId");空 = 设置页默认模型 */
-const model = defineModel<string>("model", { default: "" });
-/** 思考强度;空 = 模型默认档 */
-const thinking = defineModel<string>("thinking", { default: "" });
-
-const { t } = useI18n();
-const aiConfig = useAiConfigStore();
+const model = defineModel<string>("model", { default: "" }),
+  /** 思考强度;空 = 模型默认档 */
+  thinking = defineModel<string>("thinking", { default: "" }),
+  { t } = useI18n(),
+  aiConfig = useAiConfigStore();
 
 onMounted(() => {
   // 模型清单加载失败不阻塞:选择器空态禁用走默认
@@ -47,53 +46,56 @@ onMounted(() => {
 });
 
 /** 空值的 Select 占位值(reka 不接受空字符串作为 item value) */
-const DEFAULT_VALUE = "__default__";
-
-/** 可选模型:ai-config 全部厂商/模型,按厂商分组 */
-const modelGroups = computed<ModelSelectorGroup[]>(() => {
-  const config = aiConfig.config;
-  if (!config) return [];
-  return Object.entries(config.providers).map(([providerId, provider]) => ({
-    providerId,
-    providerName: provider.name || providerId,
-    models: provider.models,
-  }));
-});
-
-/** 模型触发器占位:展示设置页默认模型名并标注「默认」,无默认模型时回退通用文案 */
-const modelPlaceholder = computed(() => {
-  const resolved = aiConfig.defaultModel;
-  if (!resolved) return t("wiki.builtinModelDefault");
-  return `${modelDisplayName(resolved.model)} (${t("chat.defaultTag")})`;
-});
-
-/** 生效模型定义:已选 > 设置页默认(决定思考默认档:推理模型中档,其余关闭) */
-const effectiveModelDef = computed(() => {
-  const config = aiConfig.config;
-  if (model.value && config) {
-    const reference = parseModelOptionValue(model.value);
-    const found = reference
-      ? config.providers[reference.providerId]?.models.find((m) => m.id === reference.modelId)
-      : undefined;
-    if (found) return found;
-  }
-  return aiConfig.defaultModel?.model ?? null;
-});
-
-/** 思考默认项文案:直接展示生效档位(推理模型「中」,其余「关闭」)并标注「默认」 */
-const thinkingDefaultLabel = computed(() => {
-  const def = effectiveModelDef.value;
-  if (!def) return t("wiki.builtinThinkingDefault");
-  const level = def.reasoning ? "medium" : "off";
-  return `${t(`chat.thinkingLevels.${level}`)} (${t("chat.defaultTag")})`;
-});
-
-const thinkingOptions = computed(() =>
-  CHAT_THINKING_LEVELS.map((level) => ({
-    id: level,
-    name: t(`chat.thinkingLevels.${level}`),
-  })),
-);
+const DEFAULT_VALUE = "__default__",
+  /** 可选模型:ai-config 全部厂商/模型,按厂商分组 */
+  modelGroups = computed<ModelSelectorGroup[]>(() => {
+    const config = aiConfig.config;
+    if (!config) {
+      return [];
+    }
+    return Object.entries(config.providers).map(([providerId, provider]) => ({
+      providerId,
+      providerName: provider.name || providerId,
+      models: provider.models,
+    }));
+  }),
+  /** 模型触发器占位:展示设置页默认模型名并标注「默认」,无默认模型时回退通用文案 */
+  modelPlaceholder = computed(() => {
+    const resolved = aiConfig.defaultModel;
+    if (!resolved) {
+      return t("wiki.builtinModelDefault");
+    }
+    return `${modelDisplayName(resolved.model)} (${t("chat.defaultTag")})`;
+  }),
+  /** 生效模型定义:已选 > 设置页默认(决定思考默认档:推理模型中档,其余关闭) */
+  effectiveModelDef = computed(() => {
+    const config = aiConfig.config;
+    if (model.value && config) {
+      const reference = parseModelOptionValue(model.value),
+        found = reference
+          ? config.providers[reference.providerId]?.models.find((m) => m.id === reference.modelId)
+          : undefined;
+      if (found) {
+        return found;
+      }
+    }
+    return aiConfig.defaultModel?.model ?? null;
+  }),
+  /** 思考默认项文案:直接展示生效档位(推理模型「中」,其余「关闭」)并标注「默认」 */
+  thinkingDefaultLabel = computed(() => {
+    const def = effectiveModelDef.value;
+    if (!def) {
+      return t("wiki.builtinThinkingDefault");
+    }
+    const level = def.reasoning ? "medium" : "off";
+    return `${t(`chat.thinkingLevels.${level}`)} (${t("chat.defaultTag")})`;
+  }),
+  thinkingOptions = computed(() =>
+    CHAT_THINKING_LEVELS.map((level) => ({
+      id: level,
+      name: t(`chat.thinkingLevels.${level}`),
+    })),
+  );
 
 function onModelChange(value: string) {
   model.value = value;

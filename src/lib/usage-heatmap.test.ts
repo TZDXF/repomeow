@@ -33,7 +33,9 @@ describe("buildUsageHeatmap", () => {
   it("生成 27 列 × 7 行,首列从周一开始,最后一列包含今天", () => {
     const { weeks } = buildUsageHeatmap([], today);
     expect(weeks).toHaveLength(USAGE_HEATMAP_WEEKS);
-    for (const week of weeks) expect(week).toHaveLength(7);
+    for (const week of weeks) {
+      expect(week).toHaveLength(7);
+    }
 
     const first = parseDateStr(weeks[0][0].day);
     expect(first.getDay()).toBe(1);
@@ -45,8 +47,8 @@ describe("buildUsageHeatmap", () => {
   });
 
   it("今天之后的格子标记为 future,今天及之前不是", () => {
-    const { weeks } = buildUsageHeatmap([], today);
-    const lastWeek = weeks[USAGE_HEATMAP_WEEKS - 1];
+    const { weeks } = buildUsageHeatmap([], today),
+      lastWeek = weeks[USAGE_HEATMAP_WEEKS - 1];
     for (const cell of lastWeek) {
       expect(cell.future).toBe(cell.day > "2026-08-27");
     }
@@ -56,10 +58,10 @@ describe("buildUsageHeatmap", () => {
   it("按日数据落到对应格子并按窗口最大值分档,无记录的日期为 0 档", () => {
     // 网格起点:2026-08-24(本周周一)往前 26 周 = 2026-02-23
     const { weeks } = buildUsageHeatmap(
-      [stat("2026-08-27", 100), stat("2026-02-23", 50), stat("2026-02-24", 10)],
-      today,
-    );
-    const flat = weeks.flat();
+        [stat("2026-08-27", 100), stat("2026-02-23", 50), stat("2026-02-24", 10)],
+        today,
+      ),
+      flat = weeks.flat();
     expect(flat.find((c) => c.day === "2026-08-27")).toMatchObject({
       calls: 1,
       totalTokens: 100,
@@ -75,15 +77,12 @@ describe("buildUsageHeatmap", () => {
   });
 
   it("窗口外的数据不参与最大值归一化", () => {
-    const { weeks } = buildUsageHeatmap([], today);
-    const oldest = weeks[0][0].day;
-    // 窗口外更早一天放一个超大值,窗口内一个小值仍应拿到 4 档
-    const d0 = parseDateStr(oldest);
-    const outside = formatDate(new Date(d0.getFullYear(), d0.getMonth(), d0.getDate() - 1));
-    const { weeks: w2 } = buildUsageHeatmap(
-      [stat(outside, 1_000_000), stat("2026-08-27", 10)],
-      today,
-    );
+    const { weeks } = buildUsageHeatmap([], today),
+      oldest = weeks[0][0].day,
+      // 窗口外更早一天放一个超大值,窗口内一个小值仍应拿到 4 档
+      d0 = parseDateStr(oldest),
+      outside = formatDate(new Date(d0.getFullYear(), d0.getMonth(), d0.getDate() - 1)),
+      { weeks: w2 } = buildUsageHeatmap([stat(outside, 1_000_000), stat("2026-08-27", 10)], today);
     expect(w2.flat().find((c) => c.day === "2026-08-27")?.level).toBe(4);
   });
 
@@ -98,13 +97,13 @@ describe("buildUsageHeatmap", () => {
   });
 
   it("今天恰为周一/周日时网格边界正确", () => {
-    const monday = new Date(2026, 7, 24);
-    const { weeks: wMon } = buildUsageHeatmap([], monday);
+    const monday = new Date(2026, 7, 24),
+      { weeks: wMon } = buildUsageHeatmap([], monday);
     expect(wMon[USAGE_HEATMAP_WEEKS - 1][0].day).toBe("2026-08-24");
     expect(wMon[USAGE_HEATMAP_WEEKS - 1].filter((c) => c.future)).toHaveLength(6);
 
-    const sunday = new Date(2026, 7, 30);
-    const { weeks: wSun } = buildUsageHeatmap([], sunday);
+    const sunday = new Date(2026, 7, 30),
+      { weeks: wSun } = buildUsageHeatmap([], sunday);
     expect(wSun[USAGE_HEATMAP_WEEKS - 1][6].day).toBe("2026-08-30");
     expect(wSun.flat().every((c) => !c.future)).toBe(true);
   });

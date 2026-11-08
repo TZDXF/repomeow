@@ -19,27 +19,31 @@ import type { ReportSchedule } from "@/types";
 /** 报告定时任务列表:展示配置摘要,发出启停/编辑/删除/手动执行事件(不直接改数据) */
 defineProps<{ schedules: ReportSchedule[]; runningIds: string[] }>();
 const emit = defineEmits<{
-  toggle: [schedule: ReportSchedule];
-  edit: [schedule: ReportSchedule];
-  remove: [id: string];
-  runNow: [schedule: ReportSchedule];
-}>();
-
-const { t, locale } = useI18n();
-const projectStore = useProjectsStore();
-const tagsStore = useTagsStore();
-
-const weekdayNames = computed(() => weekdayShortNames(locale.value));
+    toggle: [schedule: ReportSchedule];
+    edit: [schedule: ReportSchedule];
+    remove: [id: string];
+    runNow: [schedule: ReportSchedule];
+  }>(),
+  { t, locale } = useI18n(),
+  projectStore = useProjectsStore(),
+  tagsStore = useTagsStore(),
+  weekdayNames = computed(() => weekdayShortNames(locale.value));
 
 function weekdayLabel(mode: WeekdayMode) {
-  if (mode === "chineseWorkday") return t("reportSchedule.chineseWorkdayOnly");
-  if (mode === "weekdays") return t("reportSchedule.weekdaysOnly");
+  if (mode === "chineseWorkday") {
+    return t("reportSchedule.chineseWorkdayOnly");
+  }
+  if (mode === "weekdays") {
+    return t("reportSchedule.weekdaysOnly");
+  }
   return t("reportSchedule.everyday");
 }
 
 /** 周报周期描述:工作周模式显示固定文案;自定义模式显示 "周一 ~ 周五" */
 function weeklyLabel(s: ReportSchedule) {
-  if (s.weeklyWorkweek) return t("reportSchedule.workweekLabel");
+  if (s.weeklyWorkweek) {
+    return t("reportSchedule.workweekLabel");
+  }
   return weeklyRangeLabel(s, weekdayNames.value);
 }
 
@@ -56,7 +60,9 @@ function scheduleTagNames(ids: number[]) {
 }
 
 function lastRun(ts: number | null) {
-  if (!ts) return t("reportSchedule.never");
+  if (!ts) {
+    return t("reportSchedule.never");
+  }
   return formatLocalDateTime(ts);
 }
 </script>

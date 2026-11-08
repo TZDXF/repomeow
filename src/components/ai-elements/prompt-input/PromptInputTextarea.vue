@@ -11,23 +11,26 @@ interface Props extends /* @vue-ignore */ PromptInputTextareaProps {
   class?: HTMLAttributes["class"];
 }
 
-const props = defineProps<Props>();
-
-const { textInput, setTextInput, addFiles, files, removeFile } = usePromptInput();
-const isComposing = ref(false);
+const props = defineProps<Props>(),
+  { textInput, setTextInput, addFiles, files, removeFile } = usePromptInput(),
+  isComposing = ref(false);
 
 function handleKeyDown(e: KeyboardEvent) {
   if (e.key === "Enter") {
-    if (isComposing.value || e.isComposing || e.shiftKey) return;
+    if (isComposing.value || e.isComposing || e.shiftKey) {
+      return;
+    }
 
     e.preventDefault();
 
-    const textarea = e.currentTarget as HTMLTextAreaElement | null;
-    const submitButton = textarea?.form?.querySelector(
-      'button[type="submit"]',
-    ) as HTMLButtonElement | null;
+    const textarea = e.currentTarget as HTMLTextAreaElement | null,
+      submitButton = textarea?.form?.querySelector(
+        'button[type="submit"]',
+      ) as HTMLButtonElement | null;
 
-    if (submitButton?.disabled) return;
+    if (submitButton?.disabled) {
+      return;
+    }
 
     textarea?.form?.requestSubmit();
   }
@@ -45,13 +48,17 @@ function handleKeyDown(e: KeyboardEvent) {
 
 function handlePaste(e: ClipboardEvent) {
   const items = e.clipboardData?.items;
-  if (!items) return;
+  if (!items) {
+    return;
+  }
 
   const pastedFiles: File[] = [];
   for (const item of Array.from(items)) {
     if (item.kind === "file") {
       const file = item.getAsFile();
-      if (file) pastedFiles.push(file);
+      if (file) {
+        pastedFiles.push(file);
+      }
     }
   }
 

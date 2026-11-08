@@ -7,15 +7,16 @@ import type { EditorKind } from "@/types";
 
 // 内置打开方式优先展示本机真实图标(后端从 exe / .app 提取缓存);
 // 自定义方式没有本机程序绑定,始终展示用户选择的 Lucide 图标。
-const props = defineProps<{ kind?: EditorKind; icon: Component; iconClass?: string }>();
-
-const url = ref<string | null>(null);
-const broken = ref(false);
+const props = defineProps<{ kind?: EditorKind; icon: Component; iconClass?: string }>(),
+  url = ref<string | null>(null),
+  broken = ref(false);
 
 onMounted(async () => {
-  if (!props.kind) return;
-  const icons = await getEditorIcons();
-  const path = icons[props.kind];
+  if (!props.kind) {
+    return;
+  }
+  const icons = await getEditorIcons(),
+    path = icons[props.kind];
   if (path) {
     url.value = convertFileSrc(path);
   }

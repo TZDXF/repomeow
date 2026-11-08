@@ -18,17 +18,21 @@ export interface SemanticOutlineNode {
  * 且对父链做环检测——否则同一节点被多方引用成环,递归渲染会无限嵌套。
  */
 export function buildOutlineTree(entities: SemanticFileEntity[]): SemanticOutlineNode[] {
-  const byId = new Map<string, SemanticOutlineNode>();
-  const all = entities.map<SemanticOutlineNode>((entity) => ({ entity, children: [] }));
+  const byId = new Map<string, SemanticOutlineNode>(),
+    all = entities.map<SemanticOutlineNode>((entity) => ({ entity, children: [] }));
   for (const node of all) {
     const id = node.entity.entityId;
-    if (id && !byId.has(id)) byId.set(id, node);
+    if (id && !byId.has(id)) {
+      byId.set(id, node);
+    }
   }
   const parentOf = new Map<SemanticOutlineNode, SemanticOutlineNode>();
   for (const node of all) {
-    const parentId = node.entity.parentId;
-    const parent = parentId ? byId.get(parentId) : undefined;
-    if (parent && parent !== node) parentOf.set(node, parent);
+    const parentId = node.entity.parentId,
+      parent = parentId ? byId.get(parentId) : undefined;
+    if (parent && parent !== node) {
+      parentOf.set(node, parent);
+    }
   }
   // 环检测:沿父链向上走,回到自身即脱钩升为根(重复 id 互相引用会成环)
   for (const node of all) {
@@ -43,20 +47,26 @@ export function buildOutlineTree(entities: SemanticFileEntity[]): SemanticOutlin
       cur = parentOf.get(cur);
     }
   }
-  const roots: SemanticOutlineNode[] = [];
-  const orphans: SemanticOutlineNode[] = [];
+  const roots: SemanticOutlineNode[] = [],
+    orphans: SemanticOutlineNode[] = [];
   for (const node of all) {
     const parent = parentOf.get(node);
-    if (parent) parent.children.push(node);
-    else if (node.entity.entityId) roots.push(node);
-    else orphans.push(node);
+    if (parent) {
+      parent.children.push(node);
+    } else if (node.entity.entityId) {
+      roots.push(node);
+    } else {
+      orphans.push(node);
+    }
   }
   const byLine = (a: SemanticOutlineNode, b: SemanticOutlineNode) =>
-    a.entity.startLine - b.entity.startLine || a.entity.name.localeCompare(b.entity.name);
-  const sortRecursive = (list: SemanticOutlineNode[]) => {
-    list.sort(byLine);
-    for (const item of list) sortRecursive(item.children);
-  };
+      a.entity.startLine - b.entity.startLine || a.entity.name.localeCompare(b.entity.name),
+    sortRecursive = (list: SemanticOutlineNode[]) => {
+      list.sort(byLine);
+      for (const item of list) {
+        sortRecursive(item.children);
+      }
+    };
   sortRecursive(roots);
   sortRecursive(orphans);
   return [...roots, ...orphans];
@@ -103,11 +113,13 @@ export function entityDisplayName(entity: Pick<SemanticEntityRef, "name" | "enti
 
 /** 去重:有 entityId 按 id,否则按 filePath+name+startLine */
 export function dedupeEntityRefs(refs: SemanticEntityRef[]): SemanticEntityRef[] {
-  const seen = new Set<string>();
-  const out: SemanticEntityRef[] = [];
+  const seen = new Set<string>(),
+    out: SemanticEntityRef[] = [];
   for (const ref of refs) {
     const key = ref.entityId ?? `${ref.filePath}::${ref.name}::${ref.startLine}`;
-    if (seen.has(key)) continue;
+    if (seen.has(key)) {
+      continue;
+    }
     seen.add(key);
     out.push(ref);
   }
@@ -127,7 +139,9 @@ export function flattenRelationGroups(groups: SemanticRelationGroup[]): Semantic
  * 省略的聚合计数。无 entry 时返回空串。仅在用户显式确认后调用,不落库。
  */
 export function buildContextText(result: SemanticContextResult): string {
-  if (!result.entries.length) return "";
+  if (!result.entries.length) {
+    return "";
+  }
   const lines: string[] = [
     `# AI context: ${result.entity} (${result.entityId || result.entity})`,
     "",
@@ -184,7 +198,9 @@ export function cacheFileEntities(
   result: SemanticFileEntitiesResult,
 ) {
   // 上限防御:会话缓存不无限增长
-  if (fileEntitiesCache.size > 200) fileEntitiesCache.clear();
+  if (fileEntitiesCache.size > 200) {
+    fileEntitiesCache.clear();
+  }
   fileEntitiesCache.set(`${rootPath}::${filePath}`, result);
 }
 
@@ -196,6 +212,8 @@ export function invalidateSemanticCache(rootPath: string, filePath?: string) {
   }
   const prefix = `${rootPath}::`;
   for (const key of fileEntitiesCache.keys()) {
-    if (key.startsWith(prefix)) fileEntitiesCache.delete(key);
+    if (key.startsWith(prefix)) {
+      fileEntitiesCache.delete(key);
+    }
   }
 }

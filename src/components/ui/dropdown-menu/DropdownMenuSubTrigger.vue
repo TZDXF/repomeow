@@ -8,11 +8,10 @@ import { DropdownMenuSubTrigger, useForwardProps } from "reka-ui";
 import { cn } from "@/lib/utils";
 
 const props = defineProps<
-  DropdownMenuSubTriggerProps & { class?: HTMLAttributes["class"]; inset?: boolean }
->();
-
-const delegatedProps = reactiveOmit(props, "class", "inset");
-const forwardedProps = useForwardProps(delegatedProps);
+    DropdownMenuSubTriggerProps & { class?: HTMLAttributes["class"]; inset?: boolean }
+  >(),
+  delegatedProps = reactiveOmit(props, "class", "inset"),
+  forwardedProps = useForwardProps(delegatedProps);
 </script>
 
 <template>

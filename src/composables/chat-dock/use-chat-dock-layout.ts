@@ -3,16 +3,16 @@ import { useEventListener } from "@vueuse/core";
 import { useProjectPageActive } from "@/composables/useProjectPageState";
 import { clampChatSidebarWidth } from "@/lib/chat-layout";
 
-const PANEL_DEFAULT_WIDTH = 500;
-const PANEL_EXPANDED_WIDTH = 720;
+const PANEL_DEFAULT_WIDTH = 500,
+  PANEL_EXPANDED_WIDTH = 720;
 
 /** 嵌入项目工作区的右侧栏:开合、加宽/还原、左边缘拖拽;高度随父容器。 */
 export function useChatDockLayout(open: Ref<boolean>) {
-  const active = useProjectPageActive();
-  const panel = useTemplateRef<HTMLElement>("chatPanel");
-  const expanded = ref(false);
-  const panelWidth = ref(PANEL_DEFAULT_WIDTH);
-  const resizing = ref(false);
+  const active = useProjectPageActive(),
+    panel = useTemplateRef<HTMLElement>("chatPanel"),
+    expanded = ref(false),
+    panelWidth = ref(PANEL_DEFAULT_WIDTH),
+    resizing = ref(false);
   let stopResize: (() => void) | undefined;
 
   useEventListener(window, "keydown", (event: KeyboardEvent) => {
@@ -36,33 +36,39 @@ export function useChatDockLayout(open: Ref<boolean>) {
   }));
 
   function startResize(event: PointerEvent) {
-    if (event.button !== 0 || !panel.value) return;
+    if (event.button !== 0 || !panel.value) {
+      return;
+    }
     event.preventDefault();
     stopResize?.();
-    const handle = event.currentTarget as HTMLElement;
-    const container = panel.value.parentElement;
-    if (!container) return;
-    const startX = event.clientX;
-    // 从实际渲染宽度开始,避免窗口收窄后第一次拖动突然跳变。
-    const startWidth = panel.value.getBoundingClientRect().width;
+    const handle = event.currentTarget as HTMLElement,
+      container = panel.value.parentElement;
+    if (!container) {
+      return;
+    }
+    const startX = event.clientX,
+      // 从实际渲染宽度开始,避免窗口收窄后第一次拖动突然跳变。
+      startWidth = panel.value.getBoundingClientRect().width;
     resizing.value = true;
     handle.setPointerCapture(event.pointerId);
     const onMove = (e: PointerEvent) => {
-      expanded.value = false;
-      panelWidth.value = clampChatSidebarWidth(
-        startWidth + startX - e.clientX,
-        container.clientWidth,
-      );
-    };
-    const onUp = () => {
-      resizing.value = false;
-      handle.removeEventListener("pointermove", onMove);
-      handle.removeEventListener("pointerup", onUp);
-      handle.removeEventListener("pointercancel", onUp);
-      handle.removeEventListener("lostpointercapture", onUp);
-      if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
-      stopResize = undefined;
-    };
+        expanded.value = false;
+        panelWidth.value = clampChatSidebarWidth(
+          startWidth + startX - e.clientX,
+          container.clientWidth,
+        );
+      },
+      onUp = () => {
+        resizing.value = false;
+        handle.removeEventListener("pointermove", onMove);
+        handle.removeEventListener("pointerup", onUp);
+        handle.removeEventListener("pointercancel", onUp);
+        handle.removeEventListener("lostpointercapture", onUp);
+        if (handle.hasPointerCapture(event.pointerId)) {
+          handle.releasePointerCapture(event.pointerId);
+        }
+        stopResize = undefined;
+      };
     stopResize = onUp;
     handle.addEventListener("pointermove", onMove);
     handle.addEventListener("pointerup", onUp);
@@ -71,7 +77,9 @@ export function useChatDockLayout(open: Ref<boolean>) {
   }
 
   watch([open, active], () => {
-    if (!open.value || !active.value) stopResize?.();
+    if (!open.value || !active.value) {
+      stopResize?.();
+    }
   });
   onUnmounted(() => stopResize?.());
 

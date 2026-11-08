@@ -23,15 +23,14 @@ defineProps<{
 }>();
 
 const emit = defineEmits<{
-  back: [];
-  update: [];
-  editConfig: [];
-  regenerate: [];
-  openDir: [];
-  remove: [];
-}>();
-
-const { t } = useI18n();
+    back: [];
+    update: [];
+    editConfig: [];
+    regenerate: [];
+    openDir: [];
+    remove: [];
+  }>(),
+  { t } = useI18n();
 </script>
 
 <template>

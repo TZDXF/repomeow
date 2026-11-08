@@ -8,7 +8,9 @@ export function pickAutoPreviewPage(
   streamContents: Record<string, string>,
 ): string | null {
   const followed = pages.find((item) => item.page.id === followedId);
-  if (followed) return followed.page.id;
+  if (followed) {
+    return followed.page.id;
+  }
   return (
     pages.find((item) => item.status === "running" && streamContents[item.page.id])?.page.id ??
     pages.find((item) => item.status === "running")?.page.id ??

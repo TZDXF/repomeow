@@ -10,9 +10,8 @@ interface Props extends /* @vue-ignore */ DropdownMenuContentProps {
   class?: HTMLAttributes["class"];
 }
 
-const props = defineProps<Props>();
-
-const { align, class: _, ...restProps } = props;
+const props = defineProps<Props>(),
+  { align, class: _, ...restProps } = props;
 </script>
 
 <template>

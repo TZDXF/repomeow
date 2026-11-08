@@ -11,16 +11,14 @@ defineOptions({
 });
 
 const props = withDefaults(
-  defineProps<ContextMenuContentProps & { class?: HTMLAttributes["class"] }>(),
-  {
-    collisionPadding: () => POPPER_COLLISION_PADDING,
-  },
-);
-const emits = defineEmits<ContextMenuContentEmits>();
-
-const delegatedProps = reactiveOmit(props, "class");
-
-const forwarded = useForwardPropsEmits(delegatedProps, emits);
+    defineProps<ContextMenuContentProps & { class?: HTMLAttributes["class"] }>(),
+    {
+      collisionPadding: () => POPPER_COLLISION_PADDING,
+    },
+  ),
+  emits = defineEmits<ContextMenuContentEmits>(),
+  delegatedProps = reactiveOmit(props, "class"),
+  forwarded = useForwardPropsEmits(delegatedProps, emits);
 </script>
 
 <template>

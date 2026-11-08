@@ -24,54 +24,52 @@ import { useLatestRequest } from "@/composables/useLatestRequest";
 import { useProjectsStore } from "@/stores/projects";
 import type { GitCommitFile, GitStash, GitStatus, Project } from "@/types";
 
-const props = defineProps<{ project: Project }>();
-const open = defineModel<boolean>("open", { required: true });
-const { t } = useI18n();
-const store = useProjectsStore();
-
-const stashes = ref<GitStash[]>([]);
-const loading = ref(false);
-const loadError = ref("");
-const confirmOpen = ref(false);
-const createOpen = ref(false);
-const diffOpen = ref(false);
-const diffTarget = ref<GitStash | null>(null);
-const stashFiles = ref<GitCommitFile[]>([]);
-const stashFilesLoading = ref(false);
-const stashFilesError = ref("");
-const selectedFile = ref<GitCommitFile | null>(null);
-const {
-  diff: stashDiff,
-  loading: stashDiffLoading,
-  error: stashDiffError,
-  load: loadDiff,
-  reset: resetDiff,
-} = useGitDiffLoader({ keepPrevious: false });
-const filesRequest = useLatestRequest();
-const ignoreWs = useLocalStorage<"none" | "eol" | "change" | "all">(
-  "repomeow:commit-diff-ignore-ws",
-  "none",
-);
-const createMessage = ref("");
-const includeUntracked = ref(false);
-const creating = ref(false);
-const pending = ref<{ kind: "pop" | "drop"; stash: GitStash } | null>(null);
-const busyKey = ref("");
-
-const pendingRef = computed(() => (pending.value ? `stash@{${pending.value.stash.index}}` : ""));
-const trackedChanges = computed(
-  () => (props.project.git?.staged ?? 0) + (props.project.git?.modified ?? 0),
-);
-const untrackedChanges = computed(() => props.project.git?.untracked ?? 0);
-const canCreate = computed(
-  () => trackedChanges.value > 0 || (includeUntracked.value && untrackedChanges.value > 0),
-);
-const onlyUntrackedExcluded = computed(
-  () => trackedChanges.value === 0 && untrackedChanges.value > 0 && !includeUntracked.value,
-);
-const splitApplicable = computed(
-  () => selectedFile.value?.status !== "A" && selectedFile.value?.status !== "D",
-);
+const props = defineProps<{ project: Project }>(),
+  open = defineModel<boolean>("open", { required: true }),
+  { t } = useI18n(),
+  store = useProjectsStore(),
+  stashes = ref<GitStash[]>([]),
+  loading = ref(false),
+  loadError = ref(""),
+  confirmOpen = ref(false),
+  createOpen = ref(false),
+  diffOpen = ref(false),
+  diffTarget = ref<GitStash | null>(null),
+  stashFiles = ref<GitCommitFile[]>([]),
+  stashFilesLoading = ref(false),
+  stashFilesError = ref(""),
+  selectedFile = ref<GitCommitFile | null>(null),
+  {
+    diff: stashDiff,
+    loading: stashDiffLoading,
+    error: stashDiffError,
+    load: loadDiff,
+    reset: resetDiff,
+  } = useGitDiffLoader({ keepPrevious: false }),
+  filesRequest = useLatestRequest(),
+  ignoreWs = useLocalStorage<"none" | "eol" | "change" | "all">(
+    "repomeow:commit-diff-ignore-ws",
+    "none",
+  ),
+  createMessage = ref(""),
+  includeUntracked = ref(false),
+  creating = ref(false),
+  pending = ref<{ kind: "pop" | "drop"; stash: GitStash } | null>(null),
+  busyKey = ref(""),
+  pendingRef = computed(() => (pending.value ? `stash@{${pending.value.stash.index}}` : "")),
+  trackedChanges = computed(
+    () => (props.project.git?.staged ?? 0) + (props.project.git?.modified ?? 0),
+  ),
+  untrackedChanges = computed(() => props.project.git?.untracked ?? 0),
+  canCreate = computed(
+    () => trackedChanges.value > 0 || (includeUntracked.value && untrackedChanges.value > 0),
+  ),
+  onlyUntrackedExcluded = computed(
+    () => trackedChanges.value === 0 && untrackedChanges.value > 0 && !includeUntracked.value,
+  ),
+  splitApplicable = computed(
+    () => selectedFile.value?.status !== "A" && selectedFile.value?.status !== "D",
+  );
 
 watch(open, (value) => {
   if (value) {
@@ -144,7 +142,9 @@ async function openStashDiff(stash: GitStash) {
       await selectStashFile(files[0]);
     }
   } catch (error) {
-    if (isCurrent()) stashFilesError.value = String(error);
+    if (isCurrent()) {
+      stashFilesError.value = String(error);
+    }
   } finally {
     if (isCurrent()) {
       stashFilesLoading.value = false;

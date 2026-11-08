@@ -74,12 +74,12 @@ describe("buildFindRegExp", () => {
 describe("collectMatches", () => {
   it("收集全部匹配并回填 1-based 行号", () => {
     const re = buildFindRegExp({
-      text: "hello",
-      caseSensitive: false,
-      wholeWord: false,
-      useRegex: false,
-    })!;
-    const ranges = collectMatches(TEXT, re);
+        text: "hello",
+        caseSensitive: false,
+        wholeWord: false,
+        useRegex: false,
+      })!,
+      ranges = collectMatches(TEXT, re);
     expect(ranges.map((r) => r.line)).toEqual([1, 2, 3, 4]);
     expect(ranges.map((r) => TEXT.slice(r.from, r.to))).toEqual([
       "hello",

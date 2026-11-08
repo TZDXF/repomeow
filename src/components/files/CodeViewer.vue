@@ -7,10 +7,10 @@ import {
   drawSelection,
   lineNumbers,
   type DecorationSet,
+  keymap,
 } from "@codemirror/view";
 import { codeFolding, foldGutter, syntaxHighlighting } from "@codemirror/language";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { keymap } from "@codemirror/view";
 import { cmViewerHighlight, cmViewerTheme } from "@/lib/cm-theme";
 import { resolveCmLanguage } from "@/lib/cm-languages";
 import { buildFindRegExp, collectMatches, type FindQuery, type TextRange } from "@/lib/text-search";
@@ -28,23 +28,24 @@ import { buildFindRegExp, collectMatches, type FindQuery, type TextRange } from 
 // 滚动交给 CM 自带 scroller(行号槽固定、双向滚动),宿主须提供确定高度。
 
 const props = withDefaults(
-  defineProps<{ text: string; path: string; wrap: boolean; editable?: boolean }>(),
-  { editable: false },
-);
+    defineProps<{ text: string; path: string; wrap: boolean; editable?: boolean }>(),
+    { editable: false },
+  ),
+  host = ref<HTMLElement | null>(null);
+let view: EditorView | null = null,
+  langSeq = 0;
 
-const host = ref<HTMLElement | null>(null);
-let view: EditorView | null = null;
-let langSeq = 0;
-
-const languageConf = new Compartment();
-const wrapConf = new Compartment();
-const editableConf = new Compartment();
+const languageConf = new Compartment(),
+  wrapConf = new Compartment(),
+  editableConf = new Compartment();
 
 async function applyLanguage() {
-  const mySeq = ++langSeq;
-  const lang = await resolveCmLanguage(props.path);
+  const mySeq = ++langSeq,
+    lang = await resolveCmLanguage(props.path);
   // 卸载或期间已切换到别的文件:丢弃过期结果
-  if (!view || mySeq !== langSeq) return;
+  if (!view || mySeq !== langSeq) {
+    return;
+  }
   view.dispatch({ effects: languageConf.reconfigure(lang ?? []) });
 }
 
@@ -52,9 +53,9 @@ async function applyLanguage() {
 // 空心描边 chevron(同 lucide 图形),比文字三角更大更清晰;开/合各挂一个 class,
 // 显隐与配色交给 cm-theme(默认隐藏,悬停行号+折叠槽整片左区显现,已折叠的常显以便发现)
 const FOLD_ICON_OPEN =
-  '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
-const FOLD_ICON_CLOSED =
-  '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>';
+    '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
+  FOLD_ICON_CLOSED =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>';
 
 function foldMarkerDOM(open: boolean): HTMLElement {
   const span = document.createElement("span");
@@ -64,44 +65,49 @@ function foldMarkerDOM(open: boolean): HTMLElement {
 }
 
 // ── 文件内查找 ────────────────────────────────────────────────────────────────
-const setFindRanges = StateEffect.define<{ ranges: TextRange[]; current: number }>();
+const setFindRanges = StateEffect.define<{ ranges: TextRange[]; current: number }>(),
+  findMarks = StateField.define<DecorationSet>({
+    create: () => Decoration.none,
+    update(value, tr) {
+      let next = value.map(tr.changes);
+      for (const e of tr.effects) {
+        if (!e.is(setFindRanges)) {
+          continue;
+        }
+        const { ranges, current } = e.value;
+        next = Decoration.set(
+          ranges.map((r, i) =>
+            (i === current
+              ? Decoration.mark({ class: "cm-find-match cm-find-match-current" })
+              : Decoration.mark({ class: "cm-find-match" })
+            ).range(r.from, r.to),
+          ),
+          true,
+        );
+      }
+      return next;
+    },
+    provide: (field) => EditorView.decorations.from(field),
+  });
 
-const findMarks = StateField.define<DecorationSet>({
-  create: () => Decoration.none,
-  update(value, tr) {
-    let next = value.map(tr.changes);
-    for (const e of tr.effects) {
-      if (!e.is(setFindRanges)) continue;
-      const { ranges, current } = e.value;
-      next = Decoration.set(
-        ranges.map((r, i) =>
-          (i === current
-            ? Decoration.mark({ class: "cm-find-match cm-find-match-current" })
-            : Decoration.mark({ class: "cm-find-match" })
-          ).range(r.from, r.to),
-        ),
-        true,
-      );
-    }
-    return next;
-  },
-  provide: (field) => EditorView.decorations.from(field),
-});
-
-let findRanges: TextRange[] = [];
-let findCursor = -1;
+let findRanges: TextRange[] = [],
+  findCursor = -1;
 
 /** 在当前文档上执行查找并刷新高亮;返回带行号的全部匹配(空/非法查询为空数组) */
 function runFind(query: FindQuery): TextRange[] {
   findRanges = [];
   findCursor = -1;
-  if (!view) return [];
+  if (!view) {
+    return [];
+  }
   const re = buildFindRegExp(query);
   if (re) {
     findRanges = collectMatches(view.state.doc.toString(), re);
     // 从光标处就近选定起始匹配,没有更靠后的则回到首个
     findCursor = findRanges.findIndex((r) => r.from >= view!.state.selection.main.head);
-    if (findCursor === -1 && findRanges.length) findCursor = 0;
+    if (findCursor === -1 && findRanges.length) {
+      findCursor = 0;
+    }
   }
   view.dispatch({ effects: setFindRanges.of({ ranges: findRanges, current: findCursor }) });
   return findRanges;
@@ -121,9 +127,11 @@ function clearFind() {
 
 /** 跳到第 index 个匹配(循环取模、选中并居中滚动),返回实际索引;无匹配返回 -1 */
 function gotoMatch(index: number): number {
-  if (!view || !findRanges.length) return -1;
-  const i = ((index % findRanges.length) + findRanges.length) % findRanges.length;
-  const r = findRanges[i];
+  if (!view || !findRanges.length) {
+    return -1;
+  }
+  const i = ((index % findRanges.length) + findRanges.length) % findRanges.length,
+    r = findRanges[i];
   findCursor = i;
   view.dispatch({
     selection: { anchor: r.from, head: r.to },
@@ -137,9 +145,11 @@ function gotoMatch(index: number): number {
 
 /** 定位到 1-based 行号(全文搜索跳转用) */
 function revealLine(line: number) {
-  if (!view) return;
-  const no = Math.min(Math.max(1, line), view.state.doc.lines);
-  const l = view.state.doc.line(no);
+  if (!view) {
+    return;
+  }
+  const no = Math.min(Math.max(1, line), view.state.doc.lines),
+    l = view.state.doc.line(no);
   view.dispatch({
     selection: { anchor: l.from },
     effects: EditorView.scrollIntoView(l.from, { y: "center" }),
@@ -147,33 +157,38 @@ function revealLine(line: number) {
 }
 
 // ── 行区间高亮(wiki 来源文件 path:start-end 跳转) ─────────────────────────
-const setCiteLines = StateEffect.define<{ from: number; to: number } | null>();
-
-const citeLineMarks = StateField.define<DecorationSet>({
-  create: () => Decoration.none,
-  update(value, tr) {
-    const next = value.map(tr.changes);
-    for (const e of tr.effects) {
-      if (!e.is(setCiteLines)) continue;
-      if (!e.value) return Decoration.none;
-      const decos = [];
-      for (let n = e.value.from; n <= e.value.to && n <= tr.state.doc.lines; n++) {
-        decos.push(Decoration.line({ class: "cm-line-cite" }).range(tr.state.doc.line(n).from));
+const setCiteLines = StateEffect.define<{ from: number; to: number } | null>(),
+  citeLineMarks = StateField.define<DecorationSet>({
+    create: () => Decoration.none,
+    update(value, tr) {
+      const next = value.map(tr.changes);
+      for (const e of tr.effects) {
+        if (!e.is(setCiteLines)) {
+          continue;
+        }
+        if (!e.value) {
+          return Decoration.none;
+        }
+        const decos = [];
+        for (let n = e.value.from; n <= e.value.to && n <= tr.state.doc.lines; n++) {
+          decos.push(Decoration.line({ class: "cm-line-cite" }).range(tr.state.doc.line(n).from));
+        }
+        return Decoration.set(decos, true);
       }
-      return Decoration.set(decos, true);
-    }
-    return next;
-  },
-  provide: (field) => EditorView.decorations.from(field),
-});
+      return next;
+    },
+    provide: (field) => EditorView.decorations.from(field),
+  });
 
 /** 定位并高亮 1-based 行区间(闭区间,越界自动收敛;wiki 来源 chips 跳转用) */
 function revealLines(start: number, end?: number) {
-  if (!view) return;
-  const total = view.state.doc.lines;
-  const from = Math.min(Math.max(1, Math.floor(start)), total);
-  const to = Math.min(Math.max(from, Math.floor(end ?? start)), total);
-  const pos = view.state.doc.line(from).from;
+  if (!view) {
+    return;
+  }
+  const total = view.state.doc.lines,
+    from = Math.min(Math.max(1, Math.floor(start)), total),
+    to = Math.min(Math.max(from, Math.floor(end ?? start)), total),
+    pos = view.state.doc.line(from).from;
   view.dispatch({
     selection: { anchor: pos },
     effects: [EditorView.scrollIntoView(pos, { y: "center" }), setCiteLines.of({ from, to })],
@@ -212,7 +227,9 @@ onMounted(() => {
 watch(
   () => props.text,
   (text) => {
-    if (!view) return;
+    if (!view) {
+      return;
+    }
     // 整体替换文档 = 切文件:旧匹配位置对新文档无意义,连同高亮/游标一并复位,
     // 由宿主在文档就位后重跑查找重铺高亮
     findRanges = [];

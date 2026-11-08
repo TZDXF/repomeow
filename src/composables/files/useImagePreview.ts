@@ -10,33 +10,36 @@ export function useImagePreview(
   selected: Ref<string | null>,
   toAbsolutePath: (path: string) => string | null,
 ) {
-  const selectedExt = computed(() => (selected.value ? extOf(selected.value) : ""));
-  const isImage = computed(() => IMAGE_EXTS.has(selectedExt.value));
-  const isSvg = computed(() => selectedExt.value === "svg");
-  const isVideo = computed(() => VIDEO_EXTS.has(selectedExt.value));
-
-  const svgMode = ref<"preview" | "source">("preview");
-  const svgSource = computed(() => isSvg.value && svgMode.value === "source");
-
-  /** 图片展示地址(asset 协议 URL);非图片或绝对路径不可解析时为空串 */
-  const imageSrc = computed(() => {
-    const path = selected.value;
-    if (!path || !isImage.value) return "";
-    const abs = toAbsolutePath(path);
-    return abs ? convertFileSrc(abs) : "";
-  });
-
-  /** 视频展示地址(asset 协议 URL,range 请求由协议层处理);非视频或不可解析时为空串 */
-  const videoSrc = computed(() => {
-    const path = selected.value;
-    if (!path || !isVideo.value) return "";
-    const abs = toAbsolutePath(path);
-    return abs ? convertFileSrc(abs) : "";
-  });
+  const selectedExt = computed(() => (selected.value ? extOf(selected.value) : "")),
+    isImage = computed(() => IMAGE_EXTS.has(selectedExt.value)),
+    isSvg = computed(() => selectedExt.value === "svg"),
+    isVideo = computed(() => VIDEO_EXTS.has(selectedExt.value)),
+    svgMode = ref<"preview" | "source">("preview"),
+    svgSource = computed(() => isSvg.value && svgMode.value === "source"),
+    /** 图片展示地址(asset 协议 URL);非图片或绝对路径不可解析时为空串 */
+    imageSrc = computed(() => {
+      const path = selected.value;
+      if (!path || !isImage.value) {
+        return "";
+      }
+      const abs = toAbsolutePath(path);
+      return abs ? convertFileSrc(abs) : "";
+    }),
+    /** 视频展示地址(asset 协议 URL,range 请求由协议层处理);非视频或不可解析时为空串 */
+    videoSrc = computed(() => {
+      const path = selected.value;
+      if (!path || !isVideo.value) {
+        return "";
+      }
+      const abs = toAbsolutePath(path);
+      return abs ? convertFileSrc(abs) : "";
+    });
 
   /** 选中文件时调用:沿用既有习惯,svg 选中后默认落源码模式 */
   function onSelectImage(path: string) {
-    if (extOf(path) === "svg") svgMode.value = "source";
+    if (extOf(path) === "svg") {
+      svgMode.value = "source";
+    }
   }
 
   return {

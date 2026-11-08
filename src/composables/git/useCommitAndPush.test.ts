@@ -4,13 +4,13 @@ import { useCommitAndPush } from "./useCommitAndPush";
 
 describe("useCommitAndPush", () => {
   it("提交成功后多次推送失败，重试只推送，不重复提交", async () => {
-    const commit = vi.fn().mockResolvedValue(undefined);
-    const push = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("network"))
-      .mockRejectedValueOnce(new Error("rejected"))
-      .mockResolvedValue(undefined);
-    const flow = useCommitAndPush(commit, push, () => ({ key: "repo/main" }));
+    const commit = vi.fn().mockResolvedValue(undefined),
+      push = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("network"))
+        .mockRejectedValueOnce(new Error("rejected"))
+        .mockResolvedValue(undefined),
+      flow = useCommitAndPush(commit, push, () => ({ key: "repo/main" }));
     await expect(flow.run()).rejects.toThrow("network");
     expect(flow.pendingPush.value).toBe(true);
     await expect(flow.run()).rejects.toThrow("rejected");
@@ -25,11 +25,11 @@ describe("useCommitAndPush", () => {
 
   it("提交失败时不推送，保留提交阶段供重试", async () => {
     const commit = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("hook failed"))
-      .mockResolvedValue(undefined);
-    const push = vi.fn().mockResolvedValue(undefined);
-    const flow = useCommitAndPush(commit, push, () => ({ key: "repo/main" }));
+        .fn()
+        .mockRejectedValueOnce(new Error("hook failed"))
+        .mockResolvedValue(undefined),
+      push = vi.fn().mockResolvedValue(undefined),
+      flow = useCommitAndPush(commit, push, () => ({ key: "repo/main" }));
     await expect(flow.run()).rejects.toThrow("hook failed");
     expect(flow.pendingPush.value).toBe(false);
     expect(push).not.toHaveBeenCalled();
@@ -41,10 +41,10 @@ describe("useCommitAndPush", () => {
 
 describe("目标隔离", () => {
   it("工作树或分支切换不复用待推送状态，切回后仍可重试", async () => {
-    const target = ref({ key: "a/main" });
-    const commit = vi.fn().mockResolvedValue(undefined);
-    const push = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValue(undefined);
-    const flow = useCommitAndPush(commit, push, () => ({ ...target.value }));
+    const target = ref({ key: "a/main" }),
+      commit = vi.fn().mockResolvedValue(undefined),
+      push = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValue(undefined),
+      flow = useCommitAndPush(commit, push, () => ({ ...target.value }));
     await expect(flow.run()).rejects.toThrow("offline");
     for (const key of ["b/main", "a/feature"]) {
       target.value = { key };
@@ -64,14 +64,14 @@ describe("目标隔离", () => {
     const target = ref({ key: "a/main" });
     let finish!: () => void;
     const commit = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          finish = resolve;
-        }),
-    );
-    const push = vi.fn().mockRejectedValue(new Error("offline"));
-    const flow = useCommitAndPush(commit, push, () => ({ ...target.value }));
-    const run = flow.run();
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      ),
+      push = vi.fn().mockRejectedValue(new Error("offline")),
+      flow = useCommitAndPush(commit, push, () => ({ ...target.value })),
+      run = flow.run();
     target.value = { key: "b/main" };
     finish();
     await expect(run).rejects.toThrow("offline");

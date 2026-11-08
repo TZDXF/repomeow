@@ -15,9 +15,11 @@ vi.mock("vue-stream-markdown", async () => {
 });
 
 async function renderConfig(props: Record<string, unknown> = {}) {
-  const html = await renderToString(createSSRApp(() => h(SafeMarkdown, props)));
-  const json = html.match(/<pre[^>]*>(.*?)<\/pre>/s)?.[1];
-  if (!json) throw new Error("未收到 Markdown 渲染配置");
+  const html = await renderToString(createSSRApp(() => h(SafeMarkdown, props))),
+    json = html.match(/<pre[^>]*>(?<json>.*?)<\/pre>/s)?.groups?.json;
+  if (!json) {
+    throw new Error("未收到 Markdown 渲染配置");
+  }
   return JSON.parse(json.replace(/&quot;/g, '"').replace(/&amp;/g, "&"));
 }
 

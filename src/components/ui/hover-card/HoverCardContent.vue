@@ -10,16 +10,14 @@ defineOptions({
 });
 
 const props = withDefaults(
-  defineProps<HoverCardContentProps & { class?: HTMLAttributes["class"] }>(),
-  {
-    align: "center",
-    sideOffset: 4,
-  },
-);
-
-const delegatedProps = reactiveOmit(props, "class");
-
-const forwardedProps = useForwardProps(delegatedProps);
+    defineProps<HoverCardContentProps & { class?: HTMLAttributes["class"] }>(),
+    {
+      align: "center",
+      sideOffset: 4,
+    },
+  ),
+  delegatedProps = reactiveOmit(props, "class"),
+  forwardedProps = useForwardProps(delegatedProps);
 </script>
 
 <template>

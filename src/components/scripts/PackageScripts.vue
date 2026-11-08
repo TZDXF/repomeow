@@ -21,29 +21,25 @@ import { useProjectOverviewStore } from "@/stores/project-overview";
 import { useProjectAssetsStore } from "@/stores/project-assets";
 import type { HiddenItem, HiddenKind, PackageScript, PackageScriptsGroup, Project } from "@/types";
 
-const { t } = useI18n();
-const props = defineProps<{ project: Project }>();
-const pinsStore = usePinsStore();
-const terminalStore = useTerminalStore();
-const assetsStore = useProjectAssetsStore();
-const overviewStore = useProjectOverviewStore();
-
-const { isOpen, setOpen } = useCollapsibleOpen("scripts");
-
-/** 扫描结果来自共享 store(与 DockerCompose 卡片合并为一次后端扫描) */
-const groups = computed(() => assetsStore.assetsOf(props.project)?.package_scripts ?? []);
-const loaded = ref(false);
-/** 各分组展开状态,key 为分组目录 */
-const openStates = ref<Record<string, boolean>>({});
-/** 已隐藏的分组(dir)与单条命令("<dir>\n<name>") */
-const hiddenGroups = ref<Set<string>>(new Set());
-const hiddenScripts = ref<Set<string>>(new Set());
-/** 临时显示已隐藏项(灰显,可逐条恢复) */
-const showHidden = ref(false);
-
-const scriptKey = (dir: string, name: string) => `${dir}\n${name}`;
-
-const hiddenCount = computed(() => hiddenGroups.value.size + hiddenScripts.value.size);
+const { t } = useI18n(),
+  props = defineProps<{ project: Project }>(),
+  pinsStore = usePinsStore(),
+  terminalStore = useTerminalStore(),
+  assetsStore = useProjectAssetsStore(),
+  overviewStore = useProjectOverviewStore(),
+  { isOpen, setOpen } = useCollapsibleOpen("scripts"),
+  /** 扫描结果来自共享 store(与 DockerCompose 卡片合并为一次后端扫描) */
+  groups = computed(() => assetsStore.assetsOf(props.project)?.package_scripts ?? []),
+  loaded = ref(false),
+  /** 各分组展开状态,key 为分组目录 */
+  openStates = ref<Record<string, boolean>>({}),
+  /** 已隐藏的分组(dir)与单条命令("<dir>\n<name>") */
+  hiddenGroups = ref<Set<string>>(new Set()),
+  hiddenScripts = ref<Set<string>>(new Set()),
+  /** 临时显示已隐藏项(灰显,可逐条恢复) */
+  showHidden = ref(false),
+  scriptKey = (dir: string, name: string) => `${dir}\n${name}`,
+  hiddenCount = computed(() => hiddenGroups.value.size + hiddenScripts.value.size);
 
 interface DisplayScript {
   script: PackageScript;
@@ -57,43 +53,54 @@ interface DisplayGroup {
 
 /** 当前应展示的分组:过滤隐藏分组/命令;showHidden 时全部显示但标记 hidden 灰显 */
 const displayGroups = computed<DisplayGroup[]>(() =>
-  groups.value.flatMap((g) => {
-    const groupHidden = hiddenGroups.value.has(g.dir);
-    if (groupHidden && !showHidden.value) return [];
-    const scripts = g.scripts
-      .map((s) => ({
-        script: s,
-        hidden: groupHidden || hiddenScripts.value.has(scriptKey(g.dir, s.name)),
-      }))
-      .filter((x) => showHidden.value || !x.hidden);
-    if (!scripts.length) return [];
-    return [{ group: g, groupHidden, scripts }];
-  }),
-);
-
-// path 一并作为 watch 源:详情页切换工作区(worktree)时传入的是 id 相同、
-// path 不同的 project 副本,需要按新工作目录重新扫描
-const loadRequest = useLatestRequest();
+    groups.value.flatMap((g) => {
+      const groupHidden = hiddenGroups.value.has(g.dir);
+      if (groupHidden && !showHidden.value) {
+        return [];
+      }
+      const scripts = g.scripts
+        .map((s) => ({
+          script: s,
+          hidden: groupHidden || hiddenScripts.value.has(scriptKey(g.dir, s.name)),
+        }))
+        .filter((x) => showHidden.value || !x.hidden);
+      if (!scripts.length) {
+        return [];
+      }
+      return [{ group: g, groupHidden, scripts }];
+    }),
+  ),
+  // path 一并作为 watch 源:详情页切换工作区(worktree)时传入的是 id 相同、
+  // path 不同的 project 副本,需要按新工作目录重新扫描
+  loadRequest = useLatestRequest();
 async function load(resetView = true) {
-  const isCurrent = loadRequest.begin();
-  const currentProject = props.project;
-  if (resetView) showHidden.value = false;
+  const isCurrent = loadRequest.begin(),
+    currentProject = props.project;
+  if (resetView) {
+    showHidden.value = false;
+  }
   pinsStore.ensureLoaded();
   // stale-while-revalidate:旧扫描结果与旧隐藏项都齐备时,立即按旧数据渲染
   // (隐藏项必须先就位,否则已隐藏分组会在首屏闪现再消失),
   // 后台刷新完成后 groups / 隐藏项自动替换;仅首次进入(无旧数据)才等首轮请求
   const staleOverview = overviewStore.cached(currentProject.id);
-  if (staleOverview) applyHiddenItems(staleOverview.hidden_items);
+  if (staleOverview) {
+    applyHiddenItems(staleOverview.hidden_items);
+  }
   const hasStale = !!assetsStore.assetsOf(currentProject) && !!staleOverview;
   loaded.value = hasStale;
-  if (hasStale) resetOpenStates();
+  if (hasStale) {
+    resetOpenStates();
+  }
   // refresh 内部去重:与 DockerCompose / CustomCommands 同时挂载只触发一次
   // scan_project_assets / get_project_overview;两者失败均回退旧数据/空数据,不抛错
   const [, overview] = await Promise.all([
     assetsStore.refresh(currentProject),
     overviewStore.refresh(currentProject.id),
   ]);
-  if (!isCurrent()) return;
+  if (!isCurrent()) {
+    return;
+  }
   applyHiddenItems(overview.hidden_items);
   loaded.value = true;
   resetOpenStates();
@@ -137,10 +144,13 @@ async function setHidden(kind: HiddenKind, key: string, hidden: boolean) {
     await cmd("set_hidden_item", { projectId: props.project.id, kind, targetKey: key, hidden });
     // 同步 overview 缓存,下次进入详情时 stale 首屏就是最新隐藏状态
     overviewStore.setHiddenLocal(props.project.id, kind, key, hidden);
-    const target = kind === "packageFile" ? hiddenGroups : hiddenScripts;
-    const next = new Set(target.value);
-    if (hidden) next.add(key);
-    else next.delete(key);
+    const target = kind === "packageFile" ? hiddenGroups : hiddenScripts,
+      next = new Set(target.value);
+    if (hidden) {
+      next.add(key);
+    } else {
+      next.delete(key);
+    }
     target.value = next;
   } catch (e) {
     toast.error(String(e));
@@ -177,8 +187,8 @@ function copyScript(script: PackageScript) {
 
 /** 切换单条脚本的「常用命令」标记(托盘弹窗中可快速执行) */
 async function togglePin(group: PackageScriptsGroup, script: PackageScript) {
-  const key = scriptKey(group.dir, script.name);
-  const pinned = pinsStore.isPinned(props.project.id, "packageScript", key);
+  const key = scriptKey(group.dir, script.name),
+    pinned = pinsStore.isPinned(props.project.id, "packageScript", key);
   try {
     await pinsStore.setPinned(
       props.project.id,

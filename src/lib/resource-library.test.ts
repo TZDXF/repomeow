@@ -18,9 +18,9 @@ import {
   parseEnvLines,
   parseHeaderLines,
   parseResourceMcpJson,
-  ResourceMcpJsonError,
   collectSkillSources,
   type ResourceMarketplaceSkill,
+  type ResourceMcpJsonError,
   type ResourceSkill,
 } from "./resource-library";
 
@@ -192,20 +192,20 @@ describe("isResourceMcpTransport", () => {
 describe("parseResourceMcpJson", () => {
   it("解析 mcpServers 包装结构(stdio + 远程)", () => {
     const text = JSON.stringify({
-      mcpServers: {
-        filesystem: {
-          command: "npx",
-          args: ["-y", "@modelcontextprotocol/server-filesystem"],
-          env: { ROOT: "/tmp" },
+        mcpServers: {
+          filesystem: {
+            command: "npx",
+            args: ["-y", "@modelcontextprotocol/server-filesystem"],
+            env: { ROOT: "/tmp" },
+          },
+          remote: {
+            type: "http",
+            url: "https://mcp.example.com/mcp",
+            headers: { Authorization: "Bearer xxx" },
+          },
         },
-        remote: {
-          type: "http",
-          url: "https://mcp.example.com/mcp",
-          headers: { Authorization: "Bearer xxx" },
-        },
-      },
-    });
-    const parsed = parseResourceMcpJson(text);
+      }),
+      parsed = parseResourceMcpJson(text);
     expect(parsed.skipped).toEqual([]);
     expect(parsed.entries).toEqual([
       {
@@ -246,8 +246,8 @@ describe("parseResourceMcpJson", () => {
     "uvx",
     "blender-mcp"
   ]
-}}`;
-    const parsed = parseResourceMcpJson(text);
+}}`,
+      parsed = parseResourceMcpJson(text);
     expect(parsed.skipped).toEqual([]);
     expect(parsed.entries).toEqual([
       { name: "blender", transport: "stdio", command: "cmd", args: ["/c", "uvx", "blender-mcp"] },
@@ -399,8 +399,8 @@ describe("markMarketplaceInstalled", () => {
   });
 
   it("覆盖既有标记,id 不存在时内容不变", () => {
-    const marked = markMarketplaceInstalled(entries, "m2", "local-old");
-    const next = markMarketplaceInstalled(marked, "m2", "local-new");
+    const marked = markMarketplaceInstalled(entries, "m2", "local-old"),
+      next = markMarketplaceInstalled(marked, "m2", "local-new");
     expect(next.find((s) => s.id === "m2")?.installedSkillId).toBe("local-new");
     expect(markMarketplaceInstalled(entries, "nope", "x")).toEqual(entries);
   });
@@ -409,13 +409,13 @@ describe("markMarketplaceInstalled", () => {
 describe("mergeMarketplaceSources", () => {
   it("按 id 去重,保留 base 顺序,新来源追加尾部", () => {
     const base = [
-      { id: "builtin", name: "内置目录" },
-      { id: "community", name: "社区源", url: "https://example.com" },
-    ];
-    const incoming = [
-      { id: "community", name: "社区源" },
-      { id: "mirror", name: "镜像源" },
-    ];
+        { id: "builtin", name: "内置目录" },
+        { id: "community", name: "社区源", url: "https://example.com" },
+      ],
+      incoming = [
+        { id: "community", name: "社区源" },
+        { id: "mirror", name: "镜像源" },
+      ];
     expect(mergeMarketplaceSources(base, incoming)).toEqual([
       { id: "builtin", name: "内置目录" },
       { id: "community", name: "社区源", url: "https://example.com" },

@@ -26,43 +26,39 @@ import type { WikiGenerationConfig } from "@/lib/wiki-generator";
  * 是否随之触发生成由调用方决定。
  */
 const props = defineProps<{
-  /** false 表示关闭 */
-  open: boolean;
-  /** 当前项目路径，用于读写其独立 Wiki 生成配置。 */
-  projectPath: string;
-  /** generate = 确认按钮为「开始生成」;edit = 仅保存配置,按钮为「保存」 */
-  mode?: "generate" | "edit";
-}>();
-const emit = defineEmits<{ close: []; confirm: [] }>();
+    /** false 表示关闭 */
+    open: boolean;
+    /** 当前项目路径，用于读写其独立 Wiki 生成配置。 */
+    projectPath: string;
+    /** generate = 确认按钮为「开始生成」;edit = 仅保存配置,按钮为「保存」 */
+    mode?: "generate" | "edit";
+  }>(),
+  emit = defineEmits<{ close: []; confirm: [] }>(),
+  { t } = useI18n(),
+  /** ai-config 配置副本:模型清单来源(空/未加载时选择器禁用走默认) */
+  aiConfig = useAiConfigStore(),
+  projects = useProjectsStore(),
+  settings = useSettingsStore(),
+  projectId = ref<number | null>(null),
+  wikiAutoUpdate = ref(false),
+  initialWikiAutoUpdate = ref(false),
+  open = computed({
+    get: () => props.open,
+    set: (v: boolean) => {
+      if (!v) {
+        emit("close");
+      }
+    },
+  }),
+  // ── 本地副本:打开时从项目 config.json 同步,确认才写回 ────────────────────
 
-const { t } = useI18n();
-
-/** ai-config 配置副本:模型清单来源(空/未加载时选择器禁用走默认) */
-const aiConfig = useAiConfigStore();
-const projects = useProjectsStore();
-const settings = useSettingsStore();
-const projectId = ref<number | null>(null);
-const wikiAutoUpdate = ref(false);
-const initialWikiAutoUpdate = ref(false);
-
-const open = computed({
-  get: () => props.open,
-  set: (v: boolean) => {
-    if (!v) {
-      emit("close");
-    }
-  },
-});
-
-// ── 本地副本:打开时从项目 config.json 同步,确认才写回 ────────────────────
-
-const model = ref("");
-const thinking = ref("");
-/** 页面并发数(1-8;空 = 设置页全局 AI 并发) */
-const concurrency = ref<number | "">("");
-const configLoading = ref(false);
-const configSaving = ref(false);
-const configError = ref("");
+  model = ref(""),
+  thinking = ref(""),
+  /** 页面并发数(1-8;空 = 设置页全局 AI 并发) */
+  concurrency = ref<number | "">(""),
+  configLoading = ref(false),
+  configSaving = ref(false),
+  configError = ref("");
 let loadSequence = 0;
 
 watch(
@@ -92,7 +88,9 @@ async function loadProjectConfig() {
       loadWikiConfig(projectPath),
       cmd<Project | null>("get_project_by_path", { path: projectPath }),
     ]);
-    if (sequence !== loadSequence || !props.open) return;
+    if (sequence !== loadSequence || !props.open) {
+      return;
+    }
     projectId.value = project?.id ?? null;
     wikiAutoUpdate.value = project?.wiki_auto_update ?? false;
     initialWikiAutoUpdate.value = wikiAutoUpdate.value;
@@ -104,14 +102,18 @@ async function loadProjectConfig() {
       configError.value = error instanceof Error ? error.message : String(error);
     }
   } finally {
-    if (sequence === loadSequence) configLoading.value = false;
+    if (sequence === loadSequence) {
+      configLoading.value = false;
+    }
   }
 }
 
 /** 已选模型引用是否仍指向现存厂商与模型 */
 function builtinModelExists(value: string): boolean {
   const separator = value.indexOf("/");
-  if (separator <= 0) return false;
+  if (separator <= 0) {
+    return false;
+  }
   const provider = aiConfig.config?.providers[value.slice(0, separator)];
   return Boolean(provider?.models.some((m) => m.id === value.slice(separator + 1)));
 }
@@ -124,22 +126,23 @@ const confirmLabel = computed(() =>
 );
 
 async function confirm() {
-  if (configLoading.value || configSaving.value) return;
-  const projectPath = props.projectPath;
-  const id = projectId.value;
-  const autoUpdate = wikiAutoUpdate.value;
-  const shouldSaveAutoUpdate =
-    !settings.wikiAutoUpdate && autoUpdate !== initialWikiAutoUpdate.value;
-  const config: WikiGenerationConfig = {
-    version: 1,
-    // 失效引用(厂商/模型已从 ai-config 删除)不落盘,回退设置页默认模型
-    model: model.value && builtinModelExists(model.value) ? model.value : undefined,
-    thinking: thinking.value || undefined,
-    concurrency:
-      typeof concurrency.value === "number" && concurrency.value > 0
-        ? Math.min(8, Math.max(1, Math.round(concurrency.value)))
-        : undefined,
-  };
+  if (configLoading.value || configSaving.value) {
+    return;
+  }
+  const projectPath = props.projectPath,
+    id = projectId.value,
+    autoUpdate = wikiAutoUpdate.value,
+    shouldSaveAutoUpdate = !settings.wikiAutoUpdate && autoUpdate !== initialWikiAutoUpdate.value,
+    config: WikiGenerationConfig = {
+      version: 1,
+      // 失效引用(厂商/模型已从 ai-config 删除)不落盘,回退设置页默认模型
+      model: model.value && builtinModelExists(model.value) ? model.value : undefined,
+      thinking: thinking.value || undefined,
+      concurrency:
+        typeof concurrency.value === "number" && concurrency.value > 0
+          ? Math.min(8, Math.max(1, Math.round(concurrency.value)))
+          : undefined,
+    };
   configSaving.value = true;
   configError.value = "";
   try {
@@ -148,7 +151,9 @@ async function confirm() {
       await projects.setWikiAutoUpdate(id, autoUpdate);
       initialWikiAutoUpdate.value = autoUpdate;
     }
-    if (props.open && props.projectPath === projectPath) emit("confirm");
+    if (props.open && props.projectPath === projectPath) {
+      emit("confirm");
+    }
   } catch (error) {
     configError.value = error instanceof Error ? error.message : String(error);
   } finally {

@@ -61,11 +61,11 @@ export interface GraphLayouter {
  */
 export function createGraphLayouter(): GraphLayouter {
   // lanes[i] = 该泳道正在等待的 commit hash;null = 空闲可复用
-  const lanes: (string | null)[] = [];
-  const nodes: GraphNodeLayout[] = [];
-  // 待解析的连线:fromRow/fromLane/toLane 在子提交处即可确定,toRow 待父提交到达后解析
-  const pending: { fromRow: number; fromLane: number; toLane: number; parent: string }[] = [];
-  const rowByHash = new Map<string, number>();
+  const lanes: (string | null)[] = [],
+    nodes: GraphNodeLayout[] = [],
+    // 待解析的连线:fromRow/fromLane/toLane 在子提交处即可确定,toRow 待父提交到达后解析
+    pending: { fromRow: number; fromLane: number; toLane: number; parent: string }[] = [],
+    rowByHash = new Map<string, number>();
   let maxLanes = 0;
 
   const allocLane = (): number => {

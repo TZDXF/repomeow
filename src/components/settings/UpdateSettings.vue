@@ -4,13 +4,12 @@ import { useI18n } from "vue-i18n";
 import { Switch } from "@/components/ui/switch";
 import { useSettingsStore } from "@/stores/settings";
 
-const { t } = useI18n();
-const settingsStore = useSettingsStore();
-
-const autoCheck = computed({
-  get: () => settingsStore.autoCheckUpdate,
-  set: (v: boolean) => settingsStore.setAutoCheckUpdate(v),
-});
+const { t } = useI18n(),
+  settingsStore = useSettingsStore(),
+  autoCheck = computed({
+    get: () => settingsStore.autoCheckUpdate,
+    set: (v: boolean) => settingsStore.setAutoCheckUpdate(v),
+  });
 </script>
 
 <template>

@@ -9,37 +9,34 @@ import { FileSearch, FileText, FolderSearch, PenLine, Sparkles, Wrench } from "@
  * 文档辉光脉冲与右上角计数徽标参与动画,全部由 toolCalls 计数驱动。
  */
 const props = defineProps<{
-  /** 本轮生成累计的工具调用次数(单调递增;增量触发飞入粒子与辉光) */
-  toolCalls: number;
-}>();
+    /** 本轮生成累计的工具调用次数(单调递增;增量触发飞入粒子与辉光) */
+    toolCalls: number;
+  }>(),
+  { t } = useI18n(),
+  // ── 逐行书写(小步进定时器驱动,形成打字机节奏) ───────────────────────────
 
-const { t } = useI18n();
-
-// ── 逐行书写(小步进定时器驱动,形成打字机节奏) ───────────────────────────
-
-/** 各行目标宽度(容器宽度的百分比) */
-const LINE_WIDTHS = [88, 100, 72, 94, 60, 82];
-/** 行高 6px + 间距 10px,对应模板中的 h-1.5 + space-y-2.5 */
-const LINE_PITCH = 16;
-/** 每行书写所需 tick、整页写满后的停留 tick、整页淡去 tick */
-const WRITE_TICKS = 14;
-const HOLD_TICKS = 18;
-const FADE_TICKS = 8;
-const TICK_MS = 90;
-const WRITING_TICKS = LINE_WIDTHS.length * WRITE_TICKS;
-
-const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-const tick = ref(0);
-const lineProgress = ref<number[]>(LINE_WIDTHS.map(() => (reducedMotion ? 1 : 0)));
-const pageOpacity = ref(1);
+  /** 各行目标宽度(容器宽度的百分比) */
+  LINE_WIDTHS = [88, 100, 72, 94, 60, 82],
+  /** 行高 6px + 间距 10px,对应模板中的 h-1.5 + space-y-2.5 */
+  LINE_PITCH = 16,
+  /** 每行书写所需 tick、整页写满后的停留 tick、整页淡去 tick */
+  WRITE_TICKS = 14,
+  HOLD_TICKS = 18,
+  FADE_TICKS = 8,
+  TICK_MS = 90,
+  WRITING_TICKS = LINE_WIDTHS.length * WRITE_TICKS,
+  reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  tick = ref(0),
+  lineProgress = ref<number[]>(LINE_WIDTHS.map(() => (reducedMotion ? 1 : 0))),
+  pageOpacity = ref(1);
 
 let timer: number | undefined;
 if (!reducedMotion) {
   timer = window.setInterval(() => {
     tick.value += 1;
     if (tick.value <= WRITING_TICKS) {
-      const line = Math.floor((tick.value - 1) / WRITE_TICKS);
-      const within = ((tick.value - 1) % WRITE_TICKS) + 1;
+      const line = Math.floor((tick.value - 1) / WRITE_TICKS),
+        within = ((tick.value - 1) % WRITE_TICKS) + 1;
       lineProgress.value[line] = within / WRITE_TICKS;
     } else if (tick.value <= WRITING_TICKS + HOLD_TICKS) {
       // 整页写满,停留片刻供「阅读」
@@ -55,21 +52,24 @@ if (!reducedMotion) {
 
 /** 正在书写的行序号(整页停留/淡去阶段为 -1,隐藏光标) */
 const activeLine = computed(() =>
-  tick.value >= 1 && tick.value <= WRITING_TICKS ? Math.floor((tick.value - 1) / WRITE_TICKS) : -1,
-);
-const caretStyle = computed(() => {
-  const line = activeLine.value;
-  if (line < 0) return { opacity: "0" };
-  return {
-    top: `${line * LINE_PITCH - 3}px`,
-    left: `${lineProgress.value[line] * LINE_WIDTHS[line]}%`,
-  };
-});
+    tick.value >= 1 && tick.value <= WRITING_TICKS
+      ? Math.floor((tick.value - 1) / WRITE_TICKS)
+      : -1,
+  ),
+  caretStyle = computed(() => {
+    const line = activeLine.value;
+    if (line < 0) {
+      return { opacity: "0" };
+    }
+    return {
+      top: `${line * LINE_PITCH - 3}px`,
+      left: `${lineProgress.value[line] * LINE_WIDTHS[line]}%`,
+    };
+  }),
+  // ── 工具调用参与动画:素材飞入粒子 + 辉光脉冲 ─────────────────────────────
 
-// ── 工具调用参与动画:素材飞入粒子 + 辉光脉冲 ─────────────────────────────
-
-const SPARK_ICONS: Component[] = [FileSearch, FolderSearch, FileText, Sparkles, Wrench];
-const SPARK_LIFETIME_MS = 1600;
+  SPARK_ICONS: Component[] = [FileSearch, FolderSearch, FileText, Sparkles, Wrench],
+  SPARK_LIFETIME_MS = 1600;
 
 interface Spark {
   id: number;
@@ -78,8 +78,8 @@ interface Spark {
   x: number;
   delayMs: number;
 }
-const sparks = ref<Spark[]>([]);
-const sparkTimers = new Set<number>();
+const sparks = ref<Spark[]>([]),
+  sparkTimers = new Set<number>();
 let sparkSeq = 0;
 
 /** 文档辉光脉冲序号:以 :key 重建元素来重放一次性动画 */
@@ -89,12 +89,14 @@ watch(
   () => props.toolCalls,
   (next, prev) => {
     const delta = next - (prev ?? 0);
-    if (delta <= 0) return;
+    if (delta <= 0) {
+      return;
+    }
     glowPulse.value += 1;
     // 活动按批量上报,单次增量可能多于一个;限制并发粒子数避免拥挤
     for (let i = 0; i < Math.min(delta, 4); i += 1) {
-      const id = ++sparkSeq;
-      const delayMs = i * 140;
+      const id = ++sparkSeq,
+        delayMs = i * 140;
       sparks.value.push({
         id,
         icon: SPARK_ICONS[id % SPARK_ICONS.length],
@@ -105,7 +107,9 @@ watch(
       const timerId = window.setTimeout(() => {
         sparkTimers.delete(timerId);
         const index = sparks.value.findIndex((s) => s.id === id);
-        if (index >= 0) sparks.value.splice(index, 1);
+        if (index >= 0) {
+          sparks.value.splice(index, 1);
+        }
       }, delayMs + SPARK_LIFETIME_MS);
       sparkTimers.add(timerId);
     }
@@ -113,8 +117,12 @@ watch(
 );
 
 onUnmounted(() => {
-  if (timer !== undefined) window.clearInterval(timer);
-  for (const timerId of sparkTimers) window.clearTimeout(timerId);
+  if (timer !== undefined) {
+    window.clearInterval(timer);
+  }
+  for (const timerId of sparkTimers) {
+    window.clearTimeout(timerId);
+  }
 });
 </script>
 

@@ -27,18 +27,17 @@ import type { EditorAvailability, OpenWithOption } from "@/lib/open-with";
 import { useSettingsStore } from "@/stores/settings";
 import type { CustomOpenWith, OpenWithId } from "@/types";
 
-const { t } = useI18n();
-const store = useSettingsStore();
-const commandVariables = { pathVariable: "{path}", lineVariable: "{line}" };
-const commandPlaceholderExample = "code {path}:{line}";
-
-const availability = ref<EditorAvailability | null>(null);
-const dialogOpen = ref(false);
-const editingId = ref<string | null>(null);
-const formName = ref("");
-const formCommand = ref("");
-const formIcon = ref("");
-const submitting = ref(false);
+const { t } = useI18n(),
+  store = useSettingsStore(),
+  commandVariables = { pathVariable: "{path}", lineVariable: "{line}" },
+  commandPlaceholderExample = "code {path}:{line}",
+  availability = ref<EditorAvailability | null>(null),
+  dialogOpen = ref(false),
+  editingId = ref<string | null>(null),
+  formName = ref(""),
+  formCommand = ref(""),
+  formIcon = ref(""),
+  submitting = ref(false);
 
 onMounted(async () => {
   availability.value = await getEditorAvailability();
@@ -57,8 +56,8 @@ watch(
 );
 
 function persistOrder() {
-  const visibleIds = new Set(list.value.map((option) => option.id));
-  const queue = list.value.map((option) => option.id);
+  const visibleIds = new Set(list.value.map((option) => option.id)),
+    queue = list.value.map((option) => option.id);
   let cursor = 0;
   const merged: OpenWithId[] = store.openWithOrder.map((id) =>
     visibleIds.has(id) ? queue[cursor++] : id,
@@ -83,7 +82,9 @@ function openEdit(option: CustomOpenWith) {
 }
 
 async function submit() {
-  if (!formName.value.trim() || !formCommand.value.trim() || submitting.value) return;
+  if (!formName.value.trim() || !formCommand.value.trim() || submitting.value) {
+    return;
+  }
   submitting.value = true;
   try {
     await store.saveCustomOpenWith({
@@ -104,13 +105,15 @@ async function submit() {
 }
 
 /** 待确认删除的自定义打开方式,ConfirmDialog 确认后执行 */
-const pendingRemove = ref<CustomOpenWith | null>(null);
-const removeConfirmOpen = computed({
-  get: () => pendingRemove.value !== null,
-  set: (v) => {
-    if (!v) pendingRemove.value = null;
-  },
-});
+const pendingRemove = ref<CustomOpenWith | null>(null),
+  removeConfirmOpen = computed({
+    get: () => pendingRemove.value !== null,
+    set: (v) => {
+      if (!v) {
+        pendingRemove.value = null;
+      }
+    },
+  });
 
 function remove(option: CustomOpenWith) {
   pendingRemove.value = option;
@@ -118,7 +121,9 @@ function remove(option: CustomOpenWith) {
 
 async function confirmRemove() {
   const option = pendingRemove.value;
-  if (!option) return;
+  if (!option) {
+    return;
+  }
   try {
     await store.removeCustomOpenWith(option.id);
     toast.success(t("openWith.custom.deleted"));

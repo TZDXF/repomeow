@@ -33,15 +33,14 @@ import type { Project, TerminalSessionInfo } from "@/types";
  * 项目详情页底部内嵌终端面板:按项目过滤会话,页签可拖拽排序,
  * 顶部边缘拖拽调整高度;交互式 Shell 无停止/重启按钮;收起为底部细条。
  */
-const pageActive = useProjectPageActive();
-const props = defineProps<{ project: Project }>();
-
-const { t } = useI18n();
-const settings = useSettingsStore();
-const store = useTerminalStore();
-const creating = ref(false);
-/** Windows 下各 shell 的可用性(决定新建菜单项是否禁用);非 Windows 不显示类型选择 */
-const capabilities = ref<TerminalCapabilities | null>(null);
+const pageActive = useProjectPageActive(),
+  props = defineProps<{ project: Project }>(),
+  { t } = useI18n(),
+  settings = useSettingsStore(),
+  store = useTerminalStore(),
+  creating = ref(false),
+  /** Windows 下各 shell 的可用性(决定新建菜单项是否禁用);非 Windows 不显示类型选择 */
+  capabilities = ref<TerminalCapabilities | null>(null);
 
 onMounted(() => {
   void store.init();
@@ -50,39 +49,39 @@ onMounted(() => {
 
 /** 新建终端可选的 shell 类型(仅 Windows 展示菜单) */
 const shellChoices: { kind: TerminalKind; label: string }[] = [
-  { kind: "cmd", label: "cmd" },
-  { kind: "powershell", label: "PowerShell" },
-  { kind: "gitbash", label: "Git Bash" },
-];
-const showShellPicker = computed(() => capabilities.value?.isWindows === true);
-
-/** 当前项目的会话(会话按 project_id 归属,worktree 副本共享同一 id) */
-const list = computed(() => store.sessions.filter((s) => s.project_id === props.project.id));
-/** 应用手工拖拽排序后的展示顺序:排序表内的优先,新会话按默认序附后 */
-const orderedList = computed(() => {
-  const order = store.tabOrders.get(props.project.id);
-  if (!order?.length) return list.value;
-  const byId = new Map(list.value.map((s) => [s.id, s]));
-  const used = new Set<number>();
-  const out: TerminalSessionInfo[] = [];
-  for (const id of order) {
-    const s = byId.get(id);
-    if (s && !used.has(id)) {
-      out.push(s);
-      used.add(id);
+    { kind: "cmd", label: "cmd" },
+    { kind: "powershell", label: "PowerShell" },
+    { kind: "gitbash", label: "Git Bash" },
+  ],
+  showShellPicker = computed(() => capabilities.value?.isWindows === true),
+  /** 当前项目的会话(会话按 project_id 归属,worktree 副本共享同一 id) */
+  list = computed(() => store.sessions.filter((s) => s.project_id === props.project.id)),
+  /** 应用手工拖拽排序后的展示顺序:排序表内的优先,新会话按默认序附后 */
+  orderedList = computed(() => {
+    const order = store.tabOrders.get(props.project.id);
+    if (!order?.length) {
+      return list.value;
     }
-  }
-  for (const s of list.value) {
-    if (!used.has(s.id)) out.push(s);
-  }
-  return out;
-});
-const runningCount = computed(() => list.value.filter((s) => s.status === "running").length);
-const hasFinished = computed(() => list.value.some((s) => s.status !== "running"));
-
-const active = computed(
-  () => list.value.find((s) => s.id === store.activeId) ?? list.value[0] ?? null,
-);
+    const byId = new Map(list.value.map((s) => [s.id, s])),
+      used = new Set<number>(),
+      out: TerminalSessionInfo[] = [];
+    for (const id of order) {
+      const s = byId.get(id);
+      if (s && !used.has(id)) {
+        out.push(s);
+        used.add(id);
+      }
+    }
+    for (const s of list.value) {
+      if (!used.has(s.id)) {
+        out.push(s);
+      }
+    }
+    return out;
+  }),
+  runningCount = computed(() => list.value.filter((s) => s.status === "running").length),
+  hasFinished = computed(() => list.value.some((s) => s.status !== "running")),
+  active = computed(() => list.value.find((s) => s.id === store.activeId) ?? list.value[0] ?? null);
 
 // 选中会话被移除/切换项目时,顺延到当前项目首个会话
 watch(
@@ -100,20 +99,20 @@ watch(
 const MIN_PANEL_HEIGHT = 160;
 
 function startResize(e: PointerEvent) {
-  const handle = e.currentTarget as HTMLElement;
-  const startY = e.clientY;
-  const startHeight = store.panelHeight;
-  const maxHeight = () => Math.round(window.innerHeight * 0.85);
+  const handle = e.currentTarget as HTMLElement,
+    startY = e.clientY,
+    startHeight = store.panelHeight,
+    maxHeight = () => Math.round(window.innerHeight * 0.85);
   handle.setPointerCapture(e.pointerId);
   const onMove = (ev: PointerEvent) => {
-    const next = startHeight + (startY - ev.clientY);
-    store.panelHeight = Math.min(Math.max(next, MIN_PANEL_HEIGHT), maxHeight());
-  };
-  const onUp = () => {
-    handle.removeEventListener("pointermove", onMove);
-    handle.removeEventListener("pointerup", onUp);
-    handle.removeEventListener("pointercancel", onUp);
-  };
+      const next = startHeight + (startY - ev.clientY);
+      store.panelHeight = Math.min(Math.max(next, MIN_PANEL_HEIGHT), maxHeight());
+    },
+    onUp = () => {
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      handle.removeEventListener("pointercancel", onUp);
+    };
   handle.addEventListener("pointermove", onMove);
   handle.addEventListener("pointerup", onUp);
   handle.addEventListener("pointercancel", onUp);
@@ -132,7 +131,9 @@ function onTabReorder(sessions: TerminalSessionInfo[]) {
 // ── 会话操作 ─────────────────────────────────────────────────────
 
 async function createTerminal(shell?: TerminalKind) {
-  if (creating.value) return;
+  if (creating.value) {
+    return;
+  }
   creating.value = true;
   try {
     await store.create(props.project, shell);
@@ -144,7 +145,9 @@ async function createTerminal(shell?: TerminalKind) {
 }
 
 async function stopActive() {
-  if (!active.value) return;
+  if (!active.value) {
+    return;
+  }
   try {
     await store.stop(active.value.id);
   } catch (e) {
@@ -153,7 +156,9 @@ async function stopActive() {
 }
 
 async function restartActive() {
-  if (!active.value) return;
+  if (!active.value) {
+    return;
+  }
   try {
     await store.restart(active.value.id);
   } catch (e) {

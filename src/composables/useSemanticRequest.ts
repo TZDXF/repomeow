@@ -31,11 +31,11 @@ export function isSemanticCanceled(error: unknown): boolean {
 export function useSemanticRequest<TArgs extends unknown[], TResult>(
   invoke: (requestId: string, ...args: TArgs) => Promise<TResult>,
 ): SemanticRequest<TArgs, TResult> {
-  const loading = ref(false);
-  const error = ref("");
-  const errorCode = ref<string | null>(null);
-  const result = shallowRef<TResult | null>(null);
-  const request = useLatestRequest();
+  const loading = ref(false),
+    error = ref(""),
+    errorCode = ref<string | null>(null),
+    result = shallowRef<TResult | null>(null),
+    request = useLatestRequest();
   let currentRequestId: string | null = null;
 
   function cancel() {
@@ -56,11 +56,15 @@ export function useSemanticRequest<TArgs extends unknown[], TResult>(
     errorCode.value = null;
     try {
       const value = await invoke(requestId, ...args);
-      if (!isCurrent()) return null;
+      if (!isCurrent()) {
+        return null;
+      }
       result.value = value;
       return value;
     } catch (e) {
-      if (!isCurrent() || isSemanticCanceled(e)) return null;
+      if (!isCurrent() || isSemanticCanceled(e)) {
+        return null;
+      }
       error.value = e instanceof Error ? e.message : String(e);
       errorCode.value =
         e && typeof e === "object" && typeof (e as { code?: unknown }).code === "string"
@@ -70,7 +74,9 @@ export function useSemanticRequest<TArgs extends unknown[], TResult>(
     } finally {
       if (isCurrent()) {
         loading.value = false;
-        if (currentRequestId === requestId) currentRequestId = null;
+        if (currentRequestId === requestId) {
+          currentRequestId = null;
+        }
       }
     }
   }

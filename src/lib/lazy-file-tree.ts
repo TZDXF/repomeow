@@ -49,48 +49,48 @@ export function buildVisibleRows(
   childrenMap: ReadonlyMap<string, readonly ProjectFileEntry[]>,
   expanded: ReadonlySet<string>,
 ): FileTreeRow<ProjectFileEntry>[] {
-  const out: FileTreeRow<ProjectFileEntry>[] = [];
-  const walk = (dir: string, depth: number) => {
-    const children = childrenMap.get(dir);
-    if (!children) {
-      return;
-    }
-    for (const entry of children) {
-      const knownEmpty = entry.isDir && childrenMap.get(entry.path)?.length === 0;
-      const isExpanded = expanded.has(entry.path);
-      out.push({
-        key: entry.path,
-        name: entryName(entry.path),
-        fullPath: entry.path,
-        isDir: entry.isDir,
-        depth,
-        expanded: isExpanded,
-        expandable: entry.isDir && !knownEmpty,
-        dimmed: entry.ignored,
-        loading: false,
-        data: entry,
-      });
-      if (!entry.isDir || !isExpanded) {
-        continue;
+  const out: FileTreeRow<ProjectFileEntry>[] = [],
+    walk = (dir: string, depth: number) => {
+      const children = childrenMap.get(dir);
+      if (!children) {
+        return;
       }
-      if (childrenMap.has(entry.path)) {
-        walk(entry.path, depth + 1);
-      } else {
+      for (const entry of children) {
+        const knownEmpty = entry.isDir && childrenMap.get(entry.path)?.length === 0,
+          isExpanded = expanded.has(entry.path);
         out.push({
-          key: `${entry.path}::__loading`,
-          name: "",
+          key: entry.path,
+          name: entryName(entry.path),
           fullPath: entry.path,
-          isDir: false,
-          depth: depth + 1,
-          expanded: false,
-          expandable: false,
-          dimmed: false,
-          loading: true,
-          data: null,
+          isDir: entry.isDir,
+          depth,
+          expanded: isExpanded,
+          expandable: entry.isDir && !knownEmpty,
+          dimmed: entry.ignored,
+          loading: false,
+          data: entry,
         });
+        if (!entry.isDir || !isExpanded) {
+          continue;
+        }
+        if (childrenMap.has(entry.path)) {
+          walk(entry.path, depth + 1);
+        } else {
+          out.push({
+            key: `${entry.path}::__loading`,
+            name: "",
+            fullPath: entry.path,
+            isDir: false,
+            depth: depth + 1,
+            expanded: false,
+            expandable: false,
+            dimmed: false,
+            loading: true,
+            data: null,
+          });
+        }
       }
-    }
-  };
+    };
   walk("", 0);
   return out;
 }

@@ -18,58 +18,54 @@ import { useSettingsStore } from "@/stores/settings";
 import { useTerminalStore } from "@/stores/terminal";
 import type { PinnedCommand, Project } from "@/types";
 
-const { t } = useI18n();
-const props = defineProps<{ project: Project; pins: PinnedCommand[] }>();
-// 托盘窗口在 TrayPopup 挂载时已 init,且每次弹窗显示时经 tray-popup://refresh 从 localStorage
-// 补读 JDK 配置;javaBuild 标记执行时按项目解析 JAVA_HOME
-const settingsStore = useSettingsStore();
-const terminalStore = useTerminalStore();
+const { t } = useI18n(),
+  props = defineProps<{ project: Project; pins: PinnedCommand[] }>(),
+  // 托盘窗口在 TrayPopup 挂载时已 init,且每次弹窗显示时经 tray-popup://refresh 从 localStorage
+  // 补读 JDK 配置;javaBuild 标记执行时按项目解析 JAVA_HOME
+  settingsStore = useSettingsStore(),
+  terminalStore = useTerminalStore();
 
 type ComposeAction = "up -d" | "up -d --build" | "build" | "restart" | "down" | "stop";
 
 /** pin 类型 -> 内嵌终端会话分类(与详情页各卡片一致,仅用于面板分组展示) */
 const PIN_SESSION_KIND: Record<PinnedCommand["kind"], string> = {
-  packageScript: "npm",
-  composeFile: "docker",
-  composeService: "docker",
-  customCommand: "custom",
-  javaBuild: "java",
-};
-
-/** 下拉菜单动作:与详情页一致,up/down/stop 有专属按钮不进菜单;服务级不含 down */
-const MENU_ACTIONS: ComposeAction[] = ["build", "up -d --build", "restart"];
-
-/** 菜单图标与颜色同详情页:build 蓝、buildUp 绿、restart 黄 */
-const MENU_ICONS: Record<ComposeAction, typeof Play> = {
-  "up -d": Play,
-  build: Hammer,
-  "up -d --build": Hammer,
-  restart: RotateCw,
-  down: Square,
-  stop: Square,
-};
-const MENU_ICON_CLASSES: Record<ComposeAction, string> = {
-  "up -d": "text-emerald-600",
-  build: "text-sky-600",
-  "up -d --build": "text-emerald-600",
-  restart: "text-amber-600",
-  down: "text-red-600",
-  stop: "text-red-600",
-};
-const MENU_LABEL_KEYS: Record<ComposeAction, string> = {
-  "up -d": "docker.up",
-  build: "docker.build",
-  "up -d --build": "docker.buildUp",
-  restart: "docker.restart",
-  down: "docker.down",
-  stop: "docker.stop",
-};
-
-const isCompose = (p: PinnedCommand) => p.kind === "composeFile" || p.kind === "composeService";
-
-/** composeService 的 target_key 为 "<file>\n<service>",取文件路径 / 服务名 */
-const fileOf = (p: PinnedCommand) => p.target_key.split("\n")[0];
-const serviceOf = (p: PinnedCommand) => p.target_key.split("\n")[1];
+    packageScript: "npm",
+    composeFile: "docker",
+    composeService: "docker",
+    customCommand: "custom",
+    javaBuild: "java",
+  },
+  /** 下拉菜单动作:与详情页一致,up/down/stop 有专属按钮不进菜单;服务级不含 down */
+  MENU_ACTIONS: ComposeAction[] = ["build", "up -d --build", "restart"],
+  /** 菜单图标与颜色同详情页:build 蓝、buildUp 绿、restart 黄 */
+  MENU_ICONS: Record<ComposeAction, typeof Play> = {
+    "up -d": Play,
+    build: Hammer,
+    "up -d --build": Hammer,
+    restart: RotateCw,
+    down: Square,
+    stop: Square,
+  },
+  MENU_ICON_CLASSES: Record<ComposeAction, string> = {
+    "up -d": "text-emerald-600",
+    build: "text-sky-600",
+    "up -d --build": "text-emerald-600",
+    restart: "text-amber-600",
+    down: "text-red-600",
+    stop: "text-red-600",
+  },
+  MENU_LABEL_KEYS: Record<ComposeAction, string> = {
+    "up -d": "docker.up",
+    build: "docker.build",
+    "up -d --build": "docker.buildUp",
+    restart: "docker.restart",
+    down: "docker.down",
+    stop: "docker.stop",
+  },
+  isCompose = (p: PinnedCommand) => p.kind === "composeFile" || p.kind === "composeService",
+  /** composeService 的 target_key 为 "<file>\n<service>",取文件路径 / 服务名 */
+  fileOf = (p: PinnedCommand) => p.target_key.split("\n")[0],
+  serviceOf = (p: PinnedCommand) => p.target_key.split("\n")[1];
 
 interface PinEntry {
   pin: PinnedCommand;
@@ -83,9 +79,9 @@ interface PinEntry {
  */
 const entries = computed<PinEntry[]>(() => {
   const pinnedFiles = new Set(
-    props.pins.filter((p) => p.kind === "composeFile").map((p) => p.target_key),
-  );
-  const out: PinEntry[] = [];
+      props.pins.filter((p) => p.kind === "composeFile").map((p) => p.target_key),
+    ),
+    out: PinEntry[] = [];
   for (const p of props.pins) {
     if (p.kind === "composeService" && pinnedFiles.has(fileOf(p))) {
       continue;
@@ -117,10 +113,10 @@ function runIcon(p: PinnedCommand) {
 async function runPinned(p: PinnedCommand) {
   try {
     // cwd 存的是相对项目根的目录(monorepo 子包),执行时用当前 project.path 拼接,迁移目录后仍可用
-    const cwd = p.cwd ? `${props.project.path}/${p.cwd}` : undefined;
-    // Spring Boot 标记命令注入项目选择的 JAVA_HOME(与详情页卡片同一解析逻辑)
-    const javaHome =
-      p.kind === "javaBuild" ? resolveJavaHome(settingsStore, props.project.id) : undefined;
+    const cwd = p.cwd ? `${props.project.path}/${p.cwd}` : undefined,
+      // Spring Boot 标记命令注入项目选择的 JAVA_HOME(与详情页卡片同一解析逻辑)
+      javaHome =
+        p.kind === "javaBuild" ? resolveJavaHome(settingsStore, props.project.id) : undefined;
     await terminalStore.run(props.project, p.command, {
       cwd,
       javaHome,
@@ -135,8 +131,8 @@ async function runPinned(p: PinnedCommand) {
 
 /** compose 条目执行指定动作(command 为基础前缀,在此拼接动作与服务名) */
 async function runCompose(p: PinnedCommand, action: ComposeAction) {
-  const service = p.kind === "composeService" ? serviceOf(p) : undefined;
-  const command = `${p.command} ${service ? `${action} ${service}` : action}`;
+  const service = p.kind === "composeService" ? serviceOf(p) : undefined,
+    command = `${p.command} ${service ? `${action} ${service}` : action}`;
   try {
     await terminalStore.run(props.project, command, { kind: "docker", label: p.label });
     toast.success(t("pins.started", { name: p.label }));

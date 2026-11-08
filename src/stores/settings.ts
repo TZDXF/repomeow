@@ -8,9 +8,9 @@ import { isOpenWithId, normalizeOpenWithOrder } from "@/lib/open-with";
 import type { CustomOpenWith, JdkConfig, OpenWithId } from "@/types";
 
 /** 主题相关设置变更的跨窗口广播:通知托盘弹窗等其它窗口同步重渲自身 DOM */
-const THEME_CHANGED_EVENT = "settings://theme-changed";
-/** 打开方式(排序 + 默认项)变更的跨窗口广播:各 webview 的 Pinia store 与 localStorage 读写互不可见 */
-const OPEN_WITH_CHANGED_EVENT = "settings://open-with-changed";
+const THEME_CHANGED_EVENT = "settings://theme-changed",
+  /** 打开方式(排序 + 默认项)变更的跨窗口广播:各 webview 的 Pinia store 与 localStorage 读写互不可见 */
+  OPEN_WITH_CHANGED_EVENT = "settings://open-with-changed";
 
 export type ThemeMode = "system" | "light" | "dark";
 export type ThemeSkin = "default" | "island" | "pixel" | "glassmorphism" | "glass-pro";
@@ -23,14 +23,14 @@ export type CloseAction = "tray" | "exit";
 /** 执行命令的终端(仅 Windows 生效;该键同时被 Rust 侧 spawn_terminal 经 read_setting_string 读取) */
 export type TerminalKind = "cmd" | "powershell" | "gitbash";
 // 应用数据统一存放于用户主目录下的 .repomeow 目录(与 Rust 端 APP_DATA_DIR_NAME 保持一致)
-const APP_DATA_DIR_NAME = ".repomeow";
-const STORE_FILE = "settings.json";
-/** 打开方式列表顺序的 localStorage 键(纯 UI 偏好,不进 settings.json) */
-const OPEN_WITH_ORDER_CACHE_KEY = "repomeow:open-with-order";
-/** JDK 配置三键的 localStorage 键(开发环境偏好,不进 settings.json;settings.json 里的历史数据不迁移) */
-const JDK_LIST_CACHE_KEY = "repomeow:jdk-list";
-const DEFAULT_JDK_CACHE_KEY = "repomeow:default-jdk-id";
-const PROJECT_JDK_MAP_CACHE_KEY = "repomeow:project-jdk-map";
+const APP_DATA_DIR_NAME = ".repomeow",
+  STORE_FILE = "settings.json",
+  /** 打开方式列表顺序的 localStorage 键(纯 UI 偏好,不进 settings.json) */
+  OPEN_WITH_ORDER_CACHE_KEY = "repomeow:open-with-order",
+  /** JDK 配置三键的 localStorage 键(开发环境偏好,不进 settings.json;settings.json 里的历史数据不迁移) */
+  JDK_LIST_CACHE_KEY = "repomeow:jdk-list",
+  DEFAULT_JDK_CACHE_KEY = "repomeow:default-jdk-id",
+  PROJECT_JDK_MAP_CACHE_KEY = "repomeow:project-jdk-map";
 
 /** 从 localStorage 读 JSON;缺失/不可用/非法时返回 undefined,由调用方回退默认值 */
 function readLocalJson(key: string): unknown {
@@ -55,50 +55,50 @@ function persistLocalJson(key: string, value: unknown) {
 // 经 stores/ai-config.ts 读写;此处仅保留与厂商无关的并发上限。
 
 export const useSettingsStore = defineStore("settings", () => {
-  const theme = ref<ThemeMode>("system");
-  const themeSkin = ref<ThemeSkin>("default");
-  const mdTheme = ref<MdTheme>("default");
-  const language = ref<Language>("zh-CN");
-  /** 用户配置的外部打开方式。 */
-  const customOpenWith = ref<CustomOpenWith[]>([]);
-  const defaultOpenWith = ref<OpenWithId>("explorer");
-  /** 打开方式列表顺序(设置页可拖拽调整,下拉菜单同步遵循) */
-  const openWithOrder = ref<OpenWithId[]>(normalizeOpenWithOrder([], customOpenWith.value));
-  /** AI 调用并发上限(1-5),适用于批量生成报告等所有 AI 请求场景 */
-  const aiConcurrency = ref(2);
-  /** 项目列表视图模式(grid / table) */
-  const projectsViewMode = ref<ProjectsViewMode>("grid");
-  /** 项目列表排序方式 */
-  const projectsSortKey = ref<ProjectsSortKey>("name");
-  /** 启动时自动检查更新 */
-  const autoCheckUpdate = ref(true);
-  /** 开发者模式(默认关闭):F12 切换 DevTools + Ctrl+Shift+E 元素源码选取 */
-  const developerMode = ref(false);
-  /**
-   * Wiki 自动增量更新全局开关(默认关闭):打开 = 所有项目都参与自动增量更新
-   * (项目勾选被忽略并在 UI 禁用);关闭 = 仅项目勾选了的参与
-   * (projects 表 wiki_auto_update)
-   */
-  const wikiAutoUpdate = ref(false);
-  // 仅控制项目资源部署目标的显隐,不影响 ACP 或已落盘配置。
-  const hiddenResourceAgents = ref<string[]>([]);
-  /** 关闭主窗口行为(默认最小化到托盘) */
-  const closeAction = ref<CloseAction>("tray");
-  /** 执行命令的终端(默认 cmd,仅 Windows 生效;内嵌终端共用同一 shell 选择) */
-  const terminal = ref<TerminalKind>("cmd");
-  /** 启用 GitHub CLI(gh)作为「账号仓库」的虚拟账号来源(默认关闭,opt-in) */
-  const enableGhCli = ref(false);
-  /** 新建 worktree 的默认目录模板:支持 {branch} 占位符与相对路径(相对主工作区根解析) */
-  const worktreeDirTemplate = ref(".worktrees/{branch}");
-  /** 用户登记的 JDK 列表(开发环境配置,Spring Boot 运行按项目选用) */
-  const jdkList = ref<JdkConfig[]>([]);
-  /** 默认 JDK 的 id(项目未单独选择时使用;空 = 不注入,走系统 PATH) */
-  const defaultJdkId = ref("");
-  /** 按项目选择的 JDK(projectId -> jdk id;缺省 = 跟随默认 JDK) */
-  const projectJdkMap = ref<Record<string, string>>({});
+  const theme = ref<ThemeMode>("system"),
+    themeSkin = ref<ThemeSkin>("default"),
+    mdTheme = ref<MdTheme>("default"),
+    language = ref<Language>("zh-CN"),
+    /** 用户配置的外部打开方式。 */
+    customOpenWith = ref<CustomOpenWith[]>([]),
+    defaultOpenWith = ref<OpenWithId>("explorer"),
+    /** 打开方式列表顺序(设置页可拖拽调整,下拉菜单同步遵循) */
+    openWithOrder = ref<OpenWithId[]>(normalizeOpenWithOrder([], customOpenWith.value)),
+    /** AI 调用并发上限(1-5),适用于批量生成报告等所有 AI 请求场景 */
+    aiConcurrency = ref(2),
+    /** 项目列表视图模式(grid / table) */
+    projectsViewMode = ref<ProjectsViewMode>("grid"),
+    /** 项目列表排序方式 */
+    projectsSortKey = ref<ProjectsSortKey>("name"),
+    /** 启动时自动检查更新 */
+    autoCheckUpdate = ref(true),
+    /** 开发者模式(默认关闭):F12 切换 DevTools + Ctrl+Shift+E 元素源码选取 */
+    developerMode = ref(false),
+    /**
+     * Wiki 自动增量更新全局开关(默认关闭):打开 = 所有项目都参与自动增量更新
+     * (项目勾选被忽略并在 UI 禁用);关闭 = 仅项目勾选了的参与
+     * (projects 表 wiki_auto_update)
+     */
+    wikiAutoUpdate = ref(false),
+    // 仅控制项目资源部署目标的显隐,不影响 ACP 或已落盘配置。
+    hiddenResourceAgents = ref<string[]>([]),
+    /** 关闭主窗口行为(默认最小化到托盘) */
+    closeAction = ref<CloseAction>("tray"),
+    /** 执行命令的终端(默认 cmd,仅 Windows 生效;内嵌终端共用同一 shell 选择) */
+    terminal = ref<TerminalKind>("cmd"),
+    /** 启用 GitHub CLI(gh)作为「账号仓库」的虚拟账号来源(默认关闭,opt-in) */
+    enableGhCli = ref(false),
+    /** 新建 worktree 的默认目录模板:支持 {branch} 占位符与相对路径(相对主工作区根解析) */
+    worktreeDirTemplate = ref(".worktrees/{branch}"),
+    /** 用户登记的 JDK 列表(开发环境配置,Spring Boot 运行按项目选用) */
+    jdkList = ref<JdkConfig[]>([]),
+    /** 默认 JDK 的 id(项目未单独选择时使用;空 = 不注入,走系统 PATH) */
+    defaultJdkId = ref(""),
+    /** 按项目选择的 JDK(projectId -> jdk id;缺省 = 跟随默认 JDK) */
+    projectJdkMap = ref<Record<string, string>>({});
 
-  let fileStore: Store | null = null;
-  let initPromise: Promise<void> | null = null;
+  let fileStore: Store | null = null,
+    initPromise: Promise<void> | null = null;
 
   const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
 
@@ -120,8 +120,8 @@ export const useSettingsStore = defineStore("settings", () => {
   }
 
   function applyTheme() {
-    const dark = theme.value === "dark" || (theme.value === "system" && systemDark.matches);
-    const root = document.documentElement;
+    const dark = theme.value === "dark" || (theme.value === "system" && systemDark.matches),
+      root = document.documentElement;
     root.classList.toggle("dark", dark);
     if (themeSkin.value === "default") {
       root.removeAttribute("data-theme");
@@ -142,7 +142,9 @@ export const useSettingsStore = defineStore("settings", () => {
   }
 
   function onSystemThemeChange() {
-    if (theme.value === "system") applyTheme();
+    if (theme.value === "system") {
+      applyTheme();
+    }
   }
 
   /**
@@ -183,7 +185,9 @@ export const useSettingsStore = defineStore("settings", () => {
         return [];
       }
     }
-    if (!Array.isArray(saved)) return [];
+    if (!Array.isArray(saved)) {
+      return [];
+    }
     const ids = new Set<string>();
     return saved.flatMap((item) => {
       if (
@@ -225,9 +229,11 @@ export const useSettingsStore = defineStore("settings", () => {
         return [];
       }
     }
-    if (!Array.isArray(saved)) return [];
-    const ids = new Set<string>();
-    const paths = new Set<string>();
+    if (!Array.isArray(saved)) {
+      return [];
+    }
+    const ids = new Set<string>(),
+      paths = new Set<string>();
     return saved.flatMap((item) => {
       if (
         !item ||
@@ -261,7 +267,9 @@ export const useSettingsStore = defineStore("settings", () => {
         return {};
       }
     }
-    if (!saved || typeof saved !== "object" || Array.isArray(saved)) return {};
+    if (!saved || typeof saved !== "object" || Array.isArray(saved)) {
+      return {};
+    }
     return Object.fromEntries(
       Object.entries(saved as Record<string, unknown>).flatMap(([k, v]) =>
         typeof v === "string" && v.trim() ? [[k, v] as const] : [],
@@ -489,7 +497,9 @@ export const useSettingsStore = defineStore("settings", () => {
   }
 
   async function persist(key: string, value: unknown) {
-    if (!fileStore) return;
+    if (!fileStore) {
+      return;
+    }
     await fileStore.set(key, value);
     await fileStore.save();
   }
@@ -545,7 +555,9 @@ export const useSettingsStore = defineStore("settings", () => {
   }
 
   async function setDefaultOpenWith(value: OpenWithId) {
-    if (!isOpenWithId(value, customOpenWith.value)) return;
+    if (!isOpenWithId(value, customOpenWith.value)) {
+      return;
+    }
     defaultOpenWith.value = value;
     await persist("defaultOpenWith", value);
     await emitOpenWithChanged();
@@ -564,7 +576,9 @@ export const useSettingsStore = defineStore("settings", () => {
       command: value.command.trim(),
       icon: value.icon,
     };
-    if (!next.id || !next.name || !next.command) return;
+    if (!next.id || !next.name || !next.command) {
+      return;
+    }
     const existing = customOpenWith.value.findIndex((option) => option.id === next.id);
     if (existing === -1) {
       customOpenWith.value = [...customOpenWith.value, next];
@@ -580,7 +594,9 @@ export const useSettingsStore = defineStore("settings", () => {
   }
 
   async function removeCustomOpenWith(id: string) {
-    if (!customOpenWith.value.some((option) => option.id === id)) return;
+    if (!customOpenWith.value.some((option) => option.id === id)) {
+      return;
+    }
     const customId = `custom:${id}` as const;
     customOpenWith.value = customOpenWith.value.filter((option) => option.id !== id);
     openWithOrder.value = normalizeOpenWithOrder(openWithOrder.value, customOpenWith.value);
@@ -600,13 +616,17 @@ export const useSettingsStore = defineStore("settings", () => {
   }
 
   async function setProjectsViewMode(value: ProjectsViewMode) {
-    if (value !== "grid" && value !== "table") return;
+    if (value !== "grid" && value !== "table") {
+      return;
+    }
     projectsViewMode.value = value;
     await persist("projectsViewMode", value);
   }
 
   async function setProjectsSortKey(value: ProjectsSortKey) {
-    if (value !== "name" && value !== "updated" && value !== "created") return;
+    if (value !== "name" && value !== "updated" && value !== "created") {
+      return;
+    }
     projectsSortKey.value = value;
     await persist("projectsSortKey", value);
   }
@@ -633,13 +653,17 @@ export const useSettingsStore = defineStore("settings", () => {
   }
 
   async function setCloseAction(value: CloseAction) {
-    if (value !== "tray" && value !== "exit") return;
+    if (value !== "tray" && value !== "exit") {
+      return;
+    }
     closeAction.value = value;
     await persist("closeAction", value);
   }
 
   async function setTerminal(value: TerminalKind) {
-    if (value !== "cmd" && value !== "powershell" && value !== "gitbash") return;
+    if (value !== "cmd" && value !== "powershell" && value !== "gitbash") {
+      return;
+    }
     terminal.value = value;
     await persist("terminal", value);
   }
@@ -651,7 +675,9 @@ export const useSettingsStore = defineStore("settings", () => {
 
   async function setWorktreeDirTemplate(value: string) {
     const v = value.trim();
-    if (!v) return;
+    if (!v) {
+      return;
+    }
     worktreeDirTemplate.value = v;
     await persist("worktreeDirTemplate", v);
   }
@@ -668,8 +694,12 @@ export const useSettingsStore = defineStore("settings", () => {
   /** 新增或更新一个 JDK(按 id upsert,路径去重);首个条目自动成为默认 */
   async function saveJdk(value: JdkConfig) {
     const next = { id: value.id, name: value.name.trim(), path: value.path.trim() };
-    if (!next.id || !next.name || !next.path) return;
-    if (jdkList.value.some((j) => j.path === next.path && j.id !== next.id)) return;
+    if (!next.id || !next.name || !next.path) {
+      return;
+    }
+    if (jdkList.value.some((j) => j.path === next.path && j.id !== next.id)) {
+      return;
+    }
     const existing = jdkList.value.findIndex((j) => j.id === next.id);
     if (existing === -1) {
       jdkList.value = [...jdkList.value, next];
@@ -684,16 +714,20 @@ export const useSettingsStore = defineStore("settings", () => {
 
   /** 批量追加 JDK(自动探测用):过滤已存在路径后追加,单次落库;返回实际新增数 */
   async function addJdks(jdks: JdkConfig[]) {
-    const known = new Set(jdkList.value.map((j) => j.path.toLowerCase()));
-    const additions: JdkConfig[] = [];
+    const known = new Set(jdkList.value.map((j) => j.path.toLowerCase())),
+      additions: JdkConfig[] = [];
     for (const jdk of jdks) {
-      const next = { id: jdk.id, name: jdk.name.trim(), path: jdk.path.trim() };
-      const key = next.path.toLowerCase();
-      if (!next.id || !next.name || !next.path || known.has(key)) continue;
+      const next = { id: jdk.id, name: jdk.name.trim(), path: jdk.path.trim() },
+        key = next.path.toLowerCase();
+      if (!next.id || !next.name || !next.path || known.has(key)) {
+        continue;
+      }
       known.add(key);
       additions.push(next);
     }
-    if (!additions.length) return 0;
+    if (!additions.length) {
+      return 0;
+    }
     jdkList.value = [...jdkList.value, ...additions];
     if (!defaultJdkId.value) {
       defaultJdkId.value = additions[0].id;
@@ -704,7 +738,9 @@ export const useSettingsStore = defineStore("settings", () => {
 
   /** 删除 JDK:若为默认项则回退到首个剩余项;同时清理引用它的项目选择 */
   async function removeJdk(id: string) {
-    if (!jdkList.value.some((j) => j.id === id)) return;
+    if (!jdkList.value.some((j) => j.id === id)) {
+      return;
+    }
     jdkList.value = jdkList.value.filter((j) => j.id !== id);
     if (defaultJdkId.value === id) {
       defaultJdkId.value = jdkList.value[0]?.id ?? "";
@@ -718,7 +754,9 @@ export const useSettingsStore = defineStore("settings", () => {
   }
 
   async function setDefaultJdk(id: string) {
-    if (!jdkList.value.some((j) => j.id === id)) return;
+    if (!jdkList.value.some((j) => j.id === id)) {
+      return;
+    }
     defaultJdkId.value = id;
     persistJdkCache();
   }
@@ -726,9 +764,13 @@ export const useSettingsStore = defineStore("settings", () => {
   /** 设置/清除按项目选择的 JDK(jdkId 为空 = 跟随默认 JDK);projectId 接受项目 id(number) */
   async function setProjectJdk(projectId: string | number, jdkId: string) {
     const key = String(projectId);
-    if (!key) return;
+    if (!key) {
+      return;
+    }
     if (jdkId) {
-      if (!jdkList.value.some((j) => j.id === jdkId)) return;
+      if (!jdkList.value.some((j) => j.id === jdkId)) {
+        return;
+      }
       projectJdkMap.value = { ...projectJdkMap.value, [key]: jdkId };
     } else {
       const rest = { ...projectJdkMap.value };

@@ -11,9 +11,8 @@ defineSlots<{
   default: (props: { headingValue: string }) => any;
 }>();
 
-const delegatedProps = reactiveOmit(props, "class");
-
-const forwardedProps = useForwardProps(delegatedProps);
+const delegatedProps = reactiveOmit(props, "class"),
+  forwardedProps = useForwardProps(delegatedProps);
 </script>
 
 <template>

@@ -26,22 +26,19 @@ import {
 } from "@/lib/accounts";
 import { useSettingsStore } from "@/stores/settings";
 
-const { t } = useI18n();
-const settingsStore = useSettingsStore();
-
-const accounts = ref<GitAccount[]>([]);
-const loading = ref(false);
-
-const enableGhCli = computed({
-  get: () => settingsStore.enableGhCli,
-  set: (v: boolean) => settingsStore.setEnableGhCli(v),
-});
-
-const PROVIDERS: { value: Provider; label: string }[] = [
-  { value: "github", label: "GitHub" },
-  { value: "gitee", label: "Gitee" },
-  { value: "gitlab", label: "GitLab" },
-];
+const { t } = useI18n(),
+  settingsStore = useSettingsStore(),
+  accounts = ref<GitAccount[]>([]),
+  loading = ref(false),
+  enableGhCli = computed({
+    get: () => settingsStore.enableGhCli,
+    set: (v: boolean) => settingsStore.setEnableGhCli(v),
+  }),
+  PROVIDERS: { value: Provider; label: string }[] = [
+    { value: "github", label: "GitHub" },
+    { value: "gitee", label: "Gitee" },
+    { value: "gitlab", label: "GitLab" },
+  ];
 
 function providerLabel(p: Provider): string {
   return PROVIDERS.find((x) => x.value === p)?.label ?? p;
@@ -61,13 +58,13 @@ async function reload() {
 onMounted(reload);
 
 // ── 新增 / 编辑对话框 ──────────────────────────────────────────
-const dialogOpen = ref(false);
-const editing = ref<GitAccount | null>(null);
-const provider = ref<Provider>("github");
-const label = ref("");
-const baseUrl = ref("");
-const token = ref("");
-const saving = ref(false);
+const dialogOpen = ref(false),
+  editing = ref<GitAccount | null>(null),
+  provider = ref<Provider>("github"),
+  label = ref(""),
+  baseUrl = ref(""),
+  token = ref(""),
+  saving = ref(false);
 
 function openAdd() {
   editing.value = null;
@@ -88,7 +85,9 @@ function openEdit(account: GitAccount) {
 }
 
 async function save() {
-  if (saving.value) return;
+  if (saving.value) {
+    return;
+  }
   saving.value = true;
   try {
     if (editing.value) {
@@ -118,18 +117,19 @@ async function save() {
 }
 
 /** 待确认删除的账号,ConfirmDialog 确认后执行 */
-const pendingRemove = ref<GitAccount | null>(null);
-const removeConfirmOpen = computed({
-  get: () => pendingRemove.value !== null,
-  set: (v) => {
-    if (!v) pendingRemove.value = null;
-  },
-});
-
-const pendingRemoveName = computed(() => {
-  const a = pendingRemove.value;
-  return a ? a.label || a.username || providerLabel(a.provider) : "";
-});
+const pendingRemove = ref<GitAccount | null>(null),
+  removeConfirmOpen = computed({
+    get: () => pendingRemove.value !== null,
+    set: (v) => {
+      if (!v) {
+        pendingRemove.value = null;
+      }
+    },
+  }),
+  pendingRemoveName = computed(() => {
+    const a = pendingRemove.value;
+    return a ? a.label || a.username || providerLabel(a.provider) : "";
+  });
 
 function remove(account: GitAccount) {
   pendingRemove.value = account;
@@ -137,7 +137,9 @@ function remove(account: GitAccount) {
 
 async function confirmRemove() {
   const account = pendingRemove.value;
-  if (!account) return;
+  if (!account) {
+    return;
+  }
   try {
     await removeGitAccount(account.id);
     toast.success(t("settings.accounts.deleted"));

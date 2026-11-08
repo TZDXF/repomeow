@@ -22,9 +22,13 @@ const WIKI_UNREAD_STORAGE_KEY = "repomeow:wiki-unread-pages";
 function loadUnreadPages(): Record<string, string[]> {
   try {
     const raw = globalThis.localStorage?.getItem(WIKI_UNREAD_STORAGE_KEY);
-    if (!raw) return {};
+    if (!raw) {
+      return {};
+    }
     const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
     return Object.fromEntries(
       Object.entries(parsed).flatMap(([path, ids]) =>
         Array.isArray(ids)
@@ -108,8 +112,8 @@ function generationKey(projectPath: string): string {
 
 /** 将面向开发者的 Wiki 生成错误转换为适合直接展示给用户的提示。 */
 export function toFriendlyWikiGenerationError(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error);
-  const normalized = raw.toLowerCase();
+  const raw = error instanceof Error ? error.message : String(error),
+    normalized = raw.toLowerCase();
   if (normalized.includes("airatelimited") || normalized.includes("ai_rate_limited")) {
     return i18n.global.t("errors.ai_rate_limited");
   }
@@ -152,8 +156,8 @@ function buildGenOptions(language: SupportedLocale): WikiGenOptions {
  * 不同项目可以同时生成;阅读数据也按归一化项目路径隔离,供缓存页面独立订阅。
  */
 export const useWikiStore = defineStore("wiki", () => {
-  const documents = reactive<Record<string, WikiDocumentState>>({});
-  const loadVersions = new Map<string, number>();
+  const documents = reactive<Record<string, WikiDocumentState>>({}),
+    loadVersions = new Map<string, number>();
 
   function documentFor(projectPath: string): WikiDocumentState {
     const key = generationKey(projectPath);
@@ -167,34 +171,43 @@ export const useWikiStore = defineStore("wiki", () => {
   }
 
   function markPagesUnread(projectPath: string, pageIds: string[]) {
-    if (!pageIds.length) return;
+    if (!pageIds.length) {
+      return;
+    }
     const key = generationKey(projectPath);
     unreadPages[key] = [...new Set([...(unreadPages[key] ?? []), ...pageIds])];
     saveUnreadPages(unreadPages);
   }
 
   function markPageRead(projectPath: string, pageId: string) {
-    const key = generationKey(projectPath);
-    const current = unreadPages[key];
-    if (!current?.includes(pageId)) return;
+    const key = generationKey(projectPath),
+      current = unreadPages[key];
+    if (!current?.includes(pageId)) {
+      return;
+    }
     const remaining = current.filter((id) => id !== pageId);
-    if (remaining.length) unreadPages[key] = remaining;
-    else delete unreadPages[key];
+    if (remaining.length) {
+      unreadPages[key] = remaining;
+    } else {
+      delete unreadPages[key];
+    }
     saveUnreadPages(unreadPages);
   }
 
   function clearUnreadPages(projectPath: string) {
     const key = generationKey(projectPath);
-    if (!(key in unreadPages)) return;
+    if (!(key in unreadPages)) {
+      return;
+    }
     delete unreadPages[key];
     saveUnreadPages(unreadPages);
   }
 
   // ── 生成进度 ──
-  const generations = reactive<Record<string, WikiGenerationState>>({});
-  const generationControllers = new Map<string, AbortController>();
-  /** 进行中的整本生成 promise;remove 时等待对应项目收敛,避免删除后又被落盘重建 */
-  const generationRuns = new Map<string, Promise<void>>();
+  const generations = reactive<Record<string, WikiGenerationState>>({}),
+    generationControllers = new Map<string, AbortController>(),
+    /** 进行中的整本生成 promise;remove 时等待对应项目收敛,避免删除后又被落盘重建 */
+    generationRuns = new Map<string, Promise<void>>();
 
   /** 获取指定项目的生成状态;返回值由 Vue reactive 托管,可直接用于 computed */
   function generationFor(projectPath: string): WikiGenerationState | undefined {
@@ -206,107 +219,119 @@ export const useWikiStore = defineStore("wiki", () => {
   }
 
   /** 是否存在任意整本生成任务,供需要全局概览的调用方使用 */
-  const generating = computed(() => Object.values(generations).some(isActiveGeneration));
-
-  /** 标题栏使用的 Wiki 后台任务摘要；整本生成、增量更新、单页重生成统一计数。 */
-  const backgroundTasks = computed<WikiBackgroundTask[]>(() => {
-    const tasks: WikiBackgroundTask[] = Object.entries(generations)
-      .filter(([, state]) => isActiveGeneration(state))
-      .map(([key, state]) => ({
-        id: `generate:${key}`,
-        action: "generate",
-        projectId: state.projectId,
-        projectName: state.projectName,
-        completed: state.pages.filter((page) =>
-          ["done", "failed", "cancelled"].includes(page.status),
-        ).length,
-        total: state.pages.length,
-      }));
-    if (updateProgress.value) {
-      tasks.push({
-        id: `update:${updateProgress.value.projectName}`,
-        action: "update",
-        projectId: updateProgress.value.projectId,
-        projectName: updateProgress.value.projectName,
-        completed: updateProgress.value.completed,
-        total: updateProgress.value.total,
-      });
-    } else if (pageRegeneration.value) {
-      tasks.push({
-        id: `page:${pageRegeneration.value.projectName}:${pageRegeneration.value.pageTitle}`,
-        action: "page",
-        projectId: pageRegeneration.value.projectId,
-        projectName: pageRegeneration.value.projectName,
-        completed: 0,
-        total: 1,
-      });
-    }
-    return tasks;
-  });
+  const generating = computed(() => Object.values(generations).some(isActiveGeneration)),
+    /** 标题栏使用的 Wiki 后台任务摘要；整本生成、增量更新、单页重生成统一计数。 */
+    backgroundTasks = computed<WikiBackgroundTask[]>(() => {
+      const tasks: WikiBackgroundTask[] = Object.entries(generations)
+        .filter(([, state]) => isActiveGeneration(state))
+        .map(([key, state]) => ({
+          id: `generate:${key}`,
+          action: "generate",
+          projectId: state.projectId,
+          projectName: state.projectName,
+          completed: state.pages.filter((page) =>
+            ["done", "failed", "cancelled"].includes(page.status),
+          ).length,
+          total: state.pages.length,
+        }));
+      if (updateProgress.value) {
+        tasks.push({
+          id: `update:${updateProgress.value.projectName}`,
+          action: "update",
+          projectId: updateProgress.value.projectId,
+          projectName: updateProgress.value.projectName,
+          completed: updateProgress.value.completed,
+          total: updateProgress.value.total,
+        });
+      } else if (pageRegeneration.value) {
+        tasks.push({
+          id: `page:${pageRegeneration.value.projectName}:${pageRegeneration.value.pageTitle}`,
+          action: "page",
+          projectId: pageRegeneration.value.projectId,
+          projectName: pageRegeneration.value.projectName,
+          completed: 0,
+          total: 1,
+        });
+      }
+      return tasks;
+    });
 
   async function load(projectPath: string) {
-    const key = generationKey(projectPath);
-    const document = documentFor(projectPath);
-    const version = (loadVersions.get(key) ?? 0) + 1;
+    const key = generationKey(projectPath),
+      document = documentFor(projectPath),
+      version = (loadVersions.get(key) ?? 0) + 1;
     loadVersions.set(key, version);
     document.loading = true;
     try {
       const data = await loadWiki(projectPath);
       // 同项目重叠读取/删除后,迟到的旧响应不能覆盖较新的内容。
-      if (loadVersions.get(key) !== version) return;
+      if (loadVersions.get(key) !== version) {
+        return;
+      }
       document.data = data;
       if (data) {
-        const validIds = new Set(data.pages.map((page) => page.id));
-        const validUnread = (unreadPages[key] ?? []).filter((id) => validIds.has(id));
+        const validIds = new Set(data.pages.map((page) => page.id)),
+          validUnread = (unreadPages[key] ?? []).filter((id) => validIds.has(id));
         if (validUnread.length !== (unreadPages[key]?.length ?? 0)) {
-          if (validUnread.length) unreadPages[key] = validUnread;
-          else delete unreadPages[key];
+          if (validUnread.length) {
+            unreadPages[key] = validUnread;
+          } else {
+            delete unreadPages[key];
+          }
           saveUnreadPages(unreadPages);
         }
       }
     } finally {
-      if (loadVersions.get(key) === version) document.loading = false;
+      if (loadVersions.get(key) === version) {
+        document.loading = false;
+      }
     }
   }
 
   /** 整本生成;同一项目避免重复启动,不同项目可并行;结束后刷新该项目已缓存的阅读数据 */
   function generate(project: WikiTaskProject, language: SupportedLocale) {
     const key = generationKey(project.path);
-    if (isGenerating(project.path)) return generationRuns.get(key) ?? Promise.resolve();
+    if (isGenerating(project.path)) {
+      return generationRuns.get(key) ?? Promise.resolve();
+    }
     const run = runGenerate(project, language, key);
     generationRuns.set(key, run);
     return run;
   }
 
   async function runGenerate(project: WikiTaskProject, language: SupportedLocale, key: string) {
-    const controller = new AbortController();
-    const state = reactive<WikiGenerationState>({
-      projectId: project.id,
-      projectName: project.name,
-      phase: "idle",
-      pages: [],
-      error: "",
-      streamContents: {},
-      context: null,
-      toolCalls: 0,
-      retries: {},
-      startedAt: Date.now(),
-    });
+    const controller = new AbortController(),
+      state = reactive<WikiGenerationState>({
+        projectId: project.id,
+        projectName: project.name,
+        phase: "idle",
+        pages: [],
+        error: "",
+        streamContents: {},
+        context: null,
+        toolCalls: 0,
+        retries: {},
+        startedAt: Date.now(),
+      });
     generations[key] = state;
     generationControllers.set(key, controller);
     try {
       await generateWiki(project, buildGenOptions(language), controller.signal, {
         onPhase: (p) => {
           state.phase = p;
-          if (p !== "outlining") delete state.retries.outline;
+          if (p !== "outlining") {
+            delete state.retries.outline;
+          }
         },
         onPage: (page, status, error, stats) => {
-          const item = state.pages.find((i) => i.page.id === page.id);
-          const friendly = error ? toFriendlyWikiGenerationError(error) : undefined;
+          const item = state.pages.find((i) => i.page.id === page.id),
+            friendly = error ? toFriendlyWikiGenerationError(error) : undefined;
           if (item) {
             item.status = status;
             item.error = friendly;
-            if (stats?.durationMs !== undefined) item.durationMs = stats.durationMs;
+            if (stats?.durationMs !== undefined) {
+              item.durationMs = stats.durationMs;
+            }
           } else {
             state.pages.push({
               page: { ...page },
@@ -317,13 +342,17 @@ export const useWikiStore = defineStore("wiki", () => {
           }
           // 完成页保留正文，整本生成期间仍可阅读；失败/取消页释放残稿。
           if (status !== "running" && status !== "pending") {
-            if (status !== "done") delete state.streamContents[page.id];
+            if (status !== "done") {
+              delete state.streamContents[page.id];
+            }
             delete state.retries[page.id];
           }
         },
         onPageProgress: (page, partial) => {
           state.streamContents[page.id] = partial;
-          if (partial) delete state.retries[page.id];
+          if (partial) {
+            delete state.retries[page.id];
+          }
         },
         onContext: (context) => {
           state.context = { ...context };
@@ -340,7 +369,9 @@ export const useWikiStore = defineStore("wiki", () => {
           state.retries[retry.pageId ?? "outline"] = { ...retry };
         },
       });
-      if (state.phase === "done") clearUnreadPages(project.path);
+      if (state.phase === "done") {
+        clearUnreadPages(project.path);
+      }
     } catch (e) {
       state.error = toFriendlyWikiGenerationError(e);
       state.phase = controller.signal.aborted ? "cancelled" : "failed";
@@ -361,18 +392,20 @@ export const useWikiStore = defineStore("wiki", () => {
   }
 
   /** 单页重生成:就地更新该页内容,保持其余页面与 meta 不变 */
-  const regeneratingPage = ref<string | null>(null);
-  const pageRegeneration = ref<{
-    projectId?: number;
-    projectName: string;
-    pageTitle: string;
-  } | null>(null);
+  const regeneratingPage = ref<string | null>(null),
+    pageRegeneration = ref<{
+      projectId?: number;
+      projectName: string;
+      pageTitle: string;
+    } | null>(null);
   async function regeneratePage(
     project: WikiTaskProject,
     page: WikiOutlinePage,
     language: SupportedLocale,
   ) {
-    if (isGenerating(project.path) || regeneratingPage.value) return;
+    if (isGenerating(project.path) || regeneratingPage.value) {
+      return;
+    }
     regeneratingPage.value = page.id;
     pageRegeneration.value = {
       projectId: project.id,
@@ -381,7 +414,9 @@ export const useWikiStore = defineStore("wiki", () => {
     };
     try {
       await regenerateWikiPage(project, page, language, new AbortController().signal);
-      if (documents[generationKey(project.path)]) await load(project.path);
+      if (documents[generationKey(project.path)]) {
+        await load(project.path);
+      }
     } finally {
       regeneratingPage.value = null;
       pageRegeneration.value = null;
@@ -393,10 +428,12 @@ export const useWikiStore = defineStore("wiki", () => {
    * 成功后把 meta.headSha 推进到当前 HEAD。返回重生成的页数;
    * 无 headSha(非 git 项目)或历史被改写时抛错,由调用方退化为整本重生成
    */
-  const updating = ref(false);
-  const updateProgress = ref<WikiUpdateProgress | null>(null);
+  const updating = ref(false),
+    updateProgress = ref<WikiUpdateProgress | null>(null);
   async function update(project: WikiTaskProject, language: SupportedLocale): Promise<number> {
-    if (!documentFor(project.path).data || updating.value || isGenerating(project.path)) return 0;
+    if (!documentFor(project.path).data || updating.value || isGenerating(project.path)) {
+      return 0;
+    }
     const options = buildGenOptions(language);
     updating.value = true;
     updateProgress.value = {
@@ -413,7 +450,9 @@ export const useWikiStore = defineStore("wiki", () => {
         }
       });
       markPagesUnread(project.path, result.updatedPageIds);
-      if (documents[generationKey(project.path)]) await load(project.path);
+      if (documents[generationKey(project.path)]) {
+        await load(project.path);
+      }
       return result.updatedPageIds.length;
     } finally {
       updating.value = false;
@@ -464,7 +503,9 @@ export const useWikiStore = defineStore("wiki", () => {
         }
       });
       markPagesUnread(project.path, result.updatedPageIds);
-      if (documents[generationKey(project.path)]) await load(project.path);
+      if (documents[generationKey(project.path)]) {
+        await load(project.path);
+      }
       return result.updatedPageIds.length;
     } finally {
       updating.value = false;
@@ -475,8 +516,8 @@ export const useWikiStore = defineStore("wiki", () => {
 
   async function remove(projectPath: string) {
     // 该项目正在生成时先中止并等流水线收敛,避免删除后又被落盘的页面把目录建回来
-    const key = generationKey(projectPath);
-    const run = generationRuns.get(key);
+    const key = generationKey(projectPath),
+      run = generationRuns.get(key);
     if (run) {
       generationControllers.get(key)?.abort();
       await run.catch(() => {});

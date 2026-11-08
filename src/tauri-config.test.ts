@@ -9,16 +9,16 @@ const readRepoJson = (relativePath: string): unknown =>
 
 describe("tauri 配置安全基线", () => {
   const conf = readRepoJson("src-tauri/tauri.conf.json") as {
-    app: {
-      security: {
-        csp: string | null;
-        assetProtocol: { scope: { allow: string[]; deny: string[] } };
+      app: {
+        security: {
+          csp: string | null;
+          assetProtocol: { scope: { allow: string[]; deny: string[] } };
+        };
       };
+    },
+    cap = readRepoJson("src-tauri/capabilities/default.json") as {
+      permissions: (string | { identifier: string })[];
     };
-  };
-  const cap = readRepoJson("src-tauri/capabilities/default.json") as {
-    permissions: (string | { identifier: string })[];
-  };
 
   it("必须显式配置 CSP,不得回退为 null", () => {
     const csp = conf.app.security.csp;

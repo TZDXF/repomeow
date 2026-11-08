@@ -7,9 +7,8 @@ interface Props {
   class?: HTMLAttributes["class"];
 }
 
-const props = defineProps<Props>();
-
-const classes = computed(() => cn("flex flex-col gap-8 p-4", props.class));
+const props = defineProps<Props>(),
+  classes = computed(() => cn("flex flex-col gap-8 p-4", props.class));
 </script>
 
 <template>

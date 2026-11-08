@@ -15,6 +15,7 @@ const props = withDefaults(
   }>(),
   {
     showLineNumbers: false,
+    class: undefined,
   },
 );
 

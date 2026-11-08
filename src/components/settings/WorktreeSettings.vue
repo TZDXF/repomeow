@@ -4,11 +4,10 @@ import { useI18n } from "vue-i18n";
 import { Input } from "@/components/ui/input";
 import { useSettingsStore } from "@/stores/settings";
 
-const { t } = useI18n();
-const store = useSettingsStore();
-
-// 本地草稿:失焦/回车时非空才持久化,避免输入中途清空导致模板丢失
-const draft = ref(store.worktreeDirTemplate);
+const { t } = useI18n(),
+  store = useSettingsStore(),
+  // 本地草稿:失焦/回车时非空才持久化,避免输入中途清空导致模板丢失
+  draft = ref(store.worktreeDirTemplate);
 
 watch(
   () => store.worktreeDirTemplate,

@@ -41,20 +41,21 @@ import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
 import { baseName, cleanPath, joinPath, splitDirName } from "@/lib/path";
 
-const { t } = useI18n();
-const store = useProjectsStore();
-const settingsStore = useSettingsStore();
-const router = useRouter();
-
-// 上一次添加项目用的存放位置,存 localStorage,作为下次的默认值
-const LAST_LOCATION_KEY = "repomeow:last-add-location";
+const { t } = useI18n(),
+  store = useProjectsStore(),
+  settingsStore = useSettingsStore(),
+  router = useRouter(),
+  // 上一次添加项目用的存放位置,存 localStorage,作为下次的默认值
+  LAST_LOCATION_KEY = "repomeow:last-add-location";
 
 function loadLastLocation(): string {
   return localStorage.getItem(LAST_LOCATION_KEY) ?? "";
 }
 
 function saveLastLocation(dir: string) {
-  if (dir) localStorage.setItem(LAST_LOCATION_KEY, dir);
+  if (dir) {
+    localStorage.setItem(LAST_LOCATION_KEY, dir);
+  }
 }
 
 /** 取路径的父目录(本地目录模式下项目路径本身即选中文件夹,记录其父目录作为存放位置) */
@@ -64,84 +65,83 @@ function parentPathOf(p: string): string {
   return parent === "\\" || parent === "/" ? "" : parent;
 }
 
-const visible = ref(false);
-const mode = ref<"local" | "clone" | "account">("local");
-
-// 本地目录模式
-const path = ref("");
-const name = ref("");
-const submitting = ref(false);
-
-// 克隆仓库模式
-const url = ref("");
-const parentDir = ref("");
-const dirName = ref("");
-const cloneName = ref("");
-const dirNameTouched = ref(false);
-const cloneNameTouched = ref(false);
-const cloning = ref(false);
-const shallowClone = ref(false);
-const cancelling = ref(false);
-let cloneJobId = "";
-// 从「账号仓库」入口克隆时记录账号,后端用其 token 克隆;手动切模式时清空
-let cloneAccountId: number | undefined;
+const visible = ref(false),
+  mode = ref<"local" | "clone" | "account">("local"),
+  // 本地目录模式
+  path = ref(""),
+  name = ref(""),
+  submitting = ref(false),
+  // 克隆仓库模式
+  url = ref(""),
+  parentDir = ref(""),
+  dirName = ref(""),
+  cloneName = ref(""),
+  dirNameTouched = ref(false),
+  cloneNameTouched = ref(false),
+  cloning = ref(false),
+  shallowClone = ref(false),
+  cancelling = ref(false);
+let cloneJobId = "",
+  // 从「账号仓库」入口克隆时记录账号,后端用其 token 克隆;手动切模式时清空
+  cloneAccountId: number | undefined;
 // 从「账号仓库」入口克隆时带入的远程仓库简介,作为项目描述;手动切模式时清空
-const cloneDescription = ref("");
-
-// 账号仓库模式
-const accounts = ref<GitAccount[]>([]);
-const accountsLoading = ref(false);
-const accountsLoaded = ref(false);
-const selectedAccountId = ref<number | null>(null);
-const repos = ref<RemoteRepo[]>([]);
-const reposLoading = ref(false);
-const reposError = ref("");
-const repoSearch = ref("");
-const selectedOwner = ref("");
-const ownerPickerOpen = ref(false);
-const ownerSearch = ref("");
-const ownerSearchInput = ref<{ $el: HTMLInputElement } | null>(null);
-const addedRemotes = ref<Set<string>>(new Set());
-
-/** 当前账号下仓库涉及的组织/用户(去重,按名称排序) */
-const ownerOptions = computed(() => {
-  const owners = new Set(repos.value.map((r) => r.owner).filter(Boolean));
-  return [...owners].sort((a, b) => a.localeCompare(b));
-});
-
-/** 组织超过该数量时,组织下拉内显示搜索框 */
-const OWNER_SEARCH_THRESHOLD = 3;
-const showOwnerSearch = computed(() => ownerOptions.value.length > OWNER_SEARCH_THRESHOLD);
-
-/** 按搜索词过滤后的组织选项 */
-const filteredOwnerOptions = computed(() => {
-  const q = ownerSearch.value.trim().toLowerCase();
-  if (!q) return ownerOptions.value;
-  return ownerOptions.value.filter((o) => o.toLowerCase().includes(q));
-});
-
-const filteredRepos = computed(() => {
-  let list = repos.value;
-  if (selectedOwner.value) {
-    list = list.filter((r) => r.owner === selectedOwner.value);
-  }
-  // 空格切分为多个查询词,词间 AND:每个词至少命中组织名/全名/仓库名/描述之一
-  const terms = repoSearch.value.toLowerCase().split(/\s+/).filter(Boolean);
-  if (terms.length === 0) return list;
-  return list.filter((r) => {
-    const fields = [r.owner, r.fullName, r.name, r.description].map((s) => s.toLowerCase());
-    return terms.every((q) => fields.some((f) => f.includes(q)));
+const cloneDescription = ref(""),
+  // 账号仓库模式
+  accounts = ref<GitAccount[]>([]),
+  accountsLoading = ref(false),
+  accountsLoaded = ref(false),
+  selectedAccountId = ref<number | null>(null),
+  repos = ref<RemoteRepo[]>([]),
+  reposLoading = ref(false),
+  reposError = ref(""),
+  repoSearch = ref(""),
+  selectedOwner = ref(""),
+  ownerPickerOpen = ref(false),
+  ownerSearch = ref(""),
+  ownerSearchInput = ref<{ $el: HTMLInputElement } | null>(null),
+  addedRemotes = ref<Set<string>>(new Set()),
+  /** 当前账号下仓库涉及的组织/用户(去重,按名称排序) */
+  ownerOptions = computed(() => {
+    const owners = new Set(repos.value.map((r) => r.owner).filter(Boolean));
+    return [...owners].sort((a, b) => a.localeCompare(b));
+  }),
+  /** 组织超过该数量时,组织下拉内显示搜索框 */
+  OWNER_SEARCH_THRESHOLD = 3,
+  showOwnerSearch = computed(() => ownerOptions.value.length > OWNER_SEARCH_THRESHOLD),
+  /** 按搜索词过滤后的组织选项 */
+  filteredOwnerOptions = computed(() => {
+    const q = ownerSearch.value.trim().toLowerCase();
+    if (!q) {
+      return ownerOptions.value;
+    }
+    return ownerOptions.value.filter((o) => o.toLowerCase().includes(q));
+  }),
+  filteredRepos = computed(() => {
+    let list = repos.value;
+    if (selectedOwner.value) {
+      list = list.filter((r) => r.owner === selectedOwner.value);
+    }
+    // 空格切分为多个查询词,词间 AND:每个词至少命中组织名/全名/仓库名/描述之一
+    const terms = repoSearch.value.toLowerCase().split(/\s+/).filter(Boolean);
+    if (terms.length === 0) {
+      return list;
+    }
+    return list.filter((r) => {
+      const fields = [r.owner, r.fullName, r.name, r.description].map((s) => s.toLowerCase());
+      return terms.every((q) => fields.some((f) => f.includes(q)));
+    });
   });
-});
 
 /** 首次进入账号模式时加载账号列表与本地项目 remote 地址(「已添加」匹配用) */
 async function ensureAccountsLoaded() {
-  if (accountsLoaded.value || accountsLoading.value) return;
+  if (accountsLoaded.value || accountsLoading.value) {
+    return;
+  }
   accountsLoading.value = true;
   try {
-    const [accs, remoteUrls] = await Promise.all([listGitAccounts(), listProjectRemoteUrls()]);
-    // 设置页开启 GitHub CLI 集成时才探测 gh;探测失败静默降级(下拉不显示该项)
-    const ghAccount = settingsStore.enableGhCli ? await getGhCliAccount().catch(() => null) : null;
+    const [accs, remoteUrls] = await Promise.all([listGitAccounts(), listProjectRemoteUrls()]),
+      // 设置页开启 GitHub CLI 集成时才探测 gh;探测失败静默降级(下拉不显示该项)
+      ghAccount = settingsStore.enableGhCli ? await getGhCliAccount().catch(() => null) : null;
     accounts.value = ghAccount ? [...accs, ghAccount] : accs;
     addedRemotes.value = new Set(remoteUrls.map(normalizeRemoteUrl));
     if (accounts.value.length > 0 && selectedAccountId.value == null) {
@@ -161,21 +161,27 @@ let reposLoadSeq = 0;
 /** 一次加载账号下全部仓库(后端循环分页拉全,前端只做客户端搜索过滤) */
 async function loadRepos() {
   const id = selectedAccountId.value;
-  if (id == null) return;
+  if (id == null) {
+    return;
+  }
   const seq = ++reposLoadSeq;
   reposLoading.value = true;
   reposError.value = "";
   try {
     const list = await listAccountRepos(id);
     // 期间已切换到其他账号:结果过期,丢弃
-    if (seq === reposLoadSeq) repos.value = list;
+    if (seq === reposLoadSeq) {
+      repos.value = list;
+    }
   } catch (e) {
     if (seq === reposLoadSeq) {
       reposError.value = String(e);
       toast.error(reposError.value);
     }
   } finally {
-    if (seq === reposLoadSeq) reposLoading.value = false;
+    if (seq === reposLoadSeq) {
+      reposLoading.value = false;
+    }
   }
 }
 
@@ -185,7 +191,9 @@ watch(selectedAccountId, (id) => {
   repoSearch.value = "";
   selectedOwner.value = "";
   ownerPickerOpen.value = false;
-  if (id != null) loadRepos();
+  if (id != null) {
+    loadRepos();
+  }
 });
 
 /** 选中组织(空串为「全部组织」)后收起下拉 */
@@ -197,7 +205,9 @@ function pickOwner(owner: string) {
 /** 组织下拉打开时清空上次搜索,并把焦点交给搜索框(超过阈值才有搜索框) */
 function focusOwnerSearch(e: Event) {
   ownerSearch.value = "";
-  if (!showOwnerSearch.value) return;
+  if (!showOwnerSearch.value) {
+    return;
+  }
   e.preventDefault();
   ownerSearchInput.value?.$el?.focus();
 }
@@ -209,7 +219,9 @@ function isAdded(repo: RemoteRepo): boolean {
 
 /** 选中仓库:回填克隆表单并切到克隆模式,克隆时带上账号凭据 */
 function pickRepo(repo: RemoteRepo) {
-  if (isAdded(repo) || !repo.httpCloneUrl) return;
+  if (isAdded(repo) || !repo.httpCloneUrl) {
+    return;
+  }
   cloneAccountId = selectedAccountId.value ?? undefined;
   cloneDescription.value = repo.description;
   dirNameTouched.value = false;
@@ -225,23 +237,28 @@ function dirNameFromUrl(raw: string): string {
 
 watch(url, (value) => {
   const derived = dirNameFromUrl(value);
-  if (!dirNameTouched.value) dirName.value = derived;
+  if (!dirNameTouched.value) {
+    dirName.value = derived;
+  }
 });
 
 watch(dirName, (value) => {
-  if (!cloneNameTouched.value) cloneName.value = value;
+  if (!cloneNameTouched.value) {
+    cloneName.value = value;
+  }
 });
 
 /** 存放位置与目录名拼出的完整目标路径(分隔符跟随存放位置的写法) */
 const targetPath = computed(() => {
-  const dirNameTrimmed = dirName.value.trim();
-  if (!parentDir.value || !dirNameTrimmed) return "";
-  return joinPath(parentDir.value, dirNameTrimmed);
-});
-
-const cloneReady = computed(
-  () => url.value.trim() && parentDir.value && dirName.value.trim() && cloneName.value.trim(),
-);
+    const dirNameTrimmed = dirName.value.trim();
+    if (!parentDir.value || !dirNameTrimmed) {
+      return "";
+    }
+    return joinPath(parentDir.value, dirNameTrimmed);
+  }),
+  cloneReady = computed(
+    () => url.value.trim() && parentDir.value && dirName.value.trim() && cloneName.value.trim(),
+  );
 
 async function pickFolder() {
   const selected = await open({
@@ -271,7 +288,9 @@ async function pickParentDir() {
 }
 
 async function submit() {
-  if (!path.value || !name.value.trim() || submitting.value) return;
+  if (!path.value || !name.value.trim() || submitting.value) {
+    return;
+  }
   submitting.value = true;
   try {
     const project = await store.addProject(path.value, name.value.trim());
@@ -289,23 +308,21 @@ async function submit() {
 }
 
 async function submitClone() {
-  if (!cloneReady.value || cloning.value) return;
+  if (!cloneReady.value || cloning.value) {
+    return;
+  }
   cloning.value = true;
   cancelling.value = false;
   cloneJobId = crypto.randomUUID();
   try {
     const clonedPath = await store.cloneProject(
-      url.value.trim(),
-      targetPath.value,
-      cloneJobId,
-      cloneAccountId,
-      shallowClone.value,
-    );
-    const project = await store.addProject(
-      clonedPath,
-      cloneName.value.trim(),
-      cloneDescription.value,
-    );
+        url.value.trim(),
+        targetPath.value,
+        cloneJobId,
+        cloneAccountId,
+        shallowClone.value,
+      ),
+      project = await store.addProject(clonedPath, cloneName.value.trim(), cloneDescription.value);
     toast.success(t("projects.add.cloned", { name: project.name }));
     saveLastLocation(parentDir.value);
     visible.value = false;
@@ -321,7 +338,9 @@ async function submitClone() {
     router.push(`/projects/${project.id}`);
   } catch (e) {
     // 用户主动取消:静默复位,不弹错误
-    if (!cancelling.value) toast.error(String(e));
+    if (!cancelling.value) {
+      toast.error(String(e));
+    }
   } finally {
     cloning.value = false;
     cloneJobId = "";
@@ -329,15 +348,21 @@ async function submitClone() {
 }
 
 function cancelClone() {
-  if (!cloning.value || cancelling.value) return;
+  if (!cloning.value || cancelling.value) {
+    return;
+  }
   cancelling.value = true;
   store.cancelClone(cloneJobId).catch(() => {});
 }
 
 // 克隆过程中关闭弹窗(ESC/点 X/点遮罩)视为取消克隆;打开时回填上次的存放位置
 watch(visible, (open_) => {
-  if (!open_ && cloning.value) cancelClone();
-  if (open_ && !parentDir.value) parentDir.value = loadLastLocation();
+  if (!open_ && cloning.value) {
+    cancelClone();
+  }
+  if (open_ && !parentDir.value) {
+    parentDir.value = loadLastLocation();
+  }
 });
 
 /** 顶部模式切换;手动切出克隆模式时丢弃「账号仓库」带入的凭据与简介 */
@@ -347,7 +372,9 @@ function switchMode(m: "local" | "clone" | "account") {
     cloneAccountId = undefined;
     cloneDescription.value = "";
   }
-  if (m === "account") ensureAccountsLoaded();
+  if (m === "account") {
+    ensureAccountsLoaded();
+  }
 }
 </script>
 

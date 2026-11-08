@@ -10,19 +10,19 @@ import { useI18n } from "vue-i18n";
  *   摘取、以虚线空心点重放到目标分支最新提交之后。
  * 画布几何固定,分支名截断后作为 SVG 文本标注,不随容器缩放。
  */
-const { t } = useI18n();
-const props = defineProps<{
-  kind: "merge" | "rebase";
-  /** 源分支名(worktree 检出的分支) */
-  source: string;
-  /** 目标分支名(主工作区当前分支) */
-  target: string;
-  squash?: boolean;
-}>();
+const { t } = useI18n(),
+  props = defineProps<{
+    kind: "merge" | "rebase";
+    /** 源分支名(worktree 检出的分支) */
+    source: string;
+    /** 目标分支名(主工作区当前分支) */
+    target: string;
+    squash?: boolean;
+  }>();
 
 /** 图上分支名截断,避免长分支名相互遮挡 */
 function short(name: string) {
-  return name.length > 16 ? name.slice(0, 15) + "…" : name;
+  return name.length > 16 ? `${name.slice(0, 15)}…` : name;
 }
 
 const mergeLabel = computed(() =>

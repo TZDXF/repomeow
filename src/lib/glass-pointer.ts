@@ -1,9 +1,9 @@
 /** Theme-scoped pointer lighting; only the hovered material is measured per frame. */
 export function attachGlassPointer(surface: HTMLElement): () => void {
   const preference = window.matchMedia("(pointer: coarse)");
-  let frame = 0;
-  let latest: PointerEvent | undefined;
-  let active: HTMLElement | null = null;
+  let frame = 0,
+    latest: PointerEvent | undefined,
+    active: HTMLElement | null = null;
   const selector = '[data-slot="card"], .project-card, .theme-choice, .chat-fab';
 
   function clearCard() {
@@ -24,25 +24,30 @@ export function attachGlassPointer(surface: HTMLElement): () => void {
       "--glass-shift-x",
       "--glass-shift-y",
       "--glass-pointer-opacity",
-    ])
+    ]) {
       surface.style.removeProperty(key);
+    }
   }
 
   function paint() {
     frame = 0;
-    if (!latest || preference.matches || document.hidden) return;
+    if (!latest || preference.matches || document.hidden) {
+      return;
+    }
     const bounds = surface.getBoundingClientRect();
-    if (!bounds.width || !bounds.height) return;
-    const x = Math.max(0, Math.min(bounds.width, latest.clientX - bounds.left));
-    const y = Math.max(0, Math.min(bounds.height, latest.clientY - bounds.top));
+    if (!bounds.width || !bounds.height) {
+      return;
+    }
+    const x = Math.max(0, Math.min(bounds.width, latest.clientX - bounds.left)),
+      y = Math.max(0, Math.min(bounds.height, latest.clientY - bounds.top));
     surface.style.setProperty("--glass-scene-x", `${x}px`);
     surface.style.setProperty("--glass-scene-y", `${y}px`);
     surface.style.setProperty("--glass-shift-x", `${(x / bounds.width - 0.5) * 18}px`);
     surface.style.setProperty("--glass-shift-y", `${(y / bounds.height - 0.5) * 14}px`);
     surface.style.setProperty("--glass-pointer-opacity", "1");
     const card =
-      latest.target instanceof Element ? latest.target.closest<HTMLElement>(selector) : null;
-    const next = card && surface.contains(card) ? card : null;
+        latest.target instanceof Element ? latest.target.closest<HTMLElement>(selector) : null,
+      next = card && surface.contains(card) ? card : null;
     if (active !== next) {
       clearCard();
       active = next;
@@ -56,9 +61,13 @@ export function attachGlassPointer(surface: HTMLElement): () => void {
   }
 
   function move(event: PointerEvent) {
-    if (preference.matches || event.pointerType === "touch" || document.hidden) return;
+    if (preference.matches || event.pointerType === "touch" || document.hidden) {
+      return;
+    }
     latest = event;
-    if (!frame) frame = requestAnimationFrame(paint);
+    if (!frame) {
+      frame = requestAnimationFrame(paint);
+    }
   }
 
   surface.addEventListener("pointermove", move, { passive: true });

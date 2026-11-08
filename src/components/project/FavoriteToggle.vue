@@ -5,9 +5,9 @@ import { Star } from "@lucide/vue";
 import { useProjectsStore } from "@/stores/projects";
 import type { Project } from "@/types";
 
-const { t } = useI18n();
-const props = defineProps<{ project: Project }>();
-const store = useProjectsStore();
+const { t } = useI18n(),
+  props = defineProps<{ project: Project }>(),
+  store = useProjectsStore();
 
 // 未收藏时仅在父级 group hover 时显示;收藏后实心黄星常驻
 async function toggle() {

@@ -7,17 +7,15 @@ import { POPPER_COLLISION_PADDING } from "@/lib/popper";
 import { cn } from "@/lib/utils";
 
 const props = withDefaults(
-  defineProps<TooltipContentProps & { class?: HTMLAttributes["class"] }>(),
-  {
-    sideOffset: 0,
-    collisionPadding: () => POPPER_COLLISION_PADDING,
-  },
-);
-
-const emits = defineEmits<TooltipContentEmits>();
-
-const delegatedProps = reactiveOmit(props, "class");
-const forwarded = useForwardPropsEmits(delegatedProps, emits);
+    defineProps<TooltipContentProps & { class?: HTMLAttributes["class"] }>(),
+    {
+      sideOffset: 0,
+      collisionPadding: () => POPPER_COLLISION_PADDING,
+    },
+  ),
+  emits = defineEmits<TooltipContentEmits>(),
+  delegatedProps = reactiveOmit(props, "class"),
+  forwarded = useForwardPropsEmits(delegatedProps, emits);
 </script>
 
 <template>

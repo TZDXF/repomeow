@@ -7,12 +7,12 @@ export interface BranchTreeNode {
 }
 
 export function buildBranchTree(names: string[]): BranchTreeNode[] {
-  const roots: BranchTreeNode[] = [];
-  const byPath = new Map<string, BranchTreeNode>();
+  const roots: BranchTreeNode[] = [],
+    byPath = new Map<string, BranchTreeNode>();
   for (const full of names) {
     const segs = full.split("/");
-    let prefix = "";
-    let siblings = roots;
+    let prefix = "",
+      siblings = roots;
     for (let i = 0; i < segs.length; i++) {
       prefix = prefix ? `${prefix}/${segs[i]}` : segs[i];
       let node = byPath.get(prefix);

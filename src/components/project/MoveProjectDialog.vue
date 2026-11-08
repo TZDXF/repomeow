@@ -18,19 +18,19 @@ import { useProjectsStore } from "@/stores/projects";
 import { joinPath, splitDirName } from "@/lib/path";
 import type { Project } from "@/types";
 
-const { t } = useI18n();
-const props = defineProps<{ project: Project }>();
-const open = defineModel<boolean>("open", { required: true });
-
-const store = useProjectsStore();
-
-const parentDir = ref("");
-const dirName = ref("");
-const saving = ref(false);
+const { t } = useI18n(),
+  props = defineProps<{ project: Project }>(),
+  open = defineModel<boolean>("open", { required: true }),
+  store = useProjectsStore(),
+  parentDir = ref(""),
+  dirName = ref(""),
+  saving = ref(false);
 
 // 每次打开重置为当前位置与目录名
 watch(open, (v) => {
-  if (!v) return;
+  if (!v) {
+    return;
+  }
   const { parent, name } = splitDirName(props.project.path);
   parentDir.value = parent;
   dirName.value = name;
@@ -38,7 +38,9 @@ watch(open, (v) => {
 
 const targetPreview = computed(() => {
   const name = dirName.value.trim();
-  if (!parentDir.value || !name) return "";
+  if (!parentDir.value || !name) {
+    return "";
+  }
   return joinPath(parentDir.value, name);
 });
 
@@ -55,7 +57,9 @@ async function pickParent() {
 }
 
 async function confirm() {
-  if (!parentDir.value || !dirName.value.trim() || saving.value) return;
+  if (!parentDir.value || !dirName.value.trim() || saving.value) {
+    return;
+  }
   saving.value = true;
   try {
     const moved = await store.moveProjectDir(props.project.id, parentDir.value, dirName.value);

@@ -121,23 +121,23 @@ describe("buildTimeline", () => {
 
   it("思考与工具调用进过程组;纯空白正文不进渲染列表", () => {
     const views = buildTimeline(
-      session({
-        messages: [
-          msg({
-            id: "a1",
-            role: "assistant",
-            content: "\n\n",
-            thinking: "想一下",
-            toolRunIds: ["r1"],
-          }),
-          msg({ id: "a2", role: "assistant", content: "正文" }),
-        ],
-        toolRuns: {
-          r1: { id: "r1", name: "read", args: {}, ok: true, summary: "ok" },
-        },
-      }),
-    );
-    const turn = views[0] as TurnView;
+        session({
+          messages: [
+            msg({
+              id: "a1",
+              role: "assistant",
+              content: "\n\n",
+              thinking: "想一下",
+              toolRunIds: ["r1"],
+            }),
+            msg({ id: "a2", role: "assistant", content: "正文" }),
+          ],
+          toolRuns: {
+            r1: { id: "r1", name: "read", args: {}, ok: true, summary: "ok" },
+          },
+        }),
+      ),
+      turn = views[0] as TurnView;
     expect(turn.contents).toEqual(["正文"]);
     expect(turn.groups).toHaveLength(1);
     expect(turn.groups[0].thinking).toBe("想一下");
@@ -188,17 +188,17 @@ describe("buildTimeline", () => {
   });
 
   it("流式思考进过程组并标记 thinkingStreaming;重试/压缩状态挂到 live 回合", () => {
-    const retry = { attempt: 1, maxAttempts: 3, delayMs: 5000, scheduledAt: 1000, message: "m" };
-    const views = buildTimeline(
-      session({
-        busy: true,
-        streamingThinking: "思考中",
-        retry,
-        compacting: true,
-        messages: [],
-      }),
-    );
-    const turn = views[0] as TurnView;
+    const retry = { attempt: 1, maxAttempts: 3, delayMs: 5000, scheduledAt: 1000, message: "m" },
+      views = buildTimeline(
+        session({
+          busy: true,
+          streamingThinking: "思考中",
+          retry,
+          compacting: true,
+          messages: [],
+        }),
+      ),
+      turn = views[0] as TurnView;
     expect(turn.groups[0]).toMatchObject({ thinking: "思考中", thinkingStreaming: true });
     expect(turn.retry).toEqual(retry);
     expect(turn.compacting).toBe(true);
@@ -208,31 +208,28 @@ describe("buildTimeline", () => {
 describe("buildCommittedTimeline 记忆化", () => {
   it("依赖未变时复用同一视图对象;工具运行更新才重建对应回合", () => {
     const run: ChatToolRun = {
-      id: "r1",
-      name: "bash",
-      args: {},
-      ok: null,
-      summary: "",
-    };
-    const state = session({
-      messages: [
-        msg({ id: "u1", role: "user", content: "问" }),
-        msg({ id: "a1", role: "assistant", content: "答", toolRunIds: ["r1"] }),
-      ],
-      toolRuns: { r1: run },
-    });
-    const cache = new Map();
-    const first = buildCommittedTimeline(state, cache);
+        id: "r1",
+        name: "bash",
+        args: {},
+        ok: null,
+        summary: "",
+      },
+      state = session({
+        messages: [
+          msg({ id: "u1", role: "user", content: "问" }),
+          msg({ id: "a1", role: "assistant", content: "答", toolRunIds: ["r1"] }),
+        ],
+        toolRuns: { r1: run },
+      }),
+      cache = new Map(),
+      first = buildCommittedTimeline(state, cache);
     // 全量重建后依赖全等:视图对象 identity 不变(流式期间不触发下游重绘的关键)
     expect(buildCommittedTimeline(state, cache)).toEqual(first);
     expect(buildCommittedTimeline(state, cache)[1]).toBe(first[1]);
 
     // run 对象被替换(工具执行完成):仅引用它的回合重建
-    const resolved = { ...run, ok: true, summary: "done" };
-    const updated = buildCommittedTimeline(
-      session({ ...state, toolRuns: { r1: resolved } }),
-      cache,
-    );
+    const resolved = { ...run, ok: true, summary: "done" },
+      updated = buildCommittedTimeline(session({ ...state, toolRuns: { r1: resolved } }), cache);
     expect(updated[0]).toBe(first[0]);
     expect(updated[1]).not.toBe(first[1]);
   });

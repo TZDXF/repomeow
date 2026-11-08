@@ -13,19 +13,17 @@ import {
 } from "@/components/ui/dialog";
 import { useUpdateStore } from "@/stores/update";
 
-const { t } = useI18n();
-const store = useUpdateStore();
-
-const open = computed({
-  get: () => store.dialogOpen,
-  // 下载安装中也可关闭对话框:下载在 store 中继续(后台下载),
-  // 进度经标题栏进度环展示,随时可重新打开查看
-  set: (v: boolean) => {
-    store.dialogOpen = v;
-  },
-});
-
-const releaseNotes = computed(() => store.update?.body?.trim() || t("update.noNotes"));
+const { t } = useI18n(),
+  store = useUpdateStore(),
+  open = computed({
+    get: () => store.dialogOpen,
+    // 下载安装中也可关闭对话框:下载在 store 中继续(后台下载),
+    // 进度经标题栏进度环展示,随时可重新打开查看
+    set: (v: boolean) => {
+      store.dialogOpen = v;
+    },
+  }),
+  releaseNotes = computed(() => store.update?.body?.trim() || t("update.noNotes"));
 </script>
 
 <template>

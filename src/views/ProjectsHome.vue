@@ -25,14 +25,13 @@ import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore, type ProjectsSortKey, type ProjectsViewMode } from "@/stores/settings";
 import { useTagsStore } from "@/stores/tags";
 
-const { t } = useI18n();
-const store = useProjectsStore();
-const tagsStore = useTagsStore();
-const settings = useSettingsStore();
-
-// 搜索(防抖)
-const searchInput = ref(store.query);
-const searchInputRef = ref<InstanceType<typeof Input> | null>(null);
+const { t } = useI18n(),
+  store = useProjectsStore(),
+  tagsStore = useTagsStore(),
+  settings = useSettingsStore(),
+  // 搜索(防抖)
+  searchInput = ref(store.query),
+  searchInputRef = ref<InstanceType<typeof Input> | null>(null);
 watchDebounced(searchInput, (value) => store.setQuery(value), { debounce: 250 });
 
 function clearSearch() {
@@ -42,43 +41,38 @@ function clearSearch() {
 
 // 视图模式与排序方式持久化到 settings store
 const viewMode = computed<ProjectsViewMode>({
-  get: () => settings.projectsViewMode,
-  set: (v) => settings.setProjectsViewMode(v),
-});
-const sortKey = computed<ProjectsSortKey>({
-  get: () => settings.projectsSortKey,
-  set: (v) => settings.setProjectsSortKey(v),
-});
-
-const SORT_LABELS: Record<ProjectsSortKey, string> = {
-  name: t("projects.home.sortByName"),
-  updated: t("projects.home.sortByUpdated"),
-  created: t("projects.home.sortByCreated"),
-};
-
-const selectedTags = computed(() =>
-  tagsStore.tags.filter((t) => store.selectedTagIds.includes(t.id)),
-);
-
-const sortedProjects = computed(() => {
-  const list = [...store.projects];
-  // 收藏项目无条件置顶(组内按收藏时间倒序),其余按当前排序键排列
-  switch (sortKey.value) {
-    case "updated":
-      // 以 git 最新提交时间衡量「最近更新」;非 git 仓库或状态未加载时回退到信息更新时间
-      return list.sort(
-        (a, b) =>
-          compareFavorited(a, b) ||
-          (b.git?.last_commit_at ?? b.updated_at) - (a.git?.last_commit_at ?? a.updated_at),
-      );
-    case "created":
-      return list.sort((a, b) => compareFavorited(a, b) || b.created_at - a.created_at);
-    default:
-      return list.sort(
-        (a, b) => compareFavorited(a, b) || a.name.localeCompare(b.name, "zh-Hans-CN"),
-      );
-  }
-});
+    get: () => settings.projectsViewMode,
+    set: (v) => settings.setProjectsViewMode(v),
+  }),
+  sortKey = computed<ProjectsSortKey>({
+    get: () => settings.projectsSortKey,
+    set: (v) => settings.setProjectsSortKey(v),
+  }),
+  SORT_LABELS: Record<ProjectsSortKey, string> = {
+    name: t("projects.home.sortByName"),
+    updated: t("projects.home.sortByUpdated"),
+    created: t("projects.home.sortByCreated"),
+  },
+  selectedTags = computed(() => tagsStore.tags.filter((t) => store.selectedTagIds.includes(t.id))),
+  sortedProjects = computed(() => {
+    const list = [...store.projects];
+    // 收藏项目无条件置顶(组内按收藏时间倒序),其余按当前排序键排列
+    switch (sortKey.value) {
+      case "updated":
+        // 以 git 最新提交时间衡量「最近更新」;非 git 仓库或状态未加载时回退到信息更新时间
+        return list.sort(
+          (a, b) =>
+            compareFavorited(a, b) ||
+            (b.git?.last_commit_at ?? b.updated_at) - (a.git?.last_commit_at ?? a.updated_at),
+        );
+      case "created":
+        return list.sort((a, b) => compareFavorited(a, b) || b.created_at - a.created_at);
+      default:
+        return list.sort(
+          (a, b) => compareFavorited(a, b) || a.name.localeCompare(b.name, "zh-Hans-CN"),
+        );
+    }
+  });
 </script>
 
 <template>

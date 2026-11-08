@@ -12,7 +12,7 @@ export async function runPool(
     while (index < tasks.length && !signal.aborted) {
       const task = tasks[index++];
       // 并发池语义:单个 worker 内必须串行 await,并行度由 worker 数量控制
-      // eslint-disable-next-line no-await-in-loop
+
       await task();
     }
   }

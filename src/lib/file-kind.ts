@@ -32,8 +32,8 @@ export const VIDEO_EXTS = new Set([
 
 /** 取路径扩展名(小写、不含点;只看最后一个路径段内的最后一个点) */
 export function extOf(path: string): string {
-  const name = path.slice(path.lastIndexOf("/") + 1);
-  const dot = name.lastIndexOf(".");
+  const name = path.slice(path.lastIndexOf("/") + 1),
+    dot = name.lastIndexOf(".");
   return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
 }
 

@@ -11,10 +11,10 @@ interface CliSkillsInstallResult {
   updated: string[];
 }
 
-const { t } = useI18n();
-const installing = ref(false);
-const pathStatus = ref<{ supported: boolean; directory: string; added: boolean } | null>(null);
-const pathBusy = ref(false);
+const { t } = useI18n(),
+  installing = ref(false),
+  pathStatus = ref<{ supported: boolean; directory: string; added: boolean } | null>(null),
+  pathBusy = ref(false);
 onMounted(async () => {
   try {
     pathStatus.value = await cmd("cli_get_path_status");

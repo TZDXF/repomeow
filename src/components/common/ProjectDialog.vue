@@ -5,17 +5,17 @@ import { useProjectDialogState } from "@/composables/useProjectDialogState";
 import { PROJECT_PAGE_ACTIVE } from "@/composables/useProjectPageState";
 
 const props = withDefaults(defineProps<DialogRootProps>(), {
-  open: undefined,
-  modal: undefined,
-  unmountOnHide: undefined,
-});
-const emit = defineEmits<DialogRootEmits>();
-const active = inject(PROJECT_PAGE_ACTIVE, undefined);
-const { visible, unmountOnHide, updateOpen } = useProjectDialogState(
-  props,
-  (value) => emit("update:open", value),
-  active,
-);
+    open: undefined,
+    modal: undefined,
+    unmountOnHide: undefined,
+  }),
+  emit = defineEmits<DialogRootEmits>(),
+  active = inject(PROJECT_PAGE_ACTIVE, undefined),
+  { visible, unmountOnHide, updateOpen } = useProjectDialogState(
+    props,
+    (value) => emit("update:open", value),
+    active,
+  );
 </script>
 
 <template>

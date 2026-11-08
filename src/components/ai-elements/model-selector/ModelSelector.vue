@@ -20,33 +20,31 @@ import { modelDisplayName, type ModelSelectorGroup } from "./types";
  * `genericOption` 可在所有分组前附加一个通用选项(如「默认模型」)。
  */
 const props = withDefaults(
-  defineProps<{
-    modelValue: string;
-    groups: ModelSelectorGroup[];
-    placeholder?: string;
-    disabled?: boolean;
-    size?: "sm" | "default";
-    /** 覆盖触发器的宽度约束(默认 min-w-0 max-w-44,浮层紧凑场景用) */
-    triggerClass?: string;
-    /** 附加在所有分组之前的通用选项(value 不得含 "/",避免与复合值混淆) */
-    genericOption?: { value: string; label: string };
-    /** 隐藏下拉项的「默认」徽标(触发器已展示默认模型名的场景用) */
-    hideDefaultTag?: boolean;
-  }>(),
-  {
-    placeholder: "",
-    disabled: false,
-    size: "sm",
-    triggerClass: "min-w-0 max-w-44",
-    genericOption: undefined,
-    hideDefaultTag: false,
-  },
-);
-
-const emit = defineEmits<{ "update:modelValue": [value: string] }>();
-
-const { t } = useI18n();
-const aiConfig = useAiConfigStore();
+    defineProps<{
+      modelValue: string;
+      groups: ModelSelectorGroup[];
+      placeholder?: string;
+      disabled?: boolean;
+      size?: "sm" | "default";
+      /** 覆盖触发器的宽度约束(默认 min-w-0 max-w-44,浮层紧凑场景用) */
+      triggerClass?: string;
+      /** 附加在所有分组之前的通用选项(value 不得含 "/",避免与复合值混淆) */
+      genericOption?: { value: string; label: string };
+      /** 隐藏下拉项的「默认」徽标(触发器已展示默认模型名的场景用) */
+      hideDefaultTag?: boolean;
+    }>(),
+    {
+      placeholder: "",
+      disabled: false,
+      size: "sm",
+      triggerClass: "min-w-0 max-w-44",
+      genericOption: undefined,
+      hideDefaultTag: false,
+    },
+  ),
+  emit = defineEmits<{ "update:modelValue": [value: string] }>(),
+  { t } = useI18n(),
+  aiConfig = useAiConfigStore();
 
 /** 是否为全局默认模型(AI 设置中的「默认模型」) */
 function isDefaultModel(providerId: string, modelId: string): boolean {

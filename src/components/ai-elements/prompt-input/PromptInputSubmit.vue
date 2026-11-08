@@ -17,29 +17,28 @@ interface Props extends /* @vue-ignore */ InputGroupButtonProps {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  variant: "default",
-  size: "icon-sm",
-});
-
-const icon = computed(() => {
-  if (props.status === "submitted") {
-    return Loader2Icon;
-  } else if (props.status === "streaming") {
-    return SquareIcon;
-  } else if (props.status === "error") {
-    return XIcon;
-  }
-  return CornerDownLeftIcon;
-});
-
-const iconClass = computed(() => {
-  if (props.status === "submitted") {
-    return "size-4 animate-spin";
-  }
-  return "size-4";
-});
-
-const { status, size, variant, class: _, ...restProps } = props;
+    variant: "default",
+    size: "icon-sm",
+    class: undefined,
+    status: undefined,
+  }),
+  icon = computed(() => {
+    if (props.status === "submitted") {
+      return Loader2Icon;
+    } else if (props.status === "streaming") {
+      return SquareIcon;
+    } else if (props.status === "error") {
+      return XIcon;
+    }
+    return CornerDownLeftIcon;
+  }),
+  iconClass = computed(() => {
+    if (props.status === "submitted") {
+      return "size-4 animate-spin";
+    }
+    return "size-4";
+  }),
+  { status, size, variant, class: _, ...restProps } = props;
 </script>
 
 <template>

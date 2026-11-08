@@ -6,13 +6,11 @@ import { buildCommitCalendar, type CommitCalendarCell } from "@/lib/git-stats";
 import type { GitDayStat } from "@/types";
 
 const props = defineProps<{
-  byDay: GitDayStat[];
-}>();
-
-const { t } = useI18n();
-
-/** 最近一年提交日历(周列 × 周一~周日行,GitHub 贡献图风格) */
-const calendar = computed(() => buildCommitCalendar(props.byDay));
+    byDay: GitDayStat[];
+  }>(),
+  { t } = useI18n(),
+  /** 最近一年提交日历(周列 × 周一~周日行,GitHub 贡献图风格) */
+  calendar = computed(() => buildCommitCalendar(props.byDay));
 
 function cellTitle(cell: CommitCalendarCell): string {
   if (cell.count === 0) {

@@ -45,23 +45,23 @@ export function buildWorktreeTree(worktrees: GitWorktree[]): WorktreeTreeNode | 
   if (!main) {
     return null;
   }
-  const linked = worktrees.filter((w) => !w.is_main);
-  const root: WorktreeTreeNode = {
-    key: `main:${main.path}`,
-    kind: "main",
-    worktree: main,
-    label: main.branch ?? "",
-    displayPath: main.path,
-    children: [],
-  };
-  const parentOf = new Map<WorktreeTreeNode, WorktreeTreeNode>();
-  const attach = (node: WorktreeTreeNode, parent: WorktreeTreeNode) => {
-    parent.children.push(node);
-    parentOf.set(node, parent);
-  };
-  // 分支名 -> worktree 节点(同一分支不会同时检出在两个工作区)
-  const byBranch = new Map<string, WorktreeTreeNode>();
-  const byPath = new Map<string, WorktreeTreeNode>();
+  const linked = worktrees.filter((w) => !w.is_main),
+    root: WorktreeTreeNode = {
+      key: `main:${main.path}`,
+      kind: "main",
+      worktree: main,
+      label: main.branch ?? "",
+      displayPath: main.path,
+      children: [],
+    },
+    parentOf = new Map<WorktreeTreeNode, WorktreeTreeNode>(),
+    attach = (node: WorktreeTreeNode, parent: WorktreeTreeNode) => {
+      parent.children.push(node);
+      parentOf.set(node, parent);
+    },
+    // 分支名 -> worktree 节点(同一分支不会同时检出在两个工作区)
+    byBranch = new Map<string, WorktreeTreeNode>(),
+    byPath = new Map<string, WorktreeTreeNode>();
   for (const w of linked) {
     const n: WorktreeTreeNode = {
       key: `wt:${w.path}`,
@@ -78,35 +78,39 @@ export function buildWorktreeTree(worktrees: GitWorktree[]): WorktreeTreeNode | 
   }
   /** 沿已挂接的父链检查会否成环(A 基于 B、B 又基于 A 时后挂接者回退到根) */
   const createsCycle = (parent: WorktreeTreeNode, self: WorktreeTreeNode) => {
-    let p: WorktreeTreeNode | undefined = parent;
-    while (p) {
-      if (p === self) {
-        return true;
+      let p: WorktreeTreeNode | undefined = parent;
+      while (p) {
+        if (p === self) {
+          return true;
+        }
+        p = parentOf.get(p);
       }
-      p = parentOf.get(p);
-    }
-    return false;
-  };
-  const branchNodes = new Map<string, WorktreeTreeNode>();
+      return false;
+    },
+    branchNodes = new Map<string, WorktreeTreeNode>();
   for (const w of linked) {
-    const node = byPath.get(w.path)!;
-    const base = w.base_branch?.trim();
+    const node = byPath.get(w.path)!,
+      base = w.base_branch?.trim();
     let parent = root;
     if (base && base !== w.branch) {
-      const cands = [...new Set([base, shortName(base)])];
-      const onMain = !!main.branch && cands.includes(main.branch);
+      const cands = [...new Set([base, shortName(base)])],
+        onMain = !!main.branch && cands.includes(main.branch);
       if (!onMain) {
-        const exactHit = byBranch.get(base);
-        const shortHit = byBranch.get(shortName(base));
+        const exactHit = byBranch.get(base),
+          shortHit = byBranch.get(shortName(base));
         // 短名互配命中的工作区若自身也来自同一 base(如 base 写 origin/zc-dev,命中
         // 的 zc-dev 工作区同样从 origin/zc-dev 创建),两者是兄弟而非父子,应共同挂到
         // base 的占位分支节点下
-        const hit =
-          exactHit && exactHit !== node
-            ? exactHit
-            : shortHit && shortHit !== node && shortHit.worktree?.base_branch?.trim() !== base
-              ? shortHit
-              : undefined;
+        let hit: WorktreeTreeNode | undefined;
+        if (exactHit && exactHit !== node) {
+          hit = exactHit;
+        } else if (
+          shortHit &&
+          shortHit !== node &&
+          shortHit.worktree?.base_branch?.trim() !== base
+        ) {
+          hit = shortHit;
+        }
         if (hit && !createsCycle(hit, node)) {
           parent = hit;
         } else if (!hit) {
@@ -161,13 +165,12 @@ interface LinkPoints {
  * 同一父节点的各子连线竖直段重叠,视觉上即一条导轨加若干横向短接线。
  */
 const elbow = link<LinkPoints, [number, number]>(curveStepBefore)
-  .x((p) => p[0])
-  .y((p) => p[1]);
-
-/** d3 linkHorizontal(默认 curveBumpX):占位分支 pill 右缘 -> 子卡左缘的三次贝塞尔 */
-const lane = linkHorizontal<LinkPoints, [number, number]>()
-  .x((p) => p[0])
-  .y((p) => p[1]);
+    .x((p) => p[0])
+    .y((p) => p[1]),
+  /** d3 linkHorizontal(默认 curveBumpX):占位分支 pill 右缘 -> 子卡左缘的三次贝塞尔 */
+  lane = linkHorizontal<LinkPoints, [number, number]>()
+    .x((p) => p[0])
+    .y((p) => p[1]);
 
 /** 单段 L 形连线(父下沿 stub -> 子左缘中心) */
 export function stepLink(sx: number, sy: number, tx: number, ty: number): string {
@@ -185,58 +188,56 @@ export function layoutWorktreeTree(root: WorktreeTreeNode): {
   links: WorktreeLayoutLink[];
   height: number;
 } {
-  const nodes: WorktreeLayoutNode[] = [];
-  const links: WorktreeLayoutLink[] = [];
+  const nodes: WorktreeLayoutNode[] = [],
+    links: WorktreeLayoutLink[] = [],
+    /** 放置 h 及其子树,返回该节点块总高 */
+    place = (h: HierarchyNode<WorktreeTreeNode>, x: number, y: number): number => {
+      const n = h.data,
+        rowH = n.kind === "main" ? MAIN_H : ROW_H;
+      nodes.push({ node: n, x, y, h: rowH });
+      const kids = h.children ?? [];
+      if (!kids.length) {
+        return rowH;
+      }
 
-  /** 放置 h 及其子树,返回该节点块总高 */
-  const place = (h: HierarchyNode<WorktreeTreeNode>, x: number, y: number): number => {
-    const n = h.data;
-    const rowH = n.kind === "main" ? MAIN_H : ROW_H;
-    nodes.push({ node: n, x, y, h: rowH });
-    const kids = h.children ?? [];
-    if (!kids.length) {
-      return rowH;
-    }
+      if (n.kind === "branch") {
+        // 子 worktree 在 pill 右侧竖向堆叠,首个子卡与 pill 顶部对齐(不垂直居中)
+        let cy = y;
+        for (const c of kids) {
+          const ch = place(c, x + LABEL_W, cy);
+          links.push({
+            key: `${n.key}->${c.data.key}`,
+            d:
+              lane({
+                source: [x + PILL_W, y + ROW_H / 2],
+                target: [x + LABEL_W - ARROW, cy + ROW_H / 2],
+              }) ?? "",
+            tip: [x + LABEL_W, cy + ROW_H / 2],
+          });
+          cy += ch + ROW_GAP;
+        }
+        return Math.max(rowH, cy - ROW_GAP - y);
+      }
 
-    if (n.kind === "branch") {
-      // 子 worktree 在 pill 右侧竖向堆叠,首个子卡与 pill 顶部对齐(不垂直居中)
-      let cy = y;
+      // 子节点区块与父节点下沿间隔 ROW_GAP:worktree 子卡缩进整个标签列,占位分支 pill 只缩进导轨区
+      let cy = y + rowH + ROW_GAP;
       for (const c of kids) {
-        const ch = place(c, x + LABEL_W, cy);
+        const isBranch = c.data.kind === "branch",
+          cx = isBranch ? x + RAIL_W : x + CARD_INDENT,
+          ch = place(c, cx, cy);
         links.push({
           key: `${n.key}->${c.data.key}`,
-          d:
-            lane({
-              source: [x + PILL_W, y + ROW_H / 2],
-              target: [x + LABEL_W - ARROW, cy + ROW_H / 2],
-            }) ?? "",
-          tip: [x + LABEL_W, cy + ROW_H / 2],
+          d: stepLink(x + RAIL_X, y + rowH, isBranch ? cx : cx - ARROW, cy + ROW_H / 2),
+          tip: isBranch ? null : [cx, cy + ROW_H / 2],
         });
         cy += ch + ROW_GAP;
       }
-      return Math.max(rowH, cy - ROW_GAP - y);
-    }
-
-    // 子节点区块与父节点下沿间隔 ROW_GAP:worktree 子卡缩进整个标签列,占位分支 pill 只缩进导轨区
-    let cy = y + rowH + ROW_GAP;
-    for (const c of kids) {
-      const isBranch = c.data.kind === "branch";
-      const cx = isBranch ? x + RAIL_W : x + CARD_INDENT;
-      const ch = place(c, cx, cy);
-      links.push({
-        key: `${n.key}->${c.data.key}`,
-        d: stepLink(x + RAIL_X, y + rowH, isBranch ? cx : cx - ARROW, cy + ROW_H / 2),
-        tip: isBranch ? null : [cx, cy + ROW_H / 2],
-      });
-      cy += ch + ROW_GAP;
-    }
-    return cy - ROW_GAP - y;
-  };
-
-  const height = place(
-    hierarchy(root, (n) => n.children),
-    0,
-    0,
-  );
+      return cy - ROW_GAP - y;
+    },
+    height = place(
+      hierarchy(root, (n) => n.children),
+      0,
+      0,
+    );
   return { nodes, links, height };
 }

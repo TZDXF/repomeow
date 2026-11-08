@@ -22,88 +22,82 @@ import { formatDate } from "@/lib/format";
 import type { ReportPeriodType } from "@/types";
 
 const BATCH_FILTER_OPTIONS: { value: BatchFilter; labelKey: string }[] = [
-  { value: "workdays", labelKey: "report.batchFilterWorkdays" },
-  { value: "hasCommits", labelKey: "report.batchFilterHasCommits" },
-];
-
-const MODE_OPTIONS: { value: ReportPeriodType; labelKey: string }[] = [
-  { value: "daily", labelKey: "report.modeDaily" },
-  { value: "weekly", labelKey: "report.modeWeekly" },
-];
-
-const DAILY_RANGE_OPTIONS: { value: DailyRangeKey; labelKey: string }[] = [
-  { value: "today", labelKey: "report.today" },
-  { value: "yesterday", labelKey: "report.yesterday" },
-  { value: "custom", labelKey: "report.custom" },
-];
-
-const WEEKLY_RANGE_OPTIONS: { value: WeeklyRangeKey; labelKey: string }[] = [
-  { value: "thisWeek", labelKey: "report.thisWeek" },
-  { value: "lastWeek", labelKey: "report.lastWeek" },
-  { value: "custom", labelKey: "report.custom" },
-];
-
-const props = defineProps<{
-  language: string;
-  batchRunning: boolean;
-  weekRanges: Record<"thisWeek" | "lastWeek", { from: Date; to: Date }>;
-}>();
-const selection = defineModel<ReportPeriodSelection>({ required: true });
-const { t } = useI18n();
-
-const isBatch = computed(() => selection.value.execMode === "batch");
-const maxDate = calendarToday(getLocalTimeZone()) as unknown as RangeDateValue;
-const maxDateSingle = calendarToday(getLocalTimeZone()) as unknown as SingleDateValue;
+    { value: "workdays", labelKey: "report.batchFilterWorkdays" },
+    { value: "hasCommits", labelKey: "report.batchFilterHasCommits" },
+  ],
+  MODE_OPTIONS: { value: ReportPeriodType; labelKey: string }[] = [
+    { value: "daily", labelKey: "report.modeDaily" },
+    { value: "weekly", labelKey: "report.modeWeekly" },
+  ],
+  DAILY_RANGE_OPTIONS: { value: DailyRangeKey; labelKey: string }[] = [
+    { value: "today", labelKey: "report.today" },
+    { value: "yesterday", labelKey: "report.yesterday" },
+    { value: "custom", labelKey: "report.custom" },
+  ],
+  WEEKLY_RANGE_OPTIONS: { value: WeeklyRangeKey; labelKey: string }[] = [
+    { value: "thisWeek", labelKey: "report.thisWeek" },
+    { value: "lastWeek", labelKey: "report.lastWeek" },
+    { value: "custom", labelKey: "report.custom" },
+  ],
+  props = defineProps<{
+    language: string;
+    batchRunning: boolean;
+    weekRanges: Record<"thisWeek" | "lastWeek", { from: Date; to: Date }>;
+  }>(),
+  selection = defineModel<ReportPeriodSelection>({ required: true }),
+  { t } = useI18n(),
+  isBatch = computed(() => selection.value.execMode === "batch"),
+  maxDate = calendarToday(getLocalTimeZone()) as unknown as RangeDateValue,
+  maxDateSingle = calendarToday(getLocalTimeZone()) as unknown as SingleDateValue;
 
 function update(values: Partial<ReportPeriodSelection>) {
   selection.value = { ...selection.value, ...values };
 }
 
 const batchSwitch = computed({
-  get: () => isBatch.value,
-  set: (value: boolean) => update({ execMode: value ? "batch" : "single" }),
-});
-const batchRange = computed({
-  get: () => selection.value.batchRange,
-  set: (value: ReportPeriodSelection["batchRange"]) => update({ batchRange: value }),
-});
-const customDate = computed({
-  get: () => selection.value.customDate,
-  set: (value: ReportPeriodSelection["customDate"]) => update({ customDate: value }),
-});
-const customRange = computed({
-  get: () => selection.value.customRange,
-  set: (value: ReportPeriodSelection["customRange"]) => update({ customRange: value }),
-});
-const batchSkipExisting = computed({
-  get: () => selection.value.batchSkipExisting,
-  set: (value: boolean) => update({ batchSkipExisting: value }),
-});
-
-const batchRangeLabel = computed(() => {
-  const { start, end } = selection.value.batchRange;
-  if (start && end) {
-    return `${formatDate(toLocalDate(start))} - ${formatDate(toLocalDate(end))}`;
-  }
-  const single = start ?? end;
-  return single ? formatDate(toLocalDate(single)) : t("report.pickRange");
-});
-const customRangeLabel = computed(() => {
-  const { start, end } = selection.value.customRange;
-  if (start && end) {
-    return `${formatDate(toLocalDate(start))} - ${formatDate(toLocalDate(end))}`;
-  }
-  const single = start ?? end;
-  return single ? formatDate(toLocalDate(single)) : t("report.pickRange");
-});
-const customDateLabel = computed(() =>
-  selection.value.customDate
-    ? formatDate(toLocalDate(selection.value.customDate))
-    : t("report.pickDate"),
-);
-const selectedWeekRange = computed(() =>
-  selection.value.weeklyKey === "custom" ? null : props.weekRanges[selection.value.weeklyKey],
-);
+    get: () => isBatch.value,
+    set: (value: boolean) => update({ execMode: value ? "batch" : "single" }),
+  }),
+  batchRange = computed({
+    get: () => selection.value.batchRange,
+    set: (value: ReportPeriodSelection["batchRange"]) => update({ batchRange: value }),
+  }),
+  customDate = computed({
+    get: () => selection.value.customDate,
+    set: (value: ReportPeriodSelection["customDate"]) => update({ customDate: value }),
+  }),
+  customRange = computed({
+    get: () => selection.value.customRange,
+    set: (value: ReportPeriodSelection["customRange"]) => update({ customRange: value }),
+  }),
+  batchSkipExisting = computed({
+    get: () => selection.value.batchSkipExisting,
+    set: (value: boolean) => update({ batchSkipExisting: value }),
+  }),
+  batchRangeLabel = computed(() => {
+    const { start, end } = selection.value.batchRange;
+    if (start && end) {
+      return `${formatDate(toLocalDate(start))} - ${formatDate(toLocalDate(end))}`;
+    }
+    const single = start ?? end;
+    return single ? formatDate(toLocalDate(single)) : t("report.pickRange");
+  }),
+  customRangeLabel = computed(() => {
+    const { start, end } = selection.value.customRange;
+    if (start && end) {
+      return `${formatDate(toLocalDate(start))} - ${formatDate(toLocalDate(end))}`;
+    }
+    const single = start ?? end;
+    return single ? formatDate(toLocalDate(single)) : t("report.pickRange");
+  }),
+  customDateLabel = computed(() =>
+    selection.value.customDate
+      ? formatDate(toLocalDate(selection.value.customDate))
+      : t("report.pickDate"),
+  ),
+  selectedWeekRange = computed(() =>
+    selection.value.weeklyKey === "custom" ? null : props.weekRanges[selection.value.weeklyKey],
+  );
 
 function fmtWeekRange(range: { from: Date; to: Date }) {
   return `${formatDate(range.from)} ~ ${formatDate(range.to)}`;

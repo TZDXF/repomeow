@@ -13,9 +13,8 @@ import { reactiveOmit } from "@vueuse/core";
 import { cn } from "@/lib/utils";
 import { ScrollArea as UiScrollArea } from "@/components/ui/scroll-area";
 
-const props = defineProps<ScrollAreaRootProps & { class?: HTMLAttributes["class"] }>();
-
-const delegatedProps = reactiveOmit(props, "class");
+const props = defineProps<ScrollAreaRootProps & { class?: HTMLAttributes["class"] }>(),
+  delegatedProps = reactiveOmit(props, "class");
 </script>
 
 <template>

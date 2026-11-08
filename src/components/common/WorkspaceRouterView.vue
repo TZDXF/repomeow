@@ -5,13 +5,13 @@ import ProjectPageScope from "@/components/common/ProjectPageScope.vue";
 import { useProjectPageCache } from "@/composables/useProjectPageCache";
 import { resolveTabFromPath, useTabsStore } from "@/stores/tabs";
 
-const route = useRoute();
-const tabs = useTabsStore();
-const isProject = computed(() => resolveTabFromPath(route.path).kind === "project");
-const pages = useProjectPageCache(
-  () => route,
-  () => tabs.openProjectIds,
-);
+const route = useRoute(),
+  tabs = useTabsStore(),
+  isProject = computed(() => resolveTabFromPath(route.path).kind === "project"),
+  pages = useProjectPageCache(
+    () => route,
+    () => tabs.openProjectIds,
+  );
 </script>
 
 <template>

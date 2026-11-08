@@ -42,8 +42,8 @@ export function foldContextLines(
   expanded: ReadonlySet<string>,
   options: { minRunLength?: number; edgeLength?: number } = {},
 ): (DiffLine | DiffFold)[] {
-  const { minRunLength = 12, edgeLength = 3 } = options;
-  const out: (DiffLine | DiffFold)[] = [];
+  const { minRunLength = 12, edgeLength = 3 } = options,
+    out: (DiffLine | DiffFold)[] = [];
   let i = 0;
   while (i < lines.length) {
     if (lines[i].kind !== "ctx") {
@@ -55,8 +55,8 @@ export function foldContextLines(
     while (j < lines.length && lines[j].kind === "ctx") {
       j++;
     }
-    const length = j - i;
-    const key = `${i}:${length}`;
+    const length = j - i,
+      key = `${i}:${length}`;
     if (length > minRunLength && !expanded.has(key)) {
       out.push(...lines.slice(i, i + edgeLength));
       out.push({ kind: "fold", count: length - edgeLength * 2, key });
@@ -97,10 +97,10 @@ export function buildPaneRows(rows: DiffSideRow[], side: DiffPaneSide): DiffPane
 
 /** 各规范 sideRow 在左右窗格中的起始行偏移，末尾元素是总行数哨兵。 */
 export function buildPaneRowOffsets(rows: DiffSideRow[]): DiffPaneRowOffsets {
-  const left: number[] = [];
-  const right: number[] = [];
-  let leftCount = 0;
-  let rightCount = 0;
+  const left: number[] = [],
+    right: number[] = [];
+  let leftCount = 0,
+    rightCount = 0;
   for (const row of rows) {
     left.push(leftCount);
     right.push(rightCount);
@@ -126,13 +126,13 @@ export function locatePaneRowPosition(offsets: number[], scrollTop: number, rowH
   if (offsets.length < 2) {
     return 0;
   }
-  const total = offsets[offsets.length - 1];
-  const scaled = Math.min((scrollTop - rowHeight / 5) / rowHeight, total);
+  const total = offsets[offsets.length - 1],
+    scaled = Math.min((scrollTop - rowHeight / 5) / rowHeight, total);
   if (scaled <= 0) {
     return scaled;
   }
-  let low = 0;
-  let high = offsets.length - 2;
+  let low = 0,
+    high = offsets.length - 2;
   while (low < high) {
     const middle = (low + high + 1) >> 1;
     if (offsets[middle] <= scaled) {
@@ -153,8 +153,8 @@ export function paneScrollTopAt(offsets: number[], rowPosition: number, rowHeigh
   if (offsets.length < 2) {
     return 0;
   }
-  const index = Math.min(Math.max(Math.floor(rowPosition), 0), offsets.length - 2);
-  const fraction = Math.min(Math.max(rowPosition - index, 0), 1);
+  const index = Math.min(Math.max(Math.floor(rowPosition), 0), offsets.length - 2),
+    fraction = Math.min(Math.max(rowPosition - index, 0), 1);
   return (
     (offsets[index] + fraction * (offsets[index + 1] - offsets[index])) * rowHeight + rowHeight / 5
   );
@@ -162,20 +162,20 @@ export function paneScrollTopAt(offsets: number[], rowPosition: number, rowHeigh
 
 /** 连续增删 sideRow 合并成连接条使用的变化块。 */
 export function buildChangeBlocks(rows: DiffSideRow[]): DiffChangeBlock[] {
-  const blocks: DiffChangeBlock[] = [];
-  const isChange = (index: number) => {
-    const row = rows[index];
-    return row.kind === "line" && (row.left?.kind === "del" || row.right?.kind === "add");
-  };
+  const blocks: DiffChangeBlock[] = [],
+    isChange = (index: number) => {
+      const row = rows[index];
+      return row.kind === "line" && (row.left?.kind === "del" || row.right?.kind === "add");
+    };
   let i = 0;
   while (i < rows.length) {
     if (!isChange(i)) {
       i++;
       continue;
     }
-    let j = i;
-    let hasDelete = false;
-    let hasAdd = false;
+    let j = i,
+      hasDelete = false,
+      hasAdd = false;
     while (j < rows.length && isChange(j)) {
       if (rows[j].left?.kind === "del") {
         hasDelete = true;
@@ -230,18 +230,18 @@ interface DividerShapeOptions {
 
 export function buildDividerShapes(options: DividerShapeOptions): DiffDividerShape[] {
   const { rows, blocks, offsets, width, viewportHeight, leftScrollTop, rightScrollTop, rowHeight } =
-    options;
-  const yLeft = (position: number) =>
-    paneScrollTopAt(offsets.left, position, rowHeight) - leftScrollTop;
-  const yRight = (position: number) =>
-    paneScrollTopAt(offsets.right, position, rowHeight) - rightScrollTop;
-  const shapes: DiffDividerShape[] = [];
+      options,
+    yLeft = (position: number) =>
+      paneScrollTopAt(offsets.left, position, rowHeight) - leftScrollTop,
+    yRight = (position: number) =>
+      paneScrollTopAt(offsets.right, position, rowHeight) - rightScrollTop,
+    shapes: DiffDividerShape[] = [];
   rows.forEach((row, index) => {
     if (row.kind !== "fold") {
       return;
     }
-    const leftY = yLeft(index) + rowHeight / 2;
-    const rightY = yRight(index) + rowHeight / 2;
+    const leftY = yLeft(index) + rowHeight / 2,
+      rightY = yRight(index) + rowHeight / 2;
     if (
       leftY >= -rowHeight &&
       rightY >= -rowHeight &&
@@ -257,10 +257,10 @@ export function buildDividerShapes(options: DividerShapeOptions): DiffDividerSha
     }
   });
   for (const block of blocks) {
-    const leftTop = yLeft(block.start);
-    const leftBottom = yLeft(block.end);
-    const rightTop = yRight(block.start);
-    const rightBottom = yRight(block.end);
+    const leftTop = yLeft(block.start),
+      leftBottom = yLeft(block.end),
+      rightTop = yRight(block.start),
+      rightBottom = yRight(block.end);
     if (
       (leftBottom >= -rowHeight || rightBottom >= -rowHeight) &&
       (leftTop <= viewportHeight + rowHeight || rightTop <= viewportHeight + rowHeight)

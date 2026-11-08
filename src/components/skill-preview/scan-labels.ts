@@ -12,18 +12,17 @@ export interface ScanLabelI18n {
 }
 
 const SEVERITY_CLASSES: Record<string, string> = {
-  critical: "border-red-600/30 bg-red-600/10 text-red-600 dark:text-red-400",
-  high: "border-orange-500/30 bg-orange-500/10 text-orange-600 dark:text-orange-400",
-  medium: "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  low: "border-border bg-muted text-muted-foreground",
-};
-
-const LEVEL_CLASSES: Record<string, string> = {
-  low: "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  medium: "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  high: "border-orange-500/30 bg-orange-500/10 text-orange-600 dark:text-orange-400",
-  critical: "border-red-600/30 bg-red-600/10 text-red-600 dark:text-red-400",
-};
+    critical: "border-red-600/30 bg-red-600/10 text-red-600 dark:text-red-400",
+    high: "border-orange-500/30 bg-orange-500/10 text-orange-600 dark:text-orange-400",
+    medium: "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    low: "border-border bg-muted text-muted-foreground",
+  },
+  LEVEL_CLASSES: Record<string, string> = {
+    low: "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+    medium: "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    high: "border-orange-500/30 bg-orange-500/10 text-orange-600 dark:text-orange-400",
+    critical: "border-red-600/30 bg-red-600/10 text-red-600 dark:text-red-400",
+  };
 
 export function scanSeverityClass(severity: string): string {
   return SEVERITY_CLASSES[severity] ?? SEVERITY_CLASSES.medium;
@@ -52,14 +51,18 @@ export function scanCategoryLabel(i18n: ScanLabelI18n, finding: ResourceSkillSca
 export function scanFindingTitle(i18n: ScanLabelI18n, finding: ResourceSkillScanFinding): string {
   if (finding.ruleId) {
     const key = `settings.resources.skills.previewPage.scan.rules.${finding.ruleId}`;
-    if (i18n.te(key)) return i18n.t(key);
+    if (i18n.te(key)) {
+      return i18n.t(key);
+    }
   }
   return finding.title || finding.category;
 }
 
 /** AI 语义层异常提示(skipped/canceled/failed);正常或无报告时为空串 */
 export function scanLlmNotice(i18n: ScanLabelI18n, report: ResourceSkillScanReport | null): string {
-  if (!report) return "";
+  if (!report) {
+    return "";
+  }
   if (report.llmStatus === "skipped") {
     return i18n.t("settings.resources.skills.previewPage.scan.llmSkipped");
   }

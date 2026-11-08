@@ -34,12 +34,14 @@ interface TranslationCacheSchema extends DBSchema {
 
 type CacheDb = IDBPDatabase<TranslationCacheSchema>;
 
-let dbPromise: Promise<CacheDb | null> | null = null;
-/** 每个应用会话只在首次打开时全量清扫一次过期条目 */
-let swept = false;
+let dbPromise: Promise<CacheDb | null> | null = null,
+  /** 每个应用会话只在首次打开时全量清扫一次过期条目 */
+  swept = false;
 
 function openCacheDb(): Promise<CacheDb | null> {
-  if (typeof indexedDB === "undefined") return Promise.resolve(null);
+  if (typeof indexedDB === "undefined") {
+    return Promise.resolve(null);
+  }
   dbPromise ??= openDB<TranslationCacheSchema>(TRANSLATION_CACHE_DB, 1, {
     upgrade(db) {
       const store = db.createObjectStore(TRANSLATION_CACHE_STORE);
@@ -68,13 +70,19 @@ async function hashContent(text: string): Promise<string> {
 
 /** 取缓存的译文;未命中/已过期/任何异常返回 null。过期条目顺手删除。 */
 export async function getCachedTranslation(text: string, language: string): Promise<string | null> {
-  if (!text) return null;
+  if (!text) {
+    return null;
+  }
   try {
     const db = await openCacheDb();
-    if (!db) return null;
-    const key = await cacheKey(text, language);
-    const entry = await db.get(TRANSLATION_CACHE_STORE, key);
-    if (!entry) return null;
+    if (!db) {
+      return null;
+    }
+    const key = await cacheKey(text, language),
+      entry = await db.get(TRANSLATION_CACHE_STORE, key);
+    if (!entry) {
+      return null;
+    }
     if (entry.createdAt + TRANSLATION_CACHE_TTL_MS <= Date.now()) {
       void db.delete(TRANSLATION_CACHE_STORE, key);
       return null;
@@ -91,17 +99,21 @@ export async function putCachedTranslation(
   language: string,
   translatedText: string,
 ): Promise<void> {
-  if (!text || !translatedText) return;
+  if (!text || !translatedText) {
+    return;
+  }
   try {
     const db = await openCacheDb();
-    if (!db) return;
-    const hash = await hashContent(text);
-    const entry: TranslationCacheEntry = {
-      hash,
-      language,
-      translatedText,
-      createdAt: Date.now(),
-    };
+    if (!db) {
+      return;
+    }
+    const hash = await hashContent(text),
+      entry: TranslationCacheEntry = {
+        hash,
+        language,
+        translatedText,
+        createdAt: Date.now(),
+      };
     await db.put(TRANSLATION_CACHE_STORE, entry, `${language}:${CACHE_KEY_VERSION}:${hash}`);
   } catch {
     // 缓存写入失败不影响翻译结果
@@ -112,7 +124,9 @@ export async function putCachedTranslation(
 export async function purgeExpiredTranslations(): Promise<void> {
   try {
     const db = await openCacheDb();
-    if (db) await sweepExpired(db);
+    if (db) {
+      await sweepExpired(db);
+    }
   } catch {
     // 清扫失败无碍,下次会话再试
   }
@@ -120,12 +134,12 @@ export async function purgeExpiredTranslations(): Promise<void> {
 
 async function sweepExpired(db: CacheDb): Promise<void> {
   try {
-    const tx = db.transaction(TRANSLATION_CACHE_STORE, "readwrite");
-    const cutoff = Date.now() - TRANSLATION_CACHE_TTL_MS;
-    const expiredKeys = await tx.store
-      .index("createdAt")
-      .getAllKeys(IDBKeyRange.upperBound(cutoff));
-    for (const key of expiredKeys) tx.store.delete(key);
+    const tx = db.transaction(TRANSLATION_CACHE_STORE, "readwrite"),
+      cutoff = Date.now() - TRANSLATION_CACHE_TTL_MS,
+      expiredKeys = await tx.store.index("createdAt").getAllKeys(IDBKeyRange.upperBound(cutoff));
+    for (const key of expiredKeys) {
+      tx.store.delete(key);
+    }
     await tx.done;
   } catch {
     // 同上,清扫失败静默

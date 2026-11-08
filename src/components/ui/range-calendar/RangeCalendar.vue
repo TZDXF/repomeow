@@ -18,13 +18,10 @@ import {
   RangeCalendarPrevButton,
 } from ".";
 
-const props = defineProps<RangeCalendarRootProps & { class?: HTMLAttributes["class"] }>();
-
-const emits = defineEmits<RangeCalendarRootEmits>();
-
-const delegatedProps = reactiveOmit(props, "class");
-
-const forwarded = useForwardPropsEmits(delegatedProps, emits);
+const props = defineProps<RangeCalendarRootProps & { class?: HTMLAttributes["class"] }>(),
+  emits = defineEmits<RangeCalendarRootEmits>(),
+  delegatedProps = reactiveOmit(props, "class"),
+  forwarded = useForwardPropsEmits(delegatedProps, emits);
 </script>
 
 <template>

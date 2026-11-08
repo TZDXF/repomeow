@@ -77,8 +77,8 @@ describe("pickAutoPreviewPage", () => {
 
 describe("useWikiAutoPreview", () => {
   it("跨状态更新保持当前页，完成后不自动切换", async () => {
-    const state = makeState([pageItem("a", "running"), pageItem("b", "running")], { b: "partial" });
-    const followedId = useWikiAutoPreview(computed(() => state));
+    const state = makeState([pageItem("a", "running"), pageItem("b", "running")], { b: "partial" }),
+      followedId = useWikiAutoPreview(computed(() => state));
     await nextTick();
     // a 还没输出而 b 在输出,初始跟随 b
     expect(followedId.value).toBe("b");
@@ -97,8 +97,8 @@ describe("useWikiAutoPreview", () => {
   });
 
   it("跟随页暂无输出时也不会被动切页", async () => {
-    const state = makeState([pageItem("a", "running"), pageItem("b", "running")], {});
-    const followedId = useWikiAutoPreview(computed(() => state));
+    const state = makeState([pageItem("a", "running"), pageItem("b", "running")], {}),
+      followedId = useWikiAutoPreview(computed(() => state));
     await nextTick();
     expect(followedId.value).toBe("a");
     state.streamContents.b = "y";

@@ -7,13 +7,10 @@ import { reactiveOmit } from "@vueuse/core";
 import { DropdownMenuItemIndicator, DropdownMenuRadioItem, useForwardPropsEmits } from "reka-ui";
 import { cn } from "@/lib/utils";
 
-const props = defineProps<DropdownMenuRadioItemProps & { class?: HTMLAttributes["class"] }>();
-
-const emits = defineEmits<DropdownMenuRadioItemEmits>();
-
-const delegatedProps = reactiveOmit(props, "class");
-
-const forwarded = useForwardPropsEmits(delegatedProps, emits);
+const props = defineProps<DropdownMenuRadioItemProps & { class?: HTMLAttributes["class"] }>(),
+  emits = defineEmits<DropdownMenuRadioItemEmits>(),
+  delegatedProps = reactiveOmit(props, "class"),
+  forwarded = useForwardPropsEmits(delegatedProps, emits);
 </script>
 
 <template>

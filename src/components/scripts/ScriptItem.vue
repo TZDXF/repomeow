@@ -8,32 +8,30 @@ import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { commandIcon } from "@/lib/command-icons";
 import { copyToClipboard } from "@/lib/utils";
 
-const { t } = useI18n();
-const props = defineProps<{
-  name: string;
-  command: string;
-  description?: string;
-  icon?: string;
-  editable?: boolean;
-  /** 是否可被隐藏(显示悬停 EyeOff 按钮) */
-  hidable?: boolean;
-  /** 当前处于已隐藏状态(灰显 + 常显 Eye 恢复按钮,仅在「显示已隐藏」模式下出现) */
-  dimmed?: boolean;
-  /** 是否可标记为「常用命令」(显示 Star 按钮,在托盘弹窗中可快速执行) */
-  pinnable?: boolean;
-  /** 当前是否已被标记 */
-  pinned?: boolean;
-}>();
-
-const iconComponent = computed(() => (props.icon ? commandIcon(props.icon) : undefined));
-
-const emit = defineEmits<{
-  run: [];
-  edit: [];
-  delete: [];
-  toggleHide: [];
-  togglePin: [];
-}>();
+const { t } = useI18n(),
+  props = defineProps<{
+    name: string;
+    command: string;
+    description?: string;
+    icon?: string;
+    editable?: boolean;
+    /** 是否可被隐藏(显示悬停 EyeOff 按钮) */
+    hidable?: boolean;
+    /** 当前处于已隐藏状态(灰显 + 常显 Eye 恢复按钮,仅在「显示已隐藏」模式下出现) */
+    dimmed?: boolean;
+    /** 是否可标记为「常用命令」(显示 Star 按钮,在托盘弹窗中可快速执行) */
+    pinnable?: boolean;
+    /** 当前是否已被标记 */
+    pinned?: boolean;
+  }>(),
+  iconComponent = computed(() => (props.icon ? commandIcon(props.icon) : undefined)),
+  emit = defineEmits<{
+    run: [];
+    edit: [];
+    delete: [];
+    toggleHide: [];
+    togglePin: [];
+  }>();
 
 async function copyCommand() {
   await copyToClipboard(props.command);

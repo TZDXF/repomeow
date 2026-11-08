@@ -2,27 +2,24 @@
 import { computed } from "vue";
 import { useContextValue } from "./context";
 
-const ICON_RADIUS = 10;
-const ICON_VIEWBOX = 24;
-const ICON_CENTER = 12;
-const ICON_STROKE_WIDTH = 3.5;
-const ICON_SIZE = 16;
-
-const { usedTokens, maxTokens } = useContextValue();
-
-const circumference = 2 * Math.PI * ICON_RADIUS;
-
-const usedPercent = computed(() => {
-  if (usedTokens.value == null || !maxTokens.value) return 0;
-  return Math.min(1, usedTokens.value / maxTokens.value);
-});
-
-const dashOffset = computed(() => circumference * (1 - usedPercent.value));
-
-const svgStyle = {
-  transformOrigin: "center",
-  transform: "rotate(-90deg)",
-};
+const ICON_RADIUS = 10,
+  ICON_VIEWBOX = 24,
+  ICON_CENTER = 12,
+  ICON_STROKE_WIDTH = 3.5,
+  ICON_SIZE = 16,
+  { usedTokens, maxTokens } = useContextValue(),
+  circumference = 2 * Math.PI * ICON_RADIUS,
+  usedPercent = computed(() => {
+    if (usedTokens.value == null || !maxTokens.value) {
+      return 0;
+    }
+    return Math.min(1, usedTokens.value / maxTokens.value);
+  }),
+  dashOffset = computed(() => circumference * (1 - usedPercent.value)),
+  svgStyle = {
+    transformOrigin: "center",
+    transform: "rotate(-90deg)",
+  };
 </script>
 
 <template>

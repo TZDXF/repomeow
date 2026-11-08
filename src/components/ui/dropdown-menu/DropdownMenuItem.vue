@@ -6,21 +6,19 @@ import { DropdownMenuItem, useForwardProps } from "reka-ui";
 import { cn } from "@/lib/utils";
 
 const props = withDefaults(
-  defineProps<
-    DropdownMenuItemProps & {
-      class?: HTMLAttributes["class"];
-      inset?: boolean;
-      variant?: "default" | "destructive";
-    }
-  >(),
-  {
-    variant: "default",
-  },
-);
-
-const delegatedProps = reactiveOmit(props, "inset", "variant", "class");
-
-const forwardedProps = useForwardProps(delegatedProps);
+    defineProps<
+      DropdownMenuItemProps & {
+        class?: HTMLAttributes["class"];
+        inset?: boolean;
+        variant?: "default" | "destructive";
+      }
+    >(),
+    {
+      variant: "default",
+    },
+  ),
+  delegatedProps = reactiveOmit(props, "inset", "variant", "class"),
+  forwardedProps = useForwardProps(delegatedProps);
 </script>
 
 <template>

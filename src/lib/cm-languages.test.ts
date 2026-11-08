@@ -43,12 +43,12 @@ describe("resolveCmLanguage", () => {
   });
 
   it("同语言命中缓存:相同 key 返回同一 Promise", async () => {
-    const a = resolveCmLanguage("x/one.ts");
-    const b = resolveCmLanguage("y/two.ts");
+    const a = resolveCmLanguage("x/one.ts"),
+      b = resolveCmLanguage("y/two.ts");
     expect(b).toBe(a);
     // 命中不同 loader 表(文件名 vs 扩展名)的 key 相互隔离
-    const d1 = resolveCmLanguage("Dockerfile");
-    const d2 = resolveCmLanguage("sub/Dockerfile");
+    const d1 = resolveCmLanguage("Dockerfile"),
+      d2 = resolveCmLanguage("sub/Dockerfile");
     expect(d2).toBe(d1);
   });
 });

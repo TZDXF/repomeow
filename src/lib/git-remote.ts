@@ -29,10 +29,10 @@ export function parseGitRemote(remote: string): GitRemoteInfo | null {
     return null;
   }
 
-  let scheme = "https";
-  let host = "";
-  let port = "";
-  let repoPath = "";
+  let scheme = "https",
+    host = "",
+    port = "",
+    repoPath = "";
 
   // scp 风格: git@github.com:owner/repo.git(无协议头,且冒号不在端口位)
   const scp = /^[\w.-]+@(?<host>[\w.-]+):(?<path>.+)$/.exec(raw);

@@ -12,24 +12,22 @@ import type { FileTreeRow } from "@/lib/file-tree";
  * +N/-N 等),文件行点击发 select、可展开目录行点击发 toggle
  */
 const props = withDefaults(
-  defineProps<{
-    rows: FileTreeRow<T>[];
-    /** 选中的行 fullPath */
-    selected?: string | null;
-    /** default = 文件树页(text-sm/图标 h-4);sm = git 面板(text-xs mono/图标 h-3.5) */
-    size?: "default" | "sm";
-    /** 平铺模式:不缩进不渲染箭头,行内边距 px-3 */
-    flat?: boolean;
+    defineProps<{
+      rows: FileTreeRow<T>[];
+      /** 选中的行 fullPath */
+      selected?: string | null;
+      /** default = 文件树页(text-sm/图标 h-4);sm = git 面板(text-xs mono/图标 h-3.5) */
+      size?: "default" | "sm";
+      /** 平铺模式:不缩进不渲染箭头,行内边距 px-3 */
+      flat?: boolean;
+    }>(),
+    { selected: null, size: "default", flat: false },
+  ),
+  emit = defineEmits<{
+    select: [row: FileTreeRow<T>];
+    toggle: [row: FileTreeRow<T>];
   }>(),
-  { selected: null, size: "default", flat: false },
-);
-
-const emit = defineEmits<{
-  select: [row: FileTreeRow<T>];
-  toggle: [row: FileTreeRow<T>];
-}>();
-
-const { t } = useI18n();
+  { t } = useI18n();
 
 function isSelected(row: FileTreeRow<T>) {
   return !row.loading && props.selected != null && props.selected === row.fullPath;
@@ -41,7 +39,9 @@ function onRowClick(row: FileTreeRow<T>) {
   }
   if (row.isDir) {
     // 已知空目录不 expandable,点击无动作;懒加载树的未加载目录由父级按需拉取
-    if (row.expandable) emit("toggle", row);
+    if (row.expandable) {
+      emit("toggle", row);
+    }
   } else {
     emit("select", row);
   }

@@ -28,47 +28,42 @@ import "@/styles/holiday-calendar.css";
 import { useSettingsStore } from "@/stores/settings";
 
 const props = defineProps<{
-  modelValue: string | null;
-  calendarData: CalendarMeta | null;
-  /** 周报时间范围高亮("YYYY-MM-DD" 起止,闭区间);null 表示不高亮 */
-  highlightRange?: { start: string; end: string } | null;
-  /** 选中视角:日(点选单日) | 周(点选某日即选中其周一至周日整周) | 月(月格点选整月) */
-  selectionMode: ReportViewMode;
-}>();
+    modelValue: string | null;
+    calendarData: CalendarMeta | null;
+    /** 周报时间范围高亮("YYYY-MM-DD" 起止,闭区间);null 表示不高亮 */
+    highlightRange?: { start: string; end: string } | null;
+    /** 选中视角:日(点选单日) | 周(点选某日即选中其周一至周日整周) | 月(月格点选整月) */
+    selectionMode: ReportViewMode;
+  }>(),
+  emit = defineEmits<{
+    "update:modelValue": [date: string];
+    "month-change": [year: number, month: number];
+  }>(),
+  { t } = useI18n(),
+  settings = useSettingsStore(),
+  /** 节假日判定数据(日期集合 + 真实节日名称表),随 calendarData 更新 */
+  dayCtx = computed<HolidayDayContext>(() => ({
+    holidaySet: new Set(props.calendarData?.holidays ?? []),
+    workdaySet: new Set(props.calendarData?.workdays ?? []),
+    holidayNames: props.calendarData?.holidayNames ?? {},
+    workdayNames: props.calendarData?.workdayNames ?? {},
+  })),
+  reportDates = computed(() => props.calendarData?.dates ?? {}),
+  /** 使用浏览器 Intl API 生成周一~周日的短标签，避免 t() 数组不可靠 */
+  weekDayLabels = computed(() => {
+    const lang = settings.language,
+      fmt = new Intl.DateTimeFormat(lang, { weekday: lang === "zh-CN" ? "narrow" : "short" }),
+      // 2024-01-01 is Monday
+      mon = new Date(2024, 0, 1);
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(mon);
+      d.setDate(1 + i);
+      return fmt.format(d);
+    });
+  }),
+  // ── CalendarRoot model: string ↔ DateValue ────────────────────────────
 
-const emit = defineEmits<{
-  "update:modelValue": [date: string];
-  "month-change": [year: number, month: number];
-}>();
-
-const { t } = useI18n();
-const settings = useSettingsStore();
-
-/** 节假日判定数据(日期集合 + 真实节日名称表),随 calendarData 更新 */
-const dayCtx = computed<HolidayDayContext>(() => ({
-  holidaySet: new Set(props.calendarData?.holidays ?? []),
-  workdaySet: new Set(props.calendarData?.workdays ?? []),
-  holidayNames: props.calendarData?.holidayNames ?? {},
-  workdayNames: props.calendarData?.workdayNames ?? {},
-}));
-const reportDates = computed(() => props.calendarData?.dates ?? {});
-
-/** 使用浏览器 Intl API 生成周一~周日的短标签，避免 t() 数组不可靠 */
-const weekDayLabels = computed(() => {
-  const lang = settings.language;
-  const fmt = new Intl.DateTimeFormat(lang, { weekday: lang === "zh-CN" ? "narrow" : "short" });
-  // 2024-01-01 is Monday
-  const mon = new Date(2024, 0, 1);
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(mon);
-    d.setDate(1 + i);
-    return fmt.format(d);
-  });
-});
-
-// ── CalendarRoot model: string ↔ DateValue ────────────────────────────
-
-const innerValue = ref<DateValue>() as Ref<DateValue | undefined>;
+  innerValue = ref<DateValue>() as Ref<DateValue | undefined>;
 
 // parent → calendar
 watch(
@@ -100,12 +95,14 @@ function onCalendarUpdate(v: DateValue | undefined) {
 
 // ── month navigation ────────────────────────────────────────────────────
 
-const placeholder = ref(today(getLocalTimeZone())) as Ref<DateValue>;
-const lastPlaceholder = ref("");
+const placeholder = ref(today(getLocalTimeZone())) as Ref<DateValue>,
+  lastPlaceholder = ref("");
 
 watch(placeholder, (val) => {
   const ds = val.toString();
-  if (ds === lastPlaceholder.value) return;
+  if (ds === lastPlaceholder.value) {
+    return;
+  }
   lastPlaceholder.value = ds;
   emit("month-change", val.year, val.month);
 });
@@ -140,20 +137,18 @@ watch(
 
 /** 月份短标签(1月..12月 / Jan..Dec),用 Intl 生成,无需新增 i18n 词条 */
 const monthLabels = computed(() => {
-  const fmt = new Intl.DateTimeFormat(settings.language, { month: "short" });
-  return Array.from({ length: 12 }, (_, i) => fmt.format(new Date(2024, i, 1)));
-});
-
-/** 月选择视图标题:仅年份(zh 显示「2026年」,en 显示「2026」) */
-const yearLabel = computed(() =>
-  new Intl.DateTimeFormat(settings.language, { year: "numeric" }).format(
-    new Date(placeholder.value.year, 0, 1),
+    const fmt = new Intl.DateTimeFormat(settings.language, { month: "short" });
+    return Array.from({ length: 12 }, (_, i) => fmt.format(new Date(2024, i, 1)));
+  }),
+  /** 月选择视图标题:仅年份(zh 显示「2026年」,en 显示「2026」) */
+  yearLabel = computed(() =>
+    new Intl.DateTimeFormat(settings.language, { year: "numeric" }).format(
+      new Date(placeholder.value.year, 0, 1),
+    ),
   ),
-);
-
-/** 年选择视图:当前年所在十年为核心,前后各扩 1 年共 12 格(首尾两格淡化) */
-const decadeStart = computed(() => Math.floor(placeholder.value.year / 10) * 10);
-const yearCells = computed(() => Array.from({ length: 12 }, (_, i) => decadeStart.value - 1 + i));
+  /** 年选择视图:当前年所在十年为核心,前后各扩 1 年共 12 格(首尾两格淡化) */
+  decadeStart = computed(() => Math.floor(placeholder.value.year / 10) * 10),
+  yearCells = computed(() => Array.from({ length: 12 }, (_, i) => decadeStart.value - 1 + i));
 
 /** 月/年视图下的左右翻页:月视图 ±1 年,年视图 ±10 年 */
 function shiftView(dir: 1 | -1) {
@@ -180,11 +175,11 @@ function pickYear(year: number) {
 
 /** 高亮规则:已选日期所在月/年铺底色,今天所在月/年标主色 */
 function monthCellClass(month: number): string {
-  const sel = innerValue.value;
-  const now = today(getLocalTimeZone());
-  const y = placeholder.value.year;
-  const classes: string[] = [];
-  const isSelected = !!sel && sel.year === y && sel.month === month;
+  const sel = innerValue.value,
+    now = today(getLocalTimeZone()),
+    y = placeholder.value.year,
+    classes: string[] = [],
+    isSelected = !!sel && sel.year === y && sel.month === month;
   if (isSelected) {
     // 月视角下月格即选中态,用主色实心;日/周视角的月视图仅是下钻导航,保持淡底
     classes.push(
@@ -200,9 +195,9 @@ function monthCellClass(month: number): string {
 }
 
 function yearCellClass(year: number): string {
-  const sel = innerValue.value;
-  const now = today(getLocalTimeZone());
-  const classes: string[] = [];
+  const sel = innerValue.value,
+    now = today(getLocalTimeZone()),
+    classes: string[] = [];
   if (year < decadeStart.value || year > decadeStart.value + 9) {
     classes.push("text-muted-foreground/50");
   }
@@ -238,29 +233,43 @@ function getWeeklyCount(dv: DateValue): number {
 /** 周报范围高亮:日期是否落在 highlightRange 闭区间内(字符串即 ISO 日期,可直接字典序比较) */
 function isInHighlightRange(dv: DateValue): boolean {
   const r = props.highlightRange;
-  if (!r) return false;
+  if (!r) {
+    return false;
+  }
   const ds = dv.toString();
   return ds >= r.start && ds <= r.end;
 }
 
 /** 范围高亮 class:中段去圆角连成带,起止日保留外侧圆角(完整类名供 Tailwind 扫描) */
 function getHighlightClass(dv: DateValue): string {
-  if (!isInHighlightRange(dv)) return "";
-  const r = props.highlightRange!;
-  const ds = dv.toString();
-  if (ds === r.start && ds === r.end) return "bg-primary/10";
-  if (ds === r.start) return "bg-primary/10 rounded-r-none";
-  if (ds === r.end) return "bg-primary/10 rounded-l-none";
+  if (!isInHighlightRange(dv)) {
+    return "";
+  }
+  const r = props.highlightRange!,
+    ds = dv.toString();
+  if (ds === r.start && ds === r.end) {
+    return "bg-primary/10";
+  }
+  if (ds === r.start) {
+    return "bg-primary/10 rounded-r-none";
+  }
+  if (ds === r.end) {
+    return "bg-primary/10 rounded-l-none";
+  }
   return "bg-primary/10 rounded-none";
 }
 
 /** 周视角的选中周范围:已选日期所在周一至周日(与 week-starts-on=1 一致) */
 const selectedWeekRange = computed(() => {
-  if (props.selectionMode !== "week") return null;
+  if (props.selectionMode !== "week") {
+    return null;
+  }
   const sel = innerValue.value;
-  if (!sel) return null;
-  const dow = (sel.toDate(getLocalTimeZone()).getDay() + 6) % 7;
-  const start = sel.subtract({ days: dow });
+  if (!sel) {
+    return null;
+  }
+  const dow = (sel.toDate(getLocalTimeZone()).getDay() + 6) % 7,
+    start = sel.subtract({ days: dow });
   return { start: start.toString(), end: start.add({ days: 6 }).toString() };
 });
 
@@ -270,11 +279,19 @@ const selectedWeekRange = computed(() => {
  */
 function getSelectionClass(dv: DateValue): string {
   const r = selectedWeekRange.value;
-  if (!r) return "";
+  if (!r) {
+    return "";
+  }
   const ds = dv.toString();
-  if (ds < r.start || ds > r.end) return "";
-  if (ds === r.start) return "bg-primary/15 rounded-r-none";
-  if (ds === r.end) return "bg-primary/15 rounded-l-none";
+  if (ds < r.start || ds > r.end) {
+    return "";
+  }
+  if (ds === r.start) {
+    return "bg-primary/15 rounded-r-none";
+  }
+  if (ds === r.end) {
+    return "bg-primary/15 rounded-l-none";
+  }
   return "bg-primary/15 rounded-none";
 }
 

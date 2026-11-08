@@ -23,7 +23,9 @@ describe("safeLinkHref", () => {
   });
 
   it("危险协议降级为 null", () => {
+    // oxlint-disable-next-line no-script-url -- 安全回归用例必须覆盖危险协议。
     expect(safeLinkHref("javascript:alert(1)")).toBeNull();
+    // oxlint-disable-next-line no-script-url -- 同时覆盖大写危险协议。
     expect(safeLinkHref("JAVASCRIPT:alert(1)")).toBeNull();
     expect(safeLinkHref("data:text/html,<script>alert(1)</script>")).toBeNull();
     expect(safeLinkHref("file:///etc/passwd")).toBeNull();
@@ -32,6 +34,7 @@ describe("safeLinkHref", () => {
 
   it("协议中插入空白/控制符的绕过尝试同样拦截", () => {
     expect(safeLinkHref("java\tscript:alert(1)")).toBeNull();
+    // oxlint-disable-next-line no-script-url -- 验证危险协议两侧空白不会绕过拦截。
     expect(safeLinkHref("  javascript:alert(1)  ")).toBeNull();
   });
 
@@ -44,8 +47,8 @@ describe("safeLinkHref", () => {
 });
 
 describe("safeMarkdownImage", () => {
-  const root = "C:/work/project";
-  const base = "C:/work/project/docs";
+  const root = "C:/work/project",
+    base = "C:/work/project/docs";
   it("允许项目内图片并规范化路径", () => {
     expect(safeMarkdownImage("../images/a.png?raw=1#x", base, root)).toBe(
       "C:/work/project/images/a.png",

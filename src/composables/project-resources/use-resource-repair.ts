@@ -43,12 +43,12 @@ export interface ResourceRepairOptions {
  * reapply/detach 修复动作;repairing 为防重入锁,记录全部恢复后自动关面板。
  */
 export function useResourceRepair(options: ResourceRepairOptions) {
-  const { t } = useI18n();
-  const repairResource = ref<ResourceChoice | null>(null);
-  const repairing = ref("");
-  const repairRecords = computed(() =>
-    repairResource.value ? repairableRecordsOf(options.records(repairResource.value.id)) : [],
-  );
+  const { t } = useI18n(),
+    repairResource = ref<ResourceChoice | null>(null),
+    repairing = ref(""),
+    repairRecords = computed(() =>
+      repairResource.value ? repairableRecordsOf(options.records(repairResource.value.id)) : [],
+    );
   watch(repairRecords, (next) => {
     if (repairResource.value && !next.length) {
       repairResource.value = null;
@@ -65,14 +65,14 @@ export function useResourceRepair(options: ResourceRepairOptions) {
     }
     repairing.value = repairBusyKey(record, "update");
     try {
-      const current = new Set(options.records(resource.id).map((d) => d.agentId));
-      const result = await assignProjectResource({
-        path: options.projectPath(),
-        kind: options.kind(),
-        resourceId: resource.id,
-        agentIds: [...current],
-        expectedRevision: options.data.value.revision,
-      });
+      const current = new Set(options.records(resource.id).map((d) => d.agentId)),
+        result = await assignProjectResource({
+          path: options.projectPath(),
+          kind: options.kind(),
+          resourceId: resource.id,
+          agentIds: [...current],
+          expectedRevision: options.data.value.revision,
+        });
       if (result.failures.length) {
         toast.error(
           t("projectAi.partial", { count: result.applied, failed: result.failures.length }),

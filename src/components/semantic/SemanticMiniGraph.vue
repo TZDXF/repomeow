@@ -14,25 +14,22 @@ import type { SemanticEntityRef } from "@/types";
 // 传递影响在列表页签按 depth 展示。每侧最多 MAX_SIDE 个节点,超出折叠为 +N 占位(不连边)。
 
 const props = defineProps<{
-  target: SemanticEntityRef;
-  dependencies: SemanticEntityRef[];
-  dependents: SemanticEntityRef[];
-}>();
-
-const emit = defineEmits<{
-  open: [entity: SemanticEntityRef];
-}>();
-
-const { t } = useI18n();
-
-const MAX_SIDE = 8;
-const NODE_W = 170;
-const NODE_H = 26;
-const GAP = 6;
-const PAD_Y = 6;
-const CAPTION_H = 16;
-const COL_X = { dependents: 8, target: 234, dependencies: 460 } as const;
-const WIDTH = COL_X.dependencies + NODE_W + 8;
+    target: SemanticEntityRef;
+    dependencies: SemanticEntityRef[];
+    dependents: SemanticEntityRef[];
+  }>(),
+  emit = defineEmits<{
+    open: [entity: SemanticEntityRef];
+  }>(),
+  { t } = useI18n(),
+  MAX_SIDE = 8,
+  NODE_W = 170,
+  NODE_H = 26,
+  GAP = 6,
+  PAD_Y = 6,
+  CAPTION_H = 16,
+  COL_X = { dependents: 8, target: 234, dependencies: 460 } as const,
+  WIDTH = COL_X.dependencies + NODE_W + 8;
 
 interface GraphNode {
   x: number;
@@ -43,37 +40,36 @@ interface GraphNode {
   entity: SemanticEntityRef | null;
 }
 
-const dependents = computed(() => dedupeEntityRefs(props.dependents));
-const dependencies = computed(() => dedupeEntityRefs(props.dependencies));
-
-const blockRows = computed(() => {
-  const rows = (list: SemanticEntityRef[]) => {
-    const { shown, extra } = sliceGraphSide(list, MAX_SIDE);
-    return shown.length + (extra > 0 ? 1 : 0);
-  };
-  return Math.max(rows(dependents.value), rows(dependencies.value), 1);
-});
-
-const height = computed(
-  () => CAPTION_H + PAD_Y * 2 + blockRows.value * NODE_H + (blockRows.value - 1) * GAP,
-);
-
-const targetY = computed(() => CAPTION_H + (height.value - CAPTION_H - NODE_H) / 2);
+const dependents = computed(() => dedupeEntityRefs(props.dependents)),
+  dependencies = computed(() => dedupeEntityRefs(props.dependencies)),
+  blockRows = computed(() => {
+    const rows = (list: SemanticEntityRef[]) => {
+      const { shown, extra } = sliceGraphSide(list, MAX_SIDE);
+      return shown.length + (extra > 0 ? 1 : 0);
+    };
+    return Math.max(rows(dependents.value), rows(dependencies.value), 1);
+  }),
+  height = computed(
+    () => CAPTION_H + PAD_Y * 2 + blockRows.value * NODE_H + (blockRows.value - 1) * GAP,
+  ),
+  targetY = computed(() => CAPTION_H + (height.value - CAPTION_H - NODE_H) / 2);
 
 /** 一侧节点纵向居中排布,超出 MAX_SIDE 的部分折叠为一个 +N 占位节点 */
 function placeSide(list: SemanticEntityRef[], x: number): GraphNode[] {
-  const { shown, extra } = sliceGraphSide(list, MAX_SIDE);
-  const rows = shown.length + (extra > 0 ? 1 : 0);
-  if (!rows) return [];
-  const blockH = rows * NODE_H + (rows - 1) * GAP;
-  const y0 = CAPTION_H + (height.value - CAPTION_H - blockH) / 2;
-  const nodes: GraphNode[] = shown.map((entity, i) => ({
-    x,
-    y: y0 + i * (NODE_H + GAP),
-    label: truncateGraphLabel(entityDisplayName(entity)),
-    tooltip: `${entity.entityType} · ${entity.filePath}:${entity.startLine}`,
-    entity,
-  }));
+  const { shown, extra } = sliceGraphSide(list, MAX_SIDE),
+    rows = shown.length + (extra > 0 ? 1 : 0);
+  if (!rows) {
+    return [];
+  }
+  const blockH = rows * NODE_H + (rows - 1) * GAP,
+    y0 = CAPTION_H + (height.value - CAPTION_H - blockH) / 2,
+    nodes: GraphNode[] = shown.map((entity, i) => ({
+      x,
+      y: y0 + i * (NODE_H + GAP),
+      label: truncateGraphLabel(entityDisplayName(entity)),
+      tooltip: `${entity.entityType} · ${entity.filePath}:${entity.startLine}`,
+      entity,
+    }));
   if (extra > 0) {
     nodes.push({
       x,
@@ -88,17 +84,16 @@ function placeSide(list: SemanticEntityRef[], x: number): GraphNode[] {
 
 /** 左右两侧合并渲染(key 用坐标,实体与占位节点均稳定唯一) */
 const sideNodes = computed(() => [
-  ...placeSide(dependents.value, COL_X.dependents),
-  ...placeSide(dependencies.value, COL_X.dependencies),
-]);
-
-const targetNode = computed<GraphNode>(() => ({
-  x: COL_X.target,
-  y: targetY.value,
-  label: truncateGraphLabel(entityDisplayName(props.target)),
-  tooltip: props.target.entityId ?? `${props.target.filePath}:${props.target.startLine}`,
-  entity: props.target,
-}));
+    ...placeSide(dependents.value, COL_X.dependents),
+    ...placeSide(dependencies.value, COL_X.dependencies),
+  ]),
+  targetNode = computed<GraphNode>(() => ({
+    x: COL_X.target,
+    y: targetY.value,
+    label: truncateGraphLabel(entityDisplayName(props.target)),
+    tooltip: props.target.entityId ?? `${props.target.filePath}:${props.target.startLine}`,
+    entity: props.target,
+  }));
 
 function curve(from: readonly [number, number], to: readonly [number, number]): string {
   const mx = (from[0] + to[0]) / 2;
@@ -107,10 +102,12 @@ function curve(from: readonly [number, number], to: readonly [number, number]): 
 
 /** 边方向:调用者 → 目标(箭头入),目标 → 依赖(箭头出);占位节点不连边 */
 const edges = computed(() => {
-  const targetCy = targetY.value + NODE_H / 2;
-  const out: string[] = [];
+  const targetCy = targetY.value + NODE_H / 2,
+    out: string[] = [];
   for (const node of sideNodes.value) {
-    if (!node.entity) continue;
+    if (!node.entity) {
+      continue;
+    }
     const cy = node.y + NODE_H / 2;
     out.push(
       node.x === COL_X.dependents
@@ -122,7 +119,9 @@ const edges = computed(() => {
 });
 
 function openNode(node: GraphNode) {
-  if (node.entity) emit("open", node.entity);
+  if (node.entity) {
+    emit("open", node.entity);
+  }
 }
 </script>
 

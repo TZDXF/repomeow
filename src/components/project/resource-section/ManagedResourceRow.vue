@@ -21,29 +21,28 @@ import {
 import { repairableRecordsOf } from "@/composables/project-resources/use-resource-repair";
 
 const props = defineProps<{
-  resource: ResourceChoice;
-  kind: ProjectResourceKind;
-  targets: ProjectAiTarget[];
-  /** 该资源的部署记录(父层已按 resourceId 过滤) */
-  records: ResourceDeployment[];
-  hiddenAgents: string[];
-  /** 导入防重入锁:当前导入中的资源 id(行内导入按钮据此转圈) */
-  importing: string | null;
-}>();
-const emit = defineEmits<{
-  preview: [];
-  toggleAgent: [agent: ProjectAiTarget];
-  repair: [];
-  importLocal: [];
-  remove: [];
-}>();
-const { t } = useI18n();
-
-const agents = computed(() =>
-  visibleResourceAgents(props.targets, props.kind, props.records, props.hiddenAgents),
-);
-const repairable = computed(() => repairableRecordsOf(props.records));
-const importTarget = computed(() => localImportTargetOf(props.resource, props.records, props.kind));
+    resource: ResourceChoice;
+    kind: ProjectResourceKind;
+    targets: ProjectAiTarget[];
+    /** 该资源的部署记录(父层已按 resourceId 过滤) */
+    records: ResourceDeployment[];
+    hiddenAgents: string[];
+    /** 导入防重入锁:当前导入中的资源 id(行内导入按钮据此转圈) */
+    importing: string | null;
+  }>(),
+  emit = defineEmits<{
+    preview: [];
+    toggleAgent: [agent: ProjectAiTarget];
+    repair: [];
+    importLocal: [];
+    remove: [];
+  }>(),
+  { t } = useI18n(),
+  agents = computed(() =>
+    visibleResourceAgents(props.targets, props.kind, props.records, props.hiddenAgents),
+  ),
+  repairable = computed(() => repairableRecordsOf(props.records)),
+  importTarget = computed(() => localImportTargetOf(props.resource, props.records, props.kind));
 
 function chipClass(agent: ProjectAiTarget) {
   const record = findDeployment(props.records, agent.id);

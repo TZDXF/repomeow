@@ -8,11 +8,9 @@ import { useSettingsStore, type TerminalKind } from "@/stores/settings";
 // availability 为 null 时(探测失败)或非 Windows 时仅展示内置终端说明
 defineProps<{ availability: TerminalCapabilities | null }>();
 
-const { t } = useI18n();
-const store = useSettingsStore();
-
-const OPTIONS: { value: TerminalKind; icon: typeof Terminal; labelKey: string; descKey: string }[] =
-  [
+const { t } = useI18n(),
+  store = useSettingsStore(),
+  OPTIONS: { value: TerminalKind; icon: typeof Terminal; labelKey: string; descKey: string }[] = [
     {
       value: "cmd",
       icon: Terminal,

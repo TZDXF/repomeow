@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 
-const html = readFileSync(new URL("../../index.html", import.meta.url), "utf8");
-const bootstrap = html.match(/<script>([\s\S]*?)<\/script>/)![1];
+const html = readFileSync(new URL("../../index.html", import.meta.url), "utf8"),
+  bootstrap = html.match(/<script>(?<bootstrap>[\s\S]*?)<\/script>/)!.groups!.bootstrap;
 
 function applyCache(raw: string | null, systemDark = false) {
   const attributes = new Map<string, string>();

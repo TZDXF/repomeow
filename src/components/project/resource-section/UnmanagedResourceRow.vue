@@ -13,26 +13,23 @@ import {
 } from "@/composables/project-resources/use-project-resource-data";
 
 const props = defineProps<{
-  item: UnmanagedItem;
-  kind: ProjectResourceKind;
-  targets: ProjectAiTarget[];
-  hiddenAgents: string[];
-  /** 分配防重入锁:`${item.key}:${agent.id}` 命中时该 chip 转圈 */
-  toggling: string;
-  /** 导入防重入锁:当前导入中的条目 key */
-  importing: string | null;
-}>();
-const emit = defineEmits<{
-  preview: [];
-  configure: [agent: ProjectAiTarget];
-  import: [];
-  remove: [];
-}>();
-const { t } = useI18n();
-
-const agents = computed(() =>
-  visibleUnmanagedAgents(props.targets, props.kind, props.hiddenAgents),
-);
+    item: UnmanagedItem;
+    kind: ProjectResourceKind;
+    targets: ProjectAiTarget[];
+    hiddenAgents: string[];
+    /** 分配防重入锁:`${item.key}:${agent.id}` 命中时该 chip 转圈 */
+    toggling: string;
+    /** 导入防重入锁:当前导入中的条目 key */
+    importing: string | null;
+  }>(),
+  emit = defineEmits<{
+    preview: [];
+    configure: [agent: ProjectAiTarget];
+    import: [];
+    remove: [];
+  }>(),
+  { t } = useI18n(),
+  agents = computed(() => visibleUnmanagedAgents(props.targets, props.kind, props.hiddenAgents));
 
 function ownerSource(agentId: string) {
   return unmanagedOwnerSource(props.item, agentId, props.targets, props.kind);

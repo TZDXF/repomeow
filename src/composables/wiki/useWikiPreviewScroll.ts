@@ -12,8 +12,8 @@ interface WikiPreviewScrollOptions {
  * 切换预览页或进入/结束生成时回到顶部并重新启用跟随。
  */
 export function useWikiPreviewScroll(options: WikiPreviewScrollOptions) {
-  let pinnedToBottom = true;
-  let suppressScrollEvents = false;
+  let pinnedToBottom = true,
+    suppressScrollEvents = false;
 
   /** reka-ui ScrollArea 的实际滚动元素是内部 viewport。 */
   function scrollViewport(): HTMLElement | null {

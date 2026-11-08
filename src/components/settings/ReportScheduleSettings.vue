@@ -17,26 +17,25 @@ import type { ReportSchedule, SystemSchedule } from "@/types";
  * 数据与持久化在 useReportSchedules;列表/对话框拆到 report-schedule/ 子组件;
  * 表单构造与展示文案等纯逻辑在 composables/report-schedule/schedule-utils.ts。
  */
-const { t } = useI18n();
-const {
-  schedules,
-  systemSchedules,
-  loading,
-  runningIds,
-  saveSystemSchedule,
-  toggleSystemSchedule,
-  toggleSchedule,
-  upsertSchedule,
-  deleteSchedule,
-  runNow,
-} = useReportSchedules();
+const { t } = useI18n(),
+  {
+    schedules,
+    systemSchedules,
+    loading,
+    runningIds,
+    saveSystemSchedule,
+    toggleSystemSchedule,
+    toggleSchedule,
+    upsertSchedule,
+    deleteSchedule,
+    runNow,
+  } = useReportSchedules(),
+  // ── 对话框开关与编辑目标 ─────────────────────────────────────────────────
 
-// ── 对话框开关与编辑目标 ─────────────────────────────────────────────────
-
-const dialogOpen = ref(false);
-const editing = ref<ReportSchedule | null>(null);
-const systemDialogOpen = ref(false);
-const systemEditing = ref<SystemSchedule | null>(null);
+  dialogOpen = ref(false),
+  editing = ref<ReportSchedule | null>(null),
+  systemDialogOpen = ref(false),
+  systemEditing = ref<SystemSchedule | null>(null);
 
 function openCreate() {
   editing.value = null;

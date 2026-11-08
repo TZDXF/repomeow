@@ -13,8 +13,8 @@ import { reactiveOmit } from "@vueuse/core";
 import { Toaster as Sonner } from "vue-sonner";
 import { cn } from "@/lib/utils";
 
-const props = defineProps<ToasterProps>();
-const delegatedProps = reactiveOmit(props, "class", "toastOptions");
+const props = defineProps<ToasterProps>(),
+  delegatedProps = reactiveOmit(props, "class", "toastOptions");
 </script>
 
 <template>

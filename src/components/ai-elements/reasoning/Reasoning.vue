@@ -19,22 +19,20 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  isStreaming: false,
-  defaultOpen: true,
-  duration: undefined,
-});
-
-const emit = defineEmits<{
-  (e: "update:open", value: boolean): void;
-  (e: "update:duration", value: number): void;
-}>();
-
-const isOpen = useVModel(props, "open", emit, {
-  defaultValue: props.defaultOpen,
-  passive: true,
-});
-
-const internalDuration = ref<number | undefined>(props.duration);
+    isStreaming: false,
+    defaultOpen: true,
+    duration: undefined,
+    class: undefined,
+  }),
+  emit = defineEmits<{
+    (e: "update:open", value: boolean): void;
+    (e: "update:duration", value: number): void;
+  }>(),
+  isOpen = useVModel(props, "open", emit, {
+    defaultValue: props.defaultOpen,
+    passive: true,
+  }),
+  internalDuration = ref<number | undefined>(props.duration);
 
 watch(
   () => props.duration,
@@ -48,11 +46,10 @@ function updateDuration(val: number) {
   emit("update:duration", val);
 }
 
-const hasAutoClosed = ref(false);
-const startTime = ref<number | null>(null);
-
-const MS_IN_S = 1000;
-const AUTO_CLOSE_DELAY = 1000;
+const hasAutoClosed = ref(false),
+  startTime = ref<number | null>(null),
+  MS_IN_S = 1000,
+  AUTO_CLOSE_DELAY = 1000;
 
 // 随流式起止记录耗时
 watch(

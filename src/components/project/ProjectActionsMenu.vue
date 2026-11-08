@@ -26,14 +26,12 @@ import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
 import type { Project } from "@/types";
 
-const { t } = useI18n();
-const props = defineProps<{ project: Project }>();
-
-const store = useProjectsStore();
-const settings = useSettingsStore();
-
-// 可用性探测在 lib/open-with 内模块级共享,避免每个项目实例重复 invoke
-const availability = ref<EditorAvailability | null>(null);
+const { t } = useI18n(),
+  props = defineProps<{ project: Project }>(),
+  store = useProjectsStore(),
+  settings = useSettingsStore(),
+  // 可用性探测在 lib/open-with 内模块级共享,避免每个项目实例重复 invoke
+  availability = ref<EditorAvailability | null>(null);
 
 onMounted(async () => {
   availability.value = await getEditorAvailability();
@@ -58,9 +56,9 @@ async function openWith(option: OpenWithOption) {
   }
 }
 
-const archiveConfirmOpen = ref(false);
-const relocateOpen = ref(false);
-const moveOpen = ref(false);
+const archiveConfirmOpen = ref(false),
+  relocateOpen = ref(false),
+  moveOpen = ref(false);
 
 async function archive() {
   try {

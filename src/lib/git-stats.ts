@@ -38,19 +38,27 @@ export interface GitWeekStat {
  * t 的 UTC 日期即提交者本地日期(仅作日历标识),故用 UTC 字段还原,避免浏览者时区串日
  */
 export function dayKeyOf(t: number): string {
-  const d = new Date(t * 1000);
-  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(d.getUTCDate()).padStart(2, "0");
+  const d = new Date(t * 1000),
+    m = String(d.getUTCMonth() + 1).padStart(2, "0"),
+    day = String(d.getUTCDate()).padStart(2, "0");
   return `${d.getUTCFullYear()}-${m}-${day}`;
 }
 
 /** 提交数 → 强度档(0-4),阈值与设置页用量热力图一致(25%/50%/75% 分档) */
 export function heatLevel(count: number, max: number): 0 | 1 | 2 | 3 | 4 {
-  if (count <= 0) return 0;
+  if (count <= 0) {
+    return 0;
+  }
   const ratio = count / Math.max(max, 1);
-  if (ratio >= 0.75) return 4;
-  if (ratio >= 0.5) return 3;
-  if (ratio >= 0.25) return 2;
+  if (ratio >= 0.75) {
+    return 4;
+  }
+  if (ratio >= 0.5) {
+    return 3;
+  }
+  if (ratio >= 0.25) {
+    return 2;
+  }
   return 1;
 }
 
@@ -60,25 +68,29 @@ export function heatLevel(count: number, max: number): 0 | 1 | 2 | 3 | 4 {
  * 强度分档基于窗口内的最大日提交数(窗口外数据不参与归一化)。
  */
 export function buildCommitCalendar(byDay: GitDayStat[], today: Date = new Date()): CommitCalendar {
-  const countByDay = new Map(byDay.map((d) => [dayKeyOf(d.t), d.count]));
-  const end = startOfDay(today);
-  const start = addDays(mondayOfWeek(end), -7 * (COMMIT_CALENDAR_WEEKS - 1));
+  const countByDay = new Map(byDay.map((d) => [dayKeyOf(d.t), d.count])),
+    end = startOfDay(today),
+    start = addDays(mondayOfWeek(end), -7 * (COMMIT_CALENDAR_WEEKS - 1));
 
   let maxCount = 0;
   for (let i = 0; ; i++) {
     const d = addDays(start, i);
-    if (d > end) break;
+    if (d > end) {
+      break;
+    }
     const count = countByDay.get(formatDate(d)) ?? 0;
-    if (count > maxCount) maxCount = count;
+    if (count > maxCount) {
+      maxCount = count;
+    }
   }
 
-  const weeks: CommitCalendarCell[][] = [];
-  const monthLabels: { col: number; month: number }[] = [];
+  const weeks: CommitCalendarCell[][] = [],
+    monthLabels: { col: number; month: number }[] = [];
   for (let col = 0; col < COMMIT_CALENDAR_WEEKS; col++) {
     const week: CommitCalendarCell[] = [];
     for (let row = 0; row < 7; row++) {
-      const d = addDays(start, col * 7 + row);
-      const count = countByDay.get(formatDate(d)) ?? 0;
+      const d = addDays(start, col * 7 + row),
+        count = countByDay.get(formatDate(d)) ?? 0;
       week.push({
         day: formatDate(d),
         count,
@@ -98,13 +110,13 @@ export function buildCommitCalendar(byDay: GitDayStat[], today: Date = new Date(
 export function aggregateWeeks(byDay: GitDayStat[], limit = TREND_WEEKS): GitWeekStat[] {
   const weeks = new Map<string, GitWeekStat>();
   for (const d of byDay) {
-    const date = new Date(d.t * 1000);
-    // 提交者本地日期存在 UTC 刻度上,故用 UTC 字段推算周一
-    const weekday = (date.getUTCDay() + 6) % 7;
-    const monday = new Date(
-      Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() - weekday),
-    );
-    const key = dayKeyOf(monday.getTime() / 1000);
+    const date = new Date(d.t * 1000),
+      // 提交者本地日期存在 UTC 刻度上,故用 UTC 字段推算周一
+      weekday = (date.getUTCDay() + 6) % 7,
+      monday = new Date(
+        Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() - weekday),
+      ),
+      key = dayKeyOf(monday.getTime() / 1000);
     let week = weeks.get(key);
     if (!week) {
       week = { day: key, count: 0, additions: 0, deletions: 0 };
@@ -140,7 +152,9 @@ export function buildCumulativeCommits(byDay: GitDayStat[]): CumulativePoint[] {
 
 /** Top N + 其余归并为一项(merge 由调用方求和);不足 N 项时原样返回 */
 export function topWithOther<T>(items: T[], limit: number, merge: (rest: T[]) => T): T[] {
-  if (items.length <= limit) return items;
+  if (items.length <= limit) {
+    return items;
+  }
   return [...items.slice(0, limit), merge(items.slice(limit))];
 }
 

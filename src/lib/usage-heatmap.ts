@@ -44,11 +44,19 @@ export function usageLevel(
   totalTokens: number,
   maxTokens: number,
 ): 0 | 1 | 2 | 3 | 4 {
-  if (totalTokens <= 0) return calls > 0 ? 1 : 0;
+  if (totalTokens <= 0) {
+    return calls > 0 ? 1 : 0;
+  }
   const ratio = totalTokens / Math.max(maxTokens, 1);
-  if (ratio >= 0.75) return 4;
-  if (ratio >= 0.5) return 3;
-  if (ratio >= 0.25) return 2;
+  if (ratio >= 0.75) {
+    return 4;
+  }
+  if (ratio >= 0.5) {
+    return 3;
+  }
+  if (ratio >= 0.25) {
+    return 2;
+  }
   return 1;
 }
 
@@ -57,28 +65,32 @@ export function usageLevel(
  * 网格从「当前周往前数 WEEKS-1 周的周一」开始,到本周日结束;today 之后的格子标记为 future。
  */
 export function buildUsageHeatmap(byDay: AiUsageDayStat[], today: Date = new Date()): UsageHeatmap {
-  const statByDay = new Map(byDay.map((s) => [s.day, s]));
-  const end = startOfDay(today);
-  const start = addDays(mondayOfWeek(end), -7 * (USAGE_HEATMAP_WEEKS - 1));
+  const statByDay = new Map(byDay.map((s) => [s.day, s])),
+    end = startOfDay(today),
+    start = addDays(mondayOfWeek(end), -7 * (USAGE_HEATMAP_WEEKS - 1));
 
   // 强度分档基于窗口内的最大日 tokens(窗口外数据不参与归一化)
   let maxTokens = 0;
   for (let i = 0; ; i++) {
     const d = addDays(start, i);
-    if (d > end) break;
+    if (d > end) {
+      break;
+    }
     const stat = statByDay.get(formatDate(d));
-    if (stat && stat.totalTokens > maxTokens) maxTokens = stat.totalTokens;
+    if (stat && stat.totalTokens > maxTokens) {
+      maxTokens = stat.totalTokens;
+    }
   }
 
-  const weeks: UsageHeatCell[][] = [];
-  const monthLabels: { col: number; month: number }[] = [];
+  const weeks: UsageHeatCell[][] = [],
+    monthLabels: { col: number; month: number }[] = [];
   for (let col = 0; col < USAGE_HEATMAP_WEEKS; col++) {
     const week: UsageHeatCell[] = [];
     for (let row = 0; row < 7; row++) {
-      const d = addDays(start, col * 7 + row);
-      const stat = statByDay.get(formatDate(d));
-      const calls = stat?.calls ?? 0;
-      const totalTokens = stat?.totalTokens ?? 0;
+      const d = addDays(start, col * 7 + row),
+        stat = statByDay.get(formatDate(d)),
+        calls = stat?.calls ?? 0,
+        totalTokens = stat?.totalTokens ?? 0;
       week.push({
         day: formatDate(d),
         calls,

@@ -16,38 +16,37 @@ import TagCheckList from "@/components/tags/TagCheckList.vue";
 import type { Project, Tag } from "@/types";
 
 const props = withDefaults(
-  defineProps<{
-    projects: Project[];
-    tags: Tag[];
-    /**
-     * true 时列表纵向撑满父容器(配合外层 class 控制高度,用于高对话框右列);
-     * 默认 false 保持 max-h-36 紧凑高度(DailyReportDialog 行为不变)
-     */
-    fillHeight?: boolean;
-  }>(),
-  { fillHeight: false },
-);
-const selectedIds = defineModel<number[]>({ required: true });
-const { t } = useI18n();
-
-const keyword = ref("");
-const filterTagIds = ref<number[]>([]);
-const visibleProjects = computed(() => {
-  const query = keyword.value.trim().toLowerCase();
-  return props.projects.filter((project) => {
-    const matchesQuery =
-      !query ||
-      project.name.toLowerCase().includes(query) ||
-      project.path.toLowerCase().includes(query);
-    const matchesTags =
-      !filterTagIds.value.length ||
-      filterTagIds.value.every((id) => project.tags.some((tag) => tag.id === id));
-    return matchesQuery && matchesTags;
-  });
-});
-const selectedFilterTags = computed(() =>
-  props.tags.filter((tag) => filterTagIds.value.includes(tag.id)),
-);
+    defineProps<{
+      projects: Project[];
+      tags: Tag[];
+      /**
+       * true 时列表纵向撑满父容器(配合外层 class 控制高度,用于高对话框右列);
+       * 默认 false 保持 max-h-36 紧凑高度(DailyReportDialog 行为不变)
+       */
+      fillHeight?: boolean;
+    }>(),
+    { fillHeight: false },
+  ),
+  selectedIds = defineModel<number[]>({ required: true }),
+  { t } = useI18n(),
+  keyword = ref(""),
+  filterTagIds = ref<number[]>([]),
+  visibleProjects = computed(() => {
+    const query = keyword.value.trim().toLowerCase();
+    return props.projects.filter((project) => {
+      const matchesQuery =
+          !query ||
+          project.name.toLowerCase().includes(query) ||
+          project.path.toLowerCase().includes(query),
+        matchesTags =
+          !filterTagIds.value.length ||
+          filterTagIds.value.every((id) => project.tags.some((tag) => tag.id === id));
+      return matchesQuery && matchesTags;
+    });
+  }),
+  selectedFilterTags = computed(() =>
+    props.tags.filter((tag) => filterTagIds.value.includes(tag.id)),
+  );
 
 function toggleTagFilter(id: number) {
   filterTagIds.value = filterTagIds.value.includes(id)

@@ -14,20 +14,19 @@ import ScrollArea from "@/components/common/ScrollArea.vue";
 import { filterProjectsByKeyword } from "./project-filter";
 import type { Project } from "@/types";
 
-const { t } = useI18n();
-const props = defineProps<{ projects: Project[]; checkedIds: number[] }>();
-const emit = defineEmits<{ toggle: [projectId: number] }>();
-
-const keyword = ref("");
-
-const filtered = computed(() => filterProjectsByKeyword(props.projects, keyword.value));
-
-/** 已选项目对象列表(下拉外展示为可点击移除的 chips) */
-const selected = computed(() => props.projects.filter((p) => props.checkedIds.includes(p.id)));
+const { t } = useI18n(),
+  props = defineProps<{ projects: Project[]; checkedIds: number[] }>(),
+  emit = defineEmits<{ toggle: [projectId: number] }>(),
+  keyword = ref(""),
+  filtered = computed(() => filterProjectsByKeyword(props.projects, keyword.value)),
+  /** 已选项目对象列表(下拉外展示为可点击移除的 chips) */
+  selected = computed(() => props.projects.filter((p) => props.checkedIds.includes(p.id)));
 
 // 阻止字符键冒泡触发菜单的 type-ahead,Escape 保留给菜单关闭
 function onSearchKeydown(e: KeyboardEvent) {
-  if (e.key !== "Escape") e.stopPropagation();
+  if (e.key !== "Escape") {
+    e.stopPropagation();
+  }
 }
 </script>
 

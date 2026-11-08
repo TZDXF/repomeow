@@ -58,11 +58,11 @@ function skill(dir: string, name: string, description = ""): ProjectSkill {
 describe("buildListedResources", () => {
   it("列表 = shortlist ∪ 已部署;来源缺失时回退部署记录里的名字", () => {
     const data = snapshot({
-      shortlist: ["a", "b"],
-      resources: [choice({ id: "a", name: "资源A" })],
-      deployments: [deployment({ resourceId: "c", agentId: "claude", name: "部署C" })],
-    });
-    const listed = buildListedResources(data);
+        shortlist: ["a", "b"],
+        resources: [choice({ id: "a", name: "资源A" })],
+        deployments: [deployment({ resourceId: "c", agentId: "claude", name: "部署C" })],
+      }),
+      listed = buildListedResources(data);
     expect(listed.map((r) => r.id)).toEqual(["a", "b", "c"]);
     expect(listed[0].name).toBe("资源A");
     // b、c 在 resources 里不存在:b 回退 id,c 回退部署记录名
@@ -79,30 +79,30 @@ describe("buildListedResources", () => {
 describe("buildUnmanagedItems", () => {
   it("mcp:按文件展开服务器,跳过已部署(path+name)条目", () => {
     const assets: ProjectAiAssets = {
-      files: [],
-      skills: [],
-      mcp: [
-        {
+        files: [],
+        skills: [],
+        mcp: [
+          {
+            path: ".mcp.json",
+            dialect: "claude",
+            agents: ["claude"],
+            servers: [
+              { name: "s1", config: {} },
+              { name: "s2", config: {} },
+            ],
+          },
+        ],
+      },
+      deployments = [
+        deployment({
+          resourceId: "x",
+          agentId: "claude",
+          kind: "mcp",
           path: ".mcp.json",
-          dialect: "claude",
-          agents: ["claude"],
-          servers: [
-            { name: "s1", config: {} },
-            { name: "s2", config: {} },
-          ],
-        },
+          name: "s1",
+        }),
       ],
-    };
-    const deployments = [
-      deployment({
-        resourceId: "x",
-        agentId: "claude",
-        kind: "mcp",
-        path: ".mcp.json",
-        name: "s1",
-      }),
-    ];
-    const items = buildUnmanagedItems("mcp", assets, deployments, []);
+      items = buildUnmanagedItems("mcp", assets, deployments, []);
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({
       key: "mcp:.mcp.json:s2",
@@ -114,19 +114,19 @@ describe("buildUnmanagedItems", () => {
 
   it("skills:跳过已部署目录,同名跨 Agent 目录合并为一行(主来源取排序首项)", () => {
     const assets: ProjectAiAssets = {
-      files: [],
-      mcp: [],
-      skills: [
-        skill(".claude/skills/foo", "foo", "来自claude"),
-        skill(".agents/skills/foo", "foo"),
-        skill(".agents/skills/bar", "bar"),
+        files: [],
+        mcp: [],
+        skills: [
+          skill(".claude/skills/foo", "foo", "来自claude"),
+          skill(".agents/skills/foo", "foo"),
+          skill(".agents/skills/bar", "bar"),
+        ],
+      },
+      deployments = [
+        deployment({ resourceId: "x", agentId: "agents", path: ".agents/skills/bar" }),
       ],
-    };
-    const deployments = [
-      deployment({ resourceId: "x", agentId: "agents", path: ".agents/skills/bar" }),
-    ];
-    const targets = [target({ id: "claude" }), target({ id: "agents" })];
-    const items = buildUnmanagedItems("skills", assets, deployments, targets);
+      targets = [target({ id: "claude" }), target({ id: "agents" })],
+      items = buildUnmanagedItems("skills", assets, deployments, targets);
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({
       key: "skill:foo",
@@ -141,25 +141,25 @@ describe("buildUnmanagedItems", () => {
 
 describe("非托管归属", () => {
   const targets = [
-    target({ id: "claude", skillPath: ".claude/skills", mcpPath: ".mcp.json" }),
-    target({ id: "codex", skillPath: ".codex/skills", mcpPath: ".codex/config.toml" }),
-  ];
-  const skillItem: UnmanagedItem = {
-    key: "skill:foo",
-    name: "foo",
-    description: "",
-    path: ".claude/skills/foo/SKILL.md",
-    source: ".claude/skills/foo",
-    sources: [".claude/skills/foo", ".codex/skills/foo"],
-  };
-  const mcpItem: UnmanagedItem = {
-    key: "mcp:.mcp.json:s1",
-    name: "s1",
-    description: "",
-    path: ".mcp.json",
-    source: ".mcp.json",
-    sources: [".mcp.json"],
-  };
+      target({ id: "claude", skillPath: ".claude/skills", mcpPath: ".mcp.json" }),
+      target({ id: "codex", skillPath: ".codex/skills", mcpPath: ".codex/config.toml" }),
+    ],
+    skillItem: UnmanagedItem = {
+      key: "skill:foo",
+      name: "foo",
+      description: "",
+      path: ".claude/skills/foo/SKILL.md",
+      source: ".claude/skills/foo",
+      sources: [".claude/skills/foo", ".codex/skills/foo"],
+    },
+    mcpItem: UnmanagedItem = {
+      key: "mcp:.mcp.json:s1",
+      name: "s1",
+      description: "",
+      path: ".mcp.json",
+      source: ".mcp.json",
+      sources: [".mcp.json"],
+    };
 
   it("skills 同名合并行可有多个归属(每个目录前缀各算一个)", () => {
     expect(unmanagedOwners(skillItem, targets, "skills")).toEqual(["claude", "codex"]);

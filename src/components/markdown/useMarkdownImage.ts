@@ -19,14 +19,18 @@ export function useMarkdownImage(
       });
       src.value = undefined;
       const safe = safeMarkdownImage(url, base, root);
-      if (!safe) return;
+      if (!safe) {
+        return;
+      }
       if (/^https?:\/\//i.test(safe)) {
         src.value = safe;
         return;
       }
       void cmd<string>("resolve_markdown_image", { root, imagePath: safe })
         .then((resolved) => {
-          if (active) src.value = convertFileSrc(resolved);
+          if (active) {
+            src.value = convertFileSrc(resolved);
+          }
         })
         .catch(() => {});
     },

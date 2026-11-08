@@ -6,7 +6,9 @@ import type { Project } from "@/types";
  */
 export function filterProjectsByKeyword(projects: Project[], keyword: string): Project[] {
   const kw = keyword.trim().toLowerCase();
-  if (!kw) return projects;
+  if (!kw) {
+    return projects;
+  }
   return projects.filter(
     (p) => p.name.toLowerCase().includes(kw) || p.path.toLowerCase().includes(kw),
   );

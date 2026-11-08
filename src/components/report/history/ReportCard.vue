@@ -24,13 +24,12 @@ defineProps<{
   beforeDownload: ReturnType<typeof createBeforeDownload>;
 }>();
 const emit = defineEmits<{
-  "update:open": [open: boolean];
-  export: [report: ReportHistoryDetail];
-  delete: [id: number];
-}>();
-
-/** 报告内各项目提交明细的展开态(按项目名记录,卡片实例随报告 id 复用) */
-const commitOpen = ref<Record<string, boolean>>({});
+    "update:open": [open: boolean];
+    export: [report: ReportHistoryDetail];
+    delete: [id: number];
+  }>(),
+  /** 报告内各项目提交明细的展开态(按项目名记录,卡片实例随报告 id 复用) */
+  commitOpen = ref<Record<string, boolean>>({});
 </script>
 
 <template>

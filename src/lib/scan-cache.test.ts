@@ -34,11 +34,11 @@ function report(skillId: string, score: number): ResourceSkillScanReport {
 
 /** 把库内报告分值等于 score 的条目 createdAt 回拨 ageMs(模拟过期写入) */
 async function backdate(score: number, ageMs: number) {
-  const db = await openDB(SCAN_CACHE_DB, 1);
-  const tx = db.transaction(SCAN_CACHE_STORE, "readwrite");
-  const keys = await tx.store.getAllKeys();
-  const rows = (await tx.store.getAll()) as { report: { score: number } }[];
-  const createdAt = Date.now() - ageMs;
+  const db = await openDB(SCAN_CACHE_DB, 1),
+    tx = db.transaction(SCAN_CACHE_STORE, "readwrite"),
+    keys = await tx.store.getAllKeys(),
+    rows = (await tx.store.getAll()) as { report: { score: number } }[],
+    createdAt = Date.now() - ageMs;
   rows.forEach((row, i) => {
     if (row.report.score === score) {
       void tx.store.put({ ...row, createdAt }, keys[i]);
@@ -49,8 +49,8 @@ async function backdate(score: number, ageMs: number) {
 }
 
 async function storedReports(): Promise<number[]> {
-  const db = await openDB(SCAN_CACHE_DB, 1);
-  const rows = (await db.getAll(SCAN_CACHE_STORE)) as { report: { score: number } }[];
+  const db = await openDB(SCAN_CACHE_DB, 1),
+    rows = (await db.getAll(SCAN_CACHE_STORE)) as { report: { score: number } }[];
   db.close();
   return rows.map((row) => row.report.score);
 }

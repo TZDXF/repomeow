@@ -47,14 +47,14 @@ export interface MarkdownTranslation {
 }
 
 export function useMarkdownTranslation(options: MarkdownTranslationOptions): MarkdownTranslation {
-  const translating = ref(false);
-  const translatedText = ref<string | null>(null);
-  const translatedFor = ref<string | null>(null);
-  const showTranslated = ref(false);
+  const translating = ref(false),
+    translatedText = ref<string | null>(null),
+    translatedFor = ref<string | null>(null),
+    showTranslated = ref(false);
   /** 当前在途翻译的 runId(ai_cancel_run 的取消句柄);空 = 无在途请求 */
-  let translateRunId = "";
-  /** 翻译轮次序号:取消/换文件后自增,使仍在途的缓存查询与 AI 结果作废 */
-  let translateSeq = 0;
+  let translateRunId = "",
+    /** 翻译轮次序号:取消/换文件后自增,使仍在途的缓存查询与 AI 结果作废 */
+    translateSeq = 0;
 
   const hasTranslation = computed(
     () => translatedText.value !== null && translatedFor.value === options.getIdentity(),
@@ -91,18 +91,22 @@ export function useMarkdownTranslation(options: MarkdownTranslationOptions): Mar
 
   async function run(skipCache: boolean) {
     // 请求开始即捕获身份/正文/语言快照,await 之后只认这组快照
-    const identity = options.getIdentity();
-    const text = options.getText();
-    if (!identity || !text) return;
-    const language = options.getLanguage();
-    const seq = ++translateSeq;
+    const identity = options.getIdentity(),
+      text = options.getText();
+    if (!identity || !text) {
+      return;
+    }
+    const language = options.getLanguage(),
+      seq = ++translateSeq;
     // 缓存查询期间同样置忙:防止 await 期间重复点击并发触发第二次翻译
     translating.value = true;
     try {
       if (!skipCache) {
         // 先查 IndexedDB 缓存(键 = 界面语言 + 内容 hash):命中直接展示、不再调 AI
         const cached = await getCachedTranslation(text, language);
-        if (isStale(seq, identity)) return;
+        if (isStale(seq, identity)) {
+          return;
+        }
         if (cached !== null) {
           applyResult(identity, cached);
           return;
@@ -116,12 +120,16 @@ export function useMarkdownTranslation(options: MarkdownTranslationOptions): Mar
         request: { text, language, runId },
       });
       // 取消后返回 null;换文件/切走后的在途结果作废
-      if (result === null || isStale(seq, identity)) return;
+      if (result === null || isStale(seq, identity)) {
+        return;
+      }
       applyResult(identity, result);
       void putCachedTranslation(text, language, result);
     } catch (e) {
       // 旧请求(已被取消/替换)的失败不打扰用户
-      if (isStale(seq, identity)) return;
+      if (isStale(seq, identity)) {
+        return;
+      }
       toast.error(String(e));
     } finally {
       // 只复位本轮状态:新请求已开始时,旧 finally 不得清掉新请求的 runId/busy
@@ -149,7 +157,9 @@ export function useMarkdownTranslation(options: MarkdownTranslationOptions): Mar
   }
 
   async function retranslate() {
-    if (translating.value || !hasTranslation.value) return;
+    if (translating.value || !hasTranslation.value) {
+      return;
+    }
     await run(true);
   }
 

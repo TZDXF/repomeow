@@ -52,36 +52,30 @@ import type {
   SemanticFileEntity,
 } from "@/types";
 
-const active = useProjectPageActive();
-const { t } = useI18n();
-const route = useRoute();
-const router = useRouter();
-const store = useProjectsStore();
-const settingsStore = useSettingsStore();
-
-const project = computed<Project | undefined>(() => {
-  const id = Number(route.params.id);
-  return Number.isFinite(id) ? store.getProjectById(id) : undefined;
-});
-
-// ── 工作区跟随:与 ProjectDetail 同一 localStorage 键(projectId -> worktree 绝对路径) ──
-// 文件树/预览/搜索全部以当前工作区为根,未选择 worktree 时回退主工作区路径;
-// 选中的 worktree 已被删除时由详情页 WorktreeSwitcher 校验并重置该键
-const worktreeSelection = useLocalStorage<Record<string, string>>(
-  "repomeow.worktree-selection",
-  {},
-);
-const rootPath = computed(() => {
-  const id = project.value?.id;
-  return (
-    (id != null ? worktreeSelection.value[String(id)] : undefined) ?? project.value?.path ?? ""
-  );
-});
-
-// ── 选中与预览 ──────────────────────────────────────────────────────────────
-const selected = ref<string | null>(null);
-const { listError, listLoading, refreshDirs, revealPath, rootEmpty, toggleFolder, visibleRows } =
-  useLazyProjectFiles({ rootPath, selected });
+const active = useProjectPageActive(),
+  { t } = useI18n(),
+  route = useRoute(),
+  router = useRouter(),
+  store = useProjectsStore(),
+  settingsStore = useSettingsStore(),
+  project = computed<Project | undefined>(() => {
+    const id = Number(route.params.id);
+    return Number.isFinite(id) ? store.getProjectById(id) : undefined;
+  }),
+  // ── 工作区跟随:与 ProjectDetail 同一 localStorage 键(projectId -> worktree 绝对路径) ──
+  // 文件树/预览/搜索全部以当前工作区为根,未选择 worktree 时回退主工作区路径;
+  // 选中的 worktree 已被删除时由详情页 WorktreeSwitcher 校验并重置该键
+  worktreeSelection = useLocalStorage<Record<string, string>>("repomeow.worktree-selection", {}),
+  rootPath = computed(() => {
+    const id = project.value?.id;
+    return (
+      (id != null ? worktreeSelection.value[String(id)] : undefined) ?? project.value?.path ?? ""
+    );
+  }),
+  // ── 选中与预览 ──────────────────────────────────────────────────────────────
+  selected = ref<string | null>(null),
+  { listError, listLoading, refreshDirs, revealPath, rootEmpty, toggleFolder, visibleRows } =
+    useLazyProjectFiles({ rootPath, selected });
 
 async function openFileFromSearch(path: string) {
   selected.value = path;
@@ -89,15 +83,15 @@ async function openFileFromSearch(path: string) {
   await revealPath(path);
 }
 
-const previewError = ref(false);
-// 选中文件已被移动/删除(预览失败或树变更时经存在性复核确认)
-const previewGone = ref(false);
-const previewText = ref<string | null>(null);
-// 当前 previewText 所属文件(与 text 同步赋值/清空):区分「选中了什么」与「内容就位没有」,
-// 旧文件残留内容不得进新文件的渲染分支(代码→MD 切换闪旧文本即此因)
-const previewPath = ref<string | null>(null);
-const previewTruncated = ref(false);
-const previewBinary = ref(false);
+const previewError = ref(false),
+  // 选中文件已被移动/删除(预览失败或树变更时经存在性复核确认)
+  previewGone = ref(false),
+  previewText = ref<string | null>(null),
+  // 当前 previewText 所属文件(与 text 同步赋值/清空):区分「选中了什么」与「内容就位没有」,
+  // 旧文件残留内容不得进新文件的渲染分支(代码→MD 切换闪旧文本即此因)
+  previewPath = ref<string | null>(null),
+  previewTruncated = ref(false),
+  previewBinary = ref(false);
 let previewSeq = 0;
 
 // 根路径变化(切项目/切工作区)时清掉选中与在途预览:旧工作区的文件在新根下无意义,
@@ -107,21 +101,11 @@ watch(rootPath, () => {
   previewSeq++;
 });
 
-const MD_EXTS = new Set(["md", "markdown"]);
-
-// 图片预览公共逻辑(与 ResourceSkillPreview 共用):asset 直显 + svg 预览/源码切换
-const {
-  selectedExt,
-  isImage,
-  isSvg,
-  svgMode,
-  svgSource,
-  imageSrc,
-  onSelectImage,
-  isVideo,
-  videoSrc,
-} = useImagePreview(selected, (path) => (project.value ? resolvePath(rootPath.value, path) : null));
-const isMarkdown = computed(() => MD_EXTS.has(selectedExt.value));
+const MD_EXTS = new Set(["md", "markdown"]),
+  // 图片预览公共逻辑(与 ResourceSkillPreview 共用):asset 直显 + svg 预览/源码切换
+  { selectedExt, isImage, isSvg, svgMode, svgSource, imageSrc, onSelectImage, isVideo, videoSrc } =
+    useImagePreview(selected, (path) => (project.value ? resolvePath(rootPath.value, path) : null)),
+  isMarkdown = computed(() => MD_EXTS.has(selectedExt.value));
 
 // 切换文件不显示 loading:本地读取很快,loading 只会闪烁;
 // 保留旧内容直到新内容就位(序号防串台),仅错误/二进制等状态标记随切换即清
@@ -147,7 +131,9 @@ watch([selected, svgSource], async ([path]) => {
       root: rootPath.value,
       relPath: path,
     });
-    if (mySeq !== previewSeq) return;
+    if (mySeq !== previewSeq) {
+      return;
+    }
     if (res.text === null) {
       previewText.value = null;
       previewPath.value = null;
@@ -158,7 +144,9 @@ watch([selected, svgSource], async ([path]) => {
       previewTruncated.value = res.truncated;
     }
   } catch (e) {
-    if (mySeq !== previewSeq) return;
+    if (mySeq !== previewSeq) {
+      return;
+    }
     previewText.value = null;
     previewPath.value = null;
     // 路径类错误(文件被移动/删除/无权限读取):复核存在性,确认不存在给明确提示,
@@ -170,14 +158,18 @@ watch([selected, svgSource], async ([path]) => {
           root: rootPath.value,
           relPath: path,
         });
-        if (mySeq !== previewSeq) return;
+        if (mySeq !== previewSeq) {
+          return;
+        }
         if (!exists) {
           previewGone.value = true;
           refreshDirs(new Set([parentDirOf(path), path]));
           return;
         }
       } catch {
-        if (mySeq !== previewSeq) return;
+        if (mySeq !== previewSeq) {
+          return;
+        }
         // 复核请求本身失败:按通用错误展示
       }
     }
@@ -186,24 +178,27 @@ watch([selected, svgSource], async ([path]) => {
 });
 
 // ── 代码视图:CodeMirror 只读查看(行号/折叠/语法高亮/换行由 CodeViewer 承担) ───
-const mdMode = ref<"rendered" | "source">("rendered");
-// 代码自动换行(持久化),经 prop 驱动 CodeViewer 的 lineWrapping 热切换
-const codeWrap = useLocalStorage("repomeow:files-code-wrap", false);
-
-/** 是否以代码视图展示(Markdown 渲染模式下不显示代码) */
-const codeVisible = computed(
-  () => previewText.value !== null && !(isMarkdown.value && mdMode.value === "rendered"),
-);
+const mdMode = ref<"rendered" | "source">("rendered"),
+  // 代码自动换行(持久化),经 prop 驱动 CodeViewer 的 lineWrapping 热切换
+  codeWrap = useLocalStorage("repomeow:files-code-wrap", false),
+  /** 是否以代码视图展示(Markdown 渲染模式下不显示代码) */
+  codeVisible = computed(
+    () => previewText.value !== null && !(isMarkdown.value && mdMode.value === "rendered"),
+  );
 
 // ── 在编辑器中打开当前文件(用设置里的默认打开方式,与提交详情面板同一逻辑) ──
 async function openSelectedInIde() {
   const path = selected.value;
-  if (!path) return;
+  if (!path) {
+    return;
+  }
   const option = sortOpenWithOptions(
     settingsStore.openWithOrder,
     settingsStore.customOpenWith,
   ).find((candidate) => candidate.id === settingsStore.defaultOpenWith);
-  if (!option) return;
+  if (!option) {
+    return;
+  }
   try {
     await openPathWith(option, resolvePath(rootPath.value, path));
   } catch (e) {
@@ -214,26 +209,25 @@ async function openSelectedInIde() {
 /** Markdown 渲染分支可否使用当前内容:残留内容须本身来自 md 文件——
  *  代码文件的旧文本以 MD 渲染会闪现错内容,等待新内容期间显示空白(md→md 仍保留旧文防闪) */
 const mdRenderable = computed(
-  () => previewPath.value !== null && MD_EXTS.has(extOf(previewPath.value)),
-);
-
-// ── 搜索:左栏全文搜索面板 + 文件内查找条 ─────────────────────────────────────
-const codeViewer = ref<InstanceType<typeof CodeViewer> | null>(null);
-const findBarRef = ref<InstanceType<typeof FindBar> | null>(null);
-const sidebarRef = ref<InstanceType<typeof ProjectFilesSidebar> | null>(null);
-
-const leftView = ref<"tree" | "search" | "outline">("tree");
-
-// ── 结构视图(sem 语义导航):仅当前文件为可预览文本时可用 ──────────────────────
-const outlineEnabled = computed(
-  () =>
-    !!selected.value &&
-    !previewBinary.value &&
-    !isVideo.value &&
-    (!isImage.value || svgSource.value),
-);
+    () => previewPath.value !== null && MD_EXTS.has(extOf(previewPath.value)),
+  ),
+  // ── 搜索:左栏全文搜索面板 + 文件内查找条 ─────────────────────────────────────
+  codeViewer = ref<InstanceType<typeof CodeViewer> | null>(null),
+  findBarRef = ref<InstanceType<typeof FindBar> | null>(null),
+  sidebarRef = ref<InstanceType<typeof ProjectFilesSidebar> | null>(null),
+  leftView = ref<"tree" | "search" | "outline">("tree"),
+  // ── 结构视图(sem 语义导航):仅当前文件为可预览文本时可用 ──────────────────────
+  outlineEnabled = computed(
+    () =>
+      !!selected.value &&
+      !previewBinary.value &&
+      !isVideo.value &&
+      (!isImage.value || svgSource.value),
+  );
 watch(outlineEnabled, (enabled) => {
-  if (!enabled && leftView.value === "outline") leftView.value = "tree";
+  if (!enabled && leftView.value === "outline") {
+    leftView.value = "tree";
+  }
 });
 
 // 语义实体会话缓存世代:HEAD 变更 / 切换工作区时递增,通知结构面板重新加载
@@ -245,8 +239,12 @@ onMounted(async () => {
   unlistenGitChanged = await onListen<GitProjectChangedPayload>(
     "git://project-changed",
     (payload) => {
-      if (!payload.head_changed) return;
-      if (payload.path !== project.value?.path) return;
+      if (!payload.head_changed) {
+        return;
+      }
+      if (payload.path !== project.value?.path) {
+        return;
+      }
       invalidateSemanticCache(rootPath.value);
       semanticCacheEpoch.value++;
     },
@@ -258,13 +256,17 @@ onBeforeUnmount(() => unlistenGitChanged?.());
 let watchedRoot: string | null = null;
 
 async function syncTreeWatch(root: string) {
-  if (watchedRoot === root) return;
+  if (watchedRoot === root) {
+    return;
+  }
   if (watchedRoot) {
     const old = watchedRoot;
     watchedRoot = null;
     cmd("unwatch_project_files", { root: old }).catch(() => {});
   }
-  if (!root) return;
+  if (!root) {
+    return;
+  }
   try {
     await cmd("watch_project_files", { root });
     watchedRoot = root;
@@ -288,7 +290,9 @@ async function verifySelectedExists(path: string) {
       root: rootPath.value,
       relPath: path,
     });
-    if (exists || mySeq !== previewSeq || selected.value !== path) return;
+    if (exists || mySeq !== previewSeq || selected.value !== path) {
+      return;
+    }
     previewSeq++; // 作废在途读取,残留内容不得回填
     previewText.value = null;
     previewPath.value = null;
@@ -304,11 +308,15 @@ onMounted(async () => {
   unlistenTreeChanged = await onListen<FilesTreeChangedPayload>(
     "files://tree-changed",
     (payload) => {
-      if (toForwardSlash(payload.root) !== toForwardSlash(rootPath.value)) return;
+      if (toForwardSlash(payload.root) !== toForwardSlash(rootPath.value)) {
+        return;
+      }
       if (payload.paths.length === 0) {
         // 大规模变更/事件丢失:全量刷新并复核选中文件
         refreshDirs(null);
-        if (selected.value) void verifySelectedExists(selected.value);
+        if (selected.value) {
+          void verifySelectedExists(selected.value);
+        }
         return;
       }
       const dirs = new Set<string>();
@@ -318,7 +326,7 @@ onMounted(async () => {
       }
       refreshDirs(dirs);
       const sel = selected.value;
-      if (sel && payload.paths.some((p) => sel === p || sel.startsWith(p + "/"))) {
+      if (sel && payload.paths.some((p) => sel === p || sel.startsWith(`${p}/`))) {
         void verifySelectedExists(sel);
       }
     },
@@ -334,9 +342,13 @@ onBeforeUnmount(() => {
 
 /** 结构面板点击实体:当前文件内定位并高亮行区间 */
 function onOutlineLocate(startLine: number, endLine: number) {
-  if (!selected.value) return;
+  if (!selected.value) {
+    return;
+  }
   // 渲染态(Markdown/SVG)没有代码视图,强制源码模式保证可定位
-  if (MD_EXTS.has(extOf(selected.value))) mdMode.value = "source";
+  if (MD_EXTS.has(extOf(selected.value))) {
+    mdMode.value = "source";
+  }
   onSelectImage(selected.value);
   void nextTick(() => codeViewer.value?.revealLines(startLine, endLine));
 }
@@ -346,15 +358,17 @@ const pendingReveal = ref<{ path: string; startLine: number; endLine: number } |
 
 function onSemanticOpen(path: string, startLine: number, endLine: number) {
   selected.value = path;
-  if (MD_EXTS.has(extOf(path))) mdMode.value = "source";
+  if (MD_EXTS.has(extOf(path))) {
+    mdMode.value = "source";
+  }
   onSelectImage(path);
   pendingReveal.value = { path, startLine, endLine };
   tryReveal();
 }
 
 // ── 影响分析(结构面板实体入口) ──────────────────────────────────────────────
-const impactOpen = ref(false);
-const impactEntity = ref<SemanticEntityRef | null>(null);
+const impactOpen = ref(false),
+  impactEntity = ref<SemanticEntityRef | null>(null);
 
 function onImpact(entity: SemanticFileEntity) {
   impactEntity.value = entity;
@@ -367,8 +381,8 @@ function onImpactOpen(entity: SemanticEntityRef) {
 }
 
 // ── 实体历史(结构面板实体入口,时间线项跳转 GitGraph 定位提交) ────────────────
-const historyOpen = ref(false);
-const historyEntity = ref<SemanticEntityRef | null>(null);
+const historyOpen = ref(false),
+  historyEntity = ref<SemanticEntityRef | null>(null);
 
 function onHistory(entity: SemanticFileEntity) {
   historyEntity.value = entity;
@@ -382,8 +396,9 @@ function tryReveal() {
     selected.value !== target.path ||
     !codeVisible.value ||
     previewPath.value !== target.path
-  )
+  ) {
     return;
+  }
   pendingReveal.value = null;
   codeViewer.value?.revealLines(target.startLine, target.endLine);
 }
@@ -391,27 +406,28 @@ function tryReveal() {
 watch([selected, previewText, codeVisible], () => void nextTick(tryReveal), { flush: "post" });
 
 const {
-  closeFind,
-  findCase,
-  findIndex,
-  findInvalid,
-  findOpen,
-  findRegex,
-  findStep,
-  findText,
-  findTotal,
-  findWord,
-  onFindToggle,
-  openFind,
-} = useFileFind({ codeViewer, codeVisible, findBarRef, previewText });
-
-// ── 全文搜索结果跳转:打开文件并定位到命中行 ──────────────────────────────────
-const pendingJump = ref<{ path: string; line: number; query: FindQuery } | null>(null);
+    closeFind,
+    findCase,
+    findIndex,
+    findInvalid,
+    findOpen,
+    findRegex,
+    findStep,
+    findText,
+    findTotal,
+    findWord,
+    onFindToggle,
+    openFind,
+  } = useFileFind({ codeViewer, codeVisible, findBarRef, previewText }),
+  // ── 全文搜索结果跳转:打开文件并定位到命中行 ──────────────────────────────────
+  pendingJump = ref<{ path: string; line: number; query: FindQuery } | null>(null);
 
 function onSearchOpen(path: string, line: number, query: FindQuery) {
   selected.value = path;
   // 渲染态(Markdown/SVG)没有代码视图,强制源码模式保证可定位
-  if (MD_EXTS.has(extOf(path))) mdMode.value = "source";
+  if (MD_EXTS.has(extOf(path))) {
+    mdMode.value = "source";
+  }
   onSelectImage(path);
   pendingJump.value = { path, line, query };
   tryJump();
@@ -420,13 +436,17 @@ function onSearchOpen(path: string, line: number, query: FindQuery) {
 function tryJump() {
   const j = pendingJump.value;
   // 目标文件内容就位(previewPath 对上)才跳,防止在残留文本上定位到错误位置
-  if (!j || selected.value !== j.path || !codeVisible.value || previewPath.value !== j.path) return;
+  if (!j || selected.value !== j.path || !codeVisible.value || previewPath.value !== j.path) {
+    return;
+  }
   pendingJump.value = null;
   const cv = codeViewer.value;
-  if (!cv) return;
+  if (!cv) {
+    return;
+  }
   // 文件内跑同一查询,优先精确定位到命中行上的匹配;行上无匹配退化到行首
-  const ranges = cv.runFind(j.query);
-  const idx = ranges.findIndex((r) => r.line === j.line);
+  const ranges = cv.runFind(j.query),
+    idx = ranges.findIndex((r) => r.line === j.line);
   if (idx >= 0) {
     findTotal.value = ranges.length;
     findIndex.value = cv.gotoMatch(idx);
@@ -439,7 +459,9 @@ watch([selected, previewText, codeVisible], () => void nextTick(tryJump), { flus
 
 // ── 快捷键:Ctrl+F 文件内查找 / Ctrl+Shift+F 全文搜索 / F3 与 Esc ────────────
 function onKeydown(e: KeyboardEvent) {
-  if (!active.value) return;
+  if (!active.value) {
+    return;
+  }
   const key = e.key.toLowerCase();
   if (e.ctrlKey && key === "f") {
     if (e.shiftKey) {
@@ -474,34 +496,35 @@ provide(MD_BASE_PATH_KEY, () => mdBasePath.value);
 provide(MD_ROOT_PATH_KEY, () => rootPath.value);
 
 const mdComponents = {
-  img: MdImage,
-  a: MdLink,
-};
-
-const controls: ControlsConfig = {
-  table: {
-    copy: true,
-    download: true,
-    fullscreen: true,
-    customize: createTableCustomize(t),
+    img: MdImage,
+    a: MdLink,
   },
-  code: { copy: true, collapse: true },
-};
-
-const beforeDownload = createBeforeDownload(t);
-
-// 阻止库把 shadcn 变量内联成非法色值,MD 主题交给 CSS 层
-const detachedThemeEl = document.createElement("div");
-const themeElement = () => detachedThemeEl;
+  controls: ControlsConfig = {
+    table: {
+      copy: true,
+      download: true,
+      fullscreen: true,
+      customize: createTableCustomize(t),
+    },
+    code: { copy: true, collapse: true },
+  },
+  beforeDownload = createBeforeDownload(t),
+  // 阻止库把 shadcn 变量内联成非法色值,MD 主题交给 CSS 层
+  detachedThemeEl = document.createElement("div"),
+  themeElement = () => detachedThemeEl;
 
 /** 渲染态链接点击:外链交给系统浏览器,相对路径用系统默认程序打开 */
 async function onBodyClick(e: MouseEvent) {
   const a = (e.target as HTMLElement).closest("a");
-  if (!a) return;
+  if (!a) {
+    return;
+  }
   // MdLink 已按协议白名单过滤,这里再过一遍 safeLinkHref 兜底(防其他来源的 <a>)
   const href = safeLinkHref(a.getAttribute("href"));
   e.preventDefault();
-  if (!href || href.startsWith("#")) return;
+  if (!href || href.startsWith("#")) {
+    return;
+  }
   try {
     // safeLinkHref 放行后即只剩白名单协议(http/https/mailto),可安全交系统浏览器
     if (hasScheme(href)) {
@@ -510,7 +533,9 @@ async function onBodyClick(e: MouseEvent) {
       const resolved = resolvePath(mdBasePath.value, href);
       // Markdown 链接来自不可信仓库内容:仅允许打开项目根内的路径,防止
       // 绝对路径链接把本机任意文件交给系统默认程序
-      if (!isInsidePath(rootPath.value, resolved)) return;
+      if (!isInsidePath(rootPath.value, resolved)) {
+        return;
+      }
       await openLocalPath(resolved);
     }
   } catch {
@@ -519,21 +544,21 @@ async function onBodyClick(e: MouseEvent) {
 }
 
 // ── 左栏宽度拖拽 ────────────────────────────────────────────────────────────
-const treeWidth = useLocalStorage("repomeow:files-tree-w", 280);
-const TREE_MIN_W = 180;
-const TREE_MAX_W = 560;
+const treeWidth = useLocalStorage("repomeow:files-tree-w", 280),
+  TREE_MIN_W = 180,
+  TREE_MAX_W = 560;
 
 function startTreeResize(e: PointerEvent) {
   e.preventDefault();
-  const startX = e.clientX;
-  const startW = treeWidth.value;
-  const onMove = (ev: PointerEvent) => {
-    treeWidth.value = Math.min(TREE_MAX_W, Math.max(TREE_MIN_W, startW + ev.clientX - startX));
-  };
-  const onUp = () => {
-    window.removeEventListener("pointermove", onMove);
-    window.removeEventListener("pointerup", onUp);
-  };
+  const startX = e.clientX,
+    startW = treeWidth.value,
+    onMove = (ev: PointerEvent) => {
+      treeWidth.value = Math.min(TREE_MAX_W, Math.max(TREE_MIN_W, startW + ev.clientX - startX));
+    },
+    onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
   window.addEventListener("pointermove", onMove);
   window.addEventListener("pointerup", onUp);
 }

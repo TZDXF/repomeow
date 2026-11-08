@@ -4,11 +4,11 @@ import type { DialogRootProps } from "reka-ui";
 import { useProjectDialogState } from "@/composables/useProjectDialogState";
 
 function dialog(initialOpen = true) {
-  const props = reactive<DialogRootProps>({ open: initialOpen });
-  const active = ref(true);
-  const update = vi.fn((open: boolean) => {
-    props.open = open;
-  });
+  const props = reactive<DialogRootProps>({ open: initialOpen }),
+    active = ref(true),
+    update = vi.fn((open: boolean) => {
+      props.open = open;
+    });
   return { props, active, update, ...useProjectDialogState(props, update, active) };
 }
 
@@ -46,8 +46,8 @@ describe("项目弹窗状态", () => {
   });
 
   it("两个项目可分别保留开关,互不覆盖", () => {
-    const a = dialog();
-    const b = dialog(false);
+    const a = dialog(),
+      b = dialog(false);
     a.active.value = false;
     b.updateOpen(true);
     expect(a.visible.value).toBe(false);
@@ -67,9 +67,9 @@ describe("项目弹窗状态", () => {
   });
 
   it("无项目作用域时保留普通弹窗和 unmountOnHide 配置", () => {
-    const props = reactive<DialogRootProps>({ open: true, unmountOnHide: true });
-    const update = vi.fn();
-    const view = useProjectDialogState(props, update);
+    const props = reactive<DialogRootProps>({ open: true, unmountOnHide: true }),
+      update = vi.fn(),
+      view = useProjectDialogState(props, update);
     expect(view.visible.value).toBe(true);
     expect(view.unmountOnHide.value).toBe(true);
     view.updateOpen(false);
@@ -77,8 +77,8 @@ describe("项目弹窗状态", () => {
   });
 
   it("兼容 defaultOpen 和未受控的触发器开关", () => {
-    const active = ref(true);
-    const view = useProjectDialogState({ defaultOpen: true }, vi.fn(), active);
+    const active = ref(true),
+      view = useProjectDialogState({ defaultOpen: true }, vi.fn(), active);
     expect(view.visible.value).toBe(true);
     active.value = false;
     expect(view.visible.value).toBe(false);

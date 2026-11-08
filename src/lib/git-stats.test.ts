@@ -47,7 +47,9 @@ describe("buildCommitCalendar", () => {
   it("生成 53 周 × 7 行,含未来占位格", () => {
     const { weeks } = buildCommitCalendar([], today);
     expect(weeks).toHaveLength(COMMIT_CALENDAR_WEEKS);
-    for (const week of weeks) expect(week).toHaveLength(7);
+    for (const week of weeks) {
+      expect(week).toHaveLength(7);
+    }
     // 今天之后的格子标记 future;今天本身不标记
     const flat = weeks.flat();
     expect(flat.find((c) => c.day === "2026-08-27")?.future).toBe(false);
@@ -56,8 +58,8 @@ describe("buildCommitCalendar", () => {
 
   it("数据落到对应日期格,强度按窗口内最大值归一化", () => {
     // 网格起点:本周周一往前 52 周
-    const { weeks } = buildCommitCalendar([day("2026-08-24", 4), day("2026-08-25", 2)], today);
-    const flat = weeks.flat();
+    const { weeks } = buildCommitCalendar([day("2026-08-24", 4), day("2026-08-25", 2)], today),
+      flat = weeks.flat();
     expect(flat.find((c) => c.day === "2026-08-24")).toMatchObject({ count: 4, level: 4 });
     expect(flat.find((c) => c.day === "2026-08-25")).toMatchObject({ count: 2, level: 3 });
     // 窗口外的历史数据不进入网格

@@ -3,8 +3,8 @@ import { toggleInSet } from "./utils";
 
 describe("toggleInSet", () => {
   it("adds without mutating the original and preserves order", () => {
-    const original = new Set(["a", "b"]);
-    const result = toggleInSet(original, "c");
+    const original = new Set(["a", "b"]),
+      result = toggleInSet(original, "c");
     expect([...original]).toEqual(["a", "b"]);
     expect([...result]).toEqual(["a", "b", "c"]);
     expect(result).not.toBe(original);

@@ -18,29 +18,28 @@ import ScrollArea from "@/components/common/ScrollArea.vue";
 import { Separator } from "@/components/ui/separator";
 import { useTagsStore } from "@/stores/tags";
 
-const { t } = useI18n();
-const emit = defineEmits<{ refreshProjects: [] }>();
-
-const store = useTagsStore();
-
-const visible = ref(false);
-const newName = ref("");
-const newColor = ref("#3b82f6");
-const submitting = ref(false);
-
-const PRESET_COLORS = [
-  "#3b82f6",
-  "#22c55e",
-  "#eab308",
-  "#ef4444",
-  "#a855f7",
-  "#ec4899",
-  "#14b8a6",
-  "#f97316",
-];
+const { t } = useI18n(),
+  emit = defineEmits<{ refreshProjects: [] }>(),
+  store = useTagsStore(),
+  visible = ref(false),
+  newName = ref(""),
+  newColor = ref("#3b82f6"),
+  submitting = ref(false),
+  PRESET_COLORS = [
+    "#3b82f6",
+    "#22c55e",
+    "#eab308",
+    "#ef4444",
+    "#a855f7",
+    "#ec4899",
+    "#14b8a6",
+    "#f97316",
+  ];
 
 async function create() {
-  if (!newName.value.trim() || submitting.value) return;
+  if (!newName.value.trim() || submitting.value) {
+    return;
+  }
   submitting.value = true;
   try {
     await store.createTag(newName.value.trim(), newColor.value);
@@ -54,13 +53,15 @@ async function create() {
 }
 
 /** 待确认删除的标签,ConfirmDialog 确认后执行 */
-const pendingRemove = ref<{ id: number; name: string } | null>(null);
-const removeConfirmOpen = computed({
-  get: () => pendingRemove.value !== null,
-  set: (v) => {
-    if (!v) pendingRemove.value = null;
-  },
-});
+const pendingRemove = ref<{ id: number; name: string } | null>(null),
+  removeConfirmOpen = computed({
+    get: () => pendingRemove.value !== null,
+    set: (v) => {
+      if (!v) {
+        pendingRemove.value = null;
+      }
+    },
+  });
 
 function remove(id: number, name: string) {
   pendingRemove.value = { id, name };
@@ -68,7 +69,9 @@ function remove(id: number, name: string) {
 
 async function confirmRemove() {
   const tag = pendingRemove.value;
-  if (!tag) return;
+  if (!tag) {
+    return;
+  }
   try {
     await store.deleteTag(tag.id);
     emit("refreshProjects");

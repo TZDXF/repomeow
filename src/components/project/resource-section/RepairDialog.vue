@@ -20,21 +20,21 @@ import {
 import { repairBusyKey } from "@/composables/project-resources/use-resource-repair";
 
 const props = defineProps<{
-  /** 当前修复的资源;null 时面板关闭 */
-  resource: ResourceChoice | null;
-  /** 该资源的可修复部署记录(父层已按状态过滤) */
-  records: ResourceDeployment[];
-  /** 修复防重入锁:repairBusyKey 格式,非空时全部按钮禁用 */
-  repairing: string;
-  /** Agent 显示名回退(id → name) */
-  agentName: (agentId: string) => string;
-}>();
-const emit = defineEmits<{
-  close: [];
-  applyUpdate: [record: ResourceDeployment];
-  repair: [record: ResourceDeployment, action: RepairAction];
-}>();
-const { t } = useI18n();
+    /** 当前修复的资源;null 时面板关闭 */
+    resource: ResourceChoice | null;
+    /** 该资源的可修复部署记录(父层已按状态过滤) */
+    records: ResourceDeployment[];
+    /** 修复防重入锁:repairBusyKey 格式,非空时全部按钮禁用 */
+    repairing: string;
+    /** Agent 显示名回退(id → name) */
+    agentName: (agentId: string) => string;
+  }>(),
+  emit = defineEmits<{
+    close: [];
+    applyUpdate: [record: ResourceDeployment];
+    repair: [record: ResourceDeployment, action: RepairAction];
+  }>(),
+  { t } = useI18n();
 
 function onOpenChange(value: boolean) {
   if (!props.repairing && !value) {

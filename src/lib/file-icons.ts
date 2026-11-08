@@ -20,8 +20,8 @@ import type { IconifyJSON } from "@iconify/vue";
 const collection = vscodeIconsJson as IconifyJSON;
 addCollection(collection);
 
-const available = new Set(Object.keys(collection.icons));
-const PREFIX = "vscode-icons:";
+const available = new Set(Object.keys(collection.icons)),
+  PREFIX = "vscode-icons:";
 
 /** vscode-icons-js 的 SVG 文件名转 iconify 图标名(file_type_ts.svg -> file-type-ts) */
 function toIconifyName(svgFileName: string): string {

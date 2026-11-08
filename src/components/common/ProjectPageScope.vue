@@ -4,8 +4,8 @@ import { RouterView, routeLocationKey, type RouteLocationNormalizedLoaded } from
 import { ConfigProvider } from "reka-ui";
 import { PROJECT_PAGE_ACTIVE } from "@/composables/useProjectPageState";
 
-const props = defineProps<{ route: RouteLocationNormalizedLoaded; active: boolean }>();
-const container = ref<HTMLElement>();
+const props = defineProps<{ route: RouteLocationNormalizedLoaded; active: boolean }>(),
+  container = ref<HTMLElement>();
 provide(
   PROJECT_PAGE_ACTIVE,
   computed(() => props.active),

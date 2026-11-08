@@ -19,27 +19,27 @@ import { Separator } from "@/components/ui/separator";
 import { useTagsStore } from "@/stores/tags";
 import type { Tag } from "@/types";
 
-const { t } = useI18n();
-const store = useTagsStore();
-
-const PRESET_COLORS = [
-  "#3b82f6",
-  "#22c55e",
-  "#eab308",
-  "#ef4444",
-  "#a855f7",
-  "#ec4899",
-  "#14b8a6",
-  "#f97316",
-];
-
-// 新建
-const newName = ref("");
-const newColor = ref("#3b82f6");
-const submitting = ref(false);
+const { t } = useI18n(),
+  store = useTagsStore(),
+  PRESET_COLORS = [
+    "#3b82f6",
+    "#22c55e",
+    "#eab308",
+    "#ef4444",
+    "#a855f7",
+    "#ec4899",
+    "#14b8a6",
+    "#f97316",
+  ],
+  // 新建
+  newName = ref(""),
+  newColor = ref("#3b82f6"),
+  submitting = ref(false);
 
 async function create() {
-  if (!newName.value.trim() || submitting.value) return;
+  if (!newName.value.trim() || submitting.value) {
+    return;
+  }
   submitting.value = true;
   try {
     await store.createTag(newName.value.trim(), newColor.value);
@@ -53,10 +53,10 @@ async function create() {
 }
 
 // 编辑
-const editingTag = ref<Tag | null>(null);
-const editName = ref("");
-const editColor = ref("#3b82f6");
-const saving = ref(false);
+const editingTag = ref<Tag | null>(null),
+  editName = ref(""),
+  editColor = ref("#3b82f6"),
+  saving = ref(false);
 
 function openEdit(tag: Tag) {
   editingTag.value = tag;
@@ -66,7 +66,9 @@ function openEdit(tag: Tag) {
 
 async function saveEdit() {
   const tag = editingTag.value;
-  if (!tag || !editName.value.trim() || saving.value) return;
+  if (!tag || !editName.value.trim() || saving.value) {
+    return;
+  }
   saving.value = true;
   try {
     await store.updateTag(tag.id, editName.value.trim(), editColor.value);
@@ -80,13 +82,15 @@ async function saveEdit() {
 }
 
 // 删除
-const pendingRemove = ref<Tag | null>(null);
-const removeConfirmOpen = computed({
-  get: () => pendingRemove.value !== null,
-  set: (v) => {
-    if (!v) pendingRemove.value = null;
-  },
-});
+const pendingRemove = ref<Tag | null>(null),
+  removeConfirmOpen = computed({
+    get: () => pendingRemove.value !== null,
+    set: (v) => {
+      if (!v) {
+        pendingRemove.value = null;
+      }
+    },
+  });
 
 function remove(tag: Tag) {
   pendingRemove.value = tag;
@@ -94,7 +98,9 @@ function remove(tag: Tag) {
 
 async function confirmRemove() {
   const tag = pendingRemove.value;
-  if (!tag) return;
+  if (!tag) {
+    return;
+  }
   try {
     await store.deleteTag(tag.id);
     toast.success(t("settings.tags.deleted"));

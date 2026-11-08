@@ -21,8 +21,8 @@ async function harness(
 
 describe("prompt input 提交结果", () => {
   it("拒绝发送时恢复输入并保留附件", async () => {
-    const submit = vi.fn(() => false);
-    const context = await harness(submit);
+    const submit = vi.fn(() => false),
+      context = await harness(submit);
     context.files.value = [{ id: "f1", type: "file", url: "data:text/plain,a", filename: "a.txt" }];
     await context.submitForm();
     expect(submit).toHaveBeenCalledWith({ text: "待发送的问题", files: context.files.value });
@@ -34,10 +34,10 @@ describe("prompt input 提交结果", () => {
   it("异步拒绝不覆盖等待期间的新输入", async () => {
     let resolve!: (value: boolean) => void;
     const result = new Promise<boolean>((done) => {
-      resolve = done;
-    });
-    const context = await harness(() => result);
-    const pending = context.submitForm();
+        resolve = done;
+      }),
+      context = await harness(() => result),
+      pending = context.submitForm();
     expect(context.textInput.value).toBe("");
     context.setTextInput("新草稿");
     resolve(false);

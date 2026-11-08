@@ -37,24 +37,22 @@ import { useTagsStore } from "@/stores/tags";
 import type { ReportSchedule } from "@/types";
 
 /** 定时报告 新建/编辑 对话框:只负责表单与校验,持久化由父组件经 submit 事件完成 */
-const props = defineProps<{ editing: ReportSchedule | null }>();
-const open = defineModel<boolean>("open", { required: true });
-const emit = defineEmits<{ submit: [data: ReportSchedule] }>();
-
-const { t, locale } = useI18n();
-const projectStore = useProjectsStore();
-const tagsStore = useTagsStore();
-
-const form = ref<ScheduleFormState>(createEmptyScheduleForm());
-
-/** 周一~周日的本地化短标签(浏览器 Intl,避免 i18n 数组不可靠);2024-01-01 是周一 */
-const weekdayNames = computed(() => weekdayShortNames(locale.value));
-
-const activeProjects = computed(() => projectStore.projects.filter((p) => !p.archived_at));
+const props = defineProps<{ editing: ReportSchedule | null }>(),
+  open = defineModel<boolean>("open", { required: true }),
+  emit = defineEmits<{ submit: [data: ReportSchedule] }>(),
+  { t, locale } = useI18n(),
+  projectStore = useProjectsStore(),
+  tagsStore = useTagsStore(),
+  form = ref<ScheduleFormState>(createEmptyScheduleForm()),
+  /** 周一~周日的本地化短标签(浏览器 Intl,避免 i18n 数组不可靠);2024-01-01 是周一 */
+  weekdayNames = computed(() => weekdayShortNames(locale.value)),
+  activeProjects = computed(() => projectStore.projects.filter((p) => !p.archived_at));
 
 // 每次打开时重建表单;关键词/筛选标签等临时筛选状态随对话框卸载自动重置
 watch(open, (isOpen) => {
-  if (!isOpen) return;
+  if (!isOpen) {
+    return;
+  }
   form.value = props.editing ? scheduleToForm(props.editing) : createEmptyScheduleForm();
 });
 

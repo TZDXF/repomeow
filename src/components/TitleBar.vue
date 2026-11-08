@@ -11,21 +11,20 @@ import TitleTabs from "@/components/common/TitleTabs.vue";
 import UpdateDialog from "@/components/update/UpdateDialog.vue";
 import { useUpdateStore } from "@/stores/update";
 
-const { t } = useI18n();
-const appWindow = getCurrentWindow();
-const route = useRoute();
-const router = useRouter();
-const isMaximized = ref(false);
-const updateStore = useUpdateStore();
+const { t } = useI18n(),
+  appWindow = getCurrentWindow(),
+  route = useRoute(),
+  router = useRouter(),
+  isMaximized = ref(false),
+  updateStore = useUpdateStore();
 let unlistenResize: UnlistenFn | undefined;
 
 // 报告/设置是标题栏右侧的固定导航图标,按当前路由高亮(资源库技能预览归属设置)
-const reportsActive = computed(() => route.path.startsWith("/report-history"));
-const settingsActive = computed(() => route.path.startsWith("/settings"));
-
-/** 更新下载进度环几何(viewBox 36,半径 15.5) */
-const RING_R = 15.5;
-const RING_C = 2 * Math.PI * RING_R;
+const reportsActive = computed(() => route.path.startsWith("/report-history")),
+  settingsActive = computed(() => route.path.startsWith("/settings")),
+  /** 更新下载进度环几何(viewBox 36,半径 15.5) */
+  RING_R = 15.5,
+  RING_C = 2 * Math.PI * RING_R;
 
 onMounted(async () => {
   isMaximized.value = await appWindow.isMaximized();

@@ -16,15 +16,15 @@ function route(path: string, query: Record<string, string> = {}) {
   } as unknown as RouteLocationNormalizedLoaded;
 }
 function setup() {
-  const scope = effectScope();
-  const current = reactive(route("/projects/1"));
-  const ids = ref([1, 2]);
-  const pages = scope.run(() =>
-    useProjectPageCache(
-      () => current,
-      () => ids.value,
-    ),
-  )!;
+  const scope = effectScope(),
+    current = reactive(route("/projects/1")),
+    ids = ref([1, 2]),
+    pages = scope.run(() =>
+      useProjectPageCache(
+        () => current,
+        () => ids.value,
+      ),
+    )!;
   async function navigate(path: string, query?: Record<string, string>) {
     Object.assign(current, route(path, query));
     await nextTick();
@@ -57,7 +57,9 @@ describe("项目页面缓存", () => {
 
   it("切到首页、设置、报告时保留项目页面,但不把这些页面加入项目缓存", async () => {
     const view = setup();
-    for (const path of ["/", "/settings", "/report-history"]) await view.navigate(path);
+    for (const path of ["/", "/settings", "/report-history"]) {
+      await view.navigate(path);
+    }
     expect(view.pages.value.map((page) => page.route.path)).toEqual(["/projects/1"]);
     view.stop();
   });
@@ -79,8 +81,8 @@ describe("项目页面缓存", () => {
   });
 
   it("重新打开已关闭项目时创建新缓存项,不复用旧草稿实例", async () => {
-    const view = setup();
-    const original = view.pages.value[0];
+    const view = setup(),
+      original = view.pages.value[0];
     view.ids.value = [2];
     await view.navigate("/projects/2");
     view.ids.value = [2, 1];

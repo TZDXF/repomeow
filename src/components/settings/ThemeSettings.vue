@@ -7,16 +7,16 @@ import { useSettingsStore, type ThemeMode, type ThemeSkin } from "@/stores/setti
 
 import ThemeChoicePreview from "./ThemeChoicePreview.vue";
 
-const { t } = useI18n();
-const store = useSettingsStore();
-const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
-const prefersDark = ref(systemDark.matches);
-const previewMode = computed(() => {
-  if (store.theme !== "system") {
-    return store.theme;
-  }
-  return prefersDark.value ? "dark" : "light";
-});
+const { t } = useI18n(),
+  store = useSettingsStore(),
+  systemDark = window.matchMedia("(prefers-color-scheme: dark)"),
+  prefersDark = ref(systemDark.matches),
+  previewMode = computed(() => {
+    if (store.theme !== "system") {
+      return store.theme;
+    }
+    return prefersDark.value ? "dark" : "light";
+  });
 
 function syncSystemDark(event: MediaQueryListEvent) {
   prefersDark.value = event.matches;
@@ -26,7 +26,9 @@ onMounted(() => systemDark.addEventListener("change", syncSystemDark));
 onUnmounted(() => systemDark.removeEventListener("change", syncSystemDark));
 
 async function selectSkin(value: ThemeSkin) {
-  if (value === store.themeSkin) return;
+  if (value === store.themeSkin) {
+    return;
+  }
   await store.setThemeSkin(value);
   if (value === "glass-pro") {
     toast.warning(t("settings.skin.glassProEnabledNotice"));
@@ -34,56 +36,55 @@ async function selectSkin(value: ThemeSkin) {
 }
 
 const OPTIONS: { value: ThemeMode; labelKey: string; descriptionKey: string; icon: Component }[] = [
-  {
-    value: "system",
-    labelKey: "settings.theme.system",
-    descriptionKey: "settings.theme.systemDesc",
-    icon: Monitor,
-  },
-  {
-    value: "light",
-    labelKey: "settings.theme.light",
-    descriptionKey: "settings.theme.lightDesc",
-    icon: Sun,
-  },
-  {
-    value: "dark",
-    labelKey: "settings.theme.dark",
-    descriptionKey: "settings.theme.darkDesc",
-    icon: Moon,
-  },
-];
-
-const SKINS: { value: ThemeSkin; labelKey: string; descriptionKey: string }[] = [
-  {
-    value: "default",
-    labelKey: "settings.skin.default",
-    descriptionKey: "settings.skin.defaultDesc",
-  },
-  {
-    // 设计来源: Animal Island UI https://guokaigdg.github.io/animal-island-ui/#/skill
-    value: "island",
-    labelKey: "settings.skin.island",
-    descriptionKey: "settings.skin.islandDesc",
-  },
-  {
-    // 设计来源: StyleKit Pixel Art https://www.stylekit.top/zh/styles/pixel-art
-    value: "pixel",
-    labelKey: "settings.skin.pixel",
-    descriptionKey: "settings.skin.pixelDesc",
-  },
-  {
-    // 设计来源: https://www.stylekit.top/zh/styles/glassmorphism
-    value: "glassmorphism",
-    labelKey: "settings.skin.glassmorphism",
-    descriptionKey: "settings.skin.glassmorphismDesc",
-  },
-  {
-    value: "glass-pro",
-    labelKey: "settings.skin.glassPro",
-    descriptionKey: "settings.skin.glassProDesc",
-  },
-];
+    {
+      value: "system",
+      labelKey: "settings.theme.system",
+      descriptionKey: "settings.theme.systemDesc",
+      icon: Monitor,
+    },
+    {
+      value: "light",
+      labelKey: "settings.theme.light",
+      descriptionKey: "settings.theme.lightDesc",
+      icon: Sun,
+    },
+    {
+      value: "dark",
+      labelKey: "settings.theme.dark",
+      descriptionKey: "settings.theme.darkDesc",
+      icon: Moon,
+    },
+  ],
+  SKINS: { value: ThemeSkin; labelKey: string; descriptionKey: string }[] = [
+    {
+      value: "default",
+      labelKey: "settings.skin.default",
+      descriptionKey: "settings.skin.defaultDesc",
+    },
+    {
+      // 设计来源: Animal Island UI https://guokaigdg.github.io/animal-island-ui/#/skill
+      value: "island",
+      labelKey: "settings.skin.island",
+      descriptionKey: "settings.skin.islandDesc",
+    },
+    {
+      // 设计来源: StyleKit Pixel Art https://www.stylekit.top/zh/styles/pixel-art
+      value: "pixel",
+      labelKey: "settings.skin.pixel",
+      descriptionKey: "settings.skin.pixelDesc",
+    },
+    {
+      // 设计来源: https://www.stylekit.top/zh/styles/glassmorphism
+      value: "glassmorphism",
+      labelKey: "settings.skin.glassmorphism",
+      descriptionKey: "settings.skin.glassmorphismDesc",
+    },
+    {
+      value: "glass-pro",
+      labelKey: "settings.skin.glassPro",
+      descriptionKey: "settings.skin.glassProDesc",
+    },
+  ];
 </script>
 
 <template>

@@ -18,45 +18,40 @@ import type { TextSearchHit, TextSearchOutcome } from "@/types";
 // 结果按文件分组可折叠,行片段用前端同一正则标记命中(转义渲染,不走 v-html);
 // 点击行 emit open,由父组件打开文件并把文本查询带过去做文件内定位。
 
-const props = defineProps<{ root: string }>();
-
-const emit = defineEmits<{
-  (e: "open", path: string, line: number, query: FindQuery): void;
-}>();
-
-const { t } = useI18n();
-
-const query = ref("");
-const include = ref("");
-const exclude = ref("");
-const caseSensitive = ref(false);
-const wholeWord = ref(false);
-const useRegex = ref(false);
-const results = ref<TextSearchHit[]>([]);
-const truncated = ref(false);
-const searching = ref(false);
-const error = ref("");
-const collapsed = ref(new Set<string>());
-const host = ref<HTMLElement | null>(null);
-
-const findQuery = computed<FindQuery>(() => ({
-  text: query.value,
-  caseSensitive: caseSensitive.value,
-  wholeWord: wholeWord.value,
-  useRegex: useRegex.value,
-}));
-
-/** 正则模式且查询非法时不发请求,直接置错 */
-const invalidRegex = computed(
-  () => useRegex.value && !!query.value.trim() && buildFindRegExp(findQuery.value) === null,
-);
-
-const totalMatches = computed(() => results.value.reduce((n, h) => n + h.count, 0));
-
-const highlightRe = computed(() => {
-  if (!results.value.length || invalidRegex.value) return null;
-  return buildFindRegExp(findQuery.value);
-});
+const props = defineProps<{ root: string }>(),
+  emit = defineEmits<{
+    (e: "open", path: string, line: number, query: FindQuery): void;
+  }>(),
+  { t } = useI18n(),
+  query = ref(""),
+  include = ref(""),
+  exclude = ref(""),
+  caseSensitive = ref(false),
+  wholeWord = ref(false),
+  useRegex = ref(false),
+  results = ref<TextSearchHit[]>([]),
+  truncated = ref(false),
+  searching = ref(false),
+  error = ref(""),
+  collapsed = ref(new Set<string>()),
+  host = ref<HTMLElement | null>(null),
+  findQuery = computed<FindQuery>(() => ({
+    text: query.value,
+    caseSensitive: caseSensitive.value,
+    wholeWord: wholeWord.value,
+    useRegex: useRegex.value,
+  })),
+  /** 正则模式且查询非法时不发请求,直接置错 */
+  invalidRegex = computed(
+    () => useRegex.value && !!query.value.trim() && buildFindRegExp(findQuery.value) === null,
+  ),
+  totalMatches = computed(() => results.value.reduce((n, h) => n + h.count, 0)),
+  highlightRe = computed(() => {
+    if (!results.value.length || invalidRegex.value) {
+      return null;
+    }
+    return buildFindRegExp(findQuery.value);
+  });
 
 let seq = 0;
 /** 输入/搜索选项变化后 300ms 防抖触发搜索 */
@@ -105,18 +100,24 @@ async function runSearch() {
       include: include.value,
       exclude: exclude.value,
     });
-    if (mySeq !== seq) return;
+    if (mySeq !== seq) {
+      return;
+    }
     results.value = out.hits;
     truncated.value = out.truncated;
     collapsed.value = new Set();
   } catch (e) {
-    if (mySeq !== seq) return;
+    if (mySeq !== seq) {
+      return;
+    }
     results.value = [];
     truncated.value = false;
     // cmd 已把后端错误翻译成本地化文案
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
-    if (mySeq === seq) searching.value = false;
+    if (mySeq === seq) {
+      searching.value = false;
+    }
   }
 }
 
@@ -127,21 +128,27 @@ function toggleCollapse(path: string) {
 /** 行片段按命中切分(span 渲染,内容经文本插值转义,无 XSS 面) */
 function segments(text: string): { s: string; hit: boolean }[] {
   const re = highlightRe.value;
-  if (!re) return [{ s: text, hit: false }];
+  if (!re) {
+    return [{ s: text, hit: false }];
+  }
   const out: { s: string; hit: boolean }[] = [];
   re.lastIndex = 0;
-  let last = 0;
-  let m: RegExpExecArray | null;
+  let last = 0,
+    m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null && out.length < 60) {
     if (m[0].length === 0) {
       re.lastIndex++;
       continue;
     }
-    if (m.index > last) out.push({ s: text.slice(last, m.index), hit: false });
+    if (m.index > last) {
+      out.push({ s: text.slice(last, m.index), hit: false });
+    }
     out.push({ s: m[0], hit: true });
     last = m.index + m[0].length;
   }
-  if (last < text.length) out.push({ s: text.slice(last), hit: false });
+  if (last < text.length) {
+    out.push({ s: text.slice(last), hit: false });
+  }
   return out;
 }
 

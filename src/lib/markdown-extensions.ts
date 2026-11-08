@@ -22,7 +22,9 @@ export const markdownExtensions = {
  * mermaid 等内置预览不受影响(对象形态依旧启用内置预览)。
  */
 export function mergeSafePreviewers(custom?: PreviewerConfig): PreviewerConfig {
-  if (custom === false) return false;
+  if (custom === false) {
+    return false;
+  }
   const obj = typeof custom === "object" ? custom : undefined;
   return {
     ...obj,

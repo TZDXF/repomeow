@@ -16,42 +16,38 @@ import {
  */
 export const useBatchReportStore = defineStore("batchReport", () => {
   /** 当前批次时段列表(无提交的时段在确认后从此列表移除) */
-  const items = ref<BatchItem[]>([]);
-  const running = ref(false);
-  /** 浮窗是否可见(有批次即显示,结束后跳转历史或手动关闭时隐藏) */
-  const active = ref(false);
-  /** 浮窗展开(进度条+明细) / 折叠(环形进度) */
-  const expanded = ref(false);
-  /** 因无提交而被排除的时段数(从列表移除,仅计入统计) */
-  const noCommitDays = ref(0);
+  const items = ref<BatchItem[]>([]),
+    running = ref(false),
+    /** 浮窗是否可见(有批次即显示,结束后跳转历史或手动关闭时隐藏) */
+    active = ref(false),
+    /** 浮窗展开(进度条+明细) / 折叠(环形进度) */
+    expanded = ref(false),
+    /** 因无提交而被排除的时段数(从列表移除,仅计入统计) */
+    noCommitDays = ref(0);
   /** 取消控制器:中止进行中的 AI 请求并停止派发新任务 */
   let aborter: AbortController | null = null;
 
   const stats = computed(() => {
-    const list = items.value;
-    const done = list.filter((i) => i.status === "done").length;
-    const failed = list.filter((i) => i.status === "failed").length;
-    // 跳过 = 已有报告 + 已取消 + 无提交被排除的天数
-    const skipped =
-      list.filter((i) => i.status.startsWith("skipped") || i.status === "cancelled").length +
-      noCommitDays.value;
-    return {
-      // 总数按最初规划计算(移除的无提交时段仍占分母,进度平滑递增)
-      total: list.length + noCommitDays.value,
-      finished: done + failed + skipped,
-      done,
-      skipped,
-      failed,
-    };
-  });
-
-  /** 0-1 进度,驱动环形/条形进度 */
-  const progress = computed(() =>
-    stats.value.total ? stats.value.finished / stats.value.total : 0,
-  );
-
-  /** 当前批次是否已全部结束(成功/跳过/失败/取消) */
-  const settled = computed(() => active.value && !running.value);
+      const list = items.value,
+        done = list.filter((i) => i.status === "done").length,
+        failed = list.filter((i) => i.status === "failed").length,
+        // 跳过 = 已有报告 + 已取消 + 无提交被排除的天数
+        skipped =
+          list.filter((i) => i.status.startsWith("skipped") || i.status === "cancelled").length +
+          noCommitDays.value;
+      return {
+        // 总数按最初规划计算(移除的无提交时段仍占分母,进度平滑递增)
+        total: list.length + noCommitDays.value,
+        finished: done + failed + skipped,
+        done,
+        skipped,
+        failed,
+      };
+    }),
+    /** 0-1 进度,驱动环形/条形进度 */
+    progress = computed(() => (stats.value.total ? stats.value.finished / stats.value.total : 0)),
+    /** 当前批次是否已全部结束(成功/跳过/失败/取消) */
+    settled = computed(() => active.value && !running.value);
 
   /**
    * 状态变更写回。
@@ -95,12 +91,12 @@ export const useBatchReportStore = defineStore("batchReport", () => {
       running.value = false;
       aborter = null;
     }
-    const s = stats.value;
-    const message = i18n.global.t("report.batchDoneToast", {
-      done: s.done,
-      skipped: s.skipped,
-      failed: s.failed,
-    });
+    const s = stats.value,
+      message = i18n.global.t("report.batchDoneToast", {
+        done: s.done,
+        skipped: s.skipped,
+        failed: s.failed,
+      });
     if (s.failed) {
       toast.warning(message);
     } else {

@@ -98,14 +98,14 @@ function pruneHistory(items: BackgroundTaskItem[], now = Date.now()): Background
 }
 
 function loadHistory(): BackgroundTaskItem[] {
-  const target = storage();
-  const value = target?.getItem(HISTORY_STORAGE_KEY);
+  const target = storage(),
+    value = target?.getItem(HISTORY_STORAGE_KEY);
   if (!value) {
     return [];
   }
   try {
-    const parsed: unknown = JSON.parse(value);
-    const history = pruneHistory(Array.isArray(parsed) ? parsed.filter(isStoredTask) : []);
+    const parsed: unknown = JSON.parse(value),
+      history = pruneHistory(Array.isArray(parsed) ? parsed.filter(isStoredTask) : []);
     // 兼容旧版本：Git 检查不再属于可记录的后台任务，读取时同步清掉历史记录。
     try {
       target?.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history));
@@ -123,10 +123,9 @@ function loadHistory(): BackgroundTaskItem[] {
  * Rust 任务走 applyProgress；前端 Store 任务由 syncFrontendTasks 镜像进来。
  */
 export const useBackgroundTasksStore = defineStore("backgroundTasks", () => {
-  const tasksById = reactive<Record<string, BackgroundTaskItem>>({});
-  const history = ref<BackgroundTaskItem[]>(loadHistory());
-
-  const tasks = computed(() => Object.values(tasksById).sort((a, b) => a.startedAt - b.startedAt));
+  const tasksById = reactive<Record<string, BackgroundTaskItem>>({}),
+    history = ref<BackgroundTaskItem[]>(loadHistory()),
+    tasks = computed(() => Object.values(tasksById).sort((a, b) => a.startedAt - b.startedAt));
 
   function persistHistory() {
     const target = storage();
@@ -148,8 +147,8 @@ export const useBackgroundTasksStore = defineStore("backgroundTasks", () => {
     },
     now = Date.now(),
   ) {
-    const { id, source, task } = input;
-    const previous = tasksById[id];
+    const { id, source, task } = input,
+      previous = tasksById[id];
     tasksById[id] = {
       id,
       source,
@@ -211,8 +210,8 @@ export const useBackgroundTasksStore = defineStore("backgroundTasks", () => {
 
   /** 以命名空间全量同步一组前端任务；上次存在、本次消失的任务自动进入历史。 */
   function syncFrontendTasks(namespace: string, nextTasks: FrontendBackgroundTask[]) {
-    const source = `frontend:${namespace}`;
-    const nextIds = new Set(nextTasks.map((task) => `${source}:${task.id}`));
+    const source = `frontend:${namespace}`,
+      nextIds = new Set(nextTasks.map((task) => `${source}:${task.id}`));
     for (const task of Object.values(tasksById)) {
       if (task.source === source && !nextIds.has(task.id)) {
         finish(task.id);

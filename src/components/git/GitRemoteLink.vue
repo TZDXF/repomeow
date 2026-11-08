@@ -13,8 +13,8 @@ import { cmd } from "@/lib/tauri";
 import { parseGitRemote, type GitProvider, type GitRemoteInfo } from "@/lib/git-remote";
 import type { GitRemote, Project } from "@/types";
 
-const { t } = useI18n();
-const props = defineProps<{ project: Project }>();
+const { t } = useI18n(),
+  props = defineProps<{ project: Project }>();
 
 interface RemoteEntry {
   name: string;

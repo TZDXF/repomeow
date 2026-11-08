@@ -24,31 +24,28 @@ import type {
 // 已删除实体(semantic_entity_not_found)展示「当前版本已不存在」,不回退同名实体。
 
 const props = defineProps<{
-  root: string;
-  entity: SemanticEntityRef | null;
-  /** 查看的提交不是 HEAD 时显示「按当前代码结构分析」提示 */
-  showCurrentCodeNotice?: boolean;
-}>();
-
-const emit = defineEmits<{
-  /** 跳到源码(由宿主决定:文件页内定位 / 编辑器打开) */
-  open: [entity: SemanticEntityRef];
-}>();
-
-const open = defineModel<boolean>("open", { required: true });
-
-const { t } = useI18n();
-
-const depth = ref(2);
-const tab = ref<"affected" | "tests" | "dependencies" | "dependents">("affected");
-
-// ── 会话缓存:root + entity + depth;HEAD 变化使整个项目的缓存失效并自动重载 ──
-const impactCache = new Map<string, SemanticImpactResult>();
+    root: string;
+    entity: SemanticEntityRef | null;
+    /** 查看的提交不是 HEAD 时显示「按当前代码结构分析」提示 */
+    showCurrentCodeNotice?: boolean;
+  }>(),
+  emit = defineEmits<{
+    /** 跳到源码(由宿主决定:文件页内定位 / 编辑器打开) */
+    open: [entity: SemanticEntityRef];
+  }>(),
+  open = defineModel<boolean>("open", { required: true }),
+  { t } = useI18n(),
+  depth = ref(2),
+  tab = ref<"affected" | "tests" | "dependencies" | "dependents">("affected"),
+  // ── 会话缓存:root + entity + depth;HEAD 变化使整个项目的缓存失效并自动重载 ──
+  impactCache = new Map<string, SemanticImpactResult>();
 
 function clearCacheForRoot() {
   const prefix = `${props.root}::`;
   for (const key of impactCache.keys()) {
-    if (key.startsWith(prefix)) impactCache.delete(key);
+    if (key.startsWith(prefix)) {
+      impactCache.delete(key);
+    }
   }
 }
 
@@ -57,9 +54,13 @@ onMounted(async () => {
   unlistenGitChanged = await onListen<GitProjectChangedPayload>(
     "git://project-changed",
     (payload) => {
-      if (!payload.head_changed || payload.path !== props.root) return;
+      if (!payload.head_changed || payload.path !== props.root) {
+        return;
+      }
       clearCacheForRoot();
-      if (open.value && props.entity) void load(true);
+      if (open.value && props.entity) {
+        void load(true);
+      }
     },
   );
 });
@@ -67,13 +68,17 @@ onBeforeUnmount(() => unlistenGitChanged?.());
 
 function cacheKey(): string | null {
   const entity = props.entity;
-  if (!entity) return null;
+  if (!entity) {
+    return null;
+  }
   return `${props.root}::${entity.entityId ?? `${entity.filePath}:${entity.name}`}::${depth.value}`;
 }
 
 const request = useSemanticRequest((requestId: string) => {
   const entity = props.entity;
-  if (!entity) return Promise.reject(new Error("no entity"));
+  if (!entity) {
+    return Promise.reject(new Error("no entity"));
+  }
   return cmd<SemanticImpactResult>("semantic_entity_impact", {
     path: props.root,
     entityId: entity.entityId ?? undefined,
@@ -85,7 +90,9 @@ const request = useSemanticRequest((requestId: string) => {
 });
 
 async function load(force = false) {
-  if (!props.entity) return;
+  if (!props.entity) {
+    return;
+  }
   const key = cacheKey()!;
   if (!force) {
     const cached = impactCache.get(key);
@@ -96,15 +103,20 @@ async function load(force = false) {
   }
   const result = await request.run();
   if (result) {
-    if (impactCache.size > 100) impactCache.clear();
+    if (impactCache.size > 100) {
+      impactCache.clear();
+    }
     impactCache.set(key, result);
   }
 }
 
 watch([open, () => props.entity, depth], ([isOpen, entity], [, prevEntity]) => {
-  if (entity !== prevEntity) closeContextPreview();
-  if (isOpen) void load();
-  else {
+  if (entity !== prevEntity) {
+    closeContextPreview();
+  }
+  if (isOpen) {
+    void load();
+  } else {
     request.cancel();
     closeContextPreview();
   }
@@ -113,20 +125,21 @@ watch([open, () => props.entity, depth], ([isOpen, entity], [, prevEntity]) => {
 // ── 复制 AI 上下文(第 4B 期):仅用户显式触发;预算/跳数走后端默认(2000/1);
 // 先预览将包含的实体与源码规模,确认后才写剪贴板;不落库、不写日志 ──
 const contextRequest = useSemanticRequest((requestId: string) => {
-  const entity = props.entity;
-  if (!entity) return Promise.reject(new Error("no entity"));
-  return cmd<SemanticContextResult>("semantic_entity_context", {
-    path: props.root,
-    entityId: entity.entityId ?? undefined,
-    entityName: entity.entityId ? undefined : entity.name,
-    filePath: entity.filePath || undefined,
-    requestId,
-  });
-});
-const contextPreviewOpen = ref(false);
-
-const contextEntries = computed(() => contextRequest.result.value?.entries ?? []);
-const contextOmitted = computed(() => contextRequest.result.value?.omitted ?? []);
+    const entity = props.entity;
+    if (!entity) {
+      return Promise.reject(new Error("no entity"));
+    }
+    return cmd<SemanticContextResult>("semantic_entity_context", {
+      path: props.root,
+      entityId: entity.entityId ?? undefined,
+      entityName: entity.entityId ? undefined : entity.name,
+      filePath: entity.filePath || undefined,
+      requestId,
+    });
+  }),
+  contextPreviewOpen = ref(false),
+  contextEntries = computed(() => contextRequest.result.value?.entries ?? []),
+  contextOmitted = computed(() => contextRequest.result.value?.omitted ?? []);
 
 function prepareContext() {
   contextPreviewOpen.value = true;
@@ -140,33 +153,34 @@ function closeContextPreview() {
 
 function copyContext() {
   const result = contextRequest.result.value;
-  if (!result) return;
+  if (!result) {
+    return;
+  }
   const text = buildContextText(result);
-  if (!text) return;
+  if (!text) {
+    return;
+  }
   void copyToClipboard(text);
   closeContextPreview();
 }
 
-const entityMissing = computed(() => request.errorCode.value === "semantic_entity_not_found");
-
-const affected = computed(() => request.result.value?.affected ?? []);
-const tests = computed(() => dedupeEntityRefs(request.result.value?.tests ?? []));
-const dependencies = computed(() => request.result.value?.dependencies ?? []);
-const dependents = computed(() => request.result.value?.dependents ?? []);
-
-// ── 关系小图:只画 target + 直接依赖/调用者;两侧都为空时无图可画,禁用开关 ──
-const showGraph = ref(true);
-const hasDirectRelations = computed(() => dependencies.value.length + dependents.value.length > 0);
-
-const tabs = computed(() => {
-  const r = request.result.value;
-  return [
-    { key: "affected" as const, count: r?.total ?? 0 },
-    { key: "tests" as const, count: tests.value.length },
-    { key: "dependencies" as const, count: dependencies.value.length },
-    { key: "dependents" as const, count: dependents.value.length },
-  ];
-});
+const entityMissing = computed(() => request.errorCode.value === "semantic_entity_not_found"),
+  affected = computed(() => request.result.value?.affected ?? []),
+  tests = computed(() => dedupeEntityRefs(request.result.value?.tests ?? [])),
+  dependencies = computed(() => request.result.value?.dependencies ?? []),
+  dependents = computed(() => request.result.value?.dependents ?? []),
+  // ── 关系小图:只画 target + 直接依赖/调用者;两侧都为空时无图可画,禁用开关 ──
+  showGraph = ref(true),
+  hasDirectRelations = computed(() => dependencies.value.length + dependents.value.length > 0),
+  tabs = computed(() => {
+    const r = request.result.value;
+    return [
+      { key: "affected" as const, count: r?.total ?? 0 },
+      { key: "tests" as const, count: tests.value.length },
+      { key: "dependencies" as const, count: dependencies.value.length },
+      { key: "dependents" as const, count: dependents.value.length },
+    ];
+  });
 </script>
 
 <template>

@@ -37,9 +37,15 @@ export function appendCapped(
 export function terminalStatusDotClass(
   s: Pick<TerminalSessionInfo, "status" | "exit_code">,
 ): string {
-  if (s.status === "running") return "bg-emerald-500 animate-pulse";
-  if (s.status === "stopped") return "bg-amber-500";
-  if (s.status === "spawn_failed") return "bg-red-500";
+  if (s.status === "running") {
+    return "bg-emerald-500 animate-pulse";
+  }
+  if (s.status === "stopped") {
+    return "bg-amber-500";
+  }
+  if (s.status === "spawn_failed") {
+    return "bg-red-500";
+  }
   return s.exit_code === 0 ? "bg-muted-foreground" : "bg-red-500";
 }
 /** 内嵌终端执行的可选参数(cwd 缺省为项目根;kind/label 仅用于前端分组展示) */

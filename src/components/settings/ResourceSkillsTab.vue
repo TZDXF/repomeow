@@ -53,37 +53,30 @@ import {
 } from "@/lib/resource-library";
 import ResourceSkillGroupsDialog from "./ResourceSkillGroupsDialog.vue";
 
-const { t, te } = useI18n();
-const router = useRouter();
-
-const loading = ref(true);
-const groups = ref<ResourceSkillGroup[]>([]);
-const skills = ref<ResourceSkill[]>([]);
-const query = ref("");
-const activeGroupId = ref<string | null>(null);
-// 「来源」特殊分组:按市场技能的 marketplace.source 自动派生,与分组互斥选中
-const activeSourceId = ref<string | null>(null);
-
-const groupsDialogOpen = ref(false);
-const pendingDelete = ref<ResourceSkill | null>(null);
-
-const importing = ref(false);
-const urlDialogOpen = ref(false);
-const urlInput = ref("");
-const urlSubmitting = ref(false);
-
-// 市场技能更新状态:skillId → true=有更新 / false=已最新 / null=无法判断
-const checkingUpdates = ref(false);
-const updatingIds = ref<string[]>([]);
-const updateStatus = ref(new Map<string, boolean | null>());
-
-const marketplaceSkillCount = computed(
-  () => skills.value.filter((skill) => skill.marketplace).length,
-);
-const updatableCount = computed(
-  () => skills.value.filter((skill) => updateStatus.value.get(skill.id) === true).length,
-);
-const updatingAll = ref(false);
+const { t, te } = useI18n(),
+  router = useRouter(),
+  loading = ref(true),
+  groups = ref<ResourceSkillGroup[]>([]),
+  skills = ref<ResourceSkill[]>([]),
+  query = ref(""),
+  activeGroupId = ref<string | null>(null),
+  // 「来源」特殊分组:按市场技能的 marketplace.source 自动派生,与分组互斥选中
+  activeSourceId = ref<string | null>(null),
+  groupsDialogOpen = ref(false),
+  pendingDelete = ref<ResourceSkill | null>(null),
+  importing = ref(false),
+  urlDialogOpen = ref(false),
+  urlInput = ref(""),
+  urlSubmitting = ref(false),
+  // 市场技能更新状态:skillId → true=有更新 / false=已最新 / null=无法判断
+  checkingUpdates = ref(false),
+  updatingIds = ref<string[]>([]),
+  updateStatus = ref(new Map<string, boolean | null>()),
+  marketplaceSkillCount = computed(() => skills.value.filter((skill) => skill.marketplace).length),
+  updatableCount = computed(
+    () => skills.value.filter((skill) => updateStatus.value.get(skill.id) === true).length,
+  ),
+  updatingAll = ref(false);
 
 function isUpdating(skillId: string): boolean {
   return updatingIds.value.includes(skillId);
@@ -103,9 +96,9 @@ async function checkUpdates() {
   }
   checkingUpdates.value = true;
   try {
-    const statuses = await checkResourceMarketplaceUpdates();
-    const next = new Map<string, boolean | null>();
-    const failed: string[] = [];
+    const statuses = await checkResourceMarketplaceUpdates(),
+      next = new Map<string, boolean | null>(),
+      failed: string[] = [];
     let available = 0;
     for (const status of statuses) {
       next.set(status.skillId, status.updateAvailable);
@@ -186,39 +179,42 @@ function openSourcePage(skill: ResourceSkill) {
 }
 
 const filtered = computed(() =>
-  filterSkills(skills.value, query.value, activeGroupId.value, activeSourceId.value),
-);
-const groupMap = computed(() => new Map(groups.value.map((g) => [g.id, g])));
-const sources = computed(() => collectSkillSources(skills.value));
-const filterPickerOpen = ref(false);
-const filterPickerQuery = ref("");
-const filterOptions = computed(() => [
-  ...groups.value.map((group) => ({
-    key: `group:${group.id}`,
-    id: group.id,
-    name: group.name,
-    kind: "group" as const,
-    color: group.color,
-    title: group.description || group.name,
-  })),
-  ...sources.value.map((source) => ({
-    key: `source:${source}`,
-    id: source,
-    name: source,
-    kind: "source" as const,
-    color: null,
-    title: source,
-  })),
-]);
-const visibleFilters = computed(() => filterOptions.value.slice(0, 4));
-const searchedFilters = computed(() => {
-  const normalized = filterPickerQuery.value.trim().toLowerCase();
-  return filterOptions.value.filter((option) => option.name.toLowerCase().includes(normalized));
-});
+    filterSkills(skills.value, query.value, activeGroupId.value, activeSourceId.value),
+  ),
+  groupMap = computed(() => new Map(groups.value.map((g) => [g.id, g]))),
+  sources = computed(() => collectSkillSources(skills.value)),
+  filterPickerOpen = ref(false),
+  filterPickerQuery = ref(""),
+  filterOptions = computed(() => [
+    ...groups.value.map((group) => ({
+      key: `group:${group.id}`,
+      id: group.id,
+      name: group.name,
+      kind: "group" as const,
+      color: group.color,
+      title: group.description || group.name,
+    })),
+    ...sources.value.map((source) => ({
+      key: `source:${source}`,
+      id: source,
+      name: source,
+      kind: "source" as const,
+      color: null,
+      title: source,
+    })),
+  ]),
+  visibleFilters = computed(() => filterOptions.value.slice(0, 4)),
+  searchedFilters = computed(() => {
+    const normalized = filterPickerQuery.value.trim().toLowerCase();
+    return filterOptions.value.filter((option) => option.name.toLowerCase().includes(normalized));
+  });
 
 function selectFilter(option: (typeof filterOptions.value)[number]) {
-  if (option.kind === "group") selectGroup(option.id);
-  else selectSource(option.id);
+  if (option.kind === "group") {
+    selectGroup(option.id);
+  } else {
+    selectSource(option.id);
+  }
   filterPickerOpen.value = false;
   filterPickerQuery.value = "";
 }

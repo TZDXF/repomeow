@@ -6,8 +6,8 @@ export function useCommitAndPush<T extends { key: string } = { key: string }>(
   push: (target: T) => Promise<void>,
   getTarget: () => T,
 ) {
-  const pendingTargets = ref(new Set<string>());
-  const pendingPush = computed(() => pendingTargets.value.has(getTarget().key));
+  const pendingTargets = ref(new Set<string>()),
+    pendingPush = computed(() => pendingTargets.value.has(getTarget().key));
 
   async function run() {
     const target = getTarget();

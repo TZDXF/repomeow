@@ -16,14 +16,13 @@ import { Input } from "@/components/ui/input";
 import { useProjectsStore } from "@/stores/projects";
 import type { Project } from "@/types";
 
-const { t } = useI18n();
-const props = defineProps<{ project: Project }>();
-const open = defineModel<boolean>("open", { required: true });
-const store = useProjectsStore();
-
-const branch = ref("main");
-const remoteUrl = ref("");
-const submitting = ref(false);
+const { t } = useI18n(),
+  props = defineProps<{ project: Project }>(),
+  open = defineModel<boolean>("open", { required: true }),
+  store = useProjectsStore(),
+  branch = ref("main"),
+  remoteUrl = ref(""),
+  submitting = ref(false);
 
 // 每次打开时重置为初始状态
 watch(open, (v) => {
@@ -34,7 +33,9 @@ watch(open, (v) => {
 });
 
 async function submit() {
-  if (submitting.value) return;
+  if (submitting.value) {
+    return;
+  }
   submitting.value = true;
   try {
     await store.initRepository(props.project, branch.value.trim(), remoteUrl.value.trim());

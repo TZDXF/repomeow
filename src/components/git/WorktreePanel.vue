@@ -26,49 +26,43 @@ import { useProjectsStore } from "@/stores/projects";
 import { useSettingsStore } from "@/stores/settings";
 import type { GitBranches, GitWorktree, Project } from "@/types";
 
-const { t } = useI18n();
-const props = defineProps<{
-  project: Project;
-  /** 详情页当前选中的工作区路径(树形图上高亮),null = 主工作区 */
-  activePath?: string | null;
-}>();
-const open = defineModel<boolean>("open", { required: true });
-/** worktree 列表增删或合并/变基落地后通知父组件(切换下拉据此刷新并校验当前选中) */
-const emit = defineEmits<{ changed: [] }>();
-
-const store = useProjectsStore();
-const settings = useSettingsStore();
-
-const worktrees = ref<GitWorktree[]>([]);
-const loading = ref(false);
-const branches = ref<GitBranches>({ local: [], remote: [], tracking: [] });
-
-// --- 新建 worktree 表单 ---
-const createOpen = ref(false);
-/** new = 新建分支挂载;existing = 挂载已有分支 */
-const branchMode = ref<"new" | "existing">("new");
-const newBranch = ref("");
-const existingBranch = ref("");
-const baseBranch = ref("");
-const dirPath = ref("");
-/** 用户手动改过目录后不再随分支名联动 */
-const dirTouched = ref(false);
-const creating = ref(false);
-
-// --- 合并/变基确认(对话框与执行逻辑在 WorktreeOpsDialogs,此处仅持有状态标记) ---
-const opsRef = ref<InstanceType<typeof WorktreeOpsDialogs> | null>(null);
-/** 变基(按 worktree 路径标记进行中/中断),与树形图行状态联动 */
-const rebasingPath = ref<string | null>(null);
-const rebaseInterruptedPath = ref<string | null>(null);
-const aborting = ref(false);
-
-// --- 删除确认 ---
-const removeTarget = ref<GitWorktree | null>(null);
-const removeForce = ref(false);
-const removeDeleteBranch = ref(false);
-const removing = ref(false);
-
-const currentBranch = computed(() => props.project.git?.branch ?? null);
+const { t } = useI18n(),
+  props = defineProps<{
+    project: Project;
+    /** 详情页当前选中的工作区路径(树形图上高亮),null = 主工作区 */
+    activePath?: string | null;
+  }>(),
+  open = defineModel<boolean>("open", { required: true }),
+  /** worktree 列表增删或合并/变基落地后通知父组件(切换下拉据此刷新并校验当前选中) */
+  emit = defineEmits<{ changed: [] }>(),
+  store = useProjectsStore(),
+  settings = useSettingsStore(),
+  worktrees = ref<GitWorktree[]>([]),
+  loading = ref(false),
+  branches = ref<GitBranches>({ local: [], remote: [], tracking: [] }),
+  // --- 新建 worktree 表单 ---
+  createOpen = ref(false),
+  /** new = 新建分支挂载;existing = 挂载已有分支 */
+  branchMode = ref<"new" | "existing">("new"),
+  newBranch = ref(""),
+  existingBranch = ref(""),
+  baseBranch = ref(""),
+  dirPath = ref(""),
+  /** 用户手动改过目录后不再随分支名联动 */
+  dirTouched = ref(false),
+  creating = ref(false),
+  // --- 合并/变基确认(对话框与执行逻辑在 WorktreeOpsDialogs,此处仅持有状态标记) ---
+  opsRef = ref<InstanceType<typeof WorktreeOpsDialogs> | null>(null),
+  /** 变基(按 worktree 路径标记进行中/中断),与树形图行状态联动 */
+  rebasingPath = ref<string | null>(null),
+  rebaseInterruptedPath = ref<string | null>(null),
+  aborting = ref(false),
+  // --- 删除确认 ---
+  removeTarget = ref<GitWorktree | null>(null),
+  removeForce = ref(false),
+  removeDeleteBranch = ref(false),
+  removing = ref(false),
+  currentBranch = computed(() => props.project.git?.branch ?? null);
 
 /** 远程分支去掉远端名前缀: "origin/team/x" -> "team/x" */
 function remoteShortName(remote: string) {
@@ -77,26 +71,28 @@ function remoteShortName(remote: string) {
 
 // 已被某个 worktree 检出的分支名(挂载已有分支时不可再选)
 const checkedOutBranches = computed(() => {
-  return new Set(worktrees.value.map((w) => w.branch).filter((b): b is string => !!b));
-});
-
-// 可挂载的已有分支:本地/远程均排除已被检出的。远程分支全量列出——本地与远程
-// 可能不同步,同名时两者是不同提交,由用户选择挂载哪一侧(后端按远程语义对齐)
-const attachableLocal = computed(() =>
-  branches.value.local.filter((b) => !checkedOutBranches.value.has(b)),
-);
-const attachableRemote = computed(() =>
-  branches.value.remote.filter((r) => !checkedOutBranches.value.has(remoteShortName(r))),
-);
-
-/** 当前选定的挂载分支名(用于目录模板联动与提交校验);
- * 远程引用(origin/x)落地后的本地名是去掉首段前缀的部分 */
-const effectiveBranch = computed(() => {
-  if (branchMode.value === "new") return newBranch.value.trim();
-  const b = existingBranch.value;
-  if (!b) return "";
-  return branches.value.local.includes(b) ? b : remoteShortName(b);
-});
+    return new Set(worktrees.value.map((w) => w.branch).filter((b): b is string => !!b));
+  }),
+  // 可挂载的已有分支:本地/远程均排除已被检出的。远程分支全量列出——本地与远程
+  // 可能不同步,同名时两者是不同提交,由用户选择挂载哪一侧(后端按远程语义对齐)
+  attachableLocal = computed(() =>
+    branches.value.local.filter((b) => !checkedOutBranches.value.has(b)),
+  ),
+  attachableRemote = computed(() =>
+    branches.value.remote.filter((r) => !checkedOutBranches.value.has(remoteShortName(r))),
+  ),
+  /** 当前选定的挂载分支名(用于目录模板联动与提交校验);
+   * 远程引用(origin/x)落地后的本地名是去掉首段前缀的部分 */
+  effectiveBranch = computed(() => {
+    if (branchMode.value === "new") {
+      return newBranch.value.trim();
+    }
+    const b = existingBranch.value;
+    if (!b) {
+      return "";
+    }
+    return branches.value.local.includes(b) ? b : remoteShortName(b);
+  });
 
 async function load() {
   loading.value = true;
@@ -124,7 +120,9 @@ watch(open, (v) => {
 
 // 展开新建表单时:基点默认当前分支,目录按设置模板预填
 watch(createOpen, (v) => {
-  if (!v) return;
+  if (!v) {
+    return;
+  }
   branchMode.value = "new";
   baseBranch.value = currentBranch.value ?? "";
   existingBranch.value = "";
@@ -144,15 +142,17 @@ function applyTemplate(branch: string) {
 }
 
 async function create() {
-  const isNew = branchMode.value === "new";
-  const name = isNew ? newBranch.value.trim() : existingBranch.value;
-  const dir = dirPath.value.trim();
-  if (!name || !dir || creating.value) return;
+  const isNew = branchMode.value === "new",
+    name = isNew ? newBranch.value.trim() : existingBranch.value,
+    dir = dirPath.value.trim();
+  if (!name || !dir || creating.value) {
+    return;
+  }
   creating.value = true;
   try {
-    const current = currentBranch.value;
-    const startPoint =
-      isNew && baseBranch.value && baseBranch.value !== current ? baseBranch.value : undefined;
+    const current = currentBranch.value,
+      startPoint =
+        isNew && baseBranch.value && baseBranch.value !== current ? baseBranch.value : undefined;
     worktrees.value = await store.addWorktree(props.project, dir, name, {
       createBranch: isNew,
       startPoint,
@@ -177,7 +177,9 @@ function onOpsChanged() {
 }
 
 async function abortRebase(w: GitWorktree) {
-  if (aborting.value) return;
+  if (aborting.value) {
+    return;
+  }
   aborting.value = true;
   try {
     await store.abortRebase(props.project, w.path);
@@ -192,7 +194,9 @@ async function abortRebase(w: GitWorktree) {
 
 /** 主工作区合并冲突进行中时提供兜底中止入口 */
 async function abortMerge() {
-  if (aborting.value) return;
+  if (aborting.value) {
+    return;
+  }
   aborting.value = true;
   try {
     await store.abortMerge(props.project);
@@ -206,7 +210,9 @@ async function abortMerge() {
 
 async function remove() {
   const w = removeTarget.value;
-  if (!w || removing.value) return;
+  if (!w || removing.value) {
+    return;
+  }
   removing.value = true;
   try {
     worktrees.value = await store.removeWorktree(props.project, w.path, {

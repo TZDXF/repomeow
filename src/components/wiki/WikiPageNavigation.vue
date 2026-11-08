@@ -9,72 +9,64 @@ import type { WikiGenPhase } from "@/lib/wiki-generator";
 import type { WikiNavItem } from "./wiki-navigation";
 
 const props = defineProps<{
-  items: WikiNavItem[];
-  activeId: string | null;
-  generating: boolean;
-  phase?: WikiGenPhase;
-  totalPageCount: number;
-  processedPageCount: number;
-}>();
-
-const emit = defineEmits<{
-  select: [id: string];
-  cancel: [];
-}>();
-
-const { t } = useI18n();
-
-const phaseText = computed(() => {
-  const map: Record<WikiGenPhase, string> = {
-    collecting: t("wiki.phase.collecting"),
-    outlining: t("wiki.phase.outlining"),
-    generating: t("wiki.phase.generating"),
-    done: "",
-    failed: "",
-    cancelled: "",
-  };
-  return props.phase ? map[props.phase] : "";
-});
-
-const phaseSteps = computed(() => [
-  t("wiki.progress.collecting"),
-  t("wiki.progress.outlining"),
-  t("wiki.progress.generating"),
-]);
-
-const activePhaseIndex = computed(() => {
-  switch (props.phase) {
-    case "outlining":
-      return 1;
-    case "generating":
-      return 2;
-    default:
-      return 0;
-  }
-});
-
-const pageProgressPercent = computed(() =>
-  props.totalPageCount > 0
-    ? Math.round((props.processedPageCount / props.totalPageCount) * 100)
-    : 0,
-);
-
-const pageProgressStyle = computed(() => ({ width: `${pageProgressPercent.value}%` }));
-
-/** 按 section 保序分组；无 section 的页面归入 null 组并扁平展示。 */
-const groups = computed(() => {
-  const result: { section: string | null; items: WikiNavItem[] }[] = [];
-  for (const item of props.items) {
-    const section = item.section ?? null;
-    const last = result[result.length - 1];
-    if (last && last.section === section) {
-      last.items.push(item);
-    } else {
-      result.push({ section, items: [item] });
+    items: WikiNavItem[];
+    activeId: string | null;
+    generating: boolean;
+    phase?: WikiGenPhase;
+    totalPageCount: number;
+    processedPageCount: number;
+  }>(),
+  emit = defineEmits<{
+    select: [id: string];
+    cancel: [];
+  }>(),
+  { t } = useI18n(),
+  phaseText = computed(() => {
+    const map: Record<WikiGenPhase, string> = {
+      collecting: t("wiki.phase.collecting"),
+      outlining: t("wiki.phase.outlining"),
+      generating: t("wiki.phase.generating"),
+      done: "",
+      failed: "",
+      cancelled: "",
+    };
+    return props.phase ? map[props.phase] : "";
+  }),
+  phaseSteps = computed(() => [
+    t("wiki.progress.collecting"),
+    t("wiki.progress.outlining"),
+    t("wiki.progress.generating"),
+  ]),
+  activePhaseIndex = computed(() => {
+    switch (props.phase) {
+      case "outlining":
+        return 1;
+      case "generating":
+        return 2;
+      default:
+        return 0;
     }
-  }
-  return result;
-});
+  }),
+  pageProgressPercent = computed(() =>
+    props.totalPageCount > 0
+      ? Math.round((props.processedPageCount / props.totalPageCount) * 100)
+      : 0,
+  ),
+  pageProgressStyle = computed(() => ({ width: `${pageProgressPercent.value}%` })),
+  /** 按 section 保序分组；无 section 的页面归入 null 组并扁平展示。 */
+  groups = computed(() => {
+    const result: { section: string | null; items: WikiNavItem[] }[] = [];
+    for (const item of props.items) {
+      const section = item.section ?? null,
+        last = result[result.length - 1];
+      if (last && last.section === section) {
+        last.items.push(item);
+      } else {
+        result.push({ section, items: [item] });
+      }
+    }
+    return result;
+  });
 
 /** importance H/M/L 徽标，颜色与文字双重编码，避免只靠色点辨认。 */
 function importanceClass(importance: string): string {
@@ -89,8 +81,12 @@ function importanceClass(importance: string): string {
 }
 
 function importanceCode(importance: string): "H" | "M" | "L" {
-  if (importance === "high") return "H";
-  if (importance === "low") return "L";
+  if (importance === "high") {
+    return "H";
+  }
+  if (importance === "low") {
+    return "L";
+  }
   return "M";
 }
 
@@ -109,16 +105,18 @@ function pageStatsText(item: WikiNavItem): string {
   if (item.durationMs === undefined) {
     return "";
   }
-  const totalSeconds = Math.max(0, Math.round(item.durationMs / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
+  const totalSeconds = Math.max(0, Math.round(item.durationMs / 1000)),
+    minutes = Math.floor(totalSeconds / 60),
+    seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 /** 生成中页面的实时字数;<1000 原样展示,否则缩写为 k,避免宽度抖动 */
 function pageWordCountText(item: WikiNavItem): string {
   const count = item.wordCount ?? 0;
-  if (count < 1000) return t("wiki.charCount", { count });
+  if (count < 1000) {
+    return t("wiki.charCount", { count });
+  }
   return t("wiki.charCount", { count: `${(count / 1000).toFixed(1)}k` });
 }
 </script>

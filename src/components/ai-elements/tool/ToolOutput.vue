@@ -13,24 +13,22 @@ interface Props extends /* @vue-ignore */ HTMLAttributes {
   class?: HTMLAttributes["class"];
 }
 
-const props = defineProps<Props>();
-
-const showOutput = computed(
-  () => (props.output !== undefined && props.output !== null) || props.errorText,
-);
-
-const text = computed(() => {
-  if (props.errorText) {
-    return props.errorText;
-  }
-  if (typeof props.output === "string") {
-    return props.output;
-  }
-  if (typeof props.output === "object" && props.output !== null && !isVNode(props.output)) {
-    return JSON.stringify(props.output, null, 2);
-  }
-  return String(props.output ?? "");
-});
+const props = defineProps<Props>(),
+  showOutput = computed(
+    () => (props.output !== undefined && props.output !== null) || props.errorText,
+  ),
+  text = computed(() => {
+    if (props.errorText) {
+      return props.errorText;
+    }
+    if (typeof props.output === "string") {
+      return props.output;
+    }
+    if (typeof props.output === "object" && props.output !== null && !isVNode(props.output)) {
+      return JSON.stringify(props.output, null, 2);
+    }
+    return String(props.output ?? "");
+  });
 </script>
 
 <template>

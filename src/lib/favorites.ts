@@ -5,7 +5,7 @@ import type { Project } from "@/types";
  * 返回 0 表示两者同组(都收藏或都未收藏),调用方再叠加各自的排序键。
  */
 export function compareFavorited(a: Project, b: Project): number {
-  const fa = a.favorited_at ?? 0;
-  const fb = b.favorited_at ?? 0;
+  const fa = a.favorited_at ?? 0,
+    fb = b.favorited_at ?? 0;
   return fb - fa;
 }

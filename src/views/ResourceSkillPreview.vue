@@ -64,52 +64,47 @@ import {
 } from "@/components/ui/dialog";
 import ScrollArea from "@/components/common/ScrollArea.vue";
 
-const route = useRoute();
-const router = useRouter();
-const { t, te, locale } = useI18n();
-const settingsStore = useSettingsStore();
-
-const skillId = computed(() => String(route.params.id ?? ""));
-/** 本地目录模式(项目内非托管技能):query.dir 为技能目录绝对路径,不经资源库 */
-const localDir = computed(() => {
-  const value = route.query.dir;
-  return typeof value === "string" ? value : "";
-});
-const isLocal = computed(() => !!localDir.value);
-/** 扫描报告缓存键:库技能用 id,本地目录用 dir: 前缀路径 */
-const scanCacheId = computed(() => (isLocal.value ? `dir:${localDir.value}` : skillId.value));
-/** 本地目录模式的名称/描述(来自目录报告的 frontmatter 解析) */
-const localMeta = ref<{ name: string; description: string } | null>(null);
-const skill = ref<ResourceSkill | null>(null);
-const tokens = ref<ResourceSkillTokenReport | null>(null);
-const loadingTokens = ref(false);
+const route = useRoute(),
+  router = useRouter(),
+  { t, te, locale } = useI18n(),
+  settingsStore = useSettingsStore(),
+  skillId = computed(() => String(route.params.id ?? "")),
+  /** 本地目录模式(项目内非托管技能):query.dir 为技能目录绝对路径,不经资源库 */
+  localDir = computed(() => {
+    const value = route.query.dir;
+    return typeof value === "string" ? value : "";
+  }),
+  isLocal = computed(() => !!localDir.value),
+  /** 扫描报告缓存键:库技能用 id,本地目录用 dir: 前缀路径 */
+  scanCacheId = computed(() => (isLocal.value ? `dir:${localDir.value}` : skillId.value)),
+  /** 本地目录模式的名称/描述(来自目录报告的 frontmatter 解析) */
+  localMeta = ref<{ name: string; description: string } | null>(null),
+  skill = ref<ResourceSkill | null>(null),
+  tokens = ref<ResourceSkillTokenReport | null>(null),
+  loadingTokens = ref(false);
 
 /** 右侧选中内容:文件或安全扫描 */
 type Selection = { kind: "file"; path: string } | { kind: "scan" };
-const selected = ref<Selection>({ kind: "file", path: "SKILL.md" });
-
-// ── 图片预览(与 ProjectFiles 共用 useImagePreview):asset 协议直显 ──
-const selectedFilePath = computed(() =>
-  selected.value.kind === "file" ? selected.value.path : null,
-);
-/** 资源库技能的磁盘目录(图片拼绝对路径用;本地模式直接用 localDir) */
-const librarySkillDir = ref<string | null>(null);
-const { isImage, isSvg, svgMode, svgSource, imageSrc, onSelectImage, isVideo, videoSrc } =
-  useImagePreview(selectedFilePath, (path) => {
-    const root = isLocal.value ? localDir.value : librarySkillDir.value;
-    return root ? joinPath(root, path) : null;
-  });
-
-// ── Markdown 渲染(与 AI 抽屉同一套配置)────────────────────────────────
-const language = computed(() => locale.value as SupportedLocale);
-const controls: ControlsConfig = {
-  table: { copy: true, download: true },
-  code: { copy: true, collapse: true },
-};
-const beforeDownload = createBeforeDownload(t);
-// 传游离元素,避免 Markdown 库将 island/pixel 的十六进制主题变量写成无效的 hsl(#…)
-const detachedThemeEl = document.createElement("div");
-const themeElement = () => detachedThemeEl;
+const selected = ref<Selection>({ kind: "file", path: "SKILL.md" }),
+  // ── 图片预览(与 ProjectFiles 共用 useImagePreview):asset 协议直显 ──
+  selectedFilePath = computed(() => (selected.value.kind === "file" ? selected.value.path : null)),
+  /** 资源库技能的磁盘目录(图片拼绝对路径用;本地模式直接用 localDir) */
+  librarySkillDir = ref<string | null>(null),
+  { isImage, isSvg, svgMode, svgSource, imageSrc, onSelectImage, isVideo, videoSrc } =
+    useImagePreview(selectedFilePath, (path) => {
+      const root = isLocal.value ? localDir.value : librarySkillDir.value;
+      return root ? joinPath(root, path) : null;
+    }),
+  // ── Markdown 渲染(与 AI 抽屉同一套配置)────────────────────────────────
+  language = computed(() => locale.value as SupportedLocale),
+  controls: ControlsConfig = {
+    table: { copy: true, download: true },
+    code: { copy: true, collapse: true },
+  },
+  beforeDownload = createBeforeDownload(t),
+  // 传游离元素,避免 Markdown 库将 island/pixel 的十六进制主题变量写成无效的 hsl(#…)
+  detachedThemeEl = document.createElement("div"),
+  themeElement = () => detachedThemeEl;
 // 链接白名单与点击拦截:SafeMarkdown 默认以 MdLink 接管 a 标签(safeLinkHref
 // 放行裸相对路径),点击统一由 onMarkdownClick 拦截(同 ProjectFiles)
 
@@ -198,13 +193,15 @@ async function openDir() {
 }
 
 // ── 分组归属:头部按钮打开对话框,勾选分组后整体保存 ─────────────────────
-const groupsDialogOpen = ref(false);
-const allGroups = ref<ResourceSkillGroup[]>([]);
-const selectedGroupIds = ref(new Set<string>());
-const savingGroups = ref(false);
+const groupsDialogOpen = ref(false),
+  allGroups = ref<ResourceSkillGroup[]>([]),
+  selectedGroupIds = ref(new Set<string>()),
+  savingGroups = ref(false);
 
 function openGroupsDialog() {
-  if (!skill.value) return;
+  if (!skill.value) {
+    return;
+  }
   selectedGroupIds.value = new Set(skill.value.groupIds);
   groupsDialogOpen.value = true;
   void loadGroups();
@@ -227,7 +224,9 @@ function toggleGroup(groupId: string) {
 }
 
 async function saveGroups() {
-  if (!skill.value || savingGroups.value) return;
+  if (!skill.value || savingGroups.value) {
+    return;
+  }
   savingGroups.value = true;
   try {
     skill.value = await updateResourceSkillGroups(skill.value.id, [...selectedGroupIds.value]);
@@ -242,7 +241,9 @@ async function saveGroups() {
 
 /** 头部徽标展示的所属分组;分组记录缺失时回退原始 id */
 const skillGroupEntries = computed(() => {
-  if (!skill.value) return [];
+  if (!skill.value) {
+    return [];
+  }
   const map = new Map(allGroups.value.map((group) => [group.id, group]));
   return skill.value.groupIds.map((id) => ({
     id,
@@ -262,9 +263,9 @@ function formatTokens(value: number): string {
 
 /** 技能目录文件树:buildFileTree 聚合层级(目录在前),默认全部展开;
  *  SKILL.md 行尾以「描述/内容」展示技能级 token 占用 */
-const treeNodes = computed(() => buildFileTree(tokens.value?.files ?? []));
-const collapsedDirs = ref(new Set<string>());
-const treeRows = computed(() => flattenVisibleTree(treeNodes.value, collapsedDirs.value));
+const treeNodes = computed(() => buildFileTree(tokens.value?.files ?? [])),
+  collapsedDirs = ref(new Set<string>()),
+  treeRows = computed(() => flattenVisibleTree(treeNodes.value, collapsedDirs.value));
 
 function onTreeToggle(row: FileTreeRow<ResourceSkillTokenFile>) {
   const next = new Set(collapsedDirs.value);
@@ -283,10 +284,10 @@ function onTreeSelect(row: FileTreeRow<ResourceSkillTokenFile>) {
 }
 
 // ── 右侧:文件内容 ─────────────────────────────────────────────────────
-const fileCache = new Map<string, string | null>();
-/** 正在加载的文件路径(null = 无在途加载);按路径判断,避免连续切换时加载态互相覆盖 */
-const loadingPath = ref<string | null>(null);
-const fileContent = ref<string | null>(null);
+const fileCache = new Map<string, string | null>(),
+  /** 正在加载的文件路径(null = 无在途加载);按路径判断,避免连续切换时加载态互相覆盖 */
+  loadingPath = ref<string | null>(null),
+  fileContent = ref<string | null>(null);
 
 /** 按当前选中文件同步内容(缓存命中立即展示,未命中保持 null 等待加载) */
 function syncContent() {
@@ -323,7 +324,9 @@ async function ensureFileContent(path: string) {
 }
 
 function selectFile(path: string) {
-  if (selected.value.kind === "file" && selected.value.path === path) return;
+  if (selected.value.kind === "file" && selected.value.path === path) {
+    return;
+  }
   resetTranslation();
   selected.value = { kind: "file", path };
   onSelectImage(path);
@@ -332,26 +335,29 @@ function selectFile(path: string) {
 
 // svg 预览/源码切换:源码模式需补读文本内容,切回预览时由 ensureFileContent 的守卫清空
 watch(svgSource, () => {
-  if (selected.value.kind === "file") void ensureFileContent(selected.value.path);
+  if (selected.value.kind === "file") {
+    void ensureFileContent(selected.value.path);
+  }
 });
 
 function selectScan() {
-  if (selected.value.kind === "scan") return;
+  if (selected.value.kind === "scan") {
+    return;
+  }
   resetTranslation();
   selected.value = { kind: "scan" };
 }
 
 /** 相对链接解析基准 = 当前 md 文件所在目录(技能内相对路径,"." 表示技能根) */
 const mdBaseDir = computed(() =>
-  selected.value.kind === "file"
-    ? selected.value.path.split("/").slice(0, -1).join("/") || "."
-    : ".",
-);
-/** 技能目录内全部文件路径(链接跳转前的存在性校验) */
-const filePathSet = computed(() => new Set((tokens.value?.files ?? []).map((f) => f.path)));
-
-/** md 渲染容器(页内锚点滚动时限定查找范围) */
-const mdContainerRef = ref<HTMLElement | null>(null);
+    selected.value.kind === "file"
+      ? selected.value.path.split("/").slice(0, -1).join("/") || "."
+      : ".",
+  ),
+  /** 技能目录内全部文件路径(链接跳转前的存在性校验) */
+  filePathSet = computed(() => new Set((tokens.value?.files ?? []).map((f) => f.path))),
+  /** md 渲染容器(页内锚点滚动时限定查找范围) */
+  mdContainerRef = ref<HTMLElement | null>(null);
 
 /** GitHub 风格标题 slug:小写、去标点(保留中日韩等文字/数字/_/-)、空白转连字符 */
 function slugifyHeading(text: string): string {
@@ -365,7 +371,9 @@ function slugifyHeading(text: string): string {
 /** 页内锚点:库渲染的标题不带 id,按 GitHub slug 规则(重名追加 -1/-2)匹配并滚动到位 */
 function scrollToAnchor(hash: string) {
   const container = mdContainerRef.value;
-  if (!container) return;
+  if (!container) {
+    return;
+  }
   let target = hash;
   try {
     target = decodeURIComponent(hash);
@@ -375,8 +383,8 @@ function scrollToAnchor(hash: string) {
   target = target.toLowerCase();
   const seen = new Map<string, number>();
   for (const el of container.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6")) {
-    const base = slugifyHeading(el.textContent ?? "");
-    const count = seen.get(base) ?? 0;
+    const base = slugifyHeading(el.textContent ?? ""),
+      count = seen.get(base) ?? 0;
     seen.set(base, count + 1);
     if ((count === 0 ? base : `${base}-${count}`) === target) {
       el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -388,11 +396,15 @@ function scrollToAnchor(hash: string) {
 /** md 内链接点击:页内锚点滚动到对应标题;外链交系统浏览器;相对路径解析为技能内文件并在右侧切换查看 */
 async function onMarkdownClick(e: MouseEvent) {
   const a = (e.target as HTMLElement).closest("a");
-  if (!a) return;
+  if (!a) {
+    return;
+  }
   // MdLink 已按协议白名单过滤,这里再过一遍 safeLinkHref 兜底(防其他来源的 <a>)
   const href = safeLinkHref(a.getAttribute("href"));
   e.preventDefault();
-  if (!href) return;
+  if (!href) {
+    return;
+  }
   if (href.startsWith("#")) {
     scrollToAnchor(href.slice(1));
     return;
@@ -413,24 +425,22 @@ async function onMarkdownClick(e: MouseEvent) {
 // ── 右侧:翻译(md 文件;后端 ai_translate_markdown 优先用翻译专用配置、未配置回退
 //  设置页默认模型;译文按内容 hash 缓存 30 天;状态机与 AI 抽屉/远程审计共用)──
 const translation = useMarkdownTranslation({
-  getIdentity: () => (selected.value.kind === "file" ? selected.value.path : null),
-  getText: () => fileContent.value,
-  getLanguage: () => settingsStore.language,
-});
-const {
-  translating,
-  showTranslated,
-  hasTranslation,
-  toggle: toggleTranslate,
-  retranslate,
-  reset: resetTranslation,
-} = translation;
-
-const isTranslatable = computed(
-  () => selected.value.kind === "file" && isMarkdown(selected.value.path),
-);
-
-const displayContent = computed(() => translation.displayContent(fileContent.value ?? ""));
+    getIdentity: () => (selected.value.kind === "file" ? selected.value.path : null),
+    getText: () => fileContent.value,
+    getLanguage: () => settingsStore.language,
+  }),
+  {
+    translating,
+    showTranslated,
+    hasTranslation,
+    toggle: toggleTranslate,
+    retranslate,
+    reset: resetTranslation,
+  } = translation,
+  isTranslatable = computed(
+    () => selected.value.kind === "file" && isMarkdown(selected.value.path),
+  ),
+  displayContent = computed(() => translation.displayContent(fileContent.value ?? ""));
 
 // ── 右侧:安全扫描(静态规则 + 内置 Agent 语义层;生命周期由 useSkillScan 持有,
 //  结果展示在 components/skill-preview/SkillScanPanel)────────────────────

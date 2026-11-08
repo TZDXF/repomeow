@@ -16,19 +16,17 @@ export interface TokenizedCode {
 
 // Highlighter cache (singleton per language)
 const highlighterCache = new Map<
-  string,
-  Promise<HighlighterGeneric<BundledLanguage, BundledTheme>>
->();
-
-// Token cache
-const tokensCache = new Map<string, TokenizedCode>();
-
-// Subscribers for async token updates
-const subscribers = new Map<string, Set<(result: TokenizedCode) => void>>();
+    string,
+    Promise<HighlighterGeneric<BundledLanguage, BundledTheme>>
+  >(),
+  // Token cache
+  tokensCache = new Map<string, TokenizedCode>(),
+  // Subscribers for async token updates
+  subscribers = new Map<string, Set<(result: TokenizedCode) => void>>();
 
 function getTokensCacheKey(code: string, language: BundledLanguage) {
-  const start = code.slice(0, 100);
-  const end = code.length > 100 ? code.slice(-100) : "";
+  const start = code.slice(0, 100),
+    end = code.length > 100 ? code.slice(-100) : "";
   return `${language}:${code.length}:${start}:${end}`;
 }
 
@@ -73,10 +71,9 @@ export function highlightCode(
   language: BundledLanguage,
   callback?: (result: TokenizedCode) => void,
 ): TokenizedCode | null {
-  const tokensCacheKey = getTokensCacheKey(code, language);
-
-  // Return cached result if available
-  const cached = tokensCache.get(tokensCacheKey);
+  const tokensCacheKey = getTokensCacheKey(code, language),
+    // Return cached result if available
+    cached = tokensCache.get(tokensCacheKey);
   if (cached) {
     return cached;
   }
@@ -92,22 +89,20 @@ export function highlightCode(
   // Start highlighting in background
   getHighlighter(language)
     .then((highlighter) => {
-      const availableLangs = highlighter.getLoadedLanguages();
-      const langToUse = availableLangs.includes(language) ? language : "text";
-
-      const result = highlighter.codeToTokens(code, {
-        lang: langToUse,
-        themes: {
-          light: "github-light",
-          dark: "github-dark",
-        },
-      });
-
-      const tokenized: TokenizedCode = {
-        tokens: result.tokens,
-        fg: result.fg ?? "inherit",
-        bg: result.bg ?? "transparent",
-      };
+      const availableLangs = highlighter.getLoadedLanguages(),
+        langToUse = availableLangs.includes(language) ? language : "text",
+        result = highlighter.codeToTokens(code, {
+          lang: langToUse,
+          themes: {
+            light: "github-light",
+            dark: "github-dark",
+          },
+        }),
+        tokenized: TokenizedCode = {
+          tokens: result.tokens,
+          fg: result.fg ?? "inherit",
+          bg: result.bg ?? "transparent",
+        };
 
       // Cache the result
       tokensCache.set(tokensCacheKey, tokenized);

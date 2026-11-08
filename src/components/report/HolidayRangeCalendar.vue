@@ -28,23 +28,19 @@ import {
 } from "@/components/ui/range-calendar";
 
 /** 范围选择日历(ui RangeCalendar 的节假日版):高亮法定节假日/调休补班/周末,与报告历史日历一致 */
-const props = defineProps<RangeCalendarRootProps & { class?: HTMLAttributes["class"] }>();
-const emits = defineEmits<RangeCalendarRootEmits>();
-
-const delegatedProps = reactiveOmit(props, "class");
-
-const forwarded = useForwardPropsEmits(delegatedProps, emits);
-
-const { t, locale } = useI18n();
-const { holidaySet, workdaySet, holidayNames, workdayNames } = useHolidayData();
-
-/** 节假日判定数据(日期集合 + 真实节日名称表) */
-const dayCtx = computed<HolidayDayContext>(() => ({
-  holidaySet: holidaySet.value,
-  workdaySet: workdaySet.value,
-  holidayNames: holidayNames.value,
-  workdayNames: workdayNames.value,
-}));
+const props = defineProps<RangeCalendarRootProps & { class?: HTMLAttributes["class"] }>(),
+  emits = defineEmits<RangeCalendarRootEmits>(),
+  delegatedProps = reactiveOmit(props, "class"),
+  forwarded = useForwardPropsEmits(delegatedProps, emits),
+  { t, locale } = useI18n(),
+  { holidaySet, workdaySet, holidayNames, workdayNames } = useHolidayData(),
+  /** 节假日判定数据(日期集合 + 真实节日名称表) */
+  dayCtx = computed<HolidayDayContext>(() => ({
+    holidaySet: holidaySet.value,
+    workdaySet: workdaySet.value,
+    holidayNames: holidayNames.value,
+    workdayNames: workdayNames.value,
+  }));
 
 function dayClass(dv: DateValue): string {
   return getHolidayDayClass(dv.toString(), isWeekendDate(dv), dayCtx.value);

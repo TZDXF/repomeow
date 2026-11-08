@@ -40,7 +40,10 @@ let localKey = 0;
 export const nextDraftKey = () => `local-${localKey++}`;
 
 export function toTriState(value: boolean | undefined): CompatTriState {
-  return value === undefined ? "auto" : value ? "on" : "off";
+  if (value === undefined) {
+    return "auto";
+  }
+  return value ? "on" : "off";
 }
 
 export function draftModel(model: AiModelDef): ModelDraft {

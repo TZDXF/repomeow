@@ -14,16 +14,13 @@ defineOptions({
 });
 
 const props = defineProps<
-  ListboxFilterProps & {
-    class?: HTMLAttributes["class"];
-  }
->();
-
-const delegatedProps = reactiveOmit(props, "class");
-
-const forwardedProps = useForwardProps(delegatedProps);
-
-const { filterState } = useCommand();
+    ListboxFilterProps & {
+      class?: HTMLAttributes["class"];
+    }
+  >(),
+  delegatedProps = reactiveOmit(props, "class"),
+  forwardedProps = useForwardProps(delegatedProps),
+  { filterState } = useCommand();
 </script>
 
 <template>

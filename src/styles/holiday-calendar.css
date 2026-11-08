@@ -28,8 +28,10 @@
 /* 区间日历(RangeCalendar)的中间日期也带 data-selected,但底色透明,
    恢复红绿标注;仅起止格(另有 data-selection-start / data-selection-end)跟随主色前景。 */
 [data-slot="range-calendar"]
-  :is(.report-calendar-holiday, .report-calendar-weekend, .report-calendar-makeup)[data-selected]:not(
-    [data-selection-start]
-  ):not([data-selection-end]) {
+  :is(
+    .report-calendar-holiday,
+    .report-calendar-weekend,
+    .report-calendar-makeup
+  )[data-selected]:not([data-selection-start]):not([data-selection-end]) {
   color: var(--holiday-color);
 }

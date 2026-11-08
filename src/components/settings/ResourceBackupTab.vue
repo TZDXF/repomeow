@@ -27,30 +27,27 @@ import {
   type ResourceBackupStatus,
 } from "@/lib/resource-library";
 
-const { t } = useI18n();
+const { t } = useI18n(),
+  status = ref<ResourceBackupStatus | null>(null),
+  loading = ref(true),
+  syncing = ref(false),
+  stateVariant = computed(() => {
+    const state = status.value?.state;
+    if (state === "error") {
+      return "destructive";
+    }
+    if (state === "syncing") {
+      return "default";
+    }
+    return "outline";
+  }),
+  stateLabel = computed(() => {
+    const state = status.value?.state ?? "never";
+    return t(`settings.resources.backup.state.${state}`);
+  });
 
-const status = ref<ResourceBackupStatus | null>(null);
-const loading = ref(true);
-const syncing = ref(false);
-
-const stateVariant = computed(() => {
-  const state = status.value?.state;
-  if (state === "error") {
-    return "destructive";
-  }
-  if (state === "syncing") {
-    return "default";
-  }
-  return "outline";
-});
-
-const stateLabel = computed(() => {
-  const state = status.value?.state ?? "never";
-  return t(`settings.resources.backup.state.${state}`);
-});
-
-let disposed = false;
-let unlisten: (() => void) | null = null;
+let disposed = false,
+  unlisten: (() => void) | null = null;
 
 async function load() {
   loading.value = true;
@@ -86,7 +83,9 @@ onMounted(async () => {
   if (status.value?.configured) {
     syncResourceBackupNow()
       .then((next) => {
-        if (!disposed) status.value = next;
+        if (!disposed) {
+          status.value = next;
+        }
       })
       .catch(() => {
         // 后台检查失败静默:状态栏保留最近一次同步结果
@@ -100,10 +99,10 @@ onUnmounted(() => {
 });
 
 // 配置远端
-const configOpen = ref(false);
-const remoteUrl = ref("");
-const branch = ref("");
-const savingConfig = ref(false);
+const configOpen = ref(false),
+  remoteUrl = ref(""),
+  branch = ref(""),
+  savingConfig = ref(false);
 
 function openConfig() {
   remoteUrl.value = status.value?.remoteUrl ?? "";
@@ -146,32 +145,30 @@ async function syncNow() {
 
 // 通用确认(解除同步 / 分叉解决方向)
 type PendingConfirm = "unlink" | "resolveRemote" | "resolveLocal";
-const pendingConfirm = ref<PendingConfirm | null>(null);
-const confirmOpen = computed({
-  get: () => pendingConfirm.value !== null,
-  set: (v) => {
-    if (!v) {
-      pendingConfirm.value = null;
+const pendingConfirm = ref<PendingConfirm | null>(null),
+  confirmOpen = computed({
+    get: () => pendingConfirm.value !== null,
+    set: (v) => {
+      if (!v) {
+        pendingConfirm.value = null;
+      }
+    },
+  }),
+  confirmDescription = computed(() => {
+    switch (pendingConfirm.value) {
+      case "unlink":
+        return t("settings.resources.backup.unlinkConfirm");
+      case "resolveRemote":
+        return t("settings.resources.backup.resolveRemoteConfirm");
+      case "resolveLocal":
+        return t("settings.resources.backup.resolveLocalConfirm");
+      default:
+        return "";
     }
-  },
-});
-
-const confirmDescription = computed(() => {
-  switch (pendingConfirm.value) {
-    case "unlink":
-      return t("settings.resources.backup.unlinkConfirm");
-    case "resolveRemote":
-      return t("settings.resources.backup.resolveRemoteConfirm");
-    case "resolveLocal":
-      return t("settings.resources.backup.resolveLocalConfirm");
-    default:
-      return "";
-  }
-});
-
-const confirmDestructive = computed(
-  () => pendingConfirm.value === "unlink" || pendingConfirm.value === "resolveRemote",
-);
+  }),
+  confirmDestructive = computed(
+    () => pendingConfirm.value === "unlink" || pendingConfirm.value === "resolveRemote",
+  );
 
 async function confirm() {
   switch (pendingConfirm.value) {

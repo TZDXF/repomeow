@@ -39,17 +39,16 @@ import { useChatStore } from "@/stores/chat";
 import { useProjectsStore } from "@/stores/projects";
 import type { Project } from "@/types";
 
-const { t } = useI18n();
-const route = useRoute();
-const router = useRouter();
-const store = useProjectsStore();
-const chatOpen = ref(false);
-const chat = useChatStore();
-
-const project = computed(() => {
-  const id = Number(route.params.id);
-  return Number.isFinite(id) ? store.getProjectById(id) : undefined;
-});
+const { t } = useI18n(),
+  route = useRoute(),
+  router = useRouter(),
+  store = useProjectsStore(),
+  chatOpen = ref(false),
+  chat = useChatStore(),
+  project = computed(() => {
+    const id = Number(route.params.id);
+    return Number.isFinite(id) ? store.getProjectById(id) : undefined;
+  });
 
 // 选中项目进入详情页时刷新本地工作区状态(走后端 15s 缓存,大仓库不重复跑 git status;
 // 远端 fetch 由后端刷新循环调度,带退避治理,前端不再逐项目触发)
@@ -82,15 +81,12 @@ watch(
 // 与 npm/docker/自定义命令卡片——store 的 git 读写均以 project.path 执行并把结果回填 project.git,
 // 用副本即可让操作落在 worktree 上,且不污染列表里主工作区的状态;自定义命令按 project_id
 // 存取,副本保留原 id,增删改与「常用命令」标记仍跨工作区共享,仅执行目录跟随 worktree。
-const worktreeOpen = ref(false);
-const switcherRef = ref<InstanceType<typeof WorktreeSwitcher> | null>(null);
-const activeWorktreePath = ref<string | null>(null);
-const worktreeProject = ref<Project | null>(null);
-/** 各项目记忆的工作区选择:projectId -> worktree 绝对路径(与 useCollapsibleOpen 同走 localStorage) */
-const worktreeSelection = useLocalStorage<Record<string, string>>(
-  "repomeow.worktree-selection",
-  {},
-);
+const worktreeOpen = ref(false),
+  switcherRef = ref<InstanceType<typeof WorktreeSwitcher> | null>(null),
+  activeWorktreePath = ref<string | null>(null),
+  worktreeProject = ref<Project | null>(null),
+  /** 各项目记忆的工作区选择:projectId -> worktree 绝对路径(与 useCollapsibleOpen 同走 localStorage) */
+  worktreeSelection = useLocalStorage<Record<string, string>>("repomeow.worktree-selection", {});
 
 // 进入/切换项目时恢复记忆的工作区;选中的 worktree 是否仍存在由 WorktreeSwitcher 加载
 // 列表后校验,已删除时会把 activeWorktreePath 重置为 null(自动回退主工作区)
@@ -110,8 +106,11 @@ watch(
     const id = project.value?.id;
     if (id != null) {
       const next = { ...worktreeSelection.value };
-      if (path) next[String(id)] = path;
-      else delete next[String(id)];
+      if (path) {
+        next[String(id)] = path;
+      } else {
+        delete next[String(id)];
+      }
       worktreeSelection.value = next;
     }
     if (path && project.value) {
@@ -144,26 +143,32 @@ watch(project, (p) => {
 function onWorktreeChanged() {
   switcherRef.value?.reload();
   const target = worktreeProject.value ?? project.value;
-  if (target) store.refreshGitStatus(target, { force: true });
+  if (target) {
+    store.refreshGitStatus(target, { force: true });
+  }
 }
 
 // --- 视图切换:执行(脚本/服务/命令卡片网格)与 AI(项目 AI 资产,全宽非卡片) ---
 // 各项目独立记忆视图,避免另一个 tab 的选择覆盖当前项目。
 type DetailView = "overview" | "ai";
 const detailViews = useLocalStorage<Record<string, DetailView>>(
-  "repomeow.project-detail-views",
-  {},
-);
-const detailView = computed<DetailView>({
-  get: () => detailViews.value[String(project.value?.id)] ?? "overview",
-  set: (value) => {
-    if (project.value) detailViews.value = { ...detailViews.value, [project.value.id]: value };
-  },
-});
+    "repomeow.project-detail-views",
+    {},
+  ),
+  detailView = computed<DetailView>({
+    get: () => detailViews.value[String(project.value?.id)] ?? "overview",
+    set: (value) => {
+      if (project.value) {
+        detailViews.value = { ...detailViews.value, [project.value.id]: value };
+      }
+    },
+  });
 
 // --- 收藏切换(收藏项目在列表中置顶) ---
 async function toggleFavorite() {
-  if (!project.value) return;
+  if (!project.value) {
+    return;
+  }
   const favorite = !project.value.favorited_at;
   try {
     await store.setFavorite(project.value.id, favorite);
@@ -178,12 +183,14 @@ async function toggleFavorite() {
 }
 
 // --- 名称内联编辑 ---
-const editingName = ref(false);
-const draftName = ref("");
-const nameInput = ref<InstanceType<typeof Input> | null>(null);
+const editingName = ref(false),
+  draftName = ref(""),
+  nameInput = ref<InstanceType<typeof Input> | null>(null);
 
 function startEditName() {
-  if (!project.value) return;
+  if (!project.value) {
+    return;
+  }
   draftName.value = project.value.name;
   editingName.value = true;
   // Input 未 defineExpose,经 $el 取实际 input 元素
@@ -191,10 +198,14 @@ function startEditName() {
 }
 
 async function saveName() {
-  if (!editingName.value || !project.value) return;
+  if (!editingName.value || !project.value) {
+    return;
+  }
   editingName.value = false;
   const name = draftName.value.trim();
-  if (!name || name === project.value.name) return;
+  if (!name || name === project.value.name) {
+    return;
+  }
   try {
     await store.updateProject(project.value.id, name, project.value.description);
     toast.success(t("projects.detail.saved"));
@@ -204,12 +215,14 @@ async function saveName() {
 }
 
 // --- 描述内联编辑 ---
-const editingDesc = ref(false);
-const draftDesc = ref("");
-const descInput = ref<InstanceType<typeof Textarea> | null>(null);
+const editingDesc = ref(false),
+  draftDesc = ref(""),
+  descInput = ref<InstanceType<typeof Textarea> | null>(null);
 
 function startEditDesc() {
-  if (!project.value) return;
+  if (!project.value) {
+    return;
+  }
   draftDesc.value = project.value.description;
   editingDesc.value = true;
   // Textarea 未 defineExpose,经 $el 取实际 textarea 元素
@@ -217,10 +230,14 @@ function startEditDesc() {
 }
 
 async function saveDesc() {
-  if (!editingDesc.value || !project.value) return;
+  if (!editingDesc.value || !project.value) {
+    return;
+  }
   editingDesc.value = false;
   const description = draftDesc.value.trim();
-  if (description === project.value.description) return;
+  if (description === project.value.description) {
+    return;
+  }
   try {
     await store.updateProject(project.value.id, project.value.name, description);
     toast.success(t("projects.detail.saved"));

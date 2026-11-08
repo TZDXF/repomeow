@@ -48,10 +48,15 @@ function runId(prefix: string): string {
 }
 
 function bindCancellation(id: string, signal?: AbortSignal): () => void {
-  if (!signal) return () => {};
+  if (!signal) {
+    return () => {};
+  }
   const cancel = () => void cmd<void>("ai_cancel_run", { runId: id }).catch(() => {});
-  if (signal.aborted) cancel();
-  else signal.addEventListener("abort", cancel, { once: true });
+  if (signal.aborted) {
+    cancel();
+  } else {
+    signal.addEventListener("abort", cancel, { once: true });
+  }
   return () => signal.removeEventListener("abort", cancel);
 }
 
@@ -63,8 +68,8 @@ export async function generateCommitMessage(
   paths?: string[] | null,
   signal?: AbortSignal,
 ): Promise<string | null> {
-  const id = runId("commit");
-  const unbind = bindCancellation(id, signal);
+  const id = runId("commit"),
+    unbind = bindCancellation(id, signal);
   try {
     return await cmd<string | null>("ai_generate_commit_message", {
       request: {
@@ -90,8 +95,8 @@ export async function generateAgentsMd(
   language: SupportedLocale,
   options?: { model?: string; thinking?: string; signal?: AbortSignal },
 ): Promise<boolean | null> {
-  const id = runId("agents-md");
-  const unbind = bindCancellation(id, options?.signal);
+  const id = runId("agents-md"),
+    unbind = bindCancellation(id, options?.signal);
   try {
     return await cmd<boolean | null>("ai_generate_agents_md", {
       request: {
@@ -111,8 +116,8 @@ export async function generateAndSaveReport(
   input: ReportGenerationInput,
   signal?: AbortSignal,
 ): Promise<GeneratedReport | null> {
-  const id = runId("report");
-  const unbind = bindCancellation(id, signal);
+  const id = runId("report"),
+    unbind = bindCancellation(id, signal);
   try {
     return await cmd<GeneratedReport | null>("ai_generate_and_save_report", {
       request: { runId: id, ...input },
@@ -135,9 +140,9 @@ export async function generateBatchReports(
   signal: AbortSignal,
   onEvent: (event: BatchReportStatusEvent) => void,
 ): Promise<void> {
-  const id = runId("batch-report");
-  const unbind = bindCancellation(id, signal);
-  const channel = new Channel<BatchReportStatusEvent>();
+  const id = runId("batch-report"),
+    unbind = bindCancellation(id, signal),
+    channel = new Channel<BatchReportStatusEvent>();
   channel.onmessage = onEvent;
   try {
     await cmd<void>("ai_generate_batch_reports", {

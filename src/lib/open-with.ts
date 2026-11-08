@@ -204,8 +204,8 @@ export function normalizeOpenWithOrder(
   saved: readonly unknown[],
   customOpenWith: readonly CustomOpenWith[] = [],
 ): OpenWithId[] {
-  const all = openWithOptions(customOpenWith).map((option) => option.id);
-  const kept = saved.filter((id): id is OpenWithId => all.includes(id as OpenWithId));
+  const all = openWithOptions(customOpenWith).map((option) => option.id),
+    kept = saved.filter((id): id is OpenWithId => all.includes(id as OpenWithId));
   return [...kept, ...all.filter((id) => !kept.includes(id))];
 }
 

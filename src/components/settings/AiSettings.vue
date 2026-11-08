@@ -35,23 +35,22 @@ import {
 import { useAiConfigStore } from "@/stores/ai-config";
 import { useSettingsStore } from "@/stores/settings";
 
-const { t } = useI18n();
-const store = useAiConfigStore();
-const settings = useSettingsStore();
+const { t } = useI18n(),
+  store = useAiConfigStore(),
+  settings = useSettingsStore(),
+  // ── 本地编辑副本(API Key 类输入不适合边敲边存,点「保存」才全量落盘) ──
 
-// ── 本地编辑副本(API Key 类输入不适合边敲边存,点「保存」才全量落盘) ──
-
-const drafts = ref<ProviderDraft[]>([]);
-const defaultRef = ref<AiModelRef | null>(null);
-const chatPrefs = ref(emptyChatPrefs());
-const taskModels = ref<AiTaskModels>({});
-const modelPurposes = ["commit", "report", "translation"] as const;
-const loading = ref(false);
-const saving = ref(false);
-const testing = ref(false);
-const fetchingKey = ref<string | null>(null);
-const confirmDeleteKey = ref<string | null>(null);
-const openMap = reactive<Record<string, boolean>>({});
+  drafts = ref<ProviderDraft[]>([]),
+  defaultRef = ref<AiModelRef | null>(null),
+  chatPrefs = ref(emptyChatPrefs()),
+  taskModels = ref<AiTaskModels>({}),
+  modelPurposes = ["commit", "report", "translation"] as const,
+  loading = ref(false),
+  saving = ref(false),
+  testing = ref(false),
+  fetchingKey = ref<string | null>(null),
+  confirmDeleteKey = ref<string | null>(null),
+  openMap = reactive<Record<string, boolean>>({});
 
 function draftProvider(id: string, provider: AiProvider): ProviderDraft {
   return {
@@ -92,12 +91,11 @@ onMounted(async () => {
 
 // ── 添加厂商 / 从 CC Switch 导入(对话框抽为子组件,确认后并入草稿) ────
 
-const addDialogOpen = ref(false);
-const builtinCatalog = ref<Record<string, AiProvider>>({});
-const ccSwitchDialogOpen = ref(false);
-
-/** 已占用的厂商 id(传给添加对话框做去重与选项过滤) */
-const existingProviderIds = computed(() => drafts.value.map((draft) => draft.id.trim()));
+const addDialogOpen = ref(false),
+  builtinCatalog = ref<Record<string, AiProvider>>({}),
+  ccSwitchDialogOpen = ref(false),
+  /** 已占用的厂商 id(传给添加对话框做去重与选项过滤) */
+  existingProviderIds = computed(() => drafts.value.map((draft) => draft.id.trim()));
 
 function onAddProvider(payload: {
   id: string;
@@ -122,12 +120,16 @@ function onAddProvider(payload: {
 
 /** 为导入的厂商生成不与现有草稿冲突的 id(重复时追加 -2/-3 后缀) */
 function uniqueProviderId(base: string): string {
-  const used = new Set(drafts.value.map((draft) => draft.id.trim()));
-  const root = base.trim() || "imported";
-  if (!used.has(root)) return root;
+  const used = new Set(drafts.value.map((draft) => draft.id.trim())),
+    root = base.trim() || "imported";
+  if (!used.has(root)) {
+    return root;
+  }
   for (let index = 2; ; index++) {
     const candidate = `${root}-${index}`;
-    if (!used.has(candidate)) return candidate;
+    if (!used.has(candidate)) {
+      return candidate;
+    }
   }
 }
 
@@ -155,7 +157,9 @@ function removeProvider(draft: ProviderDraft) {
   if (confirmDeleteKey.value !== draft.key) {
     confirmDeleteKey.value = draft.key;
     setTimeout(() => {
-      if (confirmDeleteKey.value === draft.key) confirmDeleteKey.value = null;
+      if (confirmDeleteKey.value === draft.key) {
+        confirmDeleteKey.value = null;
+      }
     }, 3000);
     return;
   }
@@ -171,7 +175,9 @@ const fetchedModels = reactive<Record<string, string[]>>({});
 
 /** 拉取厂商模型列表,作为模型 ID 输入框的下拉候选 */
 async function fetchModels(draft: ProviderDraft) {
-  if (fetchingKey.value) return;
+  if (fetchingKey.value) {
+    return;
+  }
   fetchingKey.value = draft.key;
   try {
     const list = await fetchAiModels(draft.baseUrl.trim(), draft.apiKey.trim(), draft.api);
@@ -188,26 +194,25 @@ async function fetchModels(draft: ProviderDraft) {
 // ── 默认模型 ─────────────────────────────────────────────────────────
 
 const modelGroups = computed<ModelSelectorGroup[]>(() =>
-  drafts.value
-    .filter((draft) => draft.id.trim())
-    .map((draft) => ({
-      providerId: draft.id.trim(),
-      providerName: draft.name.trim() || draft.id.trim(),
-      models: draft.models
-        .filter((model) => model.id.trim())
-        .map((model) => ({
-          ...model.source,
-          id: model.id.trim(),
-          api: model.api || undefined,
-          name: model.name.trim(),
-          reasoning: true,
-        })),
-    })),
-);
-
-const defaultModelValue = computed(() =>
-  defaultRef.value ? modelOptionValue(defaultRef.value.providerId, defaultRef.value.modelId) : "",
-);
+    drafts.value
+      .filter((draft) => draft.id.trim())
+      .map((draft) => ({
+        providerId: draft.id.trim(),
+        providerName: draft.name.trim() || draft.id.trim(),
+        models: draft.models
+          .filter((model) => model.id.trim())
+          .map((model) => ({
+            ...model.source,
+            id: model.id.trim(),
+            api: model.api || undefined,
+            name: model.name.trim(),
+            reasoning: true,
+          })),
+      })),
+  ),
+  defaultModelValue = computed(() =>
+    defaultRef.value ? modelOptionValue(defaultRef.value.providerId, defaultRef.value.modelId) : "",
+  );
 
 function onDefaultModelChange(value: string) {
   defaultRef.value = parseModelOptionValue(value);
@@ -234,19 +239,25 @@ function parseTokenCount(value: string): number {
  * 保留 UI 未暴露的既有字段(thinkingFormat 等),全 auto 且无残留时返回 undefined。
  */
 function buildCompat(model: ModelDraft): AiModelCompat | undefined {
-  const compat: AiModelCompat = { ...model.source.compat };
-  const applyTri = (
-    key: "supportsDeveloperRole" | "supportsReasoningEffort" | "supportsStore",
-    state: CompatTriState,
-  ) => {
-    if (state === "auto") delete compat[key];
-    else compat[key] = state === "on";
-  };
+  const compat: AiModelCompat = { ...model.source.compat },
+    applyTri = (
+      key: "supportsDeveloperRole" | "supportsReasoningEffort" | "supportsStore",
+      state: CompatTriState,
+    ) => {
+      if (state === "auto") {
+        delete compat[key];
+      } else {
+        compat[key] = state === "on";
+      }
+    };
   applyTri("supportsDeveloperRole", model.compat.supportsDeveloperRole);
   applyTri("supportsReasoningEffort", model.compat.supportsReasoningEffort);
   applyTri("supportsStore", model.compat.supportsStore);
-  if (model.compat.maxTokensField === "auto") delete compat.maxTokensField;
-  else compat.maxTokensField = model.compat.maxTokensField;
+  if (model.compat.maxTokensField === "auto") {
+    delete compat.maxTokensField;
+  } else {
+    compat.maxTokensField = model.compat.maxTokensField;
+  }
   return Object.keys(compat).length > 0 ? compat : undefined;
 }
 
@@ -288,9 +299,13 @@ function buildProviders(): Record<string, AiProvider> | null {
 
 async function save(): Promise<void> {
   const providers = buildProviders();
-  if (!providers) return;
+  if (!providers) {
+    return;
+  }
   const base = store.config;
-  if (!base) return;
+  if (!base) {
+    return;
+  }
   saving.value = true;
   try {
     await store.save({
@@ -318,7 +333,9 @@ async function save(): Promise<void> {
 }
 
 async function testConnection() {
-  if (testing.value) return;
+  if (testing.value) {
+    return;
+  }
   testing.value = true;
   try {
     // 先落库当前表单值,测试使用的就是界面上看到的默认模型

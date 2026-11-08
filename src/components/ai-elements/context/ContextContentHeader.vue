@@ -6,31 +6,29 @@ import { cn } from "@/lib/utils";
 import { contextPercent, formatContextPercent, useContextValue } from "./context";
 
 const props = defineProps<{
-  class?: HTMLAttributes["class"];
-}>();
-
-const { usedTokens, maxTokens } = useContextValue();
-
-const percent = computed(() => contextPercent(usedTokens.value, maxTokens.value));
-const displayPct = computed(() =>
-  percent.value != null ? formatContextPercent(percent.value) : "—",
-);
-const used = computed(() => (usedTokens.value == null ? "—" : formatTokenCount(usedTokens.value)));
-const total = computed(() =>
-  maxTokens.value && maxTokens.value > 0 ? formatTokenCount(maxTokens.value) : null,
-);
-
-/** 占用分档着色:<70% 常规、<90% 提醒、其余警示 */
-const barTone = computed(() => {
-  const value = (percent.value ?? 0) * 100;
-  if (value >= 90) return "bg-destructive";
-  if (value >= 70) return "bg-amber-500";
-  return "bg-primary";
-});
-
-const barWidth = computed(() =>
-  percent.value == null || percent.value <= 0 ? "0%" : `${Math.max(2, percent.value * 100)}%`,
-);
+    class?: HTMLAttributes["class"];
+  }>(),
+  { usedTokens, maxTokens } = useContextValue(),
+  percent = computed(() => contextPercent(usedTokens.value, maxTokens.value)),
+  displayPct = computed(() => (percent.value != null ? formatContextPercent(percent.value) : "—")),
+  used = computed(() => (usedTokens.value == null ? "—" : formatTokenCount(usedTokens.value))),
+  total = computed(() =>
+    maxTokens.value && maxTokens.value > 0 ? formatTokenCount(maxTokens.value) : null,
+  ),
+  /** 占用分档着色:<70% 常规、<90% 提醒、其余警示 */
+  barTone = computed(() => {
+    const value = (percent.value ?? 0) * 100;
+    if (value >= 90) {
+      return "bg-destructive";
+    }
+    if (value >= 70) {
+      return "bg-amber-500";
+    }
+    return "bg-primary";
+  }),
+  barWidth = computed(() =>
+    percent.value == null || percent.value <= 0 ? "0%" : `${Math.max(2, percent.value * 100)}%`,
+  );
 </script>
 
 <template>

@@ -14,18 +14,17 @@ const { t } = useI18n();
 type ResourceTabId = ResourceSettingsTab;
 
 const tabComponents: Record<ResourceTabId, { icon: Component; component: Component }> = {
-  skills: { icon: Boxes, component: ResourceSkillsTab },
-  mcp: { icon: Cable, component: ResourceMcpTab },
-  agents: { icon: Bot, component: ResourceAgentsTab },
-  backup: { icon: DatabaseBackup, component: ResourceBackupTab },
-  market: { icon: Store, component: ResourceMarketplaceTab },
-};
-const tabs = resourceSettingsTabs.map((id) => ({ id, ...tabComponents[id] }));
-
-const activeTab = ref<ResourceTabId>("skills");
-const activeComponent = computed(
-  () => tabs.find((tab) => tab.id === activeTab.value)?.component ?? ResourceSkillsTab,
-);
+    skills: { icon: Boxes, component: ResourceSkillsTab },
+    mcp: { icon: Cable, component: ResourceMcpTab },
+    agents: { icon: Bot, component: ResourceAgentsTab },
+    backup: { icon: DatabaseBackup, component: ResourceBackupTab },
+    market: { icon: Store, component: ResourceMarketplaceTab },
+  },
+  tabs = resourceSettingsTabs.map((id) => ({ id, ...tabComponents[id] })),
+  activeTab = ref<ResourceTabId>("skills"),
+  activeComponent = computed(
+    () => tabs.find((tab) => tab.id === activeTab.value)?.component ?? ResourceSkillsTab,
+  );
 
 function selectTab(tab: ResourceTabId) {
   activeTab.value = tab;

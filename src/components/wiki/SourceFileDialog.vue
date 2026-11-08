@@ -14,35 +14,36 @@ import type { FilePreview } from "@/types";
  * chips 带来源行区间(startLine/endLine,页面 LLM 标注)时定位并高亮对应行
  */
 const props = defineProps<{
-  /** 项目根目录 */
-  root: string;
-  /** 要查看的仓库内相对路径;null 表示关闭 */
-  relPath: string | null;
-  /** 来源行区间(1-based 闭区间);无标注时为 null */
-  startLine?: number | null;
-  endLine?: number | null;
-}>();
-const emit = defineEmits<{ (e: "close"): void }>();
-
-const { t } = useI18n();
-
-const open = computed({
-  get: () => props.relPath !== null,
-  set: (v: boolean) => {
-    if (!v) emit("close");
-  },
-});
-
-const preview = ref<FilePreview | null>(null);
-const loading = ref(false);
-const viewer = ref<InstanceType<typeof CodeViewer> | null>(null);
-let loadSeq = 0;
-/** 当前已加载预览对应的路径(同文件换行区间时避免重复读取) */
-let loadedPath: string | null = null;
+    /** 项目根目录 */
+    root: string;
+    /** 要查看的仓库内相对路径;null 表示关闭 */
+    relPath: string | null;
+    /** 来源行区间(1-based 闭区间);无标注时为 null */
+    startLine?: number | null;
+    endLine?: number | null;
+  }>(),
+  emit = defineEmits<{ (e: "close"): void }>(),
+  { t } = useI18n(),
+  open = computed({
+    get: () => props.relPath !== null,
+    set: (v: boolean) => {
+      if (!v) {
+        emit("close");
+      }
+    },
+  }),
+  preview = ref<FilePreview | null>(null),
+  loading = ref(false),
+  viewer = ref<InstanceType<typeof CodeViewer> | null>(null);
+let loadSeq = 0,
+  /** 当前已加载预览对应的路径(同文件换行区间时避免重复读取) */
+  loadedPath: string | null = null;
 
 /** 加载完成后定位到来源行区间(等 CodeViewer 挂载;越界由 revealLines 收敛) */
 async function revealSourceRange() {
-  if (!props.startLine) return;
+  if (!props.startLine) {
+    return;
+  }
   await nextTick();
   viewer.value?.revealLines(props.startLine, props.endLine ?? undefined);
 }
@@ -73,17 +74,25 @@ watch(
         loadedPath = rel;
       }
     } catch {
-      if (seq === loadSeq) preview.value = null;
+      if (seq === loadSeq) {
+        preview.value = null;
+      }
     } finally {
-      if (seq === loadSeq) loading.value = false;
+      if (seq === loadSeq) {
+        loading.value = false;
+      }
     }
-    if (seq === loadSeq) await revealSourceRange();
+    if (seq === loadSeq) {
+      await revealSourceRange();
+    }
   },
 );
 
 /** 标题上的行区间后缀(如 :12-40) */
 const rangeLabel = computed(() => {
-  if (!props.startLine) return "";
+  if (!props.startLine) {
+    return "";
+  }
   const end = props.endLine ?? props.startLine;
   return end > props.startLine ? `:${props.startLine}-${end}` : `:${props.startLine}`;
 });

@@ -35,7 +35,9 @@ type ContentDownloadType = "code" | "mermaid" | "table";
 export function createTableCustomize(t: ComposerTranslation) {
   return (builtinControls: Control[]): Control[] => {
     return builtinControls.map((c) => {
-      if (c.key !== "download") return c;
+      if (c.key !== "download") {
+        return c;
+      }
       return {
         ...c,
         // 去掉 options,避免 Dropdown;改成单击按钮直接弹 save dialog
@@ -47,24 +49,28 @@ export function createTableCustomize(t: ComposerTranslation) {
               toast.error(t("markdown.tableNotFound"));
               return;
             }
-            const data = extractTableData(tableEl);
-            const path = await save({
-              title: t("markdown.saveDialogTitle"),
-              defaultPath: "table.csv",
-              filters: [
-                { name: "CSV", extensions: ["csv"] },
-                { name: "TSV", extensions: ["tsv"] },
-                { name: "Markdown", extensions: ["md"] },
-              ],
-            });
-            if (!path) return;
+            const data = extractTableData(tableEl),
+              path = await save({
+                title: t("markdown.saveDialogTitle"),
+                defaultPath: "table.csv",
+                filters: [
+                  { name: "CSV", extensions: ["csv"] },
+                  { name: "TSV", extensions: ["tsv"] },
+                  { name: "Markdown", extensions: ["md"] },
+                ],
+              });
+            if (!path) {
+              return;
+            }
             const ext = path.split(".").pop()?.toLowerCase() ?? "";
-            const content =
-              ext === "tsv"
-                ? tableDataToTSV(data)
-                : ext === "md" || ext === "markdown"
-                  ? tableDataToMarkdown(data)
-                  : tableDataToCSV(data);
+            let content: string;
+            if (ext === "tsv") {
+              content = tableDataToTSV(data);
+            } else if (ext === "md" || ext === "markdown") {
+              content = tableDataToMarkdown(data);
+            } else {
+              content = tableDataToCSV(data);
+            }
             await cmd<void>("save_text_file", { path, content });
             toast.success(t("markdown.savedAs", { path }));
           } catch (e) {
@@ -86,16 +92,20 @@ export function createTableCustomize(t: ComposerTranslation) {
 export function createBeforeDownload(t: ComposerTranslation) {
   return async (event: DownloadEvent) => {
     // 图片(type: "image")走库默认 a[download] 处理即可
-    if (event.type === "image") return true;
-    const contentType = event.type satisfies ContentDownloadType;
-    const filename = defaultFilename(contentType);
+    if (event.type === "image") {
+      return true;
+    }
+    const contentType = event.type satisfies ContentDownloadType,
+      filename = defaultFilename(contentType);
     try {
       const path = await save({
         title: t("markdown.saveDialogTitle"),
         defaultPath: filename,
         filters: filtersFor(contentType),
       });
-      if (!path) return false;
+      if (!path) {
+        return false;
+      }
       await cmd<void>("save_text_file", { path, content: event.content });
       toast.success(t("markdown.savedAs", { path }));
       return false;
@@ -107,13 +117,15 @@ export function createBeforeDownload(t: ComposerTranslation) {
 }
 
 function findTableElement(start: HTMLElement | null): HTMLTableElement | null {
-  if (!start) return null;
+  if (!start) {
+    return null;
+  }
   // toolbar 与 table 是兄弟节点(都在 [data-stream-markdown="table-wrapper"] 内),
   // closest('table') 走祖先链会找不到 table。
   // 可靠路径:从触发元素自己开始向上找最近的 table-wrapper → 在其子树中找 <table>。
   // 这样全屏 Modal 内的 toolbar 也能找到 modal 自己的表格(而不是外面的)。
-  let el: HTMLElement | null = start;
-  let wrapper: HTMLElement | null = null;
+  let el: HTMLElement | null = start,
+    wrapper: HTMLElement | null = null;
   while (el) {
     if (el.dataset.streamMarkdown === "table-wrapper") {
       wrapper = el;

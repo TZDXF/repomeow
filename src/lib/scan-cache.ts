@@ -34,12 +34,14 @@ interface ScanCacheSchema extends DBSchema {
 
 type CacheDb = IDBPDatabase<ScanCacheSchema>;
 
-let dbPromise: Promise<CacheDb | null> | null = null;
-/** 每个应用会话只在首次打开时全量清扫一次过期条目 */
-let swept = false;
+let dbPromise: Promise<CacheDb | null> | null = null,
+  /** 每个应用会话只在首次打开时全量清扫一次过期条目 */
+  swept = false;
 
 function openCacheDb(): Promise<CacheDb | null> {
-  if (typeof indexedDB === "undefined") return Promise.resolve(null);
+  if (typeof indexedDB === "undefined") {
+    return Promise.resolve(null);
+  }
   dbPromise ??= openDB<ScanCacheSchema>(SCAN_CACHE_DB, 1, {
     upgrade(db) {
       const store = db.createObjectStore(SCAN_CACHE_STORE);
@@ -58,13 +60,21 @@ export async function getCachedScanReport(
   skillId: string,
   fingerprint: string,
 ): Promise<ResourceSkillScanReport | null> {
-  if (!skillId || !fingerprint) return null;
+  if (!skillId || !fingerprint) {
+    return null;
+  }
   try {
     const db = await openCacheDb();
-    if (!db) return null;
+    if (!db) {
+      return null;
+    }
     const entry = await db.get(SCAN_CACHE_STORE, skillId);
-    if (!entry) return null;
-    if (entry.fingerprint !== fingerprint) return null;
+    if (!entry) {
+      return null;
+    }
+    if (entry.fingerprint !== fingerprint) {
+      return null;
+    }
     if (entry.createdAt + SCAN_CACHE_TTL_MS <= Date.now()) {
       void db.delete(SCAN_CACHE_STORE, skillId);
       return null;
@@ -81,10 +91,14 @@ export async function putCachedScanReport(
   fingerprint: string,
   report: ResourceSkillScanReport,
 ): Promise<void> {
-  if (!skillId || !fingerprint) return;
+  if (!skillId || !fingerprint) {
+    return;
+  }
   try {
     const db = await openCacheDb();
-    if (!db) return;
+    if (!db) {
+      return;
+    }
     const entry: ScanCacheEntry = { fingerprint, report, createdAt: Date.now() };
     await db.put(SCAN_CACHE_STORE, entry, skillId);
   } catch {
@@ -96,7 +110,9 @@ export async function putCachedScanReport(
 export async function purgeExpiredScans(): Promise<void> {
   try {
     const db = await openCacheDb();
-    if (db) await sweepExpired(db);
+    if (db) {
+      await sweepExpired(db);
+    }
   } catch {
     // 清扫失败无碍,下次会话再试
   }
@@ -104,12 +120,12 @@ export async function purgeExpiredScans(): Promise<void> {
 
 async function sweepExpired(db: CacheDb): Promise<void> {
   try {
-    const tx = db.transaction(SCAN_CACHE_STORE, "readwrite");
-    const cutoff = Date.now() - SCAN_CACHE_TTL_MS;
-    const expiredKeys = await tx.store
-      .index("createdAt")
-      .getAllKeys(IDBKeyRange.upperBound(cutoff));
-    for (const key of expiredKeys) tx.store.delete(key);
+    const tx = db.transaction(SCAN_CACHE_STORE, "readwrite"),
+      cutoff = Date.now() - SCAN_CACHE_TTL_MS,
+      expiredKeys = await tx.store.index("createdAt").getAllKeys(IDBKeyRange.upperBound(cutoff));
+    for (const key of expiredKeys) {
+      tx.store.delete(key);
+    }
     await tx.done;
   } catch {
     // 同上,清扫失败静默
