@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "vue-tsc --noEmit && vite build && node scripts/check-entry-bundle.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "sem:prepare": "node scripts/sem/prepare.mjs",
@@ -13,7 +13,7 @@
     "cli:dev": "cargo run --manifest-path src-tauri/Cargo.toml --",
     "start": "pnpm sem:prepare && tauri dev --config src-tauri/tauri.dev.conf.json",
     "build:desktop": "pnpm sem:prepare && tauri build",
-    "lint": "oxlint .",
+    "lint": "oxlint . --max-warnings=0",
     "lint:fix": "oxlint . --fix",
     "format": "oxfmt --write src/",
     "format:check": "oxfmt --check src/",
@@ -104,6 +104,9 @@
     "vue-tsc": "^3.3.11"
   },
   "packageManager": "pnpm@11.10.0",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
   "pnpm": {
     "ignoredBuiltDependencies": [
       "esbuild"

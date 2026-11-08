@@ -9,9 +9,9 @@
 
 ## 项目概述
 
-**RepoMeow(喵库)**:Tauri 2 + Vue 3 + TypeScript 桌面应用(当前版本 0.2.0),本地开发项目管理中心。功能包括:项目登记/归档、npm scripts 与自定义命令执行、Docker compose 服务管理、Git 状态与写操作(提交/拉取/推送/分支切换)、README Markdown 渲染、Wiki 生成、项目 AI 问答(chat)、AI 资源库、定时报告、标签、多编辑器打开、系统托盘。
+**RepoMeow(喵库)**:Tauri 2 + Vue 3 + TypeScript 桌面应用(版本以 `package.json` 与 `src-tauri/Cargo.toml` 为准),本地开发项目管理中心。功能包括:项目登记/归档、npm scripts 与自定义命令执行、Docker compose 服务管理、Git 状态与写操作(提交/拉取/推送/分支切换)、README Markdown 渲染、Wiki 生成、项目 AI 问答(chat)、AI 资源库、定时报告、标签、多编辑器打开、系统托盘。
 
-- 包管理器:**pnpm**(存在 `pnpm-lock.yaml` / `pnpm-workspace.yaml`,勿用 npm)。
+- 包管理器:**pnpm 11.10.0**(存在 `pnpm-lock.yaml` / `pnpm-workspace.yaml`,勿用 npm);Node 为 `^20.19.0 || >=22.12.0`(`package.json` engines 与 Vite 8 一致,CI 使用 22)。
 - 主要平台:Windows 本地开发为主;release.yml 以四 job 矩阵同时发布 Windows(NSIS)/ macOS(dmg,arm64+x64)/ Linux(deb+AppImage)。
 - 提交信息:**gitmoji + conventional 前缀 + 中文**,单行详细描述,参考 `git log`(例:`🐛 fix(project-ai): 修复…——原因与方案;验证:oxlint / pnpm build 通过`)。
 
@@ -21,7 +21,7 @@
 | --- | --- |
 | `pnpm start` | `sem:prepare && tauri dev --config src-tauri/tauri.dev.conf.json`,完整桌面端开发(前端 + Rust);dev 用独立 identifier 以便与安装版同时运行(见关键规则 2) |
 | `pnpm dev` | 仅 Vite 前端(端口 1420,见 `tauri.conf.json` devUrl) |
-| `pnpm build` | `vue-tsc --noEmit && vite build`,**唯一的类型检查手段** |
+| `pnpm build` | `vue-tsc --noEmit && vite build` + 首屏入口 500 KiB 预算检查,**唯一的类型检查手段** |
 | `pnpm build:desktop` | `sem:prepare && tauri build` 打包(NSIS) |
 | `pnpm lint` / `pnpm lint:fix` | `oxlint .` 静态检查 / 自动修复 |
 | `pnpm format` / `pnpm format:check` | `oxfmt --write src/` 格式化 / 仅检查 |
@@ -73,7 +73,7 @@ src-tauri/src/
   time_util.rs          now_ts 等时间戳统一入口(勿散写 chrono::Utc::now())
   background_task.rs    后台任务进度事件守卫(background://task-progress)
   tray.rs / workday.rs  系统托盘 + 迷你弹窗;chinese-days 节假日缓存
-src-tauri/migrations/   SQL 迁移 NNN_name.sql(当前 001~011)
+src-tauri/migrations/   SQL 迁移 NNN_name.sql(完整清单以该目录与 `db/migrations.rs` 为准)
 scripts/                sem/(sidecar 下载)、release/(发布流程)
 ```
 
@@ -81,7 +81,7 @@ scripts/                sem/(sidecar 下载)、release/(发布流程)
 
 1. **新增 Rust 命令**:在 `commands/` 对应域实现(返回 `AppResult<T>`)后,必须在 `lib.rs` 的 `invoke_handler!` 注册;前端经 `cmd<T>("snake_case 名", { camelCase 参数 })` 调用(Tauri 自动映射参数名)。
 2. **插件**(`Cargo.toml` + `lib.rs`):`tauri` 启用 `protocol-asset` / `tray-icon` / `image-png`;插件注册顺序:single-instance(**必须最先**,二次启动聚焦已有窗口)→ opener / dialog / shell / store / updater / process / autostart(自启附 `--autostart` 参数)。single-instance 在 Windows 上按 `tauri.conf.json` 的 `identifier` 派生判重 mutex,WebView2 用户数据目录同样按 identifier 落在 `%LOCALAPPDATA%`;dev 经 `tauri.dev.conf.json`(`pnpm start` 的 `--config` 参数,仅 dev 生效)覆盖为 `com.repomeow.dev`,使 dev 与安装版可同时运行,发布构建不经过该文件、identifier 保持 `com.repomeow.app`。
-3. **数据库**:SQLite 位于 `~/.repomeow/projects.db`。迁移按 `PRAGMA user_version` 顺序应用、保证幂等;每个迁移文件顶部用 `-- App version: x.y.z` 与 `-- Status: in development|released` 标注。版本发布后不得修改已发布的迁移文件,结构变更新增 `00N_xxx.sql`;未发布的开发版本内可直接改当前版本定义。当前已应用 001_init ~ 011_system_schedules。
+3. **数据库**:SQLite 位于 `~/.repomeow/projects.db`。迁移按 `PRAGMA user_version` 顺序应用、保证幂等;每个迁移文件顶部用 `-- App version: x.y.z` 与 `-- Status: in development|released` 标注。版本发布后不得修改已发布的迁移文件,结构变更新增 `00N_xxx.sql`;未发布的开发版本内可直接改当前版本定义。新增迁移时同步检查目录清单与加载逻辑，不在代理文档中硬编码易过期的当前范围。
 4. **应用数据目录 `.repomeow`**:Rust(`lib.rs` 的 `APP_DATA_DIR_NAME`)与前端(`stores/settings.ts`)各有一份常量,改动需同步。设置走 `tauri-plugin-store` → `~/.repomeow/settings.json`;AI 提示词存 `~/.repomeow/prompts/*.md`;AI 接入配置存 `~/.repomeow/ai-config.json`;Wiki 存 `~/.repomeow/wiki/<basename>-<hash>/`;运行期缓存(编辑器图标、chinese-days)在安装目录 `data/` 下(`lib.rs` 的 `runtime_data_root()`,dev 模式落在 `target/debug/data/`),安装目录不可写时静默降级。
 5. **窗口与生命周期**:主窗口默认 `visible: false`,启动时统一 `show()`;带 `--autostart` 保持隐藏仅驻留托盘。托盘迷你弹窗(`TRAY_POPUP_LABEL`)永不真正关闭(失焦收起);主窗口关闭行为按设置项 `closeAction`(tray=最小化到托盘 / exit=退出进程)。
 6. **后台任务**(`lib.rs` setup):`scheduler::run(handle)` 定时报告调度;`commands::git::monitor_loop(handle)` 统一 Git 检查循环并 emit `git://project-changed`;资源库启动同步检查 `commands::ai::startup_sync_check`。Git 更新后的联动逻辑订阅该事件,勿新增独立轮询。
@@ -91,4 +91,4 @@ scripts/                sem/(sidecar 下载)、release/(发布流程)
 10. **内置 CLI + Skills**:`main.rs` 在 Tauri 初始化前检查首参数,命中 `wiki`/`sem`/`project`/`report`/`tag`/`script`/`pin`/`hidden`/`ai`/`prompt`/`account`/`file`/`terminal` 即进入 `src/cli/` 的 clap CLI(执行后退出;普通命令不开窗口,terminal 经 single-instance 参数握手启动/唤醒桌面);CLI 覆盖应用数据面管理能力(项目登记/归档/开关、标签、自定义命令、pin/hidden、Wiki 配置、报告历史与调度、AI 配置/用量、提示词、Git 账号、项目文件、桌面终端 Tab 启停);git/docker 等本机工具不包装,agent 直接调用,实现复用 `commands/*` 的 `pub(crate)` 纯函数/`blocking` 变体;成功 JSON 写 stdout(help/version 为纯文本),失败 `{"code","message","detail"}` JSON 写 stderr 且退出码非 0。release 为 windows 子系统,CLI 模式先 `AttachConsole(ATTACH_PARENT_PROCESS)` 以便终端可见输出。配套内置技能 `repomeow`(仓库根 `skills/repomeow/`,SKILL.md 入口 + references/ 细分,通过 PATH 直接调用 `repomeow`,导入时不写入本机可执行路径)经「设置 → CLI」一键导入资源库,再由项目 AI 资源部署到各 agent;能力暴露由技能部署控制,无运行时开关。详见根目录 `CLI.md`。
 11. **i18n**:词条改动需同步 zh-CN 与 en-US,`src/i18n/locales/locales.test.ts` 校验键对齐。
 12. **错误处理**:Rust 错误经 `error.rs` 序列化为 `{ code, message }` 传前端;前端 `lib/tauri.ts` 对部分笼统错误码追加展示 message,新增错误码需在 Rust 错误枚举、前端处理与 i18n 文案三处同步。
-13. **oxlint 配置**:correctness / suspicious / perf 为 error,style 为 warn;忽略 `dist/`、`node_modules/`、`src-tauri/`、`scripts/`。
+13. **oxlint 配置**:correctness / suspicious / perf 为 error,style 为 warn;忽略 `dist/`、`node_modules/`、`src-tauri/`、`scripts/`。`pnpm lint` 以零 warning 为门禁;`one-var` 关闭以保留独立声明及初始化顺序,`max-params` 上限为 6;生成的 `components/ui/` 不手改,其可选 props 与无类型 ref 规则在配置中豁免。

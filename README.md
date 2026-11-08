@@ -60,7 +60,7 @@
 
 ## 开发环境
 
-- [Node.js](https://nodejs.org/) 18+ 与 [pnpm](https://pnpm.io/)（勿用 npm）
+- [Node.js](https://nodejs.org/) `^20.19.0 || >=22.12.0`（与 Vite 8 的引擎要求一致）与 [pnpm](https://pnpm.io/) 11.10.0（勿用 npm）
 - [Rust](https://rustup.rs/) 工具链
 - Tauri 2 系统依赖（Windows 需 WebView2，见 [Tauri 官方文档](https://v2.tauri.app/start/prerequisites/)）
 
@@ -70,7 +70,7 @@
 pnpm install        # 安装依赖
 pnpm start          # 准备 sem sidecar 并 tauri dev:完整桌面端开发(前端 + Rust 热更新)
 pnpm dev            # 仅 Vite 前端(端口 1420)
-pnpm build          # 类型检查(vue-tsc)+ 前端构建(唯一的类型检查手段)
+pnpm build          # 类型检查(vue-tsc)+ 前端构建 + 首屏入口 500 KiB 预算检查
 pnpm build:desktop  # 打包桌面安装包(Windows NSIS)
 pnpm lint           # oxlint 静态检查
 pnpm lint:fix       # 自动修复可修 lint 问题
