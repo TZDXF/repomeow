@@ -13,6 +13,11 @@ import {
 import { Input } from "@/components/ui/input";
 import ScrollArea from "@/components/common/ScrollArea.vue";
 import TagCheckList from "@/components/tags/TagCheckList.vue";
+import {
+  filterReportProjects,
+  selectVisibleProjectIds,
+  type TagFilterMode,
+} from "./project-selector";
 import type { Project, Tag } from "@/types";
 
 const props = withDefaults(
@@ -24,26 +29,21 @@ const props = withDefaults(
        * 默认 false 保持 max-h-36 紧凑高度(DailyReportDialog 行为不变)
        */
       fillHeight?: boolean;
+      /** 多标签筛选方式;默认交集,报告历史生成入口显式使用 any 并集 */
+      tagFilterMode?: TagFilterMode;
     }>(),
-    { fillHeight: false },
+    { fillHeight: false, tagFilterMode: "all" },
   ),
   selectedIds = defineModel<number[]>({ required: true }),
   { t } = useI18n(),
   keyword = ref(""),
   filterTagIds = ref<number[]>([]),
-  visibleProjects = computed(() => {
-    const query = keyword.value.trim().toLowerCase();
-    return props.projects.filter((project) => {
-      const matchesQuery =
-          !query ||
-          project.name.toLowerCase().includes(query) ||
-          project.path.toLowerCase().includes(query),
-        matchesTags =
-          !filterTagIds.value.length ||
-          filterTagIds.value.every((id) => project.tags.some((tag) => tag.id === id));
-      return matchesQuery && matchesTags;
-    });
-  }),
+  visibleProjects = computed(() =>
+    filterReportProjects(props.projects, keyword.value, {
+      tagIds: filterTagIds.value,
+      tagFilterMode: props.tagFilterMode,
+    }),
+  ),
   selectedFilterTags = computed(() =>
     props.tags.filter((tag) => filterTagIds.value.includes(tag.id)),
   );
@@ -61,9 +61,7 @@ function toggleProject(id: number) {
 }
 
 function selectVisible() {
-  selectedIds.value = [
-    ...new Set([...selectedIds.value, ...visibleProjects.value.map((p) => p.id)]),
-  ];
+  selectedIds.value = selectVisibleProjectIds(selectedIds.value, visibleProjects.value);
 }
 </script>
 
