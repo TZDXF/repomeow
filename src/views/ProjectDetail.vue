@@ -450,14 +450,24 @@ async function saveDesc() {
           <!-- clip-path 限制玻璃卡片的背景采样边界,避免下方终端输出变化在卡片下沿形成闪烁暗带。
                单纯 overflow 裁剪或 contain:paint 无法隔离 backdrop-filter 的背景采样。 -->
           <ScrollArea v-if="project.path_exists" class="min-h-0 flex-1 [clip-path:inset(0)]">
+            <!-- 多列布局按卡片实际高度填列，避免 Grid 同行卡片被最高项撑出空白。
+                 column-width 保留原 360px 最小列宽，宽度不足时自动减为单列。 -->
             <div
               v-if="detailView === 'overview'"
-              class="grid items-start gap-4 p-6 [grid-template-columns:repeat(auto-fill,minmax(min(100%,360px),1fr))]"
+              class="px-6 pb-2 pt-6 [column-gap:1rem] [column-width:360px]"
             >
-              <PackageScripts :project="worktreeProject ?? project" />
-              <DockerCompose :project="worktreeProject ?? project" />
-              <SpringBootCard :project="worktreeProject ?? project" />
-              <CustomCommands :project="worktreeProject ?? project" />
+              <div class="mb-4 break-inside-avoid empty:hidden">
+                <PackageScripts :project="worktreeProject ?? project" />
+              </div>
+              <div class="mb-4 break-inside-avoid empty:hidden">
+                <DockerCompose :project="worktreeProject ?? project" />
+              </div>
+              <div class="mb-4 break-inside-avoid empty:hidden">
+                <SpringBootCard :project="worktreeProject ?? project" />
+              </div>
+              <div class="mb-4 break-inside-avoid">
+                <CustomCommands :project="worktreeProject ?? project" />
+              </div>
             </div>
             <AiAssetsView v-else :project="worktreeProject ?? project" />
           </ScrollArea>
