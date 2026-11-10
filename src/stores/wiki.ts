@@ -234,16 +234,17 @@ export const useWikiStore = defineStore("wiki", () => {
           ).length,
           total: state.pages.length,
         }));
-      if (updateProgress.value) {
+      for (const [key, progress] of Object.entries(updateProgress)) {
         tasks.push({
-          id: `update:${updateProgress.value.projectName}`,
+          id: `update:${key}`,
           action: "update",
-          projectId: updateProgress.value.projectId,
-          projectName: updateProgress.value.projectName,
-          completed: updateProgress.value.completed,
-          total: updateProgress.value.total,
+          projectId: progress.projectId,
+          projectName: progress.projectName,
+          completed: progress.completed,
+          total: progress.total,
         });
-      } else if (pageRegeneration.value) {
+      }
+      if (!Object.keys(updateProgress).length && pageRegeneration.value) {
         tasks.push({
           id: `page:${pageRegeneration.value.projectName}:${pageRegeneration.value.pageTitle}`,
           action: "page",
@@ -428,15 +429,20 @@ export const useWikiStore = defineStore("wiki", () => {
    * 成功后把 meta.headSha 推进到当前 HEAD。返回重生成的页数;
    * 无 headSha(非 git 项目)或历史被改写时抛错,由调用方退化为整本重生成
    */
-  const updating = ref(false),
-    updateProgress = ref<WikiUpdateProgress | null>(null);
+  const updateProgress = reactive<Record<string, WikiUpdateProgress>>({}),
+    updating = computed(() => Object.keys(updateProgress).length > 0);
+
+  function isUpdating(projectPath: string): boolean {
+    return !!updateProgress[generationKey(projectPath)];
+  }
+
   async function update(project: WikiTaskProject, language: SupportedLocale): Promise<number> {
-    if (!documentFor(project.path).data || updating.value || isGenerating(project.path)) {
+    const key = generationKey(project.path);
+    if (!documentFor(project.path).data || isUpdating(project.path) || isGenerating(project.path)) {
       return 0;
     }
     const options = buildGenOptions(language);
-    updating.value = true;
-    updateProgress.value = {
+    updateProgress[key] = {
       projectId: project.id,
       projectName: project.name,
       completed: 0,
@@ -444,19 +450,19 @@ export const useWikiStore = defineStore("wiki", () => {
     };
     try {
       const result = await updateWiki(project, options, false, (progress) => {
-        if (updateProgress.value) {
-          updateProgress.value.completed = progress.completed;
-          updateProgress.value.total = progress.total;
+        const current = updateProgress[key];
+        if (current) {
+          current.completed = progress.completed;
+          current.total = progress.total;
         }
       });
       markPagesUnread(project.path, result.updatedPageIds);
-      if (documents[generationKey(project.path)]) {
+      if (documents[key]) {
         await load(project.path);
       }
       return result.updatedPageIds.length;
     } finally {
-      updating.value = false;
-      updateProgress.value = null;
+      delete updateProgress[key];
       regeneratingPage.value = null;
     }
   }
@@ -487,9 +493,9 @@ export const useWikiStore = defineStore("wiki", () => {
     if (updating.value || isGenerating(project.path) || regeneratingPage.value) {
       return 0;
     }
-    const options = buildGenOptions(language);
-    updating.value = true;
-    updateProgress.value = {
+    const key = generationKey(project.path),
+      options = buildGenOptions(language);
+    updateProgress[key] = {
       projectId: project.id,
       projectName: project.name,
       completed: 0,
@@ -497,19 +503,19 @@ export const useWikiStore = defineStore("wiki", () => {
     };
     try {
       const result = await updateWiki(project, options, true, (progress) => {
-        if (updateProgress.value) {
-          updateProgress.value.completed = progress.completed;
-          updateProgress.value.total = progress.total;
+        const current = updateProgress[key];
+        if (current) {
+          current.completed = progress.completed;
+          current.total = progress.total;
         }
       });
       markPagesUnread(project.path, result.updatedPageIds);
-      if (documents[generationKey(project.path)]) {
+      if (documents[key]) {
         await load(project.path);
       }
       return result.updatedPageIds.length;
     } finally {
-      updating.value = false;
-      updateProgress.value = null;
+      delete updateProgress[key];
       regeneratingPage.value = null;
     }
   }
@@ -541,6 +547,7 @@ export const useWikiStore = defineStore("wiki", () => {
     backgroundTasks,
     regeneratingPage,
     updating,
+    isUpdating,
     isPageUnread,
     markPageRead,
     load,

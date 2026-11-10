@@ -215,11 +215,12 @@ function document(path: string, content = path): WikiData {
 }
 
 function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => {
+  let resolve!: (value: T) => void, reject!: (reason: Error) => void;
+  const promise = new Promise<T>((done, fail) => {
     resolve = done;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 describe("缓存 Wiki 页面的项目隔离", () => {
@@ -360,5 +361,83 @@ describe("缓存 Wiki 页面的项目隔离", () => {
     await store.update(first, "zh-CN");
     expect(updateWiki).toHaveBeenCalledWith(first, expect.any(Object), false, expect.any(Function));
     expect(store.documentFor(second.path).data?.meta.projectPath).toBe(second.path);
+  });
+
+  it("A 更新期间切换到 B 不共享 loading，切回 A 保留原进度", async () => {
+    const pending = deferred<{ updatedPageIds: string[] }>();
+    vi.mocked(updateWiki).mockReturnValueOnce(pending.promise);
+    const store = useWikiStore();
+    await store.load(first.path);
+    await store.load(second.path);
+
+    const run = store.update(first, "zh-CN");
+    expect(store.isUpdating(first.path)).toBe(true);
+    expect(store.isUpdating(second.path)).toBe(false);
+    expect(store.backgroundTasks).toEqual([
+      expect.objectContaining({ action: "update", projectName: first.name }),
+    ]);
+
+    const onProgress = vi.mocked(updateWiki).mock.calls[0][3];
+    onProgress({ completed: 1, total: 3 });
+    expect(store.isUpdating(first.path)).toBe(true);
+    expect(store.isUpdating(second.path)).toBe(false);
+    expect(store.backgroundTasks[0]).toEqual(expect.objectContaining({ completed: 1, total: 3 }));
+
+    pending.resolve({ updatedPageIds: ["overview"] });
+    await run;
+    expect(store.isUpdating(first.path)).toBe(false);
+    expect(store.isUpdating(second.path)).toBe(false);
+  });
+
+  it("A 更新完成不会提前清除 B 的更新状态", async () => {
+    const pendingA = deferred<{ updatedPageIds: string[] }>(),
+      pendingB = deferred<{ updatedPageIds: string[] }>();
+    vi.mocked(updateWiki)
+      .mockReturnValueOnce(pendingA.promise)
+      .mockReturnValueOnce(pendingB.promise);
+    const store = useWikiStore();
+    await store.load(first.path);
+    await store.load(second.path);
+
+    const runA = store.update(first, "zh-CN"),
+      runB = store.update(second, "zh-CN");
+    expect(store.isUpdating(first.path)).toBe(true);
+    expect(store.isUpdating(second.path)).toBe(true);
+    expect(store.backgroundTasks).toHaveLength(2);
+
+    pendingA.resolve({ updatedPageIds: [] });
+    await runA;
+    expect(store.isUpdating(first.path)).toBe(false);
+    expect(store.isUpdating(second.path)).toBe(true);
+    expect(store.backgroundTasks).toEqual([
+      expect.objectContaining({ action: "update", projectName: second.name }),
+    ]);
+
+    pendingB.resolve({ updatedPageIds: [] });
+    await runB;
+    expect(store.isUpdating(second.path)).toBe(false);
+  });
+
+  it("A 更新失败不会清除 B 的更新状态或文档", async () => {
+    const pendingA = deferred<{ updatedPageIds: string[] }>(),
+      pendingB = deferred<{ updatedPageIds: string[] }>();
+    vi.mocked(updateWiki)
+      .mockReturnValueOnce(pendingA.promise)
+      .mockReturnValueOnce(pendingB.promise);
+    const store = useWikiStore();
+    await store.load(first.path);
+    await store.load(second.path);
+
+    const runA = store.update(first, "zh-CN"),
+      runB = store.update(second, "zh-CN");
+    pendingA.reject(new Error("update failed"));
+    await expect(runA).rejects.toThrow("update failed");
+    expect(store.isUpdating(first.path)).toBe(false);
+    expect(store.isUpdating(second.path)).toBe(true);
+    expect(store.documentFor(second.path).data?.meta.projectPath).toBe(second.path);
+
+    pendingB.resolve({ updatedPageIds: [] });
+    await runB;
+    expect(store.backgroundTasks).toHaveLength(0);
   });
 });
