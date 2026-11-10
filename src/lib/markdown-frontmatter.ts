@@ -16,8 +16,8 @@ export function withVisibleMarkdownFrontmatter(content: string): string {
   if (!closing) {
     return content;
   }
-  const bom = content.startsWith("\uFEFF") ? "\uFEFF" : "",
-    yaml = rest.slice(0, closing.index),
+  const yaml = rest.slice(0, closing.index),
     body = rest.slice(closing.index + closing[0].length);
-  return `${bom}\`\`\`yaml\n${yaml}\`\`\`\n${body}`;
+  // BOM 仅属于原始文件;渲染输入若保留它,markmend 会把代码围栏当作普通段落。
+  return `\`\`\`yaml\n${yaml}\`\`\`\n${body}`;
 }
