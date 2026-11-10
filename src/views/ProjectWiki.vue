@@ -64,6 +64,10 @@ const generation = computed(() => {
     const p = project.value;
     return p ? wiki.isGenerating(p.path) : false;
   }),
+  updatingHere = computed(() => {
+    const p = project.value;
+    return p ? wiki.isUpdating(p.path) : false;
+  }),
   // ── 页面选择 ──────────────────────────────────────────────────────────────
 
   pages = computed(() => wikiData.value?.pages ?? []),
@@ -250,8 +254,7 @@ function onGenConfirm() {
 }
 
 /** 实际执行整本生成(对话框确认后,或增量更新退化时读取当前项目配置直接跑) */
-function generate() {
-  const p = project.value;
+function generate(p = project.value) {
   if (!p) {
     return;
   }
@@ -316,7 +319,8 @@ async function updateWiki() {
     const count = await wiki.update({ id: p.id, path: p.path, name: p.name }, settings.language);
     toast.success(count > 0 ? t("wiki.updatedPages", { count }) : t("wiki.updateNoop"));
   } catch {
-    generate();
+    // 更新期间可能已切换项目；失败回退只能重新生成发起更新的项目。
+    generate(p);
   }
 }
 </script>
@@ -329,7 +333,7 @@ async function updateWiki() {
       :elapsed-text="elapsedText"
       :stale="wikiData?.stale ?? false"
       :has-data="!!wikiData"
-      :updating="wiki.updating"
+      :updating="updatingHere"
       @back="router.push(`/projects/${project.id}`)"
       @update="updateWiki"
       @edit-config="requestConfigEdit"
