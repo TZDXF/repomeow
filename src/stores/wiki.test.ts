@@ -440,4 +440,48 @@ describe("缓存 Wiki 页面的项目隔离", () => {
     await runB;
     expect(store.backgroundTasks).toHaveLength(0);
   });
+
+  it.each([
+    { name: "手动更新完成", automatic: false, shouldFail: false },
+    { name: "手动更新失败", automatic: false, shouldFail: true },
+    { name: "自动更新完成", automatic: true, shouldFail: false },
+    { name: "自动更新失败", automatic: true, shouldFail: true },
+  ])("A $name 时 B 单页重生成标记和互斥保持有效", async ({ automatic, shouldFail }) => {
+    const pendingUpdate = deferred<{ updatedPageIds: string[] }>(),
+      pendingPage = deferred<Awaited<ReturnType<typeof regenerateWikiPage>>>();
+    vi.mocked(updateWiki).mockReturnValueOnce(pendingUpdate.promise);
+    vi.mocked(regenerateWikiPage).mockReturnValueOnce(pendingPage.promise);
+    const store = useWikiStore();
+    await store.load(first.path);
+    await store.load(second.path);
+
+    const runA = automatic ? store.autoUpdate(first, "zh-CN") : store.update(first, "zh-CN");
+    await vi.waitFor(() => expect(updateWiki).toHaveBeenCalledOnce());
+    const page = store.documentFor(second.path).data!.pages[0],
+      runB = store.regeneratePage(second, page, "zh-CN");
+    expect(store.regeneratingPage).toBe(page.id);
+
+    await store.regeneratePage(second, page, "zh-CN");
+    expect(regenerateWikiPage).toHaveBeenCalledOnce();
+
+    if (shouldFail) {
+      pendingUpdate.reject(new Error("update failed"));
+      await expect(runA).rejects.toThrow("update failed");
+    } else {
+      pendingUpdate.resolve({ updatedPageIds: [] });
+      await runA;
+    }
+    expect(store.regeneratingPage).toBe(page.id);
+    expect(store.backgroundTasks).toEqual([
+      expect.objectContaining({ action: "page", projectName: second.name }),
+    ]);
+
+    await store.regeneratePage(second, page, "zh-CN");
+    expect(regenerateWikiPage).toHaveBeenCalledOnce();
+
+    pendingPage.resolve({ model: "test-model", generator: "builtin" });
+    await runB;
+    expect(store.regeneratingPage).toBeNull();
+    expect(store.backgroundTasks).toHaveLength(0);
+  });
 });

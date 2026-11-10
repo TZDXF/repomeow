@@ -463,7 +463,6 @@ export const useWikiStore = defineStore("wiki", () => {
       return result.updatedPageIds.length;
     } finally {
       delete updateProgress[key];
-      regeneratingPage.value = null;
     }
   }
 
@@ -516,7 +515,6 @@ export const useWikiStore = defineStore("wiki", () => {
       return result.updatedPageIds.length;
     } finally {
       delete updateProgress[key];
-      regeneratingPage.value = null;
     }
   }
 
