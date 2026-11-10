@@ -33,6 +33,7 @@ import { cmd, onListen } from "@/lib/tauri";
 import { extOf, IMAGE_EXTS, VIDEO_EXTS } from "@/lib/file-kind";
 import { invalidateSemanticCache } from "@/lib/semantic";
 import { hasScheme, resolvePath, safeLinkHref } from "@/lib/markdown";
+import { withVisibleMarkdownFrontmatter } from "@/lib/markdown-frontmatter";
 import { openLocalPath, openPathWith, sortOpenWithOptions } from "@/lib/open-with";
 import { createBeforeDownload, createTableCustomize } from "@/lib/markdown-download";
 import { isInsidePath, toForwardSlash } from "@/lib/path";
@@ -495,7 +496,8 @@ const mdBasePath = computed(() =>
 provide(MD_BASE_PATH_KEY, () => mdBasePath.value);
 provide(MD_ROOT_PATH_KEY, () => rootPath.value);
 
-const mdComponents = {
+const mdContent = computed(() => withVisibleMarkdownFrontmatter(previewText.value ?? "")),
+  mdComponents = {
     img: MdImage,
     a: MdLink,
   },
@@ -751,7 +753,7 @@ function startTreeResize(e: PointerEvent) {
           <div v-else class="p-6 text-sm" @click="onBodyClick">
             <SafeMarkdown
               mode="static"
-              :content="previewText ?? ''"
+              :content="mdContent"
               :controls="controls"
               :components="mdComponents"
               :theme-element="themeElement"

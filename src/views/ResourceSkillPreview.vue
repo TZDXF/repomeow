@@ -27,6 +27,7 @@ import type { SupportedLocale } from "@/i18n";
 import { buildFileTree, flattenVisibleTree, type FileTreeRow } from "@/lib/file-tree";
 import { createBeforeDownload } from "@/lib/markdown-download";
 import { hasScheme, resolvePath, safeLinkHref } from "@/lib/markdown";
+import { withVisibleMarkdownFrontmatter } from "@/lib/markdown-frontmatter";
 import { extOf, IMAGE_EXTS, VIDEO_EXTS } from "@/lib/file-kind";
 import { joinPath } from "@/lib/path";
 import { openLocalPath } from "@/lib/open-with";
@@ -440,7 +441,8 @@ const translation = useMarkdownTranslation({
   isTranslatable = computed(
     () => selected.value.kind === "file" && isMarkdown(selected.value.path),
   ),
-  displayContent = computed(() => translation.displayContent(fileContent.value ?? ""));
+  displayContent = computed(() => translation.displayContent(fileContent.value ?? "")),
+  renderedContent = computed(() => withVisibleMarkdownFrontmatter(displayContent.value));
 
 // ── 右侧:安全扫描(静态规则 + 内置 Agent 语义层;生命周期由 useSkillScan 持有,
 //  结果展示在 components/skill-preview/SkillScanPanel)────────────────────
@@ -773,7 +775,7 @@ onBeforeUnmount(() => {
           >
             <SafeMarkdown
               mode="static"
-              :content="displayContent"
+              :content="renderedContent"
               :controls="controls"
               :theme-element="themeElement"
               :locale="language"
