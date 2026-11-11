@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent } from "vue";
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { Button } from "@/components/ui/button";
 import ScrollArea from "@/components/common/ScrollArea.vue";
@@ -12,9 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useUpdateStore } from "@/stores/update";
-
-// 更新弹窗随首屏加载，Markdown 渲染器按需拆包，避免把代码高亮等重依赖放入入口。
-const SafeMarkdown = defineAsyncComponent(() => import("@/components/markdown/SafeMarkdown.vue"));
+import UpdateNotes from "./UpdateNotes";
 
 const { t } = useI18n(),
   store = useUpdateStore(),
@@ -41,7 +39,7 @@ const { t } = useI18n(),
 
       <ScrollArea class="max-h-64 rounded-md border bg-muted/40">
         <div class="min-w-0 p-3 text-sm">
-          <SafeMarkdown mode="static" :content="releaseNotes" />
+          <UpdateNotes :content="releaseNotes" />
         </div>
       </ScrollArea>
 

@@ -1,9 +1,9 @@
-import { createSSRApp, h } from "vue";
+import { createSSRApp, defineComponent, h, type Component } from "vue";
 import { renderToString } from "vue/server-renderer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import UpdateDialog from "./UpdateDialog.vue";
 
-const { store } = vi.hoisted(() => ({
+const { store, loaderState } = vi.hoisted(() => ({
   store: {
     update: null as null | { body?: string; version: string },
     currentVersion: "1.0.0",
@@ -14,7 +14,19 @@ const { store } = vi.hoisted(() => ({
     downloadAndInstall: vi.fn(),
     relaunchApp: vi.fn(),
   },
+  loaderState: {
+    load: (): Promise<Component> => Promise.reject(new Error("loader 未初始化")),
+  },
 }));
+
+const MarkdownStub = defineComponent({
+  props: {
+    content: { type: String, default: "" },
+    mode: { type: String, default: "static" },
+  },
+  setup: (props) => () =>
+    h("div", { "data-safe-markdown": "", "data-mode": props.mode }, props.content),
+});
 
 vi.mock("@/stores/update", () => ({ useUpdateStore: () => store }));
 vi.mock("vue-i18n", () => ({
@@ -22,24 +34,9 @@ vi.mock("vue-i18n", () => ({
     t: (key: string) => (key === "update.noNotes" ? "暂无更新说明" : key),
   }),
 }));
-vi.mock("@/lib/tauri", () => ({ cmd: vi.fn() }));
-vi.mock("@/lib/markdown-extensions", () => ({
-  markdownExtensions: {},
-  mergeSafePreviewers: (value: unknown) => value,
+vi.mock("./update-markdown-loader", () => ({
+  loadUpdateMarkdown: () => loaderState.load(),
 }));
-vi.mock("vue-stream-markdown", async () => {
-  const { defineComponent, h } = await import("vue");
-  return {
-    Markdown: defineComponent({
-      props: {
-        content: { type: String, default: "" },
-        mode: { type: String, default: "static" },
-      },
-      setup: (props) => () =>
-        h("div", { "data-safe-markdown": "", "data-mode": props.mode }, props.content),
-    }),
-  };
-});
 vi.mock("@/components/common/ScrollArea.vue", async () => {
   const { defineComponent, h } = await import("vue");
   return {
@@ -87,6 +84,7 @@ async function renderDialog() {
 describe("UpdateDialog 更新说明", () => {
   beforeEach(() => {
     store.update = null;
+    loaderState.load = () => Promise.resolve(MarkdownStub);
   });
 
   it("将常见 Markdown 格式交给现有安全组件静态渲染", async () => {
