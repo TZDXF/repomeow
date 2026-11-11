@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   assignChanges,
   mergeSkillsByName,
+  projectAiMcpLoadCommand,
   resourceTree,
   selectionState,
   toggleResources,
@@ -159,6 +160,16 @@ it("sends the snapshot revision with add/assign/remove commands", async () => {
     source: ".mcp.json",
     name: "context",
     expectedRevision: "revision-1",
+  });
+});
+
+describe("projectAiMcpLoadCommand", () => {
+  it("provides a copyable DSH patch command only for an integrated DSH target", () => {
+    expect(projectAiMcpLoadCommand({ id: "dsh", mcpPath: ".dsh/mcp.cordis.yml" })).toBe(
+      "dsh --patch .dsh/mcp.cordis.yml",
+    );
+    expect(projectAiMcpLoadCommand({ id: "dsh", mcpPath: "" })).toBe("");
+    expect(projectAiMcpLoadCommand({ id: "claude", mcpPath: ".mcp.json" })).toBe("");
   });
 });
 

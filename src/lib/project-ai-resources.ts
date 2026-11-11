@@ -61,6 +61,11 @@ export interface ResourceAssignResult {
   failures: { agentId: string; code: string; message: string }[];
 }
 export const listProjectAiTargets = () => cmd<ProjectAiTarget[]>("project_ai_targets");
+
+/** DSH 不自动发现项目级 MCP overlay，设置页需提供明确的启动加载入口。 */
+export function projectAiMcpLoadCommand(agent: Pick<ProjectAiTarget, "id" | "mcpPath">): string {
+  return agent.id === "dsh" && agent.mcpPath ? `dsh --patch ${agent.mcpPath}` : "";
+}
 export const loadProjectResources = (path: string, kind: ProjectResourceKind) =>
   cmd<ProjectResourceSnapshot>("project_ai_resources", { path, kind });
 export interface ResourceAddInput {

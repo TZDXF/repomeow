@@ -306,6 +306,9 @@ export default {
     mcpNotIntegrated: "Not integrated yet",
     agentSettingsHint:
       "Choose deployment targets shown on project AI pages. Installation is not required. Hiding a target never removes resources or changes Wiki ACP agents. This preference is local to this device.",
+    dshMcpLoadHint:
+      "After saving MCP configuration, load it from the project directory with this command. Restart sessions that do not use HMR.",
+    copyMcpCommand: "Copy MCP load command",
     sharedHint:
       "Some tools also read other tools’ skill directories. Changes to shared content may affect them. Managed paths are retained while another target references them.",
     search: "Search resources or groups…",

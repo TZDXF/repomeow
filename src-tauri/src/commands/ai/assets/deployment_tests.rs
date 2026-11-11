@@ -1445,6 +1445,130 @@ fn dsh_mcp_transport_roundtrip_claim_and_validation() {
 }
 
 #[test]
+fn dsh_mcp_top_level_entry_scan_update_and_remove() {
+    let f = Fixture::new();
+    f.mcp();
+    fs::create_dir_all(f.root.join(".dsh")).unwrap();
+    let file = f.root.join(".dsh/mcp.cordis.yml");
+    let original = r#"- id: base-context
+  name: '@deepseek-ai/dsh-mcp-client'
+  inject: [credentials]
+  config:
+    serverName: context
+    transport: stdio
+    command: old-command
+- insert:
+    - id: existing
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: existing
+        transport: streamable-http
+        url: https://example.com/mcp
+"#;
+    fs::write(&file, original).unwrap();
+    let target = mcp_target("dsh").unwrap();
+    let doc = McpDocument::read(&f.root, target).unwrap();
+    assert_eq!(
+        doc.entry(target, "context").unwrap().unwrap()["command"],
+        "old-command"
+    );
+    assert_eq!(
+        super::super::deployment_mcp::read_dsh_servers(&file).len(),
+        2
+    );
+
+    let updated = json!({
+        "serverName": "context",
+        "transport": "stdio",
+        "command": "node",
+        "args": ["server.js"],
+        "env": {"KEY": "secret"}
+    });
+    let bytes = doc.edit(target, "context", Some(&updated)).unwrap();
+    fs::write(&file, bytes).unwrap();
+    let text = fs::read_to_string(&file).unwrap();
+    assert_eq!(text.matches("serverName: context").count(), 1, "{text}");
+    assert!(text.contains("id: base-context"));
+    let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&text).unwrap();
+    assert_eq!(yaml[0]["inject"][0], "credentials");
+    assert!(!text.contains("repomeow-mcp-context"));
+    let doc = McpDocument::read(&f.root, target).unwrap();
+    assert_eq!(doc.entry(target, "context").unwrap().unwrap(), updated);
+
+    let bytes = doc.edit(target, "context", None).unwrap();
+    fs::write(&file, bytes).unwrap();
+    let doc = McpDocument::read(&f.root, target).unwrap();
+    assert!(doc.entry(target, "context").unwrap().is_none());
+    assert!(doc.entry(target, "existing").unwrap().is_some());
+}
+
+#[test]
+fn dsh_mcp_preserves_js_and_roundtrips_dynamic_env_and_headers() {
+    let f = Fixture::new();
+    f.mcp();
+    fs::create_dir_all(f.root.join(".dsh")).unwrap();
+    let file = f.root.join(".dsh/mcp.cordis.yml");
+    let original = r#"- id: existing
+  name: '@deepseek-ai/dsh-mcp-client'
+  config:
+    serverName: existing
+    transport: streamable-http
+    url: https://example.com/mcp
+    headers:
+      Authorization: !!js '`Bearer ${process.env.MCP_TOKEN}`'
+- id: unrelated
+  disabled: !!js process.env.DSH_DISABLED === '1'
+  config:
+    literal: "!!js stays text"
+    block: |
+      !!js also stays text
+    jsBlock: !!js |
+      !!js nested stays text
+"#;
+    fs::write(&file, original).unwrap();
+    let target = mcp_target("dsh").unwrap();
+    let dynamic = json!({
+        "serverName": "dynamic",
+        "transport": "stdio",
+        "command": "node",
+        "args": [],
+        "env": {"TOKEN": "${TOKEN}", "MIXED": "Bearer ${TOKEN}"}
+    });
+    let doc = McpDocument::read(&f.root, target).unwrap();
+    let bytes = doc.edit(target, "dynamic", Some(&dynamic)).unwrap();
+    fs::write(&file, bytes).unwrap();
+    let text = fs::read_to_string(&file).unwrap();
+    assert!(
+        text.contains("Authorization: !!js '`Bearer ${process.env.MCP_TOKEN}`'"),
+        "{text}"
+    );
+    assert!(text.contains("disabled: !!js process.env.DSH_DISABLED === '1'"));
+    assert!(text.contains("literal: '!!js stays text'"));
+    assert!(text.contains("      !!js also stays text"));
+    assert!(text.contains("jsBlock: !!js |"));
+    assert!(text.contains("      !!js nested stays text"));
+    assert!(text.contains("TOKEN: !!js process.env.TOKEN"));
+    assert!(text.contains("MIXED: !!js '`Bearer ${process.env.TOKEN}`'"));
+    assert!(!text.contains("!repomeow-js"));
+
+    let doc = McpDocument::read(&f.root, target).unwrap();
+    assert_eq!(doc.entry(target, "dynamic").unwrap().unwrap(), dynamic);
+    let existing = doc.entry(target, "existing").unwrap().unwrap();
+    assert_eq!(existing["headers"]["Authorization"], "Bearer ${MCP_TOKEN}");
+
+    let remote = json!({
+        "serverName": "remote",
+        "transport": "streamable-http",
+        "url": "https://example.com/mcp",
+        "headers": {"Authorization": "Bearer ${MCP_TOKEN}"}
+    });
+    let bytes = doc.edit(target, "remote", Some(&remote)).unwrap();
+    fs::write(&file, bytes).unwrap();
+    let doc = McpDocument::read(&f.root, target).unwrap();
+    assert_eq!(doc.entry(target, "remote").unwrap().unwrap(), remote);
+}
+
+#[test]
 fn manifest_round_trip_preserves_shortlist_and_revision() {
     let f = Fixture::new();
     f.skill("s1", "review", "# Review");
