@@ -3,17 +3,11 @@ import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { Icon } from "@iconify/vue";
-import { Bot, Copy } from "@lucide/vue";
-import { Button } from "@/components/ui/button";
+import { Bot } from "@lucide/vue";
 import { Switch } from "@/components/ui/switch";
 import { useSettingsStore } from "@/stores/settings";
-import {
-  listProjectAiTargets,
-  projectAiMcpLoadCommand,
-  type ProjectAiTarget,
-} from "@/lib/project-ai-resources";
+import { listProjectAiTargets, type ProjectAiTarget } from "@/lib/project-ai-resources";
 import { agentBrandIcon } from "@/lib/agent-icons";
-import { copyToClipboard } from "@/lib/utils";
 
 const { t } = useI18n(),
   settings = useSettingsStore(),
@@ -21,11 +15,7 @@ const { t } = useI18n(),
   saving = ref(false),
   /** 预先解析品牌图标,无对应品牌的回退 lucide Bot。 */
   rows = computed(() =>
-    targets.value.map((agent) => ({
-      ...agent,
-      icon: agentBrandIcon(agent.id),
-      mcpLoadCommand: projectAiMcpLoadCommand(agent),
-    })),
+    targets.value.map((agent) => ({ ...agent, icon: agentBrandIcon(agent.id) })),
   );
 onMounted(async () => {
   try {
@@ -67,26 +57,6 @@ async function toggle(id: string, visible: boolean) {
             Skills: {{ agent.skillPath }} · MCP:
             {{ agent.mcpPath || t("projectAi.mcpNotIntegrated") }}
           </p>
-          <div v-if="agent.mcpLoadCommand" class="mt-3 rounded-md bg-muted/40 p-3">
-            <p class="text-xs text-muted-foreground">{{ t("projectAi.dshMcpLoadHint") }}</p>
-            <div class="mt-2 flex items-center gap-2">
-              <code class="min-w-0 flex-1 break-all font-mono text-xs">{{
-                agent.mcpLoadCommand
-              }}</code>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                class="h-7 shrink-0 gap-1.5 px-2 text-xs"
-                :aria-label="t('projectAi.copyMcpCommand')"
-                :title="t('projectAi.copyMcpCommand')"
-                @click="copyToClipboard(agent.mcpLoadCommand)"
-              >
-                <Copy class="size-3.5" />
-                {{ t("projectAi.copyMcpCommand") }}
-              </Button>
-            </div>
-          </div>
         </div>
         <Switch
           :model-value="!settings.hiddenResourceAgents.includes(agent.id)"

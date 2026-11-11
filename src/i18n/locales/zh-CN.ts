@@ -289,8 +289,6 @@ export default {
     mcpNotIntegrated: "暂未接入",
     agentSettingsHint:
       "控制项目 AI 资源页显示的配置目标,无需安装对应工具。隐藏不会删除已配置资源,不影响 Wiki 的 ACP Agent。此偏好仅保存在本机。",
-    dshMcpLoadHint: "MCP 配置保存后需在项目目录通过以下命令加载;无 HMR 的会话请重启后生效。",
-    copyMcpCommand: "复制 MCP 加载命令",
     sharedHint:
       "部分工具也会读取其他工具的技能目录;同一目录的内容变更可能影响其他工具。共享托管路径仍有引用时不会删除。",
     search: "搜索资源或分组…",
