@@ -5,6 +5,7 @@ import {
   getChatHistory,
   saveChatHistory,
   selectChatHistory,
+  deleteChatHistory,
   newChatSession,
   sendChatMessage,
   truncateChatLastTurn,
@@ -43,6 +44,7 @@ vi.mock("@/lib/chat", () => ({
     updatedAt: 1,
   })),
   selectChatHistory: vi.fn(),
+  deleteChatHistory: vi.fn(async () => {}),
   truncateChatLastTurn: vi.fn(async () => {}),
 }));
 
@@ -578,6 +580,21 @@ describe("chat history", () => {
     };
   }
 
+  function seedHistory(ids = ["one", "two"], activeId: string | null = "one") {
+    const store = useChatStore(),
+      history = store.ensureHistory(PATH),
+      session = store.ensureSession(PATH);
+    history.entries = ids.map((id, index) => ({
+      id,
+      title: `历史 ${id}`,
+      updatedAt: 100 - index,
+    }));
+    history.activeId = activeId;
+    history.loaded = true;
+    session.messages = snapshot(activeId ?? ids[0]).state.messages;
+    return { store, history, session };
+  }
+
   it("整轮结束自动保存稳定消息、思考、工具和统计,不保存运行中状态", async () => {
     const store = useChatStore(),
       run = store.send(PATH, PROJECT, "需要保留的问题");
@@ -664,6 +681,54 @@ describe("chat history", () => {
     expect(store.ensureSession(PATH).messages).toEqual(saved.state.messages);
     expect(store.ensureHistory(PATH).activeId).toBe(saved.entry.id);
     expect(store.ensureHistory(PATH).changing).toBe(false);
+  });
+
+  it("删除非当前历史只更新列表,保留当前消息与选中状态", async () => {
+    const { store, history, session } = seedHistory(),
+      messages = session.messages;
+
+    await expect(store.deleteHistory(PATH, "two")).resolves.toBe(true);
+
+    expect(deleteChatHistory).toHaveBeenCalledWith(PATH, "two");
+    expect(history.entries.map((entry) => entry.id)).toEqual(["one"]);
+    expect(history.activeId).toBe("one");
+    expect(session.messages).toBe(messages);
+    expect(session.messages[0].content).toBe("历史问题");
+  });
+
+  it("删除当前历史同步清空当前对话与选中状态,保留其他记录", async () => {
+    const { store, history } = seedHistory();
+
+    await expect(store.deleteHistory(PATH, "one")).resolves.toBe(true);
+
+    expect(history.entries.map((entry) => entry.id)).toEqual(["two"]);
+    expect(history.activeId).toBeNull();
+    expect(store.ensureSession(PATH).messages).toEqual([]);
+    expect(store.ensureSession(PATH).toolRuns).toEqual({});
+    expect(store.ensureSession(PATH).busy).toBe(false);
+  });
+
+  it("删除最后一个历史后列表为空且当前会话回到空白状态", async () => {
+    const { store, history } = seedHistory(["only"], "only");
+
+    await expect(store.deleteHistory(PATH, "only")).resolves.toBe(true);
+
+    expect(history.entries).toEqual([]);
+    expect(history.activeId).toBeNull();
+    expect(store.ensureSession(PATH).messages).toEqual([]);
+  });
+
+  it("删除失败保留列表、选中状态和当前消息,并显示错误", async () => {
+    const { store, history, session } = seedHistory();
+    vi.mocked(deleteChatHistory).mockRejectedValueOnce(new Error("disk full"));
+
+    await expect(store.deleteHistory(PATH, "one")).resolves.toBe(false);
+
+    expect(history.entries.map((entry) => entry.id)).toEqual(["one", "two"]);
+    expect(history.activeId).toBe("one");
+    expect(session.messages[0].content).toBe("历史问题");
+    expect(history.error).toContain("disk full");
+    expect(history.changing).toBe(false);
   });
 
   it("切换失败保留当前对话;读取失败可重试且项目历史互不覆盖", async () => {

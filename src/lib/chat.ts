@@ -209,3 +209,8 @@ export function selectChatHistory(
 ): Promise<ChatHistorySnapshot> {
   return cmd<ChatHistorySnapshot>("chat_history_select", { projectPath, sessionId });
 }
+
+/** 删除一段历史;删除当前历史时后端同时清空其活动上下文。 */
+export function deleteChatHistory(projectPath: string, sessionId: string): Promise<void> {
+  return cmd<void>("chat_history_delete", { projectPath, sessionId });
+}

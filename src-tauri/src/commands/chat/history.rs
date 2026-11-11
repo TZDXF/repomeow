@@ -241,6 +241,52 @@ fn select_history(db: &Db, project_path: &str, session_id: &str) -> AppResult<Ch
     Ok(snapshot)
 }
 
+#[tauri::command]
+pub fn chat_history_delete(
+    db: State<'_, Db>,
+    project_path: String,
+    session_id: String,
+) -> AppResult<()> {
+    delete_history(&db, &project_path, &session_id)
+}
+
+fn delete_history(db: &Db, project_path: &str, session_id: &str) -> AppResult<()> {
+    let path = clean_str(project_path);
+    let deleting_active = {
+        let conn = db.0.lock().unwrap();
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM chat_active_sessions
+             WHERE project_path = ?1 AND session_id = ?2)",
+            params![path, session_id],
+            |row| row.get(0),
+        )?
+    };
+    // 删除非当前历史不打断正在回答的当前会话。
+    if deleting_active {
+        ensure_idle(&path)?;
+    }
+    let mut conn = db.0.lock().unwrap();
+    let tx = conn.transaction()?;
+    let deleting_active: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM chat_active_sessions
+         WHERE project_path = ?1 AND session_id = ?2)",
+        params![path, session_id],
+        |row| row.get(0),
+    )?;
+    tx.execute(
+        "DELETE FROM chat_history WHERE project_path = ?1 AND id = ?2",
+        params![path, session_id],
+    )?;
+    if deleting_active {
+        set_active(&tx, &path, None)?;
+    }
+    tx.commit()?;
+    if deleting_active {
+        chat_sessions().lock().unwrap().remove(&path);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -279,6 +325,41 @@ mod tests {
             get_history(&db, path).unwrap().active.unwrap().entry.id,
             "one"
         );
+    }
+
+    #[test]
+    fn deleting_history_preserves_non_active_selection_and_clears_last_active() {
+        let db = database();
+        let path = "C:/chat-history-tests/delete";
+        save_history(&db, path, "one".into(), "first".into(), json!({})).unwrap();
+        save_history(&db, path, "two".into(), "second".into(), json!({})).unwrap();
+        select_history(&db, path, "one").unwrap();
+
+        delete_history(&db, path, "two").unwrap();
+        let history = get_history(&db, path).unwrap();
+        assert_eq!(history.entries.len(), 1);
+        assert_eq!(history.entries[0].id, "one");
+        assert_eq!(history.active.unwrap().entry.id, "one");
+
+        delete_history(&db, path, "one").unwrap();
+        let history = get_history(&db, path).unwrap();
+        assert!(history.entries.is_empty());
+        assert!(history.active.is_none());
+    }
+
+    #[test]
+    fn deleting_history_is_project_scoped() {
+        let db = database();
+        let path = "C:/chat-history-tests/delete-scope";
+        let other = "C:/chat-history-tests/delete-other";
+        save_history(&db, path, "shared".into(), "first".into(), json!({})).unwrap();
+        save_history(&db, other, "shared".into(), "other".into(), json!({})).unwrap();
+
+        delete_history(&db, path, "shared").unwrap();
+        assert!(get_history(&db, path).unwrap().entries.is_empty());
+        let remaining = get_history(&db, other).unwrap();
+        assert_eq!(remaining.entries.len(), 1);
+        assert_eq!(remaining.active.unwrap().entry.id, "shared");
     }
 
     #[test]
