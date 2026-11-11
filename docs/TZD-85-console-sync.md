@@ -60,17 +60,19 @@ Python 回归校验 release PE console 标志、无 TTY 下 UTF-8/流分离/0/1/
 2026-11-11 Windows 本机验证：
 
 - `pnpm lint`、`pnpm format:check`、`pnpm build` 通过；前端 76 个文件、601 项测试通过，首屏入口 148.1 KiB。
-- Rust：排除两项本地无法完成的 shell 取消测试，批量运行与修正后的单项复测合计验证 1122 项通过、7 项 ignored。新写锁、并发域版本、Wiki 冲突、失败失效及技能入口契约测试均通过。
-- 两项既有 `agent::harness::env::tests::exec_timeout_kills_command` / `exec_abort_cancels_command` 在本地沙箱内未能终止循环子进程，首轮全量检查中止，复测显式跳过这两项。首轮 Git/Wiki 测试失败在沙箱外均通过。现有 `cargo fmt --check` 在未改动的上游文件中也有差异，改动的 Rust 文件已单独格式化。
+- Rust：批量运行与定向复测分批覆盖 1124 项通过、7 项原有 ignored。新写锁、并发域版本、Wiki 冲突、失败失效及技能入口契约测试均通过。
+- 两项既有 `agent::harness::env::tests::exec_timeout_kills_command` / `exec_abort_cancels_command` 在沙箱内未能终止循环子进程，首轮全量检查中止；在系统上下文单独复测两项均通过，遗留循环也已清理。首轮 Git/Wiki 测试失败在沙箱外均通过。现有 `cargo fmt --check` 在未改动的上游文件中也有差异，改动的 Rust 文件已单独格式化。
 - 优化 release console PE subsystem=3；`scripts/test-cli.py` 59 次调用通过，含 cmd 原始 UTF-8 重定向、PATH 命中、账号本机 API 样本、增删改、并发写入和隔离目录。Windows PowerShell 5.1.26100.9836 与 PowerShell 7.6.9 的 `test-cli.ps1` 均通过。
 - 使用独立 `com.repomeow.tzd85.test` identifier/productName、数据目录和 WebView profile 构建优化 release GUI，经 CDP 连接实际 WebView 验证：项目增改/归档/恢复/删除、标签、自定义命令增改删、pin 级联、脚本扫描与隐藏/恢复、README 当前预览、提示词外部更新与未保存草稿、AI 配置、账号增改删、系统调度、Wiki 删除、报告删除均自动刷新。三次测量分别为 845ms、119ms、331ms，未手动刷新或重启页面。
 - Wiki/报告使用本地固定数据，未调用付费 AI。未实测托盘弹窗、交互式 ConPTY、macOS/Linux 包。本机已有用户 GUI 在运行，未执行会关闭同名进程的 NSIS 静默安装；安装包生成成功，脚本包含 console 的安装/卸载项，隔离 PATH 调用通过。正式升级安装、更新签名及托盘窗口由质量工程师补验。
 - 仅重新 bundle 已打过类型标记的同一测试二进制时，Tauri 提示找不到原始 `__TAURI_BUNDLE_TYPE` 标记；最终 NSIS 生成退出码为 0。本次未发布或执行 updater 签名。
 
-受限环境的库测试命令：
+分批库测试命令（在系统上下文执行）：
 
 ```powershell
 cargo test --locked --manifest-path src-tauri/Cargo.toml --lib -- --skip agent::harness::env::tests::exec_timeout_kills_command --skip agent::harness::env::tests::exec_abort_cancels_command
+cargo test --locked --manifest-path src-tauri/Cargo.toml --lib cli::skills::tests::builtin_skills_use_path_command
+cargo test --locked --manifest-path src-tauri/Cargo.toml --lib agent::harness::env::tests::exec_ -- --test-threads=1
 ```
 
-本次测试 GUI、重复握手实例和 HTTP 桥接器均已关闭，未终止用户已安装的 RepoMeow。取消测试的进程终止权限限制另在任务交付记录中说明。
+本次测试 GUI、重复握手实例、HTTP 桥接器及遗留测试循环均已关闭，未终止用户已安装的 RepoMeow。
