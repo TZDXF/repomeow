@@ -6,6 +6,7 @@ use super::{
     McpTarget,
 };
 use serde_json::{json, Value};
+use serde_yaml_ng::Value as YamlValue;
 use std::{collections::HashMap, fs, path::Path};
 use toml_edit::{DocumentMut, Item, Table};
 
@@ -21,12 +22,64 @@ fn validate_pi_name(name: &str) -> RlResult<()> {
     Ok(())
 }
 
+/// DSH 将 serverName 用于工具命名,官方约束为 `[A-Za-z0-9_-]{1,32}`。
+fn validate_dsh_name(name: &str) -> RlResult<()> {
+    if name.is_empty()
+        || name.len() > 32
+        || !name
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
+    {
+        return Err(problem(format!(
+            "DeepSeek Harness: invalid MCP server name: {name}"
+        )));
+    }
+    Ok(())
+}
+
+fn dsh_definition(server: &McpServer) -> RlResult<Value> {
+    validate_dsh_name(&server.name)?;
+    let mut value = json!({
+        "serverName": server.name,
+        "transport": if server.transport == "stdio" { "stdio" } else { "streamable-http" },
+    });
+    if server.transport == "stdio" {
+        let command = server
+            .command
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .ok_or_else(|| problem("MCP command missing"))?;
+        value["command"] = json!(command);
+        value["args"] = json!(server.args);
+        if !server.env.is_empty() {
+            value["env"] = json!(server.env);
+        }
+    } else {
+        if server.transport != "http" {
+            return Err(problem("DeepSeek Harness: SSE unsupported"));
+        }
+        let url = server
+            .url
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .ok_or_else(|| problem("MCP URL missing"))?;
+        value["url"] = json!(url);
+        if !server.headers.is_empty() {
+            value["headers"] = json!(server.headers);
+        }
+    }
+    Ok(value)
+}
+
 pub(super) fn definition(server: &McpServer, target: &McpTarget) -> RlResult<Value> {
     if target.agents.contains(&"pi") {
         validate_pi_name(&server.name)?;
     }
     if !server.enabled {
         return Err(problem(format!("disabled MCP: {}", server.name)));
+    }
+    if target.dialect == "dsh" {
+        return dsh_definition(server);
     }
     if server.transport == "sse"
         && (target.dialect == "codex"
@@ -146,6 +199,40 @@ pub(super) fn parse_server_value(
         enabled: true,
     };
     let obj = value.as_object().ok_or_else(|| problem(name))?;
+    if target.dialect == "dsh" {
+        validate_dsh_name(name)?;
+        if obj.get("serverName").and_then(Value::as_str) != Some(name) {
+            return Err(problem("DeepSeek Harness: serverName mismatch"));
+        }
+        return match obj.get("transport").and_then(Value::as_str) {
+            Some("stdio") => {
+                let command = obj
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.trim().is_empty())
+                    .ok_or_else(|| problem(name))?;
+                Ok(McpServerInput {
+                    command: Some(command.to_string()),
+                    args: str_list(obj.get("args")),
+                    env: str_map(obj.get("env")),
+                    ..base("stdio")
+                })
+            }
+            Some("streamable-http") => {
+                let url = obj
+                    .get("url")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.trim().is_empty())
+                    .ok_or_else(|| problem(name))?;
+                Ok(McpServerInput {
+                    url: Some(url.to_string()),
+                    headers: str_map(obj.get("headers")),
+                    ..base("http")
+                })
+            }
+            _ => Err(problem("DeepSeek Harness: unsupported MCP transport")),
+        };
+    }
     if target.agents.contains(&"pi") {
         validate_pi_name(name)?;
         if let Some(kind) = obj.get("type") {
@@ -238,10 +325,56 @@ pub(super) fn parse_server_value(
     })
 }
 
+fn dsh_plugin_config(entry: &YamlValue) -> Option<&YamlValue> {
+    (entry.get("name")?.as_str()? == "@deepseek-ai/dsh-mcp-client")
+        .then(|| entry.get("config"))
+        .flatten()
+}
+
+fn dsh_server_name(config: &YamlValue) -> Option<&str> {
+    config.get("serverName")?.as_str()
+}
+
+/// 扫描 DSH patch 中由 mcp-client 插件声明的服务器;损坏文件与无关插件不暴露条目。
+pub(super) fn read_dsh_servers(path: &Path) -> Vec<super::McpServerEntry> {
+    let Ok(raw) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(doc) = serde_yaml_ng::from_str::<YamlValue>(&raw) else {
+        return Vec::new();
+    };
+    let mut entries = Vec::new();
+    for patch in doc.as_sequence().into_iter().flatten() {
+        for plugin in patch
+            .get("insert")
+            .and_then(YamlValue::as_sequence)
+            .into_iter()
+            .flatten()
+        {
+            let Some(config) = dsh_plugin_config(plugin) else {
+                continue;
+            };
+            let Some(name) = dsh_server_name(config) else {
+                continue;
+            };
+            let Ok(config) = serde_json::to_value(config) else {
+                continue;
+            };
+            entries.push(super::McpServerEntry {
+                name: name.to_string(),
+                config,
+            });
+        }
+    }
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    entries
+}
+
 pub(super) struct McpDocument {
     original: Option<Vec<u8>>,
     json: Option<Value>,
     toml: Option<DocumentMut>,
+    yaml: Option<YamlValue>,
 }
 
 impl McpDocument {
@@ -257,7 +390,26 @@ impl McpDocument {
             .map(|bytes| std::str::from_utf8(bytes))
             .transpose()
             .map_err(|e| problem(e.to_string()))?;
-        if target.dialect == "codex" {
+        if target.dialect == "dsh" {
+            let doc = if text.is_some_and(|text| text.trim().is_empty()) || text.is_none() {
+                YamlValue::Sequence(Vec::new())
+            } else {
+                serde_yaml_ng::from_str::<YamlValue>(text.unwrap())
+                    .map_err(|e| problem(e.to_string()))?
+            };
+            if !doc.is_sequence() {
+                return Err(problem(format!(
+                    "{}: patch must be a sequence",
+                    target.path
+                )));
+            }
+            Ok(Self {
+                original,
+                json: None,
+                toml: None,
+                yaml: Some(doc),
+            })
+        } else if target.dialect == "codex" {
             let doc = text
                 .unwrap_or("")
                 .parse::<DocumentMut>()
@@ -272,6 +424,7 @@ impl McpDocument {
                 original,
                 json: None,
                 toml: Some(doc),
+                yaml: None,
             })
         } else {
             // VS Code 与 OpenCode 2 配置为 JSONC(允许注释/尾逗号),读侧容忍;
@@ -307,11 +460,31 @@ impl McpDocument {
                 original,
                 json: Some(value),
                 toml: None,
+                yaml: None,
             })
         }
     }
 
     pub fn entry(&self, target: &McpTarget, name: &str) -> RlResult<Option<Value>> {
+        if let Some(doc) = &self.yaml {
+            for patch in doc.as_sequence().into_iter().flatten() {
+                for plugin in patch
+                    .get("insert")
+                    .and_then(YamlValue::as_sequence)
+                    .into_iter()
+                    .flatten()
+                {
+                    if let Some(config) = dsh_plugin_config(plugin) {
+                        if dsh_server_name(config) == Some(name) {
+                            return serde_json::to_value(config)
+                                .map(Some)
+                                .map_err(|e| problem(e.to_string()));
+                        }
+                    }
+                }
+            }
+            return Ok(None);
+        }
         if let Some(doc) = &self.toml {
             // toml 的 serde 转换可处理普通表和 inline table,且不会吞掉解析错误。
             let value: toml::Value = toml::from_str(&doc.to_string())
@@ -339,6 +512,56 @@ impl McpDocument {
         name: &str,
         value: Option<&Value>,
     ) -> RlResult<Vec<u8>> {
+        if let Some(doc) = self.yaml.as_mut() {
+            let patches = doc.as_sequence_mut().ok_or_else(|| problem(target.path))?;
+            if let Some(value) = value {
+                validate_dsh_name(name)?;
+                let plugin = serde_yaml_ng::to_value(json!({
+                    "id": format!("repomeow-mcp-{name}"),
+                    "name": "@deepseek-ai/dsh-mcp-client",
+                    "config": value,
+                }))
+                .map_err(|e| problem(e.to_string()))?;
+                let mut replaced = false;
+                for patch in patches.iter_mut() {
+                    for existing in patch
+                        .get_mut("insert")
+                        .and_then(YamlValue::as_sequence_mut)
+                        .into_iter()
+                        .flatten()
+                    {
+                        if dsh_plugin_config(existing).and_then(dsh_server_name) == Some(name) {
+                            *existing = plugin.clone();
+                            replaced = true;
+                        }
+                    }
+                }
+                if !replaced {
+                    let patch = serde_yaml_ng::to_value(json!({ "insert": [plugin] }))
+                        .map_err(|e| problem(e.to_string()))?;
+                    patches.push(patch);
+                }
+            } else {
+                for patch in patches.iter_mut() {
+                    if let Some(plugins) =
+                        patch.get_mut("insert").and_then(YamlValue::as_sequence_mut)
+                    {
+                        plugins.retain(|plugin| {
+                            dsh_plugin_config(plugin).and_then(dsh_server_name) != Some(name)
+                        });
+                    }
+                }
+                patches.retain(|patch| {
+                    patch
+                        .get("insert")
+                        .and_then(YamlValue::as_sequence)
+                        .is_none_or(|plugins| !plugins.is_empty())
+                });
+            }
+            return serde_yaml_ng::to_string(doc)
+                .map(String::into_bytes)
+                .map_err(|e| problem(e.to_string()));
+        }
         if let Some(doc) = self.toml.as_mut() {
             if doc.get(target.key).is_none() && value.is_some() {
                 doc.insert(target.key, Item::Table(Table::new()));

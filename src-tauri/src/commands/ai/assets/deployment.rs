@@ -42,7 +42,7 @@ pub struct ProjectAiTarget {
     mcp_path: &'static str,
 }
 // 新目标路径依据: Kimi Code docs/en/customization/skills.md 与 mcp.md;
-// DeepSeek Harness packages/skill/skill-filesystem/README.md;
+// DeepSeek Harness packages/skill/skill-filesystem/README.md 与 packages/mcp/mcp-client/README.md;
 // MiniMax Code: vercel-labs/skills src/agents.ts; Pi: packages/coding-agent/docs/skills.md。
 const TARGETS: &[ProjectAiTarget] = &[
     ProjectAiTarget {
@@ -97,7 +97,8 @@ const TARGETS: &[ProjectAiTarget] = &[
         id: "dsh",
         name: "DeepSeek Harness",
         skill_path: ".dsh/skills",
-        mcp_path: "",
+        // 经 dsh --patch .dsh/mcp.cordis.yml 加载的项目级 Cordis overlay。
+        mcp_path: ".dsh/mcp.cordis.yml",
     },
     ProjectAiTarget {
         id: "minimax",
