@@ -953,6 +953,10 @@ export default {
     historyLoadFailed: "Failed to load conversation history",
     historySaveFailed:
       "Failed to save conversation history. The current conversation has been kept.",
+    historyDelete: "Delete conversation",
+    historyDeleteConfirm: 'Delete conversation "{title}"? This cannot be undone.',
+    historyDeleteFailed:
+      "Failed to delete conversation. The list and current conversation have been kept.",
     historyRetry: "Retry",
     responding: "Responding",
     entry: "Project Q&A",
