@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useUpdateStore } from "@/stores/update";
+import UpdateNotes from "./UpdateNotes";
 
 const { t } = useI18n(),
   store = useUpdateStore(),
@@ -36,8 +37,10 @@ const { t } = useI18n(),
         </DialogDescription>
       </DialogHeader>
 
-      <ScrollArea class="max-h-64 rounded-md border bg-muted/40 p-3">
-        <p class="whitespace-pre-line text-sm text-muted-foreground">{{ releaseNotes }}</p>
+      <ScrollArea class="max-h-64 rounded-md border bg-muted/40">
+        <div class="min-w-0 p-3 text-sm">
+          <UpdateNotes :content="releaseNotes" />
+        </div>
       </ScrollArea>
 
       <div v-if="store.status === 'downloading'" class="flex flex-col gap-1.5">
