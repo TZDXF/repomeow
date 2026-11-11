@@ -121,10 +121,19 @@ async fn launch_desktop_and_wait(
         ToolFailure::new("desktop_launch_failed", "无法定位 RepoMeow 可执行文件")
             .with_detail(error.to_string())
     })?;
-    Command::new(executable)
+    // Console CLI and desktop are siblings both in a bundle and cargo target/.
+    let desktop = executable.with_file_name(if cfg!(windows) {
+        "repomeow.exe"
+    } else {
+        "repomeow"
+    });
+    Command::new(desktop)
         .arg(TERMINAL_IPC_ARG)
         .arg(request_path)
         .arg(response_path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .spawn()
         .map_err(|error| {
             ToolFailure::new("desktop_launch_failed", "启动 RepoMeow 桌面应用失败")

@@ -3,6 +3,7 @@ mod ai;
 mod background_task;
 pub mod cli;
 mod commands;
+mod data_sync;
 mod db;
 mod env_refresh;
 mod error;
@@ -25,6 +26,9 @@ pub(crate) const APP_DATA_DIR_NAME: &str = ".repomeow";
 
 /// RepoMeow 持久化数据根目录。AI、提示词、Wiki 等后端模块统一从这里派生路径。
 pub(crate) fn app_data_dir(app: &tauri::AppHandle) -> error::AppResult<std::path::PathBuf> {
+    if let Some(root) = std::env::var_os("REPOMEOW_DATA_DIR").filter(|root| !root.is_empty()) {
+        return Ok(root.into());
+    }
     let home = app
         .path()
         .home_dir()
@@ -89,13 +93,14 @@ pub fn run() {
         .setup(|app| {
             // 数据库文件: ~/.repomeow/projects.db
             // (Windows: C:\Users\<user>\.repomeow\projects.db)
-            let dir = app.path().home_dir()?.join(APP_DATA_DIR_NAME);
+            let dir = app_data_dir(app.handle())?;
             let db = Db::open(&dir.join("projects.db"))?;
             // 清洗入库归一化前的存量登记路径(统一分隔符风格,消除同目录重复登记)
             commands::project::normalize_stored_paths(&db.0.lock().unwrap());
             // AI 用量日志保留期清理(190 天前)
             commands::usage::prune_old_entries(&db.0.lock().unwrap());
             app.manage(db);
+            app.manage(std::sync::Mutex::new(data_sync::Revisions::new()));
 
             // 调度通知:用于定时任务变更时唤醒后台 scheduler
             let notify = Arc::new(Notify::new());
@@ -120,10 +125,7 @@ pub fn run() {
             }
 
             // CLI 在桌面未运行时以内部参数启动本进程;待终端状态注册后再处理。
-            terminal_ipc::handle_desktop_args(
-                app.handle(),
-                &std::env::args().collect::<Vec<_>>(),
-            );
+            terminal_ipc::handle_desktop_args(app.handle(), &std::env::args().collect::<Vec<_>>());
 
             // 启动日报/周报定时调度器(后台 tokio 任务,仅 App 运行时生效)
             let handle = app.handle().clone();
@@ -139,6 +141,7 @@ pub fn run() {
 
             // 资源库非阻塞同步检查:配置了备份远端才在后台跑一次(失败静默)
             commands::ai::startup_sync_check(app.handle());
+            data_sync::monitor(app.handle().clone());
 
             Ok(())
         })
@@ -172,6 +175,8 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
+            data_sync::get_app_data_dir,
+            data_sync::cli_data_revisions,
             commands::project::add_project,
             commands::project::list_projects,
             commands::project::get_project,

@@ -16,6 +16,13 @@ import type { Project, ProjectAssets } from "@/types";
  * (对象 key 枚举顺序不是插入序,整数样 key 会按数值排序,不能做 LRU)。
  */
 export const useProjectAssetsStore = defineStore("project-assets", () => {
+  let epoch = 0;
+  function invalidate() {
+    epoch++;
+    byProject.value.clear();
+    inflight.clear();
+    triggerRef(byProject);
+  }
   /**
    * 按「项目 id + 路径」存放最近一次扫描结果,作为下次进入时的 stale 数据。
    * shallowRef:assetsOf 会在渲染依赖(computed)里被调用,LRU 读时挪序不能触发
@@ -62,24 +69,29 @@ export const useProjectAssetsStore = defineStore("project-assets", () => {
     if (pending) {
       return pending;
     }
-    const p = (async () => {
-      try {
-        const assets = await cmd<ProjectAssets>("scan_project_assets", {
-          path: project.path,
-        });
-        setCapped(key, assets);
-      } catch {
-        // 刷新失败不冲掉可用的旧数据;仅在没有任何数据时写空结果(卡片按无数据显示)
-        if (!byProject.value.has(key)) {
-          setCapped(key, { package_scripts: [], compose_files: [], java_builds: [] });
+    const requestEpoch = epoch,
+      p = (async () => {
+        try {
+          const assets = await cmd<ProjectAssets>("scan_project_assets", {
+            path: project.path,
+          });
+          if (requestEpoch === epoch) {
+            setCapped(key, assets);
+          }
+        } catch {
+          // 刷新失败不冲掉可用的旧数据;仅在没有任何数据时写空结果(卡片按无数据显示)
+          if (requestEpoch === epoch && !byProject.value.has(key)) {
+            setCapped(key, { package_scripts: [], compose_files: [], java_builds: [] });
+          }
         }
-      }
-    })().finally(() => {
-      inflight.delete(key);
-    });
+      })().finally(() => {
+        if (inflight.get(key) === p) {
+          inflight.delete(key);
+        }
+      });
     inflight.set(key, p);
     return p;
   }
 
-  return { assetsOf, refresh };
+  return { assetsOf, refresh, invalidate };
 });

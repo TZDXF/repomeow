@@ -27,6 +27,6 @@ pub(super) fn save_text_file(path: String, content: String) -> AppResult<()> {
             ));
         }
     }
-    std::fs::write(p, content.as_bytes())?;
+    crate::data_sync::atomic_write(p, content.as_bytes())?;
     Ok(())
 }

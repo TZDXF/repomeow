@@ -43,7 +43,9 @@ export const useProjectsStore = defineStore("projects", () => {
    * withGit 为 false 时(搜索/筛选等高频操作)不重新拉取 git 状态,
    * 仅按项目 id 保留已有的 git 信息,避免频繁触发 git 更新。
    */
+  let fetchSequence = 0;
   async function fetchProjects(options: { withGit?: boolean } = {}) {
+    const sequence = ++fetchSequence;
     const withGit = options.withGit ?? true;
     loading.value = true;
     try {
@@ -52,6 +54,9 @@ export const useProjectsStore = defineStore("projects", () => {
           tagIds: selectedTagIds.value.length ? selectedTagIds.value : null,
         }),
         prevGit = new Map(projects.value.map((p) => [p.id, p.git] as const));
+      if (sequence !== fetchSequence) {
+        return;
+      }
       list.forEach((p) => {
         p.git = prevGit.get(p.id) ?? p.git;
       });
@@ -62,8 +67,21 @@ export const useProjectsStore = defineStore("projects", () => {
         refreshAllGitStatus();
       }
     } finally {
-      loading.value = false;
+      if (sequence === fetchSequence) {
+        loading.value = false;
+      }
     }
+  }
+
+  async function refreshFromExternal() {
+    fetchSequence++;
+    const all = await cmd<Project[]>("list_projects", { query: null, tagIds: null });
+    const previous = projectsById.value;
+    for (const project of all) {
+      project.git ??= previous.get(project.id)?.git ?? null;
+    }
+    projectsById.value = new Map(all.map((project) => [project.id, project]));
+    await Promise.all([fetchProjects({ withGit: false }), fetchArchivedProjects()]);
   }
 
   function setQuery(value: string) {
@@ -508,6 +526,7 @@ export const useProjectsStore = defineStore("projects", () => {
   }
 
   return {
+    refreshFromExternal,
     projects,
     projectsById,
     archivedProjects,

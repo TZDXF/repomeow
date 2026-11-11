@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onCliDataChanged } from "@/lib/cli-sync";
 import { useLatestRequest } from "@/composables/useLatestRequest";
 import { onProjectPageReactivated } from "@/composables/useProjectPageState";
 import { computed, ref, watch } from "vue";
@@ -206,6 +207,8 @@ async function togglePin(group: PackageScriptsGroup, script: PackageScript) {
     toast.error(String(e));
   }
 }
+
+onCliDataChanged(["hidden", "file"], () => load(false));
 </script>
 
 <template>

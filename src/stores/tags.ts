@@ -6,9 +6,14 @@ import type { Tag } from "@/types";
 
 export const useTagsStore = defineStore("tags", () => {
   const tags = ref<Tag[]>([]);
+  let loadSequence = 0;
 
   async function fetchTags() {
-    tags.value = await cmd<Tag[]>("list_tags");
+    const sequence = ++loadSequence,
+      fresh = await cmd<Tag[]>("list_tags");
+    if (sequence === loadSequence) {
+      tags.value = fresh;
+    }
   }
 
   // 标签增删改会影响项目内嵌的 tags(name/color/关联),需同步刷新项目列表;

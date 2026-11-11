@@ -2,7 +2,7 @@
 //! 再由项目 AI 资源部署到各 agent 的 skills 目录。
 //!
 //! 渐进式披露:SKILL.md 为入口与分组路由,细分用法在 references/ 下。
-//! 技能通过 PATH 直接调用 `repomeow`,导入时原样保存,不写入本机可执行文件路径。
+//! 技能通过 PATH 直接调用 `repomeow-cli`,导入时原样保存,不写入本机可执行文件路径。
 
 /// 内置 skill 定义。
 pub(crate) struct BuiltinSkill {
@@ -52,7 +52,8 @@ mod tests {
         for skill in BUILTIN_SKILLS {
             for (path, content) in skill.files {
                 assert!(!content.contains("{{REPOMEOW_CLI}}"), "{path}");
-                assert!(content.contains("`repomeow`"), "{path}");
+                assert!(content.contains("`repomeow-cli`"), "{path}");
+                assert!(!content.contains("repomeow project "), "{path}");
             }
         }
     }

@@ -28,6 +28,25 @@ fn temp_dir(tag: &str) -> PathBuf {
 }
 
 #[test]
+fn concurrent_wiki_delete_or_config_write_cannot_interrupt_an_active_generation() {
+    let root = temp_dir("writer-lock");
+    let dir = root.join("project");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("keep.md"), "old content").unwrap();
+    let guard = super::operation_guard(&dir).unwrap();
+    assert!(remove_wiki_dir(&dir).is_err());
+    assert!(save_config_in(&dir, WikiGenerationConfig::default()).is_err());
+    assert_eq!(
+        fs::read_to_string(dir.join("keep.md")).unwrap(),
+        "old content"
+    );
+    drop(guard);
+    save_config_in(&dir, WikiGenerationConfig::default()).unwrap();
+    remove_wiki_dir(&dir).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn folder_name_distinguishes_same_basename() {
     let a = folder_name("D:/code/web");
     let b = folder_name("E:/other/web");

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onCliDataChanged } from "@/lib/cli-sync";
 import { onProjectPageReactivated } from "@/composables/useProjectPageState";
 import Dialog from "@/components/common/ProjectDialog.vue";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
@@ -159,6 +160,8 @@ async function togglePin(c: CustomCommand) {
     toast.error(String(e));
   }
 }
+
+onCliDataChanged(["script"], load);
 </script>
 
 <template>

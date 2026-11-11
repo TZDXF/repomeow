@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onCliDataChanged } from "@/lib/cli-sync";
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
@@ -110,7 +111,8 @@ const MD_EXTS = new Set(["md", "markdown"]),
 
 // 切换文件不显示 loading:本地读取很快,loading 只会闪烁;
 // 保留旧内容直到新内容就位(序号防串台),仅错误/二进制等状态标记随切换即清
-watch([selected, svgSource], async ([path]) => {
+const previewRevision = ref(0);
+watch([selected, svgSource, previewRevision], async ([path]) => {
   const mySeq = ++previewSeq;
   previewError.value = false;
   previewGone.value = false;
@@ -564,6 +566,13 @@ function startTreeResize(e: PointerEvent) {
   window.addEventListener("pointermove", onMove);
   window.addEventListener("pointerup", onUp);
 }
+
+onCliDataChanged(["file"], async () => {
+  refreshDirs(null);
+  invalidateSemanticCache(rootPath.value);
+  semanticCacheEpoch.value++;
+  previewRevision.value++;
+});
 </script>
 
 <template>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onCliDataChanged } from "@/lib/cli-sync";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
@@ -432,6 +433,14 @@ watch(
   },
   { immediate: true },
 );
+
+onCliDataChanged(["report"], async () => {
+  await loadCalendarMeta(calendarYear.value, calendarMonth.value);
+  const range = selectedRange.value;
+  if (range) {
+    await loadReports(range.from, range.to);
+  }
+});
 </script>
 
 <template>

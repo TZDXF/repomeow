@@ -14,8 +14,6 @@ use tauri::{
 };
 use tauri_plugin_store::StoreExt;
 
-use crate::APP_DATA_DIR_NAME;
-
 /// 迷你项目列表弹窗的窗口 label
 pub(crate) const TRAY_POPUP_LABEL: &str = "tray-popup";
 /// 主窗口 label(tauri.conf.json 默认)
@@ -60,12 +58,7 @@ fn now_millis() -> u64 {
 /// 从 ~/.repomeow/settings.json 读取字符串设置项(与前端 tauri-plugin-store 同一文件)。
 /// 读取失败返回 None,调用方自行回退默认值。
 pub(crate) fn read_setting_string(app: &AppHandle, key: &str) -> Option<String> {
-    let path = app
-        .path()
-        .home_dir()
-        .ok()?
-        .join(APP_DATA_DIR_NAME)
-        .join("settings.json");
+    let path = crate::app_data_dir(app).ok()?.join("settings.json");
     let store = app.store(path).ok()?;
     store.get(key)?.as_str().map(str::to_owned)
 }

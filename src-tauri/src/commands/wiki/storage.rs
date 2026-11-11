@@ -67,6 +67,7 @@ pub(super) fn save_meta_in(dir: &Path, mut meta: WikiMeta) -> AppResult<()> {
 }
 
 pub(crate) fn save_config_in(dir: &Path, mut config: WikiGenerationConfig) -> AppResult<()> {
+    let _guard = super::operation_guard(dir)?;
     config.version = CONFIG_VERSION;
     fs::create_dir_all(dir)?;
     let target = dir.join(CONFIG_FILE);
@@ -486,6 +487,7 @@ fn clear_readonly_recursive(root: &Path) {
 fn clear_readonly_recursive(_root: &Path) {}
 
 pub(crate) fn remove_wiki_dir(dir: &Path) -> AppResult<()> {
+    let _guard = super::operation_guard(dir)?;
     match fs::remove_dir_all(dir) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),

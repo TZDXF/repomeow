@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onCliDataChanged } from "@/lib/cli-sync";
 import Dialog from "@/components/common/ProjectDialog.vue";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -59,7 +60,11 @@ const props = defineProps<{
   configLoading = ref(false),
   configSaving = ref(false),
   configError = ref("");
-let loadSequence = 0;
+let loadSequence = 0,
+  configBaseline = "";
+function configSnapshot() {
+  return JSON.stringify([model.value, thinking.value, concurrency.value, wikiAutoUpdate.value]);
+}
 
 watch(
   () => [props.open, props.projectPath] as const,
@@ -97,6 +102,7 @@ async function loadProjectConfig() {
     model.value = config.model ?? "";
     thinking.value = config.thinking ?? "";
     concurrency.value = config.concurrency ? Math.min(8, Math.max(1, config.concurrency)) : "";
+    configBaseline = configSnapshot();
   } catch (error) {
     if (sequence === loadSequence) {
       configError.value = error instanceof Error ? error.message : String(error);
@@ -160,6 +166,16 @@ async function confirm() {
     configSaving.value = false;
   }
 }
+onCliDataChanged(["wiki", "project"], async () => {
+  if (!props.open) {
+    return;
+  }
+  if (configSnapshot() === configBaseline) {
+    await loadProjectConfig();
+  } else {
+    configError.value = t("settings.cli.externalChanges");
+  }
+});
 </script>
 
 <template>
