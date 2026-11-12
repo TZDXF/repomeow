@@ -33,24 +33,27 @@ $data = repomeow-cli project list | ConvertFrom-Json
 $raw = repomeow-cli project list
 ```
 
-PowerShell 5.1 按 `[Console]::OutputEncoding` 解码原生输出，`>` 默认写 UTF-16；接收中文前设置 `[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)`。它还可能将原生 stderr 包装为 `NativeCommandError`。这是 shell 的转换行为；精确的 UTF-8 字节及错误 JSON 可用 Python 捕获，或使用 PowerShell 7.4+ 的原生重定向。`cmd /d /c "repomeow-cli project list >projects.json 2>errors.json"` 同样保留原始 UTF-8 字节。各 shell 均可正确等待并取得 0/1/2 退出码。
+PowerShell 5.1 按 `[Console]::OutputEncoding` 解码原生输出，`>` 默认写 UTF-16；接收中文前设置 `[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)`。它还可能将原生 stderr 包装为 `NativeCommandError`。这是 shell 的转换行为；精确的 UTF-8 字节及错误 JSON 可用 Node.js 捕获，或使用 PowerShell 7.4+ 的原生重定向。`cmd /d /c "repomeow-cli project list >projects.json 2>errors.json"` 同样保留原始 UTF-8 字节。各 shell 均可正确等待并取得 0/1/2 退出码。
 
-```python
-import json
-import shutil
-import subprocess
+以下示例保存为 `.mjs` 后用 `node` 执行；Node/pnpm 也是项目现有的开发和回归环境。已安装的独立 CLI 运行无需 Node.js 或其他解释器。
 
-exe = shutil.which("repomeow-cli")
-if exe is None:
-    raise RuntimeError("请安装 RepoMeow 并配置 PATH")
-p = subprocess.run(
-    [exe, "project", "list"], stdin=subprocess.DEVNULL,
-    capture_output=True, text=True, encoding="utf-8", timeout=60,
-)
-if p.returncode:
-    failure = json.loads(p.stderr)
-    raise RuntimeError(f"exit={p.returncode}: {failure['code']}: {failure['message']}")
-projects = json.loads(p.stdout)["projects"]
+```javascript
+import { spawnSync } from 'node:child_process';
+
+const p = spawnSync('repomeow-cli', ['project', 'list'], {
+  stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000,
+  windowsHide: true, // 默认不开 shell，stdout/stderr 保留原始 Buffer
+});
+if (p.error) throw p.error; // 包括未安装/未配置 PATH、超时
+if (p.signal || p.status === null) throw new Error('CLI 未正常退出');
+const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+const stdout = decoder.decode(p.stdout);
+const stderr = decoder.decode(p.stderr);
+if (p.status !== 0) {
+  const failure = JSON.parse(stderr);
+  throw new Error(`exit=${p.status}: ${failure.code}: ${failure.message}`);
+}
+const projects = JSON.parse(stdout).projects;
 ```
 
 完整写入/缓存清单、一致性规则和回归入口见 [同步设计记录](docs/TZD-85-console-sync.md)。

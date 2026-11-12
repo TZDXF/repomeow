@@ -27,6 +27,7 @@
 | `pnpm format` / `pnpm format:check` | `oxfmt --write src/` 格式化 / 仅检查 |
 | `pnpm test:unit` | `vitest run`(node 环境,仅 `src/**/*.test.ts`,无 setup 文件) |
 | `pnpm cli:dev -- <args>` | 运行独立 console 目标 repomeow-cli(不开窗口) |
+| `pnpm test:cli --exe <程序>` / `pnpm test:cli:shells --exe <程序>` | Node 内置模块驱动的 CLI 回归 / PS 5.1+7 Actions 包装六组回归，无额外解释器依赖 |
 | `pnpm sem:prepare` / `sem:check` | 下载/校验 sem sidecar 二进制 |
 | `pnpm release:*` | `scripts/release/release.mjs` 本地发布调试(check/build/sign/latest/all/local) |
 

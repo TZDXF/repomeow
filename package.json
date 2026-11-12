@@ -18,6 +18,8 @@
     "format": "oxfmt --write src/",
     "format:check": "oxfmt --check src/",
     "test:unit": "vitest run",
+    "test:cli": "node scripts/test-cli.mjs",
+    "test:cli:shells": "node scripts/test-cli-shells.mjs",
     "release:check": "node scripts/release/release.mjs check",
     "release:build": "node scripts/release/release.mjs build",
     "release:sign": "node scripts/release/release.mjs sign",

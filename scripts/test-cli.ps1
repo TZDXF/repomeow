@@ -34,7 +34,7 @@ try {
     } finally {
         $ErrorActionPreference = 'Stop'
     }
-    # Used by test-cli-shells.py to verify failure propagation and cleanup.
+    # Used by test-cli-shells.mjs to verify failure propagation and cleanup.
     if ($InjectAssertionFailure) { throw 'Injected assertion failure' }
 } finally {
     $env:REPOMEOW_DATA_DIR = $originalRoot

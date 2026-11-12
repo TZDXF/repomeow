@@ -94,10 +94,10 @@ jobs:
         run: cargo build --release --locked --bins --manifest-path src-tauri/Cargo.toml
 
       - name: Test console streams, exits, isolation and concurrent writes
-        run: python scripts/test-cli.py --exe src-tauri/target/release/repomeow-cli.exe
+        run: pnpm test:cli --exe src-tauri/target/release/repomeow-cli.exe
 
       - name: Test Actions PowerShell success and failure propagation
-        run: python scripts/test-cli-shells.py --exe src-tauri/target/release/repomeow-cli.exe
+        run: pnpm test:cli:shells --exe src-tauri/target/release/repomeow-cli.exe
 
       - name: Test Windows PowerShell direct calls
         shell: powershell

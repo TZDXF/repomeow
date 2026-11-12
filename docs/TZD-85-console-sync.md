@@ -47,30 +47,50 @@ pnpm test:unit
 pnpm build
 cargo test --locked --manifest-path src-tauri/Cargo.toml
 cargo build --release --locked --bins --manifest-path src-tauri/Cargo.toml
-python scripts/test-cli.py --exe src-tauri/target/release/repomeow-cli.exe
-python scripts/test-cli-shells.py --exe src-tauri/target/release/repomeow-cli.exe
+pnpm test:cli --exe src-tauri/target/release/repomeow-cli.exe
+pnpm test:cli:shells --exe src-tauri/target/release/repomeow-cli.exe
 powershell -NoProfile -File scripts/test-cli.ps1 -Exe src-tauri/target/release/repomeow-cli.exe
 pwsh -NoProfile -File scripts/test-cli.ps1 -Exe src-tauri/target/release/repomeow-cli.exe
 pnpm tauri build --bundles nsis
 ```
 
-Python 回归校验 release PE console 标志、无 TTY 下 UTF-8/流分离/0/1/2、增删改/归档、失败写入、隔离目录、并发标签/提示词/文本写入。PowerShell 回归检查直接重定向、管道、变量接收和退出码。Rust 回归验证写锁、失败失效、并发域版本；前端回归验证重叠请求、重试、作用域销毁及旧响应不能复活缓存。`quality.yml` 对 `dev` PR 运行这些检查。
+Node.js 回归校验 release PE console 标志、无 TTY 下 UTF-8/流分离/0/1/2、增删改/归档、失败写入、隔离目录、并发标签/提示词/文本写入。PowerShell 回归检查直接重定向、管道、变量接收和退出码。Rust 回归验证写锁、失败失效、并发域版本；前端回归验证重叠请求、重试、作用域销毁及旧响应不能复活缓存。`quality.yml` 对 `dev` PR 运行这些检查。
 
-Windows 的退出码回归必须运行 `test-cli-shells.py`（需要同时安装 Windows PowerShell 5.1 和 PowerShell 7）。它按 Actions 的方式为脚本添加 `$ErrorActionPreference = 'stop'` 前缀及 `exit $LASTEXITCODE` 尾部判断，分别检查两种 shell 的正常完成退出 0、故意断言失败及清理失败退出非零，并检查断言失败时仍清理隔离数据目录。清理失败由包装脚本临时替换 `Remove-Item` 注入，遗留的测试目录由 Python 外层临时目录统一回收。仅运行 `-File test-cli.ps1` 不能覆盖这层宿主包装。脚本保留 CLI 业务退出码 1/2 的断言，只有全部断言和清理成功后才输出 `passed:true` 并显式 `exit 0`。
+Windows 的退出码回归必须运行 `pnpm test:cli:shells --exe <程序>`（需要同时安装 Windows PowerShell 5.1 和 PowerShell 7）。它按 Actions 的方式为脚本添加 `$ErrorActionPreference = 'stop'` 前缀及 `exit $LASTEXITCODE` 尾部判断，分别检查两种 shell 的正常完成退出 0、故意断言失败及清理失败退出 1，并检查断言失败时仍清理隔离数据目录。测试宿主先设置 UTF-8 输出，保证本地化 PS 5.1 的诊断文本也可严格解码；不改退出码包装。清理失败由包装脚本临时替换 `Remove-Item` 注入，遗留的测试目录由 Node 外层临时目录统一回收。仅运行 `-File test-cli.ps1` 不能覆盖这层宿主包装。脚本保留 CLI 业务退出码 1/2 的断言，只有全部断言和清理成功后才输出 `passed:true` 并显式 `exit 0`。
+
+### Node.js 驱动迁移与覆盖对应
+
+迁移基准为 PR #9 的 `febbe26fc9688dd503d588964f3b4afbe62cce1b`（开发基线 `dev` SHA 仍见本文开头）。两个旧测试驱动已移除，改用 `scripts/test-cli.mjs` 和 `scripts/test-cli-shells.mjs`，共用内置模块辅助文件 `cli-test-util.mjs`；无新增依赖或测试解释器要求。使用项目现有 Node engines `^20.19.0 || >=22.12.0`、pnpm 11.10.0，Quality 继续使用 Node 22。已编译 CLI 的日常使用无需 Node/pnpm。
+
+| 迁移前覆盖 | Node.js 对应及保留的检查 |
+| --- | --- |
+| console 目标、help/version、参数/业务失败 | PE subsystem=3；帮助不建数据目录；0/1/2 及错误 JSON 三字段；成功 stderr/失败 stdout 为空 |
+| UTF-8、文件原始字节、JSON | 子进程 stdout/stderr 为 Buffer；TextDecoder fatal 严格解码（额外验证拒绝非法字节）；文件字节一致；JSON.parse |
+| 增改删/归档、失败写入 | 同顺序的项目、标签、命令、pin/hidden、文件、AI、调度、用量、账号本地 HTTP fixture、Wiki 调用；保留越界拒绝、无效配置不覆盖等断言 |
+| 并发及隔离 | 8 个标签、2 类提示词、4 次文件写入并行；验证不丢更新/不撕裂；不同数据目录隔离；域版本存在 |
+| Windows PATH、cmd 原始重定向 | 实际 cmd 中从 PATH 查找 console；0/1/2 三次调用、磁盘原始 UTF-8、流分离与 JSON；Windows 总计仍为 59 次（其他平台 56 次，不含 cmd） |
+| Actions/PowerShell 六组 | 实际 PS 5.1/7 各执行正常、故意断言失败、清理失败；退出 0/1/1；失败不输出成功；断言失败清理；模拟清理失败遗留数据由外层回收 |
+| 临时资源/异常路径 | try/finally 回收临时目录及 HTTP fixture；并发组用 Promise.allSettled 收齐子进程后传播失败，避免清理时仍有写入；每个子进程 60 秒超时 |
 
 ## 验证记录
+
+2026-11-12 Node.js 驱动迁移验证：
+
+- Node 24.21.0 经上述两个 pnpm 入口通过：`{"passed":true,"calls":59,...}`；六组 shell 场景正常/断言失败/清理失败分别为 0/1/1。另用 `pnpm dlx node@22.23.4 scripts/test-cli.mjs --exe <程序>` 及相应 `test-cli-shells.mjs` 验证 Node 22，结果相同；项目 engines、packageManager 和锁文件未改。
+- 直接提取 `CLI.md` 的 Node 示例实测 PATH 调用，成功返回 JSON，参数错误通过错误 JSON 抛出异常。lint、三个新模块语法及差异检查通过。
+- 迁移前提交 `febbe26fc9688dd503d588964f3b4afbe62cce1b` 的 Quality 运行 `43129550566` 已成功，包括 CLI 与两个实际 PowerShell 步骤；这是迁移基准的结果，迁移提交的 CI 需单独核对。本轮未改产品业务代码，复用同一 release 程序，未重跑 Rust/前端全量测试或 GUI 实测。
 
 2026-11-12 CI 退出码修复验证：
 
 - 新增 Actions 包装回归在旧脚本上复现 `passed:true` 后进程退出 1；旧验证仅运行 `-File`，未覆盖 runner 的退出码处理。
-- 修复后 `test-cli-shells.py` 六组通过：Windows PowerShell 5.1.26100.9836 / PowerShell 7.7.0 各自正常退出 0、故意断言失败退出 1、清理失败退出 1；失败不输出成功，断言失败后仍清理测试目录。`test-cli.py` 59 次 release CLI 回归通过。本轮仅修改测试脚本、CI 和说明，使用已有 release 程序，未重跑 Rust/前端全量测试。
+- 迁移前驱动六组通过：Windows PowerShell 5.1.26100.9836 / PowerShell 7.7.0 各自正常退出 0、故意断言失败退出 1、清理失败退出 1；失败不输出成功，断言失败后仍清理测试目录。59 次 release CLI 回归通过。该轮仅修改测试脚本、CI 和说明，使用已有 release 程序，未重跑 Rust/前端全量测试。
 
 2026-11-11 Windows 本机验证：
 
 - `pnpm lint`、`pnpm format:check`、`pnpm build` 通过；前端 76 个文件、601 项测试通过，首屏入口 148.1 KiB。
 - Rust：批量运行与定向复测分批覆盖 1124 项通过、7 项原有 ignored。新写锁、并发域版本、Wiki 冲突、失败失效及技能入口契约测试均通过。
 - 两项既有 `agent::harness::env::tests::exec_timeout_kills_command` / `exec_abort_cancels_command` 在沙箱内未能终止循环子进程，首轮全量检查中止；在系统上下文单独复测两项均通过，遗留循环也已清理。首轮 Git/Wiki 测试失败在沙箱外均通过。现有 `cargo fmt --check` 在未改动的上游文件中也有差异，改动的 Rust 文件已单独格式化。
-- 优化 release console PE subsystem=3；`scripts/test-cli.py` 59 次调用通过，含 cmd 原始 UTF-8 重定向、PATH 命中、账号本机 API 样本、增删改、并发写入和隔离目录。Windows PowerShell 5.1.26100.9836 与 PowerShell 7.6.9 的 `test-cli.ps1` 均通过。
+- 优化 release console PE subsystem=3；迁移前驱动 59 次调用通过，含 cmd 原始 UTF-8 重定向、PATH 命中、账号本机 API 样本、增删改、并发写入和隔离目录。Windows PowerShell 5.1.26100.9836 与 PowerShell 7.6.9 的 `test-cli.ps1` 均通过。
 - 使用独立 `com.repomeow.tzd85.test` identifier/productName、数据目录和 WebView profile 构建优化 release GUI，经 CDP 连接实际 WebView 验证：项目增改/归档/恢复/删除、标签、自定义命令增改删、pin 级联、脚本扫描与隐藏/恢复、README 当前预览、提示词外部更新与未保存草稿、AI 配置、账号增改删、系统调度、Wiki 删除、报告删除均自动刷新。三次测量分别为 845ms、119ms、331ms，未手动刷新或重启页面。
 - Wiki/报告使用本地固定数据，未调用付费 AI。未实测托盘弹窗、交互式 ConPTY、macOS/Linux 包。本机已有用户 GUI 在运行，未执行会关闭同名进程的 NSIS 静默安装；安装包生成成功，脚本包含 console 的安装/卸载项，隔离 PATH 调用通过。正式升级安装、更新签名及托盘窗口由质量工程师补验。
 - 仅重新 bundle 已打过类型标记的同一测试二进制时，Tauri 提示找不到原始 `__TAURI_BUNDLE_TYPE` 标记；最终 NSIS 生成退出码为 0。本次未发布或执行 updater 签名。
