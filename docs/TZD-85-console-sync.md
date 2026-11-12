@@ -48,6 +48,7 @@ pnpm build
 cargo test --locked --manifest-path src-tauri/Cargo.toml
 cargo build --release --locked --bins --manifest-path src-tauri/Cargo.toml
 python scripts/test-cli.py --exe src-tauri/target/release/repomeow-cli.exe
+python scripts/test-cli-shells.py --exe src-tauri/target/release/repomeow-cli.exe
 powershell -NoProfile -File scripts/test-cli.ps1 -Exe src-tauri/target/release/repomeow-cli.exe
 pwsh -NoProfile -File scripts/test-cli.ps1 -Exe src-tauri/target/release/repomeow-cli.exe
 pnpm tauri build --bundles nsis
@@ -55,7 +56,14 @@ pnpm tauri build --bundles nsis
 
 Python 回归校验 release PE console 标志、无 TTY 下 UTF-8/流分离/0/1/2、增删改/归档、失败写入、隔离目录、并发标签/提示词/文本写入。PowerShell 回归检查直接重定向、管道、变量接收和退出码。Rust 回归验证写锁、失败失效、并发域版本；前端回归验证重叠请求、重试、作用域销毁及旧响应不能复活缓存。`quality.yml` 对 `dev` PR 运行这些检查。
 
+Windows 的退出码回归必须运行 `test-cli-shells.py`（需要同时安装 Windows PowerShell 5.1 和 PowerShell 7）。它按 Actions 的方式为脚本添加 `$ErrorActionPreference = 'stop'` 前缀及 `exit $LASTEXITCODE` 尾部判断，分别检查两种 shell 的正常完成退出 0、故意断言失败及清理失败退出非零，并检查断言失败时仍清理隔离数据目录。清理失败由包装脚本临时替换 `Remove-Item` 注入，遗留的测试目录由 Python 外层临时目录统一回收。仅运行 `-File test-cli.ps1` 不能覆盖这层宿主包装。脚本保留 CLI 业务退出码 1/2 的断言，只有全部断言和清理成功后才输出 `passed:true` 并显式 `exit 0`。
+
 ## 验证记录
+
+2026-11-12 CI 退出码修复验证：
+
+- 新增 Actions 包装回归在旧脚本上复现 `passed:true` 后进程退出 1；旧验证仅运行 `-File`，未覆盖 runner 的退出码处理。
+- 修复后 `test-cli-shells.py` 六组通过：Windows PowerShell 5.1.26100.9836 / PowerShell 7.7.0 各自正常退出 0、故意断言失败退出 1、清理失败退出 1；失败不输出成功，断言失败后仍清理测试目录。`test-cli.py` 59 次 release CLI 回归通过。本轮仅修改测试脚本、CI 和说明，使用已有 release 程序，未重跑 Rust/前端全量测试。
 
 2026-11-11 Windows 本机验证：
 

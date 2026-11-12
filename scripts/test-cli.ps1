@@ -1,5 +1,8 @@
-param([Parameter(Mandatory = $true)][string]$Exe)
-$ErrorActionPreference = 'Continue'
+param(
+    [Parameter(Mandatory = $true)][string]$Exe,
+    [switch]$InjectAssertionFailure
+)
+$ErrorActionPreference = 'Stop'
 $Exe = (Resolve-Path -LiteralPath $Exe).Path
 $root = Join-Path ([IO.Path]::GetTempPath()) ('repomeow-shell-' + [Guid]::NewGuid().ToString('N'))
 $originalRoot = $env:REPOMEOW_DATA_DIR
@@ -20,12 +23,19 @@ try {
     if ($json.projects[0].name -ne $name) { throw 'Redirected Unicode mismatch' }
     $pipeline = & $Exe project list | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0 -or $pipeline.projects[0].name -ne $name) { throw 'Pipeline failed' }
-    & $Exe project add > (Join-Path $root 'out') 2> (Join-Path $root 'err')
-    if ($LASTEXITCODE -ne 2 -or (Get-Item -LiteralPath (Join-Path $root 'out')).Length -ne 0) { throw 'Parse failure/exit code mismatch' }
-    if ((Get-Content -Raw -LiteralPath (Join-Path $root 'err')) -notmatch 'invalid_arguments') { throw 'Missing stderr' }
-    & $Exe project get -p (Join-Path $root 'missing') > (Join-Path $root 'out') 2> (Join-Path $root 'err')
-    if ($LASTEXITCODE -ne 1) { throw 'Business failure/exit code mismatch' }
-    [pscustomobject]@{ passed = $true; shell = $PSVersionTable.PSVersion.ToString(); exe = $Exe } | ConvertTo-Json -Compress
+    try {
+        # PS 5.1 treats the expected native stderr as a non-terminating error.
+        $ErrorActionPreference = 'Continue'
+        & $Exe project add > (Join-Path $root 'out') 2> (Join-Path $root 'err')
+        if ($LASTEXITCODE -ne 2 -or (Get-Item -LiteralPath (Join-Path $root 'out') -ErrorAction Stop).Length -ne 0) { throw 'Parse failure/exit code mismatch' }
+        if ((Get-Content -Raw -LiteralPath (Join-Path $root 'err') -ErrorAction Stop) -notmatch 'invalid_arguments') { throw 'Missing stderr' }
+        & $Exe project get -p (Join-Path $root 'missing') > (Join-Path $root 'out') 2> (Join-Path $root 'err')
+        if ($LASTEXITCODE -ne 1) { throw 'Business failure/exit code mismatch' }
+    } finally {
+        $ErrorActionPreference = 'Stop'
+    }
+    # Used by test-cli-shells.py to verify failure propagation and cleanup.
+    if ($InjectAssertionFailure) { throw 'Injected assertion failure' }
 } finally {
     $env:REPOMEOW_DATA_DIR = $originalRoot
     [Console]::OutputEncoding = $originalEncoding
@@ -35,3 +45,7 @@ try {
     if (!$resolvedRoot.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe cleanup path' }
     Remove-Item -LiteralPath $resolvedRoot -Recurse -Force
 }
+# Only successful assertions AND cleanup may publish success/reset the native
+# failure code retained by the Actions PowerShell wrapper.
+[pscustomobject]@{ passed = $true; shell = $PSVersionTable.PSVersion.ToString(); exe = $Exe } | ConvertTo-Json -Compress
+exit 0
