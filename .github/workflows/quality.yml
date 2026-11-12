@@ -4,9 +4,11 @@ on:
   pull_request:
     branches:
       - main
+      - dev
   push:
     branches:
       - main
+      - dev
 
 permissions:
   contents: read
@@ -82,3 +84,25 @@ jobs:
       - name: Run Rust tests
         working-directory: src-tauri
         run: cargo test --locked
+
+      - name: Build frontend for release CLI embedding
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Build console and desktop release executables
+        run: cargo build --release --locked --bins --manifest-path src-tauri/Cargo.toml
+
+      - name: Test console streams, exits, isolation and concurrent writes
+        run: pnpm test:cli --exe src-tauri/target/release/repomeow-cli.exe
+
+      - name: Test Actions PowerShell success and failure propagation
+        run: pnpm test:cli:shells --exe src-tauri/target/release/repomeow-cli.exe
+
+      - name: Test Windows PowerShell direct calls
+        shell: powershell
+        run: ./scripts/test-cli.ps1 -Exe src-tauri/target/release/repomeow-cli.exe
+
+      - name: Test PowerShell 7 direct calls
+        shell: pwsh
+        run: ./scripts/test-cli.ps1 -Exe src-tauri/target/release/repomeow-cli.exe

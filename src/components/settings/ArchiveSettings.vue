@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onCliDataChanged } from "@/lib/cli-sync";
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
@@ -108,6 +109,8 @@ async function confirmAction() {
     toast.error(e instanceof Error ? e.message : String(e));
   }
 }
+
+onCliDataChanged(["project"], () => store.fetchArchivedProjects());
 </script>
 
 <template>

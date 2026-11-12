@@ -72,6 +72,19 @@ fn change_path(value: &str, directory: &str, enabled: bool) -> String {
 
 fn user_path(enabled: Option<bool>) -> crate::error::AppResult<CliPathStatus> {
     let exe = std::env::current_exe()?;
+    if enabled == Some(true) {
+        let console = exe.with_file_name(if cfg!(windows) {
+            "repomeow-cli.exe"
+        } else {
+            "repomeow-cli"
+        });
+        if !console.is_file() {
+            return Err(std::io::Error::other(
+                "Missing repomeow-cli executable; build/install both binaries first",
+            )
+            .into());
+        }
+    }
     let directory = exe
         .parent()
         .ok_or_else(|| std::io::Error::other("Missing executable parent"))?

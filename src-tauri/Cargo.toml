@@ -4,6 +4,11 @@ version = "0.2.18"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
+default-run = "repomeow"
+
+[[bin]]
+name = "repomeow-cli"
+path = "src/bin/repomeow-cli.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

@@ -17,10 +17,8 @@ use std::path::{Path, PathBuf};
 use chrono::{Datelike, NaiveDate};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use tauri::Manager;
 
 use crate::error::{AppError, AppResult, ErrorCode};
-use crate::APP_DATA_DIR_NAME;
 
 const CDN_URL: &str = "https://cdn.jsdelivr.net/npm/chinese-days/dist/chinese-days.json";
 const CACHE_FILE: &str = "chinese-days.json";
@@ -252,10 +250,7 @@ impl WorkdayChecker {
 
 /// 获取数据目录路径(与 lib.rs 中 Db::open 一致)
 pub fn data_dir(app: &tauri::AppHandle) -> PathBuf {
-    app.path()
-        .home_dir()
-        .unwrap_or_default()
-        .join(APP_DATA_DIR_NAME)
+    crate::app_data_dir(app).unwrap_or_default()
 }
 
 /// chinese-days 缓存所在目录:安装目录 data/

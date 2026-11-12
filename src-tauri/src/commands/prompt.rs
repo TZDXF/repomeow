@@ -2,11 +2,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::commands::open;
-use crate::error::{AppError, AppResult, ErrorCode};
-use crate::APP_DATA_DIR_NAME;
+use crate::error::AppResult;
 
 const PROMPTS_DIR_NAME: &str = "prompts";
 const COMMIT_PROMPT_FILE: &str = "commit.md";
@@ -26,11 +25,7 @@ pub struct AiPrompts {
 }
 
 fn prompts_dir(app: &AppHandle) -> AppResult<PathBuf> {
-    let home = app
-        .path()
-        .home_dir()
-        .map_err(|e| AppError::coded(ErrorCode::IoError, e.to_string()))?;
-    Ok(home.join(APP_DATA_DIR_NAME).join(PROMPTS_DIR_NAME))
+    Ok(crate::app_data_dir(app)?.join(PROMPTS_DIR_NAME))
 }
 
 /// 读取单个提示词文件;不存在或读取失败时返回空串(前端回退默认模板)
@@ -48,7 +43,7 @@ fn write_prompt(dir: &Path, file: &str, content: &str) -> AppResult<()> {
             Err(e) => Err(e.into()),
         }
     } else {
-        fs::write(&path, content)?;
+        crate::data_sync::atomic_write(&path, content.as_bytes())?;
         Ok(())
     }
 }
@@ -56,6 +51,7 @@ fn write_prompt(dir: &Path, file: &str, content: &str) -> AppResult<()> {
 #[tauri::command]
 pub fn get_ai_prompts(app: AppHandle) -> AppResult<AiPrompts> {
     let dir = prompts_dir(&app)?;
+    let _guard = lock_prompts(&dir)?;
     Ok(read_prompts_in(&dir))
 }
 
@@ -84,6 +80,10 @@ pub(crate) fn prompts_dir_in(data_root: &Path) -> PathBuf {
     data_root.join(PROMPTS_DIR_NAME)
 }
 
+pub(crate) fn lock_prompts(dir: &Path) -> std::io::Result<std::fs::File> {
+    crate::data_sync::lock_file(&dir.with_extension("lock"))
+}
+
 /// 返回后端内置默认模板，仅供设置页作为只读占位预览；生成逻辑不依赖前端副本。
 #[tauri::command]
 pub fn get_default_ai_prompts() -> AiPrompts {
@@ -99,6 +99,7 @@ pub fn get_default_ai_prompts() -> AiPrompts {
 #[tauri::command]
 pub fn set_ai_prompts(app: AppHandle, prompts: AiPrompts) -> AppResult<()> {
     let dir = prompts_dir(&app)?;
+    let _guard = lock_prompts(&dir)?;
     write_prompts_in(&dir, &prompts)
 }
 

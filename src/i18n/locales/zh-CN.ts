@@ -1555,10 +1555,11 @@ export default {
 
       title: "CLI",
       description:
-        "RepoMeow CLI 内置于主程序,供 AI agent 与脚本在命令行中执行项目管理、Wiki、语义分析、报告与 AI 配置等管理能力(git/docker 等本机工具请直接调用)",
+        "RepoMeow 提供独立 console 程序 repomeow-cli，供 AI agent 与脚本执行项目、Wiki、语义分析、报告和 AI 配置管理。",
+      externalChanges: "CLI 已更新数据；未保存的编辑已保留，保存将以当前编辑覆盖对应配置。",
       skillsTitle: "内置技能(Skills)",
       skillsHint:
-        "将技能导入资源库后,可在「项目 → AI 资源」部署到各 agent 的 skills 目录,配置 PATH 并重启终端和 AI 工具后,agent 即可直接使用 repomeow 调用 CLI;重复导入会同步最新技能内容,不写入本机程序路径。",
+        "将技能导入资源库后,可在「项目 → AI 资源」部署到各 agent 的 skills 目录,配置 PATH 并重启终端和 AI 工具后,agent 即可直接使用 repomeow-cli 调用 CLI;重复导入会同步最新技能内容,不写入本机程序路径。",
       skillRepomeow:
         "项目管理 / Wiki / 语义分析 / 报告与调度 / 标签 / AI 配置(SKILL.md + references 细分)",
       install: "导入到资源库",

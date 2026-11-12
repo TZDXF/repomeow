@@ -1,18 +1,18 @@
 # 报告生成、历史与调度
 
-通过 PATH 直接调用 `repomeow`。
+通过 PATH 直接调用 `repomeow-cli`。
 
 ## 生成报告
 
 ```powershell
 # 生成今日日报(单个项目)
-repomeow report generate -p <项目目录> --period-type daily
+repomeow-cli report generate -p <项目目录> --period-type daily
 
 # 生成最近 7 天周报(多个项目,逗号分隔)
-repomeow report generate -p <项目目录1>,<项目目录2> --period-type weekly
+repomeow-cli report generate -p <项目目录1>,<项目目录2> --period-type weekly
 
 # 指定时间范围/作者/语言
-repomeow report generate -p <项目目录> --period-type daily --date-from 2026-09-01 --date-to 2026-09-15 --author-mode me --language zh-CN
+repomeow-cli report generate -p <项目目录> --period-type daily --date-from 2026-09-01 --date-to 2026-09-15 --author-mode me --language zh-CN
 ```
 
 参数:
@@ -25,33 +25,33 @@ repomeow report generate -p <项目目录> --period-type daily --date-from 2026-
 
 ```powershell
 # 列表(-p 可省略;更多用 project reports)
-repomeow project reports [-p <项目目录>] [--limit 10]
+repomeow-cli project reports [-p <项目目录>] [--limit 10]
 
 # 单条详情(含 Markdown 正文与提交记录)
-repomeow report history-get --id <报告id>
+repomeow-cli report history-get --id <报告id>
 
 # 删除(级联删除关联提交记录)
-repomeow report history-delete --id <报告id>
+repomeow-cli report history-delete --id <报告id>
 ```
 
 ## 报告调度
 
 ```powershell
 # 列出全部定时报告调度
-repomeow report schedules
+repomeow-cli report schedules
 
 # 全量覆盖:先 schedules 导出编辑,再写回(JSON 数组);仅在明确要求覆盖时执行
-repomeow report schedules-save --file <调度.json>
+repomeow-cli report schedules-save --file <调度.json>
 ```
 
 ## 系统调度(Git 后台检查,非报告调度)
 
 ```powershell
-repomeow report system-schedules
-repomeow report system-schedule-save --enabled true --interval-minutes 10
+repomeow-cli report system-schedules
+repomeow-cli report system-schedule-save --enabled true --interval-minutes 10
 ```
 
-这两个命令管理 `git_update` 后台检查,不影响报告生成。`--interval-minutes` 范围 1-1440。调度变更写入数据库后,**运行中的桌面应用需重启才被调度器感知**(CLI 进程退出时无法通知其调度循环)。
+这两个命令管理 `git_update` 后台检查,不影响报告生成。`--interval-minutes` 范围 1-1440。使用同一数据目录的桌面应用会自动刷新调度并唤醒调度循环，无需重启。
 
 ## 注意
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onCliDataChanged } from "@/lib/cli-sync";
 import Dialog from "@/components/common/ProjectDialog.vue";
 import { computed, nextTick, ref, watch, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
@@ -107,6 +108,24 @@ function isDirty(): boolean {
   }
   return viewer.value?.getText() !== (preview.value.text ?? "");
 }
+
+onCliDataChanged(["file"], async () => {
+  if (!props.relPath) {
+    return;
+  }
+  if (isDirty()) {
+    toast.info(t("settings.cli.externalChanges"));
+    return;
+  }
+  const sequence = ++loadSeq,
+    fresh = await cmd<FilePreview>("read_file_preview", {
+      root: props.root,
+      relPath: props.relPath,
+    });
+  if (sequence === loadSeq) {
+    preview.value = fresh;
+  }
+});
 
 watch(
   () => props.relPath,

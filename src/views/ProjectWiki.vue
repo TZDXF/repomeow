@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onCliDataChanged } from "@/lib/cli-sync";
 import { computed, nextTick, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
@@ -323,6 +324,8 @@ async function updateWiki() {
     generate(p);
   }
 }
+
+onCliDataChanged(["wiki"], () => (project.value ? wiki.load(project.value.path) : undefined));
 </script>
 
 <template>

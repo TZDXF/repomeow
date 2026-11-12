@@ -10,9 +10,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
-
-use crate::APP_DATA_DIR_NAME;
+use tauri::AppHandle;
 
 use super::errors::{codes, RlError, RlResult};
 use super::models::{LibraryMeta, LibraryState, McpServer, SkillLibrary};
@@ -76,13 +74,9 @@ pub struct Library {
 impl Library {
     /// 应用级资源库根目录(`~/.repomeow/resource-library`)
     pub fn app(app: &AppHandle) -> RlResult<Self> {
-        let home = app
-            .path()
-            .home_dir()
-            .map_err(|e| RlError::coded("io_error", e.to_string()))?;
-        Ok(Self::new(
-            home.join(APP_DATA_DIR_NAME).join(LIBRARY_DIR_NAME),
-        ))
+        let root =
+            crate::app_data_dir(app).map_err(|e| RlError::coded("io_error", e.to_string()))?;
+        Ok(Self::new(root.join(LIBRARY_DIR_NAME)))
     }
 
     /// 任意根目录(测试用)

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onCliDataChanged } from "@/lib/cli-sync";
 import { useLatestRequest } from "@/composables/useLatestRequest";
 import { onProjectPageReactivated } from "@/composables/useProjectPageState";
 import {
@@ -378,6 +379,8 @@ async function confirmExport() {
     toast.error(String(e));
   }
 }
+
+onCliDataChanged(["hidden", "file"], () => load(false));
 </script>
 
 <template>

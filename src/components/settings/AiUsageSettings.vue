@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onCliDataChanged } from "@/lib/cli-sync";
 import { computed, nextTick, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
@@ -247,6 +248,8 @@ function ioTitle(entry: AiUsageEntry): string {
     output: fmtExact(entry.outputTokens),
   });
 }
+
+onCliDataChanged(["ai"], reload);
 </script>
 
 <template>

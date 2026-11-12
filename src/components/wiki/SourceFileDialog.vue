@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onCliDataChanged } from "@/lib/cli-sync";
 import Dialog from "@/components/common/ProjectDialog.vue";
 import { computed, nextTick, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -38,6 +39,20 @@ const props = defineProps<{
 let loadSeq = 0,
   /** 当前已加载预览对应的路径(同文件换行区间时避免重复读取) */
   loadedPath: string | null = null;
+
+onCliDataChanged(["file"], async () => {
+  if (!props.relPath) {
+    return;
+  }
+  const sequence = ++loadSeq,
+    fresh = await cmd<FilePreview>("read_file_preview", {
+      root: props.root,
+      relPath: props.relPath,
+    });
+  if (sequence === loadSeq) {
+    preview.value = fresh;
+  }
+});
 
 /** 加载完成后定位到来源行区间(等 CodeViewer 挂载;越界由 revealLines 收敛) */
 async function revealSourceRange() {

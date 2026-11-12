@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { FolderOpen, Import, Loader2, Plug, Plus } from "@lucide/vue";
@@ -25,6 +25,7 @@ import {
   emptyChatPrefs,
   getBuiltinAiProviders,
   revealAiConfigDir,
+  type AiConfigFile,
   type AiModelCompat,
   type AiModelDef,
   type AiModelRef,
@@ -65,17 +66,39 @@ function draftProvider(id: string, provider: AiProvider): ProviderDraft {
   };
 }
 
+let draftBaseline = "";
+function draftSnapshot() {
+  return JSON.stringify([drafts.value, defaultRef.value, chatPrefs.value, taskModels.value]);
+}
+function applyConfigToDraft(config: AiConfigFile) {
+  defaultRef.value = config.defaultModel;
+  taskModels.value = { ...config.taskModels };
+  chatPrefs.value = { ...emptyChatPrefs(), ...config.chat };
+  drafts.value = Object.entries(config.providers).map(([id, provider]) =>
+    draftProvider(id, provider),
+  );
+  draftBaseline = draftSnapshot();
+}
+watch(
+  () => store.config,
+  (config) => {
+    if (!config || saving.value) {
+      return;
+    }
+    if (!draftBaseline || draftSnapshot() === draftBaseline) {
+      applyConfigToDraft(config);
+    } else {
+      toast.info(t("settings.cli.externalChanges"));
+    }
+  },
+);
+
 onMounted(async () => {
   loading.value = true;
   try {
     // force:设置页打开即拉取最新配置,覆盖外部对配置文件的修改
     const config = await store.ensureLoaded(true);
-    defaultRef.value = config.defaultModel;
-    taskModels.value = { ...config.taskModels };
-    chatPrefs.value = { ...emptyChatPrefs(), ...config.chat };
-    drafts.value = Object.entries(config.providers).map(([id, provider]) =>
-      draftProvider(id, provider),
-    );
+    applyConfigToDraft(config);
   } catch (error) {
     toast.error(error instanceof Error ? error.message : String(error));
   } finally {
@@ -317,12 +340,7 @@ async function save(): Promise<void> {
     });
     // 按后端归一化结果刷新本地副本(悬空引用会被清掉,模型行重排)
     const fresh = await store.reload();
-    defaultRef.value = fresh.defaultModel;
-    taskModels.value = { ...fresh.taskModels };
-    chatPrefs.value = { ...emptyChatPrefs(), ...fresh.chat };
-    drafts.value = Object.entries(fresh.providers).map(([id, provider]) =>
-      draftProvider(id, provider),
-    );
+    applyConfigToDraft(fresh);
     toast.success(t("settings.ai.saved"));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
