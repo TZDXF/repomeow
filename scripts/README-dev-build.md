@@ -1,5 +1,7 @@
 # 开发构建与测量
 
+本次 Windows 数据与验证边界见 [TZD-91 实测报告](benchmarks/TZD-91.md)。
+
 开发构建使用 `src-tauri/Cargo.toml` 的 `dev` profile。`pnpm start` 负责准备 sem、启动 Vite 和 Tauri 的 Rust 热更新；`pnpm cli:dev -- <参数>` 使用相同开发 profile。先安装依赖并准备 sidecar：
 
 ```powershell
@@ -44,16 +46,16 @@ cargo clean --manifest-path src-tauri/Cargo.toml --profile dev
 在仓库根目录执行：
 
 ```powershell
-node scripts/bench-dev.mjs --output bench-dev-baseline.local
+node scripts/bench-dev.mjs --output src-tauri/bench-dev-baseline.local
 ```
 
 切换优化配置后，使用另一个全新目录：
 
 ```powershell
-node scripts/bench-dev.mjs --output bench-dev-optimized.local
+node scripts/bench-dev.mjs --output src-tauri/bench-dev-optimized.local
 ```
 
-测量期间关闭正在监听代码的 `pnpm start`，不要编辑 Rust 源码或同时运行其他构建。脚本拒绝复用已有输出目录，不清理已有缓存；输出目录后缀 `.local` 受仓库 gitignore 保护。父目录必须存在。脚本依次执行：
+测量期间关闭正在监听代码的 `pnpm start`，不要编辑 Rust 源码或同时运行其他构建。脚本拒绝复用已有输出目录，不清理已有缓存；输出目录后缀 `.local` 受仓库 gitignore 保护。父目录必须存在。仓库内的输出必须放在 `src-tauri/` 中（或选择仓库外的目录），避免 Vite 监听大量构建产物，在 Windows 链接期间出现 `EBUSY`。脚本依次执行：
 
 1. `cargo fetch --locked --target <rustc host>`，单独记录依赖准备时间。已有 Cargo registry 缓存时，这是缓存检查，不能称为首次下载耗时。
 2. 在 `src-tauri/` 执行 `cargo build --locked --offline --bin repomeow --target-dir <输出目录>/target --timings --message-format=json-render-diagnostics`。首次使用空 target，排除网络、保留系统文件缓存。

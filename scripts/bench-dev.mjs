@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { performance } from "node:perf_hooks";
 
@@ -12,10 +12,17 @@ const cwd = join(root, "src-tauri");
 const source = join(cwd, "src/time_util.rs");
 const args = process.argv.slice(2);
 if (args.length !== 2 || args[0] !== "--output") {
-  console.log("Usage: node scripts/bench-dev.mjs --output <new-directory.local>");
+  console.log("Usage: node scripts/bench-dev.mjs --output src-tauri/<new-directory.local>");
   process.exit(args.includes("--help") ? 0 : 2);
 }
 const output = resolve(args[1]);
+const within = (parent, child) => {
+  const path = relative(parent, child);
+  return path === "" || (path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path));
+};
+if (within(root, output) && !within(cwd, output)) {
+  throw new Error("Put benchmark output inside src-tauri/ or outside the repository so Vite does not watch build artifacts");
+}
 const target = join(output, "target");
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const capture = (command, argv) => {
