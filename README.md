@@ -84,6 +84,8 @@ pnpm release:local  # 本地发布流程调试(另有 check/build/sign/latest/al
 
 > 改动后验证：`pnpm lint` + `pnpm test:unit` + `pnpm build`；Rust 侧 `src-tauri/` 下 `cargo check` / `cargo test`（先 `pnpm sem:prepare`）。
 
+开发构建的调试信息、缓存取舍及首次/增量编译测量方法见 [开发构建与测量](scripts/README-dev-build.md)。
+
 ## 目录结构
 
 ```

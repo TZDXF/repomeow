@@ -104,3 +104,19 @@ url = "2"
 winreg = "0.56"
 # CLI 模式附加父进程控制台(windows_subsystem="windows" 默认无控制台)
 windows-sys = { version = "0.61", features = ["Win32_System_Console", "Win32_System_Environment", "Win32_UI_WindowsAndMessaging"] }
+
+# 开发保留 panic 回溯的行号，减少符号生成与链接占用；增量编译等仍用 Cargo 默认值。
+# 完整断点/变量调试使用 --profile dev-debug，取舍与测量见 scripts/README-dev-build.md。
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+# 独立输出到 target/dev-debug；显式覆盖通配规则，恢复依赖的完整调试信息。
+[profile.dev-debug]
+inherits = "dev"
+debug = true
+
+[profile.dev-debug.package."*"]
+debug = true
