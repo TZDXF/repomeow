@@ -719,6 +719,9 @@ export default {
       deleteRemoteConfirm:
         'Delete remote branch "{name}"? This removes the branch on the remote and cannot be undone.',
       remoteDeleted: 'Deleted remote branch "{name}"',
+      fetchSuccess: 'Updated remote branch "{name}"',
+      fetchAllSuccess: "Updated all remote branches",
+      updateAllHint: "Update all remote branches (also syncs branches deleted on the remote)",
     },
     stash: {
       manage: "Stash",

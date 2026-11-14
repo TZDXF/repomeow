@@ -205,6 +205,8 @@ pub fn run() {
             commands::git::git_push,
             commands::git::git_branch_delete,
             commands::git::git_remote_branch_delete,
+            commands::git::git_remote_branch_fetch,
+            commands::git::git_remote_branches_fetch,
             commands::git::git_stash_push,
             commands::git::git_stash_pop,
             commands::git::git_stash_drop,

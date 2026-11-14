@@ -17,6 +17,7 @@ import { useElementSize, useLocalStorage, useVirtualList } from "@vueuse/core";
 import { Loader2, PanelRightOpen } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { createGraphLayouter, type GraphEdgeLayout, type GraphNodeLayout } from "@/lib/git-graph";
+import { revealCommit, toggleDetailByCommit } from "@/lib/git-graph-detail";
 import { cmd, onListen } from "@/lib/tauri";
 import { toForwardSlash } from "@/lib/path";
 import { onProjectPageReactivated, useProjectPageActive } from "@/composables/useProjectPageState";
@@ -327,7 +328,10 @@ watch(selectedBranch, () => {
 
 // --- 定位 ---
 function locateNode(node: GraphNodeLayout) {
+  // 定位是明确的「看这条提交」意图:详情已收起时一并展开
+  const next = revealCommit(node.commit.hash);
   selected.value = node.commit;
+  detailOpen.value = next.detailOpen;
   const el = containerProps.ref.value,
     viewRows = el ? Math.max(Math.floor(el.clientHeight / ROW_H), 1) : 10;
   scrollTo(Math.max(0, node.row - Math.floor(viewRows / 2)));
@@ -383,20 +387,34 @@ function selectBranch(name: string) {
 
 const {
   askDeleteBranch,
+  askDeleteRemoteBranch,
   branchOp,
   confirmDeleteBranch,
   conflictFiles,
   conflictOpen,
+  deleteIsRemote,
   deleteNeedsForce,
   deleteOpen,
   deleteTarget,
   deleting,
+  fetchRemoteBranch,
   pullBranch,
   pushBranch,
 } = useGitGraphBranchActions(project, selectedBranch, load);
 
+/**
+ * 右侧详情交互:
+ * - 点另一条记录:选中并展开详情
+ * - 点已选中的记录且详情展开:不取消选中,只收起详情(保留窄条与高亮)
+ * - 点已选中的记录且详情已收起,或收起后点任意记录:展开详情
+ */
 function toggleSelect(commit: GitGraphCommit) {
-  selected.value = selected.value?.hash === commit.hash ? null : commit;
+  const next = toggleDetailByCommit(
+    { selectedHash: selected.value?.hash ?? null, detailOpen: detailOpen.value },
+    commit.hash,
+  );
+  selected.value = commit;
+  detailOpen.value = next.detailOpen;
 }
 
 function isTag(refName: string) {
@@ -438,6 +456,9 @@ function tagName(refName: string) {
         @pull-branch="pullBranch"
         @push-branch="pushBranch"
         @delete-branch="askDeleteBranch"
+        @fetch-remote-branch="fetchRemoteBranch"
+        @fetch-all-remote-branches="fetchRemoteBranch('')"
+        @delete-remote-branch="askDeleteRemoteBranch"
       />
 
       <div v-bind="containerProps" class="relative flex-1 overflow-auto">
@@ -522,10 +543,12 @@ function tagName(refName: string) {
     <!-- 拉取产生合并冲突时的解决引导(仅当前分支的 pull 可能出现) -->
     <ConflictDialog v-model:open="conflictOpen" :project="project" :conflicts="conflictFiles" />
 
-    <!-- 删除本地分支确认;未合并分支报错后切换为强制删除确认 -->
+    <!-- 删除分支确认:本地分支未合并时报错后切换为强制删除确认;
+         远程分支走 push --delete,无 force 流程 -->
     <GitBranchDeleteDialog
       v-model:open="deleteOpen"
       :branch="deleteTarget"
+      :remote="deleteIsRemote"
       :needs-force="deleteNeedsForce"
       :deleting="deleting"
       @confirm="confirmDeleteBranch"

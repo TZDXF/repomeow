@@ -687,6 +687,9 @@ export default {
       deleteRemoteConfirm:
         "确定删除远程分支「{name}」吗？该操作会在远端移除该分支，此操作不可撤销。",
       remoteDeleted: "已删除远程分支「{name}」",
+      fetchSuccess: "已更新远程分支「{name}」",
+      fetchAllSuccess: "已更新全部远程分支",
+      updateAllHint: "更新全部远程分支（会同步远端已删除的分支）",
     },
     stash: {
       manage: "Stash",
