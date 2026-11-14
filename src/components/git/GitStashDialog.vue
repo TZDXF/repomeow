@@ -197,7 +197,8 @@ async function createStash() {
     await loadStashes();
   } catch (error) {
     toast.error(String(error));
-    await store.refreshGitStatus(props.project, { force: true }).catch(() => {});
+    // stash 失败时工作区状态不确定:丢弃旧记录后真正重扫一次
+    await store.refreshGitStatus(props.project, { force: true, recheck: true }).catch(() => {});
   } finally {
     creating.value = false;
   }
@@ -235,7 +236,8 @@ async function confirmAction() {
   } catch (error) {
     toast.error(String(error));
     if (action.kind === "pop") {
-      await store.refreshGitStatus(props.project, { force: true }).catch(() => {});
+      // pop 失败可能已部分应用:丢弃旧记录后真正重扫一次
+      await store.refreshGitStatus(props.project, { force: true, recheck: true }).catch(() => {});
     }
     await loadStashes();
   } finally {
