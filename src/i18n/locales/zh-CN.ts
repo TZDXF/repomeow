@@ -687,6 +687,9 @@ export default {
       deleteRemoteConfirm:
         "确定删除远程分支「{name}」吗？该操作会在远端移除该分支，此操作不可撤销。",
       remoteDeleted: "已删除远程分支「{name}」",
+      fetchSuccess: "已更新远程分支「{name}」",
+      fetchAllSuccess: "已更新全部远程分支",
+      updateAllHint: "更新全部远程分支（会同步远端已删除的分支）",
     },
     stash: {
       manage: "Stash",
@@ -785,6 +788,7 @@ export default {
       searchPlaceholder: "搜索提交信息、hash、作者",
       searchEmpty: "无匹配提交",
       tipNotFound: "该分支的顶端提交不在当前图谱范围内",
+      filterTargetGone: "分支「{name}」已被删除,已切回当前分支",
       commitNotFound: "未找到该提交,可能需要加载更多或提交不可达",
       loadingMore: "正在加载全部提交,已加载 {count} 条",
       viewGraph: "图谱",

@@ -719,6 +719,9 @@ export default {
       deleteRemoteConfirm:
         'Delete remote branch "{name}"? This removes the branch on the remote and cannot be undone.',
       remoteDeleted: 'Deleted remote branch "{name}"',
+      fetchSuccess: 'Updated remote branch "{name}"',
+      fetchAllSuccess: "Updated all remote branches",
+      updateAllHint: "Update all remote branches (also syncs branches deleted on the remote)",
     },
     stash: {
       manage: "Stash",
@@ -820,6 +823,7 @@ export default {
       searchPlaceholder: "Search message, hash or author",
       searchEmpty: "No matching commits",
       tipNotFound: "The branch tip is outside the current graph",
+      filterTargetGone: 'Branch "{name}" was deleted; switched back to the current branch',
       commitNotFound: "Commit not found; it may require loading more history or be unreachable",
       loadingMore: "Loading full history, {count} commits loaded",
       viewGraph: "Graph",

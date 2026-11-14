@@ -12,11 +12,13 @@ import {
   Loader2,
   PanelLeftClose,
   PanelLeftOpen,
+  RefreshCw,
   Tag as TagIcon,
   Trash2,
 } from "@lucide/vue";
 import { ContextMenu, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { buildBranchTree, type BranchTreeNode } from "@/lib/branch-tree";
+import type { GitGraphBranchOpState } from "@/composables/git/useGitGraphBranchActions";
 import type { GitBranches, GitBranchTrack } from "@/types";
 import GitBranchTrackBadges from "./GitBranchTrackBadges.vue";
 import ScrollArea from "@/components/common/ScrollArea.vue";
@@ -26,12 +28,13 @@ interface BranchTreeRow {
   depth: number;
 }
 
+/** 远程分支行内的操作态:fetch 表示刷新该分支的远端跟踪引用,branch 为空表示全部更新 */
 const props = defineProps<{
     branches: GitBranches;
     tags: string[];
     currentBranch: string;
     selectedBranch: string;
-    branchOp: { branch: string; op: "pull" | "push" } | null;
+    branchOp: GitGraphBranchOpState | null;
   }>(),
   open = defineModel<boolean>("open", { required: true }),
   emit = defineEmits<{
@@ -40,6 +43,9 @@ const props = defineProps<{
     pullBranch: [name: string];
     pushBranch: [name: string];
     deleteBranch: [name: string];
+    fetchRemoteBranch: [name: string];
+    fetchAllRemoteBranches: [];
+    deleteRemoteBranch: [name: string];
   }>(),
   { t } = useI18n(),
   collapsedSections = ref<Set<string>>(new Set()),
@@ -201,47 +207,91 @@ function onBranchRowClick(prefix: string, row: BranchTreeRow) {
         </template>
 
         <template v-if="branches.remote.length">
-          <button
-            class="flex items-center gap-1 px-1 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase transition-colors hover:text-foreground"
-            @click="toggleSection('remote')"
-          >
-            <ChevronRight
-              class="h-3 w-3 transition-transform"
-              :class="collapsedSections.has('remote') ? '' : 'rotate-90'"
-            />
-            {{ t("git.branch.remote") }}
-          </button>
-          <template v-if="!collapsedSections.has('remote')">
+          <!-- 远程区标题行:折叠开关 + 「全部更新」(fetch --prune --all),
+               让远端分支列表不再是后台 monitor 刷新的陈旧快照 -->
+          <div class="flex items-center gap-1 pt-2 pb-1 pl-1">
             <button
-              v-for="row in remoteRows"
-              :key="`remote:${row.node.fullPath}`"
-              class="flex items-center gap-1.5 rounded-sm py-1 pr-2 text-left text-xs transition-colors hover:bg-accent"
-              :class="row.node.branch && selectedBranch === row.node.branch ? 'bg-accent' : ''"
-              :style="{ paddingLeft: `${8 + row.depth * 12}px` }"
-              @click="onBranchRowClick('remote', row)"
+              class="flex items-center gap-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase transition-colors hover:text-foreground"
+              @click="toggleSection('remote')"
             >
-              <span
-                v-if="row.node.children.length"
-                class="shrink-0 text-muted-foreground"
-                @click.stop="toggleFolder(`remote:${row.node.fullPath}`)"
-              >
-                <ChevronRight
-                  class="h-3 w-3 transition-transform"
-                  :class="collapsedFolders.has(`remote:${row.node.fullPath}`) ? '' : 'rotate-90'"
-                />
-              </span>
-              <span v-else class="w-3 shrink-0" />
-              <Globe
-                v-if="row.node.children.length && row.depth === 0"
-                class="h-3 w-3 shrink-0 text-muted-foreground"
+              <ChevronRight
+                class="h-3 w-3 transition-transform"
+                :class="collapsedSections.has('remote') ? '' : 'rotate-90'"
               />
-              <Folder
-                v-else-if="row.node.children.length"
-                class="h-3 w-3 shrink-0 text-muted-foreground"
-              />
-              <GitBranch v-else class="h-3 w-3 shrink-0 text-muted-foreground" />
-              <span class="truncate">{{ row.node.name }}</span>
+              {{ t("git.branch.remote") }}
             </button>
+            <button
+              class="ml-auto rounded-sm p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+              :title="t('git.branch.updateAllHint')"
+              :disabled="!!branchOp"
+              @click="emit('fetchAllRemoteBranches')"
+            >
+              <Loader2
+                v-if="branchOp?.op === 'fetch' && !branchOp.branch"
+                class="h-3 w-3 animate-spin"
+              />
+              <RefreshCw v-else class="h-3 w-3" />
+            </button>
+          </div>
+          <template v-if="!collapsedSections.has('remote')">
+            <!-- 远程分支行:右键提供 更新 / 删除远程分支;更新即定向 fetch(刷新 origin/xxx 跟踪引用) -->
+            <ContextMenu v-for="row in remoteRows" :key="`remote:${row.node.fullPath}`">
+              <ContextMenuTrigger as-child :disabled="!row.node.branch">
+                <button
+                  class="flex w-full items-center gap-1.5 rounded-sm py-1 pr-2 text-left text-xs transition-colors hover:bg-accent"
+                  :class="row.node.branch && selectedBranch === row.node.branch ? 'bg-accent' : ''"
+                  :style="{ paddingLeft: `${8 + row.depth * 12}px` }"
+                  @click="onBranchRowClick('remote', row)"
+                >
+                  <span
+                    v-if="row.node.children.length"
+                    class="shrink-0 text-muted-foreground"
+                    @click.stop="toggleFolder(`remote:${row.node.fullPath}`)"
+                  >
+                    <ChevronRight
+                      class="h-3 w-3 transition-transform"
+                      :class="
+                        collapsedFolders.has(`remote:${row.node.fullPath}`) ? '' : 'rotate-90'
+                      "
+                    />
+                  </span>
+                  <span v-else class="w-3 shrink-0" />
+                  <Globe
+                    v-if="row.node.children.length && row.depth === 0"
+                    class="h-3 w-3 shrink-0 text-muted-foreground"
+                  />
+                  <Folder
+                    v-else-if="row.node.children.length"
+                    class="h-3 w-3 shrink-0 text-muted-foreground"
+                  />
+                  <GitBranch v-else class="h-3 w-3 shrink-0 text-muted-foreground" />
+                  <span class="truncate">{{ row.node.name }}</span>
+                  <Loader2
+                    v-if="branchOp?.op === 'fetch' && branchOp.branch === row.node.branch"
+                    class="ml-auto h-3 w-3 shrink-0 animate-spin text-muted-foreground"
+                  />
+                </button>
+              </ContextMenuTrigger>
+              <ContextMenuContent v-if="row.node.branch" class="w-44">
+                <ContextMenuItem
+                  class="gap-2 text-xs"
+                  :disabled="!!branchOp"
+                  @click="emit('fetchRemoteBranch', row.node.branch!)"
+                >
+                  <RefreshCw class="h-3.5 w-3.5" />
+                  {{ t("git.branch.update") }}
+                </ContextMenuItem>
+                <ContextMenuItem
+                  class="gap-2 text-xs"
+                  variant="destructive"
+                  :disabled="!!branchOp"
+                  @click="emit('deleteRemoteBranch', row.node.branch!)"
+                >
+                  <Trash2 class="h-3.5 w-3.5" />
+                  {{ t("git.branch.deleteRemote") }}
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
           </template>
         </template>
 

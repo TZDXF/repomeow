@@ -428,6 +428,21 @@ export const useProjectsStore = defineStore("projects", () => {
     });
   }
 
+  /** 更新单个远程分支的跟踪引用(branch 形如 "origin/feature/x");不切工作区、不合并 */
+  async function fetchRemoteBranch(project: Project, branch: string) {
+    project.git = await cmd<GitStatus>("git_remote_branch_fetch", {
+      path: project.path,
+      branch,
+    });
+  }
+
+  /** 更新全部远程分支(fetch --prune --all);同时清理远端已删除分支的陈旧引用 */
+  async function fetchAllRemoteBranches(project: Project) {
+    project.git = await cmd<GitStatus>("git_remote_branches_fetch", {
+      path: project.path,
+    });
+  }
+
   // --- worktree / 合并 / 变基 ---
 
   /** 列出仓库的全部 worktree(第一条为主工作区) */
@@ -565,6 +580,8 @@ export const useProjectsStore = defineStore("projects", () => {
     pushRepository,
     deleteBranch,
     deleteRemoteBranch,
+    fetchRemoteBranch,
+    fetchAllRemoteBranches,
     listWorktrees,
     addWorktree,
     removeWorktree,
