@@ -823,6 +823,7 @@ export default {
       searchPlaceholder: "Search message, hash or author",
       searchEmpty: "No matching commits",
       tipNotFound: "The branch tip is outside the current graph",
+      filterTargetGone: 'Branch "{name}" was deleted; switched back to the current branch',
       commitNotFound: "Commit not found; it may require loading more history or be unreachable",
       loadingMore: "Loading full history, {count} commits loaded",
       viewGraph: "Graph",

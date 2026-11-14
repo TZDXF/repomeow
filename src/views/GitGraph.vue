@@ -18,6 +18,7 @@ import { Loader2, PanelRightOpen } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { createGraphLayouter, type GraphEdgeLayout, type GraphNodeLayout } from "@/lib/git-graph";
 import { revealCommit, toggleDetailByCommit } from "@/lib/git-graph-detail";
+import { prepareGraphLoad } from "@/lib/git-graph-load";
 import { cmd, onListen } from "@/lib/tauri";
 import { toForwardSlash } from "@/lib/path";
 import { onProjectPageReactivated, useProjectPageActive } from "@/composables/useProjectPageState";
@@ -209,6 +210,34 @@ async function load(preserveView = false) {
     publishLayout();
   }
   let autoLocated = false;
+
+  // 分支列表先取先落,再据此校验筛选目标:日志的修订范围依赖它,且远程分支可能刚被
+  // 删除(更新/prune 之后)。若与日志绑在同一个 Promise.all 里,坏修订会让新分支列表
+  // 一起失败,侧栏继续显示已删除的分支与旧图谱。列表失败不阻断日志(沿用旧列表)。
+  const preparation = await prepareGraphLoad(
+    () => cmd<GitBranches>("list_git_branches", { path: currentProject.path }),
+    branches.value,
+    filterValue.value,
+    selectedBranch.value,
+  );
+  if (seq !== loadSeq) {
+    return;
+  }
+  if (preparation.branches) {
+    branches.value = preparation.branches;
+  }
+
+  // 筛选目标失效(远端删除后被 prune):清空失效选择并回退到当前检出分支;
+  // selectedBranch 的 watcher 会据此重新发起一次有效范围的加载。
+  const { correction } = preparation;
+  if (correction.dropped) {
+    toast.info(t("git.graph.filterTargetGone", { name: correction.dropped }));
+    selectedBranch.value = correction.branch;
+    // 本次加载作废:selectedBranch 变化触发的新一轮加载会重新置 loading
+    loading.value = false;
+    return;
+  }
+
   try {
     const channel = new Channel<GitGraphBatch>();
     channel.onmessage = (batch) => {
@@ -250,18 +279,12 @@ async function load(preserveView = false) {
         loading.value = false;
       }
     };
-    const [branchData] = await Promise.all([
-      cmd<GitBranches>("list_git_branches", { path: currentProject.path }),
-      cmd("git_graph_log", {
-        path: currentProject.path,
-        ...graphParams.value,
-        batchSize: BATCH_SIZE,
-        onBatch: channel,
-      }),
-    ]);
-    if (seq === loadSeq) {
-      branches.value = branchData;
-    }
+    await cmd("git_graph_log", {
+      path: currentProject.path,
+      ...graphParams.value,
+      batchSize: BATCH_SIZE,
+      onBatch: channel,
+    });
   } catch (e) {
     if (seq === loadSeq) {
       if (preserveView) {

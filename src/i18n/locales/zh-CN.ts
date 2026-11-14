@@ -788,6 +788,7 @@ export default {
       searchPlaceholder: "搜索提交信息、hash、作者",
       searchEmpty: "无匹配提交",
       tipNotFound: "该分支的顶端提交不在当前图谱范围内",
+      filterTargetGone: "分支「{name}」已被删除,已切回当前分支",
       commitNotFound: "未找到该提交,可能需要加载更多或提交不可达",
       loadingMore: "正在加载全部提交,已加载 {count} 条",
       viewGraph: "图谱",
