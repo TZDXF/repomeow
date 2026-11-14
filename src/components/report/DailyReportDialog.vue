@@ -380,11 +380,13 @@ async function startBatch() {
 <template>
   <Dialog v-model:open="open">
     <!-- flex 覆盖基类 grid;内容叠加易超视口,max-h 限制弹窗总高。
+         限高用 --titlebar-height 让开自绘标题栏,否则居中后上方只剩 1.5rem,
+         不足标题栏的 2.25rem,弹窗顶部仍会被盖住。
          基类 sm:max-w-sm 在 ≥sm 断点的层叠顺序后于非变体类,会盖掉普通 max-w-*,
          故宽度必须用 sm: 变体覆盖;min(*, 100%-2rem) 防止窗口较窄时弹窗贴边。
          未生成报告时只有配置栏,用较窄宽度避免空旷 -->
     <DialogContent
-      class="flex max-h-[calc(100dvh-3rem)] flex-col"
+      class="flex max-h-[calc(100dvh_-_var(--titlebar-height)_-_2rem)] flex-col"
       :class="
         result || generating
           ? 'sm:max-w-[min(56rem,calc(100%-2rem))]'
