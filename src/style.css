@@ -49,6 +49,10 @@
 /* 选项预览重用正式主题令牌,并重置父主题继承的颜色、字体与圆角。 */
 :root,
 .theme-preview {
+  /* 自绘标题栏高度:弹窗/浮层避让标题栏的唯一来源。
+     TitleBar.vue 用 h-[var(--titlebar-height)] 取高度,弹窗限高与
+     popper 的碰撞边距(2.25rem = 36px)都以此为准,避免各处硬编码漂移。 */
+  --titlebar-height: 2.25rem;
   --font-app:
     "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "PingFang SC",
     "Microsoft YaHei", sans-serif;
@@ -330,6 +334,24 @@
   body {
     @apply bg-background text-foreground;
     @apply font-sans;
+  }
+
+  /* ===== 弹窗避让标题栏 ===== */
+  /* 基础 DialogContent 用 top-1/2 + -translate-y-1/2 居中,窗口高度不足时
+     会被 z-[60] 的标题栏(TitleBar)盖住顶部,标题与关闭按钮不可见。
+     - margin-top 把弹窗整体下移半个标题栏高,使其在标题栏下方的可视区居中;
+     - max-height 保证上下各留 1rem,内容超出时弹窗自身滚动。
+     放在 base 层:各弹窗自己的 max-h-* / h-* / overflow-* 工具类依旧可以覆盖。
+     抽屉(AiFileDrawer)等贴边弹窗用 mt-0 / max-h-none 自行退出这套规则。 */
+  [data-slot="dialog-content"] {
+    margin-top: calc(var(--titlebar-height, 2.25rem) / 2);
+    max-height: calc(100dvh - var(--titlebar-height, 2.25rem) - 2rem);
+    overflow-y: auto;
+  }
+  /* 托盘弹窗窗口没有标题栏,不需要下移 */
+  body.tray-popup-window [data-slot="dialog-content"] {
+    margin-top: 0;
+    max-height: calc(100dvh - 2rem);
   }
 
   /* ===== 滚动条主题化 ===== */
