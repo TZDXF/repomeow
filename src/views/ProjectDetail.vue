@@ -35,6 +35,8 @@ import CustomCommands from "@/components/scripts/CustomCommands.vue";
 import PackageScripts from "@/components/scripts/PackageScripts.vue";
 import TagPicker from "@/components/tags/TagPicker.vue";
 import TerminalPanel from "@/components/terminal/TerminalPanel.vue";
+import { useGitFocusRefresh } from "@/composables/git/useGitFocusRefresh";
+import { useProjectPageActive } from "@/composables/useProjectPageState";
 import { useChatStore } from "@/stores/chat";
 import { useProjectsStore } from "@/stores/projects";
 import type { Project } from "@/types";
@@ -45,6 +47,7 @@ const { t } = useI18n(),
   store = useProjectsStore(),
   chatOpen = ref(false),
   chat = useChatStore(),
+  pageActive = useProjectPageActive(),
   project = computed(() => {
     const id = Number(route.params.id);
     return Number.isFinite(id) ? store.getProjectById(id) : undefined;
@@ -147,6 +150,20 @@ function onWorktreeChanged() {
     store.refreshGitStatus(target, { force: true });
   }
 }
+
+// 窗口失焦后重新聚焦时强制重查当前工作区:详情页的变更统计只靠后端定时检查刷新
+// (间隔由设置项决定,默认 10 分钟),期间在编辑器里改动文件看不到变更。
+// 只对当前展示的项目页生效(缓存的后台项目页不重复查询),并做间隔节流避免抖动叠加。
+useGitFocusRefresh(
+  () => {
+    const target = worktreeProject.value ?? project.value;
+    if (!target?.path_exists) {
+      return;
+    }
+    return store.refreshGitStatus(target, { force: true });
+  },
+  { active: () => pageActive.value },
+);
 
 // --- 视图切换:执行(脚本/服务/命令卡片网格)与 AI(项目 AI 资产,全宽非卡片) ---
 // 各项目独立记忆视图,避免另一个 tab 的选择覆盖当前项目。
