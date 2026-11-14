@@ -14,6 +14,7 @@ import { cmd, onListen } from "@/lib/tauri";
 import { applyCliRevisions, onCliDataChanged, type CliRevisions } from "@/lib/cli-sync";
 import { scheduleHourly } from "@/lib/hourly-scheduler";
 import { useStreamMarkdownWheelZoom } from "@/composables/useStreamMarkdownWheelZoom";
+import { useWindowFocusSignal } from "@/composables/git/useGitFocusRefresh";
 import { usePinsStore } from "@/stores/pins";
 import { useBackgroundTasksStore } from "@/stores/background-tasks";
 import { useProjectsStore } from "@/stores/projects";
@@ -44,6 +45,10 @@ const router = useRouter(),
 
 // markdown 全屏弹窗(teleport 到 body)内直接滚轮缩放 mermaid/图片,无需 ctrl
 useStreamMarkdownWheelZoom();
+
+// 主窗口唯一实例订阅窗口焦点:失焦→重新聚焦时递增聚焦版本号,页面侧的
+// useGitFocusRefresh 据此重查当前工作区的 Git 状态;托盘迷你弹窗内部自动跳过。
+useWindowFocusSignal();
 
 onCliDataChanged(["project", "tag"], () => store.refreshFromExternal());
 onCliDataChanged(["tag"], () => tagsStore.fetchTags());

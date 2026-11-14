@@ -1,5 +1,6 @@
 import { ref } from "vue";
 import { defineStore } from "pinia";
+import { gitCheckCoordinator, gitCheckKey } from "@/lib/git-check-coordinator";
 import { cmd } from "@/lib/tauri";
 import type {
   GitCheckScope,
@@ -141,31 +142,61 @@ export const useProjectsStore = defineStore("projects", () => {
   /**
    * 刷新单个项目的 git 状态。
    * 默认走后端 15s 缓存:详情页进入等高频场景直接命中,避免每次进大仓库都重跑
-   * git status;缓存过期由后端 30s 统一检查循环兜底保鲜,结果经统一事件推送。
+   * git status;缓存过期由后端统一检查循环兜底保鲜,结果经统一事件推送。
    * git 写操作本身会返回最新状态并回填缓存,不经过此函数。
-   * force: true 用于路径变更(重定向/移动目录)后必须拿到最新状态的场景。
+   *
+   * 所有入口共享 `gitCheckCoordinator`:同一路径 15s 内的检查直接复用(即使调用方
+   * 要求 force、即使前一次检查来自详情页/聚焦刷新/写操作回退),避免大仓库被反复
+   * 扫描;确需真正重扫时传 `recheck: true` 或先 `forgetGitStatus`。
    */
-  async function refreshGitStatus(project: Project, options: { force?: boolean } = {}) {
+  async function refreshGitStatus(
+    project: Project,
+    options: { force?: boolean; recheck?: boolean } = {},
+  ) {
     const force = options.force ?? false,
-      registered = projects.value.some((p) => p.id === project.id && p.path === project.path),
+      recheck = options.recheck ?? false,
+      key = gitCheckKey(project.path);
+    if (recheck) {
+      // 显式要求重扫:丢弃该路径的现有记录与进行中请求,不被刚完成的检查挡住
+      gitCheckCoordinator.forget(key);
+    } else {
+      const cached = gitCheckCoordinator.cached<GitStatus>(key);
+      if (cached) {
+        // 15s 内已被任何入口检查过:直接复用,不再发 IPC(force 也不能绕开这条保护)
+        project.git = cached;
+        return project.git;
+      }
+      const pending = gitCheckCoordinator.pending<GitStatus>(key);
+      if (pending) {
+        // 同一路径已有检查在跑:复用它,不叠加并发扫描
+        project.git = await pending.catch(() => project.git ?? null);
+        return project.git;
+      }
+    }
+    const registered = projects.value.some((p) => p.id === project.id && p.path === project.path),
       scope: GitCheckScope = registered
         ? { kind: "project", projectId: project.id }
         : { kind: "path", path: project.path },
       run = async () => {
         const items = await cmd<GitStatusItem[]>("check_git_status", {
-            scope,
-            force,
-            fetchRemote: false,
-          }),
-          item = items.find((i) => i.path === project.path) ?? items[0];
+          scope,
+          force,
+          fetchRemote: false,
+        });
+        const item = items.find((i) => i.path === project.path) ?? items[0];
         if (!item) {
           throw new Error("git status unavailable");
         }
         return item.status;
-      };
+      },
+      request = run(),
+      finish = gitCheckCoordinator.begin(key, request);
     try {
-      project.git = await run();
+      const status = await request;
+      finish({ ok: true, value: status });
+      project.git = status;
     } catch {
+      finish({ ok: false });
       // 失败重试一次;仍失败时保留旧值(原本就没有则保持 null),避免卡片 git 信息闪烁丢失
       try {
         project.git = await run();
@@ -173,11 +204,13 @@ export const useProjectsStore = defineStore("projects", () => {
         /* 保留旧值,等待下一轮后台刷新 */
       }
     }
+    return project.git;
   }
 
   /**
    * 批量刷新所有项目的 git 状态:一次 IPC 返回全部(后端带缓存)。
-   * force 为 true 时绕过缓存强制重查(启动/用户主动刷新)
+   * force 为 true 时绕过后端缓存强制重查(启动/用户主动刷新)。
+   * 结果会登记到共享协调器,避免单项目入口紧接着再扫一遍。
    */
   async function refreshAllGitStatus(force = false) {
     try {
@@ -188,9 +221,17 @@ export const useProjectsStore = defineStore("projects", () => {
           fetchRemote: false,
         });
       applyGitStatusItems(items);
+      for (const item of items) {
+        gitCheckCoordinator.record(item.path, item.status);
+      }
     } catch {
       // 失败静默:由后端事件推送/窗口聚焦兜底补充
     }
+  }
+
+  /** 丢弃某路径的 Git 检查记录(路径变更/worktree 合回变基后必须强制重扫) */
+  function forgetGitStatus(path: string) {
+    gitCheckCoordinator.forget(path);
   }
 
   /** 按路径批量写入 git 状态(后端事件推送与批量命令共用) */
@@ -217,6 +258,8 @@ export const useProjectsStore = defineStore("projects", () => {
     if (project && project.path === payload.path) {
       project.git = payload.status;
     }
+    // 事件携带的就是刚查到的状态:登记到共享记录,紧随其后的聚焦/进页检查直接复用
+    gitCheckCoordinator.record(payload.path, payload.status);
   }
 
   async function addProject(path: string, name: string, description?: string) {
@@ -273,8 +316,8 @@ export const useProjectsStore = defineStore("projects", () => {
     }
     upsertProjects([project]);
     if (project.path_exists) {
-      // 路径刚变更,绕过缓存强制重查新路径状态
-      await refreshGitStatus(project, { force: true });
+      // 路径刚变更:旧路径记录已失效,新路径强制重扫一次
+      await refreshGitStatus(project, { force: true, recheck: true });
     }
     return project;
   }
@@ -287,7 +330,8 @@ export const useProjectsStore = defineStore("projects", () => {
       projects.value[idx] = project;
     }
     upsertProjects([project]);
-    await refreshGitStatus(project, { force: true });
+    // 目录刚移动,路径记录不可信:强制重扫
+    await refreshGitStatus(project, { force: true, recheck: true });
     return project;
   }
 
@@ -570,6 +614,7 @@ export const useProjectsStore = defineStore("projects", () => {
     deleteProject,
     refreshGitStatus,
     refreshAllGitStatus,
+    forgetGitStatus,
     applyGitStatusItems,
     applyGitProjectEvent,
     listBranches,

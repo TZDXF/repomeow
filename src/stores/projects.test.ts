@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
+import { gitCheckCoordinator } from "@/lib/git-check-coordinator";
 import { useProjectsStore } from "@/stores/projects";
 import { cmd } from "@/lib/tauri";
 import type { GitProjectChangedPayload, GitStatus, Project } from "@/types";
@@ -187,5 +188,92 @@ describe("projects store 全量索引", () => {
     cmdMock.mockResolvedValueOnce(makeProject(2, "repo-b-renamed"));
     await store.refreshProject(2);
     expect(store.getProjectById(2)?.name).toBe("repo-b-renamed");
+  });
+});
+
+/** 回归:所有 Git 检查入口共享 15s 路径记录,大仓库不会被聚焦/进页重复扫描 */
+describe("projects store Git 检查协调", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    cmdMock.mockReset();
+    gitCheckCoordinator.reset();
+  });
+
+  it("15s 内第二次 refreshGitStatus(含 force)复用已有结果,不再发 IPC", async () => {
+    const store = useProjectsStore(),
+      p = project();
+    store.projects = [p];
+    cmdMock.mockResolvedValueOnce([{ path: p.path, status }]);
+    await store.refreshGitStatus(p);
+    expect(cmdMock).toHaveBeenCalledOnce();
+
+    // 第二次带上 force:仍命中共享记录,不发起新的扫描
+    await store.refreshGitStatus(p, { force: true });
+    expect(cmdMock).toHaveBeenCalledOnce();
+    expect(p.git).toEqual(status);
+  });
+
+  it("另一入口刚检查过时,refreshGitStatus 直接复用其结果", async () => {
+    const store = useProjectsStore(),
+      p = project();
+    store.projects = [p];
+    gitCheckCoordinator.record(p.path, status);
+    await store.refreshGitStatus(p, { force: true });
+    expect(cmdMock).not.toHaveBeenCalled();
+    expect(p.git).toEqual(status);
+  });
+
+  it("同一路径的检查进行中时复用该请求,不叠加并发扫描", async () => {
+    const store = useProjectsStore(),
+      p = project();
+    store.projects = [p];
+    let release!: (items: unknown) => void;
+    const deferred = new Promise<unknown>((resolve) => {
+      release = resolve;
+    });
+    cmdMock.mockReturnValueOnce(deferred);
+    const first = store.refreshGitStatus(p),
+      // 检查仍在进行中时第二个入口发起同一路径请求:应复用而非再发一次 IPC
+      second = store.refreshGitStatus(p, { force: true });
+    expect(cmdMock).toHaveBeenCalledOnce();
+    release([{ path: p.path, status }]);
+    await Promise.all([first, second]);
+    expect(cmdMock).toHaveBeenCalledOnce();
+    expect(p.git).toEqual(status);
+  });
+
+  it("recheck 丢弃记录后真正重扫(路径变更/worktree 合回场景)", async () => {
+    const store = useProjectsStore(),
+      p = project();
+    store.projects = [p];
+    cmdMock.mockResolvedValue([{ path: p.path, status }]);
+    await store.refreshGitStatus(p);
+    await store.refreshGitStatus(p, { force: true, recheck: true });
+    expect(cmdMock).toHaveBeenCalledTimes(2);
+    gitCheckCoordinator.reset();
+  });
+
+  it("批量刷新把结果登记到共享记录,单项目入口紧随其后不再扫描", async () => {
+    const store = useProjectsStore(),
+      p = project();
+    store.projects = [p];
+    cmdMock.mockResolvedValueOnce([{ path: p.path, status }]);
+    await store.refreshAllGitStatus();
+    await store.refreshGitStatus(p);
+    expect(cmdMock).toHaveBeenCalledOnce();
+    expect(p.git).toEqual(status);
+  });
+
+  it("检查失败不写入记录,后续调用仍可重试", async () => {
+    const store = useProjectsStore(),
+      p = project();
+    store.projects = [p];
+    cmdMock.mockRejectedValueOnce(new Error("git unavailable"));
+    cmdMock.mockResolvedValueOnce([{ path: p.path, status }]);
+    await store.refreshGitStatus(p);
+    // 失败路径会重试一次,第二次成功即写入记录
+    expect(cmdMock).toHaveBeenCalledTimes(2);
+    expect(p.git).toEqual(status);
+    gitCheckCoordinator.reset();
   });
 });
