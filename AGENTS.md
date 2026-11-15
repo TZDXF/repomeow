@@ -31,7 +31,7 @@
 | `pnpm sem:prepare` / `sem:check` | 下载/校验 sem sidecar 二进制 |
 | `pnpm release:*` | `scripts/release/release.mjs` 本地发布调试(check/build/sign/latest/all/local) |
 
-改动后建议验证:`pnpm lint` + `pnpm test:unit` + `pnpm build`;Rust 侧 `cargo check` / `cargo test`(在 `src-tauri/` 下)。`cargo check` 前若 sem 二进制未准备,先跑 `pnpm sem:prepare`。GitHub Actions 有 `release.yml` 负责正式发布。
+改动后建议验证:`pnpm lint` + `pnpm test:unit` + `pnpm build`;Rust 侧 `cargo check` / `cargo test`(在 `src-tauri/` 下)。`cargo check` 前若 sem 二进制未准备,先跑 `pnpm sem:prepare`。Rust 侧另有 clippy 严格门禁:提交前在 `src-tauri/` 跑 `cargo clippy --locked --all-targets -- -D warnings`(`quality.yml` 的 Rust job 以同一命令卡 PR,0 warning 才通过;新 lint 需改代码或在单点 `#[allow]` 旁写明理由,不加全局 allow)。GitHub Actions 有 `release.yml` 负责正式发布。
 
 ## 架构与分层
 
