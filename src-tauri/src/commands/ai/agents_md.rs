@@ -11,7 +11,6 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use tauri::{AppHandle, State};
-use tokio_util::sync::CancellationToken;
 
 use crate::agent::harness::restricted_env::RestrictedEnv;
 use crate::agent::harness::runtime::harness_tool_from_core;
@@ -78,7 +77,7 @@ pub async fn ai_generate_agents_md(
     let cancel = run
         .as_ref()
         .map(|run| run.token.clone())
-        .unwrap_or_else(CancellationToken::new);
+        .unwrap_or_default();
     let configured = load_builtin_agent_model(&app, request.model.as_deref())?;
     let usage_model = configured.model.id.clone();
     let thinking = effective_thinking_level(&configured.model, request.thinking.as_deref());

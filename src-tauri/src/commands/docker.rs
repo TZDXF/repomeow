@@ -581,6 +581,9 @@ fn export_containers_merged(
 /// service 为空时导出该文件的全部服务:merge 为 true 时合并为单个文件(dest 为文件路径),否则 dest 为目标目录;
 /// compress 为 true 时产物 gzip 压缩(单服务导出无合并语义,merge 忽略)
 #[tauri::command]
+// #[tauri::command] 的参数名即前端 IPC 契约(camelCase ↔ 参数名一一对应),
+// 改签名会破坏前端调用;参数个数由导出选项(服务/kind/目标/合并/压缩)决定。
+#[allow(clippy::too_many_arguments)]
 pub async fn compose_export(
     app: AppHandle,
     path: String,

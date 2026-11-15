@@ -292,14 +292,14 @@ pub(super) fn search_project_text(
         let threads = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(4);
-        let chunk_size = (files.len() + threads - 1) / threads;
+        let chunk_size = files.len().div_ceil(threads);
         let matcher = &matcher;
         for chunk in files.chunks(chunk_size.max(1)) {
             let hits = &hits;
             let total = &total;
             scope.spawn(move || {
                 for rel in chunk {
-                    if let Some((count, lines)) = search_one_file(root_path, rel, &matcher, total) {
+                    if let Some((count, lines)) = search_one_file(root_path, rel, matcher, total) {
                         hits.lock().unwrap().push(TextSearchHit {
                             path: walk::to_slash(rel),
                             count,

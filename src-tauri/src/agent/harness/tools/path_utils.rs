@@ -78,23 +78,14 @@ fn replace_am_pm(path: &str) -> String {
     let mut index = 0;
     while index < bytes.len() {
         // 匹配 "(space)(AM|PM)(.)" 的一角:space + A/P + M + '.'
-        if bytes[index] == ' '
-            && index + 3 < bytes.len()
-            && (bytes[index + 1] == 'A' || bytes[index + 1] == 'P')
-            && bytes[index + 2] == 'M'
+        // 大小写两套拼写原本分支体完全相同,合并为一次判定:两套各自成对(不能混搭)
+        let am_pm = index + 3 < bytes.len()
+            && bytes[index] == ' '
             && bytes[index + 3] == '.'
-        {
-            result.push(NARROW_NO_BREAK_SPACE);
-            result.push(bytes[index + 1]);
-            result.push(bytes[index + 2]);
-            result.push('.');
-            index += 4;
-        } else if bytes[index] == ' '
-            && index + 3 < bytes.len()
-            && (bytes[index + 1] == 'a' || bytes[index + 1] == 'p')
-            && bytes[index + 2] == 'm'
-            && bytes[index + 3] == '.'
-        {
+            && (((bytes[index + 1] == 'A' || bytes[index + 1] == 'P') && bytes[index + 2] == 'M')
+                || ((bytes[index + 1] == 'a' || bytes[index + 1] == 'p')
+                    && bytes[index + 2] == 'm'));
+        if am_pm {
             result.push(NARROW_NO_BREAK_SPACE);
             result.push(bytes[index + 1]);
             result.push(bytes[index + 2]);

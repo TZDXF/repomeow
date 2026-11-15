@@ -184,7 +184,7 @@ fn save_history(
     let context = session.map(|s| SavedContext {
         messages: s.agent.messages(),
         context_tokens: *s.context_tokens.lock().unwrap(),
-        breakdown: s.breakdown.lock().unwrap().clone(),
+        breakdown: *s.breakdown.lock().unwrap(),
         last_compaction_ts: *s.last_compaction_ts.lock().unwrap(),
     });
     let context = context

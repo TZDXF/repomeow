@@ -192,12 +192,11 @@ pub fn prepare_branch_entries(entries: &[Entry], token_budget: i64) -> BranchPre
 
         let tokens = estimate_tokens(&message);
         if token_budget > 0 && total_tokens + tokens > token_budget {
-            if matches!(entry, Entry::Compaction(_) | Entry::BranchSummary(_)) {
-                if total_tokens < (token_budget as f64 * 0.9) as i64 {
+            if matches!(entry, Entry::Compaction(_) | Entry::BranchSummary(_))
+                && total_tokens < (token_budget as f64 * 0.9) as i64 {
                     messages.insert(0, message);
                     total_tokens += tokens;
                 }
-            }
             break;
         }
 
@@ -279,9 +278,10 @@ pub async fn generate_branch_summary(
             tools: Vec::new(),
         },
         {
-            let mut options = crate::agent::llm::types::SimpleStreamOptions::default();
-            options.max_tokens = Some(2048);
-            options
+            crate::agent::llm::types::SimpleStreamOptions {
+                max_tokens: Some(2048),
+                ..Default::default()
+            }
         },
         None,
         None,
@@ -397,7 +397,7 @@ mod tests {
     fn prepare_branch_entries_respects_budget() {
         let mut entries = Vec::new();
         for seq in 1..=10 {
-            let message = AgentMessage::user_text(&"x".repeat(4000), 0);
+            let message = AgentMessage::user_text("x".repeat(4000), 0);
             entries.push(message_entry(seq, None, message));
         }
         // 预算 3000 → 大约前 3 条(每条约 1000 tokens)。

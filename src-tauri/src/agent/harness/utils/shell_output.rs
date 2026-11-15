@@ -13,6 +13,9 @@ use tokio::sync::mpsc;
 use super::truncate::{
     truncate_tail, TruncatedBy, TruncationResult, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES,
 };
+/// 每个清洗后的输出块触发的进度回调 `(块文本, 进度快照)`。
+pub type ShellChunkHandler = Arc<dyn Fn(&str, ShellCaptureProgress) + Send + Sync>;
+
 use crate::agent::harness::types::{
     err, ok, CreateTempFileOptions, ExecutionEnv, ExecutionError, ExecutionErrorCode, FileContent,
     Result, ShellExecOptions,
@@ -36,7 +39,7 @@ pub struct ShellCaptureOptions {
     pub timeout: Option<f64>,
     pub abort_signal: Option<crate::agent::types::AbortSignal>,
     /// 每个清洗后的输出块触发一次,携带当前进度快照。
-    pub on_chunk: Option<Arc<dyn Fn(&str, ShellCaptureProgress) + Send + Sync>>,
+    pub on_chunk: Option<ShellChunkHandler>,
     /// 执行失败随捕获结果返回而不是失败 Result。
     pub return_execution_errors: bool,
 }

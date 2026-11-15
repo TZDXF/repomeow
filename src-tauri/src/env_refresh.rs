@@ -97,7 +97,7 @@ fn merge_registry_env(
 #[cfg(windows)]
 fn decode_utf16(bytes: &[u8]) -> Option<String> {
     let mut units: Vec<u16> = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>().0.iter()
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
     while let Some(&0) = units.last() {
@@ -113,7 +113,7 @@ fn expand_utf16(bytes: &[u8]) -> Option<String> {
     use windows_sys::Win32::System::Environment::ExpandEnvironmentStringsW;
 
     let units: Vec<u16> = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>().0.iter()
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
     unsafe {

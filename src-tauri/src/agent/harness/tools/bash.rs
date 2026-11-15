@@ -246,7 +246,7 @@ pub fn create_bash_tool(env: Arc<dyn ExecutionEnv>, options: Option<BashToolOpti
                 }
 
                 let publisher = Arc::new(UpdatePublisher::new());
-                let on_chunk: Arc<dyn Fn(&str, ShellCaptureProgress) + Send + Sync> = {
+                let on_chunk: crate::agent::harness::utils::shell_output::ShellChunkHandler = {
                     let publisher = publisher.clone();
                     let on_update = on_update.clone();
                     Arc::new(move |_text, progress| {

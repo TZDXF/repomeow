@@ -398,7 +398,7 @@ pub(super) fn list_zulu_releases() -> AppResult<Vec<RemoteJdkRelease>> {
             });
         }
     }
-    all.sort_unstable_by(|a, b| b.major.cmp(&a.major));
+    all.sort_unstable_by_key(|r| std::cmp::Reverse(r.major));
     // 下拉降噪:与 Adoptium 列表规模对齐(LTS + 最近两个大版本)
     let newest = all.first().map(|r| r.major).unwrap_or(0);
     let second = all.get(1).map(|r| r.major).unwrap_or(0);

@@ -72,9 +72,11 @@ pub(crate) fn java_builds_from_files(dir: &Path, files: &[PathBuf]) -> Vec<JavaB
 ///   所有模块,在非应用模块上报「找不到主类」;
 /// - `-pl <模块> -am install` 后再跑:import 的 BOM 模块(如 yudao-dependencies)
 ///   不在 -am 依赖闭包里,仍解析不到。
+///
 /// 因此子模块统一在根目录两段式:整仓 install -DskipTests 把父链/BOM/兄弟模块
 /// 装进本地仓库,再 `-f <模块>/pom.xml` 单模块运行(此时全部可解析,插件版本
 /// 来自模块自身声明,前缀也可从模块 pom 解析)。Gradle 原生支持任务路径,一条命令即可。
+///
 /// 生命周期目标(clean/package 等)没有直接 goal 的作用域问题:根 reactor 解析
 /// 覆盖 BOM,子模块用 `-pl <模块> [-am]` 即可。
 fn build_run_spec(

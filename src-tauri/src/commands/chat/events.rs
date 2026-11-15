@@ -75,12 +75,12 @@ pub(super) fn chat_event_listener(
                         },
                     );
                 }
-                AgentEvent::MessageEnd { message } => {
-                    if let AgentMessage::Message(TypedMessage::Assistant(assistant)) = message {
-                        usage.lock().unwrap().add(&assistant.usage);
-                        if assistant.usage.total_tokens > 0 {
-                            *context_tokens.lock().unwrap() = assistant.usage.total_tokens;
-                        }
+                AgentEvent::MessageEnd {
+                    message: AgentMessage::Message(TypedMessage::Assistant(assistant)),
+                } => {
+                    usage.lock().unwrap().add(&assistant.usage);
+                    if assistant.usage.total_tokens > 0 {
+                        *context_tokens.lock().unwrap() = assistant.usage.total_tokens;
                     }
                 }
                 AgentEvent::TurnEnd { message, .. } => {

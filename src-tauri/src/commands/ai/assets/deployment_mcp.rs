@@ -48,7 +48,7 @@ fn dsh_env_access(name: &str) -> String {
     {
         format!("process.env.{name}")
     } else {
-        format!("process.env[{}]", json!(name).to_string())
+        format!("process.env[{}]", json!(name))
     }
 }
 

@@ -1,7 +1,7 @@
 use serde::Serialize;
 use tauri::AppHandle;
 
-use crate::cli::skills::BUILTIN_SKILLS;
+use crate::cli::skills::{BuiltinSkillFiles, BUILTIN_SKILLS};
 use crate::commands::ai::{cli_upsert_builtin_skills, RlResult};
 
 #[derive(Debug, Serialize)]
@@ -17,7 +17,7 @@ pub struct CliSkillsInstallResult {
 /// 以同步最新技能内容);导入后在「项目 → AI 资源」部署到各 agent。
 #[tauri::command]
 pub async fn cli_install_builtin_skills(app: AppHandle) -> RlResult<CliSkillsInstallResult> {
-    let skills: Vec<(String, String, Vec<(String, String)>)> = BUILTIN_SKILLS
+    let skills: BuiltinSkillFiles = BUILTIN_SKILLS
         .iter()
         .map(|skill| {
             (

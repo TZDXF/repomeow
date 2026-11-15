@@ -70,7 +70,7 @@ impl RequestBudget {
                 .collect();
             let (mut lo, mut hi) = (0, boundaries.len() - 1);
             while lo < hi {
-                let mid = (lo + hi + 1) / 2;
+                let mid = (lo + hi).div_ceil(2);
                 if self.tokens(&rest[..boundaries[mid]]) <= cap {
                     lo = mid;
                 } else {

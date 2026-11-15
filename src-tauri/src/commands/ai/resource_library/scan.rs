@@ -353,7 +353,7 @@ pub(super) fn token_report(lib: &Library, id: &str) -> RlResult<SkillTokenReport
     for (path, bytes) in &files {
         let tokens = std::str::from_utf8(bytes)
             .ok()
-            .map(|text| crate::commands::usage::count_o200k_tokens(text));
+            .map(crate::commands::usage::count_o200k_tokens);
         if let Some(value) = tokens {
             total += value;
         }
@@ -446,7 +446,7 @@ pub(super) fn dir_overview(root: &Path) -> RlResult<SkillDirReport> {
     for (path, bytes) in &files {
         let tokens = std::str::from_utf8(bytes)
             .ok()
-            .map(|text| crate::commands::usage::count_o200k_tokens(text));
+            .map(crate::commands::usage::count_o200k_tokens);
         if let Some(value) = tokens {
             total += value;
         }
@@ -826,8 +826,8 @@ mod tests {
             ..critical.clone()
         };
         // 单个 CRITICAL = 50 → medium 档;带脚本 ×1.3 = 65 → high 档
-        assert_eq!(score_findings(&[critical.clone()], false).0, 50);
-        let (score, level) = score_findings(&[critical.clone()], true);
+        assert_eq!(score_findings(std::slice::from_ref(&critical), false).0, 50);
+        let (score, level) = score_findings(std::slice::from_ref(&critical), true);
         assert_eq!((score, level.as_str()), (65, "high"));
         // 2×CRITICAL + MEDIUM = 110 → 封顶 100 → critical 档
         let (score, level) =

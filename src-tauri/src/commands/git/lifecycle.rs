@@ -62,7 +62,8 @@ pub fn cleanup_on_exit() {
         if let Ok(mut jobs) = clone_jobs().try_lock() {
             for (_, mut child) in jobs.drain() {
                 let _ = child.start_kill();
-                let _ = child.wait();
+                // wait 是 future,显式 drop 表示"不等待结果"
+                std::mem::drop(child.wait());
             }
             break;
         }

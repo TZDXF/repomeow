@@ -165,13 +165,12 @@ pub fn run() {
                     }
                 }
             }
-            tauri::WindowEvent::Focused(false) => {
+            tauri::WindowEvent::Focused(false)
                 // 迷你弹窗失焦自动收起(类似 JetBrains Toolbox);
                 // 显示瞬间的焦点迁移(WebView2 子窗口夺取键盘焦点)不算真正失焦
-                if window.label() == tray::TRAY_POPUP_LABEL && !tray::should_ignore_popup_blur() {
+                if window.label() == tray::TRAY_POPUP_LABEL && !tray::should_ignore_popup_blur() => {
                     let _ = window.hide();
                 }
-            }
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![

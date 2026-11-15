@@ -1028,7 +1028,8 @@ async fn execute_tool_calls_parallel(
     emit: &AgentEventSink,
 ) -> ExecutedToolCallBatch {
     enum FinalizedEntry {
-        Done(FinalizedToolCallOutcome),
+        // Done 与 Pending 的实际体积差很大且只在本地栈上使用,装箱即可均摊大小。
+        Done(Box<FinalizedToolCallOutcome>),
         Pending(BoxFuture<'static, FinalizedToolCallOutcome>),
     }
 
@@ -1063,7 +1064,7 @@ async fn execute_tool_calls_parallel(
                     duration_ms: None,
                 };
                 emit_tool_execution_end(&finalized, emit).await;
-                entries.push(FinalizedEntry::Done(finalized));
+                entries.push(FinalizedEntry::Done(Box::new(finalized)));
                 if is_aborted(signal) {
                     break;
                 }
@@ -1117,7 +1118,7 @@ async fn execute_tool_calls_parallel(
     let ordered_finalized_calls: Vec<FinalizedToolCallOutcome> =
         join_all(entries.into_iter().map(|entry| async move {
             match entry {
-                FinalizedEntry::Done(outcome) => outcome,
+                FinalizedEntry::Done(outcome) => *outcome,
                 FinalizedEntry::Pending(future) => future.await,
             }
         }))
@@ -1809,12 +1810,9 @@ pub(crate) mod testing {
         events
             .iter()
             .filter_map(|event| match event {
-                AgentEvent::MessageStart { message } => match message {
-                    AgentMessage::Message(TypedMessage::ToolResult(tool_result)) => {
-                        Some(tool_result.clone())
-                    }
-                    _ => None,
-                },
+                AgentEvent::MessageStart {
+                    message: AgentMessage::Message(TypedMessage::ToolResult(tool_result)),
+                } => Some(tool_result.clone()),
                 _ => None,
             })
             .collect()
@@ -3148,20 +3146,22 @@ mod tests {
             description: "new".to_string(),
             parameters: serde_json::json!({"type": "object"}),
         };
-        let mut context = AgentContext::default();
-        context.tools = vec![AgentTool {
-            name: new_tool.name.clone(),
-            label: "new".to_string(),
-            description: new_tool.description.clone(),
-            output_schema: None,
-            parameters: new_tool.parameters.clone(),
-            execution_mode: None,
-            prepare_arguments: None,
-            execute: Arc::new(|_id, _args, _signal, _update| {
-                Box::pin(async { Ok(AgentToolResult::text("")) })
-            }),
-            replay: None,
-        }];
+        let context = AgentContext {
+            tools: vec![AgentTool {
+                name: new_tool.name.clone(),
+                label: "new".to_string(),
+                description: new_tool.description.clone(),
+                output_schema: None,
+                parameters: new_tool.parameters.clone(),
+                execution_mode: None,
+                prepare_arguments: None,
+                execute: Arc::new(|_id, _args, _signal, _update| {
+                    Box::pin(async { Ok(AgentToolResult::text("")) })
+                }),
+                replay: None,
+            }],
+            ..Default::default()
+        };
 
         let pending = declare_tool_changes(
             &context,

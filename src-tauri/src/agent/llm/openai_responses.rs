@@ -392,25 +392,18 @@ fn clamp_thinking_level(model: &Model, level: ThinkingLevel) -> Option<ThinkingL
     if contains(requested) {
         return Some(level);
     }
+    // Off:可用的只剩 off → 等价 reasoningEffort undefined;两段候选同为"向上/
+    // 向下寻找最近的可用档",都按此语义提前返回。
     for candidate in EXTENDED.into_iter().skip(requested as usize) {
-        match thinking_level_from_model(candidate) {
-            Some(back) => {
-                if contains(candidate) {
-                    return Some(back);
-                }
-            }
-            // Off:可用的只剩 off → 等价 reasoningEffort undefined
-            None => return None,
+        let back = thinking_level_from_model(candidate)?;
+        if contains(candidate) {
+            return Some(back);
         }
     }
     for candidate in EXTENDED.into_iter().take(requested as usize).rev() {
-        match thinking_level_from_model(candidate) {
-            Some(back) => {
-                if contains(candidate) {
-                    return Some(back);
-                }
-            }
-            None => return None,
+        let back = thinking_level_from_model(candidate)?;
+        if contains(candidate) {
+            return Some(back);
         }
     }
     None
@@ -447,13 +440,16 @@ fn insert_sampling_params(body: &mut Map<String, Value>, params: Option<&HashMap
 
 // ── 消息序列化(TS transformMessages + convertResponsesMessages) ─────
 
+/// 跨模型 replay 的 tool call id 归一回调:`(原 id, 所属 assistant 消息) → 新 id`。
+type ToolCallIdNormalizer<'a> = Option<&'a dyn Fn(&str, &AssistantMessage) -> String>;
+
 /// TS transformMessages:非图片模型降级图片;跨模型 replay 清理 thinking/签名与
 /// tool call id(归一回调由调用方注入);孤儿 tool call 合成错误结果;
 /// error/aborted assistant 整条丢弃。
 fn transform_messages(
     messages: &[Message],
     model: &Model,
-    normalize_tool_call_id: Option<&dyn Fn(&str, &AssistantMessage) -> String>,
+    normalize_tool_call_id: ToolCallIdNormalizer<'_>,
 ) -> Vec<Message> {
     let supports_images = model.input.contains(&InputKind::Image);
     let mut tool_call_id_map: HashMap<String, String> = HashMap::new();
@@ -3982,10 +3978,7 @@ mod tests {
                 served += 1;
                 let mut received = Vec::new();
                 let mut buffer = [0u8; 1024];
-                loop {
-                    let Ok(read) = stream.read(&mut buffer) else {
-                        break;
-                    };
+                while let Ok(read) = stream.read(&mut buffer) {
                     if read == 0 {
                         break;
                     }

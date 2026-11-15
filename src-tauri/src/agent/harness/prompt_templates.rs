@@ -8,6 +8,8 @@ use crate::agent::harness::types::{
 };
 
 /// 模板诊断码(对齐 TS `PromptTemplateDiagnosticCode`)。
+/// 各变体统一 `*Failed` 后缀是蓝本命名,诊断码字符串与前端消费一致,不改名。
+#[allow(clippy::enum_variant_names)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PromptTemplateDiagnosticCode {
     FileInfoFailed,
@@ -105,7 +107,7 @@ async fn load_templates_from_dir(env: &dyn ExecutionEnv, dir: &str) -> PromptTem
     };
 
     let mut sorted_entries = entries;
-    sorted_entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    sorted_entries.sort_by_key(|a| a.name.to_lowercase());
     for entry in &sorted_entries {
         let kind = resolve_kind(env, entry, &mut diagnostics).await;
         if kind != Some(FileKind::File) || !entry.name.ends_with(".md") {

@@ -745,9 +745,7 @@ fn derive_tool_batch(
     let Entry::Message(assistant_message_entry) = assistant_entry? else {
         return None;
     };
-    let Some(assistant_message) = as_assistant(&assistant_message_entry.message) else {
-        return None;
-    };
+    let assistant_message = as_assistant(&assistant_message_entry.message)?;
 
     let tool_calls: Vec<ToolCall> = assistant_message
         .content
@@ -1541,7 +1539,7 @@ mod tests {
             details: None,
         };
         let value = serde_json::to_value(
-            &crate::agent::harness::session::types::LaneRecord::Usage(record.clone()),
+            crate::agent::harness::session::types::LaneRecord::Usage(record.clone()),
         )
         .unwrap();
         assert_eq!(value["type"], "usage");

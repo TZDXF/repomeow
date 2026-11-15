@@ -13,6 +13,7 @@
 //! - `run.rs`:prompt 运行管线(prepare → context → engine → drive → finalize);
 //! - `compaction_runner.rs`:compact/auto_compact 压缩执行;
 //! - `lifecycle.rs`:create 的崩溃恢复归约、resume、abort。
+//!
 //! 上层消费方:`commands/ai/harness_support.rs`(wiki 生成与资源库安全扫描共用)。
 
 use crate::agent::agent_loop::now_ms;
@@ -1312,7 +1313,7 @@ impl AgentHarness {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let options = &mut state.stream_options;
         if patch.transport.is_some() {
-            options.transport = patch.transport.clone();
+            options.transport = patch.transport;
         }
         if patch.timeout_ms.is_some() {
             options.timeout_ms = patch.timeout_ms;

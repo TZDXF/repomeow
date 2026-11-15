@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::Path;
 
 use serde_json::Value;
 
@@ -9,12 +9,12 @@ use crate::models::GitCommitInfo;
 
 pub(crate) type AiConfig = sdk::AiConfig;
 
-pub(crate) fn load_ai_config(data_dir: &PathBuf) -> AiConfig {
+pub(crate) fn load_ai_config(data_dir: &Path) -> AiConfig {
     sdk::load_config_at(data_dir, "report")
 }
 
 /// 从 settings.json 读取界面语言(报告语言与其保持一致),默认 zh-CN
-pub(crate) fn load_language(data_dir: &PathBuf) -> String {
+pub(crate) fn load_language(data_dir: &Path) -> String {
     let path = data_dir.join("settings.json");
     fs::read_to_string(&path)
         .ok()
@@ -36,7 +36,7 @@ pub(crate) fn default_schedule_name(is_weekly: bool, language: &str) -> &'static
     }
 }
 
-pub(crate) fn load_report_prompt(data_dir: &PathBuf, report_type: &str) -> String {
+pub(crate) fn load_report_prompt(data_dir: &Path, report_type: &str) -> String {
     let file = if report_type == "weekly" {
         "report-weekly.md"
     } else {

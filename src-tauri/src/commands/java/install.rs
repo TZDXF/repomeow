@@ -88,7 +88,7 @@ fn extract_zip_with_limits(archive: &Path, dest: &Path, max_entries: usize, max_
     }
     let mut extracted = 0u64;
     for i in 0..zip.len() {
-        let mut entry = zip
+        let entry = zip
             .by_index(i)
             .map_err(|e| AppError::coded(ErrorCode::JdkInstallFailed, format!("zip: {e}")))?;
         let rel = entry.enclosed_name().ok_or_else(||

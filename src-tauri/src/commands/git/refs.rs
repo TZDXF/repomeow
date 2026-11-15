@@ -33,6 +33,7 @@ pub(super) fn list_remotes_blocking(path: &str) -> AppResult<Vec<GitRemote>> {
 /// 带超时的后台 fetch:
 /// - http(s) 协议由 git 连接/低速超时配置兜底(慢速连接 30s 无进展即中止)
 /// - ssh 等其他协议由外层 timeout 兜底,超时 kill 进程树
+///
 /// 无 remote 的仓库直接视为成功(无需退避)
 pub(super) async fn fetch_with_timeout(path: &str) -> bool {
     if !repo_has_remote(path) {
@@ -87,7 +88,8 @@ pub(super) fn kill_process_tree(mut child: tokio::process::Child) {
     }
     // 非 Windows 主路径;Windows 上作为 taskkill 的兜底(重复 kill 无害)
     let _ = child.start_kill();
-    let _ = child.wait();
+    // wait 是 future,显式 drop 表示"不等待结果"
+    std::mem::drop(child.wait());
 }
 
 /// 前台 fetch(带超时与进程树清理):`args` 追加在 `fetch` 之后。
