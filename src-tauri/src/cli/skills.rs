@@ -12,6 +12,9 @@ pub(crate) struct BuiltinSkill {
     pub(crate) files: &'static [(&'static str, &'static str)],
 }
 
+/// 待导入资源库的技能:`(名称, 描述, [(目录内相对路径, 内容)])`。
+pub(crate) type BuiltinSkillFiles = Vec<(String, String, Vec<(String, String)>)>;
+
 pub(crate) const BUILTIN_SKILLS: &[BuiltinSkill] = &[BuiltinSkill {
     name: "repomeow",
     description: "RepoMeow CLI:项目管理 / Wiki / 语义分析 / 报告与调度 / 标签 / AI 配置",

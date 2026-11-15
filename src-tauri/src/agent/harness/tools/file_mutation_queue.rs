@@ -8,17 +8,14 @@ use std::sync::{Arc, Mutex, Weak};
 
 use crate::agent::harness::types::{ExecutionEnv, FileErrorCode};
 
+/// 单 env 的队列表:`path → 串行化变更的锁`。
+type EnvQueues = HashMap<String, Arc<tokio::sync::Mutex<()>>>;
+/// 注册表条目:`env 弱引用 + 该 env 的队列表`(弱引用失效后惰性清理)。
+type EnvEntry = (Weak<dyn ExecutionEnv>, EnvQueues);
+
 struct QueueRegistry {
     /// env 指针 → (弱引用, path → 队列锁)。
-    entries: Mutex<
-        HashMap<
-            usize,
-            (
-                Weak<dyn ExecutionEnv>,
-                HashMap<String, Arc<tokio::sync::Mutex<()>>>,
-            ),
-        >,
-    >,
+    entries: Mutex<HashMap<usize, EnvEntry>>,
 }
 
 static REGISTRY: std::sync::OnceLock<QueueRegistry> = std::sync::OnceLock::new();

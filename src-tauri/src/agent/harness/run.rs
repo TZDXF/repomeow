@@ -116,6 +116,9 @@ impl AgentHarness {
 
     /// 阶段 1-4:守卫 + 配置快照 → 输入归一化 + BeforeRun hook → nextRun 捕获
     /// + durable intent 落库 → 前置条目物化。
+    // RunResult 的 Err 是完整的 RunRejected(携带原因与其中间状态),这是对外
+    // 返回契约,装箱会波及 agent_loop/commands 的全部消费点。
+    #[allow(clippy::result_large_err)]
     async fn prepare_prompt(&self, input: QueueInput) -> Result<PromptRunPrep, RunResult> {
         // 1. 守卫 + 配置快照(短临界区,不跨 await)。
         let snapshot = match self.guard_and_snapshot() {
@@ -234,6 +237,7 @@ impl AgentHarness {
 
     /// 阶段 5:历史构建(不含本次 prompt) → 5.5 pre-prompt 阈值压缩(对齐 pi
     /// `prompt()` 前置 `_checkCompaction`) → 5.8 transform_context hook。
+    #[allow(clippy::result_large_err)] // 同上:Err 为对外契约 RunRejected
     async fn build_run_context(
         &self,
         prep: &mut PromptRunPrep,
@@ -630,7 +634,7 @@ impl AgentHarness {
                     }
                     if let Some(options) = self
                         .prepare_retry_stream_options(
-                            &snapshot,
+                            snapshot,
                             &hook_gate,
                             &hook_context,
                             &run_id,
@@ -669,7 +673,7 @@ impl AgentHarness {
             agent.set_messages(messages);
             if let Some(options) = self
                 .prepare_retry_stream_options(
-                    &snapshot,
+                    snapshot,
                     &hook_gate,
                     &hook_context,
                     &run_id,

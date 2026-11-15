@@ -562,7 +562,7 @@ fn check_marketplace_update(
         let local = match lib.read_body(&skill.directory) {
             Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
             Err(err) => {
-                status.error_code = Some(RlError::from(err).code().to_string());
+                status.error_code = Some(err.code().to_string());
                 return status;
             }
         };

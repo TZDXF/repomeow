@@ -288,6 +288,11 @@ pub(super) async fn run_sem_with_input(
 
 /// 已 spawn 的 sem 子进程:Tauri sidecar(CommandEvent 流)或独立 tokio 进程。
 /// pid 在 spawn 时固定,stdin 写完即关(sidecar 靠丢弃 CommandChild)。
+///
+/// Shell 变体携带 CommandChild + 事件接收器,与 Std 的体积差来自前者;
+/// 该枚举每次只持有 1 个实例(生命周期覆盖整次调用),装箱会波及所有
+/// 构造与匹配点却省不下有意义的内存。
+#[allow(clippy::large_enum_variant)]
 enum SemChild {
     Shell {
         pid: u32,

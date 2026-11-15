@@ -131,7 +131,7 @@ pub(super) fn validate_query(query: &str) -> AppResult<String> {
     let invalid = || {
         AppError::coded(
             ErrorCode::SemanticToolFailed,
-            format!("invalid query (empty/NUL/>200 chars)"),
+            "invalid query (empty/NUL/>200 chars)".to_string(),
         )
     };
     let trimmed = query.trim();
@@ -299,6 +299,9 @@ pub async fn semantic_worktree_diff(
 }
 
 #[tauri::command]
+// #[tauri::command] 参数名即前端 IPC 契约;实体上下文查询的候选键
+// (entityId/entityName/filePath)本就是可选组合,合并成结构体会改变前端调用。
+#[allow(clippy::too_many_arguments)]
 pub async fn semantic_entity_context(
     app: AppHandle,
     path: String,

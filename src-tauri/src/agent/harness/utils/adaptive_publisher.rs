@@ -74,7 +74,7 @@ impl AdaptivePublisher {
         self.dirty
             && self
                 .next_emit_at
-                .map_or(true, |emit_at| self.clock.now() >= emit_at)
+                .is_none_or(|emit_at| self.clock.now() >= emit_at)
     }
 
     fn delay_for_update(&self, update_size_bytes: u64) -> Duration {

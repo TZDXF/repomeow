@@ -26,6 +26,10 @@ type ProgressCallback = Arc<dyn Fn(String) + Send + Sync>;
 type ActivityCallback = Arc<dyn Fn(String) + Send + Sync>;
 type RetryCallback = Arc<dyn Fn(WikiRetryNotice) + Send + Sync>;
 
+// 参数为一次内置 Wiki 生成所需的上下文(数据目录/库/项目/语言/模型/取消信号/
+// 回调);后续 generate_outline_with → generate_builtin_page_to_disk → generate_page_with
+// 逐层透传同一组值,拆结构体需在四层同时改签名与测试。
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn generate_builtin_outline_pages(
     data_dir: &Path,
     db: &Db,
@@ -59,6 +63,7 @@ pub(super) async fn generate_builtin_outline_pages(
     .await
 }
 
+#[allow(clippy::too_many_arguments)] // 同上:与 generate_builtin_outline_pages 同源上下文
 pub(super) async fn generate_outline_with(
     db: &Db,
     model: Model,
@@ -140,6 +145,7 @@ pub(super) async fn generate_outline_with(
     result.map(|pages| (pages, usage_model))
 }
 
+#[allow(clippy::too_many_arguments)] // 同上:单页落盘的完整上下文
 pub(super) async fn generate_builtin_page_to_disk(
     data_dir: &Path,
     db: &Db,
@@ -193,6 +199,7 @@ impl Drop for StagingCleanup {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // 同上:与 generate_builtin_page_to_disk 同源上下文
 pub(super) async fn generate_page_with(
     db: &Db,
     model: Model,
@@ -376,6 +383,7 @@ pub(super) async fn generate_page_with(
 }
 
 /// 提升暂存页;校验失败时给同一会话一次明确修复机会,再失败则不替换正式页
+#[allow(clippy::too_many_arguments)] // 提升/修复所需的会话与目标页信息,均由调用点一次性拥有
 async fn promote_with_repair(
     harness: &Arc<AgentHarness>,
     wiki_dir: &Path,

@@ -120,12 +120,11 @@ fn maybe_trigger_sync(app: &AppHandle, lib: &Library) {
         let outcome = match tokio::task::spawn_blocking(move || git::sync_once_impl(&lib_run)).await
         {
             Ok(outcome) => outcome,
-            Err(e) => {
-                let mut outcome = SyncOutcome::default();
-                outcome.error_code = Some("io_error".to_string());
-                outcome.error_message = Some(e.to_string());
-                outcome
-            }
+            Err(e) => SyncOutcome {
+                error_code: Some("io_error".to_string()),
+                error_message: Some(e.to_string()),
+                ..Default::default()
+            },
         };
         record_and_emit(&app, &lib, &outcome).await;
     });
@@ -771,9 +770,9 @@ pub async fn rl_marketplace_audit_detail(
 /// skills 项为 (名称, 描述, [(目录内相对路径, 内容)]),文件列表必含 SKILL.md 且位于首位。
 pub async fn cli_upsert_builtin_skills(
     app: &AppHandle,
-    skills: Vec<(String, String, Vec<(String, String)>)>,
+    skills: crate::cli::skills::BuiltinSkillFiles,
 ) -> RlResult<(Vec<String>, Vec<String>)> {
-    mutate(&app, move |lib| {
+    mutate(app, move |lib| {
         let mut installed = Vec::new();
         let mut updated = Vec::new();
         for (name, description, files) in skills {

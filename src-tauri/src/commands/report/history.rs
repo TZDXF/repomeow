@@ -71,6 +71,9 @@ pub struct ReportGeneratedPayload {
 /// 写入报告历史的内部入口。手动、批量与 AI 后端生成共用这一实现，确保报告正文、
 /// 提交快照和刷新事件始终由后端一次性完成。
 /// `app` 为 None 时(MCP 等 headless 场景)只落库,不发前端事件。
+// 报告历史的一次写入需要完整快照(项目/区间/作者/语言/类型/正文/提交明细),
+// 三者共用此入口;改成结构体会同时改动手动/批量/AI 三条调用链与测试。
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn save_report_history_impl(
     app: Option<&AppHandle>,
     conn: &Connection,
@@ -198,7 +201,7 @@ pub fn list_report_history_impl(
             .iter()
             .filter_map(|id| name_map.get(id).cloned())
             .collect();
-        names.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+        names.sort_by_key(|a| a.to_lowercase());
         item.project_names = names;
         item.total_commits = count_map.get(&item.id).copied().unwrap_or(0);
         items.push(item);

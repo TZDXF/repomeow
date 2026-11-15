@@ -74,7 +74,6 @@ impl AgentHarness {
     }
 
     /// 手动 compaction:接 compaction 模块(prepare → 摘要 → compaction 条目)。
-
     pub async fn compact(
         &self,
         options: Option<CompactOptions>,
@@ -400,6 +399,9 @@ pub(crate) fn guarded_context_tokens(
 /// 自动压缩执行体(对齐 pi `_runAutoCompaction` 默认摘要路径):
 /// 不校验/注册 engine、不切换 busy、不落 Operation 记录;
 /// 压缩条目 + StepAttempt(带 reason)+ Usage 记录照常写入会话。
+// 参数均为自动压缩必需的上游上下文(会话/模型/流/钩子/闸门/信号),
+// 拆成结构体只会把同一批值再包一层,调用点与蓝本签名难以对照。
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_auto_compaction(
     session: &Session,
     settings: CompactionSettings,

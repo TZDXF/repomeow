@@ -112,6 +112,9 @@ impl TerminalIpcResponse {
 }
 
 /// single-instance 回调与首个实例 setup 共用的入口。非内部参数直接忽略。
+// 参数解析失败时直接以 TerminalIpcResponse(整结构 152 字节)作为错误值返回,
+// 该结构本身就是回写文件的行格式;装箱会改动所有构造与匹配点。
+#[allow(clippy::result_large_err)]
 pub(crate) fn handle_desktop_args(app: &AppHandle, args: &[String]) {
     let Some(index) = args.iter().position(|arg| arg == TERMINAL_IPC_ARG) else {
         return;

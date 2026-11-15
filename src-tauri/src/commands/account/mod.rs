@@ -165,23 +165,6 @@ pub(crate) fn get_credentials(conn: &Connection, id: i64) -> AppResult<(String, 
     Ok((row.provider, row.username, row.token))
 }
 
-/// 把账号凭据拼进 http(s) clone URL(克隆成功后应重置 remote 为干净 URL,避免 token 残留 .git/config)
-pub(crate) fn build_authed_url(provider: &str, username: &str, token: &str, url: &str) -> String {
-    let userinfo = match provider {
-        "github" => format!("x-access-token:{token}"),
-        "gitlab" => format!("oauth2:{token}"),
-        "gitee" => format!("{username}:{token}"),
-        _ => return url.to_string(),
-    };
-    if let Some(rest) = url.strip_prefix("https://") {
-        format!("https://{userinfo}@{rest}")
-    } else if let Some(rest) = url.strip_prefix("http://") {
-        format!("http://{userinfo}@{rest}")
-    } else {
-        url.to_string()
-    }
-}
-
 #[tauri::command]
 pub fn list_git_accounts(db: State<'_, Db>) -> AppResult<Vec<GitAccount>> {
     let conn = db.0.lock().unwrap();

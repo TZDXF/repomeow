@@ -362,6 +362,7 @@ fn clear_readonly_recursive(root: &Path) {
         }
         let mut perms = meta.permissions();
         if perms.readonly() {
+            #[allow(clippy::permissions_set_readonly_false)] // 仅 Windows:清只读位以便删除
             perms.set_readonly(false);
             let _ = fs::set_permissions(path, perms);
         }

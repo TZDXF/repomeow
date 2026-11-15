@@ -261,18 +261,15 @@ pub fn estimate_tokens(message: &AgentMessage) -> i64 {
 fn find_valid_cut_points(entries: &[Entry], start_index: usize, end_index: usize) -> Vec<usize> {
     let mut cut_points = Vec::new();
     for (index, entry) in entries.iter().enumerate().take(end_index).skip(start_index) {
-        match entry {
-            Entry::Message(message_entry) => {
-                let role = message_entry.message.role_name();
-                match role {
-                    "bashExecution" | "custom" | "branchSummary" | "compactionSummary" | "user"
-                    | "assistant" => {
-                        cut_points.push(index);
-                    }
-                    _ => {}
+        if let Entry::Message(message_entry) = entry {
+            let role = message_entry.message.role_name();
+            match role {
+                "bashExecution" | "custom" | "branchSummary" | "compactionSummary" | "user"
+                | "assistant" => {
+                    cut_points.push(index);
                 }
+                _ => {}
             }
-            _ => {}
         }
         if let Entry::BranchSummary(_) = entry {
             cut_points.push(index);
@@ -385,12 +382,17 @@ pub struct RetryPolicy {
     pub base_delay_ms: u64,
 }
 
+/// 重试调度回调:`(attempt, max_attempts, delay_ms, 原因)`。
+pub type OnRetryScheduled = Arc<dyn Fn(u32, u32, u64, &str) + Send + Sync>;
+/// 重试结束回调:`(是否成功, 已尝试次数, 错误信息)`。
+pub type OnRetryFinished = Arc<dyn Fn(bool, u32, Option<&str>) + Send + Sync>;
+
 /// 重试回调(对齐 TS `RetryCallbacks`)。
 #[derive(Clone, Default)]
 pub struct RetryCallbacks {
-    pub on_retry_scheduled: Option<Arc<dyn Fn(u32, u32, u64, &str) + Send + Sync>>,
+    pub on_retry_scheduled: Option<OnRetryScheduled>,
     pub on_retry_attempt_start: Option<Arc<dyn Fn() + Send + Sync>>,
-    pub on_retry_finished: Option<Arc<dyn Fn(bool, u32, Option<&str>) + Send + Sync>>,
+    pub on_retry_finished: Option<OnRetryFinished>,
 }
 
 fn is_retryable_assistant_error(message: &AssistantMessage) -> bool {
@@ -623,8 +625,10 @@ pub async fn generate_summary_with_usage(
         timestamp: crate::agent::agent_loop::now_ms(),
     })];
 
-    let mut options = crate::agent::llm::types::SimpleStreamOptions::default();
-    options.max_tokens = Some(max_tokens.max(0) as u32);
+    let mut options = crate::agent::llm::types::SimpleStreamOptions {
+        max_tokens: Some(max_tokens.max(0) as u32),
+        ..Default::default()
+    };
     if model.reasoning {
         if let Some(level) = thinking_level {
             options.reasoning = Some(level);
@@ -784,8 +788,7 @@ pub fn prepare_compaction(
     }
 
     let mut previous_summary: Option<String> = None;
-    let compactable_entries: Vec<Entry>;
-    if prev_compaction_index >= 0 {
+    let compactable_entries: Vec<Entry> = if prev_compaction_index >= 0 {
         let prev = match &path_entries[prev_compaction_index as usize] {
             Entry::Compaction(prev) => prev.clone(),
             _ => unreachable!("checked above"),
@@ -814,10 +817,10 @@ pub fn prepare_compaction(
                 .iter()
                 .cloned(),
         );
-        compactable_entries = entries;
+        entries
     } else {
-        compactable_entries = path_entries.to_vec();
-    }
+        path_entries.to_vec()
+    };
     let boundary_end = compactable_entries.len();
 
     let tokens_before =
@@ -912,8 +915,10 @@ async fn generate_turn_prefix_summary(
         timestamp: crate::agent::agent_loop::now_ms(),
     })];
 
-    let mut options = crate::agent::llm::types::SimpleStreamOptions::default();
-    options.max_tokens = Some(max_tokens.max(0) as u32);
+    let mut options = crate::agent::llm::types::SimpleStreamOptions {
+        max_tokens: Some(max_tokens.max(0) as u32),
+        ..Default::default()
+    };
     if model.reasoning {
         if let Some(level) = thinking_level {
             options.reasoning = Some(level);
@@ -1048,6 +1053,33 @@ pub async fn compact(
         })
         .unwrap_or(Value::Null),
     })
+}
+
+/// Entry 的便捷角色查询(测试用)。
+#[cfg(test)]
+trait EntryRoleExt {
+    fn message_entry_role(&self) -> String;
+}
+
+#[cfg(test)]
+impl EntryRoleExt for Entry {
+    fn message_entry_role(&self) -> String {
+        match self {
+            Entry::Message(entry) => entry.message.role_name().to_string(),
+            _ => String::new(),
+        }
+    }
+}
+
+// 保持 BashExecutionMessage/CustomMessage 引用(convert_to_llm 的自定义 role 覆盖)。
+#[allow(dead_code)]
+fn _message_type_references(
+    _: &BashExecutionMessage,
+    _: &CustomMessage,
+    _: &BranchSummaryMessage,
+    _: &CompactionSummaryMessage,
+    _: &crate::agent::harness::compaction::utils::FileOperations,
+) {
 }
 
 // ---------------------------------------------------------------------------
@@ -1200,17 +1232,18 @@ mod tests {
     fn find_cut_point_splits_turn_at_tool_result() {
         // user → assistant(toolUse)→ toolResult:toolResult 不是合法切点,
         // 最近预算刚好在 toolResult 触发 → 回退到 assistant 或 user 切点。
-        let mut entries = Vec::new();
-        entries.push(message_entry(1, None, user(&"u".repeat(4000))));
-        entries.push(message_entry(
-            2,
-            Some("e1"),
-            AgentMessage::Message(TypedMessage::Assistant(test_assistant(
-                vec![AssistantContent::text(&"a".repeat(4000))],
-                StopReason::ToolUse,
-            ))),
-        ));
-        entries.push(message_entry(3, Some("e2"), tool_result(&"t".repeat(4000))));
+        let entries = vec![
+            message_entry(1, None, user(&"u".repeat(4000))),
+            message_entry(
+                2,
+                Some("e1"),
+                AgentMessage::Message(TypedMessage::Assistant(test_assistant(
+                    vec![AssistantContent::text("a".repeat(4000))],
+                    StopReason::ToolUse,
+                ))),
+            ),
+            message_entry(3, Some("e2"), tool_result(&"t".repeat(4000))),
+        ];
         let cut = find_cut_point(&entries, 0, entries.len(), 8000);
         // 切点必须不是 toolResult。
         match &entries[cut.first_kept_entry_index] {
@@ -1223,10 +1256,11 @@ mod tests {
 
     #[test]
     fn find_turn_start_index_walks_back_to_user() {
-        let mut entries = Vec::new();
-        entries.push(message_entry(1, None, user("u")));
-        entries.push(message_entry(2, Some("e1"), assistant_text("a")));
-        entries.push(message_entry(3, Some("e2"), tool_result("t")));
+        let entries = vec![
+            message_entry(1, None, user("u")),
+            message_entry(2, Some("e1"), assistant_text("a")),
+            message_entry(3, Some("e2"), tool_result("t")),
+        ];
         assert_eq!(find_turn_start_index(&entries, 2, 0), 0);
         assert_eq!(find_turn_start_index(&entries, 1, 0), 0);
         assert_eq!(find_turn_start_index(&entries, 0, 0), 0);
@@ -1257,16 +1291,13 @@ mod tests {
 
     #[test]
     fn prepare_compaction_builds_messages() {
-        let mut entries = Vec::new();
         // 最后一条 assistant 体量大:预算在它处触发 → 切回 user 边界(e3)。
-        entries.push(message_entry(1, None, user("hello")));
-        entries.push(message_entry(2, Some("e1"), assistant_text("hi")));
-        entries.push(message_entry(3, Some("e2"), user(&"q".repeat(4000))));
-        entries.push(message_entry(
-            4,
-            Some("e3"),
-            assistant_text(&"a".repeat(4000)),
-        ));
+        let entries = vec![
+            message_entry(1, None, user("hello")),
+            message_entry(2, Some("e1"), assistant_text("hi")),
+            message_entry(3, Some("e2"), user(&"q".repeat(4000))),
+            message_entry(4, Some("e3"), assistant_text(&"a".repeat(4000))),
+        ];
         let settings = CompactionSettings {
             enabled: true,
             reserve_tokens: 16384,
@@ -1349,31 +1380,4 @@ mod tests {
         assert_eq!(error.to_string(), "boom");
         let _ = json!({"x": 1});
     }
-}
-
-/// Entry 的便捷角色查询(测试用)。
-#[cfg(test)]
-trait EntryRoleExt {
-    fn message_entry_role(&self) -> String;
-}
-
-#[cfg(test)]
-impl EntryRoleExt for Entry {
-    fn message_entry_role(&self) -> String {
-        match self {
-            Entry::Message(entry) => entry.message.role_name().to_string(),
-            _ => String::new(),
-        }
-    }
-}
-
-// 保持 BashExecutionMessage/CustomMessage 引用(convert_to_llm 的自定义 role 覆盖)。
-#[allow(dead_code)]
-fn _message_type_references(
-    _: &BashExecutionMessage,
-    _: &CustomMessage,
-    _: &BranchSummaryMessage,
-    _: &CompactionSummaryMessage,
-    _: &crate::agent::harness::compaction::utils::FileOperations,
-) {
 }

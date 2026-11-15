@@ -101,6 +101,9 @@ pub fn resolve_git_conflicts_with_agent(
     Ok(returned_task_id)
 }
 
+// 任务上下文(应用/任务句柄/项目/模型/冲突清单)整体由 spawn 点一次性传入,
+// 拆结构体只是把同一批值再包一层,调用点不再能一眼对照 spawn 处的取值。
+#[allow(clippy::too_many_arguments)]
 async fn run_resolution_task(
     app: AppHandle,
     mut task: BackgroundTask,
@@ -246,11 +249,11 @@ async fn run_agent(
         let cancel = CancellationToken::new();
         let request_cancel = cancel.child_token();
         let harness = Arc::new(create_harness(configured.model.clone(), builtin_stream_fn(configured.api_key.clone(), request_cancel.clone()), tools,
-            "You are RepoMeow's internal conflict resolution agent. Only edit the specified conflict file. Shell and Git operations are unavailable.".into(), level.clone()).await?);
+            "You are RepoMeow's internal conflict resolution agent. Only edit the specified conflict file. Shell and Git operations are unavailable.".into(), level).await?);
         let usages = collect_usage_events(&harness).await;
         let result = prompt_with_timeout(
             harness,
-            conflict_prompt(&[file.clone()]),
+            conflict_prompt(std::slice::from_ref(file)),
             &cancel,
             &request_cancel,
         )

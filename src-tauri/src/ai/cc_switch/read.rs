@@ -44,7 +44,7 @@ pub(super) fn with_staged_db<T>(
 }
 
 pub(super) fn read_providers_db(db_path: &Path) -> AppResult<Vec<RawProvider>> {
-    with_staged_db(db_path, |copy| query_providers(copy))
+    with_staged_db(db_path, query_providers)
 }
 
 fn query_providers(path: &Path) -> AppResult<Vec<RawProvider>> {

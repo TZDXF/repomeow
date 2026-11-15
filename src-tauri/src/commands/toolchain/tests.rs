@@ -437,9 +437,7 @@ fn go_detection_and_operations() {
                 result.unwrap(),
                 format!("winget {action} --id GoLang.Go -e")
             );
-        } else if cfg!(target_os = "macos") {
-            assert!(result.is_ok());
-        } else if op == "install" {
+        } else if cfg!(target_os = "macos") || op == "install" {
             assert!(result.is_ok());
         } else {
             assert!(result.is_err());

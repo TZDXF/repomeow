@@ -60,7 +60,7 @@ struct CacheEnvelope {
 /// 加载工作日数据:优先读缓存,过期或不存在时从 CDN 拉取并写入缓存。
 /// 返回 holidays/workdays 日期集合("YYYY-MM-DD")及各自日期的中英节日名。
 /// `cache_root` 为运行时数据根目录(`runtime_data_root`,缓存文件直接位于其下)。
-pub fn load_data(cache_root: &PathBuf) -> AppResult<WorkdayData> {
+pub fn load_data(cache_root: &Path) -> AppResult<WorkdayData> {
     let cache_path = cache_root.join(CACHE_FILE);
 
     // 缓存仅在包络合法且 TTL 未过期时命中
@@ -96,7 +96,7 @@ fn try_load_envelope(cache_path: &Path) -> Option<WorkdayData> {
     let raw = fs::read_to_string(cache_path).ok()?;
     let (parsed, ts) = parse_cache(&raw)?;
     let age = crate::time_util::now_ts().saturating_sub(ts);
-    if age >= 0 && age < CACHE_TTL_SECS {
+    if (0..CACHE_TTL_SECS).contains(&age) {
         Some(parsed)
     } else {
         None
@@ -183,7 +183,7 @@ fn parse_data(json: &str) -> AppResult<WorkdayData> {
 /// * 其他情况 → `false`
 ///
 /// `cache_root` 为运行时数据根目录(安装目录 data/)。
-pub fn is_workday(date: NaiveDate, cache_root: &PathBuf) -> bool {
+pub fn is_workday(date: NaiveDate, cache_root: &Path) -> bool {
     // 数据拉取失败时回退为常规周一～周五判断
     let data = match load_data(cache_root) {
         Ok(d) => d,
@@ -220,7 +220,7 @@ pub struct WorkdayChecker {
 }
 
 impl WorkdayChecker {
-    pub fn load(cache_root: &PathBuf) -> Self {
+    pub fn load(cache_root: &Path) -> Self {
         let data = match load_data(cache_root) {
             Ok(d) => d,
             Err(e) => {

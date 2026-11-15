@@ -3,6 +3,8 @@
 pub mod context;
 pub mod jsonl;
 pub mod memory;
+// 与蓝本 `session/session.ts` 对齐,子模块沿用同名
+#[allow(clippy::module_inception)]
 pub mod session;
 pub mod state;
 pub mod testing;

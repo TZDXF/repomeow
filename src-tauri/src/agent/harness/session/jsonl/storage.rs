@@ -408,7 +408,7 @@ impl SessionStorage for JsonlSessionStorage {
         &'a self,
         query: EntryQuery,
     ) -> BoxFuture<'a, Result<Vec<Entry>, SessionError>> {
-        Box::pin(async move { Ok(self.state_lock().find_entries(&query)?) })
+        Box::pin(async move { self.state_lock().find_entries(&query) })
     }
 
     fn find_entries_on_branch<'a>(
@@ -416,11 +416,11 @@ impl SessionStorage for JsonlSessionStorage {
         query: BranchEntryQuery,
     ) -> BoxFuture<'a, Result<Vec<Entry>, SessionError>> {
         Box::pin(async move {
-            Ok(self.state_lock().find_entries_on_branch(
+            self.state_lock().find_entries_on_branch(
                 &query.query,
                 &query.bounds,
                 &query.start,
-            )?)
+            )
         })
     }
 
@@ -428,7 +428,7 @@ impl SessionStorage for JsonlSessionStorage {
         &'a self,
         query: RecordQuery,
     ) -> BoxFuture<'a, Result<Vec<LaneRecord>, SessionError>> {
-        Box::pin(async move { Ok(self.state_lock().find_records(&query)?) })
+        Box::pin(async move { self.state_lock().find_records(&query) })
     }
 
     fn find_open_operations<'a>(
@@ -436,14 +436,14 @@ impl SessionStorage for JsonlSessionStorage {
         lane: String,
         limit: Option<usize>,
     ) -> BoxFuture<'a, Result<Vec<OperationStartedRecord>, SessionError>> {
-        Box::pin(async move { Ok(self.state_lock().find_open_operations(&lane, limit)?) })
+        Box::pin(async move { self.state_lock().find_open_operations(&lane, limit) })
     }
 
     fn get_log<'a>(
         &'a self,
         options: LogOptions,
     ) -> BoxFuture<'a, Result<Vec<LogItem>, SessionError>> {
-        Box::pin(async move { Ok(self.state_lock().get_log(&options)?) })
+        Box::pin(async move { self.state_lock().get_log(&options) })
     }
 
     fn get_name<'a>(&'a self) -> BoxFuture<'a, Option<String>> {

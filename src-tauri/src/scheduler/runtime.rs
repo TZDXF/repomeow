@@ -33,7 +33,7 @@ pub async fn run(app: AppHandle) {
 }
 
 async fn run_loop(app: &AppHandle) {
-    let data_dir = workday::data_dir(&app);
+    let data_dir = workday::data_dir(app);
     let cache_root = workday::cache_root();
     let notify = app
         .state::<crate::commands::report::ScheduleNotify>()

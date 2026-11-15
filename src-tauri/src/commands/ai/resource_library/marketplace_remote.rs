@@ -35,6 +35,9 @@ pub(super) fn normalize_source(input: &str) -> RlResult<String> {
     Ok(source.to_ascii_lowercase())
 }
 
+/// 快照文件列表:`(仓库内相对路径, 文件内容)`。
+type SnapshotFiles = (String, Vec<(String, Vec<u8>)>);
+
 struct RepositorySnapshot {
     source: String,
     revision: String,
@@ -68,7 +71,7 @@ fn snapshot(source: &str, refresh: bool) -> RlResult<Arc<RepositorySnapshot>> {
 }
 
 /// 使用本机 Git 的 credential helper / insteadOf 等配置,不读取或复制用户凭据。
-fn git_snapshot(url: &str) -> RlResult<(String, Vec<(String, Vec<u8>)>)> {
+fn git_snapshot(url: &str) -> RlResult<SnapshotFiles> {
     let parent = std::env::temp_dir();
     let temp = parent.join(format!(
         "repomeow-marketplace-{}-{}",
@@ -394,7 +397,7 @@ fn skip_subtree(el: &scraper::ElementRef<'_>) -> bool {
 const BLOCK_TAGS: &str = "p,h1,h2,h3,h4,h5,h6,section,ul,ol,li,table,pre,blockquote,dt,dd";
 
 fn is_blockish(el: &scraper::ElementRef<'_>) -> bool {
-    BLOCK_TAGS.contains(&el.value().name()) || el.select(&selector(BLOCK_TAGS)).next().is_some()
+    BLOCK_TAGS.contains(el.value().name()) || el.select(&selector(BLOCK_TAGS)).next().is_some()
 }
 
 /// 整段恰为状态词徽章(允许 `**` 加粗包裹,如 `**Pass**`):
@@ -450,7 +453,7 @@ fn inline_text(el: scraper::ElementRef<'_>) -> String {
         for child in el.children() {
             match child.value() {
                 scraper::node::Node::Text(text) => {
-                    out.push_str(&text);
+                    out.push_str(text);
                     out.push(' ');
                 }
                 scraper::node::Node::Element(_) => {
@@ -526,7 +529,7 @@ fn append_element(el: scraper::ElementRef<'_>, out: &mut String) {
                 if header && !header_done {
                     out.push_str("| ");
                     out.push_str(&"--- | ".repeat(cells.len()));
-                    out.push_str("|");
+                    out.push('|');
                     out.push('\n');
                     header_done = true;
                 }
@@ -548,7 +551,7 @@ fn append_element(el: scraper::ElementRef<'_>, out: &mut String) {
             for child in el.children() {
                 match child.value() {
                     scraper::node::Node::Text(text) => {
-                        let text = collapse_ws(&text);
+                        let text = collapse_ws(text);
                         if !status_badge(&text) {
                             push_para(&text, out);
                         }
