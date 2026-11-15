@@ -653,7 +653,16 @@ impl FileSystem for TokioEnv {
                 Err(error) => return err(to_file_error(error, Some(&path_text))),
             };
             use tokio::io::AsyncWriteExt;
-            match file.write_all(&bytes).await {
+            if let Err(error) = file.write_all(&bytes).await {
+                return err(to_file_error(error, Some(&path_text)));
+            }
+            // 追加成功后必须先等到写入真正落到文件再返回。tokio::fs::File 的
+            // poll_write 只把字节交给 blocking 线程池就就绪(见 Tokio
+            // `File` 文档:File 被丢弃时可能仍有未完成的 I/O,`flush` 才会等待
+            // pending writes),因此 write_all 返回后紧跟的同步读可能仍看到追加
+            // 前的内容。调用约定是「append 返回即立即可见」,而不是「落盘持久化」,
+            // 所以等 flush 足够,不走 sync_all(避免每次追加一次 fsync)。
+            match file.flush().await {
                 Ok(()) => ok(()),
                 Err(error) => err(to_file_error(error, Some(&path_text))),
             }
