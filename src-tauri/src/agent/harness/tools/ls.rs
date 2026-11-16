@@ -180,6 +180,7 @@ pub fn create_ls_tool(env: Arc<dyn ExecutionEnv>) -> AgentTool {
 mod tests {
     use super::*;
     use crate::agent::harness::env::TokioEnv;
+    use crate::agent::harness::test_support::ExclusiveTempDir;
     use crate::agent::types::TextOrImageContent;
 
     fn text_of(result: &AgentToolResult) -> String {
@@ -195,31 +196,20 @@ mod tests {
     }
 
     struct TempDir {
+        // 持有目录所有权:Drop 时由夹具只删除本实例创建成功的那一个目录。
+        _dir: ExclusiveTempDir,
         root: std::path::PathBuf,
     }
 
     impl TempDir {
         fn new() -> Self {
-            let root = std::env::temp_dir().join(format!(
-                "repomeow-ls-{}-{:?}",
-                std::process::id(),
-                crate::time_util::now_system()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            ));
-            std::fs::create_dir_all(&root).unwrap();
-            Self { root }
+            let dir = ExclusiveTempDir::new("ls");
+            let root = dir.path().to_path_buf();
+            Self { _dir: dir, root }
         }
 
         fn env(&self) -> Arc<dyn ExecutionEnv> {
             Arc::new(TokioEnv::new(self.root.clone()))
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            std::fs::remove_dir_all(&self.root).ok();
         }
     }
 
