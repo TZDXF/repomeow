@@ -106,7 +106,7 @@ pub struct SkillLibrary {
 }
 
 /// skills.sh 市场中单项 Skill 的稳定来源标识，随本地 Skill 同步保存。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct MarketplaceSource {
     pub id: String,
@@ -120,18 +120,6 @@ pub struct MarketplaceSource {
     pub installed_at: Option<i64>,
 }
 
-impl Default for MarketplaceSource {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            source: String::new(),
-            url: String::new(),
-            repo_dir: String::new(),
-            installed_sha: None,
-            installed_at: None,
-        }
-    }
-}
 
 /// 市场下载结果:SKILL.md 所在目录下的全部文件,`path` 为相对该目录的
 /// 安全相对路径(`/` 分隔);`repo_dir` 是该目录在 GitHub 仓库内的路径,根级为空串

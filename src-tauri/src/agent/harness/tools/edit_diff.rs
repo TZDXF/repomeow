@@ -157,7 +157,7 @@ pub fn apply_replacements_preserving_unchanged_lines(
     sorted_replacements.sort_by_key(|replacement| replacement.match_index);
     for replacement in sorted_replacements {
         let (start_line, end_line) =
-            get_replacement_line_range(&base_lines, &replacement).map_err(|error| error)?;
+            get_replacement_line_range(&base_lines, &replacement)?;
         match groups.last_mut() {
             Some(last) if start_line < last.1 => {
                 last.1 = last.1.max(end_line);
@@ -385,8 +385,7 @@ pub fn apply_edits_to_normalized_content(
             normalized_content,
             &replacement_base_content,
             &replacements,
-        )
-        .map_err(|error| error)?
+        )?
     } else {
         apply_replacements(&replacement_base_content, &replacements, 0)
     };

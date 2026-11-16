@@ -36,7 +36,7 @@
 
 - **报告生成**：按项目与日期生成日报/周报（AI 汇总提交与变更），报告历史归档
 - **定时任务**：内置调度引擎，定时报告计划，结合中国工作日历跳过节假日
-- **内置 CLI**：主程序首参数传入子命令（wiki/sem/project/report 等）即进入 CLI 模式，命令结果以 JSON 输出；配套 1 个内置 `repomeow` 技能（含 5 个 references）可一键导入资源库并部署到各 agent，详见 [CLI.md](CLI.md)
+- **Console CLI**：安装包提供独立 `repomeow-cli`，支持原生管道、重定向和退出码；通过 CLI 写入后，同数据目录的 GUI 自动刷新。配套内置 `repomeow` 技能可导入资源库并部署到各 agent，详见 [CLI.md](CLI.md)
 
 ### 桌面体验
 
@@ -83,6 +83,8 @@ pnpm release:local  # 本地发布流程调试(另有 check/build/sign/latest/al
 ```
 
 > 改动后验证：`pnpm lint` + `pnpm test:unit` + `pnpm build`；Rust 侧 `src-tauri/` 下 `cargo check` / `cargo test`（先 `pnpm sem:prepare`）。
+
+开发构建的调试信息、缓存取舍及首次/增量编译测量方法见 [开发构建与测量](scripts/README-dev-build.md)。
 
 ## 目录结构
 

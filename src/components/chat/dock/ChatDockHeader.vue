@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { Check, History, RotateCcw } from "@lucide/vue";
+import { Check, History, RotateCcw, Trash2 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
+import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { PopoverContent } from "@/components/common/project-floating-content";
 import ScrollArea from "@/components/common/ScrollArea.vue";
@@ -17,13 +18,28 @@ defineProps<{
 const emit = defineEmits<{
     newSession: [];
     selectHistory: [id: string];
+    deleteHistory: [id: string];
   }>(),
   { t } = useI18n(),
-  historyOpen = ref(false);
+  historyOpen = ref(false),
+  deleteConfirmOpen = ref(false),
+  pendingDelete = ref<ChatHistoryEntry | null>(null);
 
 function selectHistory(id: string) {
   historyOpen.value = false;
   emit("selectHistory", id);
+}
+
+function requestDelete(entry: ChatHistoryEntry) {
+  pendingDelete.value = entry;
+  historyOpen.value = false;
+  deleteConfirmOpen.value = true;
+}
+
+function confirmDelete() {
+  if (pendingDelete.value) {
+    emit("deleteHistory", pendingDelete.value.id);
+  }
 }
 </script>
 
@@ -59,28 +75,51 @@ function selectHistory(id: string) {
           {{ t("chat.historyEmpty") }}
         </p>
         <ScrollArea v-else class="max-h-80">
-          <button
+          <div
             v-for="entry in entries"
             :key="entry.id"
-            type="button"
-            class="flex w-full items-center gap-2 rounded-sm px-2 py-2 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
-            :aria-current="entry.id === activeId ? 'true' : undefined"
-            :title="entry.title"
-            @click="selectHistory(entry.id)"
+            class="group flex items-center rounded-sm hover:bg-accent"
           >
-            <div class="flex min-w-0 flex-1 items-center gap-2">
-              <p class="min-w-0 flex-1 truncate text-sm">{{ entry.title }}</p>
-              <p
-                class="shrink-0 whitespace-nowrap text-xs text-muted-foreground"
-                :title="formatLocalDateTime(entry.updatedAt)"
-              >
-                {{ formatRelativeTime(entry.updatedAt) }}
-              </p>
-            </div>
-            <Check v-if="entry.id === activeId" class="size-3.5 shrink-0 text-primary" />
-          </button>
+            <button
+              type="button"
+              class="flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-2 text-left focus-visible:bg-accent focus-visible:outline-none"
+              :aria-current="entry.id === activeId ? 'true' : undefined"
+              :title="entry.title"
+              @click="selectHistory(entry.id)"
+            >
+              <div class="flex min-w-0 flex-1 items-center gap-2">
+                <p class="min-w-0 flex-1 truncate text-sm">{{ entry.title }}</p>
+                <p
+                  class="shrink-0 whitespace-nowrap text-xs text-muted-foreground"
+                  :title="formatLocalDateTime(entry.updatedAt)"
+                >
+                  {{ formatRelativeTime(entry.updatedAt) }}
+                </p>
+              </div>
+              <Check v-if="entry.id === activeId" class="size-3.5 shrink-0 text-primary" />
+            </button>
+            <Button
+              variant="ghost"
+              size="icon"
+              class="mr-1 h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+              :disabled="disabled"
+              :title="t('chat.historyDelete')"
+              :aria-label="t('chat.historyDelete')"
+              @click.stop="requestDelete(entry)"
+            >
+              <Trash2 class="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </ScrollArea>
       </PopoverContent>
     </Popover>
+    <ConfirmDialog
+      v-model:open="deleteConfirmOpen"
+      :title="t('chat.historyDelete')"
+      :description="t('chat.historyDeleteConfirm', { title: pendingDelete?.title })"
+      :confirm-text="t('common.delete')"
+      destructive
+      @confirm="confirmDelete"
+    />
   </div>
 </template>

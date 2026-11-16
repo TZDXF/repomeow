@@ -311,7 +311,7 @@ fn expand_shim_token(token: &str, shim_dir: &Path) -> Option<PathBuf> {
             rest = stripped;
             continue;
         }
-        let Some(j) = rest.find('%') else { return None };
+        let j = rest.find('%')?;
         let name = &rest[..j];
         if name.is_empty() {
             return None;

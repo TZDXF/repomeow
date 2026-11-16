@@ -1,11 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::commands::git;
-use crate::error::{AppError, AppResult, ErrorCode};
+use crate::error::AppResult;
 use crate::path_util::clean_str;
-use crate::APP_DATA_DIR_NAME;
 
 pub(super) const WIKI_DIR_NAME: &str = "wiki";
 
@@ -42,14 +41,7 @@ pub(crate) fn wiki_dir_at(data_root: &Path, project_path: &str) -> PathBuf {
 }
 
 pub(crate) fn wiki_dir(app: &AppHandle, project_path: &str) -> AppResult<PathBuf> {
-    let home = app
-        .path()
-        .home_dir()
-        .map_err(|e| AppError::coded(ErrorCode::IoError, e.to_string()))?;
-    Ok(wiki_dir_in(
-        &home.join(APP_DATA_DIR_NAME).join(WIKI_DIR_NAME),
-        project_path,
-    ))
+    Ok(wiki_dir_at(&crate::app_data_dir(app)?, project_path))
 }
 
 /// 读取仓库当前 HEAD 的完整 sha;非 git 仓库 / 空仓库 / 读取失败均为 None

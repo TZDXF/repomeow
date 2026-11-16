@@ -688,6 +688,9 @@ export default {
       deleteRemoteConfirm:
         "确定删除远程分支「{name}」吗？该操作会在远端移除该分支，此操作不可撤销。",
       remoteDeleted: "已删除远程分支「{name}」",
+      fetchSuccess: "已更新远程分支「{name}」",
+      fetchAllSuccess: "已更新全部远程分支",
+      updateAllHint: "更新全部远程分支（会同步远端已删除的分支）",
     },
     stash: {
       manage: "Stash",
@@ -786,6 +789,7 @@ export default {
       searchPlaceholder: "搜索提交信息、hash、作者",
       searchEmpty: "无匹配提交",
       tipNotFound: "该分支的顶端提交不在当前图谱范围内",
+      filterTargetGone: "分支「{name}」已被删除,已切回当前分支",
       commitNotFound: "未找到该提交,可能需要加载更多或提交不可达",
       loadingMore: "正在加载全部提交,已加载 {count} 条",
       viewGraph: "图谱",
@@ -911,6 +915,9 @@ export default {
     historyEmpty: "暂无历史对话，发送消息后会自动保存",
     historyLoadFailed: "加载对话历史失败",
     historySaveFailed: "保存对话历史失败，当前对话尚未丢弃",
+    historyDelete: "删除会话",
+    historyDeleteConfirm: "确定删除会话「{title}」吗？此操作不可撤销。",
+    historyDeleteFailed: "删除会话失败，列表与当前对话保持不变",
     historyRetry: "重试",
     responding: "正在回答",
     entry: "项目问答",
@@ -1553,10 +1560,11 @@ export default {
 
       title: "CLI",
       description:
-        "RepoMeow CLI 内置于主程序,供 AI agent 与脚本在命令行中执行项目管理、Wiki、语义分析、报告与 AI 配置等管理能力(git/docker 等本机工具请直接调用)",
+        "RepoMeow 提供独立 console 程序 repomeow-cli，供 AI agent 与脚本执行项目、Wiki、语义分析、报告和 AI 配置管理。",
+      externalChanges: "CLI 已更新数据；未保存的编辑已保留，保存将以当前编辑覆盖对应配置。",
       skillsTitle: "内置技能(Skills)",
       skillsHint:
-        "将技能导入资源库后,可在「项目 → AI 资源」部署到各 agent 的 skills 目录,配置 PATH 并重启终端和 AI 工具后,agent 即可直接使用 repomeow 调用 CLI;重复导入会同步最新技能内容,不写入本机程序路径。",
+        "将技能导入资源库后,可在「项目 → AI 资源」部署到各 agent 的 skills 目录,配置 PATH 并重启终端和 AI 工具后,agent 即可直接使用 repomeow-cli 调用 CLI;重复导入会同步最新技能内容,不写入本机程序路径。",
       skillRepomeow:
         "项目管理 / Wiki / 语义分析 / 报告与调度 / 标签 / AI 配置(SKILL.md + references 细分)",
       install: "导入到资源库",

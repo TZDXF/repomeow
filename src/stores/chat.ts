@@ -6,6 +6,7 @@ import {
   getChatHistory,
   saveChatHistory,
   selectChatHistory,
+  deleteChatHistory,
   type ChatHistoryEntry,
   type ChatStoredState,
   sendChatMessage,
@@ -172,7 +173,7 @@ export const useChatStore = defineStore("chat", () => {
 
   function historyError(
     path: string,
-    key: "historyLoadFailed" | "historySaveFailed",
+    key: "historyLoadFailed" | "historySaveFailed" | "historyDeleteFailed",
     error: unknown,
   ) {
     const { message } = extractChatError(error);
@@ -548,12 +549,42 @@ export const useChatStore = defineStore("chat", () => {
     }
   }
 
+  /** 删除历史;仅删除当前历史时重置对话,失败前不改动列表与选中状态。 */
+  async function deleteHistory(path: string, id: string): Promise<boolean> {
+    const history = ensureHistory(path);
+    if (history.changing || history.loading) {
+      return false;
+    }
+    history.changing = true;
+    const deletingActive = history.activeId === id;
+    try {
+      // 当前历史的在途回合先停止并落盘,再由删除命令一次性清除。
+      if (deletingActive) {
+        await settleRun(path);
+      }
+      await deleteChatHistory(path, id);
+      history.entries = history.entries.filter((entry) => entry.id !== id);
+      if (deletingActive) {
+        sessions.value[path] = defaultSession();
+        history.activeId = null;
+      }
+      history.error = null;
+      return true;
+    } catch (error) {
+      historyError(path, "historyDeleteFailed", error);
+      return false;
+    } finally {
+      history.changing = false;
+    }
+  }
+
   return {
     sessions,
     histories,
     ensureHistory,
     loadHistory,
     selectHistory,
+    deleteHistory,
     ensureSession,
     send,
     abort,

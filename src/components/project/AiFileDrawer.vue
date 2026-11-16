@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onCliDataChanged } from "@/lib/cli-sync";
 import Dialog from "@/components/common/ProjectDialog.vue";
 import { computed, nextTick, ref, watch, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
@@ -107,6 +108,24 @@ function isDirty(): boolean {
   }
   return viewer.value?.getText() !== (preview.value.text ?? "");
 }
+
+onCliDataChanged(["file"], async () => {
+  if (!props.relPath) {
+    return;
+  }
+  if (isDirty()) {
+    toast.info(t("settings.cli.externalChanges"));
+    return;
+  }
+  const sequence = ++loadSeq,
+    fresh = await cmd<FilePreview>("read_file_preview", {
+      root: props.root,
+      relPath: props.relPath,
+    });
+  if (sequence === loadSeq) {
+    preview.value = fresh;
+  }
+});
 
 watch(
   () => props.relPath,
@@ -288,12 +307,14 @@ function onMarkdownClick(e: MouseEvent) {
   <Dialog :open="open" @update:open="onDialogOpenUpdate">
     <!--
       复用 Dialog(reka-ui)获得模态语义/焦点圈定/焦点恢复,视觉仍是右侧抽屉:
-      顶部避让 TitleBar(h-9,z-[60] 在弹层之上)。Esc/外点由守卫拦截——
+      顶部避让 TitleBar(--titlebar-height,z-[60] 在弹层之上)。Esc/外点由守卫拦截——
       有未保存改动或保存中时 preventDefault;可关闭时经 update:open 走 requestClose。
+      抽屉靠 top/bottom 自己定高,用 mt-0 max-h-none overflow-hidden 退出
+      style.css 里给居中弹窗的基础限高规则(否则会被下移半个标题栏高、并被限高)。
     -->
     <DialogContent
       :show-close-button="false"
-      class="top-9 right-0 bottom-0 left-auto flex max-w-[92vw] translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-l border-t bg-background p-0 shadow-xl sm:max-w-[92vw]"
+      class="top-(--titlebar-height) right-0 bottom-0 left-auto mt-0 flex max-h-none max-w-[92vw] translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-l border-t bg-background p-0 shadow-xl sm:max-w-[92vw]"
       :style="{ width: `${drawerWidth}px` }"
       @escape-key-down="onEscapeKeyDown"
       @pointer-down-outside="onOutsideInteract"

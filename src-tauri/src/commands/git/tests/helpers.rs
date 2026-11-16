@@ -1,6 +1,6 @@
 use super::super::*;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub(super) fn temp_dir(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -12,7 +12,7 @@ pub(super) fn temp_dir(tag: &str) -> PathBuf {
     dir
 }
 
-pub(super) fn git(dir: &PathBuf, args: &[&str]) {
+pub(super) fn git(dir: &Path, args: &[&str]) {
     let out = git_command(dir.to_str().unwrap())
         .args(args)
         .output()
@@ -25,13 +25,13 @@ pub(super) fn git(dir: &PathBuf, args: &[&str]) {
     );
 }
 
-pub(super) fn init_repo(dir: &PathBuf) {
+pub(super) fn init_repo(dir: &Path) {
     git(dir, &["init", "-b", "main"]);
     git(dir, &["config", "user.email", "test@example.com"]);
     git(dir, &["config", "user.name", "test"]);
 }
 
-pub(super) fn clone_with_config(tag: &str, origin: &PathBuf) -> PathBuf {
+pub(super) fn clone_with_config(tag: &str, origin: &Path) -> PathBuf {
     let dir = temp_dir(tag);
     git(&dir, &["clone", origin.to_str().unwrap(), "."]);
     git(&dir, &["config", "user.email", "test@example.com"]);
@@ -39,7 +39,7 @@ pub(super) fn clone_with_config(tag: &str, origin: &PathBuf) -> PathBuf {
     dir
 }
 
-pub(super) fn rev_parse(dir: &PathBuf, rev: &str) -> String {
+pub(super) fn rev_parse(dir: &Path, rev: &str) -> String {
     let out = git_command(dir.to_str().unwrap())
         .args(["rev-parse", rev])
         .output()
@@ -65,7 +65,7 @@ pub(super) fn setup_origin_with_feature(tag: &str) -> (PathBuf, PathBuf) {
     (origin, clone_a)
 }
 
-pub(super) fn init_nested_repo(dir: &PathBuf, name: &str) -> PathBuf {
+pub(super) fn init_nested_repo(dir: &Path, name: &str) -> PathBuf {
     let nested = dir.join(name);
     fs::create_dir_all(&nested).unwrap();
     init_repo(&nested);

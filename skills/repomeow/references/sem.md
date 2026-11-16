@@ -1,21 +1,21 @@
 # 语义分析
 
-通过 PATH 直接调用 `repomeow`。以下命令均为只读,`-d` 可传仓库内任意路径。
+通过 PATH 直接调用 `repomeow-cli`。以下命令均为只读,`-d` 可传仓库内任意路径。
 
 ## 命令
 
 ```powershell
 # 按名称语义搜索代码实体(函数/类/接口/结构体等)
-repomeow sem find -d <仓库目录> -q <关键词>
+repomeow-cli sem find -d <仓库目录> -q <关键词>
 
 # 查看实体上下文:源码摘要 + 按调用/引用扩展的相关实体
-repomeow sem context -d <仓库目录> -e <实体名或entityId> [--file-path src/a.ts] [--budget 2000] [--hops 1]
+repomeow-cli sem context -d <仓库目录> -e <实体名或entityId> [--file-path src/a.ts] [--budget 2000] [--hops 1]
 
 # 查询实体的直接调用方(callers)与引用点(refs)
-repomeow sem relations -d <仓库目录> -e <实体名或entityId> [--file-path src/a.ts]
+repomeow-cli sem relations -d <仓库目录> -e <实体名或entityId> [--file-path src/a.ts]
 
 # 汇总当前未提交的实体级结构化变更
-repomeow sem diff -d <仓库目录>
+repomeow-cli sem diff -d <仓库目录>
 ```
 
 ## 使用建议

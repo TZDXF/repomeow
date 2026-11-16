@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::Path;
 
 use chrono::{Datelike, Local, NaiveDate, NaiveTime, Timelike};
 use tokio::time::{Duration, Instant};
@@ -70,7 +70,7 @@ pub(crate) fn work_week_start_with(
         .unwrap_or(monday)
 }
 
-pub(crate) fn work_week_start(today: NaiveDate, cache_root: &PathBuf) -> NaiveDate {
+pub(crate) fn work_week_start(today: NaiveDate, cache_root: &Path) -> NaiveDate {
     work_week_start_with(today, &|d| workday::is_workday(d, cache_root))
 }
 
@@ -102,7 +102,7 @@ pub(crate) fn is_work_week_last_day_with(
     true
 }
 
-fn is_work_week_last_day(today: NaiveDate, cache_root: &PathBuf) -> bool {
+fn is_work_week_last_day(today: NaiveDate, cache_root: &Path) -> bool {
     is_work_week_last_day_with(today, &|d| workday::is_workday(d, cache_root))
 }
 
@@ -132,7 +132,7 @@ pub(crate) fn daily_filters_allow(
 pub(crate) fn due_schedules(
     schedules: &[ReportSchedule],
     now_local: &chrono::DateTime<Local>,
-    cache_root: &PathBuf,
+    cache_root: &Path,
 ) -> Vec<ReportSchedule> {
     let now_time = now_local.time();
     let today = now_local.date_naive();

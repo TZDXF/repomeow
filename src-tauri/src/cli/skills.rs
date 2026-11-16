@@ -2,7 +2,7 @@
 //! 再由项目 AI 资源部署到各 agent 的 skills 目录。
 //!
 //! 渐进式披露:SKILL.md 为入口与分组路由,细分用法在 references/ 下。
-//! 技能通过 PATH 直接调用 `repomeow`,导入时原样保存,不写入本机可执行文件路径。
+//! 技能通过 PATH 直接调用 `repomeow-cli`,导入时原样保存,不写入本机可执行文件路径。
 
 /// 内置 skill 定义。
 pub(crate) struct BuiltinSkill {
@@ -11,6 +11,9 @@ pub(crate) struct BuiltinSkill {
     /// (技能目录内相对路径, 文件内容);必含 SKILL.md 且位于首位。
     pub(crate) files: &'static [(&'static str, &'static str)],
 }
+
+/// 待导入资源库的技能:`(名称, 描述, [(目录内相对路径, 内容)])`。
+pub(crate) type BuiltinSkillFiles = Vec<(String, String, Vec<(String, String)>)>;
 
 pub(crate) const BUILTIN_SKILLS: &[BuiltinSkill] = &[BuiltinSkill {
     name: "repomeow",
@@ -52,7 +55,8 @@ mod tests {
         for skill in BUILTIN_SKILLS {
             for (path, content) in skill.files {
                 assert!(!content.contains("{{REPOMEOW_CLI}}"), "{path}");
-                assert!(content.contains("`repomeow`"), "{path}");
+                assert!(content.contains("`repomeow-cli`"), "{path}");
+                assert!(!content.contains("repomeow project "), "{path}");
             }
         }
     }

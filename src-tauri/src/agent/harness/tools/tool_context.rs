@@ -22,7 +22,7 @@ impl std::fmt::Debug for ExecutionToolContext {
 
 impl ExecutionToolContext {
     /// 从任意 [`ToolContext`] 尝试向下转型(内置工具执行入口用)。
-    pub fn from_context<'a>(context: &'a Arc<dyn ToolContext>) -> Option<&'a Self> {
+    pub fn from_context(context: &Arc<dyn ToolContext>) -> Option<&Self> {
         // ToolContext: Any 超特质的对象安全向下转型(trait upcasting,1.86+)。
         let any: &(dyn std::any::Any + 'static) = context.as_ref();
         any.downcast_ref::<Self>()

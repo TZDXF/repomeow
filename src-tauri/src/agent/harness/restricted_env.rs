@@ -591,18 +591,12 @@ impl Shell for RestrictedEnv {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::harness::test_support::ExclusiveTempDir;
     use std::fs;
 
-    fn unique_base(tag: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "repomeow-restricted-{tag}-{}-{}",
-            std::process::id(),
-            crate::time_util::now_system()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ))
-    }
+    // 原先用 `pid + SystemTime 纳秒` 拼目录名并在 Drop 里无条件 remove_dir_all;
+    // 并发取时钟时多核可能读到相同纳秒值 → 两个夹具同名 → 先析构者删掉后者
+    // (TZD-114 的偶发 NotFound)。现改用原子创建 + 排他所有权的夹具。
 
     /// 测试目录树:
     /// base/
@@ -612,19 +606,21 @@ mod tests {
     ///   wiki/pages/page.md ← allowed_write_file(位于项目外)
     ///   outside.txt        ← 两个根之外
     struct TestTree {
+        dir: ExclusiveTempDir,
         base: PathBuf,
     }
 
     impl TestTree {
         fn new() -> Self {
-            let base = unique_base("tree");
+            let dir = ExclusiveTempDir::new("restricted-tree");
+            let base = dir.path().to_path_buf();
             fs::create_dir_all(base.join("project/src")).unwrap();
             fs::create_dir_all(base.join("wiki/pages")).unwrap();
             fs::write(base.join("project/src/main.rs"), "fn main() {}\n").unwrap();
             fs::write(base.join("project/readme.md"), "# readme\n").unwrap();
             fs::write(base.join("outside.txt"), "outside\n").unwrap();
             fs::write(base.join("wiki/pages/page.md"), "# Page\n").unwrap();
-            Self { base }
+            Self { dir, base }
         }
 
         fn project_root(&self) -> PathBuf {
@@ -648,11 +644,7 @@ mod tests {
         }
     }
 
-    impl Drop for TestTree {
-        fn drop(&mut self) {
-            fs::remove_dir_all(&self.base).ok();
-        }
-    }
+    // 目录清理由 ExclusiveTempDir 负责,只删自己原子创建成功的那一个目录。
 
     fn assert_denied(result: Result<(), FileError>) {
         let error = result.unwrap_err();
@@ -1107,8 +1099,8 @@ mod tests {
         #[tokio::test]
         async fn symlink_dir_escape_denied() {
             let tree = TestTree::new();
-            let outside_dir = unique_base("outside-dir");
-            fs::create_dir_all(&outside_dir).unwrap();
+            let outside = ExclusiveTempDir::new("restricted-outside-dir");
+            let outside_dir = outside.path().to_path_buf();
             fs::write(outside_dir.join("secret.txt"), "secret\n").unwrap();
             if !symlink_or_skip(&outside_dir, &tree.project_root().join("evil-link")) {
                 return;
@@ -1137,8 +1129,6 @@ mod tests {
                     .await
                     .map(|_| ()),
             );
-
-            fs::remove_dir_all(&outside_dir).ok();
         }
 
         #[tokio::test]

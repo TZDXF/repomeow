@@ -61,6 +61,11 @@ function selectHistory(id: string) {
   void chat.selectHistory(props.project.path, id);
 }
 
+function deleteHistory(id: string) {
+  cancelEdit();
+  void chat.deleteHistory(props.project.path, id);
+}
+
 const isEmpty = computed(() => session.value.messages.length === 0 && !session.value.busy),
   // ── 面板布局 / 时间线视图 / 消息动作(实现见 composables/chat-dock/*) ──
   { panelStyle, resizing, startResize } = useChatDockLayout(open),
@@ -96,6 +101,7 @@ const isEmpty = computed(() => session.value.messages.length === 0 && !session.v
       :disabled="historyPending || !history.loaded"
       @new-session="startNewSession"
       @select-history="selectHistory"
+      @delete-history="deleteHistory"
     />
 
     <div

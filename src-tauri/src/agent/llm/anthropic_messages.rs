@@ -40,8 +40,10 @@ use super::types::{
     user_agent, AssistantContent, AssistantMessage, AssistantMessageEvent,
     AssistantMessageEventStream, CacheRetention, Context, InputKind, Message, Model,
     ProviderResponse, SimpleStreamOptions, StopReason, TextOrImageContent, ThinkingBudgets,
-    ThinkingLevel, Tool, ToolCall, ToolChoice, ToolResultMessage, Usage, UserContent,
+    ThinkingLevel, Tool, ToolCall, ToolChoice, ToolResultMessage, UserContent,
 };
+#[cfg(test)]
+use super::types::Usage;
 use crate::time_util::now_ts_nanos;
 
 // ── 常量 ─────────────────────────────────────────────────────────────
@@ -2833,8 +2835,10 @@ mod tests {
         let context = context_of(vec![user_message("hi")]);
 
         // reasoning=Medium → budget 8192(max_tokens 容纳 thinking 后钳制)
-        let mut options = SimpleStreamOptions::default();
-        options.reasoning = Some(ThinkingLevel::Medium);
+        let options = SimpleStreamOptions {
+            reasoning: Some(ThinkingLevel::Medium),
+            ..Default::default()
+        };
         let body = build_request_body(&model, &context, Some(&options));
         assert_eq!(body["thinking"]["type"], "enabled");
         assert_eq!(body["thinking"]["budget_tokens"], 8192);
@@ -2845,16 +2849,19 @@ mod tests {
         let mut small = anthropic_model(base_url);
         small.max_tokens = 4096;
         small.reasoning = true;
-        let mut custom = SimpleStreamOptions::default();
-        custom.reasoning = Some(ThinkingLevel::High);
+        let custom = SimpleStreamOptions {
+            reasoning: Some(ThinkingLevel::High),
+            ..Default::default()
+        };
         let body = build_request_body(&small, &context, Some(&custom));
         assert_eq!(body["thinking"]["budget_tokens"], 3072);
         assert_eq!(body["max_tokens"], 4096);
 
         // reasoning=None → thinking disabled(thinkingLevelMap.off 未显式 null)
-        let mut off = SimpleStreamOptions::default();
-        off.reasoning = None;
-        off.temperature = Some(0.7);
+        let off = SimpleStreamOptions {
+            temperature: Some(0.7),
+            ..Default::default()
+        };
         let body = build_request_body(&model, &context, Some(&off));
         assert_eq!(body["thinking"], json!({ "type": "disabled" }));
         // off 显式 null → 不下发 disabled
@@ -2865,9 +2872,11 @@ mod tests {
         assert!(body.get("thinking").is_none());
 
         // thinking 开启时不带 temperature;关闭时带
-        let mut with_temp = SimpleStreamOptions::default();
-        with_temp.reasoning = Some(ThinkingLevel::Low);
-        with_temp.temperature = Some(0.7);
+        let with_temp = SimpleStreamOptions {
+            reasoning: Some(ThinkingLevel::Low),
+            temperature: Some(0.7),
+            ..Default::default()
+        };
         let body = build_request_body(&model, &context, Some(&with_temp));
         assert!(body.get("temperature").is_none());
         let body = build_request_body(&model, &context, Some(&off));
@@ -2883,8 +2892,10 @@ mod tests {
             tool("read", json!({ "type": "object" })),
             tool("my_tool", json!({})),
         ];
-        let mut options = SimpleStreamOptions::default();
-        options.api_key = Some("sk-ant-oat01-token".to_string());
+        let options = SimpleStreamOptions {
+            api_key: Some("sk-ant-oat01-token".to_string()),
+            ..Default::default()
+        };
 
         let body = build_request_body(&model, &context, Some(&options));
         // system:身份块 + 用户提示块,均带 cache_control
@@ -3068,22 +3079,28 @@ mod tests {
         let mut context = context_of(vec![user_message("hi")]);
         context.system_prompt = Some("be brief".to_string());
 
-        let mut options = SimpleStreamOptions::default();
-        options.cache_retention = Some(CacheRetention::None);
+        let options = SimpleStreamOptions {
+            cache_retention: Some(CacheRetention::None),
+            ..Default::default()
+        };
         let body = build_request_body(&model, &context, Some(&options));
         assert!(body["system"][0].get("cache_control").is_none());
         assert!(body["messages"][0]["content"].as_str().is_some()); // 字符串 content 不被包装
 
-        let mut options = SimpleStreamOptions::default();
-        options.cache_retention = Some(CacheRetention::Long);
+        let options = SimpleStreamOptions {
+            cache_retention: Some(CacheRetention::Long),
+            ..Default::default()
+        };
         let body = build_request_body(&model, &context, Some(&options));
         assert_eq!(body["system"][0]["cache_control"]["ttl"], "1h");
 
         // env 覆盖:PI_CACHE_RETENTION=long(无显式 retention)
-        let mut options = SimpleStreamOptions::default();
         let mut env = HashMap::new();
         env.insert("PI_CACHE_RETENTION".to_string(), "long".to_string());
-        options.env = Some(env);
+        let options = SimpleStreamOptions {
+            env: Some(env),
+            ..Default::default()
+        };
         let body = build_request_body(&model, &context, Some(&options));
         assert_eq!(
             body["messages"][0]["content"][0]["cache_control"]["ttl"],
@@ -3103,9 +3120,11 @@ mod tests {
         context.tools = vec![tool("read", json!({}))];
 
         // OAuth → claude-code + oauth beta;reasoning + thinking → interleaved
-        let mut options = SimpleStreamOptions::default();
-        options.api_key = Some("sk-ant-oat01-t".to_string());
-        options.reasoning = Some(ThinkingLevel::Low);
+        let options = SimpleStreamOptions {
+            api_key: Some("sk-ant-oat01-t".to_string()),
+            reasoning: Some(ThinkingLevel::Low),
+            ..Default::default()
+        };
         let features = get_beta_features(&model, &context, true, true, Some(&options));
         assert_eq!(
             features,
@@ -3131,12 +3150,14 @@ mod tests {
         assert_eq!(features, vec!["b2".to_string(), "b1".to_string()]);
 
         // metadata.user_id + tool_choice
-        let mut options = SimpleStreamOptions::default();
         let mut metadata = HashMap::new();
         metadata.insert("user_id".to_string(), json!("user-42"));
         metadata.insert("ignored".to_string(), json!(1));
-        options.metadata = Some(metadata);
-        options.tool_choice = Some(ToolChoice::None);
+        let options = SimpleStreamOptions {
+            metadata: Some(metadata),
+            tool_choice: Some(ToolChoice::None),
+            ..Default::default()
+        };
         let body = build_request_body(&model, &context, Some(&options));
         assert_eq!(body["metadata"]["user_id"], "user-42");
         assert!(body["metadata"].get("ignored").is_none());
@@ -3649,8 +3670,10 @@ mod tests {
         let server = spawn_mock_server(sse_response(String::from_utf8(body).unwrap()));
 
         let model = anthropic_model(&server.base_url);
-        let mut options = SimpleStreamOptions::default();
-        options.api_key = Some("test-key".to_string());
+        let options = SimpleStreamOptions {
+            api_key: Some("test-key".to_string()),
+            ..Default::default()
+        };
         let mut stream = stream_anthropic_messages(
             model,
             context_of(vec![user_message("hello")]),
@@ -3709,10 +3732,12 @@ mod tests {
             b"HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nContent-Length: 48\r\nConnection: close\r\n\r\n{\"type\":\"error\",\"error\":{\"message\":\"slow down\"}}".to_vec(),
         );
         let model = anthropic_model(&server.base_url);
-        let mut options = SimpleStreamOptions::default();
-        options.api_key = Some("k".to_string());
         // 429 默认可重试;显式关闭以断言错误文案透传
-        options.max_retries = Some(0);
+        let options = SimpleStreamOptions {
+            api_key: Some("k".to_string()),
+            max_retries: Some(0),
+            ..Default::default()
+        };
         let mut stream = stream_anthropic_messages(
             model,
             context_of(vec![user_message("hello")]),
@@ -3887,8 +3912,11 @@ mod tests {
         let base_url = spawn_sequential_mock(vec![retry_hint, success], served.clone());
 
         let model = anthropic_model(&base_url);
-        let mut options = SimpleStreamOptions::default();
-        options.api_key = Some("k".to_string()); // max_retries 用默认 2
+        // max_retries 用默认 2
+        let options = SimpleStreamOptions {
+            api_key: Some("k".to_string()),
+            ..Default::default()
+        };
         let mut stream = stream_anthropic_messages(
             model,
             context_of(vec![user_message("hello")]),
@@ -3919,8 +3947,10 @@ mod tests {
         let base_url = spawn_sequential_mock(vec![rejected], served.clone());
 
         let model = anthropic_model(&base_url);
-        let mut options = SimpleStreamOptions::default();
-        options.api_key = Some("k".to_string());
+        let options = SimpleStreamOptions {
+            api_key: Some("k".to_string()),
+            ..Default::default()
+        };
         let mut stream = stream_anthropic_messages(
             model,
             context_of(vec![user_message("hello")]),
@@ -3951,8 +3981,10 @@ mod tests {
         let base_url = spawn_sequential_mock(vec![slow], served.clone());
 
         let model = anthropic_model(&base_url);
-        let mut options = SimpleStreamOptions::default();
-        options.api_key = Some("k".to_string());
+        let options = SimpleStreamOptions {
+            api_key: Some("k".to_string()),
+            ..Default::default()
+        };
         let signal = CancellationToken::new();
         tokio::spawn({
             let signal = signal.clone();
@@ -4033,8 +4065,10 @@ mod tests {
         });
 
         let model = anthropic_model(&format!("http://{address}"));
-        let mut options = SimpleStreamOptions::default();
-        options.api_key = Some("k".to_string());
+        let options = SimpleStreamOptions {
+            api_key: Some("k".to_string()),
+            ..Default::default()
+        };
         let signal = CancellationToken::new();
         let mut stream = stream_anthropic_messages(
             model,

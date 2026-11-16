@@ -52,6 +52,8 @@ function onDragRegionDblClick(event: MouseEvent) {
 
 <template>
   <!--
+    高度取 --titlebar-height(style.css 的 :root 定义,2.25rem = 36px),
+    是弹窗/浮层避让标题栏的唯一来源,不要在这里写死 h-9。
     弹窗(Dialog)打开时,reka-ui 会渲染 z-50 的全屏 overlay 并把 body 设为 pointer-events: none,
     导致标题栏无法拖动。这里将标题栏提到 overlay 之上并恢复指针事件;
     @pointerdown.stop 阻止冒泡到 document,避免触发 reka-ui 的"点击外部关闭弹窗"
@@ -59,7 +61,7 @@ function onDragRegionDblClick(event: MouseEvent) {
   -->
   <div
     data-tauri-drag-region
-    class="pointer-events-auto relative z-[60] flex h-9 shrink-0 select-none items-center border-b bg-background pl-3"
+    class="pointer-events-auto relative z-[60] flex h-[var(--titlebar-height)] shrink-0 select-none items-center border-b bg-background pl-3"
     @dblclick="onDragRegionDblClick"
     @pointerdown.stop
   >

@@ -79,7 +79,7 @@ function submit() {
 <template>
   <Dialog v-model:open="open">
     <DialogContent
-      class="flex max-h-[calc(100dvh-3rem)] flex-col sm:max-w-[min(48rem,calc(100%-2rem))]"
+      class="flex max-h-[calc(100dvh_-_var(--titlebar-height)_-_2rem)] flex-col sm:max-w-[min(48rem,calc(100%-2rem))]"
     >
       <DialogHeader class="shrink-0">
         <DialogTitle>{{

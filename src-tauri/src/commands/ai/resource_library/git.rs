@@ -211,6 +211,7 @@ fn has_commits(lib: &Library) -> RlResult<bool> {
 ///    - 本地有提交 + 远端有内容 → 建立 upstream,纯快进则 pull/push,
 ///      分叉则原样透出 diverged,由 `rl_resolve_fork` 决策;
 ///    - 远端为空 → 推送本地(branch 参数可指定分支名,必要时改名本地分支)。
+///
 /// 网络失败不外抛,记录进 SyncOutcome。
 pub(super) fn remote_configure_impl(
     lib: &Library,
@@ -331,7 +332,6 @@ pub(super) fn fetch(lib: &Library) -> RlResult<()> {
 /// 与上游的比较快照(供 sync/状态使用;需先 fetch)
 #[derive(Debug, Default)]
 pub(super) struct SyncState {
-    pub branch: Option<String>,
     pub upstream: Option<String>,
     pub dirty: bool,
     pub ahead: u32,
@@ -339,10 +339,11 @@ pub(super) struct SyncState {
 }
 
 pub(super) fn compute_state(lib: &Library) -> RlResult<SyncState> {
-    let mut state = SyncState::default();
-    state.branch = branch(lib)?;
-    state.upstream = upstream(lib)?;
-    state.dirty = dirty(lib)?;
+    let mut state = SyncState {
+        upstream: upstream(lib)?,
+        dirty: dirty(lib)?,
+        ..Default::default()
+    };
     if state.upstream.is_some() {
         let dir = dir_str(lib);
         let out = capture(

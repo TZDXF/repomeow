@@ -234,7 +234,7 @@ async fn load_skills_from_dir_internal(
     }
 
     let mut sorted_entries = entries;
-    sorted_entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    sorted_entries.sort_by_key(|a| a.name.to_lowercase());
     for entry in &sorted_entries {
         if entry.name.starts_with('.') || entry.name == "node_modules" {
             continue;
@@ -625,7 +625,6 @@ pub fn dirname_env_path(path: &str) -> String {
     let normalized = path.trim_end_matches(['/', '\\']);
     let separator_index = normalized
         .rfind('/')
-        .map(|i| i)
         .into_iter()
         .chain(normalized.rfind('\\'))
         .max();

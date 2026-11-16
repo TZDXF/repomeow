@@ -25,6 +25,25 @@ pub(crate) use storage::{
 };
 pub use types::*;
 
+/// One writer per project across GUI and CLI. Refuse a conflicting operation
+/// rather than mixing pages, metadata and git snapshots from separate runs.
+pub(crate) fn operation_guard(dir: &std::path::Path) -> AppResult<std::fs::File> {
+    let root = dir
+        .parent()
+        .ok_or_else(|| std::io::Error::other("Invalid wiki directory"))?;
+    std::fs::create_dir_all(root)?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(dir.with_extension("writer.lock"))?;
+    file.try_lock().map_err(|error| {
+        std::io::Error::other(format!("Wiki 正在被另一操作写入，请稍后重试: {error}"))
+    })?;
+    Ok(file)
+}
+
 #[tauri::command]
 pub fn get_wiki_dir(app: AppHandle, project_path: String) -> AppResult<String> {
     storage::get_wiki_dir(app, project_path)

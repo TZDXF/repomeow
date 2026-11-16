@@ -180,7 +180,7 @@ pub(super) fn list_schedules_impl(data_root: Option<&Path>) -> Result<Value, Too
 }
 
 /// 从 JSON 文件全量覆盖报告调度(数组,元素结构同 schedules 输出)。
-/// 注意:若桌面应用正在运行,需重启后新调度才被调度器感知。
+/// 运行中的桌面应用由持久化版本监视器唤醒调度循环。
 pub(super) fn save_schedules_impl(
     file: &str,
     data_root: Option<&Path>,
@@ -213,7 +213,7 @@ pub(super) fn list_system_schedules_impl(data_root: Option<&Path>) -> Result<Val
     Ok(json!({ "schedules": [schedule] }))
 }
 
-/// 保存系统级调度(git_update)。注意:运行中的桌面应用需重启后生效。
+/// 保存系统级调度(git_update)，桌面版本监视器会唤醒检查循环。
 pub(super) fn save_system_schedule_impl(
     enabled: bool,
     interval_minutes: u64,

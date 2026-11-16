@@ -27,6 +27,7 @@ use std::time::Duration;
 use serde_json::{json, Map, Value};
 use tokio_util::sync::CancellationToken;
 
+#[cfg(test)]
 use super::tool_arguments::parse_streaming_json_object;
 use super::openai_retry::{is_retryable_provider_error, RequestFailure};
 #[cfg(test)]
@@ -966,25 +967,18 @@ fn clamp_thinking_level(model: &Model, level: ThinkingLevel) -> Option<ThinkingL
     if contains(requested) {
         return Some(level);
     }
+    // Off:可用的只剩 off → 等价 reasoningEffort undefined;两段候选同为"向上/
+    // 向下寻找最近的可用档",都按此语义提前返回。
     for candidate in EXTENDED.into_iter().skip(requested as usize) {
-        match thinking_level_from_model(candidate) {
-            Some(back) => {
-                if contains(candidate) {
-                    return Some(back);
-                }
-            }
-            // Off:可用的只剩 off → 等价 reasoningEffort undefined
-            None => return None,
+        let back = thinking_level_from_model(candidate)?;
+        if contains(candidate) {
+            return Some(back);
         }
     }
     for candidate in EXTENDED.into_iter().take(requested as usize).rev() {
-        match thinking_level_from_model(candidate) {
-            Some(back) => {
-                if contains(candidate) {
-                    return Some(back);
-                }
-            }
-            None => return None,
+        let back = thinking_level_from_model(candidate)?;
+        if contains(candidate) {
+            return Some(back);
         }
     }
     None
@@ -3951,10 +3945,7 @@ mod tests {
                 served += 1;
                 let mut received = Vec::new();
                 let mut buffer = [0u8; 1024];
-                loop {
-                    let Ok(read) = stream.read(&mut buffer) else {
-                        break;
-                    };
+                while let Ok(read) = stream.read(&mut buffer) {
                     if read == 0 {
                         break;
                     }

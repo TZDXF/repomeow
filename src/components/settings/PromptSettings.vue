@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onCliDataChanged } from "@/lib/cli-sync";
 import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
@@ -25,12 +26,14 @@ const activePrompt = ref<PromptId>("commit"),
   defaultReportPrompt = ref(""),
   defaultWeeklyReportPrompt = ref("");
 
+let baseline = ["", "", ""];
 onMounted(async () => {
   try {
     const [prompts, defaults] = await Promise.all([loadAiPrompts(), loadDefaultAiPrompts()]);
     commitPrompt.value = prompts.commit;
     reportPrompt.value = prompts.report;
     weeklyReportPrompt.value = prompts.reportWeekly;
+    baseline = [prompts.commit, prompts.report, prompts.reportWeekly];
     defaultCommitPrompt.value = defaults.commit;
     defaultReportPrompt.value = defaults.report;
     defaultWeeklyReportPrompt.value = defaults.reportWeekly;
@@ -47,6 +50,7 @@ async function save() {
       report: reportPrompt.value,
       reportWeekly: weeklyReportPrompt.value,
     });
+    baseline = [commitPrompt.value, reportPrompt.value, weeklyReportPrompt.value];
     toast.success(t("settings.prompts.saved"));
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
@@ -62,6 +66,23 @@ async function openDir() {
     toast.error(t("settings.prompts.openDirFailed", { error: message }));
   }
 }
+onCliDataChanged(["prompt"], async () => {
+  const prompts = await loadAiPrompts(),
+    fresh = [prompts.commit, prompts.report, prompts.reportWeekly],
+    fields = [commitPrompt, reportPrompt, weeklyReportPrompt];
+  let dirty = false;
+  fields.forEach((field, index) => {
+    if (field.value === baseline[index]) {
+      field.value = fresh[index]!;
+    } else {
+      dirty = true;
+    }
+  });
+  baseline = fresh;
+  if (dirty) {
+    toast.info(t("settings.cli.externalChanges"));
+  }
+});
 </script>
 
 <template>

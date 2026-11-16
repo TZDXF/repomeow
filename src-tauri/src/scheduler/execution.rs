@@ -1,6 +1,6 @@
 //! 调度执行:加载项目路径,标记上次运行时间,执行一次定时任务(拉提交 → 调 AI → 落库 → emit)。
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::Path;
 
 use chrono::Datelike;
 use tauri::{AppHandle, Emitter, Manager};
@@ -85,7 +85,7 @@ pub fn delete_report_history_row(conn: &rusqlite::Connection, history_id: i64) -
 /// 报告历史,并保留原始更新错误;只有运行时间更新成功后才发送前端事件。
 pub(crate) async fn fire_schedule(
     app: &AppHandle,
-    data_dir: &PathBuf,
+    data_dir: &Path,
     schedule: &ReportSchedule,
 ) -> AppResult<i64> {
     let task_label = if schedule.name.is_empty() {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onCliDataChanged } from "@/lib/cli-sync";
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
@@ -148,6 +149,8 @@ async function confirmRemove() {
     toast.error(String(e));
   }
 }
+
+onCliDataChanged(["account"], reload);
 </script>
 
 <template>

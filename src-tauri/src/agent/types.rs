@@ -204,6 +204,10 @@ impl AgentToolResult {
 /// 已知 role 强类型,其余(declaration merging 的自定义消息,如 harness 的
 /// bashExecution/branchSummary)落入 `Custom` 原始 JSON map,由 harness 层
 /// 提供类型化视图与 `convert_to_llm` 转换。
+/// 两个变体体积差较大(强类型消息 vs 原始 JSON map),但 AgentMessage 是
+/// 会话语义的最小单元:消息数组按值流转、序列化契约与蓝本 untagged 结构一致,
+/// 装箱会让所有构造/匹配点改成解引用,且改变 `Vec<AgentMessage>` 的内存布局。
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum AgentMessage {
@@ -449,6 +453,9 @@ pub struct AgentLoopConfig {
 }
 
 /// Agent 生命周期事件(对齐 TS `AgentEvent`,tag 与字段名 camelCase 兼容前端)。
+/// 变体差异来自事件负载大小;事件按值逐条投递到监听器,不进入容器,装箱只增加
+/// 一次分配并把构造/匹配点全部改成解引用,因此保留原样。
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all_fields = "camelCase")]
 pub enum AgentEvent {

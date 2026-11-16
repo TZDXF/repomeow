@@ -110,6 +110,11 @@ pub struct UsageEvent {
 
 /// harness 事件(对齐 TS `HarnessEvent`,tag 值一致;message/message_update/
 /// tool/usage 为本仓库运行时扩展,TS scaffold 未定义)。
+///
+/// 变体大小差异来自不同事件负载(RunEnd/Usage 携带完整用量与错误对象)。
+/// 事件按值在总线上一一投递、不进入大数组,装箱只会增加一次堆分配并把
+/// 构造/匹配点全部改成解引用,收益不足。
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all_fields = "camelCase")]
 pub enum HarnessEvent {
@@ -265,19 +270,12 @@ impl<TSnapshot> WatchHandle<TSnapshot> {
     }
 }
 
+#[derive(Default)]
 struct BusState {
     listeners: HashMap<HarnessEventType, HashMap<u64, HarnessEventListener>>,
     watchers: HashMap<u64, Arc<WatchShared>>,
 }
 
-impl Default for BusState {
-    fn default() -> Self {
-        Self {
-            listeners: HashMap::new(),
-            watchers: HashMap::new(),
-        }
-    }
-}
 
 /// harness 事件总线(对齐 TS `HarnessEventBus implements Events`)。
 #[derive(Clone, Default)]

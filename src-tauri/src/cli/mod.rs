@@ -886,6 +886,26 @@ async fn run_cli() -> i32 {
             return exit_code;
         }
     };
+    let domains = write_domains(&cli.command);
+    let guard = if domains.is_empty() {
+        Ok(None)
+    } else {
+        repomeow_data_root().and_then(|root| {
+            crate::data_sync::begin_write(&root, domains)
+                .map(Some)
+                .map_err(|error| {
+                    ToolFailure::new("data_sync_failed", "准备数据同步失败")
+                        .with_detail(error.to_string())
+                })
+        })
+    };
+    let _guard = match guard {
+        Ok(guard) => guard,
+        Err(failure) => {
+            eprintln!("{}", failure.to_json());
+            return 1;
+        }
+    };
     match dispatch(cli.command).await {
         Ok(value) => {
             println!("{value}");
@@ -895,6 +915,53 @@ async fn run_cli() -> i32 {
             eprintln!("{}", failure.to_json());
             1
         }
+    }
+}
+
+// Keep read commands quiet; mutations invalidate every cache they can affect.
+fn write_domains(command: &Commands) -> &'static [&'static str] {
+    match command {
+        Commands::Project(
+            ProjectCommands::ReadFile { .. }
+            | ProjectCommands::Reports { .. }
+            | ProjectCommands::Commands { .. }
+            | ProjectCommands::List { .. }
+            | ProjectCommands::Get { .. },
+        ) => &[],
+        Commands::Project(_) => &[
+            "project", "tag", "script", "pin", "hidden", "report", "wiki",
+        ],
+        Commands::Wiki(WikiCommands::Generate { .. } | WikiCommands::Update { .. }) => {
+            &["wiki", "ai"]
+        }
+        Commands::Wiki(WikiCommands::ConfigSet { .. } | WikiCommands::Delete { .. }) => &["wiki"],
+        Commands::Report(
+            ReportCommands::Generate { .. }
+            | ReportCommands::HistoryDelete { .. }
+            | ReportCommands::SchedulesSave { .. }
+            | ReportCommands::SystemScheduleSave { .. },
+        ) => &["report", "ai"],
+        Commands::Tag(TagCommands::List) => &[],
+        Commands::Tag(_) => &["tag", "project"],
+        Commands::Script(ScriptCommands::List { .. }) => &[],
+        Commands::Script(_) => &["script", "pin"],
+        Commands::Pin(PinCommands::Set { .. }) => &["pin"],
+        Commands::Hidden(HiddenCommands::Set { .. }) => &["hidden"],
+        Commands::Ai(
+            AiCommands::ConfigGet
+            | AiCommands::Models
+            | AiCommands::ConfigSave { .. }
+            | AiCommands::UsageClear
+            | AiCommands::Test,
+        ) => &["ai"],
+        Commands::Prompt(PromptCommands::Set { .. }) => &["prompt"],
+        Commands::Account(
+            AccountCommands::Add { .. }
+            | AccountCommands::Update { .. }
+            | AccountCommands::Remove { .. },
+        ) => &["account"],
+        Commands::File(FileCommands::Save { .. }) => &["file", "script", "wiki"],
+        _ => &[],
     }
 }
 

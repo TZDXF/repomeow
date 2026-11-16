@@ -200,8 +200,9 @@ pub async fn ai_regenerate_wiki_page(
     on_progress: Channel<String>,
 ) -> AppResult<RegeneratedWikiPage> {
     let run = RegisteredRun::new(request.run_id);
-    let config = wiki::load_wiki_config_internal(&app, &request.project_path)?;
     let data_dir = crate::app_data_dir(&app)?;
+    let _guard = wiki::operation_guard(&wiki::wiki_dir_at(&data_dir, &request.project_path))?;
+    let config = wiki::load_wiki_config_internal(&app, &request.project_path)?;
     let page_title = request.page.title.clone();
     let project_path = request.project_path.clone();
     let model_name = generate_builtin_page_to_disk(

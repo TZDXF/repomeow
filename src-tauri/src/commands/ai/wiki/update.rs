@@ -39,6 +39,7 @@ async fn update_wiki_at(
     cancel: &CancellationToken,
     on_event: &(dyn Fn(WikiUpdateEvent) + Send + Sync),
 ) -> AppResult<WikiUpdateResult> {
+    let _guard = wiki::operation_guard(&wiki::wiki_dir_at(data_dir, &request.project_path))?;
     let Some(data) = wiki::load_wiki_at(data_dir, &request.project_path) else {
         return Ok(WikiUpdateResult::default());
     };

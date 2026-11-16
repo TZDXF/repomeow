@@ -16,6 +16,13 @@ import type { HiddenKind, ProjectOverview } from "@/types";
  * 缓存是 Map 实现的真 LRU(同 project-assets store)。
  */
 export const useProjectOverviewStore = defineStore("project-overview", () => {
+  let epoch = 0;
+  function invalidate() {
+    epoch++;
+    byId.value.clear();
+    inflight.clear();
+    triggerRef(byId);
+  }
   /** 进行中的请求,key 为项目 id:三个卡片同时挂载只发一次 IPC */
   const inflight = new Map<number, Promise<ProjectOverview>>(),
     /**
@@ -56,19 +63,25 @@ export const useProjectOverviewStore = defineStore("project-overview", () => {
     if (pending) {
       return pending;
     }
-    const p = cmd<ProjectOverview>("get_project_overview", { projectId })
-      .then((data) => {
-        setCapped(projectId, data);
-        return data;
-      })
-      .catch(
-        () =>
-          byId.value.get(projectId) ??
-          ({ hidden_items: [], custom_commands: [] } as ProjectOverview),
-      )
-      .finally(() => {
-        inflight.delete(projectId);
-      });
+    const requestEpoch = epoch,
+      p = cmd<ProjectOverview>("get_project_overview", { projectId })
+        .then((data) => {
+          if (requestEpoch !== epoch) {
+            return refresh(projectId);
+          }
+          setCapped(projectId, data);
+          return data;
+        })
+        .catch(
+          () =>
+            byId.value.get(projectId) ??
+            ({ hidden_items: [], custom_commands: [] } as ProjectOverview),
+        )
+        .finally(() => {
+          if (inflight.get(projectId) === p) {
+            inflight.delete(projectId);
+          }
+        });
     inflight.set(projectId, p);
     return p;
   }
@@ -89,5 +102,5 @@ export const useProjectOverviewStore = defineStore("project-overview", () => {
     setCapped(projectId, { ...cur, hidden_items: items });
   }
 
-  return { cached, refresh, setHiddenLocal };
+  return { cached, refresh, setHiddenLocal, invalidate };
 });

@@ -38,6 +38,7 @@ async fn generate_wiki_at(
     cancel: &CancellationToken,
     on_event: WikiGenerationEventSink,
 ) -> AppResult<Vec<String>> {
+    let _guard = wiki::operation_guard(&wiki::wiki_dir_at(data_dir, &request.project_path))?;
     let config = wiki::load_wiki_config_at(data_dir, &request.project_path)?;
     send_wiki_event(
         &on_event,

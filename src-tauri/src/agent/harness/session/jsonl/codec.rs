@@ -182,6 +182,13 @@ fn _result_helpers() {
     let _ = err::<u8, JsonlDecodeError>(JsonlDecodeError::new(JsonlDecodeErrorKind::Syntax, "x"));
 }
 
+impl JsonlV4Header {
+    fn clone_with_legacy(mut self, path: &str) -> Self {
+        self.legacy_parent_session_path = Some(path.to_string());
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,7 +302,7 @@ mod tests {
             lane: None,
             entry: custom_entry(2, Some("entry-1")),
         };
-        let parsed = parse_mutation(&encode_mutation(&imported).trim_end()).unwrap();
+        let parsed = parse_mutation(encode_mutation(&imported).trim_end()).unwrap();
         assert_eq!(parsed, imported);
 
         let lane = SessionMutation::Lane {
@@ -303,7 +310,7 @@ mod tests {
             lane: "side".into(),
             leaf_id: Some("entry-1".into()),
         };
-        let parsed = parse_mutation(&encode_mutation(&lane).trim_end()).unwrap();
+        let parsed = parse_mutation(encode_mutation(&lane).trim_end()).unwrap();
         assert_eq!(parsed, lane);
 
         let fact = SessionMutation::Fact {
@@ -356,12 +363,5 @@ mod tests {
         assert_eq!(value["intent"]["kind"], "run");
         let parsed = parse_mutation(encode_mutation(&record).trim_end()).unwrap();
         assert_eq!(parsed, record);
-    }
-}
-
-impl JsonlV4Header {
-    fn clone_with_legacy(mut self, path: &str) -> Self {
-        self.legacy_parent_session_path = Some(path.to_string());
-        self
     }
 }

@@ -169,6 +169,11 @@ pub fn save_ai_config_file(app: &AppHandle, config: &AiConfigFile) -> AppResult<
 
 /// 读取配置;缺失或损坏时播种(含旧 settings.json 键迁移)并尽力落盘。
 pub fn load_ai_config_file_at(data_dir: &Path) -> AiConfigFile {
+    // Seeding is also a write: do not let a concurrent first read replace a
+    // configuration that another process just saved.
+    let Ok(_guard) = crate::data_sync::lock_file(&data_dir.join("ai-config.lock")) else {
+        return AiConfigFile::default();
+    };
     let path = data_dir.join(AI_CONFIG_FILE_NAME);
     let loaded = match fs::read_to_string(&path) {
         Ok(raw) => match serde_json::from_str::<AiConfigFile>(&raw) {
@@ -188,6 +193,11 @@ pub fn load_ai_config_file_at(data_dir: &Path) -> AiConfigFile {
 }
 
 pub fn save_ai_config_file_at(data_dir: &Path, config: &AiConfigFile) -> AppResult<()> {
+    let _guard = crate::data_sync::lock_file(&data_dir.join("ai-config.lock"))?;
+    save_ai_config_file_unlocked(data_dir, config)
+}
+
+fn save_ai_config_file_unlocked(data_dir: &Path, config: &AiConfigFile) -> AppResult<()> {
     let mut config = config.clone();
     normalize(&mut config);
     let path = data_dir.join(AI_CONFIG_FILE_NAME);
@@ -198,10 +208,7 @@ pub fn save_ai_config_file_at(data_dir: &Path, config: &AiConfigFile) -> AppResu
     }
     let body = serde_json::to_string_pretty(&config)
         .map_err(|e| AppError::coded(ErrorCode::IoError, e.to_string()))?;
-    let tmp = data_dir.join(format!("{AI_CONFIG_FILE_NAME}.tmp"));
-    fs::write(&tmp, body)
-        .map_err(|e| AppError::coded(ErrorCode::IoError, format!("{}: {e}", tmp.display())))?;
-    fs::rename(&tmp, &path)
+    crate::data_sync::atomic_write(&path, body.as_bytes())
         .map_err(|e| AppError::coded(ErrorCode::IoError, format!("{}: {e}", path.display())))?;
     Ok(())
 }
@@ -262,7 +269,7 @@ fn seed_at(data_dir: &Path) -> AiConfigFile {
         };
     }
     normalize(&mut config);
-    if let Err(error) = save_ai_config_file_at(data_dir, &config) {
+    if let Err(error) = save_ai_config_file_unlocked(data_dir, &config) {
         eprintln!("[ai-catalog] 播种 {AI_CONFIG_FILE_NAME} 失败: {error}");
     }
     config

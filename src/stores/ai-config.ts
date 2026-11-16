@@ -1,3 +1,4 @@
+import { onCliDataChanged } from "@/lib/cli-sync";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import {
@@ -27,6 +28,7 @@ export interface ResolvedAiModel {
 export const useAiConfigStore = defineStore("ai-config", () => {
   const config = ref<AiConfigFile | null>(null),
     loaded = ref(false);
+  let loadSequence = 0;
 
   /** 读取配置(已加载时复用内存副本;force 重新拉取) */
   async function ensureLoaded(force = false): Promise<AiConfigFile> {
@@ -36,8 +38,15 @@ export const useAiConfigStore = defineStore("ai-config", () => {
     return reload();
   }
 
+  onCliDataChanged(["ai"], () => reload());
+
   async function reload(): Promise<AiConfigFile> {
-    config.value = await getAiConfig();
+    const sequence = ++loadSequence,
+      fresh = await getAiConfig();
+    if (sequence !== loadSequence) {
+      return config.value ?? fresh;
+    }
+    config.value = fresh;
     loaded.value = true;
     return config.value;
   }

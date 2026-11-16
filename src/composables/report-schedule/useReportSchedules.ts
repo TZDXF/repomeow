@@ -1,3 +1,4 @@
+import { onCliDataChanged } from "@/lib/cli-sync";
 import { ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
@@ -18,19 +19,28 @@ export function useReportSchedules() {
     /** 手动执行中的任务 id 集合(按钮 loading 态) */
     runningIds = ref<string[]>([]);
 
+  onCliDataChanged(["report", "project"], () => load());
+
+  let loadSequence = 0;
   async function load() {
+    const sequence = ++loadSequence;
     loading.value = true;
     try {
       const [reportItems, systemItems] = await Promise.all([
         cmd<ReportSchedule[]>("list_report_schedules"),
         cmd<SystemSchedule[]>("list_system_schedules"),
       ]);
+      if (sequence !== loadSequence) {
+        return;
+      }
       schedules.value = reportItems;
       systemSchedules.value = systemItems;
     } catch {
       toast.error(t("reportSchedule.saveFailed"));
     } finally {
-      loading.value = false;
+      if (sequence === loadSequence) {
+        loading.value = false;
+      }
     }
   }
 

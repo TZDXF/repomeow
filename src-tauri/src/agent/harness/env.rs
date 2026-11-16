@@ -689,7 +689,7 @@ impl FileSystem for TokioEnv {
                 Ok(()) => ok(()),
                 Err(error) => err(to_file_error(
                     error,
-                    Some(&source.to_string_lossy().to_string()),
+                    Some(source.to_string_lossy().as_ref()),
                 )),
             }
         })
@@ -781,7 +781,7 @@ impl FileSystem for TokioEnv {
                 Err(error) if error.kind() == io::ErrorKind::NotFound => ok(false),
                 Err(error) => err(to_file_error(
                     error,
-                    Some(&resolved.to_string_lossy().to_string()),
+                    Some(resolved.to_string_lossy().as_ref()),
                 )),
             }
         })
@@ -903,7 +903,7 @@ impl FileSystem for TokioEnv {
                 Ok(()) => ok(file_path.to_string_lossy().to_string()),
                 Err(error) => err(to_file_error(
                     error,
-                    Some(&file_path.to_string_lossy().to_string()),
+                    Some(file_path.to_string_lossy().as_ref()),
                 )),
             }
         })
@@ -1105,7 +1105,7 @@ impl Shell for TokioEnv {
             let status = loop {
                 let sleep = tokio::time::sleep(
                     timeout_seconds
-                        .map(|seconds| std::time::Duration::from_secs_f64(seconds))
+                        .map(std::time::Duration::from_secs_f64)
                         .unwrap_or(std::time::Duration::from_secs(u64::MAX / 2)),
                 );
                 tokio::pin!(sleep);
@@ -1299,10 +1299,9 @@ mod tests {
             .unwrap_err();
         assert_eq!(error.code, FileErrorCode::NotFound);
         assert!(
-            env.exists("definitely-missing-file.txt".to_string(), None)
+            !env.exists("definitely-missing-file.txt".to_string(), None)
                 .await
                 .unwrap()
-                == false
         );
     }
 

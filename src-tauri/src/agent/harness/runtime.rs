@@ -136,9 +136,13 @@ pub(crate) struct EmptyToolContext;
 impl ToolContext for EmptyToolContext {}
 
 /// harness 流选项 → provider 流选项(字段一一映射)。
+/// 测试用用量采集:`(输入 token, 模型 id)` 列表。
+#[cfg(test)]
+type UsageSink = Arc<Mutex<Vec<(Option<i64>, Option<String>)>>>;
+
 pub(crate) fn stream_options_to_simple(options: &AgentHarnessStreamOptions) -> SimpleStreamOptions {
     SimpleStreamOptions {
-        transport: options.transport.clone(),
+        transport: options.transport,
         timeout_ms: options.timeout_ms,
         max_retries: options.max_retries,
         max_retry_delay_ms: options.max_retry_delay_ms,
@@ -361,7 +365,7 @@ pub(crate) fn make_mirroring_listener(
                             run_id: Some(run_id.clone()),
                             entry_id: Some(entry_id.clone()),
                             attempt: Some(attempt),
-                            stop_reason: Some(assistant.stop_reason.clone()),
+                            stop_reason: Some(assistant.stop_reason),
                             tool_call_id: None,
                             details: None,
                         }))
@@ -762,8 +766,7 @@ mod runtime_tests {
                     .push(event.event_type().as_str().to_string());
             }),
         );
-        let usages: Arc<Mutex<Vec<(Option<i64>, Option<String>)>>> =
-            Arc::new(Mutex::new(Vec::new()));
+        let usages: UsageSink = Arc::new(Mutex::new(Vec::new()));
         let usage_sink = usages.clone();
         let _unsubscribe_usage = harness.on_event(
             crate::agent::harness::events::HarnessEventType::Usage,
@@ -973,18 +976,19 @@ mod runtime_tests {
         assert!(matches!(outcome, RunOutcome::Completed { .. }));
 
         // 第二次 LLM 调用的 context 末尾应是被注入的 user 消息。
-        let captured = calls.lock().unwrap();
-        assert_eq!(captured.len(), 2);
-        let last = captured[1].messages.last().unwrap();
-        assert!(
-            matches!(last, crate::agent::llm::types::Message::User(_)),
-            "expected trailing user message, got {last:?}"
-        );
+        // 作用域内持锁,避免 MutexGuard 跨 await 一直占用。
+        {
+            let captured = calls.lock().unwrap();
+            assert_eq!(captured.len(), 2);
+            let last = captured[1].messages.last().unwrap();
+            assert!(
+                matches!(last, crate::agent::llm::types::Message::User(_)),
+                "expected trailing user message, got {last:?}"
+            );
+        }
 
-        assert_eq!(
-            message_roles(&session).await,
-            vec!["user", "assistant", "user", "assistant"]
-        );
+        let roles = message_roles(&session).await;
+        assert_eq!(roles, vec!["user", "assistant", "user", "assistant"]);
     }
 
     #[tokio::test]
@@ -1210,7 +1214,7 @@ mod runtime_tests {
             .await
             .unwrap();
         let mut a0 = test_assistant(
-            vec![AssistantContent::text(&format!("a0 {block}"))],
+            vec![AssistantContent::text(format!("a0 {block}"))],
             StopReason::Stop,
         );
         a0.usage = Usage {
@@ -1270,20 +1274,22 @@ mod runtime_tests {
         assert!(matches!(outcome, RunOutcome::Completed { .. }));
 
         // 恰好 3 次 LLM 调用:turn1 → 摘要 → turn2(多一次说明重复触发)。
-        let calls = calls.lock().unwrap();
-        assert_eq!(calls.len(), 3);
-        // 第 2 次是摘要调用(单条 user 消息包裹 <conversation>)。
-        let summary_request = &calls[1].context.messages;
-        assert_eq!(summary_request.len(), 1);
-        let summary_text = serde_json::to_string(&summary_request[0]).unwrap();
-        assert!(summary_text.contains("<conversation>"), "{summary_text}");
-        // 第 3 次(turn2)上下文以压缩摘要开头。
-        let turn2_first = serde_json::to_string(&calls[2].context.messages[0]).unwrap();
-        assert!(
-            turn2_first.contains("The conversation history before this point was compacted"),
-            "{turn2_first}"
-        );
-        drop(calls);
+        // 作用域内持锁,避免 MutexGuard 跨 await 一直占用。
+        {
+            let calls = calls.lock().unwrap();
+            assert_eq!(calls.len(), 3);
+            // 第 2 次是摘要调用(单条 user 消息包裹 <conversation>)。
+            let summary_request = &calls[1].context.messages;
+            assert_eq!(summary_request.len(), 1);
+            let summary_text = serde_json::to_string(&summary_request[0]).unwrap();
+            assert!(summary_text.contains("<conversation>"), "{summary_text}");
+            // 第 3 次(turn2)上下文以压缩摘要开头。
+            let turn2_first = serde_json::to_string(&calls[2].context.messages[0]).unwrap();
+            assert!(
+                turn2_first.contains("The conversation history before this point was compacted"),
+                "{turn2_first}"
+            );
+        }
 
         // 压缩条目 + Threshold 记录。
         let entries = branch_entries(&session).await.unwrap();
@@ -1315,7 +1321,7 @@ mod runtime_tests {
             .await
             .unwrap();
         let mut a1 = test_assistant(
-            vec![AssistantContent::text(&format!("a1 {block}"))],
+            vec![AssistantContent::text(format!("a1 {block}"))],
             StopReason::Stop,
         );
         a1.usage = Usage {

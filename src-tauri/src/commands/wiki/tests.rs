@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::commands::git;
 
@@ -25,6 +25,25 @@ fn temp_dir(tag: &str) -> PathBuf {
     ));
     fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+#[test]
+fn concurrent_wiki_delete_or_config_write_cannot_interrupt_an_active_generation() {
+    let root = temp_dir("writer-lock");
+    let dir = root.join("project");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("keep.md"), "old content").unwrap();
+    let guard = super::operation_guard(&dir).unwrap();
+    assert!(remove_wiki_dir(&dir).is_err());
+    assert!(save_config_in(&dir, WikiGenerationConfig::default()).is_err());
+    assert_eq!(
+        fs::read_to_string(dir.join("keep.md")).unwrap(),
+        "old content"
+    );
+    drop(guard);
+    save_config_in(&dir, WikiGenerationConfig::default()).unwrap();
+    remove_wiki_dir(&dir).unwrap();
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
@@ -360,7 +379,7 @@ fn project_dir(tag: &str) -> PathBuf {
     dir
 }
 
-fn project_path_of(dir: &PathBuf) -> String {
+fn project_path_of(dir: &Path) -> String {
     dir.to_string_lossy().into_owned()
 }
 
@@ -617,8 +636,7 @@ fn staging_promote_replaces_existing_and_rolls_back() {
     // 回滚:提升中途失败(暂存缺失)时旧页必须恢复,且不残留备份
     let missing = pages.join(format!("{STAGING_PREFIX}missing_01-overview.md"));
     promote_validated(&wiki, "01-overview.md", &missing)
-        .err()
-        .expect("暂存缺失应报错");
+        .expect_err("暂存缺失应报错");
     assert_eq!(
         fs::read_to_string(pages.join("01-overview.md")).unwrap(),
         staged_content(),

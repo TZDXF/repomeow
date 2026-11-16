@@ -613,6 +613,9 @@ fn register_launch(
 /// cwd 缺省为项目根 path(monorepo 子包内执行 npm run 时传子目录);
 /// java_home 非空时以进程环境注入 JAVA_HOME;kind/label 仅用于前端分组展示。
 #[tauri::command]
+// #[tauri::command] 参数名即前端 IPC 契约(项目/命令/工作目录/JAVA_HOME/分组),
+// 前端「运行脚本」与「自定义命令」两条入口共用,合并成结构体会破坏调用方。
+#[allow(clippy::too_many_arguments)]
 pub fn run_command_session(
     app: AppHandle,
     manager: State<'_, Arc<TerminalManager>>,
@@ -723,7 +726,7 @@ pub(crate) fn run_command_session_impl(
             .map(|l| l.trim().to_string())
             .filter(|l| !l.is_empty())
             .unwrap_or_else(|| spec.command.clone()),
-        kind: kind.unwrap_or_else(|| "shell").to_string(),
+        kind: kind.unwrap_or("shell").to_string(),
         command: spec.command.clone(),
         interactive: false,
         cwd: spec.cwd.clone(),
@@ -1506,7 +1509,7 @@ mod tests {
                 }
             }
         });
-        let mut drain = |secs: u64, label: &str, output: &mut Vec<u8>| {
+        let drain = |secs: u64, label: &str, output: &mut Vec<u8>| {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
             while std::time::Instant::now() < deadline {
                 if let Ok(chunk) = rx.recv_timeout(std::time::Duration::from_millis(100)) {
@@ -1611,7 +1614,10 @@ mod tests {
         }
     }
 
-    fn recording_writer() -> (Arc<Mutex<Box<dyn Write + Send>>>, Arc<Mutex<Vec<u8>>>) {
+    /// 记录型 writer 与其收到的字节。
+    type RecordingWriterPair = (Arc<Mutex<Box<dyn Write + Send>>>, Arc<Mutex<Vec<u8>>>);
+
+    fn recording_writer() -> RecordingWriterPair {
         let recorded = Arc::new(Mutex::new(Vec::<u8>::new()));
         let writer: Arc<Mutex<Box<dyn Write + Send>>> =
             Arc::new(Mutex::new(Box::new(RecordingWriter(recorded.clone()))));

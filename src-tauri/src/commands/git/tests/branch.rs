@@ -389,3 +389,111 @@ fn rejects_git_option_injection_before_running_commands() {
     assert!(worktree_add_blocking(path, "worktree", "topic", true, Some("--force"), None).unwrap_err().is_code(ErrorCode::GitBranchNameRequired));
     assert!(worktree_remove_blocking(path, "--force", false, false, None).unwrap_err().is_code(ErrorCode::InvalidPath));
 }
+
+#[tokio::test]
+async fn fetch_remote_branch_refreshes_tracking_ref_only() {
+    let (origin, clone_a) = setup_origin_with_feature("rbfetch");
+    let clone_b = clone_with_config("rbfetch-b", &origin);
+
+    // clone_a 推进并推送 feature,clone_b 的 origin/feature 仍是旧提交
+    fs::write(clone_a.join("f.txt"), "f2").unwrap();
+    git(&clone_a, &["commit", "-am", "f2"]);
+    git(&clone_a, &["push"]);
+    assert_ne!(
+        rev_parse(&clone_b, "origin/feature"),
+        rev_parse(&clone_a, "feature")
+    );
+
+    let st = fetch_remote_branch(clone_b.to_str().unwrap(), "origin/feature")
+        .await
+        .unwrap();
+    // 只刷新远端跟踪引用:工作区仍停在 main,也不会新建本地分支
+    assert_eq!(st.branch.as_deref(), Some("main"));
+    assert_eq!(
+        rev_parse(&clone_b, "origin/feature"),
+        rev_parse(&clone_a, "feature")
+    );
+    assert!(!local_branch_names(clone_b.to_str().unwrap())
+        .unwrap()
+        .contains(&"feature".to_string()));
+
+    let _ = fs::remove_dir_all(&origin);
+    let _ = fs::remove_dir_all(&clone_a);
+    let _ = fs::remove_dir_all(&clone_b);
+}
+
+#[tokio::test]
+async fn fetch_remote_branch_rejects_name_without_remote() {
+    let dir = temp_dir("rbfetch-invalid");
+    init_repo(&dir);
+
+    for name in ["main", "", "/main", "origin/"] {
+        let err = fetch_remote_branch(dir.to_str().unwrap(), name)
+            .await
+            .unwrap_err();
+        assert!(
+            err.is_code(ErrorCode::GitBranchNameRequired),
+            "输入 {name:?} 实际输出: {err}"
+        );
+    }
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn fetch_remote_branch_reports_gone_remote_branch() {
+    let (origin, clone_a) = setup_origin_with_feature("rbfetch-gone");
+    let clone_b = clone_with_config("rbfetch-gone-b", &origin);
+
+    // 远端删除 feature 后,clone_b 定向刷新该分支:报远端分支已删除,
+    // 并顺手 prune 掉本地陈旧的 origin/feature 跟踪引用
+    git(&clone_a, &["push", "origin", "--delete", "feature"]);
+    let err = fetch_remote_branch(clone_b.to_str().unwrap(), "origin/feature")
+        .await
+        .unwrap_err();
+    assert!(
+        err.is_code(ErrorCode::GitRemoteBranchGone),
+        "实际输出: {err}"
+    );
+
+    let branches = list_branches_blocking(clone_b.to_str().unwrap()).unwrap();
+    assert!(!branches.remote.contains(&"origin/feature".to_string()));
+
+    let _ = fs::remove_dir_all(&origin);
+    let _ = fs::remove_dir_all(&clone_a);
+    let _ = fs::remove_dir_all(&clone_b);
+}
+
+#[tokio::test]
+async fn fetch_all_remotes_prunes_deleted_branch() {
+    let (origin, clone_a) = setup_origin_with_feature("rbfetch-all");
+    let clone_b = clone_with_config("rbfetch-all-b", &origin);
+    assert!(list_branches_blocking(clone_b.to_str().unwrap())
+        .unwrap()
+        .remote
+        .contains(&"origin/feature".to_string()));
+
+    // 远端删除分支 + clone_a 推进 main,一次全部更新应同时刷新 main 并清理陈旧引用
+    git(&clone_a, &["push", "origin", "--delete", "feature"]);
+    git(&clone_a, &["checkout", "main"]);
+    fs::write(clone_a.join("a.txt"), "a2").unwrap();
+    git(&clone_a, &["commit", "-am", "c2"]);
+    git(&clone_a, &["push"]);
+
+    let st = fetch_all_remotes(clone_b.to_str().unwrap()).await.unwrap();
+    assert!(st.is_repo);
+    let branches = list_branches_blocking(clone_b.to_str().unwrap()).unwrap();
+    assert_eq!(
+        branches.remote,
+        vec!["origin/main".to_string()],
+        "已删除的远端分支不应继续出现在列表中"
+    );
+    assert_eq!(
+        rev_parse(&clone_b, "origin/main"),
+        rev_parse(&clone_a, "main")
+    );
+
+    let _ = fs::remove_dir_all(&origin);
+    let _ = fs::remove_dir_all(&clone_a);
+    let _ = fs::remove_dir_all(&clone_b);
+}

@@ -1,11 +1,11 @@
 ---
 name: release-tagger
-description: 在此仓库（tzdxf/repomeow，Tauri 2 + Vue 3）发布新版本。读取 `src-tauri/tauri.conf.json` 的 `version` 字段作为发布号，做一致性检查与构建验证后，走**CI 打包发布**：本机 bump → commit → push → push `v*` tag → `.github/workflows/release.yml` 在 CI 上用 tauri-action 以四 job 矩阵构建 Windows NSIS / macOS dmg（arm64+x64）/ Linux deb+AppImage、安装包签名、生成 `latest.json` 并创建 draft Release 作为构建暂存；本机不需要打包、不需要私钥。CI 跑完后补充仅面向用户功能变化的版本更新说明、同步 updater notes 并验证资产，随后自动转为正式 Release，不保持 draft 状态。在用户提及"发版"、"发布新版本"、"CI 打包"、"cut a release"、"v0.X.0"或想发起 GitHub Release 流程时调用此 skill——即便用户只是说"准备发版"，也走这条流程。
+description: 在此仓库（tzdxf/repomeow，Tauri 2 + Vue 3）发布新版本。版本变更先经 dev PR 整合、独立验证并推广到 main，再从固定的已验收 main SHA 推送 `v*` tag，由 GitHub Actions 完成四平台打包、签名和 draft 暂存；验证更新说明、updater notes 与资产后转为正式 Release。用户要求发版、指定新版本、准备发版、cut a release 或 CI 打包时使用，本机不需要打包或私钥。
 ---
 
 # CI 打包发布工作流
 
-自 v0.1.9 起，发布流程全部由 **GitHub Actions** 完成：推送 `v*` tag 触发 `.github/workflows/release.yml`，以**四 job 矩阵**（Windows NSIS / macOS arm64+x64 dmg / Linux deb+AppImage）在对应平台 runner 上用 [`tauri-apps/tauri-action`](https://github.com/tauri-apps/tauri-action) 构建、用 `update` Environment 下的 `TAURI_SIGNING_PRIVATE_KEY` 签名、上传各平台安装包 / updater `.sig` / `latest.json`，并创建 **draft Release** 作为构建暂存。本机负责 bump 版本号、push commit、push tag，以及 CI 完成后写入版本更新说明、验证资产并自动转为正式 Release，**不需要 `~/.tauri/` 私钥，不需要跑 `pnpm release:all`**。
+自 v0.1.9 起，发布流程全部由 **GitHub Actions** 完成：推送 `v*` tag 触发 `.github/workflows/release.yml`，以**四 job 矩阵**（Windows NSIS / macOS arm64+x64 dmg / Linux deb+AppImage）在对应平台 runner 上用 [`tauri-apps/tauri-action`](https://github.com/tauri-apps/tauri-action) 构建、用 `update` Environment 下的 `TAURI_SIGNING_PRIVATE_KEY` 签名、上传各平台安装包 / updater `.sig` / `latest.json`，并创建 **draft Release** 作为构建暂存。本机负责让版本变更先进入 `dev`，经独立验证和 `dev` → `main` 推广后，从固定的已验收 `main` 提交打 tag，以及 CI 完成后写入版本更新说明、验证资产并自动转为正式 Release，**不需要 `~/.tauri/` 私钥，不需要跑 `pnpm release:all`**。
 
 旧的本地打包脚本 `scripts/release/release.mjs`（`pnpm release:all` 等）保留为可选项：仅在 CI 暂时不可用、本地需要复现构建、或排查签名问题时手动调用，**不纳入默认发版流程**。
 
@@ -28,14 +28,30 @@ description: 在此仓库（tzdxf/repomeow，Tauri 2 + Vue 3）发布新版本�
 
 ## 工作流（按顺序执行，每步失败立即中止）
 
-### 1. 读出版本号，必要时 bump
+### 1. 确认 dev 基线，读出版本号并按需 bump
+
+遵循仓库 `AGENTS.md` 的分支约定。先确认工作区干净、刷新远端；需要 bump 时，从最新远端 `dev` 切开发分支，在该分支修改版本文件，不在 `main` 上提交版本变更。已有对应的开发分支或 PR 时复用，不重复创建。
 
 ```bash
-VERSION=$(grep -m1 '"version"' src-tauri/tauri.conf.json | sed -E 's/.*"version":\s*"([^"]+)".*/\1/')
-REMOTE=$(git remote get-url github 2>/dev/null || git remote get-url origin)
+if git remote get-url github >/dev/null 2>&1; then
+  REMOTE_NAME=github
+else
+  REMOTE_NAME=origin
+fi
+REMOTE=$(git remote get-url "$REMOTE_NAME")
 ```
 
 期望 `REMOTE` 含 `github.com/TZDXF/repomeow`，否则中止并提示"仓库远程异常，请确认 github remote 配置"。
+
+```bash
+git fetch "$REMOTE_NAME"
+```
+
+在上述 `dev` 基线或对应开发分支上读取版本号：
+
+```bash
+VERSION=$(grep -m1 '"version"' src-tauri/tauri.conf.json | sed -E 's/.*"version":\s*"([^"]+)".*/\1/')
+```
 
 若用户要求的版本号 ≠ `$VERSION`，同步修改四处：
 
@@ -44,27 +60,26 @@ REMOTE=$(git remote get-url github 2>/dev/null || git remote get-url origin)
 - `src-tauri/Cargo.toml` 的 `version = "..."`
 - `src-tauri/Cargo.lock` 中 `name = "repomeow"` 紧随的 `version`（改完 Cargo.toml 后跑任意 cargo 命令也会自动更新）
 
-改完用 `pnpm release:check` 校验三处一致（脚本来自 `scripts/release/release.mjs`，仅做版本号三处一致性检查，本流程默认使用，不触发构建）。
+改完将 `VERSION` 更新为目标版本，用 `pnpm release:check` 校验三处一致（脚本来自 `scripts/release/release.mjs`，仅做版本号三处一致性检查，本流程默认使用，不触发构建）。若版本已一致，不制造空 bump 提交；仍需在第 5–6 步确认该版本对应的整合、独立验证和推广已完成。
 
 ### 2. 工作区状态
 
 ```bash
 git status --short
-git rev-list --count github/main..HEAD   # 或 origin/main,看哪个是主分支
 ```
 
 若 `git status` 非空（未提交改动或 untracked 文件）：
 - 默认行为：**中止**并提示"工作区有未提交改动，请先 commit"
-- 如果改动只有版本号 bump 相关文件，允许代提交后继续，提交信息沿用历史风格：`🔖 chore(release): bump 版本号至 X.Y.Z`，且必须明确告诉用户你做了什么
+- 如果改动只有版本号 bump 相关文件，允许在上述开发分支代提交，提交信息沿用历史风格：`🔖 chore(release): bump 版本号至 X.Y.Z`，且必须明确告诉用户你做了什么；提交后仍须走第 5 步的 `dev` PR、独立验证和推广流程
 
 ### 3. 构建验证
 
 ```bash
-pnpm lint      # 0 errors 即可,style 告警不阻塞
-pnpm build     # 含 vue-tsc --noEmit 类型检查,最高保真预发布闸门
+pnpm lint      # --max-warnings=0，0 error 且 0 warning 才通过
+pnpm build     # 含 vue-tsc --noEmit 类型检查与首屏入口体积预算
 ```
 
-任何一条失败 → 中止，把输出原样贴回给用户。CI 不会重新跑 lint/typecheck，**本机这两步是仅有的发布前闸门**。
+任何一条失败 → 中止，把输出原样贴回给用户。其余本地检查按 `AGENTS.md` 和实际差异执行；这两条不能替代独立验证或 CI 门禁。`quality.yml` 会在目标为 `dev` / `main` 的 PR 及两分支 push 上运行前端 lint、格式、单测、构建和 Rust clippy/测试；仅推送发布 tag 不会触发该工作流。
 
 ### 4. 编写版本更新说明
 
@@ -80,21 +95,38 @@ pnpm build     # 含 vue-tsc --noEmit 类型检查,最高保真预发布闸门
 
 将正文以 UTF-8 写入仓库外的临时 Markdown 文件，并将绝对路径记为 `NOTES_FILE`，不要为临时说明引入未提交文件。第 8 步必须将它写入 GitHub Release，不能只在最终回复中展示。
 
-### 5. 提交 bump 并推送 main
+### 5. 版本变更进入 dev，独立验证后推广 main
+
+若有版本变更，在开发分支提交并推送该分支：
 
 ```bash
 git add package.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
 git commit -m "🔖 chore(release): bump 版本号至 $VERSION"
-git push github main
+git push -u "$REMOTE_NAME" HEAD
 ```
 
-main 必须先于 tag 推送——`v*` tag 必须指向这次 bump 提交（CI 流程会 checkout 这个 tag，tauri-action 也会用 tag 推断 `__VERSION__`）。
+创建或复用 **base 为 `dev`** 的 PR，按仓库门禁完成检查后合入 `dev`；固定整合后的 `dev` SHA，取得覆盖该 SHA 的独立验证结论。若 `dev` 随后前移，先对新增差异完成增量复核。
+
+只有整合及独立验证完成，才通过 **`dev` → `main` 的推广 PR** 更新 `main`，保留整合 ancestry，遵守现有必需检查，不直接 push `main`。推广由其它任务负责时，交付当前 PR 和待推广状态，等其完成后再继续；不得提前打 tag 或宣称已发布。
+
+已有版本不需要 bump 时，复用覆盖该版本实际提交的验证和推广记录，不重复提交或创建 PR；仅版本号相同不足以证明已完成推广。
 
 ### 6. 推送 `v*` tag 触发 CI
 
+推广合并后重新 fetch，把 QA 报告实际覆盖的最终 `dev` SHA 记为 `VERIFIED_DEV_SHA`，把远端 `main` 固定为 `RELEASE_SHA`。验证 ancestry 与内容一致，任一命令失败均中止，不能以当前分支 HEAD 或未经复核的新提交替代：
+
 ```bash
-git tag -a "v$VERSION" -m "Release v$VERSION"
-git push github "v$VERSION"
+git fetch "$REMOTE_NAME"
+RELEASE_SHA=$(git rev-parse "$REMOTE_NAME/main")
+git merge-base --is-ancestor "$VERIFIED_DEV_SHA" "$RELEASE_SHA"
+git diff --exit-code "$VERIFIED_DEV_SHA" "$RELEASE_SHA" --
+```
+
+从 `RELEASE_SHA` 的树中核对四处版本文件均与 `VERSION` 一致，而不是读取当前工作区的版本号。本地及远端 tag 已存在时中止，不覆盖已有 tag；然后显式指定已验证提交：
+
+```bash
+git tag -a "v$VERSION" "$RELEASE_SHA" -m "Release v$VERSION"
+git push "$REMOTE_NAME" "refs/tags/v$VERSION"
 ```
 
 - 若 tag 已存在 → 中止并用 `git tag -l "v*"` 列出
@@ -168,7 +200,7 @@ curl -sL https://github.com/TZDXF/repomeow/releases/latest/download/latest.json 
 
 | 现象 | 原因 | 处置 |
 |---|---|---|
-| `git remote get-url github` 报错 | 该机器未配 `github` remote 名 | 中止，请用户用 `git remote -v` 检查 |
+| `github` remote 不存在 | 该机器只配置了其它 remote 名 | 按第 1 步回退 `origin`；两者都不可用或 URL 不符才中止，用 `git remote -v` 检查 |
 | `pnpm build` 失败 | TS 错误或前端构建错误 | 中止，把 build 输出原样贴回给用户 |
 | tag 已存在 | 之前发过或本地残留 | 中止并附 `git tag -l "v*"` 输出 |
 | 三处版本号不一致 | 用户或脚本只改了其一 | 中止并指出每个文件的当前值，等用户修齐再跑 |

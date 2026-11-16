@@ -135,7 +135,8 @@ impl McpTarget {
 /// 的嵌套 mcp.servers 键(服务器对象与 claude 同形,复用 claude 方言);
 /// Kimi Code 的 `.kimi-code/mcp.json` 复用 JSON 结构,transport 字段单独映射;
 /// Pi: packages/coding-agent/docs/mcp.md,仅支持 stdio / Streamable HTTP。
-/// DSH 需 Cordis 插件/Profile 配置,没有项目级固定 MCP 文件,故不在列。
+/// DeepSeek Harness: `.dsh/mcp.cordis.yml` 是可由 `dsh --patch` 加载的项目级
+/// Cordis overlay;每个服务器挂载一个 `@deepseek-ai/dsh-mcp-client` 插件。
 pub(super) const MCP_TARGETS: &[McpTarget] = &[
     McpTarget {
         path: ".mcp.json",
@@ -190,6 +191,12 @@ pub(super) const MCP_TARGETS: &[McpTarget] = &[
         dialect: "claude",
         key: "mcpServers",
         agents: &["pi"],
+    },
+    McpTarget {
+        path: ".dsh/mcp.cordis.yml",
+        dialect: "dsh",
+        key: "",
+        agents: &["dsh"],
     },
 ];
 
@@ -293,6 +300,9 @@ fn get_json_path<'a>(doc: &'a Value, key: &str) -> Option<&'a Value> {
 fn read_mcp_servers(path: &Path, target: &McpTarget) -> Vec<McpServerEntry> {
     if target.dialect == "codex" {
         return mcp_formats::read_codex_servers(path);
+    }
+    if target.dialect == "dsh" {
+        return deployment_mcp::read_dsh_servers(path);
     }
     let Ok(raw) = fs::read_to_string(path) else {
         return Vec::new();

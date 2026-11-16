@@ -271,7 +271,7 @@ pub fn get_reports_by_range_impl(
             .iter()
             .filter_map(|id| name_map.get(id).cloned())
             .collect();
-        names.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+        names.sort_by_key(|a| a.to_lowercase());
         item.project_names = names;
         item.total_commits = count_map.get(&item.id).copied().unwrap_or(0);
         let commits = commits_map.get(&item.id).cloned().unwrap_or_default();

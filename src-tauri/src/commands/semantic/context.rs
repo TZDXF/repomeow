@@ -132,7 +132,7 @@ pub(super) async fn worktree_diff(
         Some(&root),
         &args,
         SemRunPolicy::CONTEXT,
-        request_id.as_deref(),
+        request_id,
     )
     .await?;
     if output.code != Some(0) {
@@ -150,6 +150,7 @@ pub(super) async fn worktree_diff(
 
 /// 单实体的 token 预算上下文(sem context)。entries[].content 是源码片段,
 /// 仅在用户显式触发后经 IPC 返回,不落库、不写日志。
+#[allow(clippy::too_many_arguments)] // 与 sem context 子命令的查询参数一一对应
 pub(super) async fn entity_context_impl(
     launcher: SemLauncher,
     path: String,
@@ -449,10 +450,11 @@ fn render_chunk_group(path: &str, changes: &[&super::models::SemCliChange]) -> C
     };
     CommitMetadataEntry {
         text: format!(
-            "- `{path}:{range}` {} {} chunks `{}` ({})",
+            "- `{path}:{range}` {} {} chunks `lines {}-{}` ({})",
             first.change_type,
             changes.len(),
-            format!("lines {}-{}", first.start_line, last.end_line),
+            first.start_line,
+            last.end_line,
             structural_label(first),
         ),
         entity_count: changes.len(),

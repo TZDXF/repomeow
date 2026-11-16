@@ -938,7 +938,7 @@ fn import_folder_scans_skills_and_skips_conflicts_and_invalid() {
     )
     .unwrap();
 
-    let outcome = import::skill_import_folder(&t.lib, &src.to_str().unwrap()).unwrap();
+    let outcome = import::skill_import_folder(&t.lib, src.to_str().unwrap()).unwrap();
     let names: Vec<&str> = outcome.imported.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(names, vec!["导入技能"]);
     // read_dir 顺序不确定,断言按 (name, reason) 排序后比较

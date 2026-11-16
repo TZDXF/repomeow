@@ -67,6 +67,7 @@ pub(super) fn save_meta_in(dir: &Path, mut meta: WikiMeta) -> AppResult<()> {
 }
 
 pub(crate) fn save_config_in(dir: &Path, mut config: WikiGenerationConfig) -> AppResult<()> {
+    let _guard = super::operation_guard(dir)?;
     config.version = CONFIG_VERSION;
     fs::create_dir_all(dir)?;
     let target = dir.join(CONFIG_FILE);
@@ -284,8 +285,11 @@ fn parse_line_range(spec: &str) -> Result<Option<(u64, u64)>, String> {
     Ok(Some((start, end)))
 }
 
+/// 解析出的来源条目:路径 + 可选行区间。
+type SourceEntry = (String, Option<(u64, u64)>);
+
 /// 解析单条来源:返回 Ok(None) 表示空白行(跳过);路径归一为 / 分隔
-fn parse_source_entry(line: &str) -> Result<Option<(String, Option<(u64, u64)>)>, String> {
+fn parse_source_entry(line: &str) -> Result<Option<SourceEntry>, String> {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return Ok(None);
@@ -475,6 +479,7 @@ fn clear_readonly_recursive(root: &Path) {
         }
         let mut perms = meta.permissions();
         if perms.readonly() {
+            #[allow(clippy::permissions_set_readonly_false)] // 仅 Windows:清只读位以便删除
             perms.set_readonly(false);
             let _ = fs::set_permissions(path, perms);
         }
@@ -486,6 +491,7 @@ fn clear_readonly_recursive(root: &Path) {
 fn clear_readonly_recursive(_root: &Path) {}
 
 pub(crate) fn remove_wiki_dir(dir: &Path) -> AppResult<()> {
+    let _guard = super::operation_guard(dir)?;
     match fs::remove_dir_all(dir) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),

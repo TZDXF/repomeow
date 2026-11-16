@@ -59,12 +59,12 @@ fn scripted_stream_fn(script: Arc<Mutex<Vec<AssistantMessage>>>) -> StreamFn {
             });
             writer.push(if final_message.stop_reason == StopReason::Error {
                 AssistantMessageEvent::Error {
-                    reason: final_message.stop_reason.clone(),
+                    reason: final_message.stop_reason,
                     error: final_message.clone(),
                 }
             } else {
                 AssistantMessageEvent::Done {
-                    reason: final_message.stop_reason.clone(),
+                    reason: final_message.stop_reason,
                     message: final_message.clone(),
                 }
             });

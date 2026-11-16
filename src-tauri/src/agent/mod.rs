@@ -19,6 +19,8 @@ pub mod harness;
 pub mod llm;
 pub mod types;
 
+// 与蓝本 `agent.ts` 对齐的子模块同名
+#[allow(clippy::module_inception)]
 pub mod agent;
 pub mod agent_loop;
 pub mod chat_tools;

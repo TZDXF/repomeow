@@ -144,7 +144,7 @@ fn is_valid_thought_signature(signature: &str) -> bool {
     static PATTERN: OnceLock<Regex> = OnceLock::new();
     let pattern =
         PATTERN.get_or_init(|| Regex::new(r"^[A-Za-z0-9+/]+={0,2}$").expect("static regex"));
-    !signature.is_empty() && signature.len() % 4 == 0 && pattern.is_match(signature)
+    !signature.is_empty() && signature.len().is_multiple_of(4) && pattern.is_match(signature)
 }
 
 /// 只保留同 provider/model 且 base64 合法的签名(跨模型签名不可用)。
@@ -2009,9 +2009,11 @@ mod tests {
     #[test]
     fn body_carries_temperature_and_tool_config() {
         let model = google_model("gemini-2.5-flash");
-        let mut options = SimpleStreamOptions::default();
-        options.temperature = Some(0.5);
-        options.tool_choice = Some(ToolChoice::Auto);
+        let options = SimpleStreamOptions {
+            temperature: Some(0.5),
+            tool_choice: Some(ToolChoice::Auto),
+            ..Default::default()
+        };
         let context = Context {
             system_prompt: None,
             messages: vec![user_message("hi")],
@@ -2029,8 +2031,10 @@ mod tests {
     #[test]
     fn tool_choice_none_maps_to_none_mode() {
         let model = google_model("gemini-2.5-flash");
-        let mut options = SimpleStreamOptions::default();
-        options.tool_choice = Some(ToolChoice::None);
+        let options = SimpleStreamOptions {
+            tool_choice: Some(ToolChoice::None),
+            ..Default::default()
+        };
         let context = Context {
             system_prompt: None,
             messages: vec![user_message("hi")],
@@ -2075,8 +2079,10 @@ mod tests {
         ];
         for (id, level, budget) in cases {
             let model = google_model(id);
-            let mut options = SimpleStreamOptions::default();
-            options.reasoning = Some(level);
+            let options = SimpleStreamOptions {
+                reasoning: Some(level),
+                ..Default::default()
+            };
             let body = build_request_body(&model, &context, Some(&options)).unwrap();
             assert_eq!(
                 body["generationConfig"]["thinkingConfig"]["thinkingBudget"], budget,
@@ -2095,14 +2101,16 @@ mod tests {
     #[test]
     fn custom_thinking_budgets_override_defaults() {
         let model = google_model("gemini-2.5-flash");
-        let mut options = SimpleStreamOptions::default();
-        options.reasoning = Some(ThinkingLevel::High);
-        options.thinking_budgets = Some(ThinkingBudgets {
-            minimal: None,
-            low: None,
-            medium: None,
-            high: Some(1234),
-        });
+        let options = SimpleStreamOptions {
+            reasoning: Some(ThinkingLevel::High),
+            thinking_budgets: Some(ThinkingBudgets {
+                minimal: None,
+                low: None,
+                medium: None,
+                high: Some(1234),
+            }),
+            ..Default::default()
+        };
         let context = Context {
             system_prompt: None,
             messages: vec![user_message("hi")],
@@ -2134,8 +2142,10 @@ mod tests {
         ];
         for (id, level, expected) in cases {
             let model = google_model(id);
-            let mut options = SimpleStreamOptions::default();
-            options.reasoning = Some(level);
+            let options = SimpleStreamOptions {
+                reasoning: Some(level),
+                ..Default::default()
+            };
             let body = build_request_body(&model, &context, Some(&options)).unwrap();
             assert_eq!(
                 body["generationConfig"]["thinkingConfig"]["thinkingLevel"], expected,
@@ -2187,8 +2197,10 @@ mod tests {
             "high".to_string(),
             Some("minimal".to_string()),
         )]));
-        let mut mapped_options = SimpleStreamOptions::default();
-        mapped_options.reasoning = Some(ThinkingLevel::High);
+        let mapped_options = SimpleStreamOptions {
+            reasoning: Some(ThinkingLevel::High),
+            ..Default::default()
+        };
         let body = build_request_body(&model, &context, Some(&mapped_options)).unwrap();
         assert_eq!(
             body["generationConfig"]["thinkingConfig"]["thinkingLevel"],
@@ -2201,8 +2213,10 @@ mod tests {
             "high".to_string(),
             Some("urgent".to_string()),
         )]));
-        let mut options = SimpleStreamOptions::default();
-        options.reasoning = Some(ThinkingLevel::High);
+        let options = SimpleStreamOptions {
+            reasoning: Some(ThinkingLevel::High),
+            ..Default::default()
+        };
         let error = build_request_body(&model, &context, Some(&options)).unwrap_err();
         assert!(
             error.contains("Unsupported Google thinking level mapping for google/gemini-3-flash"),
@@ -3001,8 +3015,10 @@ mod tests {
         };
         let signal = CancellationToken::new();
         signal.cancel();
-        let mut options = SimpleStreamOptions::default();
-        options.api_key = Some("key".into());
+        let options = SimpleStreamOptions {
+            api_key: Some("key".into()),
+            ..Default::default()
+        };
         let mut stream = stream_google_generative_ai(model, context, Some(options), Some(signal));
         let mut events = Vec::new();
         while let Some(event) = stream.next().await {

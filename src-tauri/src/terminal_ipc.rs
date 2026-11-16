@@ -112,6 +112,9 @@ impl TerminalIpcResponse {
 }
 
 /// single-instance 回调与首个实例 setup 共用的入口。非内部参数直接忽略。
+// 参数解析失败时直接以 TerminalIpcResponse(整结构 152 字节)作为错误值返回,
+// 该结构本身就是回写文件的行格式;装箱会改动所有构造与匹配点。
+#[allow(clippy::result_large_err)]
 pub(crate) fn handle_desktop_args(app: &AppHandle, args: &[String]) {
     let Some(index) = args.iter().position(|arg| arg == TERMINAL_IPC_ARG) else {
         return;
@@ -141,6 +144,11 @@ pub(crate) fn handle_desktop_args(app: &AppHandle, args: &[String]) {
         });
     let _ = fs::remove_file(&request_path);
     let response = match request {
+        Ok(_) if !request_matches_data_dir(app, &request_path) => TerminalIpcResponse::error(
+            "data_directory_mismatch",
+            "已运行的桌面程序使用不同的数据目录",
+            None,
+        ),
         Ok(request) => match dispatch(app, request) {
             Ok(result) => TerminalIpcResponse::success(result),
             Err(error) => TerminalIpcResponse::from_app("终端 Tab 操作失败", error),
@@ -149,6 +157,21 @@ pub(crate) fn handle_desktop_args(app: &AppHandle, args: &[String]) {
     };
     if let Err(error) = write_response(&response_path, &response) {
         eprintln!("[terminal-ipc] 写回 CLI 响应失败: {error}");
+    }
+}
+
+fn request_matches_data_dir(app: &AppHandle, path: &Path) -> bool {
+    let Ok(root) = crate::app_data_dir(app) else {
+        return false;
+    };
+    let expected = root.join("ipc");
+    match (
+        path.parent()
+            .and_then(|parent| fs::canonicalize(parent).ok()),
+        fs::canonicalize(expected).ok(),
+    ) {
+        (Some(actual), Some(expected)) => actual == expected,
+        _ => false,
     }
 }
 

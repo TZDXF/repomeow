@@ -720,6 +720,9 @@ export default {
       deleteRemoteConfirm:
         'Delete remote branch "{name}"? This removes the branch on the remote and cannot be undone.',
       remoteDeleted: 'Deleted remote branch "{name}"',
+      fetchSuccess: 'Updated remote branch "{name}"',
+      fetchAllSuccess: "Updated all remote branches",
+      updateAllHint: "Update all remote branches (also syncs branches deleted on the remote)",
     },
     stash: {
       manage: "Stash",
@@ -821,6 +824,7 @@ export default {
       searchPlaceholder: "Search message, hash or author",
       searchEmpty: "No matching commits",
       tipNotFound: "The branch tip is outside the current graph",
+      filterTargetGone: 'Branch "{name}" was deleted; switched back to the current branch',
       commitNotFound: "Commit not found; it may require loading more history or be unreachable",
       loadingMore: "Loading full history, {count} commits loaded",
       viewGraph: "Graph",
@@ -954,6 +958,10 @@ export default {
     historyLoadFailed: "Failed to load conversation history",
     historySaveFailed:
       "Failed to save conversation history. The current conversation has been kept.",
+    historyDelete: "Delete conversation",
+    historyDeleteConfirm: 'Delete conversation "{title}"? This cannot be undone.',
+    historyDeleteFailed:
+      "Failed to delete conversation. The list and current conversation have been kept.",
     historyRetry: "Retry",
     responding: "Responding",
     entry: "Project Q&A",
@@ -1611,10 +1619,12 @@ export default {
 
       title: "CLI",
       description:
-        "The RepoMeow CLI is built into the main executable, letting AI agents and scripts manage projects, Wiki, semantic analysis, reports, and AI configuration from the command line (use local git/docker CLIs directly)",
+        "RepoMeow includes a separate console executable, repomeow-cli, for AI agents and scripts to manage projects, Wiki, semantic analysis, reports and AI configuration.",
+      externalChanges:
+        "CLI data changed. Unsaved edits were preserved; saving will replace the corresponding configuration with your edits.",
       skillsTitle: "Built-in skills",
       skillsHint:
-        "Import the skill into the resource library, then deploy it to each agent's skills directory via Project → AI resources; after configuring PATH and restarting terminals and AI tools, agents can call repomeow directly. Importing again refreshes the skill contents without embedding a local executable path.",
+        "Import the skill into the resource library, then deploy it to each agent's skills directory via Project → AI resources; after configuring PATH and restarting terminals and AI tools, agents can call repomeow-cli directly. Importing again refreshes the skill contents without embedding a local executable path.",
       skillRepomeow:
         "Project management / Wiki / semantic analysis / reports & schedules / tags / AI config (SKILL.md with references)",
       install: "Import into library",

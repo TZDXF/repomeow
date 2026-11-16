@@ -23,6 +23,7 @@ impl Db {
 }
 
 pub fn init(conn: &Connection) -> AppResult<()> {
+    conn.busy_timeout(std::time::Duration::from_secs(10))?;
     conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
     migrations::run(conn)?;
     Ok(())

@@ -518,6 +518,6 @@ mod tests {
         let raw: AppError = rusqlite::Error::InvalidQuery.into();
         let json = serde_json::to_value(&raw).unwrap();
         assert_eq!(json["code"], "db_error");
-        assert!(json["message"].as_str().unwrap().len() > 0);
+        assert!(!json["message"].as_str().unwrap().is_empty());
     }
 }

@@ -10,9 +10,11 @@ import WorkspaceRouterView from "@/components/common/WorkspaceRouterView.vue";
 import GlassProBackground from "@/components/common/GlassProBackground.vue";
 import TitleBar from "@/components/TitleBar.vue";
 import BatchProgressFloat from "@/components/report/BatchProgressFloat.vue";
-import { onListen } from "@/lib/tauri";
+import { cmd, onListen } from "@/lib/tauri";
+import { applyCliRevisions, onCliDataChanged, type CliRevisions } from "@/lib/cli-sync";
 import { scheduleHourly } from "@/lib/hourly-scheduler";
 import { useStreamMarkdownWheelZoom } from "@/composables/useStreamMarkdownWheelZoom";
+import { useWindowFocusSignal } from "@/composables/git/useGitFocusRefresh";
 import { usePinsStore } from "@/stores/pins";
 import { useBackgroundTasksStore } from "@/stores/background-tasks";
 import { useProjectsStore } from "@/stores/projects";
@@ -20,6 +22,8 @@ import { useSettingsStore } from "@/stores/settings";
 import { useTagsStore } from "@/stores/tags";
 import { useUpdateStore } from "@/stores/update";
 import { useWikiStore } from "@/stores/wiki";
+import { useProjectOverviewStore } from "@/stores/project-overview";
+import { useProjectAssetsStore } from "@/stores/project-assets";
 import type {
   BackgroundTaskProgressPayload,
   ConflictResolutionFinishedPayload,
@@ -42,6 +46,37 @@ const router = useRouter(),
 // markdown 全屏弹窗(teleport 到 body)内直接滚轮缩放 mermaid/图片,无需 ctrl
 useStreamMarkdownWheelZoom();
 
+// 主窗口唯一实例订阅窗口焦点:失焦→重新聚焦时递增聚焦版本号,页面侧的
+// useGitFocusRefresh 据此重查当前工作区的 Git 状态;托盘迷你弹窗内部自动跳过。
+useWindowFocusSignal();
+
+onCliDataChanged(["project", "tag"], () => store.refreshFromExternal());
+onCliDataChanged(["tag"], () => tagsStore.fetchTags());
+onCliDataChanged(["pin"], () => pinsStore.fetchPins());
+const overviewStore = useProjectOverviewStore(),
+  assetsStore = useProjectAssetsStore();
+onCliDataChanged(["hidden", "script", "file"], () => {
+  overviewStore.invalidate();
+  assetsStore.invalidate();
+});
+
+let syncTimer: ReturnType<typeof setTimeout> | undefined;
+let unlistenCli: UnlistenFn | undefined;
+async function pollCliChanges() {
+  try {
+    const revisions = await cmd<CliRevisions | null>("cli_data_revisions");
+    if (!unmounted && revisions) {
+      applyCliRevisions(revisions);
+    }
+  } catch {
+    // Transient disk/IPC failures retry without advancing the observed revision.
+  } finally {
+    if (!unmounted) {
+      syncTimer = setTimeout(() => void pollCliChanges(), 750);
+    }
+  }
+}
+
 let stopHourlyUpdateCheck: (() => void) | undefined,
   unmounted = false,
   unlistenGit: UnlistenFn | undefined,
@@ -57,6 +92,16 @@ onMounted(async () => {
   if (unmounted) {
     return;
   }
+  unlistenCli = await onListen<CliRevisions>("data://cli-changed", (revisions) => {
+    if (!unmounted) {
+      applyCliRevisions(revisions);
+    }
+  });
+  if (unmounted) {
+    unlistenCli();
+    return;
+  }
+  void pollCliChanges();
   if (!isTrayPopup) {
     updateStore.init();
     // 启动及每个本地整点静默检查;每次读取开关,设置变更即时生效。
@@ -179,6 +224,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   unmounted = true;
+  clearTimeout(syncTimer);
+  unlistenCli?.();
   stopHourlyUpdateCheck?.();
   unlistenGit?.();
   unlistenBackgroundTasks?.();

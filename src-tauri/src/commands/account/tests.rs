@@ -30,27 +30,6 @@ fn resolve_base_url_rules() {
 }
 
 #[test]
-fn build_authed_url_embeds_credentials() {
-    assert_eq!(
-        build_authed_url("github", "octo", "tok", "https://github.com/a/b.git"),
-        "https://x-access-token:tok@github.com/a/b.git"
-    );
-    assert_eq!(
-        build_authed_url("gitlab", "u", "tok", "https://lab.local/a/b.git"),
-        "https://oauth2:tok@lab.local/a/b.git"
-    );
-    assert_eq!(
-        build_authed_url("gitee", "octo", "tok", "https://gitee.com/a/b.git"),
-        "https://octo:tok@gitee.com/a/b.git"
-    );
-    // ssh 地址不处理
-    assert_eq!(
-        build_authed_url("github", "octo", "tok", "git@github.com:a/b.git"),
-        "git@github.com:a/b.git"
-    );
-}
-
-#[test]
 fn db_roundtrip() {
     let conn = Connection::open_in_memory().unwrap();
     crate::db::migrations::run(&conn).unwrap();

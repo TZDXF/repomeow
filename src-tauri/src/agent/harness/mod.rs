@@ -66,6 +66,9 @@ pub mod skills;
 pub mod system_prompt;
 #[allow(dead_code)]
 pub mod telemetry;
+// 测试专用:并发安全的临时目录夹具(原子创建 + 排他所有权)。
+#[cfg(test)]
+pub(crate) mod test_support;
 #[allow(dead_code)]
 pub mod tools;
 #[allow(dead_code)]

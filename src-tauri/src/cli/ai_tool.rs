@@ -104,6 +104,8 @@ pub(super) fn ai_usage_clear_impl(data_root: Option<&Path>) -> Result<Value, Too
 pub(super) fn prompts_get_impl(data_root: Option<&Path>) -> Result<Value, ToolFailure> {
     let data_root = data_root_or_default(data_root)?;
     let dir = prompt::prompts_dir_in(&data_root);
+    let _guard = prompt::lock_prompts(&dir)
+        .map_err(|error| ToolFailure::new("prompt_lock_failed", error.to_string()))?;
     Ok(json!(prompt::read_prompts_in(&dir)))
 }
 
@@ -128,6 +130,8 @@ pub(super) fn prompts_set_impl(
 ) -> Result<Value, ToolFailure> {
     let data_root = data_root_or_default(data_root)?;
     let dir = prompt::prompts_dir_in(&data_root);
+    let _guard = prompt::lock_prompts(&dir)
+        .map_err(|error| ToolFailure::new("prompt_lock_failed", error.to_string()))?;
     let mut prompts = prompt::read_prompts_in(&dir);
     let read_file = |file: &str| -> Result<String, ToolFailure> {
         std::fs::read_to_string(file).map_err(|error| {

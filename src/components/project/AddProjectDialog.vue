@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onCliDataChanged } from "@/lib/cli-sync";
 import { DropdownMenuContent, PopoverContent } from "@/components/common/project-floating-content";
 import Dialog from "@/components/common/ProjectDialog.vue";
 import { computed, ref, watch } from "vue";
@@ -154,6 +155,22 @@ async function ensureAccountsLoaded() {
     accountsLoaded.value = true;
   }
 }
+
+onCliDataChanged(["account", "project"], async () => {
+  if (!accountsLoaded.value) {
+    return;
+  }
+  accountsLoaded.value = false;
+  await ensureAccountsLoaded();
+  if (
+    selectedAccountId.value != null &&
+    !accounts.value.some((account) => account.id === selectedAccountId.value)
+  ) {
+    selectedAccountId.value = accounts.value[0]?.id ?? null;
+    repos.value = [];
+    reposLoadSeq++;
+  }
+});
 
 // 仓库加载代际计数:切换账号时递增,过期请求的结果直接丢弃(相当于取消)
 let reposLoadSeq = 0;

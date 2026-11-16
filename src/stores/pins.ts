@@ -16,9 +16,15 @@ export interface PinInput {
 export const usePinsStore = defineStore("pins", () => {
   const pins = ref<PinnedCommand[]>([]),
     loaded = ref(false);
+  let loadSequence = 0;
 
   async function fetchPins() {
-    pins.value = await cmd<PinnedCommand[]>("list_pinned_commands", {});
+    const sequence = ++loadSequence,
+      fresh = await cmd<PinnedCommand[]>("list_pinned_commands", {});
+    if (sequence !== loadSequence) {
+      return;
+    }
+    pins.value = fresh;
     loaded.value = true;
   }
 

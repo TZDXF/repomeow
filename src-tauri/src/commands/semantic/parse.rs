@@ -24,6 +24,7 @@ pub(super) fn truncate_to<T>(items: &mut Vec<T>, limit: usize) -> bool {
 /// - 代码文件:根实体 `<file>::<type>::<name>`,嵌套 `<parent_id>::<name>`;
 /// - 数据文件(JSON 等,parent_id 为 `<file>::/<path>` 路径寻址):
 ///   根实体 `<file>::/<name>`,嵌套 `<parent_id>/<name>`。
+///
 /// `path_scheme` 由调用方按整个实体列表探测(见 [`detects_path_scheme`])。
 pub(super) fn build_entity_id(
     file_path: &str,

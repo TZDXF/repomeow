@@ -629,6 +629,8 @@ pub enum ThinkingFormat {
 }
 
 /// 顶层用于限制 reasoning tokens 的请求字段(vLLM/Qwen/DashScope/llama.cpp)。
+/// 变体统一 `Thinking*` 前缀是蓝本的字段命名映射,不缩短以免与 JSON 键脱节。
+#[allow(clippy::enum_variant_names)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ThinkingTokenBudgetField {

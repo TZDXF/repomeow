@@ -14,8 +14,6 @@ use tauri::{
 };
 use tauri_plugin_store::StoreExt;
 
-use crate::APP_DATA_DIR_NAME;
-
 /// 迷你项目列表弹窗的窗口 label
 pub(crate) const TRAY_POPUP_LABEL: &str = "tray-popup";
 /// 主窗口 label(tauri.conf.json 默认)
@@ -60,12 +58,7 @@ fn now_millis() -> u64 {
 /// 从 ~/.repomeow/settings.json 读取字符串设置项(与前端 tauri-plugin-store 同一文件)。
 /// 读取失败返回 None,调用方自行回退默认值。
 pub(crate) fn read_setting_string(app: &AppHandle, key: &str) -> Option<String> {
-    let path = app
-        .path()
-        .home_dir()
-        .ok()?
-        .join(APP_DATA_DIR_NAME)
-        .join("settings.json");
+    let path = crate::app_data_dir(app).ok()?.join("settings.json");
     let store = app.store(path).ok()?;
     store.get(key)?.as_str().map(str::to_owned)
 }
@@ -75,7 +68,7 @@ pub(crate) fn read_setting_string(app: &AppHandle, key: &str) -> Option<String> 
 /// 加载失败时按 language 走对应语言的硬编码兜底(避免 en-US 用户资源加载失败
 /// 时回退到中文菜单造成界面语言不一致)
 fn load_tray_texts(app: &App) -> (String, String) {
-    let lang = read_setting_string(&app.handle(), "language").unwrap_or_default();
+    let lang = read_setting_string(app.handle(), "language").unwrap_or_default();
     // 兜底文案按界面语言分支(原行为是统一中文,en-US 用户资源加载失败会看到
     // 英文界面 + 中文托盘菜单,界面风格不一致)
     let fallback_zh = ("显示主窗口".to_string(), "退出".to_string());

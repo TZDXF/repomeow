@@ -2,7 +2,8 @@ import { ref } from "vue";
 import { defineStore } from "pinia";
 import { emit } from "@tauri-apps/api/event";
 import { load, type Store } from "@tauri-apps/plugin-store";
-import { homeDir, join } from "@tauri-apps/api/path";
+import { join } from "@tauri-apps/api/path";
+import { cmd } from "@/lib/tauri";
 import { setI18nLocale, type SupportedLocale } from "@/i18n";
 import { isOpenWithId, normalizeOpenWithOrder } from "@/lib/open-with";
 import type { CustomOpenWith, JdkConfig, OpenWithId } from "@/types";
@@ -22,9 +23,8 @@ export type ProjectsSortKey = "name" | "updated" | "created";
 export type CloseAction = "tray" | "exit";
 /** 执行命令的终端(仅 Windows 生效;该键同时被 Rust 侧 spawn_terminal 经 read_setting_string 读取) */
 export type TerminalKind = "cmd" | "powershell" | "gitbash";
-// 应用数据统一存放于用户主目录下的 .repomeow 目录(与 Rust 端 APP_DATA_DIR_NAME 保持一致)
-const APP_DATA_DIR_NAME = ".repomeow",
-  STORE_FILE = "settings.json",
+// Resolve through Rust so REPOMEOW_DATA_DIR also isolates plugin-store.
+const STORE_FILE = "settings.json",
   /** 打开方式列表顺序的 localStorage 键(纯 UI 偏好,不进 settings.json) */
   OPEN_WITH_ORDER_CACHE_KEY = "repomeow:open-with-order",
   /** JDK 配置三键的 localStorage 键(开发环境偏好,不进 settings.json;settings.json 里的历史数据不迁移) */
@@ -365,7 +365,7 @@ export const useSettingsStore = defineStore("settings", () => {
   }
 
   async function doInit() {
-    fileStore = await load(await join(await homeDir(), APP_DATA_DIR_NAME, STORE_FILE), {
+    fileStore = await load(await join(await cmd<string>("get_app_data_dir"), STORE_FILE), {
       defaults: {
         theme: "system",
         themeSkin: "default",

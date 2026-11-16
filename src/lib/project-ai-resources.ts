@@ -61,6 +61,7 @@ export interface ResourceAssignResult {
   failures: { agentId: string; code: string; message: string }[];
 }
 export const listProjectAiTargets = () => cmd<ProjectAiTarget[]>("project_ai_targets");
+
 export const loadProjectResources = (path: string, kind: ProjectResourceKind) =>
   cmd<ProjectResourceSnapshot>("project_ai_resources", { path, kind });
 export interface ResourceAddInput {

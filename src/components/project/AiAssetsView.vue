@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onCliDataChanged } from "@/lib/cli-sync";
 import { onProjectPageReactivated } from "@/composables/useProjectPageState";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -62,6 +63,7 @@ watch(
   { immediate: true },
 );
 onProjectPageReactivated(resourcesChanged);
+onCliDataChanged(["file"], resourcesChanged);
 const files = computed(
     () => assets.value?.files.filter((f) => !targets.value.some((a) => a.mcpPath === f.path)) ?? [],
   ),
