@@ -14,6 +14,7 @@
 - 包管理器:**pnpm 11.10.0**(存在 `pnpm-lock.yaml` / `pnpm-workspace.yaml`,勿用 npm);Node 为 `^20.19.0 || >=22.12.0`(`package.json` engines 与 Vite 8 一致,CI 使用 22)。
 - 主要平台:Windows 本地开发为主;release.yml 以四 job 矩阵同时发布 Windows(NSIS)/ macOS(dmg,arm64+x64)/ Linux(deb+AppImage)。
 - 提交信息:**gitmoji + conventional 前缀 + 中文**,单行详细描述,参考 `git log`(例:`🐛 fix(project-ai): 修复…——原因与方案;验证:oxlint / pnpm build 通过`)。
+- 分支与 PR:**开发/修复分支一律从 `dev` 切出,PR 基准 `dev`**;`main` 只接受「已完成整合并通过独立验证的 `dev`」的推广 PR,功能 PR 不直接指向 `main`。若某项修复已先发布到 `main`,须同期回灌 `dev`(保留整合 ancestry,不 reset/强推),避免 `dev` 与 `main` 分叉成缺口。
 
 ## 常用命令
 
