@@ -474,6 +474,7 @@ pub fn create_grep_tool(env: Arc<dyn ExecutionEnv>) -> AgentTool {
 mod tests {
     use super::*;
     use crate::agent::harness::env::TokioEnv;
+    use crate::agent::harness::test_support::ExclusiveTempDir;
 
     fn text_of(result: &AgentToolResult) -> String {
         result
@@ -488,21 +489,16 @@ mod tests {
     }
 
     struct TempProject {
+        // 持有目录所有权:Drop 时由夹具只删除本实例创建成功的那一个目录。
+        _dir: ExclusiveTempDir,
         root: std::path::PathBuf,
     }
 
     impl TempProject {
         fn new() -> Self {
-            let root = std::env::temp_dir().join(format!(
-                "repomeow-grep-{}-{:?}",
-                std::process::id(),
-                crate::time_util::now_system()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            ));
-            std::fs::create_dir_all(&root).unwrap();
-            Self { root }
+            let dir = ExclusiveTempDir::new("grep");
+            let root = dir.path().to_path_buf();
+            Self { _dir: dir, root }
         }
 
         fn write(&self, relative: &str, content: &str) {
@@ -515,12 +511,6 @@ mod tests {
 
         fn env(&self) -> Arc<dyn ExecutionEnv> {
             Arc::new(TokioEnv::new(self.root.clone()))
-        }
-    }
-
-    impl Drop for TempProject {
-        fn drop(&mut self) {
-            std::fs::remove_dir_all(&self.root).ok();
         }
     }
 
