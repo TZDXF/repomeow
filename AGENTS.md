@@ -33,6 +33,19 @@
 
 改动后建议验证:`pnpm lint` + `pnpm test:unit` + `pnpm build`;Rust 侧 `cargo check` / `cargo test`(在 `src-tauri/` 下)。`cargo check` 前若 sem 二进制未准备,先跑 `pnpm sem:prepare`。Rust 侧另有 clippy 严格门禁:提交前在 `src-tauri/` 跑 `cargo clippy --locked --all-targets -- -D warnings`(`quality.yml` 的 Rust job 以同一命令卡 PR,0 warning 才通过;新 lint 需改代码或在单点 `#[allow]` 旁写明理由,不加全局 allow)。GitHub Actions 有 `release.yml` 负责正式发布。
 
+## 可选：Rust 构建缓存（Mr. Boxington / mbx）
+
+`src-tauri` 的 Cargo 编译（`build` / `test` / `clippy`）可接入 [mbx](https://mr-boxington.jdx.dev) 本地缓存，跨 checkout 复用 rustc 产物；前端 pnpm 流程不受影响。**CI 不接入**：`quality.yml` 的 rust job 继续用 `swatinem/rust-cache`，本机缓存只服务本地开发。
+
+1. 安装：按官方 installation 的 Windows x86-64 归档解压到 `%LOCALAPPDATA%\Programs\mbx` 并加入 `PATH`（校验 `SHA256SUMS`）。
+2. `cache_dir` 必须与 target 目录**同处 ReFS 卷**（Dev Drive），否则还原退化为复制；在 `%APPDATA%\mbx\config.toml` 写 `cache_dir = 'D:\mbx-cache'`，或用 `MBX_CACHE_DIR`。同卷且可克隆时 `mbx doctor` 的 `restore` 行报 `cloning is supported`。
+3. 显式跑（在 `src-tauri/` 下）：`mbx build --locked` / `mbx test --locked` / `mbx clippy --locked --all-targets`。首次构建替代 `cargo build` 前先 `pnpm sem:prepare`（`externalBin` 的 sem sidecar 就位）。
+4. 让裸 `cargo` 也走缓存：`mbx setup` 安装 Cargo shim，再把 `%LOCALAPPDATA%\mbx\bin` 前置到 `PATH`。**是否真的路由到 shim 只能用 `mbx doctor` 判断**（`setup` 行报 `Cargo shim is active and current` 才算激活；报 `is current but not active` 并给出 `PATH` 实际解析到的 cargo 路径时未激活）。`mbx setup --status` 只校验安装物与相关配置是否存在/最新，**不检查 `PATH`**，不能据此判断实际 Cargo 路由。
+5. `mbx setup` 除 Cargo shim 外还会写 rust-analyzer 用户级检查配置（`%APPDATA%\rust-analyzer\rust-analyzer.toml` 的 `check.overrideCommand`，该文件已有自己的 check 设置时不覆盖），让 IDE 检查也走缓存。若本机主动撤销了这条 IDE 配置，`mbx setup --status` 会以“rust-analyzer checks do not use mbx”退出 1，这只表示 IDE 检查未接入，**与 Cargo shim 是否在 `PATH` 激活无关**，两者不要混为一谈。
+6. 首次构建会把 `src-tauri/target` 换成指向 `cache_dir/targets` 的 symlink，并由 mbx 自动写入 `.git/info/exclude`（`.gitignore` 的 `/target/` 匹配不到 symlink）。回收/清理：`mbx clean`（本 workspace）、`mbx cache stats` / `mbx stats` / `mbx gc`。
+
+不提交 `.mbx.toml`：仓库需要的机器相关路径（`cache_dir`、`target.root`）属于全局配置，`.mbx.toml` 会拒绝；其余工作区策略（`incremental`、`share_workspace_root`、`scheduler.reserve_cpus` 等）在此仓库都用默认值更划算（`share_workspace_root` 会把源码路径写进占位符影响调试信息，`reserve_cpus` 会削减 CI 的编译并行度）。
+
 ## 架构与分层
 
 ```
