@@ -1,11 +1,11 @@
 ---
 name: release-tagger
-description: 在此仓库（tzdxf/repomeow，Tauri 2 + Vue 3）发布新版本。读取 `src-tauri/tauri.conf.json` 的 `version` 字段作为发布号，做一致性检查与构建验证后，走**CI 打包发布**：本机 bump → commit → push → push `v*` tag → `.github/workflows/release.yml` 在 CI 上用 tauri-action 以四 job 矩阵构建 Windows NSIS / macOS dmg（arm64+x64）/ Linux deb+AppImage、安装包签名、生成 `latest.json` 并自动创建 draft Release；本机不需要打包、不需要私钥。CI 跑完后补充仅面向用户功能变化的版本更新说明并验证 draft Release，默认保持 draft 状态。在用户提及"发版"、"发布新版本"、"CI 打包"、"cut a release"、"v0.X.0"或想发起 GitHub Release 流程时调用此 skill——即便用户只是说"准备发版"，也走这条流程。
+description: 在此仓库（tzdxf/repomeow，Tauri 2 + Vue 3）发布新版本。读取 `src-tauri/tauri.conf.json` 的 `version` 字段作为发布号，做一致性检查与构建验证后，走**CI 打包发布**：本机 bump → commit → push → push `v*` tag → `.github/workflows/release.yml` 在 CI 上用 tauri-action 以四 job 矩阵构建 Windows NSIS / macOS dmg（arm64+x64）/ Linux deb+AppImage、安装包签名、生成 `latest.json` 并创建 draft Release 作为构建暂存；本机不需要打包、不需要私钥。CI 跑完后补充仅面向用户功能变化的版本更新说明、同步 updater notes 并验证资产，随后自动转为正式 Release，不保持 draft 状态。在用户提及"发版"、"发布新版本"、"CI 打包"、"cut a release"、"v0.X.0"或想发起 GitHub Release 流程时调用此 skill——即便用户只是说"准备发版"，也走这条流程。
 ---
 
 # CI 打包发布工作流
 
-自 v0.1.9 起，发布流程全部由 **GitHub Actions** 完成：推送 `v*` tag 触发 `.github/workflows/release.yml`，以**四 job 矩阵**（Windows NSIS / macOS arm64+x64 dmg / Linux deb+AppImage）在对应平台 runner 上用 [`tauri-apps/tauri-action`](https://github.com/tauri-apps/tauri-action) 构建、用 `update` Environment 下的 `TAURI_SIGNING_PRIVATE_KEY` 签名、上传各平台安装包 / updater `.sig` / `latest.json`，并创建 **draft Release**。本机负责 bump 版本号、push commit、push tag，以及 CI 完成后写入版本更新说明，**不需要 `~/.tauri/` 私钥，不需要跑 `pnpm release:all`**。
+自 v0.1.9 起，发布流程全部由 **GitHub Actions** 完成：推送 `v*` tag 触发 `.github/workflows/release.yml`，以**四 job 矩阵**（Windows NSIS / macOS arm64+x64 dmg / Linux deb+AppImage）在对应平台 runner 上用 [`tauri-apps/tauri-action`](https://github.com/tauri-apps/tauri-action) 构建、用 `update` Environment 下的 `TAURI_SIGNING_PRIVATE_KEY` 签名、上传各平台安装包 / updater `.sig` / `latest.json`，并创建 **draft Release** 作为构建暂存。本机负责 bump 版本号、push commit、push tag，以及 CI 完成后写入版本更新说明、验证资产并自动转为正式 Release，**不需要 `~/.tauri/` 私钥，不需要跑 `pnpm release:all`**。
 
 旧的本地打包脚本 `scripts/release/release.mjs`（`pnpm release:all` 等）保留为可选项：仅在 CI 暂时不可用、本地需要复现构建、或排查签名问题时手动调用，**不纳入默认发版流程**。
 
@@ -118,7 +118,7 @@ CI 步骤概要（详见 `.github/workflows/release.yml`，四个平台 job 并�
 
 耗时主要在 Rust release 编译（Windows 约 1–3 分钟；macOS/Linux 冷缓存约 10–25 分钟，命中缓存后明显加快）。`fail-fast: false`，任一平台失败 `gh run watch` 退出非 0、其余平台继续，把失败 job 的日志贴回用户并建议查 `.github/workflows/release.yml` 排错。
 
-### 8. 写入版本更新说明并验证 draft Release
+### 8. 写入版本更新说明、验证并正式发布
 
 当前 workflow 的 `releaseBody` 只是下载提示，因此必须在 CI 成功完成后，用第 4 步准备的说明替换该占位正文，避免在 CI 运行期间写入而被覆盖。不使用未经筛选的自动生成提交日志作为更新说明。
 
@@ -128,38 +128,41 @@ gh release view "v$VERSION" --json body
 node scripts/release/sync-notes.mjs "v$VERSION"
 ```
 
-核对远端 `body` 与准备的说明一致，且仅包含符合上述规则的内容。写入失败或正文不符时中止并报告，不得宣称发布流程完成；修复说明即可，不要因此重推 tag 或重跑构建。保持 draft 状态不变，再验证资产：
+核对远端 `body` 与准备的说明一致，且仅包含符合上述规则的内容。写入失败或正文不符时中止并报告，不得宣称发布流程完成；修复说明即可，不要因此重推 tag 或重跑构建。先在 draft 暂存状态验证资产：
 
 ```bash
 gh release view "v$VERSION" --json isDraft,isPrerelease,assets
 ```
 
-期望：
+此阶段期望：
 
-- `isDraft: true`
+- `isDraft: true`（仅表示 CI 构建暂存尚未结束，不是最终交付状态）
 - `assets` 至少含四平台安装包与签名：`RepoMeow_<ver>_x64-setup.exe`、`RepoMeow_<ver>_aarch64.dmg`、`RepoMeow_<ver>_x64.dmg`、`repomeow_<ver>_amd64.deb`、`RepoMeow_<ver>_amd64.AppImage`，以及各 updater `.sig` 与 `latest.json`（`latest.json` 的 `platforms` 应同时含 `windows-x86_64`、`darwin-aarch64`、`darwin-x86_64`、`linux-x86_64` 四项）
 - `isPrerelease: false`
 
-任何一项不符都先排查 CI 日志，不要把不完整的 Release 转正。
+任何一项不符都先排查 CI 日志，不要发布不完整的 Release。
 
 客户端更新弹窗读取的是资产 `latest.json.notes`，不是 Release 正文。每次编辑正文后都必须运行上述同步脚本；脚本校验版本、拒绝占位说明、备份原文件，只替换 notes 并重新下载校验，保留签名、下载地址和发布日期。同步失败时停止发布并报告，不得转正或宣称完成；不需要重签安装包或重跑构建。
 
-### 9. 发布验证（可选）
-
-```bash
-gh api repos/TZDXF/repomeow/releases/latest --jq '.tag_name'   # 可能仍是上一版,draft 不影响 latest
-curl -sL https://github.com/TZDXF/repomeow/releases/latest/download/latest.json | jq .version
-```
-
-`gh api ... /releases/latest` 仍返回上一个**已发布**版（draft 不算 latest），这是预期。updater 端点 (`latest.json`) 的实际指向以 `releases/latest/download/latest.json` 资源为准——tauri-action 会上传 `latest.json` 资产，客户端 updater 读它即可。
-
-完成后告诉用户：CI 已构建并以 draft 形式上传资产，旧版应用下次启动时若启用 updater，可自动检测到 `v$VERSION`。如需把 draft 转为正式 Release（让 `releases/latest` 立即指向新版本），用：
+确认正文、updater notes、资产与平台清单全部符合后，**直接转为正式 Release，不留 draft**：
 
 ```bash
 gh release edit "v$VERSION" --draft=false
+gh release view "v$VERSION" --json isDraft,isPrerelease,assets
 ```
 
-默认 draft 状态即可——用户可手动在 GitHub UI 上点 Publish review。
+最终必须为 `isDraft: false`、`isPrerelease: false`，且资产仍完整。发布命令失败或最终仍为 draft 时，中止并报告实际状态，不得宣称发布流程完成。
+
+### 9. 发布验证（必做）
+
+```bash
+gh api repos/TZDXF/repomeow/releases/latest --jq '.tag_name'
+curl -sL https://github.com/TZDXF/repomeow/releases/latest/download/latest.json | jq .version
+```
+
+第一个命令应返回 `v$VERSION`，第二个命令应返回 `$VERSION`，确认 `releases/latest` 与 updater 端点均已指向本次正式版本。若结果不符，检查 Release 状态、updater 资产与远端缓存，报告实际结果，不得宣称验证通过。
+
+完成后告诉用户：CI 已完成四平台构建，更新说明与 updater notes 已写入，Release 已正式发布；旧版应用下次启动时若启用 updater，可自动检测到 `v$VERSION`。
 
 ## 失败模式速查
 

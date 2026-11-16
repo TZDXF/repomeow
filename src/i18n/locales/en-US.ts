@@ -483,6 +483,7 @@ export default {
     available: "New version v{version} available",
     viewDetail: "View",
     noNotes: "No release notes provided.",
+    notesLoading: "Loading release notes...",
     updateNow: "Update now",
     backgroundDownload: "Download in background",
     downloading: "Downloading update... {progress}%",

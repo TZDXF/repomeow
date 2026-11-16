@@ -457,6 +457,7 @@ export default {
     available: "发现新版本 v{version}",
     viewDetail: "查看",
     noNotes: "暂无更新说明",
+    notesLoading: "正在加载更新说明...",
     updateNow: "立即更新",
     backgroundDownload: "后台下载",
     downloading: "下载更新中... {progress}%",
