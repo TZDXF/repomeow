@@ -1,11 +1,11 @@
 ---
 name: release-tagger
-description: 在此仓库（tzdxf/repomeow，Tauri 2 + Vue 3）发布新版本。读取 `src-tauri/tauri.conf.json` 的 `version` 字段作为发布号，做一致性检查与构建验证后，走**CI 打包发布**：本机 bump → commit → push → push `v*` tag → `.github/workflows/release.yml` 在 CI 上用 tauri-action 以四 job 矩阵构建 Windows NSIS / macOS dmg（arm64+x64）/ Linux deb+AppImage、安装包签名、生成 `latest.json` 并自动创建 draft Release；本机不需要打包、不需要私钥。CI 跑完后补充仅面向用户功能变化的版本更新说明并验证 draft Release，默认保持 draft 状态。在用户提及"发版"、"发布新版本"、"CI 打包"、"cut a release"、"v0.X.0"或想发起 GitHub Release 流程时调用此 skill——即便用户只是说"准备发版"，也走这条流程。
+description: 在此仓库（tzdxf/repomeow，Tauri 2 + Vue 3）发布新版本。读取 `src-tauri/tauri.conf.json` 的 `version` 字段作为发布号，做一致性检查与构建验证后，走**CI 打包发布**：本机 bump → commit → push 到 `dev` → 经 `dev→main` 推广 PR（独立验证通过后）→ 在已经在 `main` 上的 bump 提交打并推送 `v*` tag → `.github/workflows/release.yml` 在 CI 上用 tauri-action 以四 job 矩阵构建 Windows NSIS / macOS dmg（arm64+x64）/ Linux deb+AppImage、安装包签名、生成 `latest.json` 并创建 draft Release 作为构建暂存；本机不需要打包、不需要私钥。CI 跑完后补充仅面向用户功能变化的版本更新说明、同步 updater notes 并验证资产，随后自动转为正式 Release，不保持 draft 状态。在用户提及"发版"、"发布新版本"、"CI 打包"、"cut a release"、"v0.X.0"或想发起 GitHub Release 流程时调用此 skill——即便用户只是说"准备发版"，也走这条流程。
 ---
 
 # CI 打包发布工作流
 
-自 v0.1.9 起，发布流程全部由 **GitHub Actions** 完成：推送 `v*` tag 触发 `.github/workflows/release.yml`，以**四 job 矩阵**（Windows NSIS / macOS arm64+x64 dmg / Linux deb+AppImage）在对应平台 runner 上用 [`tauri-apps/tauri-action`](https://github.com/tauri-apps/tauri-action) 构建、用 `update` Environment 下的 `TAURI_SIGNING_PRIVATE_KEY` 签名、上传各平台安装包 / updater `.sig` / `latest.json`，并创建 **draft Release**。本机负责 bump 版本号、push commit、push tag，以及 CI 完成后写入版本更新说明，**不需要 `~/.tauri/` 私钥，不需要跑 `pnpm release:all`**。
+自 v0.1.9 起，发布流程全部由 **GitHub Actions** 完成：推送 `v*` tag 触发 `.github/workflows/release.yml`，以**四 job 矩阵**（Windows NSIS / macOS arm64+x64 dmg / Linux deb+AppImage）在对应平台 runner 上用 [`tauri-apps/tauri-action`](https://github.com/tauri-apps/tauri-action) 构建、用 `update` Environment 下的 `TAURI_SIGNING_PRIVATE_KEY` 签名、上传各平台安装包 / updater `.sig` / `latest.json`，并创建 **draft Release** 作为构建暂存。本机负责在 `dev` 上 bump 版本号、push commit、经推广 PR 进入 `main` 后在 `main` 上 push tag，以及 CI 完成后写入版本更新说明、验证资产并自动转为正式 Release，**不需要 `~/.tauri/` 私钥，不需要跑 `pnpm release:all`**。
 
 旧的本地打包脚本 `scripts/release/release.mjs`（`pnpm release:all` 等）保留为可选项：仅在 CI 暂时不可用、本地需要复现构建、或排查签名问题时手动调用，**不纳入默认发版流程**。
 
@@ -15,6 +15,7 @@ description: 在此仓库（tzdxf/repomeow，Tauri 2 + Vue 3）发布新版本�
 - `gh` CLI 已登录 `TZDXF` 账号（用于查看历史发布、写入版本更新说明及验证；本机不再 `gh release create`）
 - 仓库 GitHub `update` Environment 已配置 `TAURI_SIGNING_PRIVATE_KEY`（CI 私钥；本机不需私钥）
 - `git push` 可达 `github.com/TZDXF/repomeow`（remotes `github` 或 `origin`，CI workflow 监听 `push: tags: v*`）
+- `dev` 与 `main` 已对齐：本轮 bump 提交必须能经 `dev→main` 推广 PR 进入 `main`；若两支存在分叉，先按 `AGENTS.md` 的分支约定回灌/整合后再发版
 
 ## 何时调用
 
@@ -50,7 +51,7 @@ REMOTE=$(git remote get-url github 2>/dev/null || git remote get-url origin)
 
 ```bash
 git status --short
-git rev-list --count github/main..HEAD   # 或 origin/main,看哪个是主分支
+git rev-list --count github/dev..HEAD   # 版本 bump 以 dev 为基准;先确认 HEAD 就在 dev 上
 ```
 
 若 `git status` 非空（未提交改动或 untracked 文件）：
@@ -60,11 +61,11 @@ git rev-list --count github/main..HEAD   # 或 origin/main,看哪个是主分支
 ### 3. 构建验证
 
 ```bash
-pnpm lint      # 0 errors 即可,style 告警不阻塞
+pnpm lint      # `oxlint . --max-warnings=0`：零 warning 门禁,有任何告警即失败(与 CI 同一条命令)
 pnpm build     # 含 vue-tsc --noEmit 类型检查,最高保真预发布闸门
 ```
 
-任何一条失败 → 中止，把输出原样贴回给用户。CI 不会重新跑 lint/typecheck，**本机这两步是仅有的发布前闸门**。
+任何一条失败 → 中止，把输出原样贴回给用户。`quality.yml` 在 PR 上会跑同样的检查，但发版闸门以本机这两步为准，不要因为"CI 会跑"而少跑一步。
 
 ### 4. 编写版本更新说明
 
@@ -80,23 +81,40 @@ pnpm build     # 含 vue-tsc --noEmit 类型检查,最高保真预发布闸门
 
 将正文以 UTF-8 写入仓库外的临时 Markdown 文件，并将绝对路径记为 `NOTES_FILE`，不要为临时说明引入未提交文件。第 8 步必须将它写入 GitHub Release，不能只在最终回复中展示。
 
-### 5. 提交 bump 并推送 main
+### 5. 提交 bump 到 dev（随后经推广 PR 进入 main）
 
 ```bash
+git checkout dev
+git pull --ff-only github dev
 git add package.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
 git commit -m "🔖 chore(release): bump 版本号至 $VERSION"
-git push github main
+git push github dev
 ```
 
-main 必须先于 tag 推送——`v*` tag 必须指向这次 bump 提交（CI 流程会 checkout 这个 tag，tauri-action 也会用 tag 推断 `__VERSION__`）。
+版本 bump 与其它关联变更一样**先落在 `dev`**（见 `AGENTS.md` 的分支约定：开发/修复分支一律从 `dev` 切出，PR 基准 `dev`）。`dev` 整合完毕并通过独立验证后，才随 `dev→main` 推广 PR 进入 `main`；bump 提交本身不单独发 PR，它就是推广 PR 的一部分。提交后把 `VERSION_COMMIT=$(git rev-parse HEAD)` 记下，供第 6 步校验 tag 落点。
 
-### 6. 推送 `v*` tag 触发 CI
+- **不要直接把 bump 提交推 `main`**：那会绕过 dev 整合与独立验证，与分支约定冲突。
+- **也不要在 `main` 上 bump 完再回灌 `dev`**：那等于用 `main` 的旧 HEAD 当发布点，会推上去一份未经推广的 tip。
+- 若在 `dev` 上 bump 时发现 `main` 已有更新的 bump（例如另一个版本已发布），先合并 / 对齐 `dev` 与 `main`，再继续，不要用 `git push --force` 或 reset 掩盖分叉。
+
+main 必须先于 tag 推送——`v*` tag 必须指向这次 bump 提交（CI 流程会 checkout 这个 tag，tauri-action 也会用 tag 推断 `__VERSION__`）；所以要先完成推广 PR、确认 `origin/main` 已包含该 bump 提交，再进入第 6 步。
+
+### 6. 在已验收的 main 提交上打 tag 并推送（触发 CI）
+
+先确认要打 tag 的提交确实已在 `main` 上（推广 PR 未合并时一律中止，不要先打 tag 再补合并）。设 `VERSION_COMMIT` 为第 5 步那个 bump 提交的 SHA：
+
+```bash
+git fetch github main
+git merge-base --is-ancestor "$VERSION_COMMIT" github/main \
+  || { echo "bump 提交尚未进入 main，先完成 dev→main 推广"; exit 1; }
+```
 
 ```bash
 git tag -a "v$VERSION" -m "Release v$VERSION"
 git push github "v$VERSION"
 ```
 
+- tag 打在本轮已在 `main` 上的 bump 提交（`$VERSION_COMMIT` 指第 5 步那个 bump 提交），不打在 `dev` 的 tip 上
 - 若 tag 已存在 → 中止并用 `git tag -l "v*"` 列出
 - **推送 tag 后 CI 会自动启动**：触发 `.github/workflows/release.yml` 的 `release` 矩阵——Windows(NSIS)/ macOS arm64+x64(dmg)/ Linux(deb+AppImage)四路并行，各自拉取、打包、签名、上传资产到同一个 draft Release
 - 本流程不调用 `pnpm release:all`、不调用 `gh release create`——这些事 CI 全做了
@@ -118,7 +136,7 @@ CI 步骤概要（详见 `.github/workflows/release.yml`，四个平台 job 并�
 
 耗时主要在 Rust release 编译（Windows 约 1–3 分钟；macOS/Linux 冷缓存约 10–25 分钟，命中缓存后明显加快）。`fail-fast: false`，任一平台失败 `gh run watch` 退出非 0、其余平台继续，把失败 job 的日志贴回用户并建议查 `.github/workflows/release.yml` 排错。
 
-### 8. 写入版本更新说明并验证 draft Release
+### 8. 写入版本更新说明、验证并正式发布
 
 当前 workflow 的 `releaseBody` 只是下载提示，因此必须在 CI 成功完成后，用第 4 步准备的说明替换该占位正文，避免在 CI 运行期间写入而被覆盖。不使用未经筛选的自动生成提交日志作为更新说明。
 
@@ -128,38 +146,41 @@ gh release view "v$VERSION" --json body
 node scripts/release/sync-notes.mjs "v$VERSION"
 ```
 
-核对远端 `body` 与准备的说明一致，且仅包含符合上述规则的内容。写入失败或正文不符时中止并报告，不得宣称发布流程完成；修复说明即可，不要因此重推 tag 或重跑构建。保持 draft 状态不变，再验证资产：
+核对远端 `body` 与准备的说明一致，且仅包含符合上述规则的内容。写入失败或正文不符时中止并报告，不得宣称发布流程完成；修复说明即可，不要因此重推 tag 或重跑构建。先在 draft 暂存状态验证资产：
 
 ```bash
 gh release view "v$VERSION" --json isDraft,isPrerelease,assets
 ```
 
-期望：
+此阶段期望：
 
-- `isDraft: true`
+- `isDraft: true`（仅表示 CI 构建暂存尚未结束，不是最终交付状态）
 - `assets` 至少含四平台安装包与签名：`RepoMeow_<ver>_x64-setup.exe`、`RepoMeow_<ver>_aarch64.dmg`、`RepoMeow_<ver>_x64.dmg`、`repomeow_<ver>_amd64.deb`、`RepoMeow_<ver>_amd64.AppImage`，以及各 updater `.sig` 与 `latest.json`（`latest.json` 的 `platforms` 应同时含 `windows-x86_64`、`darwin-aarch64`、`darwin-x86_64`、`linux-x86_64` 四项）
 - `isPrerelease: false`
 
-任何一项不符都先排查 CI 日志，不要把不完整的 Release 转正。
+任何一项不符都先排查 CI 日志，不要发布不完整的 Release。
 
 客户端更新弹窗读取的是资产 `latest.json.notes`，不是 Release 正文。每次编辑正文后都必须运行上述同步脚本；脚本校验版本、拒绝占位说明、备份原文件，只替换 notes 并重新下载校验，保留签名、下载地址和发布日期。同步失败时停止发布并报告，不得转正或宣称完成；不需要重签安装包或重跑构建。
 
-### 9. 发布验证（可选）
-
-```bash
-gh api repos/TZDXF/repomeow/releases/latest --jq '.tag_name'   # 可能仍是上一版,draft 不影响 latest
-curl -sL https://github.com/TZDXF/repomeow/releases/latest/download/latest.json | jq .version
-```
-
-`gh api ... /releases/latest` 仍返回上一个**已发布**版（draft 不算 latest），这是预期。updater 端点 (`latest.json`) 的实际指向以 `releases/latest/download/latest.json` 资源为准——tauri-action 会上传 `latest.json` 资产，客户端 updater 读它即可。
-
-完成后告诉用户：CI 已构建并以 draft 形式上传资产，旧版应用下次启动时若启用 updater，可自动检测到 `v$VERSION`。如需把 draft 转为正式 Release（让 `releases/latest` 立即指向新版本），用：
+确认正文、updater notes、资产与平台清单全部符合后，**直接转为正式 Release，不留 draft**：
 
 ```bash
 gh release edit "v$VERSION" --draft=false
+gh release view "v$VERSION" --json isDraft,isPrerelease,assets
 ```
 
-默认 draft 状态即可——用户可手动在 GitHub UI 上点 Publish review。
+最终必须为 `isDraft: false`、`isPrerelease: false`，且资产仍完整。发布命令失败或最终仍为 draft 时，中止并报告实际状态，不得宣称发布流程完成。
+
+### 9. 发布验证（必做）
+
+```bash
+gh api repos/TZDXF/repomeow/releases/latest --jq '.tag_name'
+curl -sL https://github.com/TZDXF/repomeow/releases/latest/download/latest.json | jq .version
+```
+
+第一个命令应返回 `v$VERSION`，第二个命令应返回 `$VERSION`，确认 `releases/latest` 与 updater 端点均已指向本次正式版本。若结果不符，检查 Release 状态、updater 资产与远端缓存，报告实际结果，不得宣称验证通过。
+
+完成后告诉用户：CI 已完成四平台构建，更新说明与 updater notes 已写入，Release 已正式发布；旧版应用下次启动时若启用 updater，可自动检测到 `v$VERSION`。
 
 ## 失败模式速查
 
