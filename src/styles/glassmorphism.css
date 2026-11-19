@@ -43,6 +43,9 @@
   --tab-active-foreground: color-mix(in srgb, var(--primary) 50%, var(--foreground));
   --tab-active-ring: color-mix(in srgb, var(--primary) 65%, transparent);
   --tab-active-highlight: rgb(255 255 255 / 70%);
+  /* 悬停只加强描边环与内高光、不换底:换底会拉低文字与填充的对比度。 */
+  --tab-active-ring-hover: color-mix(in srgb, var(--primary) 85%, transparent);
+  --tab-active-inner-glow: color-mix(in srgb, var(--primary) 22%, transparent);
   --radius: 1rem;
   --glass-shadow:
     0 12px 32px rgb(51 81 122 / 10%), inset 0 1px 0 rgb(255 255 255 / 70%),
@@ -74,6 +77,8 @@
   --tab-active-foreground: color-mix(in srgb, var(--primary) 35%, var(--foreground));
   --tab-active-ring: color-mix(in srgb, var(--primary) 70%, transparent);
   --tab-active-highlight: rgb(255 255 255 / 22%);
+  --tab-active-ring-hover: color-mix(in srgb, var(--primary) 90%, transparent);
+  --tab-active-inner-glow: color-mix(in srgb, var(--primary) 26%, transparent);
   --glass-shadow:
     0 16px 40px rgb(3 7 18 / 35%), inset 0 1px 0 rgb(255 255 255 / 22%),
     inset 0 -1px 0 rgb(2 6 16 / 35%);
@@ -293,7 +298,9 @@
     inset 0 1px 0 var(--tab-active-highlight);
 }
 
-/* 激活项悬停时不退回 accent(未选中项才走 accent hover),选中感随时保持。 */
+/* 激活项悬停:保持 --tab-active-surface 与 --tab-active-foreground 不变,
+   只把描边环换成更深一档并加一层内高光 —— 换底会让文字与填充的对比度掉到 4.5:1 以下,
+   而底色不变时文字对比度在普通/悬停两态完全一致。未选中项才走 accent hover。 */
 :is([data-theme="glassmorphism"], [data-theme="glass-pro"])
   :is(
     [role="tab"][aria-selected="true"],
@@ -301,8 +308,14 @@
     .segmented-control > [data-active],
     [data-tab-active]
   ):not(:disabled):hover {
-  background-color: color-mix(in srgb, var(--tab-active-surface) 78%, var(--primary));
+  /* 显式重申填充与文字:组件自带的 hover:bg-accent / hover:text-foreground 等工具类
+     不应在激活项悬停时把底色换回 accent。 */
+  background-color: var(--tab-active-surface);
   color: var(--tab-active-foreground);
+  box-shadow:
+    inset 0 0 0 1px var(--tab-active-ring-hover),
+    inset 0 1px 0 var(--tab-active-highlight),
+    inset 0 0 0 3px var(--tab-active-inner-glow);
 }
 
 /* 高光阴影不应吞掉组件原来的键盘焦点提示。 */
