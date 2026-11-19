@@ -233,6 +233,7 @@ async function clearFinished() {
               :key="s.id"
               class="group flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent"
               :class="active?.id === s.id && 'bg-accent text-foreground'"
+              :data-tab-active="active?.id === s.id || undefined"
               :title="`${s.command} · ${t(`terminal.status.${s.status}`)}`"
               @click="store.activeId = s.id"
             >
