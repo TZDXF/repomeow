@@ -235,6 +235,7 @@ function selectFromMore(id: number) {
             type="button"
             class="group flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs transition-colors hover:bg-accent"
             :class="isProjectActive(id) && 'bg-accent'"
+            :data-tab-active="isProjectActive(id) || undefined"
             :title="tabTitle(id)"
             @click="selectFromMore(id)"
           >

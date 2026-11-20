@@ -397,6 +397,7 @@ const entityMissing = computed(() => request.errorCode.value === "semantic_entit
             size="sm"
             class="h-7 px-2 text-xs"
             :class="tab === card.key ? 'bg-accent' : 'text-muted-foreground'"
+            :data-tab-active="tab === card.key || undefined"
             @click="tab = card.key"
           >
             {{ t(`files.semantic.impactTab.${card.key}`) }} ({{ card.count }})

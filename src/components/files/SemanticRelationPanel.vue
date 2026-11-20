@@ -61,6 +61,7 @@ watch(
         size="sm"
         class="h-6 px-2 text-[11px]"
         :class="tab === kind ? 'bg-accent' : 'text-muted-foreground'"
+        :data-tab-active="tab === kind || undefined"
         @click="tab = kind"
       >
         {{ t(`files.semantic.${kind}`) }}
