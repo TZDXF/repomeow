@@ -35,6 +35,17 @@
   --chart-5: #8b7046;
   --scrollbar-thumb: rgb(51 81 122 / 25%);
   --scrollbar-thumb-hover: rgb(51 81 122 / 45%);
+  /* Tab 激活态令牌(填充 / 文字 / 描边环 / 内高光):磨砂底上 accent 只有 14% 白,
+     与未选中底几乎同价,激活项看不出来。填充以不透明的 --popover 为底再混主色,
+     半透明混在磨砂背景上会被稀释;文字取主色与前景色的中间值,12px 标签约 5.3:1,
+     过 AA;暗色另有一组反向取值。 */
+  --tab-active-surface: color-mix(in srgb, var(--primary) 32%, var(--popover));
+  --tab-active-foreground: color-mix(in srgb, var(--primary) 50%, var(--foreground));
+  --tab-active-ring: color-mix(in srgb, var(--primary) 65%, transparent);
+  --tab-active-highlight: rgb(255 255 255 / 70%);
+  /* 悬停只加强描边环与内高光、不换底:换底会拉低文字与填充的对比度。 */
+  --tab-active-ring-hover: color-mix(in srgb, var(--primary) 85%, transparent);
+  --tab-active-inner-glow: color-mix(in srgb, var(--primary) 22%, transparent);
   --radius: 1rem;
   --glass-shadow:
     0 12px 32px rgb(51 81 122 / 10%), inset 0 1px 0 rgb(255 255 255 / 70%),
@@ -62,6 +73,12 @@
   --chart-5: #c7b087;
   --scrollbar-thumb: rgb(255 255 255 / 20%);
   --scrollbar-thumb-hover: rgb(255 255 255 / 35%);
+  --tab-active-surface: color-mix(in srgb, var(--primary) 32%, var(--popover));
+  --tab-active-foreground: color-mix(in srgb, var(--primary) 35%, var(--foreground));
+  --tab-active-ring: color-mix(in srgb, var(--primary) 70%, transparent);
+  --tab-active-highlight: rgb(255 255 255 / 22%);
+  --tab-active-ring-hover: color-mix(in srgb, var(--primary) 90%, transparent);
+  --tab-active-inner-glow: color-mix(in srgb, var(--primary) 26%, transparent);
   --glass-shadow:
     0 16px 40px rgb(3 7 18 / 35%), inset 0 1px 0 rgb(255 255 255 / 22%),
     inset 0 -1px 0 rgb(2 6 16 / 35%);
@@ -234,12 +251,11 @@
   min-width: 0;
 }
 
-/* 分段切换:选中态独立于普通 hover,用香槟填充与内描边同时标记,不改变布局尺寸。 */
+/* 分段切换:选中态独立于普通 hover,保持与其他 Tab 激活态同一套视觉(见下方统一规则),
+   不改变布局尺寸。 */
 :is([data-theme="glassmorphism"], [data-theme="glass-pro"])
   .segmented-control
   > :is([aria-pressed="true"], [aria-selected="true"]) {
-  background-color: color-mix(in srgb, var(--primary) 26%, var(--background));
-  color: var(--primary);
   font-weight: 600;
 }
 
@@ -255,6 +271,51 @@
   > :is([aria-pressed], [aria-selected]):focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: -3px;
+}
+
+/* Tab 激活态统一规则:两种玻璃皮肤下 bg-accent(白 14% / 薰衣草 18%)只比未选中底
+   略亮一点,标题栏项目 tab、终端页签、资源库 tab 与分段控件选中项都难分辨当前项。
+   这里用主色淡填充 + 1px 主色内描边环 + 内高光标记激活态,取值全部来自主题内的
+   --tab-active-* 令牌(亮/暗各一组),只在本文件的玻璃作用域生效,不波及其他主题。
+   - [role="tab"][aria-selected="true"]:标题栏 tab、资源库 tab 等带 ARIA 语义的页签;
+   - .segmented-control 下的 aria-pressed/aria-selected 选中项:首页视图切换、提交图、
+     项目详情「执行/AI」、市场/编辑弹窗分段控件;
+   - [data-tab-active]:终端页签、语义关系与影响面板等原生按钮页签的显式挂点
+     (它们没有 ARIA 选中语义,单靠样式无法选中)。
+   内描边而非外投影:标题栏 tab 条 overflow-x-auto 与分段控件 overflow:hidden
+   都会裁掉元素外的阴影。 */
+:is([data-theme="glassmorphism"], [data-theme="glass-pro"])
+  :is(
+    [role="tab"][aria-selected="true"],
+    .segmented-control > :is([aria-pressed="true"], [aria-selected="true"]),
+    .segmented-control > [data-active],
+    [data-tab-active]
+  ) {
+  background-color: var(--tab-active-surface);
+  color: var(--tab-active-foreground);
+  box-shadow:
+    inset 0 0 0 1px var(--tab-active-ring),
+    inset 0 1px 0 var(--tab-active-highlight);
+}
+
+/* 激活项悬停:保持 --tab-active-surface 与 --tab-active-foreground 不变,
+   只把描边环换成更深一档并加一层内高光 —— 换底会让文字与填充的对比度掉到 4.5:1 以下,
+   而底色不变时文字对比度在普通/悬停两态完全一致。未选中项才走 accent hover。 */
+:is([data-theme="glassmorphism"], [data-theme="glass-pro"])
+  :is(
+    [role="tab"][aria-selected="true"],
+    .segmented-control > :is([aria-pressed="true"], [aria-selected="true"]),
+    .segmented-control > [data-active],
+    [data-tab-active]
+  ):not(:disabled):hover {
+  /* 显式重申填充与文字:组件自带的 hover:bg-accent / hover:text-foreground 等工具类
+     不应在激活项悬停时把底色换回 accent。 */
+  background-color: var(--tab-active-surface);
+  color: var(--tab-active-foreground);
+  box-shadow:
+    inset 0 0 0 1px var(--tab-active-ring-hover),
+    inset 0 1px 0 var(--tab-active-highlight),
+    inset 0 0 0 3px var(--tab-active-inner-glow);
 }
 
 /* 高光阴影不应吞掉组件原来的键盘焦点提示。 */
