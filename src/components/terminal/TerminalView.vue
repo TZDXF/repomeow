@@ -8,7 +8,11 @@ import { activateTerminalLink } from "@/lib/terminal-links";
 import "@xterm/xterm/css/xterm.css";
 import { resizeCommandSession, writeCommandSession } from "@/lib/terminal";
 import { useTerminalStore } from "@/stores/terminal";
-import { terminalAnsiColors, TERMINAL_MINIMUM_CONTRAST_RATIO } from "@/lib/terminal-theme";
+import {
+  terminalAnsiColors,
+  terminalChromeTheme,
+  TERMINAL_MINIMUM_CONTRAST_RATIO,
+} from "@/lib/terminal-theme";
 
 /**
  * 单会话 xterm 视图:挂载时回放 store 输出缓存,此后经 onOutput 增量写入。
@@ -41,29 +45,19 @@ function resolveThemeColor(varName: string): string | undefined {
   return getComputedStyle(colorProbe).color || undefined;
 }
 
-/** 给 rgb() 颜色叠加透明度(选区底色用前景色冲淡,适配任意主题) */
-function withAlpha(rgb: string, alpha: number): string {
-  const m = rgb.match(/rgba?\((?<channels>[^)]+)\)/);
-  return m ? `rgba(${m.groups!.channels.split(",").slice(0, 3).join(",")},${alpha})` : rgb;
-}
-
 function currentTheme() {
   const isDark = document.documentElement.classList.contains("dark"),
     background = resolveThemeColor("--background") ?? (isDark ? "#0d1117" : "#ffffff"),
     foreground = resolveThemeColor("--foreground") ?? (isDark ? "#e6edf3" : "#1f2328"),
-    mutedForeground = resolveThemeColor("--muted-foreground") ?? "#8b949e",
-    scrollbar = resolveThemeColor("--scrollbar-thumb"),
-    scrollbarHover = resolveThemeColor("--scrollbar-thumb-hover");
+    mutedForeground = resolveThemeColor("--muted-foreground") ?? "#8b949e";
   return {
-    // 所有皮肤均透出外层面板背景,避免终端额外覆盖一层实色底。
-    background: "#00000000",
-    foreground,
-    cursor: foreground,
-    cursorAccent: background,
-    selectionBackground: withAlpha(foreground, 0.25),
-    scrollbarSliderBackground: scrollbar,
-    scrollbarSliderHoverBackground: scrollbarHover,
-    scrollbarSliderActiveBackground: scrollbarHover,
+    // 所有皮肤均透出外层面板背景,并让 overview ruler 描边不可见(见 terminal-theme.ts)
+    ...terminalChromeTheme({
+      foreground,
+      background,
+      scrollbar: resolveThemeColor("--scrollbar-thumb"),
+      scrollbarHover: resolveThemeColor("--scrollbar-thumb-hover"),
+    }),
     ...terminalAnsiColors(isDark, mutedForeground),
   };
 }
