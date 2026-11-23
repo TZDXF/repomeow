@@ -84,23 +84,25 @@ fn build_run_spec(
     dir_rel: &str,
     tool: JavaBuildTool,
 ) -> (String, String, Vec<JavaCommandAction>) {
-    // wrapper 只在项目根探测(标准布局;gradle 子项目无独立 wrapper)
-    let maven_cmd = if has_any(root, &["mvnw", "mvnw.cmd"]) {
-        wrapper_name(JavaBuildTool::Maven)
-    } else {
-        "mvn"
-    };
-    let gradle_cmd = if has_any(root, &["gradlew", "gradlew.bat"]) {
-        wrapper_name(JavaBuildTool::Gradle)
-    } else {
-        "gradle"
-    };
-    // 非 Windows 的 wrapper 需显式 ./ 前缀
-    let (maven_cmd, gradle_cmd) = if cfg!(windows) {
-        (maven_cmd.to_string(), gradle_cmd.to_string())
-    } else {
-        (format!("./{maven_cmd}"), format!("./{gradle_cmd}"))
-    };
+    // wrapper 只在项目根探测(标准布局;gradle 子项目无独立 wrapper)。
+    // 是否加 `./` 前缀跟随「实际用了哪个命令」而非平台:`./mvnw` / `./gradlew` 是项目内
+    // 相对路径,必须显式前缀(unix 不在 PATH 里,且 Windows 用 `mvnw.cmd` 可直接解析);
+    // 回退到系统命令 `mvn` / `gradle` 时一律不加——`./mvn` 会去项目目录找不存在的文件,
+    // 让无 wrapper 的工程在 macOS/Linux 上整个 Java 运行与生命周期命令全部失败。
+    let (maven_cmd, gradle_cmd) = (
+        wrapper_or_system(
+            root,
+            &["mvnw", "mvnw.cmd"],
+            wrapper_name(JavaBuildTool::Maven),
+            "mvn",
+        ),
+        wrapper_or_system(
+            root,
+            &["gradlew", "gradlew.bat"],
+            wrapper_name(JavaBuildTool::Gradle),
+            "gradle",
+        ),
+    );
 
     let action = |key: &str, command: String| JavaCommandAction {
         key: key.to_string(),
@@ -158,6 +160,21 @@ fn build_run_spec(
     };
     // 统一从项目根执行(子模块场景依赖根目录的 reactor/wrapper)
     (".".to_string(), command, more_actions)
+}
+
+/// 选出要执行的命令:项目根存在 wrapper 时用 wrapper(类 Unix 加 `./` 前缀才能在
+/// 项目目录里执行,Windows 直接写 `mvnw` / `mvnw.cmd` 即可被 cmd 解析),否则回退到
+/// 系统命令并且**不加任何前缀**。
+fn wrapper_or_system(root: &Path, names: &[&str], wrapper: &str, system: &str) -> String {
+    if has_any(root, names) {
+        if cfg!(windows) {
+            wrapper.to_string()
+        } else {
+            format!("./{wrapper}")
+        }
+    } else {
+        system.to_string()
+    }
 }
 
 /// wrapper 文件在 Windows 与类 Unix 上名字相同(mvnw/gradlew),无需平台分支

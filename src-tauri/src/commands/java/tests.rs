@@ -22,6 +22,15 @@ fn temp_project_dir(tag: &str) -> PathBuf {
     dir
 }
 
+/// 期望的 wrapper 命令前缀:类 Unix 需 `./`(项目内相对路径),Windows 直接写裸名。
+fn wrapper_prefix(name: &str) -> String {
+    if cfg!(windows) {
+        name.to_string()
+    } else {
+        format!("./{name}")
+    }
+}
+
 #[test]
 fn parses_java_versions() {
     assert_eq!(
@@ -80,7 +89,9 @@ fn discovers_spring_boot_builds() {
     .collect();
     let groups = java_builds_from_files(&dir, &files);
     assert_eq!(groups.len(), 2);
-    // maven 子模块:根目录两段式(install 后 -f 单模块运行)
+    // maven 子模块:根目录两段式(install 后 -f 单模块运行)。
+    // fixture 只有 gradlew 没有 mvnw,所以 maven 侧必须走系统 `mvn`(不带 `./`),
+    // 而下面 gradle 侧因为是真 wrapper 才带前缀 —— 两者共同钉住「前缀跟 wrapper 走」。
     assert_eq!(groups[0].dir, "server");
     assert_eq!(groups[0].tool, JavaBuildTool::Maven);
     assert_eq!(groups[0].run_dir, ".");
@@ -116,6 +127,8 @@ fn root_module_runs_directly() {
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0].dir, ".");
     assert_eq!(groups[0].run_dir, ".");
+    // 无 mvnw → 用系统 `mvn`,**不加** `./` 前缀:加了会在项目目录里执行不存在的文件,
+    // 使 macOS/Linux 上的运行与生命周期命令全部失败。
     assert_eq!(
         groups[0].run_command,
         "mvn spring-boot:run \"-Dspring-boot.run.fork=false\" \"-Dspring-boot.run.useTestClasspath=false\""
@@ -137,6 +150,101 @@ fn root_module_runs_directly() {
     );
 
     let _ = fs::remove_dir_all(&dir);
+}
+
+/// 命令前缀只取决于「有没有 wrapper」,不取决于平台:有 wrapper 才加 `./`(unix 下
+/// 项目内相对路径必须带前缀才能执行),回退系统命令时不加。否则无 wrapper 的工程在
+/// macOS/Linux 上会去项目目录找不存在的 `./mvn`/`./gradle`。
+#[test]
+fn wrapper_prefix_follows_wrapper_not_platform() {
+    let dir = temp_project_dir("wrapper-prefix");
+    fs::write(
+        dir.join("pom.xml"),
+        "<project><build><plugins><plugin><artifactId>spring-boot-maven-plugin</artifactId></plugin></plugins></build></project>",
+    )
+    .unwrap();
+    // 两个 wrapper 都在项目根(标准布局),都留在文件清单里以便 maven/gradle 各出一组
+    fs::write(dir.join("mvnw"), "#!/bin/sh\n").unwrap();
+    fs::write(dir.join("gradlew"), "#!/bin/sh\n").unwrap();
+    fs::create_dir_all(dir.join("svc")).unwrap();
+    fs::write(
+        dir.join("svc/build.gradle"),
+        "plugins { id 'org.springframework.boot' version '3.2.0' }",
+    )
+    .unwrap();
+
+    let files: Vec<PathBuf> = ["pom.xml", "svc/build.gradle"]
+        .iter()
+        .map(|p| PathBuf::from(p.replace('/', std::path::MAIN_SEPARATOR_STR)))
+        .collect();
+    let groups = java_builds_from_files(&dir, &files);
+    assert_eq!(groups.len(), 2);
+
+    let (maven, gradle) = (wrapper_prefix("mvnw"), wrapper_prefix("gradlew"));
+    let maven_group = groups
+        .iter()
+        .find(|g| g.tool == JavaBuildTool::Maven)
+        .unwrap();
+    assert!(
+        maven_group.run_command.starts_with(&format!("{maven} spring-boot:run")) ,
+        "有 wrapper 时应执行 `{maven} spring-boot:run`,实际: {}",
+        maven_group.run_command
+    );
+    // 生命周期命令共用同一前缀,不能出现裸 `mvn`
+    assert!(!maven_group
+        .more_actions
+        .iter()
+        .any(|a| a.command.starts_with("mvn ")));
+
+    let gradle_group = groups
+        .iter()
+        .find(|g| g.tool == JavaBuildTool::Gradle)
+        .unwrap();
+    assert_eq!(gradle_group.run_command, format!("{gradle} :svc:bootRun"));
+
+    let _ = fs::remove_dir_all(&dir);
+
+    // 反向:两个 wrapper 都没有时,命令必须是不带前缀的系统命令。这是修复前的实际故障面——
+    // 前缀按平台无条件加,导致 macOS/Linux 上执行不存在的 ./mvn 与 ./gradle。
+    let bare = temp_project_dir("no-wrapper");
+    fs::write(
+        bare.join("pom.xml"),
+        "<project><build><plugins><plugin><artifactId>spring-boot-maven-plugin</artifactId></plugin></plugins></build></project>",
+    )
+    .unwrap();
+    fs::create_dir_all(bare.join("svc")).unwrap();
+    fs::write(
+        bare.join("svc/build.gradle"),
+        "plugins { id 'org.springframework.boot' version '3.2.0' }",
+    )
+    .unwrap();
+    let files: Vec<PathBuf> = ["pom.xml", "svc/build.gradle"]
+        .iter()
+        .map(|p| PathBuf::from(p.replace('/', std::path::MAIN_SEPARATOR_STR)))
+        .collect();
+    let groups = java_builds_from_files(&bare, &files);
+    assert_eq!(groups.len(), 2);
+    for group in &groups {
+        assert!(
+            !group.run_command.starts_with("./"),
+            "无 wrapper 时不得加 ./ 前缀,实际: {}",
+            group.run_command
+        );
+        assert!(
+            group
+                .more_actions
+                .iter()
+                .all(|action| !action.command.starts_with("./")),
+            "无 wrapper 时生命周期命令也不得带 ./ 前缀: {:?}",
+            group
+                .more_actions
+                .iter()
+                .map(|action| action.command.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    let _ = fs::remove_dir_all(&bare);
 }
 
 #[test]

@@ -10,6 +10,8 @@
     "tauri": "tauri",
     "sem:prepare": "node scripts/sem/prepare.mjs",
     "sem:check": "node scripts/sem/prepare.mjs --check",
+    "sem:verify": "node scripts/sem/verify.mjs",
+    "sem:verify:test": "node --test scripts/sem/arch.test.mjs",
     "cli:dev": "cargo run --manifest-path src-tauri/Cargo.toml --bin repomeow-cli --",
     "start": "pnpm sem:prepare && tauri dev --config src-tauri/tauri.dev.conf.json",
     "build:desktop": "pnpm sem:prepare && tauri build",
