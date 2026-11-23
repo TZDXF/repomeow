@@ -97,7 +97,7 @@ describe("终端外框配色", () => {
     expect(terminalChromeTheme(lightChrome).background).toBe(TERMINAL_TRANSPARENT_BACKGROUND);
   });
 
-  it("滚动条滑块取皮肤令牌,缺省时交给 xterm 自行回退", () => {
+  it("滚动条滑块取皮肤令牌,hover/active 缺省时交给 xterm 自行回退", () => {
     const withTokens = terminalChromeTheme({
       ...darkChrome,
       scrollbar: "rgb(85, 72, 52)",
@@ -110,6 +110,17 @@ describe("终端外框配色", () => {
     const withoutTokens = terminalChromeTheme(darkChrome);
     expect(withoutTokens.scrollbarSliderBackground).toBeUndefined();
     expect(withoutTokens.scrollbarSliderHoverBackground).toBeUndefined();
+    expect(withoutTokens.scrollbarSliderActiveBackground).toBeUndefined();
+  });
+
+  // 只定义了 --scrollbar-thumb、没定义 --scrollbar-thumb-hover 的皮肤(自定义主题/外部皮肤):
+  // 旧实现只把 scrollbarHover 传给 hover/active,缺省就交给 xterm 回退默认(前景色 40% / 50% 透明度);
+  // 回退成普通滑块色会让悬停与按下反馈消失,这里钉住原语义。
+  it("只有 scrollbar、没有 scrollbarHover 时不把普通色借用给 hover/active", () => {
+    const onlyScrollbar = terminalChromeTheme({ ...darkChrome, scrollbar: "rgb(85, 72, 52)" });
+    expect(onlyScrollbar.scrollbarSliderBackground).toBe("rgb(85, 72, 52)");
+    expect(onlyScrollbar.scrollbarSliderHoverBackground).toBeUndefined();
+    expect(onlyScrollbar.scrollbarSliderActiveBackground).toBeUndefined();
   });
 
   it("chrome 配色不携带 ANSI 调色板,合并时不会覆盖皮肤文字色", () => {

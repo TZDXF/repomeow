@@ -34,7 +34,6 @@ export function terminalChromeTheme({
   scrollbar,
   scrollbarHover,
 }: TerminalChromeColors): ITheme {
-  const hover = scrollbarHover ?? scrollbar;
   return {
     background: TERMINAL_TRANSPARENT_BACKGROUND,
     foreground,
@@ -42,8 +41,10 @@ export function terminalChromeTheme({
     cursorAccent: background,
     selectionBackground: withAlpha(foreground, 0.25),
     scrollbarSliderBackground: scrollbar,
-    scrollbarSliderHoverBackground: hover,
-    scrollbarSliderActiveBackground: hover,
+    // hover/active 保持旧语义:只认 --scrollbar-thumb-hover,缺省时留 undefined 交给 xterm
+    // 回退(前景色 40% / 50% 透明度),不要回退到普通滑块色,否则悬停/按下反馈会消失。
+    scrollbarSliderHoverBackground: scrollbarHover,
+    scrollbarSliderActiveBackground: scrollbarHover,
     overviewRulerBorder: TERMINAL_TRANSPARENT_OVERVIEW_RULER_BORDER,
   };
 }
