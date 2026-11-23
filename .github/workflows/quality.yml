@@ -152,6 +152,7 @@ jobs:
         run: |
           node --version
           pnpm --version
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -188,23 +189,22 @@ jobs:
       - name: Prepare sem sidecar for host architecture
         run: pnpm sem:prepare --target ${{ steps.host.outputs.triple }}
 
-      - name: Verify sem sidecar architecture matches host
+      # 架构识别逻辑见 scripts/sem/arch.mjs(纯函数,有 scripts/sem/arch.test.mjs 单测)。
+      # 不再用 `file` / `lipo`:`file` 的退出码恒为 0,输出不同架构也会照常打印成功,
+      # 那样的“校验”无法当门禁。sem:verify 读文件头判架构,与 $TRIPLE 不一致即 exit 1。
+      - name: Verify sem architecture and test the reader
         run: |
-          triple="${{ steps.host.outputs.triple }}"
-          sidecar="src-tauri/binaries/sem-$triple"
-          test -x "$sidecar" || { echo "✗ 缺少 $sidecar"; exit 1; }
-          file "$sidecar"
-          echo "✓ sem sidecar 与宿主架构一致: $triple"
+          pnpm sem:verify --target ${{ steps.host.outputs.triple }}
+          pnpm sem:verify:test
 
-      # 门禁是 `cargo test --locked`,与 windows job 同一入口。下面 9 个用例在 macOS
-      # 上必然失败,原因都是可移植性问题(断言写死 Windows 路径/命令前缀、依赖大小写
-      # 敏感卷、依赖 git 全局 init.defaultBranch),不是本分支引入的产品缺陷;逐个修好
-      # 后应删除对应 --skip。其余用例全部照跑。
+      # 门禁是 `cargo test --locked`,与 windows job 同一入口。下面 7 个用例在 macOS
+      # 上必然失败,原因都是用例本身的 Windows 语义/环境假设(不是产品缺陷),逐个改成
+      # 平台无关断言后应删除对应 --skip。Java 两项曾在此列表,已随产品缺陷修复而回归
+      # (见 builds.rs 的 wrapper_or_system:只有真的用 wrapper 才加 ./ 前缀)。
       # 串行执行:data_sync / wiki 的文件锁断言用纳秒时间戳建临时目录,并行时同名目录
       # 会互相抢锁造成偶发失败;单线程 19.5s(并行 3.5s),在 30 分钟预算内可接受。
       #   restricted_env::unix_paths_stay_case_sensitive —— APFS 默认大小写不敏感
       #   editor_icon::exe_refs_* (3) —— 用例输入是 Windows 路径,Unix join 行为不同
-      #   java::discovers_spring_boot_builds / root_module_runs_directly —— 期望值缺 ./ 前缀
       #   toolchain::go_detection_and_operations —— caps 依据 source==brew,mac 无 winget
       #   terminal_ipc::project_resolution_uses_registered_active_project —— 写死 D:\\ 路径
       #   ai::resource_library::sync_pull_push_status_and_remote_gone —— 依赖 init.defaultBranch
@@ -216,8 +216,6 @@ jobs:
             --skip commands::editor_icon::tests::exe_refs_expands_env_vars \
             --skip commands::editor_icon::tests::exe_refs_jetbrains_toolbox_style \
             --skip commands::editor_icon::tests::exe_refs_vscode_style_shim \
-            --skip commands::java::tests::discovers_spring_boot_builds \
-            --skip commands::java::tests::root_module_runs_directly \
             --skip commands::toolchain::tests::go_detection_and_operations \
             --skip terminal_ipc::tests::project_resolution_uses_registered_active_project \
             --skip commands::ai::resource_library::tests::sync_pull_push_status_and_remote_gone

@@ -59,15 +59,14 @@ Rust 侧在 `src-tauri/` 目录下执行 `cargo check` / `cargo test`；`cargo c
 
 - **frontend**（ubuntu-latest，pnpm 11.10.0 + Node 22）：`pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm format:check` → `pnpm test:unit` → `pnpm build`。
 - **rust**（windows-latest）：`pnpm sem:prepare --target x86_64-pc-windows-msvc` → `src-tauri/` 下 `cargo test --locked` → `pnpm install --frozen-lockfile` + `pnpm build` → `cargo build --release --locked --bins` → `pnpm test:cli --exe` → `pnpm test:cli:shells --exe` → `scripts/test-cli.ps1` 分别经 Windows PowerShell 5.1 与 PowerShell 7 直调。
-- **macos**（macos-latest，pnpm 11.10.0 + Node 22）：与上两个 job 并行且互不影响，不改动它们的门禁，也不影响 `release.yml`。`sw_vers` / `uname -m` 先记录真实系统与架构 → `pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm format:check` → `pnpm test:unit` → `pnpm build` → 用 `rustc -vV` 的 host 三元组跑 `pnpm sem:prepare --target <host>` 并断言 `src-tauri/binaries/sem-<host>` 可执行、`file` 显示与宿主同架构 → `src-tauri/` 下 `cargo test --locked -- --test-threads=1`（带一组 `--skip`，见下）。
+- **macos**（macos-latest，pnpm 11.10.0 + Node 22）：与上两个 job 并行且互不影响，不改动它们的门禁，也不影响 `release.yml`。`sw_vers` / `uname -m` 先记录真实系统与架构 → `pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm format:check` → `pnpm test:unit` → `pnpm build` → 用 `rustc -vV` 的 host 三元组跑 `pnpm sem:prepare --target <host>`，再用 `pnpm sem:verify --target <host>` 读文件头**显式比较实际架构与三元组**（不一致退出 1），并跑 `pnpm sem:verify:test` 校验识别逻辑本身 → `src-tauri/` 下 `cargo test --locked -- --test-threads=1`（带一组 `--skip`，见下）。
 
-macOS 侧的 `cargo test` 用 `--test-threads=1` 串行跑：`data_sync` / `wiki` 的文件锁用例以纳秒时间戳建临时目录，并行时偶发抢同一把锁。9 个用例暂时 `--skip`，原因都是断言本身写死 Windows 语义（Windows 路径字面量、命令前缀缺 `./`、`source == "brew"`、依赖 git 全局 `init.defaultBranch`），不是产品缺陷；逐个改成平台无关断言后应删除对应 `--skip`：
+macOS 侧的 `cargo test` 用 `--test-threads=1` 串行跑：`data_sync` / `wiki` 的文件锁用例以纳秒时间戳建临时目录，并行时偶发抢同一把锁。7 个用例暂时 `--skip`，原因都是断言本身写死 Windows 语义（Windows 路径字面量、`source == "brew"`、依赖 git 全局 `init.defaultBranch`），不是产品缺陷；逐个改成平台无关断言后应删除对应 `--skip`：
 
 | `--skip` 的用例 | 原因 |
 | --- | --- |
 | `agent::harness::restricted_env::tests::unix_paths_stay_case_sensitive` | 默认 APFS 卷大小写不敏感，`README.MD` 能读到 `readme.md` |
 | `commands::editor_icon::tests::exe_refs_expands_env_vars` / `exe_refs_jetbrains_toolbox_style` / `exe_refs_vscode_style_shim` | 用例输入是 `C:\` 路径，Unix 下 `Path::join` 不解析盘符；环境变量用例依赖 `SystemRoot` |
-| `commands::java::tests::discovers_spring_boot_builds` / `root_module_runs_directly` | 期望值固定为 `mvn …`，Unix 实际输出带 `./` 前缀 |
 | `commands::toolchain::tests::go_detection_and_operations` | `can_update` / `can_uninstall` 要求 `source == "brew"`，用例传 `winget` |
 | `terminal_ipc::tests::project_resolution_uses_registered_active_project` | 用例写死 `D:\projects\demo` |
 | `commands::ai::resource_library::tests::sync_pull_push_status_and_remote_gone` | 本地 bare 仓库的默认分支名随 git 全局 `init.defaultBranch` 变化，删除当前分支被拒 |
@@ -76,9 +75,12 @@ macOS 侧的 `cargo test` 用 `--test-threads=1` 串行跑：`data_sync` / `wiki
 
 ## macOS 本地复跑（Mac mini 真机）
 
-CI 的 macos job 只是托管的 arm64 虚拟机；真机验收在同一套命令上复跑，先记录环境再逐条执行：
+CI 的 macos job 只是托管的 arm64 虚拟机；真机验收在同一套命令上复跑，先记录环境再逐条执行。整段可直接粘贴：开头 `set -e` 保证任一步失败即停（vim `env` / `bash` 都一样），不会再出现「sem 校验失败但仍继续跑后续命令」的假绿。
 
 ```bash
+set -e   # 任一步非零立即中止；交互执行时请勿只用 `;` 串联
+# rustup 装在 ~/.cargo 时，非登录 shell 可能没有 rustc：先确认 `rustc -V` 有输出，
+# 否则下面的三元组解析会拿到空值，sem 与 Rust 步骤都会失败。
 # 0. 环境记录（贴进验收结论）
 sw_vers                       # macOS 版本
 uname -m                      # 架构：arm64 / x86_64
@@ -94,10 +96,11 @@ pnpm format:check
 pnpm test:unit                # 期望 655 项全通过
 pnpm build                    # 含 vue-tsc 类型检查与首屏 500 KiB 预算
 
-# 2. 与架构匹配的 sem sidecar
+# 2. 与架构匹配的 sem sidecar(每步都失败即停,set -e)
 TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
 pnpm sem:prepare --target "$TRIPLE"
-test -x "src-tauri/binaries/sem-$TRIPLE" && file "src-tauri/binaries/sem-$TRIPLE"
+pnpm sem:verify --target "$TRIPLE"   # 文件头架构 ≠ $TRIPLE 时退出 1
+pnpm sem:verify:test                 # 架构识别逻辑自身的回归
 
 # 3. Rust 单测（与 CI 同一入口，同样串行 + 同一组 --skip）
 cd src-tauri
@@ -106,8 +109,6 @@ cargo test --locked -- --test-threads=1 \
   --skip commands::editor_icon::tests::exe_refs_expands_env_vars \
   --skip commands::editor_icon::tests::exe_refs_jetbrains_toolbox_style \
   --skip commands::editor_icon::tests::exe_refs_vscode_style_shim \
-  --skip commands::java::tests::discovers_spring_boot_builds \
-  --skip commands::java::tests::root_module_runs_directly \
   --skip commands::toolchain::tests::go_detection_and_operations \
   --skip terminal_ipc::tests::project_resolution_uses_registered_active_project \
   --skip commands::ai::resource_library::tests::sync_pull_push_status_and_remote_gone
@@ -120,7 +121,8 @@ cargo test --locked -- --test-threads=1 \
 ### 已知限制
 
 - 未做 Apple 公证，`pnpm build:desktop` 产物首次打开需右键 → 打开，或 `xattr -cr /Applications/RepoMeow.app`。
-- 上述 9 个 `--skip` 是未修的可移植性缺陷；修复后 CI 与本地复跑命令需同步删掉对应行。
+- 上述 7 个 `--skip` 是尚未改写的用例断言；改成平台无关断言后 CI 与本地复跑命令需同步删掉对应行。
+- `pnpm sem:verify` 只比对**文件头架构与三元组**，不校验 SHA-256（那是 `sem:prepare` 的职责），也不判断二进制能否运行。
 
 ## 提交前建议
 

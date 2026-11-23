@@ -32,7 +32,7 @@
 | `pnpm sem:prepare` / `sem:check` | 下载/校验 sem sidecar 二进制 |
 | `pnpm release:*` | `scripts/release/release.mjs` 本地发布调试(check/build/sign/latest/all/local) |
 
-改动后建议验证:`pnpm lint` + `pnpm test:unit` + `pnpm build`;Rust 侧 `cargo check` / `cargo test`(在 `src-tauri/` 下)。`cargo check` 前若 sem 二进制未准备,先跑 `pnpm sem:prepare`。Rust 侧另有 clippy 严格门禁:提交前在 `src-tauri/` 跑 `cargo clippy --locked --all-targets -- -D warnings`(`quality.yml` 的 Rust job 以同一命令卡 PR,0 warning 才通过;新 lint 需改代码或在单点 `#[allow]` 旁写明理由,不加全局 allow)。GitHub Actions 有 `release.yml` 负责正式发布;`quality.yml` 另有独立的 **macos** job(前端 lint/format/单测/构建 + 按 host 三元组准备 sem 后串行 `cargo test`),macOS 本机复跑步骤与暂时跳过的用例清单见 `docs/build-and-test.md`。
+改动后建议验证:`pnpm lint` + `pnpm test:unit` + `pnpm build`;Rust 侧 `cargo check` / `cargo test`(在 `src-tauri/` 下)。`cargo check` 前若 sem 二进制未准备,先跑 `pnpm sem:prepare`。Rust 侧另有 clippy 严格门禁:提交前在 `src-tauri/` 跑 `cargo clippy --locked --all-targets -- -D warnings`(`quality.yml` 的 Rust job 以同一命令卡 PR,0 warning 才通过;新 lint 需改代码或在单点 `#[allow]` 旁写明理由,不加全局 allow)。GitHub Actions 有 `release.yml` 负责正式发布;`quality.yml` 另有独立的 **macos** job(前端 lint/format/单测/构建 + 按 host 三元组准备 sem 并用 `pnpm sem:verify` 比对文件头架构后串行 `cargo test`),macOS 本机复跑步骤与暂时跳过的用例清单见 `docs/build-and-test.md`。
 
 ## 可选：Rust 构建缓存（Mr. Boxington / mbx）
 
