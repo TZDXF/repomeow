@@ -41,4 +41,25 @@ describe("isMacOS", () => {
     }
     expect(typeof navigator).toBe("object");
   });
+
+  it("有 navigator 时不传参默认读它的 UA", () => {
+    // TitleBar.vue 就是无参调用 isMacOS();这条用例守住 platform.ts 的「读 navigator.userAgent」生产路径,
+    // 缺失时把该行改成 `userAgent ?? ""` 全量仍是绿的(复验跑出过),mac 分支会静默失效。
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+    Object.defineProperty(globalThis, "navigator", {
+      value: {
+        userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15",
+      },
+      configurable: true,
+    });
+    try {
+      expect(isMacOS()).toBe(true);
+    } finally {
+      if (descriptor) {
+        Object.defineProperty(globalThis, "navigator", descriptor);
+      } else {
+        delete (globalThis as { navigator?: unknown }).navigator;
+      }
+    }
+  });
 });
