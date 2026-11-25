@@ -28,6 +28,17 @@ describe("isMacOS", () => {
   });
 
   it("无 navigator 时回退为非 macOS,不抛错", () => {
-    expect(isMacOS("")).toBe(false);
+    // 真的把全局 navigator 摘掉,走到 platform.ts 的 `typeof navigator === "undefined"` 分支;
+    // 传空串只会命中正则负例,守不住这条回退(测完按原描述符还原,不影响后续用例)
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+    delete (globalThis as { navigator?: unknown }).navigator;
+    try {
+      expect(isMacOS()).toBe(false);
+    } finally {
+      if (descriptor) {
+        Object.defineProperty(globalThis, "navigator", descriptor);
+      }
+    }
+    expect(typeof navigator).toBe("object");
   });
 });

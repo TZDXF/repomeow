@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   MACOS_TRAFFIC_LIGHT_INSET_PX,
@@ -29,9 +31,23 @@ describe("标题栏布局决策", () => {
     expect(resolveTitleBarLayout({ macOS: true }).handleDragRegionDblClick).toBe(false);
   });
 
-  it("交通灯占位足够容纳三个按钮且大于默认左内边距", () => {
-    // 系统默认三个按钮在 x=9/32/55、宽 14,最右边缘 ≈ 69px
-    expect(MACOS_TRAFFIC_LIGHT_INSET_PX).toBeGreaterThan(69);
+  it("交通灯占位盖过配置文件里三个按钮的实际右边缘", () => {
+    // 阈值从 tauri.macos.conf.json 的 trafficLightPosition 推导,避免配置改了却还在守旧基线:
+    // tao 的 inset_traffic_lights() 按「close 落在 x、间距与按钮尺寸取系统默认值」摆位,
+    // 本机实测间距 23pt、按钮 14pt,故右边缘 = x + 2×23 + 14 = x + 60。
+    // {x:16} → 76px,占位 80px 才留出 4px 余量;把常量降到 70~76 时这条必须失败。
+    const config = JSON.parse(
+      readFileSync(
+        path.resolve(import.meta.dirname, "../../src-tauri/tauri.macos.conf.json"),
+        "utf8",
+      ),
+    ) as {
+      app: { windows: { trafficLightPosition?: { x: number } }[] };
+    };
+    const trafficLightX = config.app.windows[0].trafficLightPosition?.x;
+    expect(trafficLightX).toBeTypeOf("number");
+    const rightEdgePx = (trafficLightX ?? 0) + 60;
+    expect(MACOS_TRAFFIC_LIGHT_INSET_PX).toBeGreaterThan(rightEdgePx);
     expect(MACOS_TRAFFIC_LIGHT_INSET_PX).toBeGreaterThan(TITLEBAR_EDGE_INSET_PX);
   });
 });
