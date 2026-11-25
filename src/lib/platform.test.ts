@@ -61,5 +61,9 @@ describe("isMacOS", () => {
         delete (globalThis as { navigator?: unknown }).navigator;
       }
     }
+    // 与 :42 那条的 `typeof navigator === "object"` 对称:给「还原」本身配守门人。
+    // 删掉上面整块 finally 时这行必红;没有它则没人能发现还原被删——乱序跑绿只能说明
+    // 没有用例依赖残留状态,证明不了还原真的执行过。
+    expect(navigator.userAgent).not.toContain("Macintosh");
   });
 });
