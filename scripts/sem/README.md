@@ -15,6 +15,8 @@ pnpm sem:verify:test                   # 架构识别逻辑(node --test)回归
 
 `verify.mjs` 补的是 `prepare` 与 `check` 都不覆盖的一段：`sem:check` 校验版本与哈希，但哈希只对应 manifest 里登记的那份归档；一旦有人手工拷错架构的二进制、或缓存里残留旧 target 的产物，名字对而内容不对时 `sem:check` 看不出来。`verify` 直接读 Mach-O / PE / ELF 文件头判架构（`arch.mjs` 纯函数，`arch.test.mjs` 覆盖 arm64/x86_64、universal、损坏格式），与 `--target` 三元组不一致即非零退出；CI 的 macos job 与 `docs/build-and-test.md` 的本地复跑都用它当门禁。
 
+长度门限由 `arch.mjs` 的 `MIN_BINARY_SIZE`（`0x40`，即读 PE 的 `e_lfanew` 至少需要的字节数）统一把关：短于门限的文件一律报「文件过小」，读各格式文件头前也先判长度，因此被截断/未下载完整的样本得到的是可读的截断错误，而不是 `Buffer.readUInt32LE` 的 `RangeError`。
+
 升级步骤：
 
 1. 更新 `manifest.json` 的版本、资产和归档 SHA-256。
