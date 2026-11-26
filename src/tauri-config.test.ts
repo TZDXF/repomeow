@@ -51,3 +51,48 @@ describe("tauri 配置安全基线", () => {
     expect(wildcardOpenPath).toBe(false);
   });
 });
+
+// 平台覆盖文件(tauri.macos.conf.json)通过 `tauri build --config` 叠加到主配置上,
+// 而 `app.windows` 是数组:JSON Merge Patch(RFC 7396)对数组是整元素替换而不是逐键合并。
+// 于是主配置窗口的每个键都必须在覆盖文件里重述一遍——漏一个键(尺寸、visible、
+// dragDropEnabled)该键就在 macOS 上静默退回 Tauri 默认值,而这类回退在 CI 上不可见。
+// 本组断言就是这个隐性契约的守护:除装饰相关键外,两份配置的窗口必须逐键一致。
+type WindowConfig = Record<string, unknown>;
+
+/** 允许 macOS 覆盖文件与主配置不同的窗口键(仅与原生窗口装饰相关)。 */
+const WINDOW_DECORATION_KEYS: readonly string[] = [
+  "decorations",
+  "titleBarStyle",
+  "hiddenTitle",
+  "trafficLightPosition",
+];
+
+const readWindows = (relativePath: string): WindowConfig[] =>
+  (readRepoJson(relativePath) as { app: { windows: WindowConfig[] } }).app.windows;
+
+const stripDecorationKeys = (window: WindowConfig): WindowConfig =>
+  Object.fromEntries(
+    Object.entries(window).filter(([key]) => !WINDOW_DECORATION_KEYS.includes(key)),
+  );
+
+describe("平台覆盖配置与主配置的窗口一致性", () => {
+  const mainWindows = readWindows("src-tauri/tauri.conf.json"),
+    macOSWindows = readWindows("src-tauri/tauri.macos.conf.json");
+
+  it("macOS 覆盖文件必须重述主配置窗口的全部非装饰键", () => {
+    expect(macOSWindows).toHaveLength(mainWindows.length);
+    mainWindows.forEach((mainWindow, index) => {
+      // 少键、多键、改值都会在这里失败:toEqual 比对键集合与值,而不只是“取到几个键”
+      expect(stripDecorationKeys(macOSWindows[index])).toEqual(stripDecorationKeys(mainWindow));
+    });
+  });
+
+  it("macOS 覆盖文件必须保留原生装饰并覆盖装饰相关键", () => {
+    const macOSWindow = macOSWindows[0];
+    expect(macOSWindow.decorations).toBe(true);
+    expect(macOSWindow.titleBarStyle).toBe("Overlay");
+    expect(macOSWindow.hiddenTitle).toBe(true);
+    // 前端给交通灯预留的左侧间距由该值推导(见 lib/titlebar.test.ts)
+    expect(macOSWindow.trafficLightPosition).toBeTypeOf("object");
+  });
+});

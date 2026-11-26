@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { assertArchMatches, detectBinaryArch, expectedArch } from "./arch.mjs";
+import { MIN_BINARY_SIZE, assertArchMatches, detectBinaryArch, expectedArch } from "./arch.mjs";
 
 /// 64 位 Mach-O 头:magic(4) cputype(4) cpusubtype(4) filetype(4) … 补到 32 字节
 function macho64(cputype, bigEndianMagic = false) {
@@ -44,6 +44,20 @@ function pe(machine) {
   buffer.writeUInt32LE(0x80, 0x3c);
   buffer.write("PE\0\0", 0x80, "ascii");
   buffer.writeUInt16LE(machine, 0x84);
+  return buffer;
+}
+
+/// 40 字节的 `MZ`:刚够写 magic + e_lfanew 之前就断了(e_lfanew 在 0x3c..0x40)
+function truncatedPe() {
+  const buffer = Buffer.alloc(40);
+  buffer.write("MZ", 0, "ascii");
+  return buffer;
+}
+
+/// 16 字节的 ELF:magic 与 class/data 都在,但 e_machine(18..20) 已经落在文件外
+function truncatedElf() {
+  const buffer = Buffer.alloc(16);
+  buffer.write("7f454c46", 0, "hex");
   return buffer;
 }
 
@@ -95,4 +109,29 @@ test("架构一致时返回实际架构", () => {
 test("无法推断的三元组与过小文件都失败", () => {
   assert.throws(() => assertArchMatches(macho64(0x0100000c), "riscv64gc-unknown-linux-gnu"), /无法从三元组推断架构/);
   assert.throws(() => assertArchMatches(Buffer.alloc(8), "aarch64-apple-darwin"), /文件过小/);
+});
+
+// 长度门限必须高于「读 PE 偏移所需的 0x40 字节」,否则 40 字节的 `MZ` 会在 readUInt32LE(0x3c)
+// 处抛 `RangeError: … Received 60`,报错语义从「文件被截断」退化成 Buffer 内部错误,
+// 而这正是残文件/中断下载最真实的形态。反向体测:把 MIN_BINARY_SIZE 调回 32 即红。
+test("截断的 PE/ELF 头报「文件过小」,不抛 RangeError", () => {
+  assert.equal(MIN_BINARY_SIZE, 0x40);
+  assert.throws(
+    () => assertArchMatches(truncatedPe(), "x86_64-pc-windows-msvc"),
+    (error) =>
+      error instanceof Error &&
+      !(error instanceof RangeError) &&
+      /文件过小/.test(error.message) &&
+      /40/.test(error.message),
+  );
+  // 直接调识别函数(不经过 assertArchMatches 的长度门限)也不能抛 RangeError,
+  // 否则「先判长度再读」的修宪只在 assertArchMatches 这一个入口成立。
+  assert.equal(detectBinaryArch(truncatedPe()), "unknown (truncated PE header)");
+  assert.equal(detectBinaryArch(truncatedElf()), "unknown (truncated ELF header)");
+  assert.equal(detectBinaryArch(Buffer.alloc(5)), "unknown (truncated Mach-O header)");
+  // 刚好达到门限但 e_lfanew 指到文件外 → 仍走签名校验的路径,不抛 RangeError
+  const edge = Buffer.alloc(MIN_BINARY_SIZE);
+  edge.write("MZ", 0, "ascii");
+  edge.writeUInt32LE(0x100, 0x3c);
+  assert.equal(detectBinaryArch(edge), "unknown (truncated PE header)");
 });

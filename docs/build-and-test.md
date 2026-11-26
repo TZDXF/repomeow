@@ -93,7 +93,7 @@ rustc -vV | sed -n 's/^host: //p'   # host 三元组，决定 sem 资产
 pnpm install --frozen-lockfile
 pnpm lint
 pnpm format:check
-pnpm test:unit                # 期望 655 项全通过
+pnpm test:unit                # 必须全绿：用例数随新增测试变化，以 vitest 汇总行的实际数字为准
 pnpm build                    # 含 vue-tsc 类型检查与首屏 500 KiB 预算
 
 # 2. 与架构匹配的 sem sidecar(每步都失败即停,set -e)
