@@ -94,7 +94,12 @@ fn classify_left_click(
     double_click_window: Duration,
 ) -> LeftClickKind {
     let suppress = trailing_suppress_window(double_click_window);
-    if now_ms.saturating_sub(last_double_click_ms) < suppress.as_millis() as u64 {
+    // 0 是「还没有发生过双击」的哨兵值,必须先于差值判定排除:
+    // 进程内首次读数是 1(见 now_millis),`1 - 0 = 1 < suppress` 会把启动后的
+    // 第一次点击误判成尾随直接丢弃(Windows 同样命中)。
+    if last_double_click_ms != 0
+        && now_ms.saturating_sub(last_double_click_ms) < suppress.as_millis() as u64
+    {
         return LeftClickKind::Trailing;
     }
     if last_click_ms != 0
@@ -147,8 +152,9 @@ const BLUR_SUPPRESS: Duration = Duration::from_millis(800);
 
 /// 弹窗显示后的宽限期内,失焦事件视为显示过程的焦点迁移,不应触发自动收起。
 pub(crate) fn should_ignore_popup_blur() -> bool {
-    now_millis().saturating_sub(LAST_POPUP_SHOWN_MS.load(Ordering::SeqCst))
-        < BLUR_SUPPRESS.as_millis() as u64
+    let last_shown = LAST_POPUP_SHOWN_MS.load(Ordering::SeqCst);
+    // 0 = 弹窗还没显示过:没有宽限期可言,不能把进程起点附近的失焦当「显示瞬间的焦点迁移」
+    last_shown != 0 && now_millis().saturating_sub(last_shown) < BLUR_SUPPRESS.as_millis() as u64
 }
 
 /// 进程启动时刻,作为托盘点击/弹窗时间的单调基准。
@@ -567,6 +573,60 @@ mod tests {
         assert_eq!(
             classify_left_click(10_850, 0, 10_000, PICK_WINDOW),
             LeftClickKind::Single
+        );
+    }
+
+    /// 回归(真实时序):进程里第一次读数是 1,`LAST_DOUBLE_CLICK_MS` 的哨兵是 0,
+    /// 若尾随判定不看哨兵,`1 - 0 = 1 < 500` 会把启动后的首次点击直接丢弃。
+    /// 这里必须用真实的 `now_millis()` 起点,伪造时间戳(`10_000` 等)覆盖不到该时序。
+    #[test]
+    fn first_click_after_startup_is_not_trailing() {
+        let now = now_millis();
+        assert_eq!(
+            classify_left_click(now, 0, 0, click_delay()),
+            LeftClickKind::Single,
+            "启动后第一次点击被当成尾随丢弃(now={now})"
+        );
+        // 刚启动就点、且距进程起点的毫秒数小于抑制窗口,同样不得判尾随
+        assert_ne!(
+            classify_left_click(now, 0, 0, click_delay()),
+            LeftClickKind::Trailing
+        );
+    }
+
+    /// 回归(序列):首次点击(t1)后 120ms 内的第二击必须判 Double 并打开主窗口,
+    /// 而不是「第一击被吞、第二击也被吞」。勾画真实的配对流程:
+    /// t1 → Single(记录 last_click),t2 = t1+120 → Double(清零 last_click,记 last_double)。
+    #[test]
+    fn first_click_then_quick_second_click_is_double() {
+        let t1 = now_millis();
+        assert_eq!(
+            classify_left_click(t1, 0, 0, click_delay()),
+            LeftClickKind::Single,
+            "首次点击不是 Single(now={t1})"
+        );
+        let t2 = t1 + 120;
+        assert_eq!(
+            classify_left_click(t2, t1, 0, click_delay()),
+            LeftClickKind::Double,
+            "首次点击后 120ms 的第二击不是 Double(t1={t1}, t2={t2})"
+        );
+    }
+
+    /// 弹窗失焦宽限期同样不能把「还没显示过」(哨兵 0)当成「刚显示」:
+    /// 未显示过时 `should_ignore_popup_blur()` 必须为 false,否则首次失焦会被误忽略。
+    #[test]
+    fn popup_blur_is_not_suppressed_before_first_show() {
+        // 直接调用被测函数:单测进程里没有任何测试写入 LAST_POPUP_SHOWN_MS,它始终是哨兵 0
+        assert_eq!(
+            LAST_POPUP_SHOWN_MS.load(Ordering::SeqCst),
+            0,
+            "单测进程里不应有测试写入 LAST_POPUP_SHOWN_MS"
+        );
+        assert!(
+            !should_ignore_popup_blur(),
+            "弹窗还没显示过(哨兵 0)却忽略了失焦,守卫失效(now={})",
+            now_millis()
         );
     }
 

@@ -4,6 +4,9 @@ version = "0.2.22"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
+# tauri 2.12.7 的 rust-version 为 1.90(2.11.x 是 1.77.2);显式声明让工具链过低时
+# 直接报 MSRV 错误,而不是在依赖里出现难以定位的编译失败。
+rust-version = "1.90"
 default-run = "repomeow"
 
 [[bin]]
