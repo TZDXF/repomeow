@@ -45,6 +45,12 @@
 - **自动更新**：内置更新检查与升级提示
 - **个性化**：亮/暗主题 + island 皮肤、Markdown 主题、中/英文界面，设置持久化
 
+## macOS 安装说明
+
+macOS 安装包目前**未做 Apple 公证**（发布链路在没有 Developer ID 凭据时会对 `.app` 做 ad-hoc 重签，签名自洽、可启动）。从浏览器下载的 dmg 带系统隔离标记，首次打开可能提示「无法验证开发者」，右键 RepoMeow.app →「打开」放行一次即可；若提示「已损坏，无法打开」，用 `xattr -cr /Applications/RepoMeow.app` 移除隔离标记后重开。
+
+签名/公证链路与排查方法见 [macOS 发布签名与公证](docs/macos-distribution.md)。
+
 ## 技术栈
 
 | 层 | 技术 |

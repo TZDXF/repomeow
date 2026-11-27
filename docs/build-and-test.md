@@ -71,7 +71,9 @@ macOS 侧的 `cargo test` 用 `--test-threads=1` 串行跑：`data_sync` / `wiki
 | `terminal_ipc::tests::project_resolution_uses_registered_active_project` | 用例写死 `D:\projects\demo` |
 | `commands::ai::resource_library::tests::sync_pull_push_status_and_remote_gone` | 本地 bare 仓库的默认分支名随 git 全局 `init.defaultBranch` 变化，删除当前分支被拒 |
 
-`.github/workflows/release.yml`（Release）：`push` tag `v*` 或手动 `workflow_dispatch` 触发，单个 `release` job 按四目标矩阵并行（Windows NSIS、macOS arm64/x64 的 dmg + app、Ubuntu 22.04 的 deb + AppImage），统一由 `tauri-action` 写入同一个 draft Release。更新包签名私钥来自 `update` Environment 的 secrets；签名口令为空，workflow 会显式置为空字符串以避开 Tauri 2.11.4 signer 的静默失败。macOS 产物未做 Apple 公证，首次打开需右键 → 打开或 `xattr -cr`。
+`.github/workflows/release.yml`（Release）：`push` tag `v*` 或手动 `workflow_dispatch` 触发，单个 `release` job 按四目标矩阵并行（Windows NSIS、macOS arm64/x64 的 dmg + app、Ubuntu 22.04 的 deb + AppImage），统一由 `tauri-action` 写入同一个 draft Release。更新包签名私钥来自 `update` Environment 的 secrets；签名口令为空，workflow 会显式置为空字符串以避开 Tauri 2.11.4 signer 的静默失败。
+
+macOS 两个矩阵 job 在打包前后各有一步：`Resolve macOS signing mode`（`scripts/macos-signing.sh plan`，有 Apple 凭据时走 Developer ID 签名 + 公证，没有时写 `APPLE_SIGNING_IDENTITY=-` 做 ad-hoc 重签）与 `Verify macOS bundle signatures`（`scripts/macos-signing.sh verify`，检查 `Contents/_CodeSignature/CodeResources` 与 `codesign --verify --deep --strict`，失败即 job 失败）。没有这两步时产物只剩 rustc 的 linker-signed 签名，用户从浏览器下载后会被判成「已损坏，无法打开」。完整说明见 [macOS 发布签名与公证](macos-distribution.md)。
 
 ## macOS 本地复跑（Mac mini 真机）
 
@@ -120,7 +122,7 @@ cargo test --locked -- --test-threads=1 \
 
 ### 已知限制
 
-- 未做 Apple 公证，`pnpm build:desktop` 产物首次打开需右键 → 打开，或 `xattr -cr /Applications/RepoMeow.app`。
+- 未配置 Apple 凭据时 CI 走 ad-hoc 降级（未公证）：`pnpm build:desktop` 本机构建与发布产物的 bundle 签名都自洽、可启动，但从浏览器下载带 quarantine 的包首次打开需右键 → 打开，或 `xattr -cr /Applications/RepoMeow.app`。彻底消除该提示需要 Developer ID 证书 + 公证，见 [macOS 发布签名与公证](macos-distribution.md)。
 - 上述 7 个 `--skip` 是尚未改写的用例断言；改成平台无关断言后 CI 与本地复跑命令需同步删掉对应行。
 - `pnpm sem:verify` 只比对**文件头架构与三元组**，不校验 SHA-256（那是 `sem:prepare` 的职责），也不判断二进制能否运行。
 
