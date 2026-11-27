@@ -146,7 +146,9 @@ CI 步骤概要（详见 `.github/workflows/release.yml`，四个平台 job 并�
 2. 设置 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""`（规避 Tauri 2.11.4 signer 静默 bug）
 3. 装 Rust stable + 对应 target + cache（按 target 区分缓存键）；Linux job 额外装 WebKitGTK 4.1 / libayatana-appindicator 等 Tauri 系统依赖
 4. `pnpm install --frozen-lockfile` + `pnpm sem:prepare --target <矩阵 target>`（校验 sem sidecar 版本与 SHA-256）
-5. `tauri-action@v0` 用 `secrets.TAURI_SIGNING_PRIVATE_KEY` 签名、按 job 顺序合并生成 `latest.json`、上传各平台产物、创建 **draft** Release。产物名：`RepoMeow_<ver>_x64-setup.exe`、`RepoMeow_<ver>_aarch64.dmg` / `RepoMeow_<ver>_x64.dmg`、`RepoMeow_<ver>_aarch64.app.tar.gz(.sig)` / `RepoMeow_<ver>_x64.app.tar.gz(.sig)`、`repomeow_<ver>_amd64.deb`、`RepoMeow_<ver>_amd64.AppImage(.sig)`
+5. 仅 macOS job：`bash scripts/macos-signing.sh plan` 判定签名模式——`update` Environment 里有 `APPLE_CERTIFICATE` + 公证凭据时走 Developer ID 签名 + 公证，没有则显式写入 `APPLE_SIGNING_IDENTITY=-` 让 tauri 做 ad-hoc 重签（缺这一步产物就只剩 rustc 的 linker-signed 签名，用户会看到「已损坏，无法打开」）。细节见 `docs/macos-distribution.md`
+6. `tauri-action@v0` 用 `secrets.TAURI_SIGNING_PRIVATE_KEY` 签名、按 job 顺序合并生成 `latest.json`、上传各平台产物、创建 **draft** Release。
+7. 仅 macOS job：`bash scripts/macos-signing.sh verify src-tauri/target/release/bundle` 自检 app / 自动更新 tar.gz / dmg 的 bundle 签名（缺 `Contents/_CodeSignature/CodeResources` 或 `codesign --verify --deep --strict` 失败即 job 失败；资产此时已传上 draft，所以转正前必须确认两个 macOS job 都绿）。产物名：`RepoMeow_<ver>_x64-setup.exe`、`RepoMeow_<ver>_aarch64.dmg` / `RepoMeow_<ver>_x64.dmg`、`RepoMeow_<ver>_aarch64.app.tar.gz(.sig)` / `RepoMeow_<ver>_x64.app.tar.gz(.sig)`、`repomeow_<ver>_amd64.deb`、`RepoMeow_<ver>_amd64.AppImage(.sig)`
 
 耗时主要在 Rust release 编译（Windows 约 1–3 分钟；macOS/Linux 冷缓存约 10–25 分钟，命中缓存后明显加快）。`fail-fast: false`，任一平台失败 `gh run watch` 退出非 0、其余平台继续，把失败 job 的日志贴回用户并建议查 `.github/workflows/release.yml` 排错。
 
@@ -155,6 +157,9 @@ CI 步骤概要（详见 `.github/workflows/release.yml`，四个平台 job 并�
 当前 workflow 的 `releaseBody` 只是下载提示，因此必须在 CI 成功完成后，用第 4 步准备的说明替换该占位正文，避免在 CI 运行期间写入而被覆盖。不使用未经筛选的自动生成提交日志作为更新说明。
 
 ```bash
+# 未公证（adhoc 模式）时先追加 macOS 用户处理说明；已签名 + 公证时该命令无输出。
+# 脚本会检查正文文件里是否已有该段落，重跑不会追加两遍。
+bash scripts/macos-signing.sh notes "$NOTES_FILE" >> "$NOTES_FILE"
 gh release edit "v$VERSION" --notes-file "$NOTES_FILE"
 gh release view "v$VERSION" --json body
 node scripts/release/sync-notes.mjs "v$VERSION"
@@ -209,6 +214,7 @@ curl -sL https://github.com/TZDXF/repomeow/releases/latest/download/latest.json 
 | CI 报 "Signing without password." 但没 .sig | Tauri 2.11.4 signer 静默 bug | 已通过强制 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""` 规避；如再现，检查 `.github/workflows/release.yml` 第 37–40 步是否被改掉 |
 | CI 报 "Public key mismatch" | `tauri.conf.json` 里的 pubkey 与新 `TAURI_SIGNING_PRIVATE_KEY` 不匹配 | 中止；让用户确认密钥来源一致后再重发 tag（需先 `git tag -d vX.Y.Z && git push github :refs/tags/vX.Y.Z` 删旧 tag） |
 | `gh run watch` 失败 / `assets` 缺文件 | CI 编译/上传失败 | 中止；贴 CI 日志给用户，按 `release.yml` 排错后重发 tag（先删旧 tag） |
+| CI 报 `::error::` + `缺少 Contents/_CodeSignature/CodeResources` / `签名校验未通过` | `macos-signing.sh plan` 没在 macOS job 里跑（或 `APPLE_SIGNING_IDENTITY=-` 没写进 `$GITHUB_ENV`），bundle 未被重签 | 中止；检查 `release.yml` 的 `Resolve macOS signing mode` 步骤是否被删，见 `docs/macos-distribution.md` |
 | draft 已存在但本机没 tag | 之前发过又删了本地 tag | 中止；`gh release view vX.Y.Z` 看状态，必要时 `gh release delete` |
 
 ## 旧流程：本地打包（仅在 CI 不可用或排查时使用）

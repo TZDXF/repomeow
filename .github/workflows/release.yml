@@ -10,7 +10,9 @@ jobs:
   release:
     # 跨平台矩阵:四个构建目标并行,产物全部上传到同一个 draft Release,
     # tauri-action 汇总各平台签名文件生成 latest.json(updater 端点)。
-    # 未做 Apple 公证:macOS 产物首次打开需右键 → 打开,或 `xattr -cr /Applications/RepoMeow.app`。
+    # macOS 签名/公证见 scripts/macos-signing.sh:凭据齐全走 Developer ID + 公证;
+    # 无凭据时显式降级为 ad-hoc 重签(签名自洽,不再是「已损坏」坏签名),但仍未公证,
+    # 首次打开需右键 → 打开,或 `xattr -cr /Applications/RepoMeow.app`。
     strategy:
       fail-fast: false
       matrix:
@@ -90,6 +92,24 @@ jobs:
       - name: Prepare sem sidecar
         run: pnpm sem:prepare --target ${{ matrix.target }}
 
+      # macOS 产物的签名/公证链路:凭据齐全时走 Developer ID + 公证,缺凭据时显式降级为
+      # ad-hoc 重签(仍然重签 bundle,避免只剩 rustc 的 linker-signed 签名)。判定与导出见
+      # scripts/macos-signing.sh;结果写进 $GITHUB_ENV 供后面的 tauri-action 读取。
+      # 没有 APPLE_CERTIFICATE 时不写 APPLE_SIGNING_IDENTITY,此处显式给 `-`。
+      - name: Resolve macOS signing mode
+        if: matrix.platform == 'macos-latest'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_PROVIDER_SHORT_NAME: ${{ secrets.APPLE_PROVIDER_SHORT_NAME }}
+        run: bash scripts/macos-signing.sh plan
+
       - name: Build and publish release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -104,3 +124,12 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+      # 打包后自检:bundle 签名必须自洽(app、自动更新 tar.gz 内的 app、dmg 都查)。
+      # 本步失败即该 job 失败。注意 tauri-action 已先把资产传上 draft Release,
+      # 因此转正前必须确认两个 macOS job 都是绿的(见 docs/macos-distribution.md)。
+      # 产物路径随 --target 变化:显式给 --target 时 tauri 写到
+      # src-tauri/target/<triple>/release/bundle,不是 target/release/bundle。
+      - name: Verify macOS bundle signatures
+        if: matrix.platform == 'macos-latest'
+        run: bash scripts/macos-signing.sh verify "src-tauri/target/${{ matrix.target }}/release/bundle"
