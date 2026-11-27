@@ -10,10 +10,14 @@ use crate::models::{
 use super::detect::fill_unix_nvm;
 use super::detect::{hidden_on_platform, retain_for_platform, Platform, TOOLS};
 use super::operation::{caps_for, resolve_op, sanitize_version};
+// `parse_shell_path_output` 的可用条件是 `any(target_os = "macos", test)`:本文件只在
+// `#[cfg(test)] mod tests` 里编译,故 lib-test 目标下各平台都有它,导入不挂平台门控
+// (挂 `cfg(unix)` 会让 Windows 的 clippy 报 E0425)。
+use super::process::parse_shell_path_output;
+// `classify_source` 各平台都有,但用它的用例只在 Unix 语义下成立,导入随用例门控,
+// 否则 Windows 上这条 import 无人使用(clippy -D warnings 会拦 unused import)。
 #[cfg(unix)]
 use super::process::classify_source;
-#[cfg(unix)]
-use super::process::parse_shell_path_output;
 use super::update_check::{
     parse_rustup_check, parse_uv_self_update_dry_run, parse_winget_list_row,
 };
@@ -636,7 +640,7 @@ fn fallback_probe_dirs_cover_homebrew_and_version_managers() {
     assert!(super::process::fallback_probe_dirs(None).len() >= 3);
 }
 
-#[cfg(not(windows))]
+#[cfg(unix)]
 #[test]
 fn path_hits_in_requires_executable_file() {
     use std::os::unix::fs::PermissionsExt;
@@ -660,7 +664,7 @@ fn path_hits_in_requires_executable_file() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-#[cfg(not(windows))]
+#[cfg(unix)]
 #[test]
 fn classifies_nvm_fnm_and_volta_install_sources() {
     use std::path::Path;

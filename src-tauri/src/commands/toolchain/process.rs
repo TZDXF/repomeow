@@ -48,15 +48,18 @@ fn probe_command(exe: &Path) -> Command {
 }
 
 /// PATH 上的可执行文件命中(找不到返回空)。
+/// 按 `windows` / `unix` 各给一份实现:两者的候选目录来源完全不同(Tauri 只支持
+/// windows / linux / macos,后两者都是 `unix`,所以这份拆分覆盖全部构建目标),
+/// 比「`not(windows)` 里再套 unix 专用 API」更容易核对条件编译的恒等式——
+/// `is_executable_file` 依赖 `std::os::unix::fs::PermissionsExt`,只能是 `unix`。
+#[cfg(windows)]
 pub(super) fn cli_hits_on_path(cli: &str) -> Vec<PathBuf> {
-    #[cfg(windows)]
-    {
-        where_hits(cli)
-    }
-    #[cfg(not(windows))]
-    {
-        path_hits_in(cli, &probe_search_dirs())
-    }
+    where_hits(cli)
+}
+
+#[cfg(unix)]
+pub(super) fn cli_hits_on_path(cli: &str) -> Vec<PathBuf> {
+    path_hits_in(cli, &probe_search_dirs())
 }
 
 /// Windows:where.exe 继承的 PATH 已由 windows_env 从注册表刷新。
@@ -77,7 +80,7 @@ fn where_hits(cli: &str) -> Vec<PathBuf> {
 
 /// Unix:直接扫候选目录,不依赖 `which`(GUI 进程的最小 PATH 里未必有它,
 /// 而且这里需要可测的纯路径匹配)。
-#[cfg(not(windows))]
+#[cfg(unix)]
 pub(super) fn path_hits_in(cli: &str, dirs: &[PathBuf]) -> Vec<PathBuf> {
     dirs.iter()
         .map(|dir| dir.join(cli))
@@ -85,9 +88,10 @@ pub(super) fn path_hits_in(cli: &str, dirs: &[PathBuf]) -> Vec<PathBuf> {
         .collect()
 }
 
-#[cfg(not(windows))]
+#[cfg(unix)]
 fn is_executable_file(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
+    // metadata() 跟随符号链接:nvm/volta/fnm 的 bin 常是 symlink,不能按目录项本身判断
     path.metadata()
         .map(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
         .unwrap_or(false)
@@ -128,7 +132,7 @@ fn probe_search_dirs() -> Vec<PathBuf> {
 }
 
 /// 把若干个 PATH 值按先后展开成目录列表,空段丢弃,重复目录只留首次出现。
-#[cfg(not(windows))]
+#[cfg(unix)]
 pub(super) fn merge_path_values(values: &[String]) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
     for value in values {
