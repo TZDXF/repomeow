@@ -616,14 +616,28 @@ fn merges_path_values_without_duplicate_or_empty_entries() {
 #[cfg(target_os = "macos")]
 #[test]
 fn fallback_probe_dirs_cover_homebrew_and_version_managers() {
-    let home = std::path::Path::new("/Users/dev");
-    let dirs = super::process::fallback_probe_dirs(Some(home));
+    // 临时 HOME:只有真实存在的目录才会进兜底列表,故先造出各管理器的 bin 目录
+    let home = std::env::temp_dir().join(format!("repomeow-fallback-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    for sub in [
+        ".cargo/bin",
+        ".local/bin",
+        ".volta/bin",
+        ".fnm/aliases/default/bin",
+        ".nvm/versions/node/v20.11.1/bin",
+        ".nvm/versions/node/v22.11.0/bin",
+    ] {
+        std::fs::create_dir_all(home.join(sub)).unwrap();
+    }
+    std::fs::create_dir_all(home.join(".nvm").join("alias")).unwrap();
+    std::fs::write(home.join(".nvm").join("alias").join("default"), "20\n").unwrap();
+
+    let dirs = super::process::fallback_probe_dirs(Some(&home));
     for expected in [
         std::path::PathBuf::from("/opt/homebrew/bin"),
         std::path::PathBuf::from("/usr/local/bin"),
         home.join(".cargo").join("bin"),
         home.join(".local").join("bin"),
-        home.join(".nvm").join("current").join("bin"),
         home.join(".volta").join("bin"),
         home.join(".fnm")
             .join("aliases")
@@ -636,8 +650,29 @@ fn fallback_probe_dirs_cover_homebrew_and_version_managers() {
             expected.display()
         );
     }
-    // 没有 HOME 时只保留系统级目录,不 panic
-    assert!(super::process::fallback_probe_dirs(None).len() >= 3);
+    // nvm 按 alias/default 指定的版本优先,其余版本按版本号从高到低;不再依赖恒空的 ~/.nvm/current
+    let nvm_dirs: Vec<_> = dirs
+        .iter()
+        .filter(|dir| dir.to_string_lossy().contains(".nvm/versions/node"))
+        .collect();
+    assert_eq!(
+        nvm_dirs,
+        vec![
+            &home.join(".nvm/versions/node/v20.11.1/bin"),
+            &home.join(".nvm/versions/node/v22.11.0/bin"),
+        ],
+        "nvm 兜底目录顺序或内容不符"
+    );
+    for dir in &dirs {
+        assert!(dir.is_dir(), "兜底目录不存在: {}", dir.display());
+    }
+    assert!(!dirs.contains(&home.join(".nvm").join("current").join("bin")));
+
+    // 没有 HOME 时只保留存在的系统级目录,不 panic
+    for dir in super::process::fallback_probe_dirs(None) {
+        assert!(dir.is_dir(), "兜底目录不存在: {}", dir.display());
+    }
+    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[cfg(unix)]
@@ -770,4 +805,205 @@ fn fake_statuses(entries: &[(&str, bool)]) -> Vec<ToolchainStatus> {
             },
         })
         .collect()
+}
+
+// ---- TZD-157 复审 P1/P2:探针有界性与伪值拒绝 ─────────────────────────────
+
+#[cfg(target_os = "macos")]
+#[test]
+fn shell_probe_is_bounded_when_rc_leaves_background_grandchildren() {
+    use std::time::{Duration, Instant};
+
+    // 复现质量工程师的 P1-1:rc 里留后台子孙进程,曾让读管道阶段无限等待
+    let home = std::env::temp_dir().join(format!("repomeow-probe-bg-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(home.join(".zshrc"), "( sleep 30 ) &\n").unwrap();
+    let started = Instant::now();
+    let path = super::process::probe_login_shell_path_with_timeout(
+        std::path::Path::new("/bin/zsh"),
+        &[("ZDOTDIR", home.to_str().unwrap())],
+        Duration::from_secs(2),
+    );
+    let elapsed = started.elapsed();
+    let _ = std::fs::remove_dir_all(&home);
+    // 探针把 PATH 写进文件、stdout/stderr 丢弃,没有管道可等:正常在秒级返回
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "登录 shell 探针被后台子孙拖住: {:?}",
+        elapsed
+    );
+    // 真实 PATH 拿到时至少要有 /usr/bin 这类目录;拿不到则必须是明确的失败
+    if let Some(path) = path {
+        assert!(path.contains("/usr/bin"), "探针结果非真实 PATH: {path}");
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn shell_probe_ignores_stderr_echo_under_set_x() {
+    use std::time::Duration;
+
+    // P1-2:rc 里的 `set -x` 把 printf 命令回显到 stderr。旧实现把 stderr 拼进解析
+    // 输入后 rfind 命中回显里的 `%s`,解析出伪值并抑制兜底目录;现在只认探针自己写的文件。
+    let home = std::env::temp_dir().join(format!("repomeow-probe-x-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(home.join(".zshrc"), "set -x\n").unwrap();
+    let path = super::process::probe_login_shell_path_with_timeout(
+        std::path::Path::new("/bin/zsh"),
+        &[("ZDOTDIR", home.to_str().unwrap())],
+        Duration::from_secs(5),
+    );
+    let _ = std::fs::remove_dir_all(&home);
+    let path = path.expect("set -x 下仍应拿到真实 PATH(文件里只有 printf 的结果)");
+    assert!(!path.contains("%s"), "set -x 回显污染进了 PATH: {path}");
+    assert!(!path.contains("REPOMEOW_PATH"), "标记残留进了 PATH: {path}");
+    assert!(path.contains("/usr/bin"), "PATH 不完整: {path}");
+}
+
+#[test]
+fn rejects_fish_style_list_and_space_joined_paths() {
+    // fish 的 $PATH 是列表:两种可能的形态都必须是「判失败」,不能给出伪值
+    // 形态一:列表按元素展开,每行一个目录(新实现用 printf '%s\n' $PATH 后拼接,这是有效值)
+    assert_eq!(
+        super::process::shell_path_from_file("/opt/homebrew/bin\n/usr/bin\n/bin\n", true)
+            .as_deref(),
+        Some("/opt/homebrew/bin:/usr/bin:/bin")
+    );
+    // 形态一之误用:仍用 "$PATH" 逐元素打印,产生多组标记串联 → 判失败
+    assert_eq!(
+        super::process::shell_path_from_file(
+            "REPOMEOW_PATH_BEGIN:/usr/bin:REPOMEOW_PATH_END\n\
+             REPOMEOW_PATH_BEGIN:/opt/homebrew/bin:REPOMEOW_PATH_END\n",
+            false
+        ),
+        None
+    );
+    // 形态二:列表按空格粘连成一个含空格的伪目录 → 判失败(交给兜底目录)
+    assert_eq!(
+        super::process::shell_path_from_file(
+            "REPOMEOW_PATH_BEGIN:/opt/homebrew/bin /usr/bin /bin:REPOMEOW_PATH_END",
+            false
+        ),
+        None
+    );
+    assert!(!super::process::is_valid_shell_path(
+        "/opt/homebrew/bin /usr/bin /bin"
+    ));
+}
+
+#[test]
+fn rejects_pseudo_paths_from_echo_and_relative_entries() {
+    // 回显里的 `%s` 伪值:含格式串 → 判失败
+    assert!(!super::process::is_valid_shell_path("%s"));
+    // 文件里出现多组标记(列表被逐元素展开 / 回显重复)一律判失败,不取其中任意一段
+    assert_eq!(
+        super::process::parse_shell_path_output(
+            "REPOMEOW_PATH_BEGIN:/usr/bin:REPOMEOW_PATH_END\n\
+             +printf 'REPOMEOW_PATH_BEGIN:%s:REPOMEOW_PATH_END' ...\n"
+        ),
+        None
+    );
+    assert_eq!(
+        super::process::parse_shell_path_output(
+            "REPOMEOW_PATH_BEGIN:/usr/bin:REPOMEOW_PATH_END\n\
+             REPOMEOW_PATH_BEGIN:/opt/homebrew/bin:REPOMEOW_PATH_END\n"
+        ),
+        None
+    );
+    // 相对路径不是合法 PATH 段
+    assert!(!super::process::is_valid_shell_path("bin:/usr/bin"));
+    // 空值与只有分隔符
+    assert!(!super::process::is_valid_shell_path(""));
+    assert!(!super::process::is_valid_shell_path("::"));
+    // 真实存在的目录才认
+    assert!(super::process::is_valid_shell_path("/usr/bin:/bin"));
+}
+
+#[cfg(unix)]
+#[test]
+fn tool_probe_is_bounded_when_child_leaves_pipe_holding_grandchild() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::{Duration, Instant};
+
+    // 工具自己起后台子孙并立即退出:旧实现会在 wait_with_output 里等管道 EOF
+    let dir = std::env::temp_dir().join(format!("repomeow-probe-tool-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("slow-tool");
+    std::fs::write(&script, "#!/bin/sh\n( sleep 30 ) &\necho 1.0.0\n").unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let started = Instant::now();
+    let result = super::process::run_with_timeout_in(&script, &[], Duration::from_secs(2));
+    let elapsed = started.elapsed();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        elapsed < Duration::from_secs(6),
+        "工具探测被后台子孙拖住: {:?}",
+        elapsed
+    );
+    // 管道被孙进程持有 → 超时后整组 kill,返回 None(调用方按「探测失败」处理)
+    assert!(result.is_none() || result.as_ref().is_some_and(|(ok, _)| *ok));
+}
+
+#[cfg(unix)]
+#[test]
+fn run_with_timeout_still_reports_normal_tool_output() {
+    use std::time::Duration;
+    // 常规路径不能因为改成进程组 + 伴生线程读取而丢输出
+    let (ok, output) = super::process::run_with_timeout_in(
+        std::path::Path::new("/bin/sh"),
+        &["-c", "echo 2.44.0; echo warn >&2"],
+        Duration::from_secs(3),
+    )
+    .expect("普通子进程应正常返回");
+    assert!(ok);
+    assert!(output.contains("2.44.0"), "丢失 stdout: {output}");
+    assert!(output.contains("warn"), "丢失 stderr: {output}");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn fish_branch_joins_list_path_from_probe_file() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // 本机不必装 fish:用一个名为 fish 的 stub 复现「$PATH 是列表」的写文件行为
+    let dir = std::env::temp_dir().join(format!("repomeow-fish-stub-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stub = dir.join("fish");
+    std::fs::write(
+        &stub,
+        "#!/bin/sh\nprintf '%s\\n' /opt/homebrew/bin /usr/bin /bin > \"$REPOMEOW_PATH_PROBE_FILE\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let path = super::process::probe_login_shell_path(&stub, &[]);
+    let _ = std::fs::remove_dir_all(&dir);
+    // 列表形态拼回成冒号分隔的 PATH,且通过形态校验(不是伪值)
+    assert_eq!(
+        path.as_deref(),
+        Some("/opt/homebrew/bin:/usr/bin:/bin"),
+        "fish 分支未把列表拼回 PATH"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn fish_branch_without_writing_file_falls_back_to_none() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // shell 什么都没写(等价于 fish 报错 / 命令失败)→ 必须明确判失败,走兜底目录
+    let dir = std::env::temp_dir().join(format!("repomeow-fish-fail-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stub = dir.join("fish");
+    std::fs::write(&stub, "#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let path = super::process::probe_login_shell_path(&stub, &[]);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(path, None, "空探针结果必须判失败");
 }
