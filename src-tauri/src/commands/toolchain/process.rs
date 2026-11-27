@@ -272,13 +272,16 @@ pub(super) fn parse_shell_path_output(output: &str) -> Option<String> {
 #[cfg(any(target_os = "macos", test))]
 pub(super) fn shell_path_from_file(content: &str, list_form: bool) -> Option<String> {
     let raw = if list_form {
-        let joined = content
+        // 用平台 PATH 分隔符拼回(Unix 是 `:`,Windows 是 `;`),不写死冒号
+        let lines: Vec<&str> = content
             .lines()
             .map(str::trim)
             .filter(|line| !line.is_empty())
-            .collect::<Vec<_>>()
-            .join(":");
-        joined
+            .collect();
+        std::env::join_paths(lines)
+            .ok()?
+            .to_string_lossy()
+            .into_owned()
     } else {
         parse_shell_path_output(content)?
     };

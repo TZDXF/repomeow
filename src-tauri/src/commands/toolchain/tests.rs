@@ -864,12 +864,21 @@ fn shell_probe_ignores_stderr_echo_under_set_x() {
 
 #[test]
 fn rejects_fish_style_list_and_space_joined_paths() {
+    // 用真实存在的临时目录做「有效路径」样本,断言不依赖 macOS 专有路径
+    // (CI 的 Windows job 上 `/usr/bin` 不存在,那里的「有效」只能是本机真实目录)
+    let real = std::env::temp_dir();
+    let real_text = real.to_string_lossy().into_owned();
+    let joined = std::env::join_paths([real.as_path(), real.as_path()])
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+
     // fish 的 $PATH 是列表:两种可能的形态都必须是「判失败」,不能给出伪值
     // 形态一:列表按元素展开,每行一个目录(新实现用 printf '%s\n' $PATH 后拼接,这是有效值)
     assert_eq!(
-        super::process::shell_path_from_file("/opt/homebrew/bin\n/usr/bin\n/bin\n", true)
+        super::process::shell_path_from_file(&format!("{real_text}\n{real_text}\n"), true)
             .as_deref(),
-        Some("/opt/homebrew/bin:/usr/bin:/bin")
+        Some(joined.as_str())
     );
     // 形态一之误用:仍用 "$PATH" 逐元素打印,产生多组标记串联 → 判失败
     assert_eq!(
@@ -917,8 +926,14 @@ fn rejects_pseudo_paths_from_echo_and_relative_entries() {
     // 空值与只有分隔符
     assert!(!super::process::is_valid_shell_path(""));
     assert!(!super::process::is_valid_shell_path("::"));
-    // 真实存在的目录才认
-    assert!(super::process::is_valid_shell_path("/usr/bin:/bin"));
+    // 绝对路径但不存在的目录不算有效(兜底目录才是给这种情形的)
+    assert!(!super::process::is_valid_shell_path(
+        "/repomeow-no-such-dir"
+    ));
+    // 真实存在的目录才认(与平台无关地用系统临时目录)
+    let real = std::env::temp_dir();
+    let real_text = real.to_string_lossy().into_owned();
+    assert!(super::process::is_valid_shell_path(&real_text));
 }
 
 #[cfg(unix)]
