@@ -23,7 +23,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset", "tray-icon", "image-png", "devtools"] }
+# tauri 2.12 起依赖 tray-icon 0.25:macOS 27 上托盘左键不再被 NSStatusItem 上长期挂着的
+# NSMenu 吞掉(tray-icon 0.24 的行为),这是「单击展示列表」在 macOS 生效的前提。
+tauri = { version = "2.12", features = ["protocol-asset", "tray-icon", "image-png", "devtools"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"
@@ -99,6 +101,12 @@ portable-pty = "0.9.0"
 [dev-dependencies]
 urlpattern = "0.6"
 url = "2"
+
+# 托盘双击判定要读系统双击间隔(macOS 托盘后端不派发 DoubleClick 事件),
+# NSEvent::doubleClickInterval 需要该 crate 的 NSEvent feature;
+# tauri 自身已按 macos 目标引入同版本 objc2-app-kit,这里不额外增加编译产物。
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSEvent"] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"

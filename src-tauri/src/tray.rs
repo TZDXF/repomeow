@@ -24,16 +24,108 @@ const POPUP_HEIGHT: f64 = 480.0;
 /// 弹窗与托盘图标/屏幕边缘的间距(px)
 const POPUP_MARGIN: f64 = 12.0;
 /// 单击响应延迟:双击事件总是先于第二击的 DoubleClick 到达两次 Click,
-/// 延迟等待以区分单击/双击,避免双击时弹窗闪现
+/// 延迟等待以区分单击/双击,避免双击时弹窗闪现。Windows 由系统派发 DoubleClick,
+/// 固定 300ms 即可;macOS 没有 DoubleClick 事件,延迟取系统双击间隔(见 click_delay)
+#[cfg(not(target_os = "macos"))]
 const CLICK_DELAY: Duration = Duration::from_millis(300);
+/// 读不到系统双击间隔时的兜底值(macOS 默认 0.5s)
+#[cfg(target_os = "macos")]
+const DOUBLE_CLICK_FALLBACK: Duration = Duration::from_millis(500);
 
 /// 单击代际计数:每次单击/双击 +1,延迟任务仅在自己仍是最后一代时才执行
 static CLICK_GENERATION: AtomicU64 = AtomicU64::new(0);
-/// 最近一次双击的时间戳(ms,UNIX epoch):双击后系统还会补发一次 Click(Up),
-/// 用它来丢弃这次尾随单击,避免双击时弹窗被重新打开
+/// 最近一次双击的时间戳(ms,UNIX epoch):Windows 派发 DoubleClick 后系统还会补发
+/// 一次 Click(Up),macOS 自行判定双击后同样会有尾随单击;两处都用它丢弃尾巴
 static LAST_DOUBLE_CLICK_MS: AtomicU64 = AtomicU64::new(0);
 /// 双击后忽略尾随单击的时间窗口
 const DOUBLE_CLICK_SUPPRESS: Duration = Duration::from_millis(500);
+/// 最近一次单击的时间戳(ms,UNIX epoch):macOS 托盘后端不派发 DoubleClick,
+/// 只能靠两次 Click 的间隔判定双击;0 表示没有可配对的单击
+#[cfg(target_os = "macos")]
+static LAST_CLICK_MS: AtomicU64 = AtomicU64::new(0);
+
+/// 上一次可配对的单击时间戳,0 表示没有。
+/// 只有 macOS 需要自行配对(Windows 由系统派发 DoubleClick),其他平台恒为 0,
+/// 使 Windows 的单击/双击分支与改动前完全一致。
+fn pairable_click_ms() -> u64 {
+    #[cfg(target_os = "macos")]
+    {
+        LAST_CLICK_MS.load(Ordering::SeqCst)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        0
+    }
+}
+
+/// 记录/清除可配对的单击时间戳(macOS 专用状态,其他平台为空操作)。
+fn set_pairable_click_ms(value: u64) {
+    #[cfg(target_os = "macos")]
+    {
+        LAST_CLICK_MS.store(value, Ordering::SeqCst);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = value;
+    }
+}
+
+/// 本次左键单击(Click Up)的归类。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LeftClickKind {
+    /// 普通单击:延迟后切换迷你弹窗
+    Single,
+    /// 双击:打开主窗口(仅 macOS 需要自己配对判定)
+    Double,
+    /// 双击后的尾随单击(Windows 的 Click(Up) 尾巴、macOS 双击后的补发):直接丢弃
+    Trailing,
+}
+
+/// 归类一次左键 Click(Up)。
+///
+/// - 双击窗口内的尾随单击先于一切判定被丢弃,避免双击后弹窗又被重新打开;
+/// - `last_click_ms` 为上一次可配对的单击时间戳(0 表示没有),macOS 用它把两次
+///   Click(Up) 配成双击;Windows 由系统派发 DoubleClick,这里恒传 0,
+///   因此 Windows 的分支行为保持原样(单击延迟切换、双击直接开主窗口)。
+fn classify_left_click(
+    now_ms: u64,
+    last_click_ms: u64,
+    last_double_click_ms: u64,
+    double_click_window: Duration,
+) -> LeftClickKind {
+    if now_ms.saturating_sub(last_double_click_ms) < DOUBLE_CLICK_SUPPRESS.as_millis() as u64 {
+        return LeftClickKind::Trailing;
+    }
+    if last_click_ms != 0
+        && now_ms.saturating_sub(last_click_ms) <= double_click_window.as_millis() as u64
+    {
+        return LeftClickKind::Double;
+    }
+    LeftClickKind::Single
+}
+
+/// 单击延迟:必须不短于双击配对窗口,否则第一击的弹窗会在第二击判定双击前就闪出来。
+fn click_delay() -> Duration {
+    #[cfg(target_os = "macos")]
+    {
+        double_click_window()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        CLICK_DELAY
+    }
+}
+
+/// 系统双击间隔(可被用户在「系统设置 → 鼠标/触控板」调整)。
+#[cfg(target_os = "macos")]
+fn double_click_window() -> Duration {
+    let secs = objc2_app_kit::NSEvent::doubleClickInterval();
+    if secs > 0.0 && secs.is_finite() {
+        Duration::from_secs_f64(secs)
+    } else {
+        DOUBLE_CLICK_FALLBACK
+    }
+}
 
 /// 弹窗最近一次显示完成的时间戳(ms,UNIX epoch)
 static LAST_POPUP_SHOWN_MS: AtomicU64 = AtomicU64::new(0);
@@ -161,21 +253,40 @@ pub(crate) fn setup(app: &App) -> tauri::Result<()> {
                             bottom: position.y,
                         }
                     };
-                    // 双击尾巴上的 Click(Up):直接忽略,不再排入延迟任务
-                    let since_double =
-                        now_millis().saturating_sub(LAST_DOUBLE_CLICK_MS.load(Ordering::SeqCst));
-                    if since_double < DOUBLE_CLICK_SUPPRESS.as_millis() as u64 {
-                        return;
-                    }
-                    // 延迟触发:若随后到来双击则该代作废,弹窗不会闪现
-                    let generation = CLICK_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
-                    let app = app.clone();
-                    std::thread::spawn(move || {
-                        std::thread::sleep(CLICK_DELAY);
-                        if CLICK_GENERATION.load(Ordering::SeqCst) == generation {
-                            toggle_popup(&app, anchor);
+                    let now = now_millis();
+                    let kind = classify_left_click(
+                        now,
+                        pairable_click_ms(),
+                        LAST_DOUBLE_CLICK_MS.load(Ordering::SeqCst),
+                        click_delay(),
+                    );
+                    match kind {
+                        // 双击尾巴上的 Click(Up):直接忽略,不再排入延迟任务
+                        LeftClickKind::Trailing => {}
+                        LeftClickKind::Double => {
+                            // 作废待处理的单击任务并记录双击时间(抑制随后的尾随 Click),
+                            // 直接打开主窗口
+                            set_pairable_click_ms(0);
+                            CLICK_GENERATION.fetch_add(1, Ordering::SeqCst);
+                            LAST_DOUBLE_CLICK_MS.store(now, Ordering::SeqCst);
+                            show_main_window(app, None);
                         }
-                    });
+                        LeftClickKind::Single => {
+                            set_pairable_click_ms(now);
+                            // 延迟触发:若随后到来双击则该代作废,弹窗不会闪现
+                            let generation = CLICK_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+                            let app = app.clone();
+                            let delay = click_delay();
+                            std::thread::spawn(move || {
+                                std::thread::sleep(delay);
+                                if CLICK_GENERATION.load(Ordering::SeqCst) == generation {
+                                    // 弹窗已按这一击的结果处理,配对状态作废
+                                    set_pairable_click_ms(0);
+                                    toggle_popup(&app, anchor);
+                                }
+                            });
+                        }
+                    }
                 }
                 TrayIconEvent::DoubleClick {
                     button: MouseButton::Left,
@@ -310,4 +421,102 @@ fn show_popup(app: &AppHandle, anchor: IconRect) {
     LAST_POPUP_SHOWN_MS.store(now_millis(), Ordering::SeqCst);
     // 通知弹窗刷新项目列表(主窗口的数据变更不会同步到弹窗的独立 Pinia 实例)
     let _ = window.emit("tray-popup://refresh", ());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Windows 与 macOS 的双击配对窗口都按同一份 500ms 语义断言(避免用系统设置值,
+    /// 该值随用户偏好变化)
+    const PICK_WINDOW: Duration = Duration::from_millis(300);
+
+    #[test]
+    fn classify_left_click_marks_first_click_as_single() {
+        assert_eq!(
+            classify_left_click(10_000, 0, 0, PICK_WINDOW),
+            LeftClickKind::Single
+        );
+    }
+
+    #[test]
+    fn classify_left_click_pairs_click_inside_window_as_double() {
+        // 间隔 120ms < 300ms 的双击配对窗口
+        assert_eq!(
+            classify_left_click(10_120, 10_000, 0, PICK_WINDOW),
+            LeftClickKind::Double
+        );
+        // 恰好等于窗口也按双击处理(系统把边界算在同一击)
+        assert_eq!(
+            classify_left_click(10_300, 10_000, 0, PICK_WINDOW),
+            LeftClickKind::Double
+        );
+    }
+
+    #[test]
+    fn classify_left_click_treats_slow_second_click_as_single() {
+        // 间隔 301ms > 窗口:两次独立单击,弹窗先收再开
+        assert_eq!(
+            classify_left_click(10_301, 10_000, 0, PICK_WINDOW),
+            LeftClickKind::Single
+        );
+    }
+
+    #[test]
+    fn classify_left_click_drops_trailing_click_after_double() {
+        // 双击后 500ms 内系统补发的 Click(Up) 一律丢弃,避免弹窗被重新打开
+        assert_eq!(
+            classify_left_click(10_100, 10_050, 10_000, PICK_WINDOW),
+            LeftClickKind::Trailing
+        );
+        // 尾随单击优先于双击配对:即使上一次单击也在窗口内,仍按尾巴丢弃
+        assert_eq!(
+            classify_left_click(10_200, 10_150, 10_000, PICK_WINDOW),
+            LeftClickKind::Trailing
+        );
+    }
+
+    #[test]
+    fn classify_left_click_accepts_click_after_double_window() {
+        // 超过 500ms 抑制窗口的单击恢复正常,不因历史双击而永久吞掉点击
+        assert_eq!(
+            classify_left_click(10_600, 0, 10_000, PICK_WINDOW),
+            LeftClickKind::Single
+        );
+    }
+
+    /// Windows 由系统派发 DoubleClick,事件回调恒传 last_click_ms = 0:
+    /// 无论间隔多短,都不会被判成 Double,分支行为与改动前一致
+    #[test]
+    fn classify_left_click_never_pairs_without_previous_click() {
+        assert_eq!(
+            classify_left_click(10_000, 0, 0, Duration::from_secs(10)),
+            LeftClickKind::Single
+        );
+        assert_eq!(
+            classify_left_click(10_001, 0, 0, Duration::from_secs(10)),
+            LeftClickKind::Single
+        );
+    }
+
+    /// macOS 的单击延迟取自系统双击间隔,必须是可用的正值(用户可调,但不会为 0/NaN)
+    #[test]
+    fn click_delay_is_usable() {
+        let delay = click_delay();
+        assert!(
+            delay >= Duration::from_millis(50),
+            "延迟过短会闪出弹窗: {delay:?}"
+        );
+        assert!(
+            delay <= Duration::from_secs(3),
+            "延迟过长会让单击明显迟钝: {delay:?}"
+        );
+    }
+
+    #[test]
+    fn trailing_suppression_window_matches_constant() {
+        assert_eq!(DOUBLE_CLICK_SUPPRESS, Duration::from_millis(500));
+        // 抑制窗口必须不短于双击配对窗口,否则双击尾巴会漏成一次单击
+        assert!(DOUBLE_CLICK_SUPPRESS >= PICK_WINDOW);
+    }
 }
