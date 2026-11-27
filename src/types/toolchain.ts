@@ -28,13 +28,13 @@ export interface ToolchainCaps {
 
 /** 单个工具链工具的检测结果(detect_toolchains) */
 export interface ToolchainStatus {
-  /** CLI 名(rustup / rustc / cargo / uv / nvm / fnm / vp / dotnet / go / git / gh) */
+  /** CLI 名(rustup / rustc / cargo / uv / node / nvm / fnm / vp / dotnet / go / git / gh) */
   id: string;
   kind: ToolchainKind;
   found: boolean;
   version: string | null;
   path: string | null;
-  /** 安装来源:"winget" / "rustup" / "brew" / "standalone" */
+  /** 安装来源:"winget" / "rustup" / "brew" / "nvm" / "fnm" / "volta" / "standalone" */
   source: string | null;
   versions: ToolchainVersion[];
   /** gh:当前登录用户名(gh auth status 解析;未登录为 null) */

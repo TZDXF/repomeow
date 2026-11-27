@@ -2,13 +2,18 @@ use std::collections::HashSet;
 
 use crate::error::ErrorCode;
 use crate::models::{
-    ToolchainCaps, ToolchainRemoteVersion, ToolchainUpdateState, ToolchainVersion,
+    ToolchainCaps, ToolchainKind, ToolchainRemoteVersion, ToolchainStatus, ToolchainUpdateState,
+    ToolchainVersion,
 };
 
 #[cfg(not(windows))]
 use super::detect::fill_unix_nvm;
-use super::detect::TOOLS;
+use super::detect::{hidden_on_platform, retain_for_platform, Platform, TOOLS};
 use super::operation::{caps_for, resolve_op, sanitize_version};
+#[cfg(unix)]
+use super::process::classify_source;
+#[cfg(unix)]
+use super::process::parse_shell_path_output;
 use super::update_check::{
     parse_rustup_check, parse_uv_self_update_dry_run, parse_winget_list_row,
 };
@@ -552,4 +557,213 @@ fn parses_uv_self_update_dry_run() {
         parse_uv_self_update_dry_run("error: network unreachable"),
         (ToolchainUpdateState::Unknown, None)
     );
+}
+
+// ---- TZD-157:macOS 登录 shell PATH 与平台过滤 ────────────────────────────
+
+#[test]
+fn parses_login_shell_path_output() {
+    // 真实 zsh -ilc 输出:前面可能有 motd / 插件输出,只在标记之间取值
+    assert_eq!(
+        parse_shell_path_output(
+            "Last login: Thu Nov 27\n\
+             REPOMEOW_PATH_BEGIN:/opt/homebrew/bin:/usr/bin:/bin:REPOMEOW_PATH_END"
+        )
+        .as_deref(),
+        Some("/opt/homebrew/bin:/usr/bin:/bin")
+    );
+    // 作业控制告警与 PATH 值无关,不影响解析
+    assert_eq!(
+        parse_shell_path_output(
+            "zsh: no job control in this shell\n\
+             REPOMEOW_PATH_BEGIN:/usr/local/bin:/usr/bin:REPOMEOW_PATH_END\n"
+        )
+        .as_deref(),
+        Some("/usr/local/bin:/usr/bin")
+    );
+    // 标记缺失(shell 报错/被 rc 文件覆盖):回退到兜底逻辑
+    assert_eq!(parse_shell_path_output("/usr/bin:/bin"), None);
+    assert_eq!(parse_shell_path_output(""), None);
+    // 空 PATH 不当地址有效值,直接判定失败
+    assert_eq!(
+        parse_shell_path_output("REPOMEOW_PATH_BEGIN:  :REPOMEOW_PATH_END"),
+        None
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn merges_path_values_without_duplicate_or_empty_entries() {
+    let merged = super::process::merge_path_values(&[
+        "/opt/homebrew/bin:/usr/bin::/usr/bin".to_string(),
+        "/usr/bin:/bin".to_string(),
+    ]);
+    assert_eq!(
+        merged,
+        vec![
+            std::path::PathBuf::from("/opt/homebrew/bin"),
+            std::path::PathBuf::from("/usr/bin"),
+            std::path::PathBuf::from("/bin"),
+        ]
+    );
+    assert!(super::process::merge_path_values(&[]).is_empty());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn fallback_probe_dirs_cover_homebrew_and_version_managers() {
+    let home = std::path::Path::new("/Users/dev");
+    let dirs = super::process::fallback_probe_dirs(Some(home));
+    for expected in [
+        std::path::PathBuf::from("/opt/homebrew/bin"),
+        std::path::PathBuf::from("/usr/local/bin"),
+        home.join(".cargo").join("bin"),
+        home.join(".local").join("bin"),
+        home.join(".nvm").join("current").join("bin"),
+        home.join(".volta").join("bin"),
+        home.join(".fnm")
+            .join("aliases")
+            .join("default")
+            .join("bin"),
+    ] {
+        assert!(
+            dirs.contains(&expected),
+            "缺少兜底目录 {}",
+            expected.display()
+        );
+    }
+    // 没有 HOME 时只保留系统级目录,不 panic
+    assert!(super::process::fallback_probe_dirs(None).len() >= 3);
+}
+
+#[cfg(not(windows))]
+#[test]
+fn path_hits_in_requires_executable_file() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = std::env::temp_dir().join(format!("repomeow-path-hits-{}", std::process::id()));
+    let bin = dir.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let executable = bin.join("mytool");
+    std::fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // 无执行位的文件与目录同名命中都不算
+    let plain = bin.join("notool");
+    std::fs::write(&plain, "").unwrap();
+    std::fs::create_dir_all(bin.join("dirtool")).unwrap();
+
+    let hits = super::process::path_hits_in("mytool", std::slice::from_ref(&bin));
+    assert_eq!(hits, vec![executable]);
+    assert!(super::process::path_hits_in("notool", std::slice::from_ref(&bin)).is_empty());
+    assert!(super::process::path_hits_in("dirtool", std::slice::from_ref(&bin)).is_empty());
+    assert!(super::process::path_hits_in("ghost", std::slice::from_ref(&bin)).is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[cfg(not(windows))]
+#[test]
+fn classifies_nvm_fnm_and_volta_install_sources() {
+    use std::path::Path;
+    for (path, expected) in [
+        ("/Users/dev/.nvm/versions/node/v22.11.0/bin/node", "nvm"),
+        ("/Users/dev/.fnm/node-versions/v22.11.0/bin/node", "fnm"),
+        (
+            "/Users/dev/Library/Application Support/fnm_multishells/1_18/bin/node",
+            "fnm",
+        ),
+        ("/Users/dev/.volta/bin/node", "volta"),
+        ("/opt/homebrew/bin/node", "brew"),
+        ("/Users/dev/.cargo/bin/cargo", "rustup"),
+        ("/usr/bin/git", "standalone"),
+    ] {
+        assert_eq!(classify_source(Path::new(path)), expected, "{path}");
+    }
+}
+
+#[test]
+fn node_is_a_detection_item_without_operations() {
+    // Node 作为独立检测项(此前只有 nvm/fnm/vp 侧面体现,brew 版 node 无从检测)
+    let node = TOOLS
+        .iter()
+        .find(|spec| spec.id == "node")
+        .expect("TOOLS 缺少 node 检测项");
+    assert_eq!(node.kind, ToolchainKind::Node);
+    // node 不做装/卸:版本管理交给 nvm / fnm / vp,node::resolve 无 node 分支
+    let caps = caps_for("node", true, Some("brew"), true);
+    assert!(!caps.can_install && !caps.can_update && !caps.can_uninstall);
+    assert!(!caps.can_switch && !caps.can_list_remote);
+    assert_eq!(extract_semver("v26.13.1").as_deref(), Some("26.13.1"));
+    assert_eq!(extract_semver("v22.11.0\n").as_deref(), Some("22.11.0"));
+    for op in ["install", "update", "uninstall", "use"] {
+        assert!(
+            resolve_op("node", op, Some("22"), Some("brew")).is_err(),
+            "node 不应支持 {op}"
+        );
+    }
+}
+
+#[test]
+fn macos_hides_uninstalled_dotnet_and_powershell() {
+    // 未安装:macOS 整条不展示,macOS 已安装/其他平台保留
+    assert!(hidden_on_platform(Platform::Macos, "dotnet", false));
+    assert!(hidden_on_platform(Platform::Macos, "pwsh", false));
+    assert!(!hidden_on_platform(Platform::Macos, "dotnet", true));
+    assert!(!hidden_on_platform(Platform::Macos, "pwsh", true));
+    assert!(!hidden_on_platform(Platform::Windows, "dotnet", false));
+    assert!(!hidden_on_platform(Platform::Windows, "pwsh", false));
+    assert!(!hidden_on_platform(Platform::Linux, "dotnet", false));
+    assert!(!hidden_on_platform(Platform::Linux, "pwsh", false));
+    // 其余工具在任何平台都不裁剪
+    for id in ["node", "rustup", "cargo", "git", "gh", "uv", "go"] {
+        assert!(!hidden_on_platform(Platform::Macos, id, false), "{id}");
+    }
+}
+
+#[test]
+fn platform_filter_drops_only_missing_desktop_tools() {
+    let mut statuses = fake_statuses(&[("dotnet", false), ("pwsh", false), ("node", true)]);
+    retain_for_platform(Platform::Macos, &mut statuses);
+    assert_eq!(
+        statuses.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+        vec!["node"]
+    );
+
+    let mut statuses = fake_statuses(&[("dotnet", true), ("pwsh", false), ("node", false)]);
+    retain_for_platform(Platform::Macos, &mut statuses);
+    // 已安装的 .NET 照常展示(给出版本与能力),未安装的 pwsh 与未安装的 node 保留
+    assert_eq!(
+        statuses.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+        vec!["dotnet", "node"]
+    );
+
+    let mut statuses = fake_statuses(&[("dotnet", false), ("pwsh", false), ("go", false)]);
+    retain_for_platform(Platform::Windows, &mut statuses);
+    assert_eq!(
+        statuses.len(),
+        3,
+        "Windows 上未安装的工具仍显示「未检测到」"
+    );
+}
+
+fn fake_statuses(entries: &[(&str, bool)]) -> Vec<ToolchainStatus> {
+    entries
+        .iter()
+        .map(|(id, found)| ToolchainStatus {
+            id: id.to_string(),
+            kind: ToolchainKind::Node,
+            found: *found,
+            version: None,
+            path: None,
+            source: None,
+            versions: Vec::new(),
+            account: None,
+            caps: ToolchainCaps {
+                can_install: false,
+                can_update: false,
+                can_uninstall: false,
+                can_switch: false,
+                can_list_remote: false,
+            },
+        })
+        .collect()
 }
