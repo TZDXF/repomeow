@@ -37,7 +37,7 @@ static CLICK_GENERATION: AtomicU64 = AtomicU64::new(0);
 /// 最近一次双击的时间戳(ms,UNIX epoch):Windows 派发 DoubleClick 后系统还会补发
 /// 一次 Click(Up),macOS 自行判定双击后同样会有尾随单击;两处都用它丢弃尾巴
 static LAST_DOUBLE_CLICK_MS: AtomicU64 = AtomicU64::new(0);
-/// 双击后忽略尾随单击的时间窗口
+/// 双击后忽略尾随单击的**最小**时间窗口(实际取值不短于配对窗口,见 trailing_suppress_window)
 const DOUBLE_CLICK_SUPPRESS: Duration = Duration::from_millis(500);
 /// 最近一次单击的时间戳(ms,UNIX epoch):macOS 托盘后端不派发 DoubleClick,
 /// 只能靠两次 Click 的间隔判定双击;0 表示没有可配对的单击
@@ -93,7 +93,8 @@ fn classify_left_click(
     last_double_click_ms: u64,
     double_click_window: Duration,
 ) -> LeftClickKind {
-    if now_ms.saturating_sub(last_double_click_ms) < DOUBLE_CLICK_SUPPRESS.as_millis() as u64 {
+    let suppress = trailing_suppress_window(double_click_window);
+    if now_ms.saturating_sub(last_double_click_ms) < suppress.as_millis() as u64 {
         return LeftClickKind::Trailing;
     }
     if last_click_ms != 0
@@ -114,6 +115,16 @@ fn click_delay() -> Duration {
     {
         CLICK_DELAY
     }
+}
+
+/// 双击后忽略尾随单击的实际时间窗口:取 `DOUBLE_CLICK_SUPPRESS` 与配对窗口的较大者。
+///
+/// 抑制窗口必须**不短于**配对窗口:双击序列里第二击之后、仍在配对窗口内的补发 Click
+/// 都要按尾巴丢弃;若抑制窗口更短(用户把系统双击间隔调到 >500ms 时),
+/// 这段滞后的补发 Click 会被判成一次 Single,表现为「打开主窗口后又弹一次列表」。
+/// Windows 的配对窗口固定 300ms,取 max 后仍是 500ms,行为与改动前一致。
+fn trailing_suppress_window(double_click_window: Duration) -> Duration {
+    DOUBLE_CLICK_SUPPRESS.max(double_click_window)
 }
 
 /// 系统双击间隔(可被用户在「系统设置 → 鼠标/触控板」调整)。
@@ -140,11 +151,20 @@ pub(crate) fn should_ignore_popup_blur() -> bool {
         < BLUR_SUPPRESS.as_millis() as u64
 }
 
+/// 进程启动时刻,作为托盘点击/弹窗时间的单调基准。
+///
+/// 这里刻意不用墙钟(`SystemTime`):墙钟被 NTP 校正或手动改动而回拨时,
+/// `now < last` 会让 `saturating_sub` 归 0,把一次普通单击误判成双击,
+/// 或让一段点击全被当成尾随单击吞掉,直到时间重新追上记录值。
+/// `Instant` 单调(Unix 走 `CLOCK_MONOTONIC`,Windows 走 `QueryPerformanceCounter`),
+/// 只做相对间隔比较,不需要绝对时间语义。
+static TRAY_EPOCH: std::sync::LazyLock<std::time::Instant> =
+    std::sync::LazyLock::new(std::time::Instant::now);
+
+/// 距进程启动的毫秒数,**恒 ≥ 1**:0 被保留给「没有上一次单击/弹窗」的哨兵值,
+/// 单调起点若正好是 0 会与哨兵混淆。
 fn now_millis() -> u64 {
-    crate::time_util::now_system()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+    TRAY_EPOCH.elapsed().as_millis() as u64 + 1
 }
 
 /// 从 ~/.repomeow/settings.json 读取字符串设置项(与前端 tauri-plugin-store 同一文件)。
@@ -513,10 +533,74 @@ mod tests {
         );
     }
 
+    /// 抑制窗口对**真实**的单击延迟/配对窗口成立,而不只是对硬编码常量成立:
+    /// 用户把系统双击间隔调大后,抑制窗口必须跟着放大,否则双击尾巴会漏成一次单击。
     #[test]
-    fn trailing_suppression_window_matches_constant() {
+    fn trailing_suppression_window_covers_real_click_delay() {
+        let delay = click_delay();
+        let suppress = trailing_suppress_window(delay);
         assert_eq!(DOUBLE_CLICK_SUPPRESS, Duration::from_millis(500));
-        // 抑制窗口必须不短于双击配对窗口,否则双击尾巴会漏成一次单击
-        assert!(DOUBLE_CLICK_SUPPRESS >= PICK_WINDOW);
+        assert!(
+            suppress >= delay,
+            "抑制窗口 {suppress:?} 短于配对窗口 {delay:?},双击尾巴会漏成单击"
+        );
+        // 系统双击间隔 ≤ 500ms 时抑制窗口保持既有 500ms(Windows 恒为此分支)
+        if delay <= DOUBLE_CLICK_SUPPRESS {
+            assert_eq!(suppress, DOUBLE_CLICK_SUPPRESS);
+        } else {
+            assert_eq!(suppress, delay);
+        }
+    }
+
+    /// 系统双击间隔大于 500ms 时(用户把双击调慢),抑制窗口跟随配对窗口放大:
+    /// 第二击之后 900ms 内的补发 Click 仍算尾随,不会漏成一次 Single
+    #[test]
+    fn trailing_suppression_window_grows_with_slow_system_interval() {
+        let slow = Duration::from_millis(900);
+        assert_eq!(trailing_suppress_window(slow), slow);
+        // 900ms 的配对窗口 + 900ms 的抑制窗口:双击后 850ms 的补发仍被丢弃
+        assert_eq!(
+            classify_left_click(10_850, 0, 10_000, slow),
+            LeftClickKind::Trailing
+        );
+        // 旧实现(固定 500ms 抑制)在这里会漏成 Single,这就是本次修复的缺口
+        assert_eq!(
+            classify_left_click(10_850, 0, 10_000, PICK_WINDOW),
+            LeftClickKind::Single
+        );
+    }
+
+    /// 托盘计时基准单调且不为 0:墙钟回拨不会让它倒退,0 留给「没有上一次」哨兵
+    #[test]
+    fn tray_clock_is_monotonic_and_non_zero() {
+        let first = now_millis();
+        assert!(first >= 1, "哨兵 0 不能被真实时间占用: {first}");
+        let second = now_millis();
+        assert!(second >= first, "计时基准出现倒退: {first} -> {second}");
+        // 相邻两次读数的差值应当很小(毫秒级),证明基准不是墙钟跳变
+        assert!(
+            second - first < 1_000,
+            "相邻读数差值异常: {first} -> {second}"
+        );
+    }
+
+    /// 抑制窗口的**上边界**必须按 `<` 判定:恰好等于窗口的那一击不再算尾随,
+    /// 而在 ≤ 配对窗口时按双击处理(与 AppKit 把边界算同一击一致)。
+    /// 该用例能区分 `now - last_double < suppress` 与写成 `<=` 的实现。
+    #[test]
+    fn trailing_suppression_upper_bound_is_exclusive() {
+        let window = Duration::from_millis(800);
+        let suppress = trailing_suppress_window(window);
+        assert_eq!(suppress, Duration::from_millis(800));
+        // 边界前一毫秒:仍在抑制窗口内 → 尾随
+        assert_eq!(
+            classify_left_click(10_799, 0, 10_000, window),
+            LeftClickKind::Trailing
+        );
+        // 恰好等于抑制窗口:不再算尾随,也没有可配对的单击 → 一次正常单击
+        assert_eq!(
+            classify_left_click(10_800, 0, 10_000, window),
+            LeftClickKind::Single
+        );
     }
 }
