@@ -10,7 +10,14 @@ jobs:
   release:
     # 跨平台矩阵:四个构建目标并行,产物全部上传到同一个 draft Release,
     # tauri-action 汇总各平台签名文件生成 latest.json(updater 端点)。
-    # 未做 Apple 公证:macOS 产物首次打开需右键 → 打开,或 `xattr -cr /Applications/RepoMeow.app`。
+    #
+    # macOS 签名现状(方案 A,过渡止血):用 ad-hoc 身份 `-` 让 bundler 自己做完
+    # 由内到外的 codesign(见下方 APPLE_SIGNING_IDENTITY 注释),并在构建后跑
+    # scripts/ci/verify-macos-sign.sh 校验三个分发载体的签名。
+    # ad-hoc **不等于** Gatekeeper 放行:用户首次打开仍会看到「无法验证开发者」,
+    # 需要右键 → 打开,或到「系统设置 → 隐私与安全性」点「仍要打开」。
+    # 拿到 Developer ID 证书 + 公证凭据(方案 C)后,门禁追加 spctl/stapler 断言即
+    # 可做到双击无提示;在那之前不要断言 `spctl ... accepted`(见脚本头部注释)。
     strategy:
       fail-fast: false
       matrix:
@@ -90,12 +97,31 @@ jobs:
       - name: Prepare sem sidecar
         run: pnpm sem:prepare --target ${{ matrix.target }}
 
+      # 前置阅读:签名必须在 tauri-action **之内**完成,不能在它之后补签。
+      # bundler 的打包顺序是 app(含由内到外的 codesign)→ dmg(装入已签 app)
+      # → updater 载荷 .app.tar.gz(打包已签 app)→ minisign .sig;tauri-action 随后
+      # 才把这三个载体上传进 draft Release。所以只要在**构建前**给出签名身份,三个载体
+      # 天然是同一份签名;反过来先上传再补签,就要重打包 dmg、重打 tar.gz、重签 .sig
+      # 再覆盖远端资产,而且很容易让 dmg 里的 app 与 updater 载荷的签名不一致——
+      # 那正是把「用户升级路径又坏一次」的写法。
+      #
+      # APPLE_SIGNING_IDENTITY 由 tauri-cli 覆盖到 bundle.macOS.signingIdentity
+      # (crates/tauri-cli/src/interface/rust.rs)。`-` 是 codesign 的 ad-hoc 身份:
+      # bundler 走正常签名分支,逐一把 sidecar(sem / repomeow-cli)与 app bundle
+      # 用 `codesign --force -s - --options runtime` 签一遍并生成 _CodeSignature,
+      # 资源密封(Sealed Resources)随之成立——「已损坏」的直接对因就此消失。
+      # dmg 容器本身在 identity 为 `-` 时按 bundler 逻辑跳过自签名(tauri#12288),
+      # 这不影响用户打开:Gatekeeper 评估的是从 dmg 拖出来的那个 app。
+      # 该变量在 Windows/Linux 上只会写进未被使用的 macOS bundle 设置,无副作用,
+      # 因此不分平台写死,避免 `${{ ... && '-' || '' }}` 渲染出空串身份导致签名必失败。
       - name: Build and publish release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # 更新包签名私钥(空口令,密钥生成时未设密码)
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # 方案 A:ad-hoc 身份,零凭据。有 Developer ID 证书后换成证书身份(方案 C)
+          APPLE_SIGNING_IDENTITY: "-"
         with:
           tagName: v__VERSION__
           releaseName: "v__VERSION__"
@@ -104,3 +130,13 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+      # 签名门禁:对三个会分发出去的载体(源 .app / updater .app.tar.gz / dmg 内
+      # 的 .app)逐一 `codesign --verify --strict`,失败即 job 红。
+      # 这里**故意不**断言 `spctl ... accepted`:ad-hoc 阶段 Gatekeeper 必然 rejected
+      # (本机实测 exit 3),断言它就是永远红。拿到证书与公证凭据后,在本步骤追加
+      #   spctl -a -vvv -t exec <app>   期望 accepted 且 source=Notarized Developer ID
+      #   xcrun stapler validate <app>  期望票据校验通过
+      - name: Verify macOS signature
+        if: matrix.platform == 'macos-latest'
+        run: ./scripts/ci/verify-macos-sign.sh ${{ matrix.target }}

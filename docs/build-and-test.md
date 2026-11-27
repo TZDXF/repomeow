@@ -71,7 +71,7 @@ macOS 侧的 `cargo test` 用 `--test-threads=1` 串行跑：`data_sync` / `wiki
 | `terminal_ipc::tests::project_resolution_uses_registered_active_project` | 用例写死 `D:\projects\demo` |
 | `commands::ai::resource_library::tests::sync_pull_push_status_and_remote_gone` | 本地 bare 仓库的默认分支名随 git 全局 `init.defaultBranch` 变化，删除当前分支被拒 |
 
-`.github/workflows/release.yml`（Release）：`push` tag `v*` 或手动 `workflow_dispatch` 触发，单个 `release` job 按四目标矩阵并行（Windows NSIS、macOS arm64/x64 的 dmg + app、Ubuntu 22.04 的 deb + AppImage），统一由 `tauri-action` 写入同一个 draft Release。更新包签名私钥来自 `update` Environment 的 secrets；签名口令为空，workflow 会显式置为空字符串以避开 Tauri 2.11.4 signer 的静默失败。macOS 产物未做 Apple 公证，首次打开需右键 → 打开或 `xattr -cr`。
+`.github/workflows/release.yml`（Release）：`push` tag `v*` 或手动 `workflow_dispatch` 触发，单个 `release` job 按四目标矩阵并行（Windows NSIS、macOS arm64/x64 的 dmg + app、Ubuntu 22.04 的 deb + AppImage），统一由 `tauri-action` 写入同一个 draft Release。更新包签名私钥来自 `update` Environment 的 secrets；签名口令为空，workflow 会显式置为空字符串以避开 Tauri 2.11.4 signer 的静默失败。macOS 产物当前用 **ad-hoc 身份**（`APPLE_SIGNING_IDENTITY: "-"`，见 workflow 中该变量的注释）由 bundler 完成由内到外的 `codesign`，资源密封随之成立、`codesign --verify --deep --strict` 可通过；构建后由 `scripts/ci/verify-macos-sign.sh` 对源 `.app`、updater 载荷 `.app.tar.gz`、dmg 内的 `.app` 三个载体逐一校验签名，失败即 job 红。ad-hoc 不含 Developer ID 证书，**不做公证**，Gatekeeper 仍会拦：首次打开提示「Apple 无法验证“RepoMeow.app”是否包含可能危害 Mac 安全或泄漏隐私的恶意软件」，点「完成」后到「系统设置 → 隐私与安全性」点「仍要打开」即可（也可 `xattr -cr /Applications/RepoMeow.app` 一次性清属性）。要变成双击无提示，需换 Developer ID 证书 + 公证凭据（方案 C），届时门禁再追加 `spctl` / `stapler` 断言。
 
 ## macOS 本地复跑（Mac mini 真机）
 
@@ -120,7 +120,7 @@ cargo test --locked -- --test-threads=1 \
 
 ### 已知限制
 
-- 未做 Apple 公证，`pnpm build:desktop` 产物首次打开需右键 → 打开，或 `xattr -cr /Applications/RepoMeow.app`。
+- 未做 Apple 公证（只有 ad-hoc 签名）：`pnpm build:desktop` 的产物首次打开会被 Gatekeeper 拦下，提示「Apple 无法验证…是否包含可能危害 Mac 安全或泄漏隐私的恶意软件」，到「系统设置 → 隐私与安全性」点「仍要打开」即可，或 `xattr -cr /Applications/RepoMeow.app` 清掉 quarantine 属性。这不是「已损坏」——资源密封已有效，`codesign --verify --deep --strict` 能通过；「已损坏」只会出现在缺 `_CodeSignature` 的旧产物上。
 - 上述 7 个 `--skip` 是尚未改写的用例断言；改成平台无关断言后 CI 与本地复跑命令需同步删掉对应行。
 - `pnpm sem:verify` 只比对**文件头架构与三元组**，不校验 SHA-256（那是 `sem:prepare` 的职责），也不判断二进制能否运行。
 
