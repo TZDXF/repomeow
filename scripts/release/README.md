@@ -119,3 +119,7 @@ node --test scripts/release/sync-notes.test.mjs
 ```
 
 脚本校验版本并拒绝空正文/占位提示，只替换 `notes`，不改变安装包签名、下载 URL 或发布日期；原元数据备份路径会输出到终端。上传后重新下载校验，失败时停止发布并检查远端资产。它也可用于修复已发布版本的说明，无需发布新版本。相同内容再次执行不会上传。
+
+## 面向用户的 macOS 安装提示
+
+`macos-install-note.md` 是面向用户的 macOS 安装说明片段（`xattr -cr` 那条），**发布时把它追加到 Release 正文与 `latest.json.notes` 末尾**，避免每次手写；写好后照常跑 `sync-notes.mjs`。背景与实测结论见 `README.md` 的「macOS 安装」一节和 `docs/build-and-test.md` 的「已知限制」。

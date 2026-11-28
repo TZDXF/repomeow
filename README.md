@@ -2,6 +2,23 @@
 
 基于 **Tauri 2 + Vue 3 + TypeScript** 的本地开发项目管理中心（桌面端）。一窗集中登记本地项目，完成脚本、Docker Compose、Git、README 预览、Wiki 生成、项目 AI 问答、定时报告等操作；并通过内置 CLI + Skills 开放给 Codex、Claude Code 等 AI agent。
 
+## macOS 安装
+
+从 [Releases](https://github.com/TZDXF/repomeow/releases/latest) 下载 `.dmg` 后按三步安装：
+
+1. 双击 `.dmg` 装载，把 `RepoMeow.app` **拖进**「应用程序」（`/Applications`）。不要在下载目录或 dmg 里直接双击打开——那样系统会以只读的 AppTranslocation 路径运行。
+2. 打开「终端」执行（**不需要 `sudo`**，应用归安装它的用户所有，`/Applications` 对 `admin` 组可写）：
+
+   ```bash
+   xattr -cr /Applications/RepoMeow.app
+   ```
+
+3. 回访达双击 `RepoMeow.app` 即可打开。若系统仍提示「无法验证开发者」，到「系统设置 → 隐私与安全性」点「仍要打开」。
+
+**为什么要这一步**：发布产物没有做 Apple 公证（需要付费开发者账号），浏览器下载的文件会被 macOS 打上 `com.apple.quarantine` 标记，Gatekeeper 因此拒绝启动并提示「已损坏，无法打开」。`xattr -cr` 只清除该标记，不改变应用内容——应用本身并没有损坏。
+
+**什么时候要再执行一次**：每次从浏览器重新下载并拖进 `/Applications` 时都要再执行一次第 2 步。应用内自动更新通常不会重新带上 quarantine 标记（Tauri 自己的下载器不写该属性）；如果更新后又出现同样的提示，重复第 2 步即可。
+
 ## 功能特性
 
 ### 项目与脚本
