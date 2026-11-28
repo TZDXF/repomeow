@@ -223,6 +223,7 @@ async function clearFinished() {
             :animation="150"
             :force-fallback="true"
             :fallback-on-body="true"
+            :fallback-tolerance="10"
             drag-class="opacity-50"
             ghost-class="opacity-30"
             class="flex items-center gap-1"

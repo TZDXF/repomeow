@@ -163,7 +163,7 @@ function selectFromMore(id: number) {
           :animation="150"
           :force-fallback="true"
           :fallback-on-body="true"
-          :fallback-tolerance="4"
+          :fallback-tolerance="10"
           drag-class="opacity-40"
           ghost-class="opacity-30"
           class="flex items-center gap-1"
