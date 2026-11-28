@@ -580,7 +580,7 @@ pub struct ToolchainRemoteVersion {
 /// 单个工具链工具的检测结果(detect_toolchains)
 #[derive(Debug, Clone, Serialize)]
 pub struct ToolchainStatus {
-    /// CLI 名(rustup / rustc / cargo / uv / nvm / fnm / vp / dotnet / go / git / gh)
+    /// CLI 名(rustup / rustc / cargo / uv / node / nvm / fnm / vp / dotnet / go / git / gh)
     pub id: String,
     pub kind: ToolchainKind,
     pub found: bool,
@@ -588,7 +588,8 @@ pub struct ToolchainStatus {
     pub version: Option<String>,
     /// PATH 上命中的可执行文件路径(unix nvm 是 shell 函数无二进制,回退填 ~/.nvm 目录)
     pub path: Option<String>,
-    /// 安装来源:"winget" / "rustup" / "brew" / "standalone"(决定更新/卸载命令)
+    /// 安装来源:"winget" / "rustup" / "brew" / "nvm" / "fnm" / "volta" / "standalone"
+    /// (决定更新/卸载命令)
     pub source: Option<String>,
     /// 版本管理器探测到的版本列表(无版本管理能力为空)
     pub versions: Vec<ToolchainVersion>,
