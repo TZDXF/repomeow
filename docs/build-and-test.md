@@ -71,7 +71,7 @@ macOS 侧的 `cargo test` 用 `--test-threads=1` 串行跑：`data_sync` / `wiki
 | `terminal_ipc::tests::project_resolution_uses_registered_active_project` | 用例写死 `D:\projects\demo` |
 | `commands::ai::resource_library::tests::sync_pull_push_status_and_remote_gone` | 本地 bare 仓库的默认分支名随 git 全局 `init.defaultBranch` 变化，删除当前分支被拒 |
 
-`.github/workflows/release.yml`（Release）：`push` tag `v*` 或手动 `workflow_dispatch` 触发，单个 `release` job 按四目标矩阵并行（Windows NSIS、macOS arm64/x64 的 dmg + app、Ubuntu 22.04 的 deb + AppImage），统一由 `tauri-action` 写入同一个 draft Release。更新包签名私钥来自 `update` Environment 的 secrets；签名口令为空，workflow 会显式置为空字符串以避开 Tauri 2.11.4 signer 的静默失败。macOS 产物未做 Apple 公证，首次打开需右键 → 打开或 `xattr -cr`。
+`.github/workflows/release.yml`（Release）：`push` tag `v*` 或手动 `workflow_dispatch` 触发，单个 `release` job 按四目标矩阵并行（Windows NSIS、macOS arm64/x64 的 dmg + app、Ubuntu 22.04 的 deb + AppImage），统一由 `tauri-action` 写入同一个 draft Release。更新包签名私钥来自 `update` Environment 的 secrets；签名口令为空，workflow 会显式置为空字符串以避开 Tauri 2.11.4 signer 的静默失败。macOS 产物未做 Apple 公证：从浏览器下载的 dmg 装出的 app 带 `com.apple.quarantine` 标记，Gatekeeper 会拒绝启动并提示「已损坏」，用户需把 app 拖进 `/Applications` 后执行 `xattr -cr /Applications/RepoMeow.app`（不需 sudo）再打开；「右键 → 打开」对未签名产物无效。完整说明见 `README.md` 的「macOS 安装」一节。
 
 ## macOS 本地复跑（Mac mini 真机）
 
@@ -120,7 +120,7 @@ cargo test --locked -- --test-threads=1 \
 
 ### 已知限制
 
-- 未做 Apple 公证，`pnpm build:desktop` 产物首次打开需右键 → 打开，或 `xattr -cr /Applications/RepoMeow.app`。
+- 未做 Apple 公证：`pnpm build:desktop` 产出的 app 若带 `com.apple.quarantine` 标记，`open` 会直接失败（等价于双击看到「已损坏」）。判据是**先把 app 放进 `/Applications`**、执行 `xattr -cr /Applications/RepoMeow.app`（不需 sudo）、再打开能正常启动；`xattr -cr` 只清标记，不改变应用内容。直接在下载目录或 dmg 里打开会以 AppTranslocation 路径运行，不能用来验证。
 - 上述 7 个 `--skip` 是尚未改写的用例断言；改成平台无关断言后 CI 与本地复跑命令需同步删掉对应行。
 - `pnpm sem:verify` 只比对**文件头架构与三元组**，不校验 SHA-256（那是 `sem:prepare` 的职责），也不判断二进制能否运行。
 

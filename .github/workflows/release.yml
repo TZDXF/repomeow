@@ -10,7 +10,11 @@ jobs:
   release:
     # 跨平台矩阵:四个构建目标并行,产物全部上传到同一个 draft Release,
     # tauri-action 汇总各平台签名文件生成 latest.json(updater 端点)。
-    # 未做 Apple 公证:macOS 产物首次打开需右键 → 打开,或 `xattr -cr /Applications/RepoMeow.app`。
+    # 未做 Apple 公证:浏览器下载的 dmg 装出的 app 带 com.apple.quarantine 标记,
+    # Gatekeeper 会拒绝启动并提示「已损坏」。用户需先把 app 拖进 /Applications,
+    # 再执行 `xattr -cr /Applications/RepoMeow.app`(不需 sudo)才能打开。
+    # 「右键 → 打开」对未签名产物无效,不要在面向用户的文案里写成可行路径。
+    # 每次发版的更新说明末尾必须带上这段 macOS 安装提示(见 .agents/skills/release-tagger/SKILL.md)。
     strategy:
       fail-fast: false
       matrix:
