@@ -37,6 +37,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cmd } from "@/lib/tauri";
+import { groupToolchains } from "@/lib/toolchain";
 import type {
   ToolchainKind,
   ToolchainOp,
@@ -51,8 +52,7 @@ const { t } = useI18n(),
   scanning = ref(false),
   /** 首扫是否已结束(区分「检测中」与「检测失败」两种空列表) */
   scanned = ref(false),
-  /** 分组展示顺序与图标;工具行顺序由后端 TOOLS 注册表决定 */
-  KIND_ORDER: ToolchainKind[] = ["rust", "python", "node", "dotnet", "go", "git", "powershell"],
+  /** 分组图标;分组顺序与空组过滤在 lib/toolchain.ts(有单测),工具行顺序由后端 TOOLS 注册表决定 */
   GROUP_ICONS: Record<ToolchainKind, Component> = {
     rust: markRaw(Hammer),
     python: markRaw(FileTerminal),
@@ -63,11 +63,7 @@ const { t } = useI18n(),
     powershell: markRaw(FileTerminal),
   },
   groups = computed(() =>
-    KIND_ORDER.map((kind) => ({
-      kind,
-      icon: GROUP_ICONS[kind],
-      tools: items.value.filter((tool) => tool.kind === kind),
-    })).filter((group) => group.tools.length > 0),
+    groupToolchains(items.value).map((group) => ({ ...group, icon: GROUP_ICONS[group.kind] })),
   );
 
 /** 版本管理器各自管理的东西不同,版本区标签随之区分(uv 行管的是 python) */

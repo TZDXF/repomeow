@@ -2,11 +2,10 @@
 
 本次 Windows 数据与验证边界见 [TZD-91 实测报告](benchmarks/TZD-91.md)。
 
-开发构建使用 `src-tauri/Cargo.toml` 的 `dev` profile。`pnpm start` 负责准备 sem、启动 Vite 和 Tauri 的 Rust 热更新；`pnpm cli:dev -- <参数>` 使用相同开发 profile。先安装依赖并准备 sidecar：
+开发构建使用 `src-tauri/Cargo.toml` 的 `dev` profile。`pnpm start` 负责启动 Vite 和 Tauri 的 Rust 热更新；`pnpm cli:dev -- <参数>` 使用相同开发 profile。先安装依赖：
 
 ```powershell
 pnpm install --frozen-lockfile
-pnpm sem:prepare
 ```
 
 ## 调试信息与缓存取舍
@@ -23,7 +22,6 @@ cargo run --locked --manifest-path src-tauri/Cargo.toml --bin repomeow-cli --pro
 Tauri 的 runner 参数通过 `--` 传给 Cargo；完整桌面开发调试可运行：
 
 ```powershell
-pnpm sem:prepare
 pnpm tauri dev --config src-tauri/tauri.dev.conf.json -- --profile dev-debug
 ```
 
@@ -66,6 +64,6 @@ node scripts/bench-dev.mjs --output src-tauri/bench-dev-optimized.local
 
 每一步写入 `results.json` 和独立 `.log`，Cargo 的逐 crate 时间线位于 `target/cargo-timings/`。JSON 包含提交、工作树状态、Cargo.toml/Cargo.lock/探针源文件 SHA-256、工具链、CPU/内存及影响 profile 的环境变量。`seconds` 是 Cargo 子进程墙钟时间，包括 Cargo 自身、构建脚本、编译、链接和日志写入；不包括事后的目录统计。它不是 CPU 编译时间；Cargo 时间线可定位各 crate，但不能简单相加当作墙钟时间。
 
-占用为 target 下所有文件逻辑字节之和，另列 `incremental` 和 `.pdb` 大小（两者是总量的组成部分）。不等于 NTFS 实际分配块，也不包括 pnpm store、node_modules、Cargo registry、sem 下载缓存和 WebView2 用户数据。先后两次测试可能受系统文件缓存、杀毒扫描和机器其他进程影响；首次与小改动各测一次时只能作为本机样本，不代表统计显著收益。
+占用为 target 下所有文件逻辑字节之和，另列 `incremental` 和 `.pdb` 大小（两者是总量的组成部分）。不等于 NTFS 实际分配块，也不包括 pnpm store、node_modules、Cargo registry 和 WebView2 用户数据。先后两次测试可能受系统文件缓存、杀毒扫描和机器其他进程影响；首次与小改动各测一次时只能作为本机样本，不代表统计显著收益。
 
-这组有限时长测量聚焦 Rust 桌面目标的编译，不启动应用，不包含 Vite、sidecar 下载、Tauri 启动到窗口可交互的时间，也不覆盖打包或发布构建。桌面开发启动、热更新和 CLI 功能须另外回归。
+这组有限时长测量聚焦 Rust 桌面目标的编译，不启动应用，不包含 Vite、Tauri 启动到窗口可交互的时间，也不覆盖打包或发布构建。桌面开发启动、热更新和 CLI 功能须另外回归。

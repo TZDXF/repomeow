@@ -22,9 +22,6 @@ import CodeViewer from "@/components/files/CodeViewer.vue";
 import FileNameSearch from "@/components/files/FileNameSearch.vue";
 import FindBar from "@/components/files/FindBar.vue";
 import ProjectFilesSidebar from "@/components/files/ProjectFilesSidebar.vue";
-import SemanticOutlinePanel from "@/components/files/SemanticOutlinePanel.vue";
-import SemanticImpactPanel from "@/components/semantic/SemanticImpactPanel.vue";
-import SemanticHistoryPanel from "@/components/semantic/SemanticHistoryPanel.vue";
 import MdImage from "@/components/markdown/MdImage.vue";
 import MdLink from "@/components/markdown/MdLink.vue";
 import { MD_BASE_PATH_KEY, MD_ROOT_PATH_KEY } from "@/components/markdown/keys";
@@ -32,7 +29,6 @@ import ImageViewer from "@/components/files/ImageViewer.vue";
 import VideoViewer from "@/components/files/VideoViewer.vue";
 import { cmd, onListen } from "@/lib/tauri";
 import { extOf, IMAGE_EXTS, VIDEO_EXTS } from "@/lib/file-kind";
-import { invalidateSemanticCache } from "@/lib/semantic";
 import { hasScheme, resolvePath, safeLinkHref } from "@/lib/markdown";
 import { withVisibleMarkdownFrontmatter } from "@/lib/markdown-frontmatter";
 import { openLocalPath, openPathWith, sortOpenWithOptions } from "@/lib/open-with";
@@ -45,14 +41,7 @@ import { useImagePreview } from "@/composables/files/useImagePreview";
 import { useLazyProjectFiles } from "@/composables/files/useLazyProjectFiles";
 import { useSettingsStore } from "@/stores/settings";
 import { useProjectsStore } from "@/stores/projects";
-import type {
-  FilePreview,
-  FilesTreeChangedPayload,
-  GitProjectChangedPayload,
-  Project,
-  SemanticEntityRef,
-  SemanticFileEntity,
-} from "@/types";
+import type { FilePreview, FilesTreeChangedPayload, Project } from "@/types";
 
 const active = useProjectPageActive(),
   { t } = useI18n(),
@@ -218,42 +207,7 @@ const mdRenderable = computed(
   codeViewer = ref<InstanceType<typeof CodeViewer> | null>(null),
   findBarRef = ref<InstanceType<typeof FindBar> | null>(null),
   sidebarRef = ref<InstanceType<typeof ProjectFilesSidebar> | null>(null),
-  leftView = ref<"tree" | "search" | "outline">("tree"),
-  // ── 结构视图(sem 语义导航):仅当前文件为可预览文本时可用 ──────────────────────
-  outlineEnabled = computed(
-    () =>
-      !!selected.value &&
-      !previewBinary.value &&
-      !isVideo.value &&
-      (!isImage.value || svgSource.value),
-  );
-watch(outlineEnabled, (enabled) => {
-  if (!enabled && leftView.value === "outline") {
-    leftView.value = "tree";
-  }
-});
-
-// 语义实体会话缓存世代:HEAD 变更 / 切换工作区时递增,通知结构面板重新加载
-const semanticCacheEpoch = ref(0);
-watch(rootPath, () => semanticCacheEpoch.value++);
-
-let unlistenGitChanged: (() => void) | null = null;
-onMounted(async () => {
-  unlistenGitChanged = await onListen<GitProjectChangedPayload>(
-    "git://project-changed",
-    (payload) => {
-      if (!payload.head_changed) {
-        return;
-      }
-      if (payload.path !== project.value?.path) {
-        return;
-      }
-      invalidateSemanticCache(rootPath.value);
-      semanticCacheEpoch.value++;
-    },
-  );
-});
-onBeforeUnmount(() => unlistenGitChanged?.());
+  leftView = ref<"tree" | "search">("tree");
 
 // ── 文件树变更监听:后端递归 notify + 去抖,事件驱动增量刷新(不轮询) ──────────
 let watchedRoot: string | null = null;
@@ -342,71 +296,6 @@ onBeforeUnmount(() => {
     watchedRoot = null;
   }
 });
-
-/** 结构面板点击实体:当前文件内定位并高亮行区间 */
-function onOutlineLocate(startLine: number, endLine: number) {
-  if (!selected.value) {
-    return;
-  }
-  // 渲染态(Markdown/SVG)没有代码视图,强制源码模式保证可定位
-  if (MD_EXTS.has(extOf(selected.value))) {
-    mdMode.value = "source";
-  }
-  onSelectImage(selected.value);
-  void nextTick(() => codeViewer.value?.revealLines(startLine, endLine));
-}
-
-// 语义搜索/关系跳转:打开目标文件后定位(与 pendingJump 同一就位判定)
-const pendingReveal = ref<{ path: string; startLine: number; endLine: number } | null>(null);
-
-function onSemanticOpen(path: string, startLine: number, endLine: number) {
-  selected.value = path;
-  if (MD_EXTS.has(extOf(path))) {
-    mdMode.value = "source";
-  }
-  onSelectImage(path);
-  pendingReveal.value = { path, startLine, endLine };
-  tryReveal();
-}
-
-// ── 影响分析(结构面板实体入口) ──────────────────────────────────────────────
-const impactOpen = ref(false),
-  impactEntity = ref<SemanticEntityRef | null>(null);
-
-function onImpact(entity: SemanticFileEntity) {
-  impactEntity.value = entity;
-  impactOpen.value = true;
-}
-
-function onImpactOpen(entity: SemanticEntityRef) {
-  impactOpen.value = false;
-  onSemanticOpen(entity.filePath, entity.startLine, entity.endLine);
-}
-
-// ── 实体历史(结构面板实体入口,时间线项跳转 GitGraph 定位提交) ────────────────
-const historyOpen = ref(false),
-  historyEntity = ref<SemanticEntityRef | null>(null);
-
-function onHistory(entity: SemanticFileEntity) {
-  historyEntity.value = entity;
-  historyOpen.value = true;
-}
-
-function tryReveal() {
-  const target = pendingReveal.value;
-  if (
-    !target ||
-    selected.value !== target.path ||
-    !codeVisible.value ||
-    previewPath.value !== target.path
-  ) {
-    return;
-  }
-  pendingReveal.value = null;
-  codeViewer.value?.revealLines(target.startLine, target.endLine);
-}
-
-watch([selected, previewText, codeVisible], () => void nextTick(tryReveal), { flush: "post" });
 
 const {
     closeFind,
@@ -569,8 +458,6 @@ function startTreeResize(e: PointerEvent) {
 
 onCliDataChanged(["file"], async () => {
   refreshDirs(null);
-  invalidateSemanticCache(rootPath.value);
-  semanticCacheEpoch.value++;
   previewRevision.value++;
 });
 </script>
@@ -609,23 +496,10 @@ onCliDataChanged(["file"], async () => {
           :root="rootPath"
           :rows="visibleRows"
           :selected="selected"
-          :outline-enabled="outlineEnabled"
           @open="onSearchOpen"
           @select="(path) => (selected = path)"
           @toggle="toggleFolder"
-        >
-          <template #outline>
-            <SemanticOutlinePanel
-              :root="rootPath"
-              :file-path="selected"
-              :cache-epoch="semanticCacheEpoch"
-              @locate="onOutlineLocate"
-              @open="onSemanticOpen"
-              @impact="onImpact"
-              @history="onHistory"
-            />
-          </template>
-        </ProjectFilesSidebar>
+        />
       </div>
 
       <!-- 拖拽条 -->
@@ -782,22 +656,6 @@ onCliDataChanged(["file"], async () => {
         />
       </div>
     </div>
-
-    <!-- 影响分析(结构大纲实体入口;文件页即当前代码,无需非 HEAD 提示) -->
-    <SemanticImpactPanel
-      v-model:open="impactOpen"
-      :root="rootPath"
-      :entity="impactEntity"
-      @open="onImpactOpen"
-    />
-
-    <!-- 实体演进时间线(点击提交跳转 GitGraph) -->
-    <SemanticHistoryPanel
-      v-model:open="historyOpen"
-      :project-id="project.id"
-      :root="rootPath"
-      :entity="historyEntity"
-    />
   </div>
 
   <div

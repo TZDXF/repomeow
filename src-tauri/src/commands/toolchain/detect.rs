@@ -16,9 +16,39 @@ use super::{process::user_home_path, version::natural_version_cmp};
 
 const AUTH_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
 
+/// 检测结果按平台裁剪时需要区分的运行平台(便于跨平台单测)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Platform {
+    Windows,
+    Macos,
+    Linux,
+}
+
+pub(super) fn current_platform() -> Platform {
+    if cfg!(windows) {
+        Platform::Windows
+    } else if cfg!(target_os = "macos") {
+        Platform::Macos
+    } else {
+        Platform::Linux
+    }
+}
+
+/// 该检测项是否从结果里剔除:
+/// macOS 上的 .NET 与 PowerShell 7 属于「不适用的桌面环境工具」,未安装时整条不展示
+/// (已安装则照常展示并给出能力);其他平台一律保留,未安装时显示「未检测到」。
+pub(super) fn hidden_on_platform(platform: Platform, id: &str, found: bool) -> bool {
+    !found && platform == Platform::Macos && matches!(id, "dotnet" | "pwsh")
+}
+
+/// 按平台裁剪检测结果(与 `hidden_on_platform` 同一判定,便于整表单测)。
+pub(super) fn retain_for_platform(platform: Platform, statuses: &mut Vec<ToolchainStatus>) {
+    statuses.retain(|status| !hidden_on_platform(platform, &status.id, status.found));
+}
+
 pub(super) struct ToolSpec {
     pub(super) id: &'static str,
-    kind: ToolchainKind,
+    pub(super) kind: ToolchainKind,
     version_args: &'static [&'static str],
 }
 
@@ -46,6 +76,11 @@ pub(super) const TOOLS: &[ToolSpec] = &[
     ToolSpec {
         id: "uv",
         kind: ToolchainKind::Python,
+        version_args: &["--version"],
+    },
+    ToolSpec {
+        id: "node",
+        kind: ToolchainKind::Node,
         version_args: &["--version"],
     },
     ToolSpec {
@@ -86,6 +121,17 @@ pub(super) const TOOLS: &[ToolSpec] = &[
 ];
 
 pub(super) fn detect_toolchains_blocking() -> Vec<ToolchainStatus> {
+    detect_toolchains_on(current_platform())
+}
+
+/// 检测实现本体:平台作为参数传入,便于单测覆盖各平台的裁剪规则。
+/// `TOOLS` 注册表保持全量(nvm/fnm 等联动与 `toolchain_op` 的工具校验都依赖它),
+/// 只在产出结果前按平台剔除未安装的 .NET / PowerShell 7。
+pub(super) fn detect_toolchains_on(platform: Platform) -> Vec<ToolchainStatus> {
+    // 每次检测重解析一次登录 shell 的 PATH:macOS GUI 进程继承的最小 PATH 里没有
+    // Homebrew / cargo / nvm 目录,而用户改完 shell 配置后点「重新检测」应当生效。
+    #[cfg(target_os = "macos")]
+    super::process::refresh_login_shell_path();
     let mut statuses: Vec<ToolchainStatus> = TOOLS.iter().map(detect_one).collect();
     let nvm_binary = statuses
         .iter()
@@ -143,6 +189,7 @@ pub(super) fn detect_toolchains_blocking() -> Vec<ToolchainStatus> {
             status.caps.can_list_remote = nvm_binary;
         }
     }
+    retain_for_platform(platform, &mut statuses);
     statuses
 }
 

@@ -1,0 +1,1 @@
+**macOS 首次安装**：从浏览器下载的 dmg 装出的 app 会被 Gatekeeper 拦截，提示「已损坏，无法打开」。请先把 `RepoMeow.app` 拖进「应用程序」（`/Applications`），再打开「终端」执行 `xattr -cr /Applications/RepoMeow.app`（不需要 `sudo`），然后双击即可正常启动。产物未做 Apple 公证（需要付费开发者账号），这是预期行为，应用本身没有损坏；`xattr -cr` 只清除浏览器写入的 `com.apple.quarantine` 标记，不改变应用内容。每次从浏览器重新下载安装都要再执行一次。

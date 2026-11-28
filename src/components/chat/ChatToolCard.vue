@@ -27,9 +27,6 @@ const props = defineProps<{ run: ChatToolRun; class?: HTMLAttributes["class"] }>
   }),
   /** 每个工具挑最能说明调用意图的主参数,在头部行内展示(完整参数展开可见) */
   PRIMARY_ARGS: Record<string, string[]> = {
-    sem_find: ["query"],
-    sem_context: ["entity"],
-    sem_relations: ["entity"],
     read_wiki: ["page_id"],
     add_custom_command: ["name"],
     update_custom_command: ["name"],

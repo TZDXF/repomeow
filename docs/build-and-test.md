@@ -1,4 +1,4 @@
-本仓库是 Tauri 2 + Vue 3 + TypeScript 前端与 Rust 后端的桌面应用（本地开发项目管理中心）：前端由 Vite / vue-tsc / oxlint / oxfmt / Vitest 驱动，后端在 `src-tauri/` 下用 Cargo 构建，sem 以 externalBin sidecar 内置。包管理与所有入口一律用 **pnpm 11.10.0**，不用 npm。
+本仓库是 Tauri 2 + Vue 3 + TypeScript 前端与 Rust 后端的桌面应用（本地开发项目管理中心）：前端由 Vite / vue-tsc / oxlint / oxfmt / Vitest 驱动，后端在 `src-tauri/` 下用 Cargo 构建。包管理与所有入口一律用 **pnpm 11.10.0**，不用 npm。
 
 开始改动前先记住几条禁止项：不要用 npm（用 pnpm）；不要 ad-hoc 写 `replace('\\', '/')`（路径归一化走 `src-tauri/src/path_util.rs` 与 `src/lib/path.ts`）；不要手改 `components/ui/` 下的 shadcn-vue 生成组件；不要修改已发布的 SQLite 迁移；不要提交密钥或个人配置；不要擅自合并、发布、部署或改权限。
 
@@ -6,14 +6,14 @@
 
 - Node `^20.19.0 || >=22.12.0`（`package.json` engines，与 Vite 8 一致；CI 使用 22）。
 - pnpm 11.10.0（`packageManager` 字段；仓库存在 `pnpm-lock.yaml` / `pnpm-workspace.yaml`）。
-- Rust 工具链与 Tauri 2 系统依赖（Windows 需 WebView2）。
-- 首次安装依赖 `pnpm install --frozen-lockfile`；sem 二进制未准备时，任何 Cargo 构建前先跑 `pnpm sem:prepare`（下载到被 gitignore 的 `src-tauri/binaries/sem-<target>`，`pnpm sem:check` 只校验不下载）。
+- Rust 工具链 **1.90 及以上**（`tauri 2.12.7` 的 `rust-version = "1.90"`；2.11.x 时为 1.77.2，随 2.12 升级抬高）与 Tauri 2 系统依赖（Windows 需 WebView2）。
+- 首次安装依赖 `pnpm install --frozen-lockfile`，之后可直接跑前端与 Cargo 构建（无额外二进制需要准备）。
 
 ## 本地启动
 
 | 命令 | 实际行为 |
 | --- | --- |
-| `pnpm start` | `sem:prepare && tauri dev --config src-tauri/tauri.dev.conf.json`，完整桌面端开发（前端 + Rust 热更新）。dev 经 `tauri.dev.conf.json` 覆盖 identifier 为 `com.repomeow.dev`，可与安装版同时运行 |
+| `pnpm start` | `tauri dev --config src-tauri/tauri.dev.conf.json`，完整桌面端开发（前端 + Rust 热更新）。dev 经 `tauri.dev.conf.json` 覆盖 identifier 为 `com.repomeow.dev`，可与安装版同时运行 |
 | `pnpm dev` | 仅 Vite 前端，端口 1420（见 `tauri.conf.json` 的 `devUrl`） |
 | `pnpm cli:dev -- <args>` | `cargo run --manifest-path src-tauri/Cargo.toml --bin repomeow-cli --`，运行独立 console 目标，不开窗口 |
 
@@ -24,7 +24,7 @@
 | 命令 | 实际行为 |
 | --- | --- |
 | `pnpm build` | `vue-tsc --noEmit && vite build && node scripts/check-entry-bundle.mjs`：类型检查 + 前端产物 + 首屏入口 500 KiB 预算检查。**这是唯一的类型检查手段**；`check-entry-bundle.mjs` 只是构建内部步骤，没有独立入口 |
-| `pnpm build:desktop` | `sem:prepare && tauri build`，打出桌面安装包（NSIS） |
+| `pnpm build:desktop` | `tauri build`，打出桌面安装包（NSIS） |
 
 ## 静态检查与格式化
 
@@ -47,7 +47,7 @@
 
 两个 CLI 回归都需要已编译的二进制：本地先用 `cargo build --release --locked --bins --manifest-path src-tauri/Cargo.toml` 得到 `src-tauri/target/release/repomeow-cli.exe`。仅执行 `scripts/test-cli.ps1`（`powershell` / `pwsh` 两种宿主）不能覆盖 Actions 的退出码包装。
 
-Rust 侧在 `src-tauri/` 目录下执行 `cargo check` / `cargo test`；`cargo check` 前若 sem 二进制未准备，先跑 `pnpm sem:prepare`。
+Rust 侧在 `src-tauri/` 目录下执行 `cargo check` / `cargo test`。
 
 ## 发布脚本
 
@@ -58,8 +58,8 @@ Rust 侧在 `src-tauri/` 目录下执行 `cargo check` / `cargo test`；`cargo c
 `.github/workflows/quality.yml`（Quality）：`pull_request` 与 `push` 到 `main`、`dev` 触发，同组任务 `cancel-in-progress`。
 
 - **frontend**（ubuntu-latest，pnpm 11.10.0 + Node 22）：`pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm format:check` → `pnpm test:unit` → `pnpm build`。
-- **rust**（windows-latest）：`pnpm sem:prepare --target x86_64-pc-windows-msvc` → `src-tauri/` 下 `cargo test --locked` → `pnpm install --frozen-lockfile` + `pnpm build` → `cargo build --release --locked --bins` → `pnpm test:cli --exe` → `pnpm test:cli:shells --exe` → `scripts/test-cli.ps1` 分别经 Windows PowerShell 5.1 与 PowerShell 7 直调。
-- **macos**（macos-latest，pnpm 11.10.0 + Node 22）：与上两个 job 并行且互不影响，不改动它们的门禁，也不影响 `release.yml`。`sw_vers` / `uname -m` 先记录真实系统与架构 → `pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm format:check` → `pnpm test:unit` → `pnpm build` → 用 `rustc -vV` 的 host 三元组跑 `pnpm sem:prepare --target <host>`，再用 `pnpm sem:verify --target <host>` 读文件头**显式比较实际架构与三元组**（不一致退出 1），并跑 `pnpm sem:verify:test` 校验识别逻辑本身 → `src-tauri/` 下 `cargo test --locked -- --test-threads=1`（带一组 `--skip`，见下）。
+- **rust**（windows-latest）：`src-tauri/` 下 `cargo test --locked` → `pnpm install --frozen-lockfile` + `pnpm build` → `cargo build --release --locked --bins` → `pnpm test:cli --exe` → `pnpm test:cli:shells --exe` → `scripts/test-cli.ps1` 分别经 Windows PowerShell 5.1 与 PowerShell 7 直调。
+- **macos**（macos-latest，pnpm 11.10.0 + Node 22）：与上两个 job 并行且互不影响，不改动它们的门禁，也不影响 `release.yml`。`sw_vers` / `uname -m` 先记录真实系统与架构 → `pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm format:check` → `pnpm test:unit` → `pnpm build` → `src-tauri/` 下 `cargo test --locked -- --test-threads=1`（带一组 `--skip`，见下）。
 
 macOS 侧的 `cargo test` 用 `--test-threads=1` 串行跑：`data_sync` / `wiki` 的文件锁用例以纳秒时间戳建临时目录，并行时偶发抢同一把锁。7 个用例暂时 `--skip`，原因都是断言本身写死 Windows 语义（Windows 路径字面量、`source == "brew"`、依赖 git 全局 `init.defaultBranch`），不是产品缺陷；逐个改成平台无关断言后应删除对应 `--skip`：
 
@@ -71,38 +71,31 @@ macOS 侧的 `cargo test` 用 `--test-threads=1` 串行跑：`data_sync` / `wiki
 | `terminal_ipc::tests::project_resolution_uses_registered_active_project` | 用例写死 `D:\projects\demo` |
 | `commands::ai::resource_library::tests::sync_pull_push_status_and_remote_gone` | 本地 bare 仓库的默认分支名随 git 全局 `init.defaultBranch` 变化，删除当前分支被拒 |
 
-`.github/workflows/release.yml`（Release）：`push` tag `v*` 或手动 `workflow_dispatch` 触发，单个 `release` job 按四目标矩阵并行（Windows NSIS、macOS arm64/x64 的 dmg + app、Ubuntu 22.04 的 deb + AppImage），统一由 `tauri-action` 写入同一个 draft Release。更新包签名私钥来自 `update` Environment 的 secrets；签名口令为空，workflow 会显式置为空字符串以避开 Tauri 2.11.4 signer 的静默失败。macOS 产物未做 Apple 公证，首次打开需右键 → 打开或 `xattr -cr`。
+`.github/workflows/release.yml`（Release）：`push` tag `v*` 或手动 `workflow_dispatch` 触发，单个 `release` job 按四目标矩阵并行（Windows NSIS、macOS arm64/x64 的 dmg + app、Ubuntu 22.04 的 deb + AppImage），统一由 `tauri-action` 写入同一个 draft Release。更新包签名私钥来自 `update` Environment 的 secrets；签名口令为空，workflow 会显式置为空字符串以避开 Tauri 2.11.4 signer 的静默失败。macOS 产物未做 Apple 公证：从浏览器下载的 dmg 装出的 app 带 `com.apple.quarantine` 标记，Gatekeeper 会拒绝启动并提示「已损坏」，用户需把 app 拖进 `/Applications` 后执行 `xattr -cr /Applications/RepoMeow.app`（不需 sudo）再打开；「右键 → 打开」对未签名产物无效。完整说明见 `README.md` 的「macOS 安装」一节。
 
 ## macOS 本地复跑（Mac mini 真机）
 
-CI 的 macos job 只是托管的 arm64 虚拟机；真机验收在同一套命令上复跑，先记录环境再逐条执行。整段可直接粘贴：开头 `set -e` 保证任一步失败即停（vim `env` / `bash` 都一样），不会再出现「sem 校验失败但仍继续跑后续命令」的假绿。
+CI 的 macos job 只是托管的 arm64 虚拟机；真机验收在同一套命令上复跑，先记录环境再逐条执行。整段可直接粘贴：开头 `set -e` 保证任一步失败即停（vim `env` / `bash` 都一样）。
 
 ```bash
 set -e   # 任一步非零立即中止；交互执行时请勿只用 `;` 串联
-# rustup 装在 ~/.cargo 时，非登录 shell 可能没有 rustc：先确认 `rustc -V` 有输出，
-# 否则下面的三元组解析会拿到空值，sem 与 Rust 步骤都会失败。
+# rustup 装在 ~/.cargo 时，非登录 shell 可能没有 rustc：先确认 `rustc -V` 有输出。
 # 0. 环境记录（贴进验收结论）
 sw_vers                       # macOS 版本
 uname -m                      # 架构：arm64 / x86_64
 xcode-select -p               # 命令行工具路径
 node --version                # 需满足 ^20.19.0 || >=22.12.0
 pnpm --version                # 11.10.0
-rustc -vV | sed -n 's/^host: //p'   # host 三元组，决定 sem 资产
+rustc -vV | sed -n 's/^host: //p'   # host 三元组
 
 # 1. 依赖与前端门禁
 pnpm install --frozen-lockfile
 pnpm lint
 pnpm format:check
-pnpm test:unit                # 期望 655 项全通过
+pnpm test:unit                # 必须全绿：用例数随新增测试变化，以 vitest 汇总行的实际数字为准
 pnpm build                    # 含 vue-tsc 类型检查与首屏 500 KiB 预算
 
-# 2. 与架构匹配的 sem sidecar(每步都失败即停,set -e)
-TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
-pnpm sem:prepare --target "$TRIPLE"
-pnpm sem:verify --target "$TRIPLE"   # 文件头架构 ≠ $TRIPLE 时退出 1
-pnpm sem:verify:test                 # 架构识别逻辑自身的回归
-
-# 3. Rust 单测（与 CI 同一入口，同样串行 + 同一组 --skip）
+# 2. Rust 单测（与 CI 同一入口，同样串行 + 同一组 --skip）
 cd src-tauri
 cargo test --locked -- --test-threads=1 \
   --skip agent::harness::restricted_env::tests::unix_paths_stay_case_sensitive \
@@ -116,14 +109,12 @@ cargo test --locked -- --test-threads=1 \
 
 - clippy 严格门禁（`cargo clippy --locked --all-targets -- -D warnings`）目前**在 macOS 上跑不过**：`#[cfg(windows)]` 分支在 Unix 上整体编译掉，触发 `unused import`（`commands/terminal.rs`、`open/shell.rs`）、`unused variable`（`commands/git/lifecycle.rs`）、`never constructed`（`open::ShellKind::PowerShell` / `GitBash`、`error::ErrorCode::MoveRobocopyFailed`、`env_refresh::apply_to_command`）以及 `docker.rs` 的 `large_enum_variant`，共 10 条 error。这些都需要按平台收窄 `cfg` 或单点 `#[allow]` 才能过，属于另一次改动，因此 macos job 只卡 `cargo test`，与 windows job 的 clippy 门禁互不影响。
 - `pnpm test:cli` / `pnpm test:cli:shells` / `scripts/test-cli.ps1` 依赖 Windows PowerShell 与 `.exe` 产物，macOS 上不复跑。
-- 真机若为 Intel（x86_64），`TRIPLE` 会解析成 `x86_64-apple-darwin`，`scripts/sem/manifest.json` 同样有对应资产与 SHA-256，无需改命令。
 
 ### 已知限制
 
-- 未做 Apple 公证，`pnpm build:desktop` 产物首次打开需右键 → 打开，或 `xattr -cr /Applications/RepoMeow.app`。
+- 未做 Apple 公证：`pnpm build:desktop` 产出的 app 若带 `com.apple.quarantine` 标记，`open` 会直接失败（等价于双击看到「已损坏」）。判据是**先把 app 放进 `/Applications`**、执行 `xattr -cr /Applications/RepoMeow.app`（不需 sudo）、再打开能正常启动；`xattr -cr` 只清标记，不改变应用内容。直接在下载目录或 dmg 里打开会以 AppTranslocation 路径运行，不能用来验证。
 - 上述 7 个 `--skip` 是尚未改写的用例断言；改成平台无关断言后 CI 与本地复跑命令需同步删掉对应行。
-- `pnpm sem:verify` 只比对**文件头架构与三元组**，不校验 SHA-256（那是 `sem:prepare` 的职责），也不判断二进制能否运行。
 
 ## 提交前建议
 
-改动后至少组合验证 `pnpm lint` + `pnpm test:unit` + `pnpm build`；触及 Rust 则补 `cargo test`（先在 `src-tauri/` 就位、必要时 `pnpm sem:prepare`）；触及 CLI 输出、数据同步或退出码则补 `pnpm test:cli` 与 `pnpm test:cli:shells`。CI 在 `dev` 上也跑同一套质量门禁，本地跑通不等于 PR 通过，以 PR 上的 Quality 结果为准。
+改动后至少组合验证 `pnpm lint` + `pnpm test:unit` + `pnpm build`；触及 Rust 则补 `cargo test`；触及 CLI 输出、数据同步或退出码则补 `pnpm test:cli` 与 `pnpm test:cli:shells`。CI 在 `dev` 上也跑同一套质量门禁，本地跑通不等于 PR 通过，以 PR 上的 Quality 结果为准。

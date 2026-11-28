@@ -1,5 +1,5 @@
 //! RepoMeow CLI:主程序内置的命令行模式,面向 AI agent 与脚本提供
-//! 项目管理、Wiki、语义分析、报告、标签与 AI 配置等应用管理能力(git/docker 等本机工具不包装)。
+//! 项目管理、Wiki、报告、标签与 AI 配置等应用管理能力(git/docker 等本机工具不包装)。
 //!
 //! - 首参数命中内置子命令即进入 CLI 模式,执行后退出,不启动桌面窗口;
 //! - 成功结果以 JSON 写 stdout(help/version 为纯文本),失败以 {"code","message","detail"} JSON 写 stderr 且退出码非 0;
@@ -9,9 +9,6 @@ use std::env;
 
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
-
-use crate::commands::semantic;
-use crate::path_util::clean_str;
 
 mod account_tool;
 mod ai_tool;
@@ -45,7 +42,7 @@ use wiki_tool::*;
 #[command(
     name = "repomeow",
     version,
-    about = "RepoMeow CLI:项目管理 / Wiki / 语义分析 / 报告 / 标签 / 命令 / AI 配置(命令结果输出 JSON)",
+    about = "RepoMeow CLI:项目管理 / Wiki / 报告 / 标签 / 命令 / AI 配置(命令结果输出 JSON)",
     disable_help_subcommand = true
 )]
 struct Cli {
@@ -58,9 +55,6 @@ enum Commands {
     /// 项目 Wiki 查询
     #[command(subcommand)]
     Wiki(WikiCommands),
-    /// 代码语义分析
-    #[command(subcommand)]
-    Sem(SemCommands),
     /// 项目管理(登记/归档/开关)与数据查询
     #[command(subcommand)]
     Project(ProjectCommands),
@@ -166,55 +160,6 @@ enum WikiCommands {
         /// RepoMeow 中项目登记使用的目录
         #[arg(short = 'p', long)]
         project_directory: String,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-enum SemCommands {
-    /// 按名称语义搜索代码实体(函数/类/接口/结构体等)
-    Find {
-        /// Git 仓库目录(仓库内任意路径均可)
-        #[arg(short, long)]
-        directory: String,
-        /// 搜索关键词:实体名或其一部分
-        #[arg(short, long)]
-        query: String,
-    },
-    /// 查看实体语义上下文:源码摘要 + 按调用/引用关系扩展的相关实体
-    Context {
-        /// Git 仓库目录(仓库内任意路径均可)
-        #[arg(short, long)]
-        directory: String,
-        /// 实体名或 entityId(形如 src/a.ts::function::run)
-        #[arg(short, long)]
-        entity: String,
-        /// 实体所在文件的仓库相对路径(/ 分隔),重名时消歧
-        #[arg(long)]
-        file_path: Option<String>,
-        /// 上下文预算(token 数,500-4000),缺省 2000
-        #[arg(long)]
-        budget: Option<u32>,
-        /// 关系扩展跳数(0-3),缺省 1
-        #[arg(long)]
-        hops: Option<u32>,
-    },
-    /// 查询实体的直接调用方(callers)与引用点(refs)
-    Relations {
-        /// Git 仓库目录(仓库内任意路径均可)
-        #[arg(short, long)]
-        directory: String,
-        /// 实体名或 entityId(含 "::" 视为 entityId)
-        #[arg(short, long)]
-        entity: String,
-        /// 实体所在文件的仓库相对路径(/ 分隔),重名时消歧
-        #[arg(long)]
-        file_path: Option<String>,
-    },
-    /// 汇总仓库当前未提交的实体级结构化变更
-    Diff {
-        /// Git 仓库目录(仓库内任意路径均可)
-        #[arg(short, long)]
-        directory: String,
     },
 }
 
@@ -801,7 +746,6 @@ fn is_cli_head(arg: &str) -> bool {
     matches!(
         arg,
         "wiki"
-            | "sem"
             | "project"
             | "report"
             | "tag"
@@ -1002,62 +946,6 @@ async fn dispatch(command: Commands) -> Result<Value, ToolFailure> {
             project_directory,
             language,
         }) => update_wiki_impl(project_directory, language, None).await,
-        Commands::Sem(SemCommands::Find { directory, query }) => {
-            let query = query.trim().to_string();
-            if query.is_empty() {
-                return Err(ToolFailure::new("invalid_query", "搜索关键词不能为空"));
-            }
-            let result = semantic::cli_semantic_find_entities(clean_str(&directory), query)
-                .await
-                .map_err(|error| ToolFailure::from_app("语义搜索失败", error))?;
-            Ok(json!(result))
-        }
-        Commands::Sem(SemCommands::Context {
-            directory,
-            entity,
-            file_path,
-            budget,
-            hops,
-        }) => {
-            let Some((entity_id, entity_name)) = split_entity_token(&entity) else {
-                return Err(ToolFailure::new("invalid_entity", "实体名不能为空"));
-            };
-            let result = semantic::cli_semantic_entity_context(
-                clean_str(&directory),
-                entity_id,
-                entity_name,
-                file_path,
-                budget.map(|value| value as usize),
-                hops.map(|value| value as usize),
-            )
-            .await
-            .map_err(|error| ToolFailure::from_app("读取实体上下文失败", error))?;
-            Ok(json!(result))
-        }
-        Commands::Sem(SemCommands::Relations {
-            directory,
-            entity,
-            file_path,
-        }) => {
-            let Some((entity_id, entity_name)) = split_entity_token(&entity) else {
-                return Err(ToolFailure::new("invalid_entity", "实体名不能为空"));
-            };
-            let (callers, refs) = semantic::cli_semantic_entity_relations(
-                clean_str(&directory),
-                entity_id,
-                entity_name,
-                file_path,
-            )
-            .await
-            .map_err(|error| ToolFailure::from_app("查询实体关系失败", error))?;
-            Ok(json!({ "callers": callers, "refs": refs }))
-        }
-        Commands::Sem(SemCommands::Diff { directory }) => {
-            let result = semantic::cli_semantic_worktree_diff(clean_str(&directory))
-                .await
-                .map_err(|error| ToolFailure::from_app("读取未提交变更失败", error))?;
-            Ok(json!(result))
-        }
         Commands::Project(ProjectCommands::ReadFile {
             project_directory,
             path,

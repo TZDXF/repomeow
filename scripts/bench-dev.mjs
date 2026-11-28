@@ -108,7 +108,7 @@ const report = {
   manifestSha256: hash(await readFile(join(cwd, "Cargo.toml"))),
   lockSha256: hash(await readFile(join(cwd, "Cargo.lock"))),
   sourceSha256: hash(original), edit: "now_utc().timestamp() -> now_utc().timestamp() + 0",
-  sizeDefinition: "Sum of logical file sizes, not allocated filesystem blocks; target only, excludes Cargo registry and pnpm/sem caches",
+  sizeDefinition: "Sum of logical file sizes, not allocated filesystem blocks; target only, excludes Cargo registry and pnpm caches",
   runs: [],
 };
 const build = ["build", "--locked", "--offline", "--bin", "repomeow", "--target-dir", target,

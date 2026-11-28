@@ -17,7 +17,6 @@ pub mod prompt;
 pub mod report;
 pub mod scan;
 pub mod script;
-pub mod semantic;
 pub mod tag;
 pub mod terminal;
 pub mod toolchain;

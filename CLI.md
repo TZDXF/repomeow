@@ -16,7 +16,7 @@
 打开「设置 → CLI」:
 
 1. Windows 点击「添加到用户 PATH」并重启终端和 AI 工具;macOS / Linux 手动将包含 `repomeow-cli` 可执行文件的目录加入 PATH;
-2. 点击「导入到资源库」将内置技能 `repomeow` 导入资源库(SKILL.md 为入口,references/ 下按 project / sem / report / manage / settings 细分);
+2. 点击「导入到资源库」将内置技能 `repomeow` 导入资源库(SKILL.md 为入口,references/ 下按 project / report / manage / settings 细分);
 3. 在「项目 → AI 资源」将技能部署到各 agent 的 skills 目录(如 `.claude/skills`、`.agents/skills`)。
 
 技能入口 SKILL.md 含输出约定与分组路由,细分用法在 references/ 下,agent 按需加载。技能通过 PATH 调用,不保存本机可执行文件路径;重复导入只刷新资源库中的技能文本,已部署副本需在「项目 → AI 资源」重新应用后同步。
@@ -60,7 +60,7 @@ const projects = JSON.parse(stdout).projects;
 
 ## 命令
 
-`<项目目录>` 指项目目录;需要登记状态的命令在项目未登记或已归档时返回 `project_not_found`(`project get/archive/unarchive/delete` 可操作已归档项目)。`project read-file`、Wiki 与 `file` 命令直接按文件系统路径操作,不要求项目已登记;`terminal create` 及终端的 `-p` 过滤要求项目已登记且未归档。`sem` 的 `-d` 可传仓库内任意路径,操作以仓库根目录为准。
+`<项目目录>` 指项目目录;需要登记状态的命令在项目未登记或已归档时返回 `project_not_found`(`project get/archive/unarchive/delete` 可操作已归档项目)。`project read-file`、Wiki 与 `file` 命令直接按文件系统路径操作,不要求项目已登记;`terminal create` 及终端的 `-p` 过滤要求项目已登记且未归档。
 
 删除、清空、全量覆盖配置/调度、整本 Wiki 重生成、文件覆盖与终端输入/启停只应在用户明确要求的范围内执行;报告生成前确认日期与作者口径,避免错误消耗 AI 额度。AI 配置和账号 token 属于敏感信息,不要写入日志或提交到仓库。
 
@@ -78,17 +78,6 @@ repomeow-cli wiki delete -p <项目目录>
 ```
 
 未生成 Wiki 时查询命令返回 `wiki_not_generated`;页面不存在返回 `wiki_page_not_found`。`stale=true` 表示 Wiki 落后于最新代码。`generate` 整本生成或重生成并覆盖现有页面,`update` 仅重生成受代码变更影响的页面;两者都会调用 AI、消耗额度并同步等待完成。`config-set` 覆盖式写入,字段不传即跟随应用默认。
-
-### `sem`
-
-```powershell
-repomeow-cli sem find -d <仓库目录> -q <关键词>
-repomeow-cli sem context -d <仓库目录> -e <实体名或entityId> [--file-path src/a.ts] [--budget 2000] [--hops 1]
-repomeow-cli sem relations -d <仓库目录> -e <实体名或entityId> [--file-path src/a.ts]
-repomeow-cli sem diff -d <仓库目录>
-```
-
-实体参数含 `::` 时按 entityId 精确匹配;重名时用 `--file-path` 消歧。
 
 ### `project`
 

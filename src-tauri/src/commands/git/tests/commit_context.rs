@@ -40,6 +40,14 @@ fn commit_context_falls_back_to_cached_without_head() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// 取某文件进入提示词前的 raw_patch(文件不存在时为 None)
+fn file_patch<'a>(files: &'a [AiCommitFileContext], path: &str) -> Option<&'a str> {
+    files
+        .iter()
+        .find(|file| file.path == path)
+        .map(|file| file.raw_patch.as_str())
+}
+
 /// 在 dir 下创建一个带一次提交的嵌套 git 仓库
 #[test]
 fn nested_repo_is_not_counted_as_untracked() {
@@ -95,7 +103,9 @@ fn ai_commit_context_follows_untracked_and_path_selection() {
 
     let without_untracked = ai_commit_context_blocking(dir.to_str().unwrap(), false, None).unwrap();
     assert_eq!(without_untracked.files.len(), 2);
-    assert!(!without_untracked.semantic_input.contains("new content"));
+    assert!(
+        !file_patch(&without_untracked.files, "new.txt").is_some_and(|p| p.contains("new content"))
+    );
 
     let with_untracked = ai_commit_context_blocking(dir.to_str().unwrap(), true, None).unwrap();
     assert_eq!(with_untracked.files.len(), 3);
@@ -103,14 +113,16 @@ fn ai_commit_context_follows_untracked_and_path_selection() {
         .files
         .iter()
         .any(|file| file.path == "new.txt"));
-    assert!(with_untracked.semantic_input.contains("new content"));
+    assert!(file_patch(&with_untracked.files, "new.txt")
+        .unwrap()
+        .contains("new content"));
 
     let selected = vec!["b.txt".to_string()];
     let partial = ai_commit_context_blocking(dir.to_str().unwrap(), true, Some(&selected)).unwrap();
     assert_eq!(partial.files.len(), 1);
     assert_eq!(partial.files[0].path, "b.txt");
-    assert!(!partial.semantic_input.contains("a changed"));
-    assert!(!partial.semantic_input.contains("new content"));
+    assert!(!partial.files[0].raw_patch.contains("a changed"));
+    assert!(!partial.files[0].raw_patch.contains("new content"));
 
     let _ = fs::remove_dir_all(&dir);
 }
@@ -132,14 +144,18 @@ fn ai_commit_context_keeps_untracked_binary_metadata() {
         .unwrap();
     assert!(binary.binary);
     assert!(context.stat.contains("asset.bin | binary"));
-    assert!(!context.semantic_input.contains("asset.bin"));
-    assert!(!context.semantic_paths.contains("asset.bin"));
+    // 二进制只保留元数据占位,不把字节内容塞进 raw_patch
+    assert_eq!(
+        binary.raw_patch,
+        "diff --git a/asset.bin b/asset.bin\nnew file mode 100644\n\
+         Binary files /dev/null and b/asset.bin differ\n"
+    );
 
     let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
-fn ai_commit_context_excludes_lockfile_from_semantic_patch_but_keeps_summary() {
+fn ai_commit_context_marks_lockfile_as_excluded_but_keeps_summary() {
     let dir = temp_dir("ai-ctx-lockfile");
     init_repo(&dir);
     fs::write(dir.join("Cargo.lock"), "version = 3\n").unwrap();
@@ -156,13 +172,19 @@ fn ai_commit_context_excludes_lockfile_from_semantic_patch_but_keeps_summary() {
     let context = ai_commit_context_blocking(dir.to_str().unwrap(), false, None).unwrap();
     assert!(context.stat.contains("Cargo.lock | M"));
     assert!(context.stat.contains("main.rs | M"));
-    assert!(!context.semantic_input.contains("Cargo.lock"));
-    assert!(!context.semantic_input.contains("name = \"probe\""));
-    assert!(context
-        .semantic_input
-        .contains("diff --git a/main.rs b/main.rs"));
-    assert!(!context.semantic_paths.contains("Cargo.lock"));
-    assert!(context.semantic_paths.contains("main.rs"));
+    let lock = context
+        .files
+        .iter()
+        .find(|file| file.path == "Cargo.lock")
+        .unwrap();
+    assert!(lock.raw_excluded);
+    let code = context
+        .files
+        .iter()
+        .find(|file| file.path == "main.rs")
+        .unwrap();
+    assert!(!code.raw_excluded);
+    assert!(code.raw_patch.contains("diff --git a/main.rs b/main.rs"));
 
     let _ = fs::remove_dir_all(&dir);
 }

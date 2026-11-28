@@ -93,7 +93,7 @@ pnpm build     # 含 vue-tsc --noEmit 类型检查与首屏入口体积预算
 - 合并同一功能的零散提交，使用简洁中文，不直接粘贴提交列表、文件路径或提交哈希；不得编造未实现或未经证实的功能与效果。
 - 若没有符合条件的功能变化，仅写「本版本暂无面向用户的功能更新。」。
 
-将正文以 UTF-8 写入仓库外的临时 Markdown 文件，并将绝对路径记为 `NOTES_FILE`，不要为临时说明引入未提交文件。第 8 步必须将它写入 GitHub Release，不能只在最终回复中展示。
+将正文以 UTF-8 写入仓库外的临时 Markdown 文件，并将绝对路径记为 `NOTES_FILE`，不要为临时说明引入未提交文件。写完功能内容后**必须**把 `scripts/release/macos-install-note.md` 的内容原样追加到正文末尾；它是仓库内受版本管理的片段，直接用 `cat` 拼进去，不要在临时文件里手写一份。第 8 步必须将它写入 GitHub Release，不能只在最终回复中展示。
 
 ### 5. 版本变更进入 dev，独立验证后推广 main
 
@@ -145,7 +145,7 @@ CI 步骤概要（详见 `.github/workflows/release.yml`，四个平台 job 并�
 1. checkout + 装 pnpm 11.10.0 + 装 Node 22
 2. 设置 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""`（规避 Tauri 2.11.4 signer 静默 bug）
 3. 装 Rust stable + 对应 target + cache（按 target 区分缓存键）；Linux job 额外装 WebKitGTK 4.1 / libayatana-appindicator 等 Tauri 系统依赖
-4. `pnpm install --frozen-lockfile` + `pnpm sem:prepare --target <矩阵 target>`（校验 sem sidecar 版本与 SHA-256）
+4. `pnpm install --frozen-lockfile`（安装前端依赖,发布构建前不再需要额外下载二进制）
 5. `tauri-action@v0` 用 `secrets.TAURI_SIGNING_PRIVATE_KEY` 签名、按 job 顺序合并生成 `latest.json`、上传各平台产物、创建 **draft** Release。产物名：`RepoMeow_<ver>_x64-setup.exe`、`RepoMeow_<ver>_aarch64.dmg` / `RepoMeow_<ver>_x64.dmg`、`RepoMeow_<ver>_aarch64.app.tar.gz(.sig)` / `RepoMeow_<ver>_x64.app.tar.gz(.sig)`、`repomeow_<ver>_amd64.deb`、`RepoMeow_<ver>_amd64.AppImage(.sig)`
 
 耗时主要在 Rust release 编译（Windows 约 1–3 分钟；macOS/Linux 冷缓存约 10–25 分钟，命中缓存后明显加快）。`fail-fast: false`，任一平台失败 `gh run watch` 退出非 0、其余平台继续，把失败 job 的日志贴回用户并建议查 `.github/workflows/release.yml` 排错。

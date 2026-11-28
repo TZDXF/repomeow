@@ -2,6 +2,23 @@
 
 基于 **Tauri 2 + Vue 3 + TypeScript** 的本地开发项目管理中心（桌面端）。一窗集中登记本地项目，完成脚本、Docker Compose、Git、README 预览、Wiki 生成、项目 AI 问答、定时报告等操作；并通过内置 CLI + Skills 开放给 Codex、Claude Code 等 AI agent。
 
+## macOS 安装
+
+从 [Releases](https://github.com/TZDXF/repomeow/releases/latest) 下载 `.dmg` 后按三步安装：
+
+1. 双击 `.dmg` 装载，把 `RepoMeow.app` **拖进**「应用程序」（`/Applications`）。不要在下载目录或 dmg 里直接双击打开——那样系统会以只读的 AppTranslocation 路径运行。
+2. 打开「终端」执行（**不需要 `sudo`**，应用归安装它的用户所有，`/Applications` 对 `admin` 组可写）：
+
+   ```bash
+   xattr -cr /Applications/RepoMeow.app
+   ```
+
+3. 回访达双击 `RepoMeow.app` 即可打开。若系统仍提示「无法验证开发者」，到「系统设置 → 隐私与安全性」点「仍要打开」。
+
+**为什么要这一步**：发布产物没有做 Apple 公证（需要付费开发者账号），浏览器下载的文件会被 macOS 打上 `com.apple.quarantine` 标记，Gatekeeper 因此拒绝启动并提示「已损坏，无法打开」。`xattr -cr` 只清除该标记，不改变应用内容——应用本身并没有损坏。
+
+**什么时候要再执行一次**：每次从浏览器重新下载并拖进 `/Applications` 时都要再执行一次第 2 步。应用内自动更新通常不会重新带上 quarantine 标记（Tauri 自己的下载器不写该属性）；如果更新后又出现同样的提示，重复第 2 步即可。
+
 ## 功能特性
 
 ### 项目与脚本
@@ -30,7 +47,6 @@
 - **项目问答**：基于项目上下文与 AI 对话（流式输出、思考过程展示、上下文占用指示），多轮会话与历史记录
 - **AI 接入**：内置多厂商/模型目录与自定义接入配置；提示词管理；AI 用量统计（含缓存 token）
 - **AI 资源库**：技能（Skill）市场浏览/安装/分组、通用 MCP 服务器定义、一键生成 AGENTS.md（自动对齐 CLAUDE.md 引用）、从 CC Switch 导入；可作 git 仓库备份同步远端，支持安全扫描
-- **语义分析**：内置 sem sidecar，代码实体语义搜索、上下文与调用关系分析、未提交变更汇总
 
 ### 报告与自动化
 
@@ -54,7 +70,6 @@
 | 编辑/图表 | CodeMirror 6（文件预览）、d3（Git 图谱）、ECharts（统计图） |
 | 渲染 | vue-stream-markdown（Shiki 高亮） |
 | 后端 | Tauri 2（Rust）、rusqlite（bundled SQLite）、tokio、clap（内置 CLI） |
-| Sidecar | sem（代码语义分析，externalBin 内置） |
 | 国际化 | vue-i18n（zh-CN 默认 / en-US 回退） |
 | 工具链 | oxlint（静态检查）、oxfmt（代码格式化）、Vitest（单元测试） |
 
@@ -68,7 +83,7 @@
 
 ```bash
 pnpm install        # 安装依赖
-pnpm start          # 准备 sem sidecar 并 tauri dev:完整桌面端开发(前端 + Rust 热更新)
+pnpm start          # tauri dev:完整桌面端开发(前端 + Rust 热更新)
 pnpm dev            # 仅 Vite 前端(端口 1420)
 pnpm build          # 类型检查(vue-tsc)+ 前端构建 + 首屏入口 500 KiB 预算检查
 pnpm build:desktop  # 打包桌面安装包(Windows NSIS)
@@ -78,11 +93,10 @@ pnpm format         # oxfmt 格式化 src/
 pnpm format:check   # 仅检查格式(CI 用)
 pnpm test:unit      # Vitest 单元测试(src/**/*.test.ts)
 pnpm cli:dev -- project list     # 以 CLI 模式运行主程序(不开窗口)
-pnpm sem:prepare    # 下载/校验 sem sidecar 二进制(首次运行或 cargo 构建前需要)
 pnpm release:local  # 本地发布流程调试(另有 check/build/sign/latest/all 子命令)
 ```
 
-> 改动后验证：`pnpm lint` + `pnpm test:unit` + `pnpm build`；Rust 侧 `src-tauri/` 下 `cargo check` / `cargo test`（先 `pnpm sem:prepare`）。
+> 改动后验证：`pnpm lint` + `pnpm test:unit` + `pnpm build`；Rust 侧 `src-tauri/` 下 `cargo check` / `cargo test`。
 
 上表是精简版；逐条对齐 `package.json` scripts 的完整速查（本地启动、构建、静态检查、测试、发布脚本与 `quality.yml` / `release.yml` 的 CI 入口）见 [构建与测试速查](docs/build-and-test.md)。
 
@@ -104,14 +118,14 @@ src/                    Vue 前端
   lib/                  cmd() Tauri 桥、路径/格式化等工具(单测与源码同目录)
 src-tauri/
   src/commands/         Tauri 命令域(project / git / script / docker / files / wiki
-                        / chat / ai / report / semantic / java / open / tag 等)
+                        / chat / ai / report / java / open / tag 等)
   src/agent/            内置 Agent(llm 适配、会话、压缩、工具)
   src/ai/               AI 接入(厂商/模型目录、SDK、Wiki 大纲、提示词)
   src/cli/              内置 CLI(首参数子命令进入,JSON 输出;技能文本在仓库根 skills/)
   src/scheduler/        定时任务调度引擎(日历 / 配置 / 执行 / 运行时)
   src/db/               SQLite 连接与迁移执行器(rusqlite)
   migrations/           SQL 迁移 NNN_name.sql(按 user_version 幂等应用,001~011)
-scripts/                sem/(sidecar 下载与清单)、release/(发布流程)
+scripts/                release/(发布流程)
 skills/repomeow/        内置技能(SKILL.md 入口 + references/ 细分,随二进制打包)
 ```
 

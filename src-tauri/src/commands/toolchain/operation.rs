@@ -48,6 +48,15 @@ pub(super) fn caps_for(
             can_switch: found,
             can_list_remote: found,
         },
+        // node 本身只做识别(装/更新交给 nvm / fnm / vp 的版本管理),
+        // 与 node::resolve 未提供 node 分支保持一致,不开任何操作
+        "node" => ToolchainCaps {
+            can_install: false,
+            can_update: false,
+            can_uninstall: false,
+            can_switch: false,
+            can_list_remote: false,
+        },
         "nvm" | "fnm" => {
             let manageable = found && manageable(source);
             ToolchainCaps {
