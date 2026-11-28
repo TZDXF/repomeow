@@ -6,7 +6,7 @@
 
 - Node `^20.19.0 || >=22.12.0`（`package.json` engines，与 Vite 8 一致；CI 使用 22）。
 - pnpm 11.10.0（`packageManager` 字段；仓库存在 `pnpm-lock.yaml` / `pnpm-workspace.yaml`）。
-- Rust 工具链与 Tauri 2 系统依赖（Windows 需 WebView2）。
+- Rust 工具链 **1.90 及以上**（`tauri 2.12.7` 的 `rust-version = "1.90"`；2.11.x 时为 1.77.2，随 2.12 升级抬高）与 Tauri 2 系统依赖（Windows 需 WebView2）。
 - 首次安装依赖 `pnpm install --frozen-lockfile`，之后可直接跑前端与 Cargo 构建（无额外二进制需要准备）。
 
 ## 本地启动
