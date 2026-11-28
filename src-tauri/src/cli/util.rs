@@ -64,19 +64,6 @@ pub(super) fn repomeow_data_root() -> Result<PathBuf, ToolFailure> {
 
 // ── 共享辅助 ──────────────────────────────────────────────────────────
 
-/// 实体参数:含 "::" 视为 entityId 精确匹配,否则视为实体名;空白输入为 None。
-pub(super) fn split_entity_token(value: &str) -> Option<(Option<String>, Option<String>)> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    if trimmed.contains("::") {
-        Some((Some(trimmed.to_string()), None))
-    } else {
-        Some((None, Some(trimmed.to_string())))
-    }
-}
-
 /// 按 UTF-8 边界截断;返回 (文本, 是否截断)。
 pub(super) fn truncate_text(text: &str, max_bytes: usize) -> (String, bool) {
     if text.len() <= max_bytes {

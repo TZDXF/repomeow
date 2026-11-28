@@ -1,7 +1,7 @@
 use serde::Serialize;
 
 /// 业务错误码,前端按 `as_str()` 查 `errors.<code>` i18n 文案。
-/// 命名:小写蛇形,`domain_semantic`(如 `project_not_found` / `git_clone_failed`)。
+/// 命名:小写蛇形,`domain_topic`(如 `project_not_found` / `git_clone_failed`)。
 /// 新增错误码时,前端 `src/i18n/locales/{zh-CN,en-US}.ts` 必须同步补 `errors.<code>`。
 ///
 /// `message` 字段约定:仅存放不可本地化的技术上下文(路径、ID、HTTP 状态码、底层错误 detail),
@@ -200,15 +200,6 @@ pub enum ErrorCode {
     AgentPromptFailed,
     AgentCanceled,
 
-    // ── sem 语义分析 Sidecar ─────────────────────────────────────────
-    SemanticToolMissing,
-    SemanticToolFailed,
-    SemanticOutputInvalid,
-    SemanticAnalysisTimeout,
-    SemanticOutputTooLarge,
-    SemanticCanceled,
-    SemanticEntityNotFound,
-
     // ── 工作日 ────────────────────────────────────────────────────────
     WorkdayHttpClientFailed,
     WorkdayFetchFailed,
@@ -365,14 +356,6 @@ impl ErrorCode {
             Self::AgentHandshakeFailed => "agent_handshake_failed",
             Self::AgentPromptFailed => "agent_prompt_failed",
             Self::AgentCanceled => "agent_canceled",
-            // sem 语义分析
-            Self::SemanticToolMissing => "semantic_tool_missing",
-            Self::SemanticToolFailed => "semantic_tool_failed",
-            Self::SemanticOutputInvalid => "semantic_output_invalid",
-            Self::SemanticAnalysisTimeout => "semantic_analysis_timeout",
-            Self::SemanticOutputTooLarge => "semantic_output_too_large",
-            Self::SemanticCanceled => "semantic_canceled",
-            Self::SemanticEntityNotFound => "semantic_entity_not_found",
             // 工作日
             Self::WorkdayHttpClientFailed => "workday_http_client_failed",
             Self::WorkdayFetchFailed => "workday_fetch_failed",

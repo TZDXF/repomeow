@@ -51,11 +51,6 @@ const GENERIC_DETAIL_CODES = new Set([
   "agent_prompt_failed",
   // 内嵌终端进程启动失败:message 携带底层 OS 错误(如 shell 路径不存在)
   "terminal_spawn_failed",
-  // sem Sidecar:message 含进程启动错误、退出码、stderr 或解析细节
-  "semantic_tool_missing",
-  "semantic_tool_failed",
-  "semantic_output_invalid",
-  "semantic_output_too_large",
 ]);
 
 /**

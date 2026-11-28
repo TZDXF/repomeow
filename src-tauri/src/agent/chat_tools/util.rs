@@ -69,15 +69,6 @@ pub(super) fn arg_u64_opt(args: &Value, key: &str) -> Result<Option<u64>, ToolEx
     }
 }
 
-/// 实体参数:含 "::" 视为 entityId 精确匹配,否则视为实体名。
-pub(super) fn split_entity_token(value: &str) -> (Option<String>, Option<String>) {
-    if value.contains("::") {
-        (Some(value.to_string()), None)
-    } else {
-        (None, Some(value.to_string()))
-    }
-}
-
 /// 按 UTF-8 边界截断并标注原始长度。
 pub(super) fn truncate_bytes(text: String, max_bytes: usize) -> String {
     if text.len() <= max_bytes {
@@ -95,7 +86,7 @@ pub(super) fn pretty_json<T: Serialize>(value: &T) -> String {
 }
 
 /// Rust 侧自生成的关联标识(8-4-4-4-12 的 UUID v4 形状;熵来自 RandomState,
-/// 非密码学随机,仅用于 sem/报告请求的 requestId 关联与取消)。
+/// 非密码学随机,仅用于报告/技能导入请求的 requestId 关联与取消)。
 pub(super) fn pseudo_request_id() -> String {
     use std::hash::{BuildHasher, Hasher};
     let mut first = std::collections::hash_map::RandomState::new().build_hasher();

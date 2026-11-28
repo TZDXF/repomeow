@@ -1,6 +1,6 @@
 //! 项目问答(chat)的 RepoMeow 工具集。
 //!
-//! 把既有域命令(语义分析 / wiki / 自定义命令 / 报告 / 文件读取 / AI 配置)
+//! 把既有域命令(wiki / 自定义命令 / 报告 / 文件读取 / AI 配置)
 //! 包装成 pi `AgentTool`,供 `commands/chat/session.rs` 构建的 Agent 使用。工具结果统一为
 //! 面向 LLM 的文本,超长按 UTF-8 边界截断并标注;执行失败返回 `Err`,
 //! 由 agent-loop 转成 error 工具结果回传模型。
@@ -14,7 +14,6 @@ mod cmds;
 mod config;
 mod file;
 mod report;
-mod sem;
 pub(crate) mod terminal;
 #[cfg(test)]
 mod tests;
@@ -25,7 +24,6 @@ use cmds::*;
 use config::*;
 use file::*;
 use report::*;
-use sem::*;
 use terminal::*;
 use util::*;
 use wiki::*;
@@ -68,10 +66,6 @@ pub fn chat_tools(app: AppHandle, ctx: ChatToolContext) -> Vec<AgentTool> {
         crate::agent::harness::tools::bash::create_local_bash_tool(ctx.work_dir(), None);
     bash_tool.execution_mode = Some(crate::agent::types::ToolExecutionMode::Sequential);
     vec![
-        sem_find_tool(&app, &ctx),
-        sem_context_tool(&app, &ctx),
-        sem_relations_tool(&app, &ctx),
-        sem_diff_tool(&app, &ctx),
         read_wiki_tool(&app, &ctx),
         update_wiki_tool(&app, &ctx),
         regenerate_wiki_tool(&app, &ctx),

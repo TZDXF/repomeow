@@ -15,8 +15,6 @@ const glassCss = readFileSync(new URL("./glassmorphism.css", import.meta.url), "
 const componentSources = {
   "标题栏 tab / 「更多」弹层": "./../components/common/TitleTabs.vue",
   终端页签: "./../components/terminal/TerminalPanel.vue",
-  语义关系面板: "./../components/files/SemanticRelationPanel.vue",
-  语义影响面板: "./../components/semantic/SemanticImpactPanel.vue",
 } as const;
 
 /** WCAG 相对亮度 */

@@ -33,8 +33,8 @@ fn temp_dir(tag: &str) -> PathBuf {
 #[test]
 fn cli_head_detection_only_accepts_known_subcommands() {
     for head in [
-        "wiki", "sem", "project", "report", "tag", "script", "pin", "hidden", "ai", "prompt",
-        "account", "file", "terminal",
+        "wiki", "project", "report", "tag", "script", "pin", "hidden", "ai", "prompt", "account",
+        "file", "terminal",
     ] {
         assert!(is_cli_head(head), "should enter CLI mode: {head}");
     }
@@ -264,7 +264,7 @@ fn cli_parses_report_generate_defaults() {
 
 #[test]
 fn cli_rejects_unknown_subcommand() {
-    assert!(Cli::try_parse_from(["repomeow", "sem", "frobnicate"]).is_err());
+    assert!(Cli::try_parse_from(["repomeow", "wiki", "frobnicate"]).is_err());
     assert!(Cli::try_parse_from(["repomeow", "unknown"]).is_err());
 }
 #[test]
@@ -554,17 +554,7 @@ async fn generate_report_validates_before_touching_disk() {
 }
 
 #[test]
-fn entity_token_split_and_truncation() {
-    assert_eq!(
-        split_entity_token("src/a.ts::function::run"),
-        Some((Some("src/a.ts::function::run".to_string()), None))
-    );
-    assert_eq!(
-        split_entity_token("run"),
-        Some((None, Some("run".to_string())))
-    );
-    assert_eq!(split_entity_token("  "), None);
-
+fn text_truncation_keeps_utf8_boundary() {
     let (text, truncated) = truncate_text("hello", 10);
     assert!(!truncated);
     assert_eq!(text, "hello");
@@ -579,7 +569,15 @@ fn cli_parse_failures_are_json() {
         vec!["repomeow", "project", "add"],
         vec!["repomeow", "tag", "create"],
         vec![
-            "repomeow", "sem", "context", "-d", "D:/repo", "-e", "run", "--budget", "invalid",
+            "repomeow",
+            "project",
+            "read-file",
+            "-p",
+            "D:/repo",
+            "--path",
+            "a.txt",
+            "--max-lines",
+            "invalid",
         ],
     ];
     for args in cases {
