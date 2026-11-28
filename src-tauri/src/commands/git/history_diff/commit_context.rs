@@ -68,7 +68,7 @@ fn diff_file_name(path: &str) -> &str {
     path.rsplit(['/', '\\']).next().unwrap_or(path)
 }
 
-/// 判断是否只保留 stat、不把正文交给 sem/LLM。匹配精确 basename 或保守的生成物后缀；
+/// 判断是否只保留 stat、不把正文交给 LLM。匹配精确 basename 或保守的生成物后缀；
 /// 普通 `.lock`、源码目录下的 `dist`、快照与声明文件仍保留正文。
 fn is_diff_excluded(path: &str) -> bool {
     let file_name = diff_file_name(path);
@@ -213,26 +213,22 @@ pub(crate) fn commit_context_blocking(path: &str) -> AppResult<GitCommitContext>
     })
 }
 
-/// AI 提交信息使用的单文件上下文。raw_patch 只会在 sem 未覆盖该文件或 sem 失败时进入提示词。
+/// AI 提交信息使用的单文件上下文。raw_patch 是进入提示词的 unified patch 正文。
 #[derive(Debug, Clone)]
 pub(crate) struct AiCommitFileContext {
     pub path: String,
-    pub old_path: Option<String>,
     pub status: String,
     pub raw_patch: String,
     pub binary: bool,
     pub raw_excluded: bool,
 }
 
-/// 与本次真实提交范围一致的 AI 上下文；semantic_input 是过滤噪声后的 unified patch，
-/// 仅在本地交给 sem，不直接发送给模型。
+/// 与本次真实提交范围一致的 AI 上下文。
 #[derive(Debug)]
 pub(crate) struct AiCommitContext {
     pub stat: String,
     /// 当前分支名(unborn HEAD 或 detached 时为空)
     pub branch: String,
-    pub semantic_input: String,
-    pub semantic_paths: HashSet<String>,
     pub files: Vec<AiCommitFileContext>,
 }
 
@@ -299,8 +295,6 @@ pub(crate) fn ai_commit_context_blocking(
         .map(|value| value.to_string_lossy().to_string())
         .unwrap_or_else(|| path.to_string());
     let mut nested_cache = HashSet::new();
-    let mut semantic_patches = Vec::new();
-    let mut semantic_paths = HashSet::new();
     let mut files = Vec::new();
 
     for (idx, delta) in diff.deltas().enumerate() {
@@ -347,19 +341,10 @@ pub(crate) fn ai_commit_context_blocking(
             let old_label = old_path.as_deref().unwrap_or(&path);
             raw_patch = format!("diff --git a/{old_label} b/{path}\n{status} {path}\n");
         }
+        // 锁文件、生成物和二进制只保留低成本 stat/元数据，避免正文撑爆模型上下文。
         let raw_excluded = is_diff_excluded(&path);
-        // sem --patch 能从仓库和 patch 恢复实体上下文，无需为每个文件复制完整 before/after。
-        // 锁文件、生成物和二进制只保留低成本 stat/fallback 元数据，避免 chunk 边界漂移放大上下文。
-        if !binary && !raw_excluded {
-            semantic_patches.push(raw_patch.clone());
-            semantic_paths.insert(path.clone());
-            if let Some(old_path) = &old_path {
-                semantic_paths.insert(old_path.clone());
-            }
-        }
         files.push(AiCommitFileContext {
             path: path.clone(),
-            old_path,
             status: status.to_string(),
             raw_patch,
             binary,
@@ -383,12 +368,9 @@ pub(crate) fn ai_commit_context_blocking(
             .collect::<Vec<_>>()
             .join("\n")
     };
-    let semantic_input = semantic_patches.join("\n");
     Ok(AiCommitContext {
         stat,
         branch,
-        semantic_input,
-        semantic_paths,
         files,
     })
 }

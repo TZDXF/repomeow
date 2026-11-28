@@ -6,13 +6,12 @@ use tauri::{AppHandle, State};
 use crate::ai::prompts::{effective_system_prompt, language_name, DEFAULT_COMMIT_PROMPT};
 use crate::ai::sdk;
 use crate::commands::git::{self, AiCommitFileContext};
-use crate::commands::semantic;
 use crate::db::Db;
 use crate::error::AppResult;
 
 use super::run::{record_usage, RegisteredRun};
 
-/// raw 只在 sem 覆盖缺口或失败时进入模型；仍保留总预算防止极端 diff 撑爆上下文。
+/// raw diff 进入模型的总预算,防止极端 diff 撑爆上下文。
 const RAW_FALLBACK_MAX_CHARS: usize = 30_000;
 
 fn default_true() -> bool {
@@ -34,32 +33,6 @@ pub struct GenerateCommitMessageRequest {
     include_untracked: bool,
     #[serde(default)]
     paths: Option<Vec<String>>,
-}
-
-fn file_is_covered(
-    file: &AiCommitFileContext,
-    covered: &std::collections::HashSet<String>,
-) -> bool {
-    covered.contains(&file.path)
-        || file
-            .old_path
-            .as_ref()
-            .is_some_and(|old_path| covered.contains(old_path))
-}
-
-fn raw_fallback_files<'a>(
-    files: &'a [AiCommitFileContext],
-    semantic_paths: &std::collections::HashSet<String>,
-    covered_paths: &std::collections::HashSet<String>,
-) -> Vec<&'a AiCommitFileContext> {
-    files
-        .iter()
-        // semantic_paths 表示 patch 已成功交给 sem；即使 --no-cosmetics 令结果为空，
-        // 也不能把原始 cosmetic diff 重新补回模型。
-        .filter(|file| {
-            !semantic_paths.contains(&file.path) && !file_is_covered(file, covered_paths)
-        })
-        .collect()
 }
 
 fn raw_fallback(files: &[&AiCommitFileContext]) -> (String, bool) {
@@ -97,7 +70,6 @@ pub async fn ai_generate_commit_message(
     db: State<'_, Db>,
     request: GenerateCommitMessageRequest,
 ) -> AppResult<Option<String>> {
-    let project_path = request.project_path.clone();
     let run = request
         .run_id
         .as_deref()
@@ -109,48 +81,15 @@ pub async fn ai_generate_commit_message(
     )
     .await?;
 
-    // sem 是主数据源。成功但被 --no-cosmetics 过滤为空仍视为已分析，避免重新补回 cosmetic raw diff；
-    // 只有 sidecar 失败时才全量 raw 降级。
-    let semantic_result = if context.semantic_input.trim().is_empty() {
-        None
-    } else {
-        semantic::commit_input_analysis(&app, &project_path, &context.semantic_input)
-            .await
-            .ok()
-    };
-    let (semantic_section, fallback_files, sem_failed) = match &semantic_result {
-        Some(analysis) => (
-            if analysis.text.trim().is_empty() {
-                String::new()
-            } else {
-                format!("\n\nSemantic changes (primary source):\n{}", analysis.text)
-            },
-            raw_fallback_files(
-                &context.files,
-                &context.semantic_paths,
-                &analysis.covered_paths,
-            ),
-            false,
-        ),
-        None => (
-            String::new(),
-            context.files.iter().collect::<Vec<_>>(),
-            !context.files.is_empty() && !context.semantic_input.trim().is_empty(),
-        ),
-    };
-    let (raw, raw_truncated) = raw_fallback(&fallback_files);
+    let files = context.files.iter().collect::<Vec<_>>();
+    let (raw, raw_truncated) = raw_fallback(&files);
     let raw_section = if raw.is_empty() {
         String::new()
     } else {
-        let title = if sem_failed {
-            "Raw diff fallback (semantic analysis unavailable):"
-        } else {
-            "Raw diff fallback (files not covered by semantic analysis):"
-        };
         format!(
-            "\n\n{title}{}\n{raw}",
+            "\n\nChange diff:{}\n{raw}",
             if raw_truncated {
-                "\n(Note: raw fallback was truncated due to length.)"
+                "\n(Note: diff was truncated due to length.)"
             } else {
                 ""
             }
@@ -166,7 +105,7 @@ pub async fn ai_generate_commit_message(
         project_section.push_str(&format!("\nBranch: {}", context.branch));
     }
     let user_prompt = format!(
-        "{project_section}\n\nChange summary:\n{}{semantic_section}{raw_section}\n\nWrite the commit message in {}.",
+        "{project_section}\n\nChange summary:\n{}{raw_section}\n\nWrite the commit message in {}.",
         if context.stat.is_empty() {
             "(none)"
         } else {
@@ -222,7 +161,6 @@ mod tests {
     fn file(path: &str, raw_patch: &str, binary: bool) -> AiCommitFileContext {
         AiCommitFileContext {
             path: path.to_string(),
-            old_path: None,
             status: "M".to_string(),
             raw_patch: raw_patch.to_string(),
             binary,
@@ -241,18 +179,17 @@ mod tests {
     }
 
     #[test]
-    fn successful_sem_does_not_restore_cosmetic_raw_diff() {
-        let code = file("src/main.rs", "cosmetic raw", false);
+    fn lockfile_content_is_omitted_but_still_listed() {
+        let code = file("src/main.rs", "code raw", false);
         let lock = AiCommitFileContext {
             raw_excluded: true,
             ..file("Cargo.lock", "lock raw", false)
         };
-        let semantic_paths = std::collections::HashSet::from(["src/main.rs".to_string()]);
-        let covered_paths = std::collections::HashSet::new();
-        let files = [code, lock];
-        let fallback = raw_fallback_files(&files, &semantic_paths, &covered_paths);
-        assert_eq!(fallback.len(), 1);
-        assert_eq!(fallback[0].path, "Cargo.lock");
+        let (raw, truncated) = raw_fallback(&[&code, &lock]);
+        assert!(raw.contains("code raw"));
+        assert!(raw.contains("- Cargo.lock (status M; generated/lockfile content omitted)"));
+        assert!(!raw.contains("lock raw"));
+        assert!(!truncated);
     }
 
     #[test]

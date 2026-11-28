@@ -6,7 +6,6 @@ export * from "./open";
 export * from "./overview";
 export * from "./project";
 export * from "./report";
-export * from "./semantic";
 export * from "./toolchain";
 export * from "./usage";
 export * from "./wiki";

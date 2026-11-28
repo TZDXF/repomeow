@@ -10,7 +10,7 @@ pub(super) fn read_project_file_tool(ctx: &ChatToolContext) -> AgentTool {
     tool(
         "read_project_file",
         "读项目文件",
-        "读取项目内单个文本文件的指定行区间(带 1-based 行号前缀)。sem_context 的结果不够、或需要查看完整文件/配置时使用;只读工具,路径必须是仓库内相对路径(/ 分隔)。参数:path(必填)仓库相对路径,如 src/lib/ai.ts;offset_line(可选)起始行,默认 1;max_lines(可选)最多返回行数,默认 400(上限 5000)。",
+        "读取项目内单个文本文件的指定行区间(带 1-based 行号前缀)。查看文件原文或某个实现细节时使用;只读工具,路径必须是仓库内相对路径(/ 分隔)。参数:path(必填)仓库相对路径,如 src/lib/ai.ts;offset_line(可选)起始行,默认 1;max_lines(可选)最多返回行数,默认 400(上限 5000)。",
         json!({
             "type": "object",
             "properties": {

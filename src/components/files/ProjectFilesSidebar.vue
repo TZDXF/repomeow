@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { FolderTree, ListTree, Search } from "@lucide/vue";
+import { FolderTree, Search } from "@lucide/vue";
 import FileTreeList from "@/components/common/FileTreeList.vue";
 import TextSearchPanel from "@/components/files/TextSearchPanel.vue";
 import { Button } from "@/components/ui/button";
@@ -10,22 +10,21 @@ import type { FileTreeRow } from "@/lib/file-tree";
 import type { FindQuery } from "@/lib/text-search";
 import type { ProjectFileEntry } from "@/types";
 
-const props = defineProps<{
-    empty: boolean;
-    error: boolean;
-    loading: boolean;
-    root: string;
-    rows: FileTreeRow<ProjectFileEntry>[];
-    selected: string | null;
-    /** 当前文件是可预览文本时启用「结构」视图 */
-    outlineEnabled: boolean;
-  }>(),
-  emit = defineEmits<{
+defineProps<{
+  empty: boolean;
+  error: boolean;
+  loading: boolean;
+  root: string;
+  rows: FileTreeRow<ProjectFileEntry>[];
+  selected: string | null;
+}>();
+
+const emit = defineEmits<{
     open: [path: string, line: number, query: FindQuery];
     select: [path: string];
     toggle: [path: string];
   }>(),
-  view = defineModel<"tree" | "search" | "outline">("view", { required: true }),
+  view = defineModel<"tree" | "search">("view", { required: true }),
   { t } = useI18n(),
   searchPanel = ref<InstanceType<typeof TextSearchPanel> | null>(null);
 
@@ -40,17 +39,10 @@ function title(): string {
   if (view.value === "tree") {
     return t("files.treeView");
   }
-  if (view.value === "search") {
-    return t("files.textSearchTitle");
-  }
-  return t("files.semantic.outlineTitle");
+  return t("files.textSearchTitle");
 }
 
-// 当前文件不可解析时切 outline 无意义,回退树视图
-function setView(next: "tree" | "search" | "outline") {
-  if (next === "outline" && !props.outlineEnabled) {
-    return;
-  }
+function setView(next: "tree" | "search") {
   view.value = next;
 }
 </script>
@@ -70,17 +62,6 @@ function setView(next: "tree" | "search" | "outline") {
         @click="setView('tree')"
       >
         <FolderTree class="h-3.5 w-3.5" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        class="h-7 w-7"
-        :class="view === 'outline' ? 'bg-accent' : ''"
-        :disabled="!outlineEnabled"
-        :title="t('files.semantic.outlineTitle')"
-        @click="setView('outline')"
-      >
-        <ListTree class="h-3.5 w-3.5" />
       </Button>
       <Button
         variant="ghost"
@@ -115,13 +96,9 @@ function setView(next: "tree" | "search" | "outline") {
     </ScrollArea>
   </template>
   <TextSearchPanel
-    v-else-if="view === 'search'"
+    v-else
     ref="searchPanel"
     :root="root"
     @open="(...args) => emit('open', ...args)"
   />
-  <!-- 结构视图由父组件经插槽提供(需要文件预览与定位上下文) -->
-  <div v-else class="min-h-0 flex-1">
-    <slot name="outline" />
-  </div>
 </template>

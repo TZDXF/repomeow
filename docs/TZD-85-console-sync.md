@@ -21,9 +21,9 @@ Windows GUI 子系统无法让 shell 可靠等待。新增 `repomeow-cli` consol
 | prompt set | prompts/*.md | 提示词设置；未编辑字段自动更新，编辑中字段保留并提示 |
 | account add/update/remove | git_accounts | 账号设置列表 |
 | wiki generate/update/config-set/delete | wiki/<项目>/config.json、meta.json、pages、Wiki git、AI 用量 | 阅读 store、已打开的 Wiki 页、干净的配置对话框、用量统计 |
-| file save | 项目内文本 | 后端 walk/Git 状态缓存、前端资产/聚合 LRU、文件树/当前预览/语义缓存、项目 AI 资产 |
+| file save | 项目内文本 | 后端 walk/Git 状态缓存、前端资产/聚合 LRU、文件树/当前预览、项目 AI 资产 |
 | terminal input/create/start/stop/restart | GUI 内存会话与一次性 ipc 文件 | 原有桌面 IPC/terminal 事件；不走持久化版本 |
-| sem 查询、project read-file/reports/commands、各 list/get（除播种） | 只读业务数据；可能有可再生工具缓存 | 不发布版本 |
+| project read-file/reports/commands、各 list/get（除播种） | 只读业务数据；可能有可再生工具缓存 | 不发布版本 |
 
 每个数据域的版本均保留，连续两个 CLI 进程修改不同域不会覆盖失效信息。前端聚合缓存、项目列表与 AI 配置读取带请求代次保护，避免较早请求覆盖新值；Wiki 原有 loadVersions 与报告请求 token 继续生效。缓存项目页仍存在于原页面作用域中，未保存的命令、AI、提示词及 Wiki 配置草稿不因同步销毁。
 
@@ -41,7 +41,6 @@ Windows GUI 子系统无法让 shell 可靠等待。新增 `repomeow-cli` consol
 
 ```powershell
 pnpm install --frozen-lockfile
-pnpm sem:prepare
 pnpm lint
 pnpm test:unit
 pnpm build

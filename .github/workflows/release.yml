@@ -19,8 +19,8 @@ jobs:
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
             args: "--bundles nsis"
-          # macOS:sem sidecar 无 universal 二进制,arm64 / x64 各构建一次;
-          # Apple 工具链可在 arm64 机器上原生编译 x86_64 目标,无需独立 Intel runner。
+          # macOS:arm64 / x64 各构建一次;Apple 工具链可在 arm64 机器上原生编译
+          # x86_64 目标,无需独立 Intel runner。
           - platform: macos-latest
             target: aarch64-apple-darwin
             args: "--target aarch64-apple-darwin --bundles dmg app"
@@ -84,11 +84,6 @@ jobs:
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
-
-      # sem:prepare 平台无关:按 --target 下载对应资产并校验 SHA-256
-      # (scripts/sem/manifest.json 固定 5 个 triple 的版本与哈希)
-      - name: Prepare sem sidecar
-        run: pnpm sem:prepare --target ${{ matrix.target }}
 
       - name: Build and publish release
         uses: tauri-apps/tauri-action@v0

@@ -17,7 +17,7 @@ pub(crate) type BuiltinSkillFiles = Vec<(String, String, Vec<(String, String)>)>
 
 pub(crate) const BUILTIN_SKILLS: &[BuiltinSkill] = &[BuiltinSkill {
     name: "repomeow",
-    description: "RepoMeow CLI:项目管理 / Wiki / 语义分析 / 报告与调度 / 标签 / AI 配置",
+    description: "RepoMeow CLI:项目管理 / Wiki / 报告与调度 / 标签 / AI 配置",
     files: &[
         (
             "SKILL.md",
@@ -26,10 +26,6 @@ pub(crate) const BUILTIN_SKILLS: &[BuiltinSkill] = &[BuiltinSkill {
         (
             "references/project.md",
             include_str!("../../../skills/repomeow/references/project.md"),
-        ),
-        (
-            "references/sem.md",
-            include_str!("../../../skills/repomeow/references/sem.md"),
         ),
         (
             "references/report.md",

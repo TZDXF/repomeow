@@ -20,19 +20,18 @@
 
 | 命令 | 说明 |
 | --- | --- |
-| `pnpm start` | `sem:prepare && tauri dev --config src-tauri/tauri.dev.conf.json`,完整桌面端开发(前端 + Rust);dev 用独立 identifier 以便与安装版同时运行(见关键规则 2) |
+| `pnpm start` | `tauri dev --config src-tauri/tauri.dev.conf.json`,完整桌面端开发(前端 + Rust);dev 用独立 identifier 以便与安装版同时运行(见关键规则 2) |
 | `pnpm dev` | 仅 Vite 前端(端口 1420,见 `tauri.conf.json` devUrl) |
 | `pnpm build` | `vue-tsc --noEmit && vite build` + 首屏入口 500 KiB 预算检查,**唯一的类型检查手段** |
-| `pnpm build:desktop` | `sem:prepare && tauri build` 打包(NSIS) |
+| `pnpm build:desktop` | `tauri build` 打包(NSIS) |
 | `pnpm lint` / `pnpm lint:fix` | `oxlint .` 静态检查 / 自动修复 |
 | `pnpm format` / `pnpm format:check` | `oxfmt --write src/` 格式化 / 仅检查 |
 | `pnpm test:unit` | `vitest run`(node 环境,仅 `src/**/*.test.ts`,无 setup 文件) |
 | `pnpm cli:dev -- <args>` | 运行独立 console 目标 repomeow-cli(不开窗口) |
 | `pnpm test:cli --exe <程序>` / `pnpm test:cli:shells --exe <程序>` | Node 内置模块驱动的 CLI 回归 / PS 5.1+7 Actions 包装六组回归，无额外解释器依赖 |
-| `pnpm sem:prepare` / `sem:check` | 下载/校验 sem sidecar 二进制 |
 | `pnpm release:*` | `scripts/release/release.mjs` 本地发布调试(check/build/sign/latest/all/local) |
 
-改动后建议验证:`pnpm lint` + `pnpm test:unit` + `pnpm build`;Rust 侧 `cargo check` / `cargo test`(在 `src-tauri/` 下)。`cargo check` 前若 sem 二进制未准备,先跑 `pnpm sem:prepare`。Rust 侧另有 clippy 严格门禁:提交前在 `src-tauri/` 跑 `cargo clippy --locked --all-targets -- -D warnings`(`quality.yml` 的 Rust job 以同一命令卡 PR,0 warning 才通过;新 lint 需改代码或在单点 `#[allow]` 旁写明理由,不加全局 allow)。GitHub Actions 有 `release.yml` 负责正式发布;`quality.yml` 另有独立的 **macos** job(前端 lint/format/单测/构建 + 按 host 三元组准备 sem 并用 `pnpm sem:verify` 比对文件头架构后串行 `cargo test`),macOS 本机复跑步骤与暂时跳过的用例清单见 `docs/build-and-test.md`。
+改动后建议验证:`pnpm lint` + `pnpm test:unit` + `pnpm build`;Rust 侧 `cargo check` / `cargo test`(在 `src-tauri/` 下)。Rust 侧另有 clippy 严格门禁:提交前在 `src-tauri/` 跑 `cargo clippy --locked --all-targets -- -D warnings`(`quality.yml` 的 Rust job 以同一命令卡 PR,0 warning 才通过;新 lint 需改代码或在单点 `#[allow]` 旁写明理由,不加全局 allow)。GitHub Actions 有 `release.yml` 负责正式发布;`quality.yml` 另有独立的 **macos** job(前端 lint/format/单测/构建 + 串行 `cargo test`),macOS 本机复跑步骤与暂时跳过的用例清单见 `docs/build-and-test.md`。
 
 ## 可选：Rust 构建缓存（Mr. Boxington / mbx）
 
@@ -40,7 +39,7 @@
 
 1. 安装：按官方 installation 的 Windows x86-64 归档解压到 `%LOCALAPPDATA%\Programs\mbx` 并加入 `PATH`（校验 `SHA256SUMS`）。
 2. `cache_dir` 必须与 target 目录**同处 ReFS 卷**（Dev Drive），否则还原退化为复制；在 `%APPDATA%\mbx\config.toml` 写 `cache_dir = 'D:\mbx-cache'`，或用 `MBX_CACHE_DIR`。同卷且可克隆时 `mbx doctor` 的 `restore` 行报 `cloning is supported`。
-3. 显式跑（在 `src-tauri/` 下）：`mbx build --locked` / `mbx test --locked` / `mbx clippy --locked --all-targets`。首次构建替代 `cargo build` 前先 `pnpm sem:prepare`（`externalBin` 的 sem sidecar 就位）。
+3. 显式跑（在 `src-tauri/` 下）：`mbx build --locked` / `mbx test --locked` / `mbx clippy --locked --all-targets`。首次构建可直接运行,无需额外准备二进制。
 4. 让裸 `cargo` 也走缓存：`mbx setup` 安装 Cargo shim，再把 `%LOCALAPPDATA%\mbx\bin` 前置到 `PATH`。**是否真的路由到 shim 只能用 `mbx doctor` 判断**（`setup` 行报 `Cargo shim is active and current` 才算激活；报 `is current but not active` 并给出 `PATH` 实际解析到的 cargo 路径时未激活）。`mbx setup --status` 只校验安装物与相关配置是否存在/最新，**不检查 `PATH`**，不能据此判断实际 Cargo 路由。
 5. `mbx setup` 除 Cargo shim 外还会写 rust-analyzer 用户级检查配置（`%APPDATA%\rust-analyzer\rust-analyzer.toml` 的 `check.overrideCommand`，该文件已有自己的 check 设置时不覆盖），让 IDE 检查也走缓存。若本机主动撤销了这条 IDE 配置，`mbx setup --status` 会以“rust-analyzer checks do not use mbx”退出 1，这只表示 IDE 检查未接入，**与 Cargo shim 是否在 `PATH` 激活无关**，两者不要混为一谈。
 6. 首次构建会把 `src-tauri/target` 换成指向 `cache_dir/targets` 的 symlink，并由 mbx 自动写入 `.git/info/exclude`（`.gitignore` 的 `/target/` 匹配不到 symlink）。回收/清理：`mbx clean`（本 workspace）、`mbx cache stats` / `mbx stats` / `mbx gc`。
@@ -56,7 +55,7 @@ src/                    Vue 3 前端(<script setup> SFC)
                         / Settings / TrayPopup(托盘迷你弹窗)
   components/           TitleBar.vue 在顶层;ui/ 为 shadcn-vue(reka-ui)生成组件,勿手改(滚动容器用 common/ScrollArea.vue 包装组件,承载视口高度修复);
                         业务组件按域分目录:ai-elements / chat / common / files / git / icons
-                        / java / markdown / open / project / report / scripts / semantic
+                        / java / markdown / open / project / report / scripts
                         / settings / tags / terminal / update / wiki
   composables/          组合式函数,部分按子域分目录(files/ git/ wiki/)
   stores/               Pinia:projects / settings / tags / wiki / chat / ai-config / terminal
@@ -74,7 +73,7 @@ src-tauri/src/
   bin/repomeow-cli.rs    console CLI 入口(含 Windows release);与 GUI 共用 cli/ 分发
   data_sync.rs          CLI 写锁/持久化域版本、GUI 监视与调度/缓存失效
   commands/             Tauri 命令域。目录模块:account / agent / ai / chat / files / git
-                        / java / open / project / report / semantic / toolchain / wiki;
+                        / java / open / project / report / toolchain / wiki;
                         单文件:docker / editor_icon / hidden / cli / overview / pin
                         / prompt / scan / script / tag / usage / walk / window
   agent/                pi-agent-core 的 Rust 复刻:llm/(adapter + EventStream)、
@@ -91,7 +90,7 @@ src-tauri/src/
   background_task.rs    后台任务进度事件守卫(background://task-progress)
   tray.rs / workday.rs  系统托盘 + 迷你弹窗;chinese-days 节假日缓存
 src-tauri/migrations/   SQL 迁移 NNN_name.sql(完整清单以该目录与 `db/migrations.rs` 为准)
-scripts/                sem/(sidecar 下载)、release/(发布流程)
+scripts/                release/(发布流程)
 ```
 
 ## 关键规则
@@ -104,8 +103,7 @@ scripts/                sem/(sidecar 下载)、release/(发布流程)
 6. **后台任务**(`lib.rs` setup):`scheduler::run(handle)` 定时报告调度;`commands::git::monitor_loop(handle)` 统一 Git 检查循环并 emit `git://project-changed`;资源库启动同步检查 `commands::ai::startup_sync_check`。Git 更新后的联动逻辑订阅该事件,勿新增独立轮询。用户切回窗口(失焦→聚焦)时,`App.vue` 的 `useWindowFocusSignal` 递增聚焦版本号(托盘迷你弹窗跳过),项目页的 `useGitFocusRefresh` 据此重查当前工作区:同一路径由 `src/lib/git-check-coordinator.ts` 的 `gitCheckCoordinator` 做 15s 复用与进行中请求复用(与后端 `STATUS_TTL` 对齐,`force` 同样受限,确需重扫的入口用 `refreshGitStatus(..., { recheck: true })`),因此大仓库不会被窗口切换反复扫描。这类"事件驱动的即时补充"与后台循环互补,仍需避免改成定时轮询。
 7. **路径别名** `@/` → `src/`(tsconfig + vite + vitest 三处均配置)。
 8. **路径风格统一**:禁止 ad-hoc `replace('\\', "/")`。Rust 侧走 `path_util.rs`(`clean_str` 落库/缓存 key、`to_forward_slash` IPC/git pathspec、`repo_relative_str`);前端走 `src/lib/path.ts`(`cleanPath` / `toForwardSlash` / `baseName` / `splitDirName` / `joinPath` / `displayRelativeTo`)。项目路径入库前必须 `clean_str`;IPC 输出的仓库内路径恒为 `/` 分隔;HashMap/缓存 key 先归一化再读写。
-9. **sem sidecar**:官方 sem CLI 以 externalBin 内置,版本/平台/SHA-256 固定在 `scripts/sem/manifest.json`,`pnpm sem:prepare` 下载到被 gitignore 的 `src-tauri/binaries/sem-<target>`;升级版本须同步 `src-tauri/third-party/sem/NOTICE`。应用只从 Rust `commands/semantic/` 暴露固定操作,禁止前端传任意 CLI 参数。
-10. **CLI + Skills**:独立 console 程序 `repomeow-cli`（含 Windows release）直接复用 `cli::run_cli_blocking()`；GUI `main.rs` 保留旧首参数 CLI 兼容入口。CLI 覆盖项目、Wiki、语义分析、报告与调度、标签、命令、pin/hidden、AI 配置/用量、提示词、账号、项目文件及桌面终端；git/docker 直接调用本机工具。命令逻辑复用 `commands/*` 的纯函数/blocking 变体；成功 JSON 写 stdout，失败错误 JSON 写 stderr，退出码 0/1/2，help/version 为文本。新增写命令需在 `cli/mod.rs::write_domains` 声明受影响域，并在 GUI 回读对应缓存；同步机制见 `data_sync.rs` 和 `docs/TZD-85-console-sync.md`。技能名称仍为 `repomeow`，源码在 `skills/repomeow/`；技能通过 PATH 调用 `repomeow-cli`，不嵌入本机路径。经「设置 → CLI」导入资源库，再在项目 AI 资源中部署。完整用法见 `CLI.md`。
+9. **CLI + Skills**:独立 console 程序 `repomeow-cli`（含 Windows release）直接复用 `cli::run_cli_blocking()`；GUI `main.rs` 保留旧首参数 CLI 兼容入口。CLI 覆盖项目、Wiki、报告与调度、标签、命令、pin/hidden、AI 配置/用量、提示词、账号、项目文件及桌面终端；git/docker 直接调用本机工具。命令逻辑复用 `commands/*` 的纯函数/blocking 变体；成功 JSON 写 stdout，失败错误 JSON 写 stderr，退出码 0/1/2，help/version 为文本。新增写命令需在 `cli/mod.rs::write_domains` 声明受影响域，并在 GUI 回读对应缓存；同步机制见 `data_sync.rs` 和 `docs/TZD-85-console-sync.md`。技能名称仍为 `repomeow`，源码在 `skills/repomeow/`；技能通过 PATH 调用 `repomeow-cli`，不嵌入本机路径。经「设置 → CLI」导入资源库，再在项目 AI 资源中部署。完整用法见 `CLI.md`。
 11. **i18n**:词条改动需同步 zh-CN 与 en-US,`src/i18n/locales/locales.test.ts` 校验键对齐。
 12. **错误处理**:Rust 错误经 `error.rs` 序列化为 `{ code, message }` 传前端;前端 `lib/tauri.ts` 对部分笼统错误码追加展示 message,新增错误码需在 Rust 错误枚举、前端处理与 i18n 文案三处同步。
 13. **oxlint 配置**:correctness / suspicious / perf 为 error,style 为 warn;忽略 `dist/`、`node_modules/`、`src-tauri/`、`scripts/`。`pnpm lint` 以零 warning 为门禁;`one-var` 关闭以保留独立声明及初始化顺序,`max-params` 上限为 6;生成的 `components/ui/` 不手改,其可选 props 与无类型 ref 规则在配置中豁免。
